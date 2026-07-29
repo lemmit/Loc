@@ -5,7 +5,7 @@
 // a step. v1 is unchanged and still ships in the "Model" tab.
 
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type ReactNode } from "react";
-import { Box, Button, Group, Text } from "@mantine/core";
+import { Box, Button, Checkbox, Group, Stack, Text, TextInput } from "@mantine/core";
 import {
   Background,
   BaseEdge,
@@ -28,7 +28,7 @@ import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
 import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
 import {
-  addStatement,
+  aggregateBody,
   deleteStatement,
   editStatement,
   listBodies,
@@ -37,18 +37,34 @@ import {
   type BodyKey,
   type BodyLocator,
   type BodyRef,
-  type StmtView,
+  type StmtPath,
 } from "../system/body";
+import type { NestedExprEditors } from "../system/BodyEditor";
 import { setEmitEvent } from "../system/emit-event";
 import { deleteField, listFields } from "../system/fields";
 import { seedExpr } from "../system/expr-model";
 import {
   editExprSlot,
+  encodeStmtPath,
   exprHints,
   slotCandidates,
   slotExpr,
   type ExprSlot,
 } from "../system/expr-slots";
+import {
+  addOpParam,
+  deleteOpParam,
+  findSurface,
+  freshOpParamName,
+  opSurface,
+  renameOpParam,
+  retypeOpParam,
+  setFindGate,
+  setFindIgnoring,
+  setOpGate,
+  setOpModifier,
+  setOpReturnType,
+} from "../system/op-surface";
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
@@ -80,6 +96,7 @@ import {
   type ViewGraph,
   type ViewKind,
   type ViewPath,
+  type ViewStep,
 } from "./view-graph";
 import {
   clearPersisted,
@@ -147,6 +164,10 @@ const KIND_COLOR: Record<ViewKind, string> = {
   create: "var(--mantine-color-orange-7)",
   destroy: "var(--mantine-color-red-7)",
   apply: "var(--mantine-color-grape-8)",
+  // `body` is a path-step kind only — the drilled view's root banner wears the
+  // member's own create / destroy / apply tint, so no node ever renders as
+  // one. The entry exists to keep this map total over `ViewKind`.
+  body: "var(--mantine-color-orange-7)",
   // `stmt` is rendered by a custom React Flow node, not styled here; the value
   // is a placeholder to satisfy the kind union.
   stmt: "transparent",
@@ -322,23 +343,120 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   timer: "TimerSource",
 };
 
-/** Derive the `BodyLocator` for the operation / workflow currently in focus
- *  (the last step of the path), or null otherwise. Operation needs the
- *  containing aggregate step immediately above it. `member` selects one of a
- *  workflow's statement-bearing members (`listBodies` key); omitted, the
- *  locator resolves to the primary `create(...)` starter. */
+/** Path-leaf kinds whose view is a statement flow over ONE body of the
+ *  aggregate the step above names — an operation, or a lifecycle `body` step
+ *  carrying its `listBodies` key. Both take the same picker, palette and
+ *  editing plumbing; only how the body is addressed differs. */
+const AGG_BODY_LEAF: ReadonlySet<string> = new Set(["operation", "body"]);
+
+/** Derive the `BodyLocator` for the body currently in focus (the last step of
+ *  the path), or null when the leaf isn't a body view. An operation / lifecycle
+ *  `body` step needs the containing aggregate step immediately above it.
+ *  `member` selects one statement-bearing member of a WORKFLOW (a `listBodies`
+ *  key: one of its creates / handles / reactors); omitted, the workflow
+ *  resolves to its primary `create(...)` starter. An operation leaf always
+ *  resolves to the historical member-less locator, byte for byte, so every
+ *  pre-existing expression-slot key still resolves; a lifecycle body carries
+ *  its key in the path step instead of in an override. */
 function leafBodyLocator(path: ViewPath, member?: BodyKey): BodyLocator | null {
   const last = path[path.length - 1];
   if (!last) return null;
   if (last.kind === "workflow") {
     return { kind: "workflow", name: last.name, ...(member ? { member } : {}) };
   }
-  if (last.kind === "operation") {
-    const agg = path[path.length - 2];
-    if (agg?.kind !== "aggregate") return null;
-    return { kind: "operation", aggregate: agg.name, op: last.name };
-  }
-  return null;
+  if (!AGG_BODY_LEAF.has(last.kind)) return null;
+  const agg = path[path.length - 2];
+  if (agg?.kind !== "aggregate") return null;
+  return last.kind === "body"
+    ? aggregateBody(agg.name, last.name)
+    : { kind: "operation", aggregate: agg.name, op: last.name };
+}
+
+/** The `listBodies` key the body picker highlights when nothing has been
+ *  chosen explicitly: a workflow's primary `create` starter, the operation or
+ *  lifecycle body the drill path already names. */
+function primaryBodyKey(path: ViewPath, members: readonly BodyRef[]): BodyKey | undefined {
+  const last = path[path.length - 1];
+  if (last?.kind === "operation") return `op:${last.name}`;
+  if (last?.kind === "body") return last.name;
+  return members.find((b) => b.key.startsWith("create"))?.key;
+}
+
+/** The statement-member picker row — one button tab per statement-bearing
+ *  member of the workflow / aggregate at the path leaf. Shared by both levels;
+ *  only the test-id prefix differs (the workflow ids predate the aggregate
+ *  reach and stay put). */
+function BodyPicker({ members, selected, testidPrefix, onSelect }: {
+  members: readonly BodyRef[];
+  selected: BodyKey | undefined;
+  testidPrefix: string;
+  onSelect: (key: BodyKey) => void;
+}): JSX.Element {
+  return (
+    <Group
+      gap={4}
+      px={6}
+      py={4}
+      bg="dark.7"
+      wrap="wrap"
+      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      data-testid={`${testidPrefix}s`}
+    >
+      <Text size="xs" c="dimmed" mr={2}>
+        member
+      </Text>
+      {members.map((b) => (
+        <Button
+          key={b.key}
+          size="compact-xs"
+          variant={selected === b.key ? "light" : "subtle"}
+          data-testid={`${testidPrefix}-${b.key}`}
+          title={`${b.label} — ${b.count} statement${b.count === 1 ? "" : "s"}`}
+          onClick={() => onSelect(b.key)}
+        >
+          {b.label} ({b.count})
+        </Button>
+      ))}
+    </Group>
+  );
+}
+
+/** One compact header field of the operation inspector. Local draft state so
+ *  typing doesn't re-parse the document per keystroke; committed on blur, and
+ *  only when the text actually changed (so focusing a field is never an edit).
+ *  The re-derived `value` re-seeds the draft after a commit lands. */
+function HeaderInput({ label, value, width, placeholder, testid, onCommit }: {
+  label?: string;
+  value: string;
+  width?: number;
+  placeholder?: string;
+  testid: string;
+  onCommit: (next: string) => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <Group gap={4} wrap="nowrap" align="center">
+      {label && (
+        <Text size="xs" c="dimmed">
+          {label}
+        </Text>
+      )}
+      <TextInput
+        size="xs"
+        w={width}
+        value={draft}
+        placeholder={placeholder}
+        data-testid={testid}
+        aria-label={label ?? testid}
+        styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+        onChange={(e) => setDraft(e.currentTarget.value)}
+        onBlur={() => {
+          if (draft.trim() !== value.trim()) onCommit(draft);
+        }}
+      />
+    </Group>
+  );
 }
 
 /** Per-edge-kind stroke + dashing. Keeps the visual language consistent across
@@ -449,10 +567,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // index (+ optional field index for emit fields / call args). Mirrors v1.
   const [structuredKey, setStructuredKey] = useState<string | null>(null);
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
-  // W2-E: which statement-bearing member of the workflow at the path leaf the
-  // statement flow is showing. `undefined` = the primary `create(...)` starter
-  // (the historical single body), so the default view is unchanged.
-  const [wfMember, setWfMember] = useState<BodyKey | undefined>(undefined);
+  // W2-E: which statement-bearing member of the workflow / aggregate at the
+  // path leaf the body surface is showing. `undefined` = the primary body (a
+  // workflow's `create(...)` starter, an operation's own statements), so the
+  // default view — and every expression-slot key derived from it — is unchanged.
+  const [bodyMember, setBodyMember] = useState<BodyKey | undefined>(undefined);
   // Re-parse after every commit by depending on `rev` (`apply` bumps it) —
   // plus the debounced editor tick and the external-reseed signals.  This used
   // to depend on `ctx`, whose identity churned on every app tick, so a
@@ -477,29 +596,39 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // unconditionally — so the message renders at the end.
   const parseOk = parsed.parserErrors.length === 0;
   const graph = useMemo(
-    () => (parseOk ? buildViewGraph(parsed.ast, path, { workflowMember: wfMember }) : EMPTY_GRAPH),
-    [parsed, path, parseOk, wfMember],
+    () => (parseOk ? buildViewGraph(parsed.ast, path, { workflowMember: bodyMember }) : EMPTY_GRAPH),
+    [parsed, path, parseOk, bodyMember],
   );
 
-  // The workflow's members, for the picker below the breadcrumb. Empty for
-  // every other level (and for a workflow with no statement-bearing member).
+  // The statement-bearing members of the container at the path leaf, for the
+  // picker below the breadcrumb: a workflow's creates / handles / reactors, or
+  // — on an operation / lifecycle-`body` leaf — every body of the aggregate
+  // that owns it, so the whole member list is one click away from any of them.
+  // Empty at every other level.
   // Gated on `parseOk` for the same reason the graph is: on a recovered AST
   // `listBodies` reports members whose CST ranges the write-backs can't trust.
-  const wfMembers: BodyRef[] = useMemo(() => {
+  const bodyMembers: BodyRef[] = useMemo(() => {
     if (!parseOk) return [];
     const last = path[path.length - 1];
-    if (last?.kind !== "workflow") return [];
-    const wf = findWorkflow(parsed.ast, last.name);
-    return wf ? listBodies(wf) : [];
+    if (last?.kind === "workflow") {
+      const wf = findWorkflow(parsed.ast, last.name);
+      return wf ? listBodies(wf) : [];
+    }
+    if (last && AGG_BODY_LEAF.has(last.kind)) {
+      const aggStep = path[path.length - 2];
+      if (aggStep?.kind !== "aggregate") return [];
+      const agg = findAggregate(parsed.ast, aggStep.name);
+      return agg ? listBodies(agg) : [];
+    }
+    return [];
   }, [parsed, path, parseOk]);
-  // Leaving the workflow (or drilling into another one) drops back to its
-  // primary create — a member key from the previous workflow means nothing here.
+  // Leaving the container (or drilling into another one) drops back to its
+  // primary body — a member key from the previous one means nothing here.
   useEffect(() => {
-    setWfMember(undefined);
+    setBodyMember(undefined);
   }, [path]);
-  /** The key the picker highlights when nothing has been chosen explicitly —
-   *  the primary `create` starter `listBodies` reports first. */
-  const primaryMemberKey = wfMembers.find((b) => b.key.startsWith("create"))?.key;
+  const primaryMemberKey = primaryBodyKey(path, bodyMembers);
+  const leafKind = path[path.length - 1]?.kind;
 
   const refusal = useRefusal();
 
@@ -527,16 +656,23 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // views + per-statement editor handlers and pass them through the stmt node's
   // `data`. The pure view-graph already laid out the column; here we layer in
   // editing.
-  const leafLoc = useMemo(() => leafBodyLocator(path, wfMember), [path, wfMember]);
+  const leafLoc = useMemo(() => leafBodyLocator(path, bodyMember), [path, bodyMember]);
   useEffect(() => {
     // Switching to a different operation / workflow / non-leaf collapses any
     // inline `ƒx` editor that was open in the previous body.
     setStructuredKey(null);
   }, [leafLoc]);
 
-  const stmtData = useMemo(() => {
-    const m = new Map<string, Record<string, unknown>>();
-    if (!leafLoc || !parseOk) return m;
+  /** Everything the body at the path leaf needs to render editable statement
+   *  rows: the structured views, the assignment-target names, and the
+   *  expression-slot plumbing (key + slot factories, the inline `ƒx`
+   *  render/toggle closures, and the path-addressed bundle nested rows use).
+   *  Shared by the flow nodes and the lifecycle list panel so both address the
+   *  SAME slots — one body, one set of keys.  Gated on `parseOk` like the
+   *  graph: statement views over a recovered AST carry CST ranges the
+   *  write-backs can't trust. */
+  const bodySurface = useMemo(() => {
+    if (!leafLoc || !parseOk) return null;
     const views = listStatementViews(parsed.ast, leafLoc) ?? [];
     // Aggregate field names for the assignment-target Autocomplete; only
     // meaningful in an operation body, empty for workflows.
@@ -554,14 +690,23 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       leafLoc.kind === "operation"
         ? `${leafLoc.aggregate}.${leafLoc.op}`
         : `${leafLoc.name}${leafLoc.member ? `#${leafLoc.member}` : ""}`;
-    const keyFor = (index: number, field?: number): string => `${base}:${index}:${field ?? ""}`;
-    const slotFor = (index: number, field?: number): ExprSlot =>
+    // `path` are the descent steps into a `for` / `if let` / `match` block
+    // below the top-level statement `index` — empty for a top-level row, which
+    // keeps its historical key (`encodeStmtPath([])` is the empty string) and
+    // its `path`-less slot.
+    const keyFor = (index: number, path: StmtPath, field?: number): string =>
+      `${base}:${index}${encodeStmtPath(path)}:${field ?? ""}`;
+    const slotFor = (index: number, path: StmtPath, field?: number): ExprSlot =>
       leafLoc.kind === "operation"
         ? {
             kind: "stmtExpr",
             owner: leafLoc.aggregate,
             op: leafLoc.op,
+            // Only set for a lifecycle member — an operation body is addressed
+            // by `op` alone, exactly as it always was.
+            ...(leafLoc.member ? { member: leafLoc.member } : {}),
             index,
+            ...(path.length > 0 ? { path } : {}),
             ...(field !== undefined ? { field } : {}),
           }
         : {
@@ -572,16 +717,21 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             // are keyed without one (see `expr-slots.ts`), so leaving it off
             // keeps the default workflow body's editing path unchanged.
             ...(leafLoc.member ? { member: leafLoc.member } : {}),
+            ...(path.length > 0 ? { path } : {}),
             ...(field !== undefined ? { field } : {}),
           };
-    const renderEditor = (index: number, field?: number): ReactNode => {
-      if (structuredKey !== keyFor(index, field)) return null;
-      const slot = slotFor(index, field);
+    /** Whether a (possibly nested) statement actually has an editable
+     *  expression — drives whether the row offers a `ƒx` toggle at all. */
+    const hasEditor = (index: number, path: StmtPath, field?: number): boolean =>
+      slotExpr(parsed.ast, slotFor(index, path, field)) != null;
+    const renderEditor = (index: number, path: StmtPath, field?: number): ReactNode => {
+      if (structuredKey !== keyFor(index, path, field)) return null;
+      const slot = slotFor(index, path, field);
       const expr = slotExpr(parsed.ast, slot);
       if (!expr) return null;
       return (
         <ExprSlotEditor
-          key={`${keyFor(index, field)}:${rev}`}
+          key={`${keyFor(index, path, field)}:${rev}`}
           seed={seedExpr(expr)}
           seedText={expr.$cstNode?.text ?? ""}
           candidates={slotCandidates(parsed.ast, slot)}
@@ -597,10 +747,17 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         />
       );
     };
-    const toggle = (index: number, field?: number): void => {
-      const k = keyFor(index, field);
+    const toggle = (index: number, path: StmtPath, field?: number): void => {
+      const k = keyFor(index, path, field);
       setStructuredKey((cur) => (cur === k ? null : k));
     };
+    /** The path-addressed `ƒx` bundle a container row hands down to the rows
+     *  of its nested statement lists (and they to theirs, recursively). */
+    const nestedFor = (index: number): NestedExprEditors => ({
+      has: (path, field) => hasEditor(index, path, field),
+      render: (path, field) => renderEditor(index, path, field),
+      toggle: (path, field) => toggle(index, path, field),
+    });
 
     // All declared events in the model — candidates for the emit-row Select.
     const events: string[] = [];
@@ -608,30 +765,54 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       if (isEventDecl(n)) events.push(n.name);
     }
 
+    return { views, targets, events, slotFor, hasEditor, renderEditor, toggle, nestedFor };
+    // `ctx` covers getSource changes (parent re-renders create a fresh ctx).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsed, parseOk, leafLoc, structuredKey, exprMode, rev]);
+
+  const stmtData = useMemo(() => {
+    const m = new Map<string, Record<string, unknown>>();
+    if (!leafLoc || !bodySurface) return m;
+    const { views, targets, events, slotFor, renderEditor, toggle, nestedFor } = bodySurface;
+
     views.forEach((view, i) => {
       const data: StmtNodeData = {
         view,
         compact,
         targets,
-        headCandidates: slotCandidates(parsed.ast, slotFor(i)),
+        headCandidates: slotCandidates(parsed.ast, slotFor(i, [])),
         onCommit: (text) => {
           const next = editStatement(ctx.getSource(), leafLoc, i, text);
           if (next == null) return false;
           apply(next);
           return true;
         },
-        valueEditor: renderEditor(i),
-        onToggleEditor: () => toggle(i),
-        renderArgEditor: (a) => renderEditor(i, a),
-        onToggleArg: (a) => toggle(i, a),
-        renderFieldEditor: (f) => renderEditor(i, f),
-        onToggleField: (f) => toggle(i, f),
+        // Row commands, the flow twin of the list editor's ↑ / ↓ / × — without
+        // them the flow view could only rewrite statements, never reorder or
+        // remove one.
+        onDelete: () => {
+          const next = deleteStatement(ctx.getSource(), leafLoc, i);
+          if (next != null) apply(next);
+        },
+        onMove: (dir) => {
+          const next = moveStatement(ctx.getSource(), leafLoc, i, dir);
+          if (next != null) apply(next);
+        },
+        canMoveUp: i > 0,
+        canMoveDown: i < views.length - 1,
+        valueEditor: renderEditor(i, []),
+        onToggleEditor: () => toggle(i, []),
+        renderArgEditor: (a) => renderEditor(i, [], a),
+        onToggleArg: (a) => toggle(i, [], a),
+        renderFieldEditor: (f) => renderEditor(i, [], f),
+        onToggleField: (f) => toggle(i, [], f),
+        nested: nestedFor(i),
         events,
         onRepointEvent:
-          // `setEmitEvent` addresses a workflow's PRIMARY create body only, so
-          // the inline event Select is withheld while a non-primary member is
-          // selected rather than repointing an emit in the wrong body.
-          view.kind === "emit" && !(leafLoc.kind === "workflow" && leafLoc.member)
+          // `setEmitEvent` addresses a workflow's PRIMARY create body / a named
+          // operation only, so the inline event Select is withheld while any
+          // other member is selected rather than repointing the wrong body's emit.
+          view.kind === "emit" && !leafLoc.member
             ? (eventName: string) => {
                 const next = setEmitEvent(
                   ctx.getSource(),
@@ -648,9 +829,10 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       m.set(`stmt:${i}`, data as unknown as Record<string, unknown>);
     });
     return m;
-    // `ctx` covers getSource changes (parent re-renders create a fresh ctx).
+    // `ctx` covers getSource changes (parent re-renders create a fresh ctx);
+    // `bodySurface` carries the structuredKey / exprMode dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, leafLoc, structuredKey, exprMode, rev, compact]);
+  }, [parsed, leafLoc, bodySurface, rev, compact]);
 
   /** Per-construct rename + delete handlers, keyed by the node id. Only
    *  populated for ViewKinds that map to v1's NodeKind (the ones
@@ -852,9 +1034,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       }
 
       // Inline filter editor on a find node (only meaningful inside a
-      // repository view, where the parent path step is the repo).
+      // repository view, where the parent path step is the repo) — plus the
+      // two header clauses that sit beside the `where` filter and have no
+      // expression tree of their own: the `requires` gate and `ignoring`.
       let expressionEditor: ReactNode | undefined;
       let onToggleExpression: (() => void) | undefined;
+      let inputs: ConstructNodeData["inputs"];
       if (n.kind === "find" && aggOwner?.kind === "repository") {
         const repoName = aggOwner.name;
         const t = buildExprToggle(
@@ -863,6 +1048,37 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         );
         expressionEditor = t.expressionEditor;
         onToggleExpression = t.onToggleExpression;
+        const surface = findSurface(parsed.ast, repoName, n.name);
+        if (surface) {
+          const findName = n.name;
+          inputs = [
+            {
+              label: "requires",
+              value: surface.requires ?? "",
+              placeholder: "(none)",
+              testid: "c4system-v2-find-requires",
+              // Empty text is "drop the clause" — `setFindGate` treats null as
+              // the removal request and returns the source untouched when
+              // there was none.
+              onCommit: (v) => {
+                const next = setFindGate(ctx.getSource(), repoName, findName, v.trim() || null);
+                if (next != null) apply(next);
+              },
+            },
+            {
+              label: "ignoring",
+              value: surface.ignoring === "*" ? "*" : (surface.ignoring ?? []).join(", "),
+              placeholder: "* or Cap1, Cap2",
+              testid: "c4system-v2-find-ignoring",
+              onCommit: (v) => {
+                const text = v.trim();
+                const spec = text === "" ? null : text === "*" ? "*" : text.split(",").map((s) => s.trim());
+                const next = setFindIgnoring(ctx.getSource(), repoName, findName, spec);
+                if (next != null) apply(next);
+              },
+            },
+          ];
+        }
       }
 
       m.set(n.id, {
@@ -873,6 +1089,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onRename,
         onDelete,
         multiSelects,
+        inputs,
         expressionEditor,
         onToggleExpression,
         compact,
@@ -1001,6 +1218,164 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     });
   };
 
+  /** Pick a body member. Inside an aggregate every member — operation and
+   *  lifecycle body alike — is SIBLING NAVIGATION: the view-graph builds the
+   *  statement flow from the path, so the leaf step is swapped and the override
+   *  cleared. An operation keeps its `{kind:"operation"}` step, which keeps its
+   *  locator and expression-slot keys member-less, exactly as before the picker
+   *  existed; a lifecycle body rides a `body` step carrying its `listBodies`
+   *  key. A workflow member has no step of its own, so it stays an override. */
+  const pickBodyMember = (key: BodyKey): void => {
+    if (leafKind && AGG_BODY_LEAF.has(leafKind)) {
+      const step: ViewStep = key.startsWith("op:")
+        ? { kind: "operation", name: key.slice(3) }
+        : { kind: "body", name: key };
+      setBodyMember(undefined);
+      setPath((p) => {
+        const last = p[p.length - 1];
+        if (!last || (last.kind === step.kind && last.name === step.name)) return p;
+        animateNextFit.current = true;
+        return [...p.slice(0, -1), step];
+      });
+      return;
+    }
+    // Selecting the primary member clears the override rather than pinning its
+    // key, so the default body keeps its member-less locator.
+    setBodyMember(key === primaryMemberKey ? undefined : key);
+  };
+
+  /** Header (signature) inspector for the operation at the path leaf — the
+   *  surface `op-surface.ts` owns: parameters, return type, the `requires` /
+   *  `when` gates and the `private` / `extern` / `audited` modifiers. Compact
+   *  by design (an inspector, not a form designer); every mutator returns null
+   *  on failure, which is a no-op here. */
+  const opInspector = ((): JSX.Element | null => {
+    const last = path[path.length - 1];
+    const aggStep = path[path.length - 2];
+    if (last?.kind !== "operation" || aggStep?.kind !== "aggregate") return null;
+    const surface = opSurface(parsed.ast, aggStep.name, last.name);
+    if (!surface) return null;
+    const agg = aggStep.name;
+    const op = last.name;
+    const commit = (next: string | null): void => {
+      if (next != null) apply(next);
+    };
+    const modifier = (name: "private" | "extern" | "audited", on: boolean): void =>
+      commit(setOpModifier(ctx.getSource(), agg, op, name, on));
+    return (
+      <Stack
+        gap={4}
+        px={6}
+        py={4}
+        bg="dark.7"
+        style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        data-testid="c4system-v2-op-inspector"
+      >
+        <Group gap={6} wrap="wrap" align="center">
+          <Text size="xs" c="dimmed">
+            params
+          </Text>
+          {surface.params.map((p, i) => (
+            <Group key={`${p.name}-${i}`} gap={2} wrap="nowrap" align="center" data-testid="c4system-v2-op-param-row">
+              <HeaderInput
+                value={p.name}
+                width={90}
+                testid="c4system-v2-op-param-name"
+                onCommit={(v) => commit(renameOpParam(ctx.getSource(), agg, op, i, v.trim()))}
+              />
+              <Text size="xs" c="dimmed">
+                :
+              </Text>
+              <HeaderInput
+                value={`${p.baseLabel}${p.array ? "[]" : ""}${p.optional ? "?" : ""}`}
+                width={110}
+                testid="c4system-v2-op-param-type"
+                onCommit={(v) => commit(retypeOpParam(ctx.getSource(), agg, op, i, v))}
+              />
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                data-testid="c4system-v2-op-param-del"
+                onClick={() => commit(deleteOpParam(ctx.getSource(), agg, op, i))}
+              >
+                ×
+              </Button>
+            </Group>
+          ))}
+          <Button
+            size="compact-xs"
+            variant="light"
+            data-testid="c4system-v2-op-param-add"
+            onClick={() =>
+              commit(
+                addOpParam(ctx.getSource(), agg, op, freshOpParamName(parsed.ast, agg, op), {
+                  base: { kind: "primitive", name: "string" },
+                  array: false,
+                  optional: false,
+                }),
+              )
+            }
+          >
+            + param
+          </Button>
+        </Group>
+        <Group gap={8} wrap="wrap" align="center">
+          {/* An emptied field is the removal request — every setter takes null
+              for "drop the clause" and no-ops when there was none. */}
+          <HeaderInput
+            label="returns"
+            value={surface.returnTypeText ?? ""}
+            width={110}
+            placeholder="(none)"
+            testid="c4system-v2-op-return"
+            onCommit={(v) => commit(setOpReturnType(ctx.getSource(), agg, op, v.trim() || null))}
+          />
+          <HeaderInput
+            label="requires"
+            value={surface.requires ?? ""}
+            width={150}
+            placeholder="(none)"
+            testid="c4system-v2-op-requires"
+            onCommit={(v) => commit(setOpGate(ctx.getSource(), agg, op, "requires", v.trim() || null))}
+          />
+          <HeaderInput
+            label="when"
+            value={surface.when ?? ""}
+            width={150}
+            placeholder="(none)"
+            testid="c4system-v2-op-when"
+            onCommit={(v) => commit(setOpGate(ctx.getSource(), agg, op, "when", v.trim() || null))}
+          />
+          <Checkbox
+            size="xs"
+            label="private"
+            checked={surface.private}
+            data-testid="c4system-v2-op-private"
+            styles={{ label: { fontSize: 11 } }}
+            onChange={(e) => modifier("private", e.currentTarget.checked)}
+          />
+          <Checkbox
+            size="xs"
+            label="extern"
+            checked={surface.extern}
+            data-testid="c4system-v2-op-extern"
+            styles={{ label: { fontSize: 11 } }}
+            onChange={(e) => modifier("extern", e.currentTarget.checked)}
+          />
+          <Checkbox
+            size="xs"
+            label="audited"
+            checked={surface.audited}
+            data-testid="c4system-v2-op-audited"
+            styles={{ label: { fontSize: 11 } }}
+            onChange={(e) => modifier("audited", e.currentTarget.checked)}
+          />
+        </Group>
+      </Stack>
+    );
+  })();
+
   /** Repoint a deployable's `targets` / `ui` binding by dragging the edge's
    *  target endpoint to another node. Owner stays fixed; an incompatible drop
    *  or unparseable rewrite leaves the source untouched. */
@@ -1019,37 +1394,17 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={jumpTo} />
-      {wfMembers.length > 0 && (
-        <Group
-          gap={4}
-          px={6}
-          py={4}
-          bg="dark.7"
-          wrap="wrap"
-          style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
-          data-testid="c4system-v2-wf-members"
-        >
-          <Text size="xs" c="dimmed" mr={2}>
-            member
-          </Text>
-          {wfMembers.map((b) => (
-            <Button
-              key={b.key}
-              size="compact-xs"
-              variant={(wfMember ?? primaryMemberKey) === b.key ? "light" : "subtle"}
-              data-testid={`c4system-v2-wf-member-${b.key}`}
-              title={`${b.label} — ${b.count} statement${b.count === 1 ? "" : "s"}`}
-              // Selecting the primary create clears the override rather than
-              // pinning its key, so the default body keeps its member-less
-              // locator (and its existing expression-slot keys).
-              onClick={() => setWfMember(b.key === primaryMemberKey ? undefined : b.key)}
-            >
-              {b.label} ({b.count})
-            </Button>
-          ))}
-        </Group>
+      {bodyMembers.length > 0 && (
+        <BodyPicker
+          members={bodyMembers}
+          selected={bodyMember ?? primaryMemberKey}
+          // The workflow ids predate the aggregate reach, so they stay put.
+          testidPrefix={leafKind === "workflow" ? "c4system-v2-wf-member" : "c4system-v2-body-member"}
+          onSelect={pickBodyMember}
+        />
       )}
-      <AddPalette path={path} source={ctx.getSource()} onChange={apply} wfMember={wfMember} />
+      {opInspector}
+      <AddPalette path={path} source={ctx.getSource()} onChange={apply} bodyMember={bodyMember} />
       <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow

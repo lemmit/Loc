@@ -20,6 +20,12 @@ import {
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
+// The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
+// default, values?)` over `./locales/en.json` with `{name}` substitution — so
+// the Svelte generator reuses the React module verbatim (same sharing pattern
+// as Vue).  Runtime files land under `src/lib/` and the body-walker seam's
+// `../i18n` import is rewritten to the depth-agnostic `$lib/i18n` specifier.
+import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -27,6 +33,7 @@ import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { buildSvelteApiModule } from "./api-builder.js";
 import {
   SVELTE_APP_DTS,
@@ -122,6 +129,20 @@ export function generateSvelteForContexts(
     );
   }
 
+  // i18n (M-T1.11 Svelte runtime — the React runtime ported to Svelte): when
+  // this UI has extractable user-visible strings, page/component bodies emit
+  // `{t("<key>", "<default>")}` for literal text slots (keyed identically to the
+  // catalog via the SHARED walker seam) and the app ships a `src/lib/i18n.ts`
+  // shim + `src/lib/locales/en.json`.  The seam's `../i18n` import rewrites to
+  // `$lib/i18n` (see `svelteImportPath`), so it resolves from any route depth.
+  // Empty catalog → no runtime, walk sites pass `undefined` and output stays
+  // byte-identical to pre-i18n.
+  const i18nEnabled = collectUiMessages(ui).length > 0;
+  if (i18nEnabled) {
+    out.set("src/lib/locales/en.json", renderLocaleCatalog(ui));
+    out.set("src/lib/i18n.ts", renderI18nModule());
+  }
+
   // Per-aggregate api modules.
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
@@ -146,6 +167,9 @@ export function generateSvelteForContexts(
     pack,
     topLevelComponents: options.topLevelComponents ?? [],
     authUi,
+    // i18n key prefix is emitted per page/component only when the UI has
+    // extractable strings (byte-identical to pre-i18n otherwise).
+    i18nEnabled,
     sourcemap: options.sourcemap,
   };
   for (const [path, content] of emitSveltePagesForUi(ui, emitCtx)) out.set(path, content);

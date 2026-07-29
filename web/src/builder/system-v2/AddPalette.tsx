@@ -3,31 +3,73 @@
 // `addConstructSource` / `addSubdomainSource` (so the same parse-guarded edits
 // the v1 inspector produces).
 //
-// Phase 3a covers system and context views — the levels v1's add.ts already
-// handles directly. Subdomain-level "+ Context", aggregate-level "+ Operation"
-// and operation-level "+ Stmt" come in Phase 3b once their pure helpers exist.
+// System and context views reuse the levels v1's add.ts already handles
+// directly; subdomain-level "+ Context", aggregate-level "+ Operation" and
+// operation-level "+ Stmt" come from the v2-only helpers next to it.
+//
+// The kinds the v2 graph renders beyond v1's `NodeKind` union get their adds
+// from the sibling `SystemExtraKind` / `ContextExtraKind` menus below.  Several
+// of those templates need a mandatory cross-reference target (a `channel`
+// carries an event, a `resource` uses a storage, …) and return null when the
+// model has none — the button then no-ops, exactly as `+ Repository` /
+// `+ API` already do when their target is missing.
 
-import { Button, Group } from "@mantine/core";
-import { addConstructSource, addSubdomainSource } from "../system/add";
-import { addStatement, type BodyKey, type BodyLocator } from "../system/body";
+import { Button, Group, Text } from "@mantine/core";
+import {
+  addConstructSource,
+  addSubdomainSource,
+  addSystemExtraSource,
+  type SystemExtraKind,
+} from "../system/add";
+import { addStatement, aggregateBody, type BodyKey, type BodyLocator } from "../system/body";
 import { addField, freshFieldName } from "../system/fields";
 import { findAggregate, type ViewPath } from "./view-graph";
-import { addContextSource, addOperationSource } from "./add-extra";
+import {
+  addContextExtraSource,
+  addContextSource,
+  addOperationSource,
+  addPermissionsSource,
+  type ContextExtraKind,
+} from "./add-extra";
 import { parseDdd } from "../parse";
 
 interface Props {
   path: ViewPath;
   source: string;
   onChange: (next: string) => void;
-  /** Selected workflow body member; undefined = the primary create. */
-  wfMember?: BodyKey;
+  /** Selected member of the WORKFLOW at the path leaf; undefined = its primary
+   *  `create` starter. An aggregate's members each have a path step of their
+   *  own (`operation` / `body`), so they need no override here. */
+  bodyMember?: BodyKey;
 }
 
 const try_ = (onChange: (next: string) => void, next: string | null): void => {
   if (next != null) onChange(next);
 };
 
-export default function AddPalette({ path, source, onChange, wfMember }: Props): JSX.Element | null {
+/** System-scope extras, grouped read-model-ish first then infrastructure —
+ *  same order the system view lays them out. */
+const SYSTEM_EXTRAS: { kind: SystemExtraKind; label: string }[] = [
+  { kind: "resource", label: "+ Resource" },
+  { kind: "channelSource", label: "+ Channel source" },
+  { kind: "timerSource", label: "+ Timer source" },
+  { kind: "capability", label: "+ Capability" },
+];
+
+/** Context-scope extras, grouped by family so the row reads as three clusters:
+ *  read models / behaviour, vocabulary, then predicates + authz. */
+const CONTEXT_EXTRAS: { kind: ContextExtraKind; label: string }[] = [
+  { kind: "projection", label: "+ Projection" },
+  { kind: "domainService", label: "+ Domain service" },
+  { kind: "channel", label: "+ Channel" },
+  { kind: "payload", label: "+ Payload" },
+  { kind: "enum", label: "+ Enum" },
+  { kind: "criterion", label: "+ Criterion" },
+  { kind: "retrieval", label: "+ Retrieval" },
+  { kind: "policy", label: "+ Policy" },
+];
+
+export default function AddPalette({ path, source, onChange, bodyMember }: Props): JSX.Element | null {
   const last = path[path.length - 1];
 
   if (!last) return null;
@@ -45,6 +87,11 @@ export default function AddPalette({ path, source, onChange, wfMember }: Props):
           onClick={() => try_(onChange, addConstructSource(source, "ui"))}>+ UI</Button>
         <Button size="compact-xs" variant="default" data-testid="c4system-v2-add-deployable"
           onClick={() => try_(onChange, addConstructSource(source, "deployable"))}>+ Deployable</Button>
+        <Text size="xs" c="dimmed" mx={2}>|</Text>
+        {SYSTEM_EXTRAS.map((e) => (
+          <Button key={e.kind} size="compact-xs" variant="default" data-testid={`c4system-v2-add-${e.kind}`}
+            onClick={() => try_(onChange, addSystemExtraSource(source, e.kind))}>{e.label}</Button>
+        ))}
       </Group>
     );
   }
@@ -54,6 +101,8 @@ export default function AddPalette({ path, source, onChange, wfMember }: Props):
       <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }} data-testid="c4system-v2-add-palette">
         <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-context"
           onClick={() => try_(onChange, addContextSource(source, last.name))}>+ Context</Button>
+        <Button size="compact-xs" variant="default" data-testid="c4system-v2-add-permissions"
+          onClick={() => try_(onChange, addPermissionsSource(source, last.name))}>+ Permissions</Button>
       </Group>
     );
   }
@@ -81,13 +130,18 @@ export default function AddPalette({ path, source, onChange, wfMember }: Props):
     );
   }
 
-  if (last.kind === "operation" || last.kind === "workflow") {
+  if (last.kind === "operation" || last.kind === "workflow" || last.kind === "body") {
     const loc: BodyLocator =
       last.kind === "workflow"
-        ? { kind: "workflow", name: last.name, member: wfMember }
+        ? { kind: "workflow", name: last.name, member: bodyMember }
         : (() => {
             const agg = path[path.length - 2];
-            return { kind: "operation", aggregate: agg?.name ?? "", op: last.name };
+            // A `body` step carries the aggregate's `listBodies` key, which
+            // reaches its create / destroy / apply bodies; an `operation` step
+            // names the operation, the shape this locator has always had.
+            return last.kind === "body"
+              ? aggregateBody(agg?.name ?? "", last.name)
+              : { kind: "operation", aggregate: agg?.name ?? "", op: last.name };
           })();
     return (
       <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }} data-testid="c4system-v2-add-palette">
@@ -111,6 +165,11 @@ export default function AddPalette({ path, source, onChange, wfMember }: Props):
           onClick={() => try_(onChange, addConstructSource(source, "workflow", { context: ctxName }))}>+ Workflow</Button>
         <Button size="compact-xs" variant="light" data-testid="c4system-v2-add-repository"
           onClick={() => try_(onChange, addConstructSource(source, "repository", { context: ctxName }))}>+ Repository</Button>
+        <Text size="xs" c="dimmed" mx={2}>|</Text>
+        {CONTEXT_EXTRAS.map((e) => (
+          <Button key={e.kind} size="compact-xs" variant="default" data-testid={`c4system-v2-add-${e.kind}`}
+            onClick={() => try_(onChange, addContextExtraSource(source, ctxName, e.kind))}>{e.label}</Button>
+        ))}
       </Group>
     );
   }

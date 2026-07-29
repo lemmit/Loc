@@ -1,6 +1,6 @@
 // Pure walker that derives the relational structure of an Aggregate: which
-// operation/derived/invariant/function references which field/containment,
-// which operation writes which field, which operation emits which event.
+// operation/lifecycle-body/derived/invariant/function references which
+// field/containment, which of them writes which field, which emits which event.
 //
 // Used by view-graph.ts to surface aggregate-level edges (reads / writes /
 // constrains / emits) — the tree-structure cue the user asked for: an
@@ -33,17 +33,20 @@ import type {
   Statement,
   ThisRef,
 } from "../../../../src/language/generated/ast.js";
+import { aggregateBodyStatements, listBodies } from "../system/body";
 
 /** A source node (an `op:`/`derived:`/`invariant:`/`function:` id from the
- *  view-graph) and the set of field-names it touches in some way. */
+ *  view-graph, or a lifecycle body's `listBodies` key) and the set of
+ *  field-names it touches in some way. */
 export type EdgeSet = Map<string, Set<string>>;
 
 export interface AggregateRelations {
-  /** consumer (op/derived/invariant/function id) → set of field names read */
+  /** consumer (op / lifecycle-body / derived / invariant / function id) → set
+   *  of field names read */
   reads: EdgeSet;
-  /** operation id → set of field names assigned */
+  /** operation / lifecycle-body id → set of field names assigned */
   writes: EdgeSet;
-  /** operation id → set of event names emitted */
+  /** operation / lifecycle-body id → set of event names emitted */
   emits: EdgeSet;
 }
 
@@ -158,6 +161,18 @@ function collectFromStatements(
 export function computeAggregateRelations(agg: Aggregate): AggregateRelations {
   const rel: AggregateRelations = { reads: new Map(), writes: new Map(), emits: new Map() };
   const stateNames = aggregateStateNames(agg);
+
+  // Lifecycle bodies (`create` / `destroy` / `apply`) act on state exactly as
+  // an operation does — a `create` that assigns `total := initial` writes
+  // `total`, an `apply` that emits does emit. They are keyed by their
+  // `listBodies` key, which is also the id the aggregate view gives their
+  // node, so each edge's source lands on the right card. (Operations are
+  // walked below under their historical `operation:<name>` source id, so the
+  // `op:` keys are skipped here.)
+  for (const b of listBodies(agg)) {
+    if (b.key.startsWith("op:")) continue;
+    collectFromStatements(aggregateBodyStatements(agg, b.key), b.key, stateNames, rel);
+  }
 
   // Operations: walk their statement bodies.
   for (const m of agg.members) {

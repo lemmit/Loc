@@ -2,6 +2,8 @@ import { AstUtils, CstUtils, GrammarUtils, type AstNode } from "langium";
 import type {
   Aggregate,
   Apply,
+  Create,
+  Destroy,
   EmitStmt,
   ForStmt,
   FunctionDecl,
@@ -48,14 +50,29 @@ import { parseDdd } from "../parse";
 // reprinting the block it lives in.
 // ---------------------------------------------------------------------------
 
-/** Key of one statement-bearing member of a workflow (or the primary create).
- *  `create` | `create:<Name>` | `handle:<Name>` | `on:<Event>` | `apply:<Event>`,
- *  with a `#<n>` suffix disambiguating a repeated key. */
+/** Key of one statement-bearing member of a workflow or an aggregate.
+ *  Workflows: `create` | `create:<Name>` | `handle:<Name>` | `on:<Event>` |
+ *  `apply:<Event>`.  Aggregates: `op:<Name>` | `create` | `create:<Name>` |
+ *  `destroy` | `destroy:<Name>` | `apply:<Event>`.  A `#<n>` suffix
+ *  disambiguates a repeated key (two unnamed `destroy`s, say). */
 export type BodyKey = string;
 
 export type BodyLocator =
+  // `member` addresses ONE statement-bearing member.  On a workflow it is a
+  // `listBodies` key and defaults to the primary `create` starter; on an
+  // aggregate it reaches the members an operation name cannot address —
+  // `create` / `create:Name` / `destroy` / `destroy:Name` / `apply:Event` —
+  // and, when omitted, `op` names the operation exactly as it always did.
   | { kind: "workflow"; name: string; member?: BodyKey }
-  | { kind: "operation"; aggregate: string; op: string };
+  | { kind: "operation"; aggregate: string; op: string; member?: BodyKey };
+
+/** Locator for ANY statement-bearing member of an aggregate, keyed the way
+ *  `listBodies` reports it (`op:confirm`, `create`, `apply:Paid`, …).  `op` is
+ *  carried alongside so the shape stays the historical `operation` locator —
+ *  when the key names an operation both routes resolve to the same body. */
+export function aggregateBody(aggregate: string, member: BodyKey): BodyLocator {
+  return { kind: "operation", aggregate, op: member.startsWith("op:") ? member.slice(3) : member, member };
+}
 
 interface Body {
   owner: AstNode;
@@ -134,23 +151,49 @@ function workflowHosts(wf: Workflow): StmtHost[] {
   return out;
 }
 
+/** Every statement-bearing member of an aggregate, in declaration order: its
+ *  `operation`s (keyed `op:<name>`, as `listBodies` has always reported them)
+ *  plus the lifecycle bodies an operation name cannot address — `create`s,
+ *  `destroy`s and event `apply` folds. */
+function aggregateHosts(agg: Aggregate): StmtHost[] {
+  const out: StmtHost[] = [];
+  const seen = new Map<string, number>();
+  const push = (key: string, label: string, owner: AstNode, statements: Statement[]): void => {
+    const n = seen.get(key) ?? 0;
+    seen.set(key, n + 1);
+    out.push({ key: n === 0 ? key : `${key}#${n}`, label, owner, statements });
+  };
+  for (const m of agg.members) {
+    if (m.$type === "Operation") {
+      const o = m as Operation;
+      push(`op:${o.name}`, `operation ${o.name}`, o, o.body);
+    } else if (m.$type === "Create") {
+      const c = m as Create;
+      push(c.name ? `create:${c.name}` : "create", c.name ? `create ${c.name}` : "create", c, c.body);
+    } else if (m.$type === "Destroy") {
+      const d = m as Destroy;
+      push(d.name ? `destroy:${d.name}` : "destroy", d.name ? `destroy ${d.name}` : "destroy", d, d.body);
+    } else if (m.$type === "Apply") {
+      const a = m as Apply;
+      const ev = a.event?.$refText ?? "";
+      push(`apply:${ev}`, `apply ${ev}`, a, a.body);
+    }
+  }
+  return out;
+}
+
 /** Statement-bearing members addressable by a `BodyLocator.member` key —
- *  workflows expose their creates / handles / ons / applies; an aggregate
- *  exposes its operations (addressed by the `operation` locator instead). */
+ *  workflows expose their creates / handles / ons / applies; an aggregate its
+ *  operations (`op:<name>`, also reachable by the bare `operation` locator)
+ *  plus its `create` / `destroy` / `apply` lifecycle bodies. */
 export function listBodies(node: AstNode): BodyRef[] {
-  if (node.$type === "Workflow") {
-    return workflowHosts(node as Workflow).map((h) => ({
-      key: h.key,
-      label: h.label,
-      count: h.statements.length,
-    }));
-  }
-  if (node.$type === "Aggregate") {
-    return (node as Aggregate).members
-      .filter((m): m is Operation => m.$type === "Operation")
-      .map((o) => ({ key: `op:${o.name}`, label: `operation ${o.name}`, count: o.body.length }));
-  }
-  return [];
+  const hosts =
+    node.$type === "Workflow"
+      ? workflowHosts(node as Workflow)
+      : node.$type === "Aggregate"
+        ? aggregateHosts(node as Aggregate)
+        : [];
+  return hosts.map((h) => ({ key: h.key, label: h.label, count: h.statements.length }));
 }
 
 /** Statements of one workflow member, keyed (default: the primary `create`). */
@@ -185,8 +228,27 @@ function resolveBody(ast: Model, loc: BodyLocator): Body | null {
   }
   const agg = findAggregate(ast, loc.aggregate);
   if (!agg) return null;
+  // A member key reaches every statement-bearing member; without one, `op`
+  // names an operation — the historical (and still exact) locator shape.
+  if (loc.member) return aggregateHosts(agg).find((h) => h.key === loc.member) ?? null;
   const op = agg.members.find((m): m is Operation => m.$type === "Operation" && m.name === loc.op);
   return op ? { owner: op, statements: op.body } : null;
+}
+
+/** Statements of one aggregate member, keyed as `listBodies` reports it. */
+export function aggregateBodyStatements(agg: AstNode, member: BodyKey): Statement[] {
+  if (agg.$type !== "Aggregate") return [];
+  return aggregateHosts(agg as Aggregate).find((h) => h.key === member)?.statements ?? [];
+}
+
+/** Names bound by an aggregate member's own signature — the operation /
+ *  create / destroy parameter list, or an `apply`'s single event parameter. */
+export function aggregateBodyParamNames(agg: AstNode, member: BodyKey): string[] {
+  if (agg.$type !== "Aggregate") return [];
+  const owner = aggregateHosts(agg as Aggregate).find((h) => h.key === member)?.owner;
+  if (!owner) return [];
+  if (owner.$type === "Apply") return [(owner as Apply).param];
+  return (owner as Operation | Create | Destroy).params.map((p) => p.name);
 }
 
 /** Operation names declared on an aggregate (for the inspector's op picker). */
@@ -681,9 +743,13 @@ interface StmtSite {
 }
 
 function resolveSite(body: Body, addr: StmtAddr): StmtSite | null {
+  return resolveSiteIn(body.statements, addr);
+}
+
+function resolveSiteIn(statements: Statement[], addr: StmtAddr): StmtSite | null {
   const path = asPath(addr);
   if (path.length === 0) return null;
-  let list: Statement[] = body.statements;
+  let list: Statement[] = statements;
   let stmt: Statement | undefined;
   for (let i = 0; i < path.length; i++) {
     const step = path[i]!;
@@ -696,6 +762,33 @@ function resolveSite(body: Body, addr: StmtAddr): StmtSite | null {
     if (!stmt) return null;
   }
   return { list, index: path[path.length - 1]!.index, stmt: stmt as Statement };
+}
+
+/** The statement a flat index / nested path addresses inside a statement list —
+ *  the addressing core, exposed so the expression-slot layer can resolve a slot
+ *  that hangs off a statement nested in a `for` / `if let` / `match` block. */
+export function statementAt(statements: readonly Statement[], addr: StmtAddr): Statement | null {
+  return resolveSiteIn(statements as Statement[], addr)?.stmt ?? null;
+}
+
+/** Every nested statement list a container statement carries, keyed by the
+ *  `StmtList` step a path uses to descend into it (empty for a leaf statement,
+ *  and for a container whose optional block is absent). */
+export function nestedStmtLists(stmt: Statement): { list: StmtList; items: Statement[] }[] {
+  const out: { list: StmtList; items: Statement[] }[] = [];
+  const push = (list: StmtList, items: Statement[] | undefined): void => {
+    if (items && items.length > 0) out.push({ list, items });
+  };
+  if (stmt.$type === "ForStmt") push("body", (stmt as ForStmt).body);
+  else if (stmt.$type === "IfLetStmt") {
+    push("then", (stmt as IfLetStmt).thenBody);
+    push("else", (stmt as IfLetStmt).elseBody);
+  } else if (stmt.$type === "MatchStmt") {
+    const m = stmt as MatchStmt;
+    m.varArms.forEach((arm, i) => push({ arm: i }, arm.body));
+    push("else", m.elseBody);
+  }
+  return out;
 }
 
 /** Where a new statement goes: a container statement's sub-list, or (when

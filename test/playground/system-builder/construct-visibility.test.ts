@@ -472,7 +472,7 @@ describe("Model v2 — authz visibility", () => {
 });
 
 describe("Model v2 — aggregate-level completeness", () => {
-  it("renders create / destroy / apply beside the operations", () => {
+  it("renders create / destroy / apply beside the operations, keyed as `listBodies` reports them", () => {
     const g = aggGraph();
     expect(byId(g, "create:place")).toMatchObject({
       kind: "create",
@@ -480,7 +480,10 @@ describe("Model v2 — aggregate-level completeness", () => {
       summary: ["(sku: string)", "1 stmt"],
     });
     expect(byId(g, "destroy:cancel")).toMatchObject({ kind: "destroy", summary: ["()", "1 stmt"] });
-    expect(byId(g, "apply:0")).toMatchObject({
+    // The apply node's id is its member key (`apply:<Event>`), not a positional
+    // index — one string addresses the body from the node, the drill step and
+    // the edge source alike.
+    expect(byId(g, "apply:Placed")).toMatchObject({
       kind: "apply",
       name: "apply Placed",
       summary: ["(e: Placed)", "1 stmt"],
@@ -507,16 +510,58 @@ describe("Model v2 — aggregate-level completeness", () => {
 
   it("none of the read-only aggregate constructs claim to be drillable", () => {
     const g = aggGraph();
-    for (const id of [
-      "create:place",
-      "destroy:cancel",
-      "apply:0",
-      "unique:0",
-      "with:0",
-      "test:0",
-    ]) {
+    for (const id of ["unique:0", "with:0", "test:0", "filter:0", "stamp:0"]) {
       expect(byId(g, id).drillable).toBe(false);
     }
+  });
+
+  it("each lifecycle body drills into a `body` step carrying its member key", () => {
+    const g = aggGraph();
+    for (const key of ["create:place", "destroy:cancel", "apply:Placed"]) {
+      expect(byId(g, key).drillable).toBe(true);
+      expect(byId(g, key).drillTo).toEqual({ kind: "body", name: key });
+    }
+  });
+
+  it("drilling a lifecycle node opens the same statement flow an operation gets", () => {
+    const opG = buildViewGraph(AST, [
+      { kind: "aggregate", name: "Order" },
+      { kind: "operation", name: "confirm" },
+    ]);
+    const bodyG = buildViewGraph(AST, [
+      { kind: "aggregate", name: "Order" },
+      { kind: "body", name: "create:place" },
+    ]);
+    expect(bodyG.title).toBe("Order.create:place()");
+    // Same node kinds, same ids, same shape — only the body differs.
+    expect(children(bodyG).map((n) => ({ id: n.id, kind: n.kind }))).toEqual(
+      children(opG).map((n) => ({ id: n.id, kind: n.kind })),
+    );
+    // …and the root banner keeps the member's own tint-carrying kind.
+    expect(bodyG.nodes.find((n) => n.isRoot)?.kind).toBe("create");
+    expect(
+      buildViewGraph(AST, [
+        { kind: "aggregate", name: "Order" },
+        { kind: "body", name: "apply:Placed" },
+      ]).nodes.find((n) => n.isRoot)?.kind,
+    ).toBe("apply");
+  });
+
+  it("a lifecycle body's writes land on the state it assigns", () => {
+    // `create place` / `destroy cancel` / `apply Placed` each assign `status`;
+    // the edge source is the member key, i.e. the lifecycle node's own id.
+    const writes = aggGraph()
+      .edges.filter((e) => e.kind === "writes")
+      .map((e) => `${e.source}->${e.target}`)
+      .sort();
+    expect(writes).toEqual(
+      [
+        "apply:Placed->field:status",
+        "create:place->field:status",
+        "destroy:cancel->field:status",
+        "operation:confirm->field:status",
+      ].sort(),
+    );
   });
 });
 

@@ -60,7 +60,12 @@ import type {
 } from "../../../../src/language/generated/ast.js";
 import { spliceNodeIfParses } from "../edit-engine";
 import { parseDdd } from "../parse";
-import { listBodies, workflowBodyStatements, type BodyKey } from "../system/body";
+import {
+  aggregateBodyStatements,
+  listBodies,
+  workflowBodyStatements,
+  type BodyKey,
+} from "../system/body";
 import { deployableContexts, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 import { computeAggregateRelations, computeEntityPartRelations } from "./aggregate-edges";
 import { computeContextRelations } from "./context-edges";
@@ -80,6 +85,13 @@ export type ViewKind =
   | "projection"
   // statement-flow node (the leaf of an operation / workflow view)
   | "stmt"
+  // PATH-STEP ONLY — never a rendered node kind. Addresses one of an
+  // aggregate's lifecycle bodies (`create` / `create:draft` / `destroy` /
+  // `destroy:archive` / `apply:Event`) by its `listBodies` key, which the step
+  // carries as its `name`. Drilling one opens the SAME statement flow an
+  // operation gets; the root banner takes the member's own create / destroy /
+  // apply tint (see `bodyStepKind`).
+  | "body"
   // a single repository find — the leaf of a repository view
   | "find"
   // aggregate-level invariant — a synthetic node (Invariant has no name; the
@@ -1348,7 +1360,12 @@ function aggregateLayout(items: RawAggNode[]): VNode[] {
     name: it.name,
     x: placed.get(it.id)!.x,
     y: placed.get(it.id)!.y,
-    drillable: DRILLABLE.has(it.kind),
+    // An explicit `drillTo` IS the drill target, so a node that carries one is
+    // drillable whatever its kind — that's how the lifecycle leaves
+    // (`create` / `destroy` / `apply`, which drill into a `body` step) open
+    // without making the same kinds drillable in the projection view, where a
+    // fold has no body step to point at.
+    drillable: DRILLABLE.has(it.kind) || it.drillTo !== undefined,
     ...(it.drillTo ? { drillTo: it.drillTo } : {}),
     ...detailOf(it),
   }));
@@ -1379,6 +1396,15 @@ function aggregateView(ast: Model, name: string): ViewGraph {
   const rel = computeAggregateRelations(agg);
   const items: RawAggNode[] = [];
   const next = counter();
+  // The aggregate's lifecycle bodies, keyed exactly as `listBodies` reports
+  // them (`create`, `create:draft`, `destroy:archive`, `apply:Paid`, `#n`-
+  // suffixed on a repeat). `aggregateHosts` walks `agg.members` in declaration
+  // order, so dropping the `op:` entries leaves the keys in the same order the
+  // Create / Destroy / Apply members are visited below — one key each, in step.
+  const lifecycleKeys = listBodies(agg)
+    .map((b) => b.key)
+    .filter((k) => !k.startsWith("op:"));
+  let lifecycleIndex = 0;
   // `with auditable, tenantOwned(...)` on the aggregate header — one compact
   // node listing the capability mixins, so the members the macro layer splices
   // in aren't attributed to thin air.
@@ -1456,18 +1482,24 @@ function aggregateView(ast: Model, name: string): ViewGraph {
         });
         break;
       }
-      // ---- lifecycle behaviour (read-only; bodies are addressable but not
-      //      yet wired into the statement-flow view) ---------------------
+      // ---- lifecycle behaviour ---------------------------------------
+      //
+      // Drillable, like an operation: the node id, the drill step and the
+      // edge source are all the member's `listBodies` KEY, so one string
+      // addresses the body everywhere (`aggregateBody(agg, key)` in the pane,
+      // `aggregateBodyStatements` in the flow view, `computeAggregateRelations`
+      // on the edges).
       case "Create":
       case "Destroy": {
         const c = m as Create | Destroy;
         const kind = m.$type === "Create" ? "create" : "destroy";
-        const label = c.name ?? kind;
+        const key = lifecycleKeys[lifecycleIndex++] ?? `${kind}:${next(kind)}`;
         items.push({
-          id: c.name ? nid(kind, c.name) : `${kind}:${next(kind)}`,
+          id: key,
           kind,
-          name: label,
-          readsOf: EMPTY,
+          name: c.name ?? kind,
+          readsOf: rel.reads.get(key) ?? EMPTY,
+          drillTo: { kind: "body", name: key },
           summary: [
             `(${c.params.map((p) => cstText(p)).join(", ")})`,
             plural(c.body.length, "stmt"),
@@ -1479,11 +1511,13 @@ function aggregateView(ast: Model, name: string): ViewGraph {
       case "Apply": {
         const a = m as Apply;
         const ev = a.event?.$refText ?? "?";
+        const key = lifecycleKeys[lifecycleIndex++] ?? `apply:${next("apply")}`;
         items.push({
-          id: `apply:${next("apply")}`,
+          id: key,
           kind: "apply",
           name: `apply ${ev}`,
-          readsOf: EMPTY,
+          readsOf: rel.reads.get(key) ?? EMPTY,
+          drillTo: { kind: "body", name: key },
           summary: [`(${a.param}: ${ev})`, plural(a.body.length, "stmt")],
         });
         break;
@@ -1838,6 +1872,27 @@ function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
   return stmtFlow(`${aggName}.${opName}()`, op.body, "operation", `${aggName}.${opName}()`);
 }
 
+/** The lifecycle node kind a `listBodies` aggregate key belongs to — the root
+ *  banner of a body view wears it, so a drilled `create` / `destroy` / `apply`
+ *  keeps the tint of the node it was opened from. An `op:` key is accepted
+ *  (both routes resolve to the same body) and reports as an operation. */
+function bodyStepKind(member: BodyKey): ViewKind {
+  if (member.startsWith("op:")) return "operation";
+  if (member.startsWith("destroy")) return "destroy";
+  if (member.startsWith("apply")) return "apply";
+  return "create";
+}
+
+/** An aggregate lifecycle body's statement flow — the same `stmtFlow` an
+ *  operation gets, against the statements `listBodies`' `member` key names
+ *  (`create` / `create:draft` / `destroy:archive` / `apply:Paid`). */
+function aggregateBodyView(ast: Model, aggName: string, member: BodyKey): ViewGraph {
+  const agg = findAggregate(ast, aggName);
+  if (!agg) return { title: `${aggName}.${member}`, nodes: [], edges: [] };
+  const label = `${aggName}.${member}()`;
+  return stmtFlow(label, aggregateBodyStatements(agg, member), bodyStepKind(member), label);
+}
+
 /** A workflow's statement flow, for ONE of its statement-bearing members.
  *  `member` is a `listBodies` key (`create` / `create:Name` / `handle:Name` /
  *  `on:Event` / `apply:Event`); omitted, it opens the primary `create(...)`
@@ -1993,8 +2048,9 @@ export interface ViewOptions {
 }
 
 /** Dispatch on the last step of `path` to the per-level builder; empty path
- *  is the root view. Operation and workflow leaves render as a statement
- *  flow (the leaf node type the pane knows how to render). */
+ *  is the root view. Operation, aggregate-lifecycle-`body` and workflow leaves
+ *  all render as the SAME statement flow (the leaf node type the pane knows
+ *  how to render). */
 export function buildViewGraph(ast: Model, path: ViewPath, opts: ViewOptions = {}): ViewGraph {
   const last = path[path.length - 1];
   if (!last) return rootView(ast);
@@ -2021,6 +2077,12 @@ export function buildViewGraph(ast: Model, path: ViewPath, opts: ViewOptions = {
       const agg = path[path.length - 2];
       if (agg?.kind !== "aggregate") return { title: last.name, nodes: [], edges: [] };
       return operationView(ast, agg.name, last.name);
+    }
+    case "body": {
+      // …and so does a lifecycle body, whose step carries the member key.
+      const agg = path[path.length - 2];
+      if (agg?.kind !== "aggregate") return { title: last.name, nodes: [], edges: [] };
+      return aggregateBodyView(ast, agg.name, last.name);
     }
     case "workflow":
       return workflowView(ast, last.name, opts.workflowMember);

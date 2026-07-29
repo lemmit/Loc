@@ -23,6 +23,12 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+// The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
+// default, values?)` over `./locales/en.json` with `{name}` substitution — so
+// the Vue generator reuses the React module verbatim (same sharing pattern as
+// the page objects / emit-templates above; a candidate for a later `_frontend/`
+// move alongside them).
+import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -48,12 +54,6 @@ import {
   PLAYWRIGHT_CONFIG_TS,
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
-// The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
-// default, values?)` over `./locales/en.json` with `{name}` substitution — so
-// the Vue generator reuses the React module verbatim (same sharing pattern as
-// the page objects / emit-templates above; a candidate for a later `_frontend/`
-// move alongside them).
-import { renderI18nModule, renderLocaleCatalog } from "../react/i18n-runtime.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { prepareVueNamedLayouts } from "./layouts-emitter.js";
 import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";

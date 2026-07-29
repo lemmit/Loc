@@ -7,7 +7,7 @@ import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Swi
 // is always included too, so custom colours round-trip).
 const PALETTE = ["blue", "red", "green", "yellow", "grape", "teal", "gray", "orange", "cyan", "pink", "violet", "indigo", "lime"];
 import { resolver, resolverWithComponents } from "./components";
-import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, expectedAssignEnum, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
+import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultForItemLambda, defaultNode, expectedAssignEnum, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
 import type { Diagnostic } from "../../lsp/protocol";
 
@@ -325,7 +325,7 @@ function Palette(): JSX.Element {
 }
 
 function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }: { options: Record<string, string[]>; operations?: Record<string, string[]>; enumCases?: ReadonlyMap<string, readonly string[]>; pageEnumFields?: ReadonlyMap<string, string> }): JSX.Element {
-  const { id, name, props, childNames, actions, query } = useEditor((state) => {
+  const { id, name, props, childNames, childSlots, actions, query } = useEditor((state) => {
     const selected = [...state.events.selected][0];
     const node = selected ? state.nodes[selected] : undefined;
     return {
@@ -333,6 +333,11 @@ function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }
       name: node?.data.displayName,
       props: (node?.data.props ?? {}) as Record<string, string | number | undefined>,
       childNames: (node?.data.nodes ?? []).map((cid) => state.nodes[cid]?.data.displayName),
+      // The named-arg slot each child fills, if any (stashed in props by
+      // serialize.ts's toCraft; undefined for a plain positional child) — lets
+      // a For's item-lambda check (below) tell its Lambda apart from an
+      // unrelated Lambda that happens to fill a named slot (e.g. `empty:`).
+      childSlots: (node?.data.nodes ?? []).map((cid) => state.nodes[cid]?.data.props?.__slot as string | undefined),
     };
   });
 
@@ -352,6 +357,23 @@ function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }
     actions.addNodeTree(value, arm.rootNodeId);
   };
 
+  // Add the positional item lambda (`item => …`) a `For` needs to become a
+  // real loop, into the selected For — the For twin of `addArm` above.  A
+  // palette-added For starts childless (no click-add primitive builds a bare
+  // `Lambda`), so this control is the only way to grow one on the canvas; a
+  // For seeded from `.ddd` source that already has an item lambda never shows
+  // it (see `hasItemLambda` below).
+  const addForItem = (): void => {
+    if (!id) return;
+    const item = defaultForItemLambda();
+    const Lam = resolver.Lambda as ComponentType<Record<string, unknown>>;
+    const lam = query.parseReactElement(<Lam {...item.props} />).toNodeTree();
+    actions.addNodeTree(lam, id);
+    const Value = resolver[item.children[0].name] as ComponentType<Record<string, unknown>>;
+    const value = query.parseReactElement(<Value {...item.children[0].props} />).toNodeTree();
+    actions.addNodeTree(value, lam.rootNodeId);
+  };
+
   // Add a statement row to the selected block-bodied lambda.
   const addStmt = (): void => {
     if (!id) return;
@@ -360,6 +382,10 @@ function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }
   };
 
   const isBlockLambda = name === "Lambda" && props.__block != null;
+  // A For already has its item renderer once a positional (unslotted) Lambda
+  // child exists — a Lambda filling a named slot (e.g. a hand-written
+  // `empty: e => …`) doesn't count.
+  const hasItemLambda = childNames.some((n, i) => n === "Lambda" && childSlots[i] === undefined);
 
   const specFields = name ? propFields(name) : [];
   // Surface passthrough props (unmodelled modifiers kept verbatim, e.g.
@@ -386,6 +412,11 @@ function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }
           {!childNames.includes("MatchElse") && (
             <Button size="compact-xs" variant="light" data-testid="c4builder-add-else" onClick={() => addArm("MatchElse")}>+ else</Button>
           )}
+        </Group>
+      )}
+      {id && name === "For" && !hasItemLambda && (
+        <Group gap={4} mb="xs">
+          <Button size="compact-xs" variant="light" data-testid="c4builder-add-item" onClick={addForItem}>+ item</Button>
         </Group>
       )}
       {id && isBlockLambda && (

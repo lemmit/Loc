@@ -41,9 +41,11 @@ import { smokeSpec } from "../_frontend/smoke-spec.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import {
   type ActionBinding,
-  defaultInitFor,
   type HandleEventClause,
+  type QueryBinding,
   renderRequiresGuard,
+  stateInitFor,
+  type TableControlBinding,
   type UploadBinding,
   walkBodyToHeex,
 } from "./heex-walker.js";
@@ -515,7 +517,8 @@ function renderLiveView(a: RenderArgs): string {
   const handleEventClauses =
     renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
     renderCreateEventClauses(walked.formBindings, contextModuleByAggName, createSuccessRoute) +
-    renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName);
+    renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName) +
+    renderTableControlClauses(walked.tableControls, walked.queryBindings, contextModuleByAggName);
   // Realtime `handle_info` clauses — one per subscribed event type, each
   // rendering the handler's `toast(…)` as `put_flash(:info, …)` and re-loading
   // any `refetch(<Agg>)` target the page displays.  Empty when the ui declares
@@ -564,6 +567,91 @@ ${h.body.join("\n")}
       )
       .join("\n")
   );
+}
+
+/** Sort / pagination `handle_event` clauses for a page whose `Table(...)` asked
+ *  for interactive controls (M-T1.1, HEEx leg).
+ *
+ *  SERVER-driven, unlike the JSX targets' client-side sort/slice: each clause
+ *  updates the page/sort assigns and then re-runs the SAME list-load block
+ *  `handle_params` uses, so the new values flow straight into the repository's
+ *  paged `list/4` (whitelisted `ORDER BY` + `LIMIT`/`OFFSET`).  That is only
+ *  possible here because a LiveView calls its context function directly — there
+ *  is no refetch hook to re-trigger.
+ *
+ *  Emits nothing (byte-identical output) when the page has no Table controls or
+ *  no list query to reload. */
+function renderTableControlClauses(
+  tableControls: readonly TableControlBinding[],
+  queryBindings: readonly QueryBinding[],
+  contextModuleByAggName: ReadonlyMap<string, string>,
+): string {
+  const listBindings = queryBindings.filter((qb) => qb.kind === "list");
+  if (tableControls.length === 0 || listBindings.length === 0) return "";
+
+  // One page carries one set of list controls; collapse (a second Table sharing
+  // the page's state would otherwise emit duplicate clauses, which Elixir
+  // rejects as a redefined function head).
+  const sortKey = tableControls.find((c) => c.sortKey)?.sortKey;
+  const sortDir = tableControls.find((c) => c.sortDir)?.sortDir;
+  const pageAssign = tableControls.find((c) => c.page)?.page;
+
+  // Data reload only — operation forms are left untouched (same call the
+  // realtime refetch makes).
+  const reload = listBindings
+    .map((qb) => {
+      const ctxModule = contextModuleByAggName.get(qb.aggregate);
+      return ctxModule ? renderQueryLoadBlock(qb, ctxModule, []) : null;
+    })
+    .filter((b): b is string => b !== null)
+    .join("\n\n");
+  if (reload === "") return "";
+
+  const clauses: string[] = [];
+  if (sortKey && sortDir) {
+    // Clicking the active column toggles direction; clicking a new column
+    // starts ascending.  A sort change resets to page 1 — otherwise a re-sort
+    // while deep in the list strands the user on a page that may not exist.
+    const resetPage = pageAssign ? `\n      |> assign(:${pageAssign}, 1)` : "";
+    clauses.push(`  @impl true
+  def handle_event("loom-sort", %{"key" => key}, socket) do
+    dir =
+      if socket.assigns.${sortKey} == key and socket.assigns.${sortDir} == "asc",
+        do: "desc",
+        else: "asc"
+
+    socket =
+      socket
+      |> assign(:${sortKey}, key)
+      |> assign(:${sortDir}, dir)${resetPage}
+
+${reload}
+
+    {:noreply, socket}
+  end\n`);
+  }
+  if (pageAssign) {
+    // The pager's buttons are disabled at the ends, but the payload is client
+    // input and a crafted event can carry anything.  `Integer.parse` + the
+    // positive guard mean a non-numeric or out-of-range page falls back to 1
+    // rather than raising (`String.to_integer/1` would) or driving
+    // `offset = (page - 1) * page_size` negative (Ecto rejects that).
+    clauses.push(`  @impl true
+  def handle_event("loom-page", %{"page" => page}, socket) do
+    page_num =
+      case Integer.parse(to_string(page)) do
+        {n, _} when n > 0 -> n
+        _ -> 1
+      end
+
+    socket = assign(socket, :${pageAssign}, page_num)
+
+${reload}
+
+    {:noreply, socket}
+  end\n`);
+  }
+  return clauses.length > 0 ? `\n${clauses.join("\n")}` : "";
 }
 
 /** Realtime `handle_info` clauses (channels.md Part I, Phoenix path).  One
@@ -680,9 +768,11 @@ function renderMount(
     : "";
   const assigns: string[] = [];
   for (const f of page.state) {
-    // Type-aware default from the walker — single source of truth so
-    // `state.field` defaults match across scaffold and custom pages.
-    assigns.push(`      |> assign(:${snake(f.name)}, ${defaultInitFor(f.type)})`);
+    // The field's declared `= <init>`, else the type-aware default from the
+    // walker — single source of truth so `state.field` defaults match across
+    // scaffold and custom pages, and across frontends (every other target
+    // already honours `init`).
+    assigns.push(`      |> assign(:${snake(f.name)}, ${stateInitFor(f)})`);
   }
   // Per-store assign — one `%<Store>{}` (struct defaults) per used store.
   for (const storeName of usedStores) {
@@ -788,11 +878,17 @@ ${okArm}
         _ -> assign(socket, :${qb.assign}, :error)
       end`;
   }
-  // List read: `list_<agg>s()` returns `{:ok, list}` (the repo wraps
-  // `Repo.all/1`).  The `{:error, _}` arm maps to the `:error` sentinel
-  // the list `cond` renders as the error slot.
+  // List read.  A bare `list_<agg>s()` returns `{:ok, list}` (the repo wraps
+  // `Repo.all/1`); the paged auto-`findAll` (M-T2.6) takes
+  // `(page, page_size, sort, dir)` and returns `{:ok, %{items: …, totalPages:
+  // …}}` — the envelope the page's `cond`/Table unwrap.  `qb.listArgs` carries
+  // whatever the `of:` call passed, so the page/sort assigns actually reach the
+  // query instead of silently falling back to the repository defaults.  The
+  // `{:error, _}` arm maps to the `:error` sentinel the list `cond` renders as
+  // the error slot.
+  const listArgs = (qb.listArgs ?? []).join(", ");
   return `    socket =
-      case ${ctxModule}.list_${aggSnake}s() do
+      case ${ctxModule}.list_${aggSnake}s(${listArgs}) do
         {:ok, items} -> assign(socket, :${qb.assign}, items)
         _ -> assign(socket, :${qb.assign}, :error)
       end`;

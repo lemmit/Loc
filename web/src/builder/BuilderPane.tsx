@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from "react";
-import { Box, Group, Text } from "@mantine/core";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Box, Button, Checkbox, Divider, Group, Popover, Select, Text, TextInput } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
-import type { Component, EnumDecl } from "../../../src/language/generated/ast.js";
-import { isAggregate, isOperation, isPage, isWorkflow } from "../../../src/language/generated/ast.js";
+import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
+import { isAggregate, isOperation, isPage, isUi, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { ifParses, spliceNodeIfParses } from "./edit-engine";
 import { RefusalLine, useRefusal } from "./refusal";
@@ -12,6 +12,41 @@ import { useLiveSourceTick } from "./use-live-source-tick";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
+import {
+  availableLayouts,
+  pageProps,
+  setPageCanonical,
+  setPageDescription,
+  setPageLayout,
+  setPageMenuMeta,
+  setPageOgImage,
+  setPageRequires,
+  setPageRoute,
+  setPageTitle,
+  type PagePropsInfo,
+} from "./page/page-props";
+import {
+  addArea,
+  addMenuLink,
+  addMenuSection,
+  addStore,
+  addStoreField,
+  deleteMenuLink,
+  deleteMenuSection,
+  deleteStore,
+  listAreas,
+  listStores,
+  menuInfo,
+  menuLinkTargets,
+  movePageToArea,
+  setStorePersist,
+  STORE_PERSIST_MODES,
+  type AreaInfo,
+  type AreaTree,
+  type MenuInfo,
+  type StoreInfo,
+  type StorePersist,
+} from "./page/ui-decl";
 import { availableTypes } from "./system/fields";
 import PageBuilder from "./page/PageBuilder";
 import StatePanel from "./page/StatePanel";
@@ -161,6 +196,32 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     [current, enumCases],
   );
 
+  // The current page's scalar props (`route:` / `title:` / … / `menu { }`) and
+  // the layout names selectable for `layout:`.  Keyed off the same `parsed`
+  // revision as everything else, so one re-parse per source change — the panel
+  // must not re-read on every render (see the `parsed` memo's note).
+  const layouts = useMemo(() => availableLayouts(parsed.ast), [parsed]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pagePropsInfo = useMemo(() => (current?.page ? pageProps(ctx.getSource(), current.name) : null), [parsed, current]);
+
+  // The `ui` the current page belongs to, and its DECLARATION-level structure
+  // (stores / areas / menu) — the surface `page/ui-decl.ts` edits.  Read once
+  // per parse revision, like `pagePropsInfo` above.
+  const uiName = useMemo(
+    () => (current?.page ? AstUtils.getContainerOfType(current.page, isUi)?.name : undefined),
+    [current],
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const uiStructure = useMemo<UiStructure | null>(() => {
+    if (uiName === undefined) return null;
+    const source = ctx.getSource();
+    const stores = listStores(source, uiName);
+    const areas = listAreas(source, uiName);
+    const menu = menuInfo(source, uiName);
+    const linkTargets = menuLinkTargets(source, uiName);
+    return stores && areas && menu && linkTargets ? { stores, areas, menu, linkTargets } : null;
+  }, [parsed, uiName]);
+
   // LSP diagnostics that fall within the current body's source range — surfaced
   // on the canvas so the builder flags problems without leaving for the
   // Problems panel.
@@ -268,6 +329,23 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       {ctx.isDesktop && current.page && (
         <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
           <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
+          {pagePropsInfo && (
+            <PagePropsPanel
+              pageName={current.name}
+              info={pagePropsInfo}
+              layouts={layouts}
+              getSource={() => ctx.getSource()}
+              onApply={applyState}
+            />
+          )}
+          {uiName !== undefined && uiStructure && (
+            <UiStructurePanel
+              uiName={uiName}
+              structure={uiStructure}
+              getSource={() => ctx.getSource()}
+              onApply={applyState}
+            />
+          )}
         </Group>
       )}
       <RefusalLine refused={refusal.refused} />
@@ -293,6 +371,367 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         />
       </Box>
     </Box>
+  );
+}
+
+// --- page settings panel ---------------------------------------------------
+//
+// A "Page settings" popover next to the State popover in the page-builder
+// chrome: the page's scalar props (`route:` / `title:` / `requires` /
+// `layout:` / `description:` / `ogImage:` / `canonical:`) plus its
+// `menu { … }` metadata.  Every edit is a narrow CST splice through
+// `page/page-props.ts`; a refused mutation returns null and `applyState`
+// leaves the source untouched, matching the existing handlers.  Desktop-only
+// (it lives inside the `ctx.isDesktop` chrome), so the compact/mobile
+// rendering is unchanged.
+
+/** Render a plain string as `.ddd` STRING-literal source. */
+const quoteText = (v: string): string => JSON.stringify(v);
+
+/** Inverse of `quoteText` for display: unwrap a string literal, pass anything
+ *  else (a computed `title:` expression, a numeric menu `order`) through. */
+function unquoteText(raw: string | undefined): string {
+  if (!raw) return "";
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    try {
+      return JSON.parse(raw) as string;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+function PagePropsPanel({ pageName, info, layouts, getSource, onApply }: {
+  pageName: string;
+  info: PagePropsInfo;
+  layouts: string[];
+  getSource: () => string;
+  onApply: (next: string | null) => void;
+}): JSX.Element {
+  // Each setter is `(source, pageName, value | null) → string | null`.
+  const commit = (
+    set: (source: string, page: string, value: string | null) => string | null,
+  ) => (value: string | null): void => onApply(set(getSource(), pageName, value));
+  const menu = (key: "section" | "label" | "order" | "hidden") => (value: string | null): void =>
+    onApply(setPageMenuMeta(getSource(), pageName, key, value));
+  return (
+    <Popover position="bottom-start" withArrow shadow="md" trapFocus>
+      <Popover.Target>
+        <Button size="compact-xs" variant="default" data-testid="c4props-toggle">Page settings</Button>
+      </Popover.Target>
+      <Popover.Dropdown p="xs" style={{ width: 420 }}>
+        <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Page {pageName}</Text>
+        <PropRow key={`route:${info.route ?? ""}`} label="route" value={info.route ?? ""} placeholder="/orders" testid="c4props-route" onCommit={commit(setPageRoute)} />
+        {/* `title:` is an Expression in the grammar — the raw source text is
+            edited so `"Orders for " + customer.name` stays editable. */}
+        <PropRow key={`title:${info.title ?? ""}`} label="title" value={info.title ?? ""} placeholder={'"Orders"'} testid="c4props-title" onCommit={commit(setPageTitle)} />
+        <PropRow key={`requires:${info.requiresText ?? ""}`} label="requires" value={info.requiresText ?? ""} placeholder="currentUser.permissions.contains(p)" testid="c4props-requires" onCommit={commit(setPageRequires)} />
+        <Group gap={6} mb={4} wrap="nowrap">
+          <Text size="xs" style={{ width: 78, fontFamily: "monospace" }} truncate>layout</Text>
+          <Select
+            size="xs"
+            style={{ flex: 1 }}
+            clearable
+            searchable
+            placeholder="default"
+            data={[...new Set([...layouts, info.layout].filter((v): v is string => !!v))]}
+            value={info.layout ?? null}
+            data-testid="c4props-layout"
+            onChange={(v) => commit(setPageLayout)(v)}
+          />
+        </Group>
+        <PropRow key={`description:${info.description ?? ""}`} label="description" value={info.description ?? ""} placeholder="page summary" testid="c4props-description" onCommit={commit(setPageDescription)} />
+        <PropRow key={`ogImage:${info.ogImage ?? ""}`} label="ogImage" value={info.ogImage ?? ""} placeholder="/og.png" testid="c4props-ogimage" onCommit={commit(setPageOgImage)} />
+        <PropRow key={`canonical:${info.canonical ?? ""}`} label="canonical" value={info.canonical ?? ""} placeholder="https://…" testid="c4props-canonical" onCommit={commit(setPageCanonical)} />
+        <Divider my={6} />
+        <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Sidebar menu</Text>
+        <PropRow key={`section:${info.menu.section ?? ""}`} label="section" value={unquoteText(info.menu.section)} placeholder="Sales" testid="c4props-menu-section" onCommit={(v) => menu("section")(v === null ? null : quoteText(v))} />
+        <PropRow key={`label:${info.menu.label ?? ""}`} label="label" value={unquoteText(info.menu.label)} placeholder="All orders" testid="c4props-menu-label" onCommit={(v) => menu("label")(v === null ? null : quoteText(v))} />
+        {/* `order` is a numeric expression — written through verbatim. */}
+        <PropRow key={`order:${info.menu.order ?? ""}`} label="order" value={info.menu.order ?? ""} placeholder="0" testid="c4props-menu-order" onCommit={menu("order")} />
+        <Checkbox
+          size="xs"
+          mt={4}
+          label="hidden"
+          checked={info.menu.hidden === "true"}
+          data-testid="c4props-menu-hidden"
+          onChange={(e) => menu("hidden")(e.currentTarget.checked ? "true" : null)}
+        />
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
+// --- ui structure panel ----------------------------------------------------
+//
+// A "UI structure" popover beside "Page settings": the `ui { … }` members that
+// sit AROUND the pages — `store`s (with their `persist:` mode and state-field
+// count), the `area { }` tree (with a move-a-page-here select), and the
+// ui-level `menu { section … }` sidebar.  An INSPECTOR, not a designer: every
+// control is one call into `page/ui-decl.ts`, whose refused edits return null
+// and leave the source untouched via `applyState`.  Desktop-only, like its
+// sibling (it renders inside the `ctx.isDesktop` chrome).
+
+interface UiStructure {
+  stores: StoreInfo[];
+  areas: AreaTree;
+  menu: MenuInfo;
+  /** Names a `menu { link … }` can resolve — bare and area-qualified. */
+  linkTargets: string[];
+}
+
+/** Depth-first flattening of the area tree, so the panel can render it as an
+ *  indented list (each row keyed + indented by its own path). */
+function flattenAreas(areas: readonly AreaInfo[]): AreaInfo[] {
+  return areas.flatMap((a) => [a, ...flattenAreas(a.areas)]);
+}
+
+function UiStructurePanel({ uiName, structure, getSource, onApply }: {
+  uiName: string;
+  structure: UiStructure;
+  getSource: () => string;
+  onApply: (next: string | null) => void;
+}): JSX.Element {
+  const { stores, areas, menu, linkTargets } = structure;
+  const [areaName, setAreaName] = useState("");
+  const [areaParent, setAreaParent] = useState<string | null>(null);
+  const [sectionLabel, setSectionLabel] = useState("");
+  const flatAreas = flattenAreas(areas.areas);
+  const allPages = [...areas.rootPages, ...flatAreas.flatMap((a) => a.pages)];
+
+  // One "move a page into this container" select; picking a page applies the
+  // move and the select resets (its value is always null).
+  const moveInto = (area: string | null) => (page: string | null): void => {
+    if (page) onApply(movePageToArea(getSource(), uiName, page, area));
+  };
+
+  return (
+    <Popover position="bottom-start" withArrow shadow="md" trapFocus>
+      <Popover.Target>
+        <Button size="compact-xs" variant="default" data-testid="uidecl-toggle">UI structure</Button>
+      </Popover.Target>
+      <Popover.Dropdown p="xs" style={{ width: 460, maxHeight: "70vh", overflowY: "auto" }}>
+        <Text size="xs" tt="uppercase" c="dimmed" mb={6}>ui {uiName}</Text>
+
+        <Text size="xs" fw={600} mb={4}>Stores</Text>
+        {stores.length === 0 && <Text size="xs" c="dimmed" mb={4}>none</Text>}
+        {stores.map((s) => (
+          <Group key={s.name} gap={6} mb={4} wrap="nowrap">
+            <Text size="xs" style={{ width: 96, fontFamily: "monospace" }} truncate>{s.name}</Text>
+            <Select
+              size="xs"
+              style={{ width: 104 }}
+              clearable
+              placeholder="memory"
+              data={[...STORE_PERSIST_MODES]}
+              value={s.persist ?? null}
+              data-testid={`uidecl-persist-${s.name}`}
+              onChange={(v) => onApply(setStorePersist(getSource(), uiName, s.name, v as StorePersist | null))}
+            />
+            <Text size="xs" c="dimmed" style={{ width: 56 }}>{s.fieldCount}f · {s.actionCount}a</Text>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              data-testid={`uidecl-store-addfield-${s.name}`}
+              onClick={() => onApply(addStoreField(getSource(), uiName, s.name))}
+            >
+              + field
+            </Button>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              data-testid={`uidecl-store-delete-${s.name}`}
+              onClick={() => onApply(deleteStore(getSource(), uiName, s.name))}
+            >
+              ×
+            </Button>
+          </Group>
+        ))}
+        <Button
+          size="compact-xs"
+          variant="default"
+          data-testid="uidecl-store-add"
+          onClick={() => onApply(addStore(getSource(), uiName))}
+        >
+          Add store
+        </Button>
+
+        <Divider my={6} />
+        <Text size="xs" fw={600} mb={4}>Areas</Text>
+        <AreaRow label="(root)" depth={0} pages={areas.rootPages} pageOptions={allPages} testid="uidecl-area-root" onMove={moveInto(null)} />
+        {flatAreas.map((a) => (
+          <AreaRow
+            key={a.path.join(".")}
+            label={a.name}
+            depth={a.path.length}
+            pages={a.pages}
+            pageOptions={allPages}
+            testid={`uidecl-area-${a.path.join("-")}`}
+            onMove={moveInto(a.name)}
+          />
+        ))}
+        <Group gap={6} mb={4} wrap="nowrap">
+          <TextInput
+            size="xs"
+            style={{ flex: 1 }}
+            placeholder="new area"
+            value={areaName}
+            data-testid="uidecl-area-name"
+            onChange={(e) => setAreaName(e.currentTarget.value)}
+          />
+          <Select
+            size="xs"
+            style={{ width: 120 }}
+            clearable
+            searchable
+            placeholder="at root"
+            data={flatAreas.map((a) => a.name)}
+            value={areaParent}
+            data-testid="uidecl-area-parent"
+            onChange={setAreaParent}
+          />
+          <Button
+            size="compact-xs"
+            variant="default"
+            data-testid="uidecl-area-add"
+            onClick={() => {
+              onApply(addArea(getSource(), uiName, areaName, areaParent ?? undefined));
+              setAreaName("");
+            }}
+          >
+            Add
+          </Button>
+        </Group>
+
+        <Divider my={6} />
+        <Text size="xs" fw={600} mb={4}>Sidebar menu</Text>
+        {!menu.hasMenu && <Text size="xs" c="dimmed" mb={4}>derived from per-page menu metadata</Text>}
+        {menu.sections.map((s) => (
+          <Box key={s.label} mb={4}>
+            <Group gap={6} wrap="nowrap">
+              <Text size="xs" fw={500} style={{ flex: 1 }} truncate>{s.label}</Text>
+              <Select
+                size="xs"
+                style={{ width: 150 }}
+                searchable
+                placeholder="+ link page"
+                data={linkTargets}
+                value={null}
+                data-testid={`uidecl-menu-addlink-${s.label}`}
+                onChange={(v) => v && onApply(addMenuLink(getSource(), uiName, s.label, { page: v }))}
+              />
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                data-testid={`uidecl-menu-delsection-${s.label}`}
+                onClick={() => onApply(deleteMenuSection(getSource(), uiName, s.label))}
+              >
+                ×
+              </Button>
+            </Group>
+            {s.entries.map((e, i) => (
+              <Group key={`${s.label}:${i}:${e.kind === "page" ? e.page : e.url}`} gap={6} pl={14} wrap="nowrap">
+                <Text size="xs" c="dimmed" style={{ flex: 1, fontFamily: "monospace" }} truncate>
+                  {e.kind === "page" ? e.page : `${e.label} → ${e.url}`}
+                </Text>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="red"
+                  onClick={() => onApply(deleteMenuLink(getSource(), uiName, s.label, i))}
+                >
+                  ×
+                </Button>
+              </Group>
+            ))}
+          </Box>
+        ))}
+        <Group gap={6} wrap="nowrap">
+          <TextInput
+            size="xs"
+            style={{ flex: 1 }}
+            placeholder="new section"
+            value={sectionLabel}
+            data-testid="uidecl-menu-section"
+            onChange={(e) => setSectionLabel(e.currentTarget.value)}
+          />
+          <Button
+            size="compact-xs"
+            variant="default"
+            data-testid="uidecl-menu-addsection"
+            onClick={() => {
+              onApply(addMenuSection(getSource(), uiName, sectionLabel));
+              setSectionLabel("");
+            }}
+          >
+            Add
+          </Button>
+        </Group>
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
+// One area row: its pages, plus the select that moves another page into it.
+function AreaRow({ label, depth, pages, pageOptions, testid, onMove }: {
+  label: string;
+  depth: number;
+  pages: string[];
+  pageOptions: string[];
+  testid: string;
+  onMove: (page: string | null) => void;
+}): JSX.Element {
+  return (
+    <Group gap={6} mb={4} wrap="nowrap" pl={depth * 10}>
+      <Text size="xs" style={{ width: 96, fontFamily: "monospace" }} truncate>{label}</Text>
+      <Text size="xs" c="dimmed" style={{ flex: 1 }} truncate>{pages.join(", ") || "—"}</Text>
+      <Select
+        size="xs"
+        style={{ width: 150 }}
+        searchable
+        placeholder="move page here"
+        data={pageOptions}
+        value={null}
+        data-testid={testid}
+        onChange={onMove}
+      />
+    </Group>
+  );
+}
+
+// One labelled text input.  Local state while typing, committed on blur (or
+// Enter) — the same pattern the State panel's default-value input uses.  An
+// emptied input commits `null`, which REMOVES the prop.  The row is keyed on
+// its incoming value by the caller, so it re-seeds after its own edit lands.
+function PropRow({ label, value, placeholder, testid, onCommit }: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  testid: string;
+  onCommit: (value: string | null) => void;
+}): JSX.Element {
+  const [text, setText] = useState(value);
+  const flush = (): void => {
+    if (text === value) return;
+    onCommit(text.trim() === "" ? null : text);
+  };
+  return (
+    <Group gap={6} mb={4} wrap="nowrap">
+      <Text size="xs" style={{ width: 78, fontFamily: "monospace" }} truncate>{label}</Text>
+      <TextInput
+        size="xs"
+        style={{ flex: 1 }}
+        placeholder={placeholder}
+        value={text}
+        data-testid={testid}
+        onChange={(e) => setText(e.currentTarget.value)}
+        onBlur={flush}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      />
+    </Group>
   );
 }
 

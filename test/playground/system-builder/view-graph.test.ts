@@ -349,6 +349,136 @@ describe("Model v2 — view-graph per level", () => {
     expect(g.nodes).toEqual([]);
   });
 
+  // Aggregate lifecycle bodies (`create` / `destroy` / `apply`) are addressed by
+  // their `listBodies` key, which is both the node id in the aggregate view and
+  // the `name` of the `body` step they drill into.
+  const LIFECYCLE_SRC = `context C {
+  event Paid { at: datetime }
+  aggregate Order {
+    status: string
+    total: decimal = 0
+    create(initial: decimal) {
+      total := initial
+      status := "draft"
+    }
+    create draft(note: string) {
+      status := note
+    }
+    destroy {
+      status := "gone"
+    }
+    apply(e: Paid) {
+      status := "paid"
+      emit Paid { at: e.at }
+    }
+    operation confirm() {
+      status := "ok"
+    }
+  }
+}`;
+
+  it("aggregate view keys each lifecycle node by its member key and points its drill at a `body` step", () => {
+    const g = buildViewGraph(parse(LIFECYCLE_SRC), [{ kind: "aggregate", name: "Order" }]);
+    const lifecycle = childNodes(g).filter((n) => ["create", "destroy", "apply"].includes(n.kind));
+    expect(lifecycle.map((n) => n.id)).toEqual(["create", "create:draft", "destroy", "apply:Paid"]);
+    for (const n of lifecycle) {
+      expect(n.drillable).toBe(true);
+      expect(n.drillTo).toEqual({ kind: "body", name: n.id });
+    }
+    // The operation beside them keeps its own `{kind:"operation"}` drill —
+    // no `drillTo` override, exactly as before.
+    expect(g.nodes.find((n) => n.id === "operation:confirm")?.drillTo).toBeUndefined();
+  });
+
+  it("a `body` step builds the same statement flow an operation gets", () => {
+    const ast = parse(LIFECYCLE_SRC);
+    const g = buildViewGraph(ast, [
+      { kind: "aggregate", name: "Order" },
+      { kind: "body", name: "create" },
+    ]);
+    expect(g.title).toBe("Order.create()");
+    expect(childNodes(g).map((n) => n.id)).toEqual(["stmt:0", "stmt:1"]);
+    expect(childNodes(g).every((n) => n.kind === "stmt" && !n.drillable)).toBe(true);
+    expect(g.edges.filter((e) => e.kind === "next").map((e) => [e.source, e.target])).toEqual([
+      ["stmt:0", "stmt:1"],
+    ]);
+    // The root banner keeps the member's own kind, so the flow is tinted like
+    // the node it was opened from.
+    expect(g.nodes.find((n) => n.isRoot)).toMatchObject({ kind: "create", drillable: false });
+    expect(
+      buildViewGraph(ast, [
+        { kind: "aggregate", name: "Order" },
+        { kind: "body", name: "destroy" },
+      ]).nodes.find((n) => n.isRoot)?.kind,
+    ).toBe("destroy");
+    expect(
+      buildViewGraph(ast, [
+        { kind: "aggregate", name: "Order" },
+        { kind: "body", name: "apply:Paid" },
+      ]).nodes.find((n) => n.isRoot)?.kind,
+    ).toBe("apply");
+  });
+
+  it("a named lifecycle member opens its own body, not the unnamed sibling's", () => {
+    const g = buildViewGraph(parse(LIFECYCLE_SRC), [
+      { kind: "aggregate", name: "Order" },
+      { kind: "body", name: "create:draft" },
+    ]);
+    expect(g.title).toBe("Order.create:draft()");
+    expect(childNodes(g).map((n) => n.id)).toEqual(["stmt:0"]);
+  });
+
+  it("an `op:` key routes through the body step to the operation's own flow", () => {
+    // Both routes reach the same body — `aggregateBody` accepts either — so the
+    // step tolerates the key even though the pane pushes an `operation` step.
+    const viaBody = buildViewGraph(parse(LIFECYCLE_SRC), [
+      { kind: "aggregate", name: "Order" },
+      { kind: "body", name: "op:confirm" },
+    ]);
+    const viaOp = buildViewGraph(parse(LIFECYCLE_SRC), [
+      { kind: "aggregate", name: "Order" },
+      { kind: "operation", name: "confirm" },
+    ]);
+    expect(childNodes(viaBody).map((n) => n.id)).toEqual(childNodes(viaOp).map((n) => n.id));
+    expect(viaBody.nodes.find((n) => n.isRoot)?.kind).toBe("operation");
+  });
+
+  it("a body step without an aggregate above it, or with an unknown key, yields an empty flow", () => {
+    expect(buildViewGraph(parse(LIFECYCLE_SRC), [{ kind: "body", name: "create" }]).nodes).toEqual(
+      [],
+    );
+    const bogus = buildViewGraph(parse(LIFECYCLE_SRC), [
+      { kind: "aggregate", name: "Order" },
+      { kind: "body", name: "apply:Nope" },
+    ]);
+    expect(childNodes(bogus)).toEqual([]);
+  });
+
+  it("lifecycle bodies contribute reads / writes / emits edges like an operation", () => {
+    const g = buildViewGraph(parse(LIFECYCLE_SRC), [{ kind: "aggregate", name: "Order" }]);
+    const writes = g.edges
+      .filter((e) => e.kind === "writes")
+      .map((e) => `${e.source}->${e.target}`)
+      .sort();
+    expect(writes).toEqual(
+      [
+        "apply:Paid->field:status",
+        "create->field:status",
+        "create->field:total",
+        "create:draft->field:status",
+        "destroy->field:status",
+        "operation:confirm->field:status",
+      ].sort(),
+    );
+    // …and the context view lifts a lifecycle emit into the aggregate→event
+    // edge, so an event emitted only from an `apply` is no longer "unused".
+    const ctx = buildViewGraph(parse(LIFECYCLE_SRC), [{ kind: "context", name: "C" }]);
+    expect(
+      ctx.edges.filter((e) => e.kind === "emits").map((e) => `${e.source}->${e.target}`),
+    ).toEqual(["aggregate:Order->event:Paid"]);
+    expect(ctx.nodes.find((n) => n.id === "event:Paid")?.unused).toBeUndefined();
+  });
+
   const WF_SRC = `context C {
   workflow place {
       create(x: int) {

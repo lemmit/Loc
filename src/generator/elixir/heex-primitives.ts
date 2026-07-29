@@ -558,18 +558,86 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   const testidArg = testidIdx >= 0 ? expr.args[testidIdx] : undefined;
   const idAttr = testidArg ? attrValue(testidArg, ctx) : `"data-table"`;
   const testidAttr = testIdAttr(expr, ctx);
+
+  // ---- Interactive controls (M-T1.1, HEEx leg) ----------------------------
+  // `sortKey:`/`sortDir:`/`page:` are bare page-state refs; `serverPaged:` +
+  // `totalPages:` come from the scaffold's paged `all` QueryView.  Sorting and
+  // paging are SERVER-driven here: the header buttons and pager write state,
+  // and the hoisted `handle_event` clauses (liveview-emit.ts) re-run
+  // `list_<agg>s/4` with the new arguments.  Absent args ⇒ every branch below
+  // is skipped and the emitted table is byte-identical to before.
+  const sortKey = stateRefArg(expr, "sortKey", ctx);
+  const sortDir = stateRefArg(expr, "sortDir", ctx);
+  const pageRef = stateRefArg(expr, "page", ctx);
+  const sortActive = sortKey !== undefined && sortDir !== undefined;
+  if (sortActive || pageRef !== undefined) {
+    ctx.tableControls.push({ sortKey, sortDir, page: pageRef });
+  }
+  // The active sort feeds the header indicator + `aria-sort`.
+  const sortAttrs = sortActive ? ` sort_key={@${sortKey}} sort_dir={@${sortDir}}` : "";
+
   const colSlots = cols
     .map((c) =>
       c.kind === "call"
-        ? renderTableColumn(c, ctx)
+        ? renderTableColumn(c, ctx, sortActive)
         : `<:col :let={_row} label="Column">${renderChild(c, ctx)}</:col>`,
     )
     .join("\n");
-  return [
-    `<.table id=${idAttr}${testidAttr} rows={${rowsExpr}}>`,
+  const table = [
+    `<.table id=${idAttr}${testidAttr}${sortAttrs} rows={${rowsExpr}}>`,
     colSlots.length > 0 ? indent(colSlots, 2) : `  <:col :let={_row} label="Data"></:col>`,
     `</.table>`,
   ].join("\n");
+
+  // The pager renders as a sibling BELOW the table (HEEx tolerates multiple
+  // roots, so no fragment wrapper is needed — the JSX `wrapMultiRoot` seam has
+  // no HEEx analogue).  Server mode reads the page count off the envelope's
+  // `totalPages`; a client-side (non-server-paged) list has no count to show
+  // without slicing in the template, so the pager is server-only here.
+  const totalPagesArg = namedArg(expr, "totalPages");
+  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
+  if (pageRef !== undefined && serverPaged && totalPagesArg) {
+    const totalPages = renderPagedEnvelopeRead(totalPagesArg, ctx);
+    return `${table}\n<.pager page={@${pageRef}} total_pages={${totalPages}} />`;
+  }
+  return table;
+}
+
+/** Read a field off the paged envelope (`rows.totalPages` → `@items.totalPages`).
+ *
+ *  The envelope is a plain map whose keys are the CAMELCASE wire names every
+ *  backend agrees on (`items` / `page` / `pageSize` / `total` / `totalPages` —
+ *  see the repository emitter), NOT snake-cased Elixir idiom.  The generic
+ *  member-access renderer snake-cases, which would emit `@items.total_pages`
+ *  and raise a `KeyError` at render time, so the field name is preserved
+ *  verbatim here and only the receiver goes through `renderExpr`. */
+function renderPagedEnvelopeRead(arg: ExprIR, ctx: WalkContext): string {
+  if (arg.kind === "member") {
+    const receiver = renderExpr(arg.receiver, { ...ctx, position: "template" });
+    return `${receiver}.${arg.member}`;
+  }
+  return renderExpr(arg, { ...ctx, position: "template" });
+}
+
+/** True when a named arg is the boolean literal `true`. */
+function isTrueLit(arg: ExprIR | undefined): boolean {
+  return arg?.kind === "literal" && arg.value === "true";
+}
+
+/** Read a named arg that must be a bare page-state reference (`sortKey:
+ *  sortKey`), returning the snake-cased assign name.  Undefined when the arg is
+ *  absent, isn't a plain ref, or doesn't name a declared `state {}` field — the
+ *  last guard keeps a hand-written `Table(page: someLocal)` from emitting a
+ *  `@some_local` that no assign backs. */
+function stateRefArg(
+  call: Extract<ExprIR, { kind: "call" }>,
+  name: string,
+  ctx: WalkContext,
+): string | undefined {
+  const arg = namedArg(call, name);
+  if (arg?.kind !== "ref") return undefined;
+  const assign = snake(arg.name);
+  return ctx.stateNames.has(assign) ? assign : undefined;
 }
 
 /** Render a `Column("label", accessor_lambda)` node as a
@@ -579,6 +647,10 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 export function renderTableColumn(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
+  /** True when the enclosing Table carries an active `sortKey:`/`sortDir:`
+   *  pair.  Only then does a `sortable:` column emit `sort_field`, which is
+   *  what turns its header into a `phx-click="loom-sort"` button. */
+  sortActive = false,
 ): string {
   if (expr.name !== "Column") {
     // Unexpected shape — emit a stub slot.
@@ -607,7 +679,28 @@ export function renderTableColumn(
     // <:col :let={o}> slot.
     cellHeex = renderChild(accessor.body, ctx);
   }
-  return `<:col :let={${renderColLetVar(accessor, ctx)}} label="${label}">${cellHeex}</:col>`;
+  // A `sortable:` column sorts by its explicit `field:`, else by the accessor's
+  // member (`o => o.name` → `"name"`) — the same resolution the JSX
+  // `emitColumn` does.  A column whose field can't be resolved stays a plain
+  // (unsortable) header rather than emitting a sort key the server can't map.
+  const sortField = sortActive ? columnSortField(expr) : undefined;
+  const sortAttr = sortField ? ` sort_field="${sortField}"` : "";
+  return `<:col :let={${renderColLetVar(accessor, ctx)}} label="${label}"${sortAttr}>${cellHeex}</:col>`;
+}
+
+/** The field a `sortable:` Column sorts by: the explicit `field:` string arg,
+ *  else the accessor lambda's simple member (`o => o.sku` → `"sku"`).
+ *  Undefined for a non-sortable column or an accessor too complex to map. */
+function columnSortField(expr: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  if (!isTrueLit(namedArg(expr, "sortable"))) return undefined;
+  const fieldArg = namedArg(expr, "field");
+  if (fieldArg?.kind === "literal" && fieldArg.lit === "string") return fieldArg.value;
+  const accessor = expr.args.find((a, i) => !expr.argNames?.[i] && a.kind === "lambda");
+  if (accessor?.kind === "lambda" && accessor.body?.kind === "member") {
+    const body = accessor.body;
+    if (body.receiver.kind === "ref") return body.member;
+  }
+  return undefined;
 }
 
 /** Extract the row variable name from a Column accessor lambda for the
@@ -647,6 +740,15 @@ function resolveQueryAggregate(arg: ExprIR): string | undefined {
   }
   if (arg.kind === "ref") return arg.name;
   return undefined;
+}
+
+/** The argument list of a `QueryView` `of:` call, rendered as handler-position
+ *  Elixir.  Only a `method-call` carries args (`<api>.<Agg>.all(page, …)`); a
+ *  plain member access (`<api>.<Agg>.all`) has none, so the load stays the
+ *  parameterless `list_<agg>s()` it has always been. */
+function queryCallArgs(arg: ExprIR | undefined, ctx: WalkContext): string[] | undefined {
+  if (arg?.kind !== "method-call" || arg.args.length === 0) return undefined;
+  return arg.args.map((a) => renderExpr(a, { ...ctx, position: "handler" }));
 }
 
 export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -713,6 +815,12 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
       kind: isSingle ? "single" : "list",
       assign: assignName,
       aggregate: aggName,
+      // Forward the `of:` call's arguments to the load block.  A paged scaffold
+      // list is `<api>.<Agg>.all(pageNum, 10, sortKey, sortDir)`; without these
+      // the emitted `list_<agg>s()` takes the repository defaults and the page
+      // never moves off 1.  HANDLER position — the load block is a function
+      // body, so state refs must render `socket.assigns.<f>`, not `@<f>`.
+      listArgs: queryCallArgs(ofArgNode, ctx),
     });
   }
 
