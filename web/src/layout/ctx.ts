@@ -106,7 +106,9 @@ export type MobileTab =
   | "output"
   | "backend"
   | "tests"
+  | "migrations"
   | "history"
+  | "agent"
   | "auth";
 
 /** Sub-view of the consolidated mobile "Code" tab: the source editor,

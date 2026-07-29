@@ -10,10 +10,18 @@ name: Cross-backend response differential (report-only)
 # leaked/dropped field, decimal serialization).
 #
 # This job NEVER gates: the capture is wrapped so it only writes a report + a
-# job summary, and the workflow is not a required check. It exists to answer
-# "how many unnamed RS-rules are hiding?" — read the artifact, then decide
-# whether the full per-request recorder + the fix campaign (slices b/c) are
-# worth it. Every bucket in the report is a candidate RS-rule.
+# job summary, and the workflow is not a required check. Every bucket in the
+# report is a candidate RS-rule.
+#
+# SCOPE, since slices (b)+(c) landed: this is now the DISCOVERY half only.
+# ENFORCEMENT moved to the per-PR wire-golden gate — each backend diffs its own
+# recorded responses against `test/behavioral/wire-golden/` inside the
+# `behavioral-e2e*.yml` leg that already boots it (A ≡ golden ∧ B ≡ golden ⇒
+# A ≡ B, so the five-way differential is five one-way gates at no new boot
+# cost). What this nightly still adds is COVERAGE the behavioral corpus lacks:
+# the wider compose stack — `showcase`, phoenix, and the auth-gated reads — over
+# systems the per-PR legs do not boot. A divergence it surfaces here becomes an
+# RS-rule and, where the behavioral corpus can reach it, a golden entry.
 
 on:
   schedule:

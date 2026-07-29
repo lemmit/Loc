@@ -36,6 +36,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEV_CLAIMS, featureCases, parseTrx, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
 // The platform clause that forces the Dapper adapter.  `__PLATFORM__` in the
@@ -138,6 +139,7 @@ function entrySource(e2eFile, bearerToken) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
+${recorderPreamble()}
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
 import { runTests } from ${J(join(REPO, "web/src/testing/harness.ts"))};
 import { transform as esbuildTransform } from "esbuild";
@@ -152,7 +154,8 @@ export async function run() {
   const compile = async (ts) => (await esbuildTransform(ts, { loader: "ts", format: "cjs" })).code;
   // The emitted suite calls absolute URLs (host/port irrelevant — matched on
   // pathname). Re-point every request at the booted .NET server.
-  const dispatch = async (req) => {
+  // Recorded at the ONE dispatch chokepoint — see wire-differential.mjs.
+  const dispatch = __record(async (req) => {
     const u = new URL(req.url);
     const r = await fetch(BASE + u.pathname + u.search, {
       method: req.method,
@@ -162,9 +165,9 @@ export async function run() {
     const headers = {};
     r.headers.forEach((v, k) => { headers[k] = v; });
     return { ok: true, response: { status: r.status, statusText: r.statusText, headers, body: await r.text() } };
-  };
+  });
   const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: BEARER_ENV });
-  return await runTests(cases);
+  return { results: await runTests(cases), wire: __wire };
 }
 `;
 }
@@ -250,7 +253,8 @@ async function runCase(c) {
     writeFileSync(entry, entrySource(e2eFile, bearerToken));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
-    return [...unitResults, ...(await run())];
+    const api = await run();
+    return { results: [...unitResults, ...api.results], wire: api.wire };
   } finally {
     if (server?.pid && !server.killed) {
       // Kill the whole process group (dotnet run spawns the app as a child).
@@ -302,25 +306,33 @@ if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
 let pass = 0;
 let fail = 0;
 let errored = 0;
+// Cross-backend runtime wire differential (M-T9.11).  The persistence adapter
+// must not change the WIRE: this leg is byte-compared against the SAME
+// canonical golden the default-adapter legs are, so an adapter that serializes
+// a decimal/absence/enum differently fails here, per-PR.
+const wire = makeWireGate("dapper", WORK);
 for (const c of corpus) {
   process.stdout.write(`\n▶ ${c.name}  [dapper → ${BASE}]\n`);
-  let results;
+  let out;
   try {
-    results = await runCase(c);
+    out = await runCase(c);
   } catch (err) {
     errored++;
     process.stdout.write(`  ERROR booting/running: ${err?.message ?? err}\n`);
     continue;
   }
-  for (const r of results) {
+  for (const r of out.results) {
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
+  await wire.check(c.name, out.wire, out.results);
 }
 
 await oidc?.stop();
 
+const wireBad = await wire.finish();
+
 process.stdout.write(`\n${pass} passed, ${fail} failed${errored ? `, ${errored} cases errored` : ""}\n`);
-process.exit(fail > 0 || errored > 0 ? 1 : 0);
+process.exit(fail > 0 || errored > 0 || wireBad > 0 ? 1 : 0);

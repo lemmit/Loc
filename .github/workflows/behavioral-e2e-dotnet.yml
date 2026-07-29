@@ -26,6 +26,11 @@ on:
       - 'bin/**'
       - 'web/src/testing/**'
       - 'test/behavioral/**'
+      # The cross-backend wire differential (M-T9.11): a change to the differ or
+      # to the canonical goldens must re-verify THIS backend against them.
+      - 'test/_helpers/wire-record.ts'
+      - 'test/_helpers/wire-waivers.ts'
+      - 'test/_helpers/response-diff.ts'
       - 'package.json'
       - '.github/workflows/behavioral-e2e-dotnet.yml'
   pull_request:
@@ -36,6 +41,11 @@ on:
       - 'src/platform/dotnet.ts'
       - 'web/src/testing/**'
       - 'test/behavioral/**'
+      # The cross-backend wire differential (M-T9.11): a change to the differ or
+      # to the canonical goldens must re-verify THIS backend against them.
+      - 'test/_helpers/wire-record.ts'
+      - 'test/_helpers/wire-waivers.ts'
+      - 'test/_helpers/response-diff.ts'
       - '.github/workflows/behavioral-e2e-dotnet.yml'
   workflow_dispatch:
 

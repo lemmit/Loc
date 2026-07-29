@@ -31,7 +31,7 @@ export default function CustomerList() {
     </Stack>
         ) }
         { customerAll.isError && (
-          <Alert color="red" variant="light">Couldn't load customers</Alert>
+          <Alert color="red" variant="light">{t("page.List.alert.4hka48", "Couldn't load customers")}</Alert>
         ) }
         { customerAll.data && customerAll.data.items.length === 0 && (
           <Center mih={200}><Text c="dimmed">{t("page.List.empty.u6pr2h", "No customers yet.")}</Text></Center>

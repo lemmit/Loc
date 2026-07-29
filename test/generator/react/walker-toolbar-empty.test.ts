@@ -128,7 +128,7 @@ describe("Toolbar + Empty in walker stdlib", () => {
           page X {
             route: "/x"
             state { kind: string = "items" }
-            body:  Empty { "No " + kind + " here" }
+            body:  Empty { \`No {kind} here\` }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -141,7 +141,9 @@ describe("Toolbar + Empty in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Text c="dimmed">\{\(\("No " \+ kind\) \+ " here"\)\}<\/Text>/);
+    expect(content).toMatch(
+      /<Text c="dimmed">\{t\("[^"]*", "No \{kind\} here", \{ kind: kind \}\)\}<\/Text>/,
+    );
     expect(content).toMatch(/const \[kind, setKind\]/);
   });
 });

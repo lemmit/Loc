@@ -21,7 +21,7 @@ system CounterApp {
       action dec() { count := count - 1 }
       body: Stack {
         Heading { "Counter", level: 1 },
-        Text { "Count: " + count },
+        Text { \`Count: {count}\` },
         Button { "+", onClick: inc },
         Button { "-", onClick: dec }
       }

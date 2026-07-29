@@ -84,8 +84,8 @@ describe("ternary conditional rendering in walker pages", () => {
     const content = files.get("web/src/pages/x.tsx")!;
     // Brace-wrapped JSX expression in child position.
     expect(content).toMatch(/\{active \? \(/);
-    expect(content).toMatch(/<Badge>Live<\/Badge>/);
-    expect(content).toMatch(/<Badge>Off<\/Badge>/);
+    expect(content).toMatch(/<Badge>\{t\("[^"]*", "Live"\)\}<\/Badge>/);
+    expect(content).toMatch(/<Badge>\{t\("[^"]*", "Off"\)\}<\/Badge>/);
   });
 
   it("ternary cond accepts a binary expression (state arithmetic)", async () => {

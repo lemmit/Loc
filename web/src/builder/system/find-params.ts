@@ -1,29 +1,33 @@
-import { AstUtils, type AstNode } from "langium";
+import { AstUtils, GrammarUtils, type AstNode } from "langium";
 import type {
   FindDecl,
   Model,
   NameRef,
   Parameter,
   Repository,
-  TypeRef,
 } from "../../../../src/language/generated/ast.js";
-import { printStructural } from "../../../../src/language/print/index.js";
-import { mkParameter } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { spliceNodeIfParses } from "../edit-engine";
+import { applyEdits, ifParses, type TextEdit } from "../edit-engine";
 import { IDENTIFIER } from "./rename";
-import { baseLabel, baseSpecOf, buildTypeRef, type BaseSpec, type TypeSpec } from "./fields";
+import { baseLabel, baseSpecOf, typeText, type BaseSpec, type TypeSpec } from "./fields";
 
 // ---------------------------------------------------------------------------
 // Repository `find` parameter editing — add / delete / retype / rename params
-// and edit the return type, mirroring the field-editing path (parse → mutate →
-// reprint the Repository → splice).  A find's params are `name: TypeRef` pairs,
-// so the type machinery is shared with `fields.ts`.
+// and edit the return type, mirroring the field-editing path (parse → locate →
+// narrow splice → re-parse).  A find's params are `name: TypeRef` pairs, so the
+// type machinery is shared with `fields.ts`.
+//
+// Like the field ops, these used to reprint the WHOLE `repository` block and
+// splice it back — which deleted every comment inside the repository (the
+// structural printer has no comment handling) and re-canonicalised each find's
+// `where` filter.  Each op now rewrites only the span it changes: one param's
+// text, the gap between two params, the param's `TypeRef`, the return type, or
+// the name token plus its filter usages.
 //
 // Param *rename* is safe to do here (unlike a field rename): a param's only
 // usages are bare `NameRef`s inside the *same find's* `where` filter, where the
-// param shadows any aggregate member of the same name — so we rename the param
-// token and every matching `NameRef` in that one filter, then reprint.
+// param shadows any aggregate member of the same name — so we rewrite the param
+// token and every matching `NameRef` in that one filter.
 // ---------------------------------------------------------------------------
 
 export interface ParamInfo {
@@ -65,69 +69,75 @@ export function findReturnSpec(ast: Model, repoName: string, findName: string): 
   return { base: baseSpecOf(find.returnType), array: find.returnType.array, optional: find.returnType.optional };
 }
 
-// --- mutating ops ----------------------------------------------------------
+// --- mutating ops (parse → locate → narrow splice → re-parse) --------------
 
-function commit(source: string, repoName: string, findName: string, mutate: (find: FindDecl, repo: Repository) => boolean): string | null {
+/** The shared prologue: re-parse and resolve the find.  Null on a
+ *  syntactically invalid source or an unknown repository / find. */
+function locate(source: string, repoName: string, findName: string): FindDecl | null {
   const fresh = parseDdd(source);
   if (fresh.parserErrors.length > 0) return null;
-  const repo = findRepo(fresh.ast, repoName);
-  const find = repo?.finds.find((f) => f.name === findName);
-  if (!repo || !find) return null;
-  if (!mutate(find, repo)) return null;
-  return spliceNodeIfParses(source, repo, printStructural(repo));
-}
-
-function buildParam(name: string, spec: TypeSpec): Parameter {
-  return mkParameter({ $type: "Parameter", name, type: buildTypeRef(spec) });
+  return findRepo(fresh.ast, repoName)?.finds.find((f) => f.name === findName) ?? null;
 }
 
 export function addFindParam(source: string, repoName: string, findName: string, paramName: string, type: TypeSpec): string | null {
-  return commit(source, repoName, findName, (find) => {
-    find.params.push(buildParam(paramName, type));
-    return true;
-  });
+  const find = locate(source, repoName, findName);
+  const cst = find?.$cstNode;
+  if (!find || !cst) return null;
+  const text = `${paramName}: ${typeText(type)}`;
+  const last = find.params[find.params.length - 1]?.$cstNode;
+  if (last) {
+    return ifParses(applyEdits(source, [{ offset: last.end, end: last.end, newText: `, ${text}` }]));
+  }
+  // Empty param list — insert just inside the find's own `(`.
+  const open = GrammarUtils.findNodeForKeyword(cst, "(");
+  if (!open) return null;
+  return ifParses(applyEdits(source, [{ offset: open.end, end: open.end, newText: text }]));
 }
 
 export function deleteFindParam(source: string, repoName: string, findName: string, index: number): string | null {
-  return commit(source, repoName, findName, (find) => {
-    if (!find.params[index]) return false;
-    find.params.splice(index, 1);
-    return true;
-  });
+  const find = locate(source, repoName, findName);
+  const cst = find?.params[index]?.$cstNode;
+  if (!find || !cst) return null;
+  // Take the separating comma with the param: the one before it when there is
+  // a preceding param, otherwise the one after it.  A sole param leaves `()`.
+  const prev = index > 0 ? find.params[index - 1].$cstNode : undefined;
+  const next = index === 0 ? find.params[1]?.$cstNode : undefined;
+  const offset = prev ? prev.end : cst.offset;
+  const end = next ? next.offset : cst.end;
+  return ifParses(applyEdits(source, [{ offset, end, newText: "" }]));
 }
 
 export function retypeFindParam(source: string, repoName: string, findName: string, index: number, type: TypeSpec): string | null {
-  return commit(source, repoName, findName, (find) => {
-    const p = find.params[index];
-    if (!p) return false;
-    p.type = buildTypeRef(type);
-    return true;
-  });
+  const cst = locate(source, repoName, findName)?.params[index]?.type.$cstNode;
+  if (!cst) return null;
+  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]));
 }
 
 export function renameFindParam(source: string, repoName: string, findName: string, index: number, newName: string): string | null {
   if (!IDENTIFIER.test(newName)) return null;
-  return commit(source, repoName, findName, (find) => {
-    const p = find.params[index];
-    if (!p || find.params.some((q, i) => i !== index && q.name === newName)) return false;
-    const old = p.name;
-    p.name = newName;
-    // The param's only usages are bare NameRefs in this find's own filter,
-    // where the param shadows any same-named member.
-    if (find.filter) {
-      for (const n of AstUtils.streamAst(find.filter)) {
-        if (n.$type === "NameRef" && (n as NameRef).name === old) (n as NameRef).name = newName;
+  const find = locate(source, repoName, findName);
+  const param = find?.params[index];
+  const nameNode = param?.$cstNode ? GrammarUtils.findNodeForProperty(param.$cstNode, "name") : undefined;
+  if (!find || !param || !nameNode) return null;
+  if (find.params.some((q, i) => i !== index && q.name === newName)) return null;
+  const edits: TextEdit[] = [{ offset: nameNode.offset, end: nameNode.end, newText: newName }];
+  // The param's only usages are bare NameRefs in this find's own filter,
+  // where the param shadows any same-named member.
+  if (find.filter) {
+    for (const n of AstUtils.streamAst(find.filter)) {
+      const cst = n.$cstNode;
+      if (cst && n.$type === "NameRef" && (n as NameRef).name === param.name) {
+        edits.push({ offset: cst.offset, end: cst.end, newText: newName });
       }
     }
-    return true;
-  });
+  }
+  return ifParses(applyEdits(source, edits));
 }
 
 export function setFindReturnType(source: string, repoName: string, findName: string, type: TypeSpec): string | null {
-  return commit(source, repoName, findName, (find) => {
-    find.returnType = buildTypeRef(type);
-    return true;
-  });
+  const cst = locate(source, repoName, findName)?.returnType.$cstNode;
+  if (!cst) return null;
+  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]));
 }
 
 /** A param name not already used by the find. */

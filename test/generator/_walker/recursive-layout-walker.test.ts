@@ -127,7 +127,7 @@ describe("recursive layout walker", () => {
     expect(content).toMatch(/Title/);
     // Card structure with title + nested Stack.
     expect(content).toMatch(/<Card withBorder padding="md">/);
-    expect(content).toMatch(/<Title order=\{3\}>Stats<\/Title>/);
+    expect(content).toMatch(/<Title order=\{3\}>\{t\("[^"]*", "Stats"\)\}<\/Title>/);
     expect(content).toMatch(/<Stack>/);
     expect(content).toMatch(/<Text>\{t\("[^"]*", "a"\)\}<\/Text>/);
     expect(content).toMatch(/<Text>\{t\("[^"]*", "b"\)\}<\/Text>/);

@@ -189,7 +189,9 @@ describe("printExpr — match", () => {
       "label",
     );
     const printed = printExpr(e);
-    expect(printed).toBe('match {\nx > 0 => "pos",\nelse => "neg"\n}');
+    // Arms are indented one level inside the braces — a match is a block, and a
+    // flat join left every arm at the enclosing column (2026-07 unfold review).
+    expect(printed).toBe('match {\n  x > 0 => "pos",\n  else => "neg"\n}');
   });
 
   it("multi-arm match comma-separates every arm (round-trip precondition)", async () => {

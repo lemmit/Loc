@@ -16,7 +16,7 @@ describe("user-defined components", () => {
         subdomain M { context C { } }
         ui WebApp {
           component WelcomeBox(name: string) {
-            body: Card { "Hello, " + name, Stack { Text { "Welcome!" } } }
+            body: Card { \`Hello, {name}\`, Stack { Text { "Welcome!" } } }
           }
           page Home {
             route: "/"
@@ -38,9 +38,11 @@ describe("user-defined components", () => {
     expect(content).toMatch(/export interface WelcomeBoxProps \{\n\s+name: string;\n\}/);
     // Default-export fn with destructured props.
     expect(content).toMatch(/export default function WelcomeBox\(\{ name \}: WelcomeBoxProps\)/);
-    // Body walked: Card with binary-op title + Stack child.
+    // Body walked: Card with interpolated title (ICU t() call) + Stack child.
     expect(content).toMatch(/<Card withBorder padding="md">/);
-    expect(content).toMatch(/<Title order=\{3\}>\{\("Hello, " \+ name\)\}<\/Title>/);
+    expect(content).toMatch(
+      /<Title order=\{3\}>\{t\("[^"]*", "Hello, \{name\}", \{ name: name \}\)\}<\/Title>/,
+    );
     expect(content).toMatch(/<Text>\{t\("[^"]*", "Welcome!"\)\}<\/Text>/);
   });
 
@@ -278,8 +280,8 @@ describe("user-defined components", () => {
           page Home(name: string) {
             route: "/:name"
             body: DetailView {
-              heading: Heading { "Hello " + name, level: 2 },
-              primaryAction: Button { "Click " + name }
+              heading: Heading { \`Hello {name}\`, level: 2 },
+              primaryAction: Button { \`Click {name}\` }
             }
           }
         }
@@ -307,7 +309,7 @@ describe("user-defined components", () => {
     const home = files.get("web/src/pages/home.tsx")!;
     expect(home).toBeDefined();
     expect(home).toMatch(
-      /<DetailView heading=\{[\s\S]*?<Title order=\{2\}>\{\("Hello " \+ name\)\}<\/Title>[\s\S]*?\}/,
+      /<DetailView heading=\{[\s\S]*?<Title order=\{2\}>\{t\("[^"]*", "Hello \{name\}", \{ name: name \}\)\}<\/Title>[\s\S]*?\}/,
     );
     expect(home).toMatch(/primaryAction=\{[\s\S]*?<Button[\s\S]*?Click[\s\S]*?\}/);
   });
@@ -360,14 +362,14 @@ describe("user-defined components", () => {
     // Only the ui-scope body emits.
     const files = await buildAndGenerate(`
       component Hero(title: string) {
-        body: Text { "top-level: " + title }
+        body: Text { \`top-level: {title}\` }
       }
 
       system S {
         subdomain M { context C { } }
         ui WebApp {
           component Hero(title: string) {
-            body: Text { "ui-scope: " + title }
+            body: Text { \`ui-scope: {title}\` }
           }
           page Home {
             route: "/"
@@ -384,8 +386,8 @@ describe("user-defined components", () => {
       }
     `);
     const hero = files.get("web/src/components/Hero.tsx")!;
-    expect(hero).toMatch(/"ui-scope: "/);
-    expect(hero).not.toMatch(/"top-level: "/);
+    expect(hero).toMatch(/"ui-scope: \{title\}"/);
+    expect(hero).not.toMatch(/"top-level: \{title\}"/);
   });
 
   it("a named layout's slot can invoke a top-level component", async () => {

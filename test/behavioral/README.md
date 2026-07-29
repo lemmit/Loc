@@ -234,3 +234,38 @@ the React/Mantine tree + `vite build` + a Chromium download), so it's
 opt-in — its own `behavioral:ui` script and `behavioral-ui-e2e.yml`
 workflow, never part of the fast `npm test`. Corpus cases without a
 `test e2e … against <react>` block carry `"ui": false`.
+
+## The wire differential — every leg gates the same canonical bytes
+
+Every runner above (all five backends plus the `dapper` / `mikroorm`
+persistence-adapter legs) records the requests its api tier makes, at the ONE
+`fetch`/`app.fetch` chokepoint it already dispatches through, and diffs the
+normalized responses against the committed goldens in
+[`wire-golden/`](wire-golden/README.md). An unwaived divergence fails that
+runner's exit code, so it fails that backend's **already per-PR**
+`behavioral-e2e*.yml` workflow.
+
+This is M-T9.11 slices (b) + (c). The alignment is free: the same emitted api
+suite runs on every backend and `runTests` is strictly sequential, so request
+*N* is the same code path everywhere and the sequence **ordinal** keys the diff
+(ids can't — they differ per run).
+
+Two design choices are the whole point:
+
+- **A golden, not an all-pairs diff.** Pairwise disagreement says *they
+  differ*, never *who is right*; RS-11 is the case where three backends agreed
+  and were all three wrong. The golden is a reviewed **oracle**, and a wire
+  change shows up as a diff on a checked-in file that a human approves.
+- **Decomposed, not centralized.** A ≡ golden ∧ B ≡ golden ⇒ A ≡ B, so the
+  five-way differential becomes five independent one-way gates riding boots
+  that already happen — no new CI job, no compose stack.
+
+```bash
+LOOM_WIRE_UPDATE=1 node run.mjs ledger payments shapes sales   # rebaseline (node is the oracle)
+LOOM_WIRE_OFF=1    node run-java.mjs                           # local-debug escape hatch
+```
+
+Known divergences live as explicit, self-expiring waivers in
+[`test/_helpers/wire-waivers.ts`](../_helpers/wire-waivers.ts) — a waiver that
+stops matching fails the gate as **stale**, so a fix deletes its waiver in the
+same PR.

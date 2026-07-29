@@ -34,8 +34,8 @@ Flutter is the one frontend with **zero** runtime coverage: `generated-flutter-b
 ### M-T9.15 — Per-PR full-stack round-trip for one non-React frontend — `open` · **L** · P2
 React is the only frontend with a **per-PR** full-stack round-trip (`behavioral-ui-e2e.yml`). Vue/Svelte/Angular/Feliz get a build gate + a *backend-less* SPA smoke (routing only, `push:main`); their only proof that generated forms create+read against a real backend is nightly (`frontend-fullstack-e2e.yml`, cron `17 5 * * *`). A wire-contract/form-binding regression on those four ships and sits on `main` until the nightly. Promote **one** (Vue, the most-used) to a per-PR `run-ui.mjs` cell.
 
-### M-T9.16 — Cross-backend *runtime* differential per-PR — `in-flight` (see M-T9.11) · P1
-Per-PR, `conformance-parity.yml` diffs the five backends' **OpenAPI specs** but never asserts they return the **same data**. Runtime value divergence (rounding, ordering, null handling, error codes) is caught only nightly (`conformance-full`) on one fixture. **This is already M-T9.11** (the differential-response gate, slice (a) landed, report-only) — folded in here as the runtime-validity face of that mission; the ask is promoting it from nightly report to a per-PR blocking gate (its slice (c)).
+### M-T9.16 — Cross-backend *runtime* differential per-PR — `done` (see M-T9.11) · P1
+Per-PR, `conformance-parity.yml` diffs the five backends' **OpenAPI specs** but never asserts they return the **same data**. Runtime value divergence (rounding, ordering, null handling, error codes) is caught only nightly (`conformance-full`) on one fixture. **This is already M-T9.11** (the differential-response gate) — folded in here as the runtime-validity face of that mission; the ask was promoting it from nightly report to a per-PR blocking gate (its slice (c)). **DONE:** each backend now diffs its recorded responses against a committed canonical golden (`test/behavioral/wire-golden/`) inside its own already-per-PR `behavioral-e2e*.yml` leg — A ≡ golden ∧ B ≡ golden ⇒ A ≡ B, so the five-way differential became five one-way gates at no new CI boot cost, with the golden supplying the oracle a pairwise diff structurally lacks. Found RS-13 (elixir over-returns on create) and RS-14 (shape-dependent, per-backend-inverted `version`-increment loss) on its first five-backend run.
 
 ---
 
@@ -90,7 +90,7 @@ Lower-severity, but each is a place where one target's emitter is pinned per-kin
 
 1. **M-T9.17** (shared-core unit tests) — highest leverage per unit of effort: one bug in these cores fans out across backends, and the tests are cheap (mock target / minimal fixtures). *(In flight — companion PR to this doc.)*
 2. **M-T9.19** (validator negative tests) — **done**: the six reachable workflow data-flow gaps + `derived-inspect-not-string` landed; the larger claimed set was false gaps (already covered) or four structurally-unreachable arms handed to M-T9.8.
-3. **M-T9.12** (event-sourcing runtime) — **done** (both fixtures behaviorally validated, node + python). **M-T9.16 / M-T9.11** (per-PR runtime differential) next — close the rest of the "compiles green, runs wrong" class on the highest-risk features.
+3. **M-T9.12** (event-sourcing runtime) — **done** (both fixtures behaviorally validated, node + python). **M-T9.16 / M-T9.11** (per-PR runtime differential) — **done**: the wire-golden gate runs on all seven behavioral legs and immediately surfaced two unnamed cross-backend runtime bugs (RS-13, RS-14), now handed to T6.
 4. **M-T9.14 / M-T9.15** (Flutter + one non-React per-PR round-trip) — frontend runtime proof.
 5. The rest as capacity allows.
 

@@ -3182,3 +3182,50 @@ traps cost real debugging time:
   `of <T>` candidate as `aggregate`) for their predicate slots to resolve — and
   that arm must **not** bind the `of T as o` alias, or `o.field` resolves against
   the candidate and surfaces member errors a fixture had been getting away with.
+
+## 57. Cross-backend runtime differential — the oracle problem, and why a golden beats all-pairs (2026-07-29)
+
+Building M-T9.11's per-PR gate (`test/behavioral/wire-golden/`) taught four
+things that generalize past this one gate:
+
+- **A pairwise differential finds the divergence but cannot name the winner.**
+  Slice (a) diffed all five backends against each other and the very first
+  finding (RS-11, `versioned` init) had **three backends agreeing on the wrong
+  value** — the capability declares `version: int token = 1`, so the lone
+  outlier was the only correct one. Blind-fixing to the majority would have
+  broken the right backend and entrenched the bug ×3. **Lesson:** a differential
+  is a *discovery* engine; enforcement needs an **oracle** (the declaration, the
+  emitted spec, a reviewed golden) — never a vote.
+
+- **N one-way gates beat one N-way gate, and cost nothing.** If A ≡ golden and
+  B ≡ golden then A ≡ B — so comparing each backend to a committed recording
+  decomposes the five-way differential into five independent checks, each of
+  which rides a `behavioral-e2e*.yml` leg **that already boots that backend on
+  every PR**. That is the whole difference between "nightly report" and "per-PR
+  gate": no new CI job was added. Reach for this shape whenever a cross-target
+  invariant is currently enforced by one big centralized job.
+
+- **A gate must not re-diagnose a failure the runner already owns.** When the api
+  tier fails, it makes fewer requests, and a seq-aligned differ faithfully
+  reports `request-count: 13 ≠ 4` — true, useless, and it buries the real error
+  (the four 404s above it). Same for a desynchronized ordinal: past that point
+  every ordinal compares unrelated requests. Both now short-circuit. **Lesson:**
+  when adding a secondary check over a primary one's data, decide explicitly
+  what it does when the primary already failed.
+
+- **Local port collisions look exactly like a wire divergence.** `run-java.mjs`
+  and `run-dapper.mjs` both default to port **8125**; running them concurrently
+  made java's requests hit the .NET server, which answered `400` with an
+  *ASP.NET* ProblemDetails body — reported as a java wire failure. The tell was
+  the RFC9110 `errors: { email: [...] }` shape, which Spring never emits.
+  **Lesson:** when spot-checking backends in parallel locally, give each leg its
+  own `LOOM_BH_*_PORT` **and** its own database; a cross-backend gate is exactly
+  the tool that will mis-attribute the collision.
+
+The gate paid for itself immediately: RS-13 (elixir returns the full aggregate
+on create where its own emitted OpenAPI declares the `{id}` envelope) and RS-14
+(the `version` **increment** is shape-dependent and *inverted* between backends
+— dotnet/java drop it on `shape: document`, elixir drops it on embedded/plain).
+Neither was visible to the spec-diff, because in both cases the emitted specs
+**agree** and only the bytes differ — and the behavioral tiers assert *locally*,
+each backend passing its own emitted asserts.

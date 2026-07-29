@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { ActionIcon, Autocomplete, Box, Button, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
-import { ASSIGN_OPS, BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EMatchArm, type EObjField, type EStmt } from "./expr-model";
+import { ActionIcon, Autocomplete, Box, Button, Group, Menu, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
+import { ASSIGN_OPS, BINARY_OPS, CONVERT_TARGETS, NEW_EXPR_FORMS, UNARY_OPS, addTemplateHole, blankExpr, emitExpr, removeTemplateHole, type ConvertTarget, type ECallArg, type EExpr, type EMatchArm, type EObjField, type EStmt } from "./expr-model";
 
 export type ExprMode = "structured" | "text";
 
@@ -38,6 +38,29 @@ interface NodeProps {
    *  type-directed member candidates. See `memberCandidates` in expr-slots.ts. */
   path: string;
   onChange: (next: EExpr, commit: boolean) => void;
+}
+
+// Insert menu ("▾") hung off every leaf node — the way a structured form is
+// built from scratch. Picking a form REPLACES the leaf with that form's blank
+// node (`NEW_EXPR_FORMS`), which always emits parseable source, so the commit
+// round-trip survives the swap and the user fills the slots in afterwards.
+function NewNodeMenu({ onPick }: { onPick: (next: EExpr) => void }): JSX.Element {
+  return (
+    <Menu shadow="md" position="bottom-start" withinPortal>
+      <Menu.Target>
+        <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-new" aria-label="replace with expression form">
+          <Text size="xs">▾</Text>
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown data-testid="c4expr-new-menu">
+        {NEW_EXPR_FORMS.map((form) => (
+          <Menu.Item key={form.id} data-testid={`c4expr-new-${form.id}`} onClick={() => onPick(form.make())}>
+            <Text size="xs" ff="monospace">{form.label}</Text>
+          </Menu.Item>
+        ))}
+      </Menu.Dropdown>
+    </Menu>
+  );
 }
 
 // Argument list shared by call (`f(…)`) and member-call (`a.b(…)`) nodes.
@@ -238,24 +261,34 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
           <Text size="xs" c="dimmed">)</Text>
         </Group>
       );
-    case "lit":
-      if (node.lit === "bool") {
-        return (
-          <Select size="xs" w={70} data={["true", "false"]} value={node.value} allowDeselect={false} data-testid="c4expr-lit" onChange={(v) => v && onChange({ ...node, value: v }, true)} />
+    case "lit": {
+      const lit = node;
+      // Every literal leaf carries the insert menu — a fresh slot seeds as
+      // `null`, so this is where a structured form is picked.
+      const withMenu = (input: JSX.Element): JSX.Element => (
+        <Group gap={0} wrap="nowrap" align="center">
+          {input}
+          <NewNodeMenu onPick={(next) => onChange(next, true)} />
+        </Group>
+      );
+      if (lit.lit === "bool") {
+        return withMenu(
+          <Select size="xs" w={70} data={["true", "false"]} value={lit.value} allowDeselect={false} data-testid="c4expr-lit" onChange={(v) => v && onChange({ ...lit, value: v }, true)} />,
         );
       }
-      if (node.lit === "null") return <Text size="xs" ff="monospace">null</Text>;
-      return (
+      if (lit.lit === "null") return withMenu(<Text size="xs" ff="monospace" data-testid="c4expr-lit-null">null</Text>);
+      return withMenu(
         <TextInput
           size="xs"
-          w={node.lit === "string" ? 120 : 70}
-          value={node.value}
+          w={lit.lit === "string" ? 120 : 70}
+          value={lit.value}
           data-testid="c4expr-lit"
           styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
-          onChange={(e) => onChange({ ...node, value: e.currentTarget.value }, false)}
-          onBlur={() => onChange(node, true)}
-        />
+          onChange={(e) => onChange({ ...lit, value: e.currentTarget.value }, false)}
+          onBlur={() => onChange(lit, true)}
+        />,
       );
+    }
     case "call":
       return (
         <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
@@ -416,6 +449,121 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
       );
     case "object":
       return <FieldsEditor fields={node.fields} path={path} onFields={(fields, c) => onChange({ ...node, fields }, c)} />;
+    case "list": {
+      const l = node;
+      const setEls = (elements: EExpr[], commit: boolean): void => onChange({ ...l, elements }, commit);
+      const move = (i: number, d: number): void => {
+        const next = l.elements.slice();
+        [next[i], next[i + d]] = [next[i + d], next[i]];
+        setEls(next, true);
+      };
+      return (
+        <Group gap={2} wrap="nowrap" align="center" data-testid="c4expr-list">
+          <Text size="xs" c="dimmed">[</Text>
+          {l.elements.map((el, i) => (
+            <Group key={i} gap={2} wrap="nowrap" align="center">
+              {i > 0 && <Text size="xs" c="dimmed">,</Text>}
+              <ExpressionEditor node={el} path={`${path}e${i}`} onChange={(n, c) => setEls(l.elements.map((x, j) => (j === i ? n : x)), c)} />
+              {i > 0 && (
+                <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-el-up" aria-label="move element up" onClick={() => move(i, -1)}>
+                  <Text size="xs">↑</Text>
+                </ActionIcon>
+              )}
+              {i < l.elements.length - 1 && (
+                <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-el-down" aria-label="move element down" onClick={() => move(i, 1)}>
+                  <Text size="xs">↓</Text>
+                </ActionIcon>
+              )}
+              <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-el-del" aria-label="remove element" onClick={() => setEls(l.elements.filter((_, j) => j !== i), true)}>
+                <Text size="xs">×</Text>
+              </ActionIcon>
+            </Group>
+          ))}
+          <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-el-add" aria-label="add element" onClick={() => setEls([...l.elements, blankExpr()], true)}>
+            <Text size="xs">+</Text>
+          </ActionIcon>
+          <Text size="xs" c="dimmed">]</Text>
+        </Group>
+      );
+    }
+    case "template": {
+      // `` `seg0{hole0}seg1…` `` — the N+1 literal segments are text inputs,
+      // the N holes are nested expression editors. Adding a hole appends one
+      // (plus its closing segment); removing one splices its neighbours back
+      // together, so the surrounding text survives either edit.
+      const t = node;
+      return (
+        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-template">
+          <Text size="xs" c="dimmed">`</Text>
+          {t.segments.map((seg, i) => {
+            const hole = t.holes[i];
+            return (
+              <Group key={i} gap={1} wrap="nowrap" align="center">
+                <TextInput
+                  size="xs"
+                  w={110}
+                  value={seg}
+                  data-testid="c4expr-template-seg"
+                  aria-label="template text"
+                  styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+                  onChange={(e) => onChange({ ...t, segments: t.segments.map((s, j) => (j === i ? e.currentTarget.value : s)) }, false)}
+                  onBlur={() => onChange(t, true)}
+                />
+                {hole && (
+                  <>
+                    <Text size="xs" c="dimmed">{"{"}</Text>
+                    <ExpressionEditor node={hole} path={`${path}h${i}`} onChange={(n, c) => onChange({ ...t, holes: t.holes.map((h, j) => (j === i ? n : h)) }, c)} />
+                    <Text size="xs" c="dimmed">{"}"}</Text>
+                    <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-hole-del" aria-label="remove hole" onClick={() => onChange(removeTemplateHole(t, i), true)}>
+                      <Text size="xs">×</Text>
+                    </ActionIcon>
+                  </>
+                )}
+              </Group>
+            );
+          })}
+          <Text size="xs" c="dimmed">`</Text>
+          <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-hole-add" aria-label="add hole" onClick={() => onChange(addTemplateHole(t, blankExpr()), true)}>
+            <Text size="xs">+</Text>
+          </ActionIcon>
+        </Group>
+      );
+    }
+    case "money": {
+      const m = node;
+      return (
+        <Group gap={1} wrap="nowrap" align="center">
+          <Text size="xs" c="dimmed" ff="monospace">money(</Text>
+          <TextInput
+            size="xs"
+            w={80}
+            value={m.amount}
+            data-testid="c4expr-money"
+            aria-label="money amount"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...m, amount: e.currentTarget.value }, false)}
+            onBlur={() => onChange(m, true)}
+          />
+          <Text size="xs" c="dimmed" ff="monospace">)</Text>
+        </Group>
+      );
+    }
+    case "now":
+      return (
+        <Group gap={0} wrap="nowrap" align="center">
+          <Text size="xs" ff="monospace" data-testid="c4expr-now">now()</Text>
+          <NewNodeMenu onPick={(next) => onChange(next, true)} />
+        </Group>
+      );
+    case "convert":
+      return (
+        <Group gap={1} wrap="nowrap" align="center" data-testid="c4expr-convert">
+          <Select size="xs" w={86} data={CONVERT_TARGETS} value={node.target} allowDeselect={false} data-testid="c4expr-convert-target" onChange={(v) => v && onChange({ ...node, target: v as ConvertTarget }, true)} />
+          <Text size="xs" c="dimmed">(</Text>
+          <ExpressionEditor node={node.inner} path={`${path}v`} onChange={(n, c) => onChange({ ...node, inner: n }, c)} />
+          <Text size="xs" c="dimmed">)</Text>
+        </Group>
+      );
     case "raw": {
       // When this leaf sits opposite an enum-typed operand in a match-arm
       // `==`/`!=` cond, render a Select of the enum's cases. Current value
@@ -439,16 +587,19 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
         );
       }
       return (
-        <Autocomplete
-          size="xs"
-          w={150}
-          value={node.text}
-          data={candidates}
-          data-testid="c4expr-raw"
-          styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
-          onChange={(v) => onChange({ ...node, text: v }, false)}
-          onBlur={() => onChange(node, true)}
-        />
+        <Group gap={0} wrap="nowrap" align="center">
+          <Autocomplete
+            size="xs"
+            w={150}
+            value={node.text}
+            data={candidates}
+            data-testid="c4expr-raw"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(v) => onChange({ ...node, text: v }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          <NewNodeMenu onPick={(next) => onChange(next, true)} />
+        </Group>
       );
     }
   }

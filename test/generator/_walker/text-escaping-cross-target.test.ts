@@ -270,14 +270,18 @@ const phoenixSystem = (): string => `
  *  job at render time, not the catalog's, so a raw `<` there is correct and
  *  must not count as a rendered-output leak.
  *
- *  Also strips i18n `{t("<key>", "<default>")}` calls (M-T1.11 React runtime):
- *  the default there is a JS STRING LITERAL passed to `t()` and rendered as a
- *  JSX text node, which React entity-escapes at RUNTIME — so a raw `<` inside
- *  that string is safe exactly like a `.loom/` catalog value, not a raw markup
- *  leak. (A genuine leak would be raw payload in MARKUP position, which strips
- *  nothing and still trips the assertions.) The default's `"` are JSON-escaped,
- *  so the string body never contains a bare `"`. */
-const I18N_CALL = /\{t\("[^"]*", "(?:[^"\\]|\\.)*"\)\}/g;
+ *  Also strips i18n translation calls (M-T1.11) in BOTH frontend forms — the
+ *  React/JSX `{t("<key>", "<default>")}` and the Vue mustache
+ *  `{{ t("<key>", "<default>") }}`: the default there is a JS STRING LITERAL
+ *  passed to `t()` and rendered as a text node, which the framework
+ *  entity-escapes at RUNTIME (React's JSX text, Vue's mustache interpolation) —
+ *  so a raw `<` inside that string is safe exactly like a `.loom/` catalog
+ *  value, not a raw markup leak. (A genuine leak would be raw payload in MARKUP
+ *  position, which strips nothing and still trips the assertions.) The default's
+ *  `"` are JSON-escaped, so the string body never contains a bare `"`.  The
+ *  optional `\{?`/`\}?` + surrounding spaces cover the Vue `{{ … }}` mustache
+ *  alongside React's single-brace JSX expression. */
+const I18N_CALL = /\{\{? ?t\("[^"]*", "(?:[^"\\]|\\.)*"\) ?\}\}?/g;
 
 function renderedText(files: Map<string, string>): string {
   let all = "";

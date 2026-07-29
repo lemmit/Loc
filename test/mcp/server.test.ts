@@ -48,6 +48,7 @@ describe("ddd-mcp server", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "loom_apply_patch",
+      "loom_diff",
       "loom_find_symbol",
       "loom_generate",
       "loom_hover",
@@ -57,6 +58,7 @@ describe("ddd-mcp server", () => {
       "loom_read_model",
       "loom_references",
       "loom_rename",
+      "loom_snapshot",
       "loom_unfold_macro",
       "loom_validate",
     ]);

@@ -31,7 +31,7 @@ export default function ProductList() {
     </Stack>
         ) }
         { productAll.isError && (
-          <Alert color="red" variant="light">Couldn't load products</Alert>
+          <Alert color="red" variant="light">{t("page.List.alert.qx0ntz", "Couldn't load products")}</Alert>
         ) }
         { productAll.data && productAll.data.items.length === 0 && (
           <Center mih={200}><Text c="dimmed">{t("page.List.empty.nnvlb2", "No products yet.")}</Text></Center>

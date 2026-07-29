@@ -22,7 +22,7 @@ describe("expressions in text positions", () => {
         ui WebApp {
           page Greet(name: string) {
             route: "/greet/:name"
-            body:  Heading { "Hello, " + name }
+            body:  Heading { \`Hello, {name}\` }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -36,8 +36,10 @@ describe("expressions in text positions", () => {
     `);
     const content = files.get("web/src/pages/greet.tsx")!;
     expect(content).toBeDefined();
-    // Binary op rendered as a JSX expression — both operands resolved.
-    expect(content).toMatch(/<Title order=\{2\}>\{\("Hello, " \+ name\)\}<\/Title>/);
+    // Interpolated backtick template in a user-visible slot lowers to an ICU t() call.
+    expect(content).toMatch(
+      /<Title order=\{2\}>\{t\("[^"]*", "Hello, \{name\}", \{ name: name \}\)\}<\/Title>/,
+    );
     // Param consumed → destructured in shell.
     expect(content).toMatch(/const \{ name \} = useParams/);
   });
@@ -82,7 +84,7 @@ describe("expressions in text positions", () => {
               total: int = 100
               count: int = 47
             }
-            body:  Stat { "Active: " + count, total - count }
+            body:  Stat { \`Active: {count}\`, total - count }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -95,12 +97,12 @@ describe("expressions in text positions", () => {
       }
     `);
     const content = files.get("web/src/pages/dashboard.tsx")!;
-    // `count` (int) auto-converts to string via the implicit `string + X`
-    // concat — the walker injects `String(count)` so JS doesn't fall
-    // through to silent coercion.  Numeric `total - count` stays a
-    // plain arithmetic expression.
+    // The string-label slot is an interpolated template → ICU t() call; the
+    // int hole `count` is coerced with `String(count)` in the values object.
+    // Numeric `total - count` stays a plain arithmetic expression (no string
+    // literal operand → not ICU-ified).
     expect(content).toMatch(
-      /<Text size="sm" c="dimmed">\{\("Active: " \+ String\(count\)\)\}<\/Text>/,
+      /<Text size="sm" c="dimmed">\{t\("[^"]*", "Active: \{count\}", \{ count: String\(count\) \}\)\}<\/Text>/,
     );
     expect(content).toMatch(/<Text fw=\{700\} size="xl">\{\(total - count\)\}<\/Text>/);
   });
@@ -112,7 +114,7 @@ describe("expressions in text positions", () => {
         ui WebApp {
           page UserCard(name: string) {
             route: "/users/:name"
-            body:  Card { "Profile: " + name, Text { "hello" } }
+            body:  Card { \`Profile: {name}\`, Text { "hello" } }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -125,8 +127,10 @@ describe("expressions in text positions", () => {
       }
     `);
     const content = files.get("web/src/pages/user_card.tsx")!;
-    // Card title slot picks up the binary op (not the inner Text).
-    expect(content).toMatch(/<Title order=\{3\}>\{\("Profile: " \+ name\)\}<\/Title>/);
+    // Card title slot picks up the interpolated template → ICU t() (not the inner Text).
+    expect(content).toMatch(
+      /<Title order=\{3\}>\{t\("[^"]*", "Profile: \{name\}", \{ name: name \}\)\}<\/Title>/,
+    );
     // Inner Text is the content child.
     expect(content).toMatch(/<Text>\{t\("[^"]*", "hello"\)\}<\/Text>/);
   });

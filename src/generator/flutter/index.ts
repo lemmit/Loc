@@ -206,6 +206,12 @@ export function generateFlutterForContexts(
   // mount and settle to their loading/error branch with no backend — the tree
   // still builds, which is exactly what the smoke proves.
   out.set("test/widget_test.dart", renderWidgetSmokeTest(pkg));
+  // A11y runtime gate (accessibility.md; docs/audits/flutter-a11y-audit-2026-07.md
+  // Phase C) — the Flutter analogue of the axe-core tripwire, which can't scan a
+  // canvas-rendered Flutter build.  Boots the real app with the semantics tree
+  // enabled and asserts Flutter's built-in WCAG guidelines on the first frame.
+  // Runs under the same `flutter test` step (whole `test/` dir) as the smoke.
+  out.set("test/a11y_test.dart", renderA11yTest(pkg));
 
   return out;
 }
@@ -619,7 +625,48 @@ void main() {
   testWidgets('app boots and renders a MaterialApp', (WidgetTester tester) async {
     await tester.pumpWidget(const App());
     await tester.pump();
+    // A page whose first frame renders a NetworkImage (Image/Avatar) hits an
+    // HTTP 400 under flutter_test — drain that expected failure so it doesn't
+    // fail the boot smoke.
+    while (tester.takeException() != null) {}
     expect(find.byType(MaterialApp), findsOneWidget);
+  });
+}
+`;
+}
+
+/** `test/a11y_test.dart` — the runtime accessibility gate (Phase C of the
+ *  Flutter a11y audit).  Flutter web renders to a canvas, so axe-core (the
+ *  web frontends' a11y tripwire) can't traverse it; Flutter's own
+ *  `flutter_test` `meetsGuideline(...)` matchers are the equivalent.  Enables
+ *  the semantics tree, pumps the real `App` once (a single `pump`, not
+ *  `pumpAndSettle` — reads never settle without a backend, see the smoke test),
+ *  and asserts the built-in WCAG guidelines on the first frame:
+ *   - tap-target size (Android 48dp / iOS 44pt),
+ *   - every tappable node has a label (`labeledTapTargetGuideline`),
+ *   - text meets WCAG-AA contrast (`textContrastGuideline`).
+ *  Generated pages may reference `NetworkImage` sources; `flutter_test` blocks
+ *  all real HTTP (status 400), which surfaces as an unrelated
+ *  `NetworkImageLoadException` — drained via `takeException()` so it can't fail
+ *  the a11y assertion. */
+function renderA11yTest(pkg: string): string {
+  return `import 'package:flutter_test/flutter_test.dart';
+import 'package:${pkg}/main.dart';
+
+void main() {
+  testWidgets('boot frame meets WCAG accessibility guidelines', (WidgetTester tester) async {
+    final SemanticsHandle handle = tester.ensureSemantics();
+    await tester.pumpWidget(const App());
+    await tester.pump();
+    // Drain expected NetworkImage load failures (flutter_test returns HTTP 400
+    // for every request) so they don't fail the guideline checks below.
+    while (tester.takeException() != null) {}
+    await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+    await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
+    await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+    await expectLater(tester, meetsGuideline(textContrastGuideline));
+    while (tester.takeException() != null) {}
+    handle.dispose();
   });
 }
 `;

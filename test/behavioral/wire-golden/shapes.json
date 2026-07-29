@@ -1,0 +1,97 @@
+{
+  "case": "shapes",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/carts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/carts/{id}/add_item",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/carts/{id}",
+      "status": 200,
+      "body": {
+        "customerId": "<volatile:key>",
+        "id": "<volatile:key>",
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "quantity": 2,
+            "sku": "WIDGET-1",
+            "unitPrice": {
+              "amount": 9.99,
+              "currency": "USD"
+            }
+          }
+        ],
+        "status": "Open",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/wishlists",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/wishlists/{id}/add_item",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/wishlists/{id}",
+      "status": 200,
+      "body": {
+        "customerId": "<volatile:key>",
+        "id": "<volatile:key>",
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "sku": "GADGET-9"
+          }
+        ],
+        "label": "Birthday",
+        "version": 2
+      }
+    }
+  ]
+}

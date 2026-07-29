@@ -9,7 +9,7 @@
 
 import { Button, Group } from "@mantine/core";
 import { addConstructSource, addSubdomainSource } from "../system/add";
-import { addStatement, type BodyLocator } from "../system/body";
+import { addStatement, type BodyKey, type BodyLocator } from "../system/body";
 import { addField, freshFieldName } from "../system/fields";
 import { findAggregate, type ViewPath } from "./view-graph";
 import { addContextSource, addOperationSource } from "./add-extra";
@@ -19,13 +19,15 @@ interface Props {
   path: ViewPath;
   source: string;
   onChange: (next: string) => void;
+  /** Selected workflow body member; undefined = the primary create. */
+  wfMember?: BodyKey;
 }
 
 const try_ = (onChange: (next: string) => void, next: string | null): void => {
   if (next != null) onChange(next);
 };
 
-export default function AddPalette({ path, source, onChange }: Props): JSX.Element | null {
+export default function AddPalette({ path, source, onChange, wfMember }: Props): JSX.Element | null {
   const last = path[path.length - 1];
 
   if (!last) return null;
@@ -82,7 +84,7 @@ export default function AddPalette({ path, source, onChange }: Props): JSX.Eleme
   if (last.kind === "operation" || last.kind === "workflow") {
     const loc: BodyLocator =
       last.kind === "workflow"
-        ? { kind: "workflow", name: last.name }
+        ? { kind: "workflow", name: last.name, member: wfMember }
         : (() => {
             const agg = path[path.length - 2];
             return { kind: "operation", aggregate: agg?.name ?? "", op: last.name };

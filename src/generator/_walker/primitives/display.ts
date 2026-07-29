@@ -4,37 +4,24 @@
 // recurse via the shared `positionalChildren`).
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { localizedRaw, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
-import {
-  numericNamed,
-  positionalArgs,
-  stringNamed,
-  unwrapAsAttr,
-  unwrapTextLiteral,
-} from "../shared/args.js";
+import { numericNamed, stringNamed, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
-import {
-  firstPositionalContent,
-  positionalChildren,
-  renderTextContent,
-  styleAttr,
-  testidAttr,
-} from "../walker-core.js";
+import { positionalChildren, styleAttr, testidAttr } from "../walker-core.js";
 
 export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Stat(label, value) — small headline-stat card.  No dedicated
   // component on either pack; both compose two stacked text
   // elements (dimmed label + bold value).
-  const positionals = positionalArgs(call);
-  const labelArg = positionals[0];
-  const valueArg = positionals[1];
-  const label = labelArg ? (renderTextContent(labelArg, ctx) ?? '""') : '""';
-  const value = valueArg ? (renderTextContent(valueArg, ctx) ?? '""') : '""';
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-stat", {
-    label: unwrapTextLiteral(label, ctx.target.escapeText),
-    value: unwrapTextLiteral(value, ctx.target.escapeText),
+    // `statLabel`/`statValue` are user-visible text slots — a plain literal is
+    // translated through `t()` when the body opted into i18n, keyed to the
+    // catalog; a dynamic slot / non-i18n target stays byte-identical.
+    label: localizedText(call, ctx, "statLabel", '""', 0),
+    value: localizedText(call, ctx, "statValue", '""', 1),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),
@@ -47,7 +34,9 @@ export function emitBadge(
   ctx: WalkContext,
   depth: number,
 ): string {
-  const raw = firstPositionalContent(call, ctx) ?? '"Badge"';
+  // The badge label is a user-visible slot — translate a plain literal through
+  // `t()` under i18n (both forms use the same call), else byte-identical.
+  const raw = localizedRaw(call, ctx, "badge", '"Badge"');
   void depth;
   return renderPrimitive(ctx, "primitive-badge", {
     // `label` is JSX-children-friendly text — quotes stripped from
@@ -172,11 +161,12 @@ export function emitAlert(
   depth: number,
 ): string {
   void depth;
-  const message = firstPositionalContent(call, ctx) ?? '""';
   const color = stringNamed(call, "color");
   const title = stringNamed(call, "title");
   return renderPrimitive(ctx, "primitive-alert", {
-    message: unwrapTextLiteral(message, ctx.target.escapeText),
+    // The alert message is a user-visible positional slot (the `title` named
+    // slot stays raw for now — attribute-position i18n is a follow-up).
+    message: localizedText(call, ctx, "alert", '""'),
     hasColor: color !== undefined,
     color: color ?? "red",
     hasTitle: title !== undefined,

@@ -1,4 +1,4 @@
-import { AstUtils, type AstNode } from "langium";
+import { AstUtils, GrammarUtils, type AstNode } from "langium";
 import type {
   Aggregate,
   EnumDecl,
@@ -8,7 +8,6 @@ import type {
   TypeRef,
   ValueObject,
 } from "../../../../src/language/generated/ast.js";
-import { printStructural } from "../../../../src/language/print/index.js";
 // The playground re-exports the canonical primitive set the toolchain
 // declares — keeps the field-builder's type picker in lockstep with
 // the IR so a new primitive (e.g. `money` in #498) shows up here
@@ -18,11 +17,10 @@ import {
   mkIdType,
   mkNamedType,
   mkPrimitiveType,
-  mkProperty,
   mkTypeRef,
 } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { spliceNodeIfParses } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 import type { NodeKind } from "./model";
 
 export { PRIMITIVES, type PrimitiveName };
@@ -30,12 +28,21 @@ export { PRIMITIVES, type PrimitiveName };
 // ---------------------------------------------------------------------------
 // Inline field editing for the Model builder's Property-bearing constructs
 // (aggregate / value object / event).  Each op re-parses the current source,
-// finds the construct, mutates its property list in memory, reprints the whole
-// construct with the structural printer, and splices it over the construct's
-// CST range — the same parse → mutate → reprint → splice path add/delete/rename
-// use.  TypeRef/Property literals are hand-built (no linking / `$container`
-// needed): the printer reads only `$type` / `name` / `target.$refText` /
-// `array` / `optional`.
+// finds the construct, and rewrites the SMALLEST CST range that expresses the
+// change: one inserted member line, one Property's own span, one field's
+// `TypeRef`.
+//
+// The ops used to reprint the whole construct through the structural printer
+// instead.  That printer has no comment handling, so every `//` / `/* */`
+// inside the aggregate was deleted and its formatting re-canonicalised on any
+// field edit — the exact loss `edit-engine.ts` promises never happens.  A
+// narrow splice touches nothing outside the edited span, so comments, blank
+// lines and hand-spacing survive byte-for-byte; retyping in particular now
+// preserves everything AFTER the type on the same field (`= default`,
+// `check`, `sensitive(...)`, `mask unless`, the access modifier), which the
+// reprint round-tripped only by luck.  Every result is re-parsed before it is
+// returned (`ifParses`), so a malformed edit reports `null` rather than
+// committing broken source.
 //
 // Field *rename* is intentionally out of scope — field-name references in
 // expressions/views are resolved during IR lowering, not as Langium
@@ -124,6 +131,18 @@ export function baseSpecOf(type: TypeRef): BaseSpec {
   }
 }
 
+/** The `.ddd` source text for a picked type — `baseLabel` plus the `[]` / `?`
+ *  suffixes, in the grammar's `base ('[]')? ('?')?` order.  This is what the
+ *  narrow splices write; `buildTypeRef` is the AST twin, kept for the page
+ *  builder's state fields (which still build nodes). */
+export function typeText(spec: TypeSpec): string {
+  // `duration` is expression-only — same guard, same reason as `buildTypeRef`.
+  if (spec.base.kind === "primitive" && spec.base.name === "duration") {
+    throw new Error("'duration' is not a storable primitive type (expression-only)");
+  }
+  return `${baseLabel(spec.base)}${spec.array ? "[]" : ""}${spec.optional ? "?" : ""}`;
+}
+
 export function buildTypeRef(spec: TypeSpec): TypeRef {
   let base: TypeRef["base"];
   switch (spec.base.kind) {
@@ -160,21 +179,16 @@ export function buildTypeRef(spec: TypeSpec): TypeRef {
   });
 }
 
-function buildProperty(name: string, spec: TypeSpec): Property {
-  return mkProperty({
-    $type: "Property",
-    name,
-    type: buildTypeRef(spec),
-    provenanced: false,
-  });
-}
-
 // --- read helpers (for the inspector UI) -----------------------------------
 
 export function listFields(node: AstNode): FieldInfo[] {
-  return propertyList(node).list.map((p) => {
+  // Read path: the panes re-read the live source mid-keystroke, so a property
+  // whose `type` didn't parse is skipped rather than dereferenced (the same
+  // recovered-AST guard `listStateFields` carries).
+  return propertyList(node).list.flatMap((p) => {
+    if (!p.type) return [];
     const base = baseSpecOf(p.type);
-    return { name: p.name, base, baseLabel: baseLabel(base), array: p.type.array, optional: p.type.optional };
+    return [{ name: p.name, base, baseLabel: baseLabel(base), array: p.type.array, optional: p.type.optional }];
   });
 }
 
@@ -204,17 +218,24 @@ export function availableTypes(ast: Model): TypeOption[] {
   return out;
 }
 
-// --- mutating ops (parse → mutate → reprint → splice) ----------------------
+// --- mutating ops (parse → locate → narrow splice → re-parse) --------------
 
-function commit(source: string, kind: NodeKind, name: string, mutate: (node: AstNode) => boolean): string | null {
+/** Leading whitespace of the line containing `offset`. */
+function lineIndent(source: string, offset: number): string {
+  let start = offset;
+  while (start > 0 && source[start - 1] !== "\n") start--;
+  let i = start;
+  while (i < source.length && (source[i] === " " || source[i] === "\t")) i++;
+  return source.slice(start, i);
+}
+
+/** The shared prologue: re-parse the source and find the construct.  Null on a
+ *  syntactically invalid source (an edit on top of broken text would splice at
+ *  offsets the recovery parser invented) or an unknown construct. */
+function locate(source: string, kind: NodeKind, name: string): AstNode | null {
   const fresh = parseDdd(source);
   if (fresh.parserErrors.length > 0) return null;
-  const node = findConstruct(fresh.ast, kind, name);
-  if (!node) return null;
-  if (!mutate(node)) return null;
-  // Gate the reprint: a printer arm that emits a malformed fragment must not
-  // reach the editor. Callers already treat null as "nothing written".
-  return spliceNodeIfParses(source, node, printStructural(node));
+  return findConstruct(fresh.ast, kind, name);
 }
 
 export function addField(
@@ -224,22 +245,46 @@ export function addField(
   fieldName: string,
   type: TypeSpec,
 ): string | null {
-  return commit(source, kind, name, (node) => {
-    propertyList(node).container.push(buildProperty(fieldName, type));
-    return true;
-  });
+  const node = locate(source, kind, name);
+  const cst = node?.$cstNode;
+  if (!node || !cst) return null;
+  const line = `${fieldName}: ${typeText(type)}`;
+  // Append after the last declared member, matching its indentation — the
+  // in-place equivalent of pushing onto the member array.  Anything after it
+  // (a trailing comment, blank lines before the `}`) is left where it is.
+  const members = propertyList(node).container;
+  const last = members[members.length - 1]?.$cstNode;
+  if (last) {
+    const indent = lineIndent(source, last.offset);
+    return ifParses(
+      applyEdits(source, [{ offset: last.end, end: last.end, newText: `\n${indent}${line}` }]),
+    );
+  }
+  // Empty body: open the first member line right after the `{`.
+  const open = GrammarUtils.findNodeForKeyword(cst, "{");
+  if (!open) return null;
+  const indent = `${lineIndent(source, cst.offset)}  `;
+  return ifParses(
+    applyEdits(source, [{ offset: open.end, end: open.end, newText: `\n${indent}${line}` }]),
+  );
 }
 
 export function deleteField(source: string, kind: NodeKind, name: string, index: number): string | null {
-  return commit(source, kind, name, (node) => {
-    const { list, container } = propertyList(node);
-    const target = list[index];
-    if (!target) return false;
-    const at = container.indexOf(target);
-    if (at < 0) return false;
-    container.splice(at, 1);
-    return true;
-  });
+  const node = locate(source, kind, name);
+  if (!node) return null;
+  const cst = propertyList(node).list[index]?.$cstNode;
+  if (!cst) return null;
+  // Swallow the preceding line break + indentation so no blank line is left…
+  let start = cst.offset;
+  while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
+  if (start > 0 && source[start - 1] === "\n") start--;
+  // …and a same-line trailing comma, since an event's fields may be
+  // comma-separated (`event E { a: int, b: string }`).
+  let end = cst.end;
+  let i = end;
+  while (i < source.length && (source[i] === " " || source[i] === "\t")) i++;
+  if (source[i] === ",") end = i + 1;
+  return ifParses(applyEdits(source, [{ offset: start, end, newText: "" }]));
 }
 
 export function retypeField(
@@ -249,12 +294,17 @@ export function retypeField(
   index: number,
   type: TypeSpec,
 ): string | null {
-  return commit(source, kind, name, (node) => {
-    const target = propertyList(node).list[index];
-    if (!target) return false;
-    target.type = buildTypeRef(type);
-    return true;
-  });
+  const node = locate(source, kind, name);
+  if (!node) return null;
+  // Only the `TypeRef` span is rewritten, so everything the grammar allows
+  // after it on the same field — `= default`, `check … message "…"`,
+  // `sensitive(…)`, `provenanced`, the access modifier / `mask unless` — is
+  // untouched rather than reprinted.
+  const cst = propertyList(node).list[index]?.type.$cstNode;
+  if (!cst) return null;
+  return ifParses(
+    applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]),
+  );
 }
 
 /** A field name not already used by the construct's fields. */

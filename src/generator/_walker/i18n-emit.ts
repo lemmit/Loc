@@ -14,36 +14,80 @@
 //   2. A plain string literal with NO i18n (`ctx.i18nPrefix` absent — every
 //      non-React target, and React apps with no extractable strings) → the raw
 //      escaped literal. BYTE-IDENTICAL to the pre-i18n path.
-//   3. A dynamic slot (a `ref`/state/`+`-concat) → the existing
-//      `firstPositionalContent` interpolation. Never translated (there is no
+//   3. An interpolated slot — a lowered backtick template (`` `Order {o.id}` ``)
+//      re-detected as an ICU message via `icuFromConcat` → `{t("<key>", "Order
+//      {id}", { id: o.id })}`, keyed identically to the catalog. Only under
+//      i18n; every non-React target + a dynamic-but-untranslatable slot keep the
+//      raw path.
+//   4. A dynamic slot with no literal text (a bare `ref`/state, `count + 1`) →
+//      the existing `renderTextContent` interpolation. Never translated (no
 //      stable source string), unchanged on every target.
 //
 // The translation runtime is a tiny generated `src/i18n.ts` lookup shim (see
-// `src/generator/react/i18n-runtime.ts`), NOT react-intl: this slice extracts
-// PLAIN literals only, so a `messages[key] ?? default` lookup is exactly
-// sufficient. ICU (`react-intl`/placeholders/plurals) arrives with the
-// template→ICU interpolation slice, which upgrades the shim.
+// `src/generator/react/i18n-runtime.ts`), NOT react-intl: a `messages[key] ??
+// default` lookup plus a `{name}` substitution covers plain literals and simple
+// interpolation. ICU format suffixes (plural/select/number) arrive with a later
+// react-intl slice once the template grammar grows a `,format` hole.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
-import { literalString, messageKey } from "./i18n-extract.js";
+import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
 import { addImport } from "./render-primitive.js";
 import { positionalArgs, unwrapTextLiteral } from "./shared/args.js";
-import { firstPositionalContent, type WalkContext } from "./walker-core.js";
+import { emitExpr, renderTextContent, type WalkContext } from "./walker-core.js";
 
 /** Import specifier for the generated translation helper. Written with the
  *  default one-hop `../` shape; `renderImportLines` rewrites it to the page's
  *  real depth (`../../i18n` for a `src/pages/orders/list.tsx`). */
 const I18N_MODULE = "../i18n";
 
-/** Render a user-visible text slot, translating a plain literal through the
- *  generated `t()` helper when the body opted into i18n (`ctx.i18nPrefix`).
+/** The raw text token for a user-visible slot, translating a plain literal
+ *  through the generated `t()` helper when the body opted into i18n
+ *  (`ctx.i18nPrefix`).  Returns either the interpolation `{t(key, "default")}`
+ *  (i18n on), the raw quoted literal `"Badge"`, or a dynamic `{expr}` — the
+ *  same token shape `firstPositionalContent` yields.  Callers wrap it for their
+ *  slot: `unwrapTextLiteral` for JSX children, `unwrapAsAttr` for an attribute.
  *
  *  `role` MUST match the slot's role in `USER_VISIBLE_SLOTS` so the emitted key
- *  equals the catalog key. `fallback` is the quoted placeholder the emitter
- *  uses when the slot is empty (e.g. `'"Heading"'`). `argIndex` selects the
- *  positional slot (0 for the common single-text primitives; 1 for a `Stat`
- *  value). */
+ *  equals the catalog key. `fallback` is the quoted placeholder used when the
+ *  slot is empty. `argIndex` selects the positional slot (0 for single-text
+ *  primitives; 1 for a `Stat` value). */
+export function localizedRaw(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  fallback: string,
+  argIndex = 0,
+): string {
+  const arg = positionalArgs(call)[argIndex];
+  const literal = literalString(arg);
+  if (literal !== undefined && ctx.i18nPrefix) {
+    const key = messageKey(ctx.i18nPrefix, role, literal);
+    addImport(ctx, I18N_MODULE, "t");
+    return ctx.target.renderInterpolation(`t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`);
+  }
+  // Interpolated slot (a lowered backtick template) under i18n → an ICU `t()`
+  // call: the default carries the named placeholders (`"Order {id}"`), the key
+  // is hashed over the positional form, and the holes render into a values
+  // object (`{ id: order.id }`) the shim substitutes at runtime.  Keyed
+  // identically to the catalog entry (both call `icuFromConcat` + `messageKey`).
+  if (arg && ctx.i18nPrefix) {
+    const icu = icuFromConcat(arg);
+    if (icu) {
+      const key = messageKey(ctx.i18nPrefix, role, icu.positional);
+      addImport(ctx, I18N_MODULE, "t");
+      const values = icu.holes.map((h) => `${h.name}: ${emitExpr(h.expr, ctx)}`).join(", ");
+      return ctx.target.renderInterpolation(
+        `t(${JSON.stringify(key)}, ${JSON.stringify(icu.display)}, { ${values} })`,
+      );
+    }
+  }
+  // Non-i18n / dynamic / empty — exactly the pre-i18n behaviour, at `argIndex`.
+  return (arg ? renderTextContent(arg, ctx) : undefined) ?? fallback;
+}
+
+/** {@link localizedRaw} unwrapped for a JSX-children text position — the
+ *  drop-in replacement for `unwrapTextLiteral(firstPositionalContent(...))`. */
 export function localizedText(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -51,13 +95,8 @@ export function localizedText(
   fallback: string,
   argIndex = 0,
 ): string {
-  const literal = literalString(positionalArgs(call)[argIndex]);
-  if (literal !== undefined && ctx.i18nPrefix) {
-    const key = messageKey(ctx.i18nPrefix, role, literal);
-    addImport(ctx, I18N_MODULE, "t");
-    return ctx.target.renderInterpolation(`t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`);
-  }
-  // Non-i18n / dynamic / empty — exactly the pre-i18n behaviour.
-  const raw = firstPositionalContent(call, ctx) ?? fallback;
-  return unwrapTextLiteral(raw, ctx.target.escapeText);
+  return unwrapTextLiteral(
+    localizedRaw(call, ctx, role, fallback, argIndex),
+    ctx.target.escapeText,
+  );
 }

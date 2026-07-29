@@ -309,6 +309,32 @@ inspection utilities (`writableUpdateFields`,
 `workflowsIn`, `aggregatesIn`).  Anything you can write by hand in
 `.ddd` source, a macro can produce.
 
+## What unfold writes back
+
+Unfold prints the expanded AST through `src/language/print/`, so the text
+that lands in the user's file is held to the same shape as hand-written
+`.ddd`:
+
+- **2-space indentation throughout**, including nested statement blocks
+  (`for` / `if let` / `match`) and lambda block bodies
+  (`onClick: e => { … }`) — each is indented as a block, not by a
+  first-line prefix.
+- **No line past 100 columns.**  The wrap budget is measured at the column
+  the text will actually occupy: `print-expr.ts` tracks an ambient print
+  column (`withIndent` / `atColumn`), and the code action seeds it with the
+  indent the splice adds.
+- **Blank lines between declarations, tight field runs.**  A member is
+  separated from its neighbour when either spans multiple lines
+  (`joinDecls`), and only declaration *containers* opt in — so a page's
+  `route:`/`body:` props and an aggregate's field list stay glued.
+- **No trailing whitespace**, including when unfolding into an empty
+  `{ }` body.
+
+These are gated by `test/language/print/print-block-layout.test.ts` (printer
+shape) and `test/macro/unfold-layout.test.ts` (the code action's output, over
+every offered unfold).  A macro that produces a construct the printer renders
+badly is a printer bug — fix it there, not in the macro.
+
 ## Cross-references
 
 - [`capabilities.md`](capabilities.md) — the `filter` / `stamp` /

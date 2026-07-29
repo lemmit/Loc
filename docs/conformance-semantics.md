@@ -267,6 +267,100 @@ the conforming backends, and the fix that established it.
 - **Provenance.** M-T9.11 differential (run 30277275068, PR #2220); owner
   decision. Fixed by M-T6.11. Tier: **behavioral**.
 
+### RS-13 · A create `POST` returns the id envelope, not the whole aggregate
+- **Guarantee.** A create `POST /api/<plural>` answers `201` with the id
+  envelope `{"id": …}` — nothing else. That envelope is what every backend's
+  emitted OpenAPI declares for the create response.
+- **Trigger.** Any aggregate created via `POST /api/<plural>`.
+- **Observable.** Every backend returns `{"id":…}`. **Elixir used to return the
+  FULL aggregate** (`{"id":…,"owner":"alice","balance":0}`), on every create, in
+  every shared system — so a client written against the declared create response
+  could read fields on Elixir it cannot read on the other four. The OpenAPI
+  spec-diff was blind to it by construction: the *specs* agreed — only the bytes
+  differed. The majority and the oracle happened to coincide, but the oracle was
+  not the vote: Elixir over-returned against **its own published contract**, so
+  the emitted spec settled it without appeal to the other four. Confirmed at the
+  source — the emitted `Create<Agg>Response` schema declares
+  `properties: %{ id: … }` (`openapi-emit.ts`) while the controller's
+  `create_result/2` answered `201` with `json(serialize(record))`.
+- **Fix.** The three Elixir create actions (`api-emit.ts` ×2 — audited and plain
+  — plus `eventsourced-emit.ts`) now answer `%{"id" => record.id}`. The
+  string-keyed map matches the serializer's own `"id" => …` entry, so the id's
+  wire form is identical on the create and read paths.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate on its
+  first five-backend run (`test/behavioral/wire-golden/{ledger,payments,sales,
+  shapes}.json`); fixed in the same PR, so the waiver is gone and the gate
+  enforces the envelope unconditionally. Tier: **behavioral**.
+
+### RS-14 · `version` increments on every persisted mutation, document shapes included
+- **Guarantee.** A `versioned` aggregate reads back `version: 2` after one
+  post-create mutation — `1` at create (RS-11), `+1` per persisted mutation —
+  **regardless of `shape:`**.
+- **Trigger.** A `versioned` aggregate with `shape: document` (jsonb-stored):
+  create, invoke an operation, read back.
+- **Observable.** Every backend now reads back `2`. Historically each of three
+  dropped the bump on a **different** shape — document `Cart` / embedded
+  `Wishlist` / plain `Order` (canonically 2 / 2 / 3) read back **1 / 2 / 3** on
+  dotnet+java and **2 / 1 / 1** on elixir — which is exactly why this survived
+  every existing gate: the behavioral tiers assert *locally* (each backend
+  passes its own emitted asserts), and no test author thought to assert
+  `version` after an operation. The **`dapper` adapter incremented correctly**
+  throughout — same .NET emitters, raw Npgsql with hand-rolled document SQL —
+  which localized the dotnet/java half to the EF/JPA mapping rather than the
+  wire emitters.
+- **Fix.** *dotnet* — the document `SaveAsync` resolves the next version FIRST
+  and stamps it into the serialized snapshot (`ToSnapshot() with { Version = … }`),
+  so `data.version` and the row column can no longer disagree. *java* — the
+  document upsert writes the incremented counter back into the blob:
+  `jsonb_set(excluded.data, '{version}', to_jsonb(<t>.version + 1))`. *elixir* —
+  the relational/embedded operation persist path bumps `version` the way the
+  document path already did. (Each is guarded on the `versioned` capability; the
+  relational .NET/Java paths needed nothing, since there the bumped column IS
+  the wire value.)
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate
+  (`test/behavioral/wire-golden/shapes.json` seq #3, `GET /api/carts/{id}`);
+  fixed in the same PR, so the waiver is gone and the gate enforces it
+  unconditionally on all five backends. Note RS-11 covered version at **create**
+  only — this is the **increment** path, and it is shape-dependent. Tier:
+  **behavioral**.
+
+### RS-15 · A tripped operation `precondition` maps to one canonical status — **OPEN**
+- **Guarantee (pending).** A `precondition` that is false at call time produces
+  the SAME status and the same `detail` shape on every backend. Which status
+  that is has **not been decided**.
+- **Trigger.** An `operation` with a `precondition` invoked in a state that
+  fails it.
+- **Observable — the backends disagree.**
+
+  | backends | status | `detail` |
+  |---|---|---|
+  | node, python, dotnet | **400** Bad Request | `"Precondition failed: <the predicate>"` |
+  | elixir | **422** Unprocessable Entity | `"A precondition failed"` (generic) |
+
+  Two divergences in one: the status, and whether the failed predicate is
+  named. Java was not measured on this path.
+- **Why this is NOT a one-backend bug.** Elixir's mapping is *deliberate and
+  documented* — a coherent denial ladder (`when` → 409, `requires` → 403,
+  `precondition` → 422, `api-emit.ts`) that deliberately replaced an older
+  `raise ArgumentError` → 500. And 422 is arguably the better RFC 9110 fit: the
+  request is well-formed but semantically rejected. Against that, 400 is what
+  the other backends emit. **This is the RS-12 shape** — an open canonical
+  decision for the owner, not a majority vote. (RS-11 is the standing reminder
+  that the majority can be the wrong side.)
+- **Consequence for the gate.** The `wire-contract` shared system deliberately
+  carries **no error-status assertion** until this is settled: the emitted
+  `test e2e` DSL expresses the expectation as `toThrow(<status>)`, so any
+  assertion would silently encode one side of the undecided question — and a
+  wire *waiver* cannot help, because the failure is the emitted test's own
+  assertion, not a golden mismatch. Error-envelope coverage joins the golden
+  once the decision lands.
+- **Conforms (provisional).** node, dotnet, python. **Targets:** elixir
+  (measured divergent), java (unmeasured).
+- **Provenance.** Found by the M-T9.11 wire-golden gate while extending its
+  coverage. Tier: **behavioral**.
+
 ---
 
 ## Adding a rule
