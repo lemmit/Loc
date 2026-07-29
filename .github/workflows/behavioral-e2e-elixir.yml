@@ -75,7 +75,16 @@ jobs:
     # hex deps (opentelemetry{,_api,_exporter} → grpcbox/chatterbox rebar3
     # builds, M-T7.1) pushed a cold-cache run past the old 20-min cap. Bumped to
     # give headroom for the extra deps.get + compile.
-    timeout-minutes: 30
+    #
+    # 30 → 45 (M-T9.11 coverage): this leg runs ONE FULL `mix compile` PER CASE,
+    # so its wall clock grows with the corpus — and it had already been silently
+    # CANCELLED at the 30-min ceiling on consecutive runs (a cancelled job reads
+    # as "not failed", which is exactly how a gate stops being read).  Adding the
+    # `wire-contract` shared system adds another compile, so the budget moves
+    # with it rather than leaving the leg chronically over.  Every other
+    # behavioral leg finishes in 3-10 min; this one is the outlier because of
+    # per-case BEAM compilation, not because it does more work.
+    timeout-minutes: 45
 
     services:
       postgres:

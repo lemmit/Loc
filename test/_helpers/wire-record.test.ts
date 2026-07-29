@@ -340,3 +340,30 @@ describe("report volume", () => {
     expect(out).toContain("14 more waived");
   });
 });
+
+describe("WIRE_NORMALIZE — path-shaped strings", () => {
+  it("templates a 7807 `instance` so the route survives but the id does not", () => {
+    const e = toWireEntry(
+      0,
+      "POST",
+      "http://x/api/listings/3f2504e0-4f89-11d3-9a0c-0305e82c3301/discontinue",
+      400,
+      JSON.stringify({
+        type: "about:blank",
+        title: "Bad Request",
+        status: 400,
+        detail: "Precondition failed",
+        instance: "/api/listings/3f2504e0-4f89-11d3-9a0c-0305e82c3301/discontinue",
+      }),
+    );
+    // Without this rule the golden could never match twice; collapsing the whole
+    // string to one token would lose the route, which is where a divergence shows.
+    expect((e.body as Record<string, unknown>).instance).toBe("/api/listings/{id}/discontinue");
+    expect((e.body as Record<string, unknown>).title).toBe("Bad Request");
+  });
+
+  it("leaves an ordinary path string alone when it carries no volatile segment", () => {
+    const e = toWireEntry(0, "GET", "/x", 200, JSON.stringify({ href: "/api/listings" }));
+    expect((e.body as Record<string, unknown>).href).toBe("/api/listings");
+  });
+});

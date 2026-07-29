@@ -61,6 +61,13 @@ export interface NormalizeOpts {
 export interface VolatileValueRule {
   readonly token: string;
   readonly test: (s: string) => boolean;
+  /** Optional REWRITE instead of a flat token — for a string that is partly
+   *  volatile and partly contract.  An RFC 7807 `instance`
+   *  (`/api/listings/<uuid>/discontinue`) is the motivating case: collapsing it
+   *  to one token would throw away the ROUTE, which is exactly the part a
+   *  divergence would show up in.  Return the canonicalized string; the token
+   *  is then only a label for the rule. */
+  readonly rewrite?: (s: string) => string;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -89,7 +96,9 @@ export function normalizeBody(value: Json, opts: NormalizeOpts = DEFAULT_NORMALI
     if (v === null) return null;
     if (typeof v === "string") {
       if (volatileByKey) return "<volatile:key>";
-      for (const rule of opts.volatileValue ?? []) if (rule.test(v)) return rule.token;
+      for (const rule of opts.volatileValue ?? []) {
+        if (rule.test(v)) return rule.rewrite ? rule.rewrite(v) : rule.token;
+      }
       return v;
     }
     if (typeof v !== "object") return v; // number | boolean

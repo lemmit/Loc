@@ -271,6 +271,35 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-15",
+    title: "A tripped operation `precondition` maps to one canonical status",
+    trigger: "an `operation` whose `precondition` is false at call time",
+    observable:
+      'the backends DISAGREE, and this rule exists to name the disagreement rather than to assert a winner. node/python/dotnet answer 400 ("Bad Request") with the specific predicate in `detail` ("Precondition failed: availability != Availability.Discontinued"); elixir answers 422 ("Unprocessable Entity") with a generic "A precondition failed". Neither side is an accident: elixir\'s mapping is deliberate and documented — a coherent denial ladder (`when` -> 409, `requires` -> 403, `precondition` -> 422, api-emit.ts) that replaced an older `raise ArgumentError` -> 500 — and 422 is arguably the better RFC 9110 fit for a well-formed but semantically-rejected request, while 400 is what the other backends emit.',
+    // NOT a one-backend bug, so NOT a majority call: this is the RS-12 shape —
+    // an OPEN canonical decision the owner settles, after which ONE side changes
+    // and this rule flips to a normal conforming-everywhere clause.  Until then
+    // the wire-contract shared system deliberately carries no error-status
+    // assertion, because an emitted `toThrow(<status>)` would silently encode
+    // one side of the undecided question.
+    // PROVISIONAL direction, recorded the way RS-12 originally was: the three
+    // backends MEASURED on 400 are listed as conforming so the registry keeps
+    // its "every rule names a winner" invariant, but the call is NOT settled —
+    // if the owner picks 422 this flips and the fix target becomes the other
+    // four.  `java` sits in `targets` because it was NOT measured on this path,
+    // not because it is known to diverge.
+    conforms: ["node", "dotnet", "python"],
+    targets: ["elixir", "java"],
+    provenance: [
+      "found by the M-T9.11 wire-golden gate while extending its coverage (test/behavioral/systems/wire-contract.ddd)",
+      "measured on a real boot: node/python/dotnet -> 400; elixir -> 422; java unmeasured",
+      "elixir: ProblemDetails.problem_response(conn, 422, ...) in api-emit.ts denialArms",
+      "node: DomainError(`Precondition failed: ...`) -> 400",
+      "OPEN owner decision: 400 (majority + state-gate precedent) vs 422 (RFC 9110 semantics, elixir's deliberate ladder)",
+    ],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------
