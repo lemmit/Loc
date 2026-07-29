@@ -64,12 +64,12 @@ root `package.json` — they're Handlebars-template strings.
 | `stacks/v3/stack-package-deps.hbs` + `-devdeps.hbs` | React 19 + react-router 7 + zod 4 + resolvers 5; vite 8, typescript 6 |
 | `stacks/sv1/stack-package-deps.hbs` + `-devdeps.hbs` | Svelte 5 + SvelteKit 2 + adapter-static 3 + svelte-query 6 + zod 4 + vite 8 + **TS 6.0** + svelte-check 4 |
 | `stacks/vue1/stack-package-deps.hbs` + `-devdeps.hbs` | Vue 3.5 + vue-router 4 + @vitejs/plugin-vue 6 + vue-query 5 + vue-tsc 3 + zod 4 + vite 8 + **TS 6.0** |
-| `stacks/ng1/stack.json` | Angular 22 + TanStack angular-query-experimental 5 + rxjs 7 + zone.js 0.15 + zod 4 + **TS 6.0** |
+| `stacks/ng1/stack-package-deps.hbs` + `-devdeps.hbs` | Angular 22 + TanStack angular-query-experimental 5 + rxjs 7 + zone.js 0.15 + zod 4 + **TS 6.0** |
 
-> `stacks/*/stack.json` is the human-readable manifest (descriptive, not consumed
+> `stacks/*/stack.json` is a two-field label (`id` + `description`, not consumed
 > at emit time); the `stack-package-deps.hbs` / `-devdeps.hbs` files are the
 > **actual emitted pins**. Every stack — v1, v3, sv1, vue1, ng1 — has both `.hbs`
-> files on disk; bump the `.hbs`, not `stack.json`. Framework-runtime deps are
+> files on disk; bump the `.hbs` (there are no version pins in `stack.json`). Framework-runtime deps are
 > stack-supplied; only library-specific deps (`@mantine/core`, `vuetify`, …) live
 > in the pack's `package-json.hbs`.
 

@@ -40,7 +40,7 @@ describe("Button disabled: + loading: named args", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Button disabled=\{busy\}>Save<\/Button>/);
+    expect(content).toMatch(/<Button disabled=\{busy\}>\{t\("[^"]*", "Save"\)\}<\/Button>/);
   });
 
   it("Button { loading: <ref> } emits the loading attr (mantine pack)", async () => {
@@ -59,7 +59,7 @@ describe("Button disabled: + loading: named args", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Button loading=\{busy\}>Save<\/Button>/);
+    expect(content).toMatch(/<Button loading=\{busy\}>\{t\("[^"]*", "Save"\)\}<\/Button>/);
   });
 
   it("disabled + loading + onClick all on one Button — wired together", async () => {
@@ -103,7 +103,7 @@ describe("Button disabled: + loading: named args", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Button>Plain<\/Button>/);
+    expect(content).toMatch(/<Button>\{t\("[^"]*", "Plain"\)\}<\/Button>/);
     expect(content).not.toMatch(/disabled=/);
     expect(content).not.toMatch(/loading=/);
     // a11y: a plain button gets no aria-label (its visible text is the name).

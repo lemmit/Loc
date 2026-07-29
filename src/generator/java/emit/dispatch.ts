@@ -66,6 +66,12 @@ export interface DispatchCtx {
    *  subscription; the ChannelConsumerService invokes these methods on
    *  delivery instead of Spring's local fan-out). */
   brokerEvents?: ReadonlySet<string>;
+  /** Durable events on a channel with NO broker (dispatch-delivery-semantics.md
+   *  standalone tier): their handlers also DROP the local `@EventListener` — a
+   *  durable event is recorded in `__loom_outbox` inside the producer's tx and
+   *  the LocalOutboxRelay invokes these methods post-commit (crash-safe,
+   *  at-least-once), never inline. */
+  localDurableEvents?: ReadonlySet<string>;
 }
 
 interface ResolvedHandler {
@@ -223,11 +229,11 @@ export function renderJavaDispatcher(
   // the channels emitter.  A broker-routed handler loses its @EventListener
   // line (design §4 — see DispatchCtx.brokerEvents).
   const handlers: { method: string; event: string }[] = [];
+  const relayDelivered = (event: string): boolean =>
+    !!dctx.brokerEvents?.has(event) || !!dctx.localDurableEvents?.has(event);
   const pushHandler = (method: string, event: string, ls: string[]): void => {
     handlers.push({ method, event });
-    methods.push(
-      ...(dctx.brokerEvents?.has(event) ? ls.filter((l) => l !== "    @EventListener") : ls),
-    );
+    methods.push(...(relayDelivered(event) ? ls.filter((l) => l !== "    @EventListener") : ls));
   };
   for (const sub of subs) {
     // Projection fold (projection.md): a pure read-model upsert, not a saga.

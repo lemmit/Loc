@@ -24,8 +24,11 @@ import { analyzeFlutterParity } from "../../../src/generator/flutter/parity.js";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // A flutter ui whose CreateForm's aggregate exercises the four form-field drop
-// sites (M-A markers) and whose page hosts a standalone `Field` (the pack's
-// no-renderer fallback, M-D).  Every one of these is a KNOWN gap pinned below.
+// sites (M-A markers).  EVERY standalone page primitive now renders (inputs,
+// FileUpload, Tabs, forms, Modal), so the only remaining parity findings are the
+// FIELD-LEVEL form-field drops inside a CreateForm — the `todo` family.  The
+// `diagnostic` (pack no-renderer) family no longer fires for any page primitive;
+// the freeze asserts that too (no diagnostic findings).  Each todo is pinned.
 const GAP_EXERCISER = `
 system Par {
   api A from D
@@ -50,8 +53,7 @@ system Par {
     api Shop: A
     page Home {
       route: "/"
-      state { s: string = "" }
-      body: Stack { Heading { "H", level: 1 }, Field("Name", bind: s) }
+      body: Stack { Heading { "H", level: 1 } }
     }
     page NewItem { route: "/new" body: Stack { Heading { "New", level: 1 }, CreateForm { of: Item } } }
   }
@@ -91,11 +93,6 @@ const KNOWN_FLUTTER_GAPS: Record<string, { reason: string; mission: "M-A" | "M-B
       "the scalar-array row editor renders text/number rows only; a repeatable enum (dropdown) row editor is unbuilt.",
     mission: "M-B",
   },
-  'flutter pack: no renderer for "primitive-field"': {
-    reason:
-      "the flutterMaterial walking-skeleton pack ships no standalone-input renderer; a bare Field/Toggle/etc. falls back to the pack no-renderer line.",
-    mission: "M-B",
-  },
 };
 
 describe("flutter parity freeze (M-E)", () => {
@@ -114,12 +111,13 @@ describe("flutter parity freeze (M-E)", () => {
     }
   });
 
-  it("both marker families are exercised (guard against a vacuous pass)", async () => {
-    // A regression that stops emitting EITHER family (the M-A form-field TODOs or
-    // the M-D pack no-renderer line) would silently shrink the finding set; assert
-    // both are present so the freeze can't pass while a whole channel goes dark.
+  it("the todo family fires, and NO pack no-renderer diagnostic does (every primitive renders)", async () => {
+    // The M-A form-field TODO family must still fire (guard against a vacuous
+    // pass).  The `diagnostic` (pack no-renderer) family must NOT — every page
+    // primitive now renders, so a resurfaced no-renderer line is a real
+    // regression (a primitive silently dropped) and fails here.
     const findings = analyzeFlutterParity(await generateSystemFiles(GAP_EXERCISER));
     expect(findings.some((f) => f.kind === "todo")).toBe(true);
-    expect(findings.some((f) => f.kind === "diagnostic")).toBe(true);
+    expect(findings.some((f) => f.kind === "diagnostic")).toBe(false);
   });
 });

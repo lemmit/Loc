@@ -446,15 +446,114 @@ function primitiveButton(c: Ctx): string {
 }
 
 // ---------------------------------------------------------------------------
-// TODO(flutter full-parity): the interactive / form family is NOT rendered in
-// the walking skeleton and is deliberately absent from both `RENDERERS` and the
-// `flutter` required-primitive set.  Full parity adds Dart renderers (or the
-// `flutterTarget` inline seams) for: Field / MultilineField / PasswordField /
-// NumberField / SelectField / Toggle (Material `TextFormField` /
-// `DropdownButtonFormField` / `Switch`), Form / MasterDetail (a `Form` +
-// two-pane layout), Modal (`showDialog`), and Tabs (`DefaultTabController` +
-// `TabBar`/`TabBarView`).
+// Controlled input primitives — each binds a page/component `state` field via
+// `bind:`.  READS `state.<bind>`; WRITES via the generated `set<Field>` method
+// (a bare call — resolved to a ConsumerWidget page-shell tear-off or a stateful
+// component's in-class method; `c.setter` is `set<Field>`, generated per state
+// field by `riverpod-emit.ts` / `component-emit.ts`).  An input with no
+// resolvable bind (`hasBind` false) renders a read-only stub (`onChanged: null`)
+// so the widget tree still compiles.  Material widget shapes mirror the
+// CI-compiled form-field emitters in `forms-emit.ts`.
+//
+// NumberField parses via the generated `set<Field>Text` setter (the pack stays
+// type-agnostic); Tabs is the one container here (DefaultTabController + TabBar +
+// TabBarView); FileUpload picks a file (file_picker), POSTs it multipart to
+// `/files`, and writes the returned `FileRef` back to state.  EVERY page
+// primitive now renders — the `FLUTTER_UNRENDERED_PRIMITIVES` gate is empty.
+// Forms (Create/Operation/Workflow/Destroy) and Modal are NOT here — they render
+// via the `flutterTarget` walker SEAMS.
 // ---------------------------------------------------------------------------
+
+/** `state.<bind>` — the reactive read of a bound state field. */
+function boundRead(c: Ctx): string {
+  return `state.${String(c.bind ?? "")}`;
+}
+
+/** A field's `InputDecoration(labelText: '…')` from the walked label. */
+function inputDecoration(c: Ctx): string {
+  return `InputDecoration(labelText: '${dartStr(String(c.labelText ?? "").trim())}')`;
+}
+
+/** `onChanged` callback — a bare setter call, or `null` (disabled) with no bind.
+ *  `valueExpr` maps the raw callback arg `v` to the setter's argument. */
+function onChangedSetter(c: Ctx, valueExpr = "v"): string {
+  return c.hasBind ? `(v) => ${String(c.setter)}(${valueExpr})` : "null";
+}
+
+function primitiveField(c: Ctx): string {
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  return `TextFormField(${arg(testidKey(c))}${init}decoration: ${inputDecoration(c)}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitiveMultilineField(c: Ctx): string {
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  return `TextFormField(${arg(testidKey(c))}${init}minLines: 3, maxLines: 5, keyboardType: TextInputType.multiline, decoration: ${inputDecoration(c)}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitivePasswordField(c: Ctx): string {
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  return `TextFormField(${arg(testidKey(c))}${init}obscureText: true, decoration: ${inputDecoration(c)}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitiveToggle(c: Ctx): string {
+  const label = dartStr(String(c.labelText ?? "").trim());
+  const value = c.hasBind ? boundRead(c) : "false";
+  return `SwitchListTile(${arg(testidKey(c))}title: const Text('${label}'), value: ${value}, onChanged: ${onChangedSetter(c)})`;
+}
+
+function primitiveSelectField(c: Ctx): string {
+  const options = String(c.optionsExpr ?? "[]");
+  const init = c.hasBind ? `initialValue: ${boundRead(c)}, ` : "";
+  const items = `(${options}).map((o) => DropdownMenuItem<String>(value: o, child: Text(o))).toList()`;
+  const onChanged = c.hasBind ? `(v) => ${String(c.setter)}(v ?? '')` : "null";
+  return `DropdownButtonFormField<String>(${arg(testidKey(c))}${init}decoration: ${inputDecoration(c)}, isExpanded: true, items: ${items}, onChanged: ${onChanged})`;
+}
+
+function primitiveNumberField(c: Ctx): string {
+  // The bound field is int/double; the generated `set<Field>Text(String)` setter
+  // (riverpod-emit / component-emit) parses per the field's Dart type, so the
+  // pack stays type-agnostic — it reads `'${state.<bind>}'` (interpolation is
+  // null-safe) and dispatches the raw text.
+  const init = c.hasBind ? `initialValue: '\${${boundRead(c)}}', ` : "";
+  const onChanged = c.hasBind ? `(v) => ${String(c.setter)}Text(v)` : "null";
+  return `TextFormField(${arg(testidKey(c))}${init}keyboardType: TextInputType.number, decoration: ${inputDecoration(c)}, onChanged: ${onChanged})`;
+}
+
+function primitiveFileUpload(c: Ctx): string {
+  const label = dartStr(String(c.labelText ?? "").trim());
+  const button = (onPressed: string) =>
+    `OutlinedButton.icon(${arg(testidKey(c))}icon: const Icon(Icons.upload_file), label: const Text('${label}'), onPressed: ${onPressed})`;
+  if (!c.hasBind) return button("null");
+  // Pick a file (with bytes — web needs `withData`), POST it as multipart to
+  // `/files`, and write the returned `FileRef` back through the setter.  The
+  // page-shell import scan keys off `FilePicker` / `apiUri(` / `FileRef.fromJson`
+  // / `jsonDecode` in this string to add file_picker / http / config / models /
+  // dart:convert.
+  const upload =
+    `() async { ` +
+    `final picked = await FilePicker.platform.pickFiles(withData: true); ` +
+    `if (picked == null || picked.files.isEmpty) return; ` +
+    `final f = picked.files.single; ` +
+    `if (f.bytes == null) return; ` +
+    `final req = http.MultipartRequest('POST', apiUri('/files'))..files.add(http.MultipartFile.fromBytes('file', f.bytes!, filename: f.name)); ` +
+    `final resp = await http.Response.fromStream(await req.send()); ` +
+    `if (resp.statusCode >= 200 && resp.statusCode < 300) { ${String(c.setter)}(FileRef.fromJson(jsonDecode(resp.body) as Map<String, dynamic>)); } ` +
+    `}`;
+  return button(upload);
+}
+
+function primitiveTabs(c: Ctx): string {
+  // `Tabs { Tab { title, … } }` → `DefaultTabController` + `TabBar` + a
+  // fixed-height `TabBarView` (a `TabBarView` needs bounded height, and pages
+  // wrap the body in a scroll view where `Expanded` has no bound).  The walked
+  // per-tab body widget arrives as `tabs[i].bodyJsx`.
+  const tabs =
+    (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[] | undefined) ?? [];
+  if (tabs.length === 0) return "const SizedBox.shrink()";
+  const bar = tabs.map((t) => `Tab(text: '${dartStr(t.label)}')`).join(", ");
+  const views = tabs.map((t) => asWidget(t.bodyJsx)).join(", ");
+  return `DefaultTabController(length: ${tabs.length}, child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[ TabBar(tabs: <Widget>[ ${bar} ]), SizedBox(height: 360, child: TabBarView(children: <Widget>[ ${views} ])) ]))`;
+}
 
 const RENDERERS: Record<string, (c: Ctx) => string> = {
   // Layout containers.
@@ -499,6 +598,18 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   // Button — a List page's row actions + a Detail page's operation triggers
   // both dispatch it.
   "primitive-button": primitiveButton,
+  // Controlled inputs — bind a page/component `state` field (read `state.<bind>`,
+  // write `set<Field>(v)`).
+  "primitive-field": primitiveField,
+  "primitive-multiline-field": primitiveMultilineField,
+  "primitive-password-field": primitivePasswordField,
+  "primitive-toggle": primitiveToggle,
+  "primitive-select-field": primitiveSelectField,
+  "primitive-number-field": primitiveNumberField,
+  // Standalone file upload — pick + multipart POST to /files, write the FileRef.
+  "primitive-file-upload": primitiveFileUpload,
+  // Container: a tab group (DefaultTabController + TabBar + TabBarView).
+  "primitive-tabs": primitiveTabs,
 };
 
 /** Build the procedural flutterMaterial pack.  Implements the `LoadedPack`

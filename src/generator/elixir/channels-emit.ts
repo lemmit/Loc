@@ -121,6 +121,207 @@ export interface ElixirConsumerRoute {
   dispatchers: string[];
 }
 
+/** The STANDALONE (no-broker) transactional-outbox tier
+ *  (dispatch-delivery-semantics.md §1-2) — the Elixir analogue of node's
+ *  `createOutboxDispatcher`/`startOutboxRelay` and the Java LoomEventOutbox +
+ *  LocalOutboxRelay.  A durable (`retention: log | work`) channel with NO
+ *  `channelSource` still gets crash-safe in-process delivery:
+ *
+ *   - `<App>.Channels.dispatch/2` (the same tee seam the emit sites already
+ *     call) routes a DURABLE event to `record_durable/2` — an Ecto insert into
+ *     `__loom_outbox` joining the caller's `Repo.transaction`, so it commits
+ *     atomically with the aggregate change — instead of fanning it out inline
+ *     (closing the crash window); ephemeral events dispatch locally as before.
+ *   - `<App>.LocalOutboxRelay` (a GenServer poll loop) drains undispatched rows,
+ *     decodes each back to its struct, parks the row id on the process
+ *     dictionary (the `last_event_id` saga marker dedups redelivery), and
+ *     broadcasts it to every hosted context Dispatcher — the subscriber handles
+ *     it, non-subscribers no-op (the Dispatcher's catch-all clause).  A
+ *     reactor's own durable emit re-enters the tee → the next drain, so
+ *     choreography rides the outbox.
+ *
+ *  Emitted only when hosted durable events ride NO broker; the broker path owns
+ *  the `channels:`-wired case (one relay drains `__loom_outbox`). */
+export function emitElixirStandaloneOutbox(
+  appName: string,
+  appModule: string,
+  /** Hosted durable event IRs + their owning-context module (for encode/decode
+   *  clauses and the `@durable` set). */
+  durable: { ev: EventIR; ctxModule: string }[],
+  /** Hosted context Dispatcher modules the relay broadcasts a decoded event to
+   *  (each no-ops on a non-matching struct). */
+  dispatchers: string[],
+): ElixirChannelFiles {
+  const files = new Map<string, string>();
+  const children: string[] = [];
+  const durableNames = [...new Set(durable.map((d) => d.ev.name))].sort();
+  const encodeClauses = durable.map(({ ev, ctxModule }) => {
+    const pairs = ev.fields.map(
+      (f) => `      ${JSON.stringify(f.name)} => ${encodeExpr(`ev.${snake(f.name)}`, f.type)}`,
+    );
+    return `  def encode_data(%${ctxModule}.Events.${upperFirst(ev.name)}{} = ev) do\n    %{\n${pairs.join(",\n")}\n    }\n  end`;
+  });
+  const decodeClauses = durable.map(({ ev, ctxModule }) => {
+    const pairs = ev.fields.map((f) => `      ${snake(f.name)}: ${decodeExpr(f.name, f.type)}`);
+    return `  def decode(${JSON.stringify(ev.name)}, data) do\n    %${ctxModule}.Events.${upperFirst(ev.name)}{\n${pairs.join(",\n")}\n    }\n  end`;
+  });
+  files.set(
+    `lib/${appName}/channels.ex`,
+    `# Auto-generated.  Standalone (no-broker) outbox tee
+# (dispatch-delivery-semantics.md §1): a durable event is recorded in
+# __loom_outbox inside the caller's Repo transaction instead of fanning out
+# inline; \`${appModule}.LocalOutboxRelay\` redelivers it post-commit.  Ephemeral
+# events dispatch to the local context dispatcher as before.
+defmodule ${appModule}.Channels do
+  @durable MapSet.new(${JSON.stringify(durableNames)})
+
+  def dispatch(ev, local_dispatcher) do
+    type = ev.__struct__ |> Module.split() |> List.last()
+
+    if MapSet.member?(@durable, type) do
+      record_durable(type, ev)
+    else
+      if local_dispatcher, do: local_dispatcher.dispatch(ev), else: :ok
+    end
+  end
+
+  defp record_durable(type, ev) do
+    %${appModule}.LoomOutbox{
+      type: type,
+      payload: encode_data(ev),
+      occurred_at: DateTime.utc_now()
+    }
+    |> ${appModule}.Repo.insert!()
+
+    :ok
+  end
+
+  @doc """
+  A drained durable outbox row is decoded and delivered to the LOCAL context
+  dispatchers here (the row id already parked on the process dictionary by the
+  relay, so a redelivery no-ops via the saga marker).  Every hosted dispatcher
+  is tried — the subscriber handles it, the rest no-op (catch-all clause).
+  """
+  def dispatch_from_relay(type, data) do
+    case decode(type, data) do
+      nil ->
+        :unrouted
+
+      ev ->
+        Enum.each([${dispatchers.join(", ")}], fn dispatcher -> dispatcher.dispatch(ev) end)
+        :ok
+    end
+  end
+
+${encodeClauses.join("\n\n")}
+
+${decodeClauses.join("\n\n")}
+
+  def decode(_type, _data), do: nil
+end
+`,
+  );
+  files.set(
+    `lib/${appName}/loom_outbox.ex`,
+    `# Auto-generated.  One owed durable event (dispatch-delivery-semantics.md):
+# written by \`${appModule}.Channels.dispatch/2\` inside the caller's Repo
+# transaction, drained by \`${appModule}.LocalOutboxRelay\`.  Maps the shared
+# __loom_outbox table the module migrations own.
+defmodule ${appModule}.LoomOutbox do
+  use Ecto.Schema
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  schema "__loom_outbox" do
+    field :occurred_at, :utc_datetime_usec
+    field :type, :string
+    field :payload, :map
+    field :dispatched_at, :utc_datetime_usec
+    field :attempts, :integer, default: 0
+  end
+end
+`,
+  );
+  const deadLetteredLog = renderPhoenixLogCall("eventDeadLettered", [
+    { name: "type", valueExpr: "row.type" },
+    { name: "attempts", valueExpr: "attempts" },
+    { name: "error", valueExpr: "inspect(error)" },
+  ]);
+  files.set(
+    `lib/${appName}/local_outbox_relay.ex`,
+    `# Auto-generated.  Standalone transactional-outbox relay
+# (dispatch-delivery-semantics.md §2): drains undispatched __loom_outbox rows in
+# occurred_at order and delivers them to the LOCAL context dispatchers
+# at-least-once.  The row id rides the process dictionary so a saga handler's
+# last_event_id marker no-ops on a redelivery.  Rows that exhaust the attempt
+# budget stay in the table and log event_dead_lettered once.
+defmodule ${appModule}.LocalOutboxRelay do
+  use GenServer
+  import Ecto.Query
+  require Logger
+
+  @interval_ms 500
+  @max_attempts 5
+  @batch 50
+
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+
+  @impl true
+  def init(:ok) do
+    Process.send_after(self(), :drain, @interval_ms)
+    {:ok, %{}}
+  end
+
+  @impl true
+  def handle_info(:drain, state) do
+    drain()
+    Process.send_after(self(), :drain, @interval_ms)
+    {:noreply, state}
+  end
+
+  defp drain do
+    ${appModule}.Repo.all(
+      from(o in ${appModule}.LoomOutbox,
+        where: is_nil(o.dispatched_at) and o.attempts < @max_attempts,
+        order_by: [asc: o.occurred_at],
+        limit: @batch
+      )
+    )
+    |> Enum.each(&deliver/1)
+  end
+
+  defp deliver(row) do
+    Process.put(:loom_event_id, row.id)
+
+    try do
+      ${appModule}.Channels.dispatch_from_relay(row.type, row.payload)
+    after
+      Process.delete(:loom_event_id)
+    end
+
+    ${appModule}.Repo.update_all(
+      from(o in ${appModule}.LoomOutbox, where: o.id == ^row.id),
+      set: [dispatched_at: DateTime.utc_now()]
+    )
+  rescue
+    error ->
+      attempts = row.attempts + 1
+
+      ${appModule}.Repo.update_all(
+        from(o in ${appModule}.LoomOutbox, where: o.id == ^row.id),
+        set: [attempts: attempts]
+      )
+
+      if attempts >= @max_attempts do
+        ${deadLetteredLog}
+      end
+  end
+end
+`,
+  );
+  children.push(`      ${appModule}.LocalOutboxRelay`);
+  return { files, children };
+}
+
 export function emitElixirChannelFiles(
   appName: string,
   appModule: string,

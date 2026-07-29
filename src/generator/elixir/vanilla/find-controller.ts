@@ -202,6 +202,23 @@ ${absentArm}
     }
 
     if (isSingleReturn(f.returnType)) {
+      // An OPTIONAL find (`: X?` / `: X option`) whose row is absent returns
+      // 404 — its declared OpenAPI status (`findOptional → [404]`) and every
+      // other backend (node throws → 404, .NET `NotFound()`, python/java
+      // 404-at-route).  The previous `json(conn, nil)` emitted an HTTP 200 with
+      // a `null` body that isn't even a valid `<Agg>Response` (the 200 schema),
+      // the lone cross-backend divergence for optional-find absence.  A bare
+      // `: X` single find (findOptional == false) keeps its shape — `findSingle`
+      // declares no error status, and its default is the (softened) A4 question.
+      if (f.returnType.kind === "optional") {
+        return wrap(`    case ${call} do
+      {:ok, nil} ->
+        ProblemDetails.problem_response(conn, 404, "Not Found", "${aggPascal} not found")
+
+      {:ok, record} ->
+        json(conn, serialize(record))
+    end`);
+      }
       return wrap(`    case ${call} do
       {:ok, nil} -> json(conn, nil)
       {:ok, record} -> json(conn, serialize(record))

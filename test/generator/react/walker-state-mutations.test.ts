@@ -57,7 +57,7 @@ describe("state + onClick mutations in walker pages", () => {
     // setCount(count + 1).  v0 drops the lambda's source param
     // name; output is `() => { ... }`.
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ setCount\(\(count \+ 1\)\); \}\}>Increment<\/Button>/,
+      /<Button onClick=\{\(\) => \{ setCount\(\(count \+ 1\)\); \}\}>\{t\("[^"]*", "Increment"\)\}<\/Button>/,
     );
   });
 
@@ -176,7 +176,7 @@ describe("state + onClick mutations in walker pages", () => {
     expect(content).toMatch(/const \[b, setB\] = useState<number>\(0\);/);
     // Both emitted in onClick body.
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ setA\(\(a \+ 1\)\); setB\(\(b \+ 2\)\); \}\}>Bump<\/Button>/,
+      /<Button onClick=\{\(\) => \{ setA\(\(a \+ 1\)\); setB\(\(b \+ 2\)\); \}\}>\{t\("[^"]*", "Bump"\)\}<\/Button>/,
     );
   });
 

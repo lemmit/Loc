@@ -112,8 +112,8 @@ describe("match expression in body position", () => {
     const home = files.get("web/src/pages/home.tsx")!;
     expect(home).toContain('((tab === "a")) ? (');
     expect(home).toContain('((tab === "b")) ? (');
-    expect(home).toContain(">Alpha</");
-    expect(home).toContain(">Beta</");
-    expect(home).toContain(">neither</");
+    expect(home).toContain(', "Alpha")}</');
+    expect(home).toContain(', "Beta")}</');
+    expect(home).toContain(', "neither")}</');
   });
 });

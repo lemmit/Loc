@@ -4,6 +4,7 @@
 // value child via the shared `walk`.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   boolNamed,
@@ -95,10 +96,9 @@ export function emitEmpty(
   // dedicated component on either pack; both compose a centred
   // dimmed text block.  The first positional is the message;
   // refs / ops welcome (routes through renderTextContent).
-  const msg = firstPositionalContent(call, ctx) ?? '"No results."';
   void depth;
   return renderPrimitive(ctx, "primitive-empty", {
-    text: unwrapTextLiteral(msg, ctx.target.escapeText),
+    text: localizedText(call, ctx, "empty", '"No results."'),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
@@ -129,11 +129,10 @@ export function emitAnchor(
   // routes via React Router's Link; without, falls through to a
   // bare anchor (no href — visible no-op).
   void depth;
-  const label = firstPositionalContent(call, ctx) ?? '"link"';
   const to = stringOrRefArgValue(call, "to", ctx);
   if (to) ctx.usesRouterLink = true;
   return renderPrimitive(ctx, "primitive-anchor", {
-    label: unwrapTextLiteral(label, ctx.target.escapeText),
+    label: localizedText(call, ctx, "anchor", '"link"'),
     to,
     hasTo: to !== undefined,
     testidAttr: testidAttr(call, ctx),
@@ -207,7 +206,7 @@ export function emitHeading(
   // Phase 2 — `min(6, 2 + headingDepth)`, so levels never skip) rather
   // than a flat default.  At page top (depth 0) this is `<h2>`; the page
   // chrome owns the single `<h1>`.
-  const text = firstPositionalContent(call, ctx) ?? '"Heading"';
+  const text = localizedText(call, ctx, "heading", '"Heading"');
   const level = numericNamed(call, "level") ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
   void depth;
   // Phase 5 — explicit typography control decoupled from semantic level.
@@ -219,7 +218,7 @@ export function emitHeading(
   const weight = numericNamed(call, "weight");
   const gradient = stringNamed(call, "gradient");
   return renderPrimitive(ctx, "primitive-heading", {
-    text: unwrapTextLiteral(text, ctx.target.escapeText),
+    text,
     level,
     size,
     hasSize: size !== undefined,
@@ -233,10 +232,9 @@ export function emitHeading(
 }
 
 export function emitText(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-text", {
-    text: unwrapTextLiteral(text, ctx.target.escapeText),
+    text: localizedText(call, ctx, "text", '""'),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
@@ -245,10 +243,9 @@ export function emitText(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
 /** `Bold { "..." }` — inline strong-emphasis span.  Same shape as
  *  `emitText`; lowers to the pack-specific `<strong>` equivalent. */
 export function emitBold(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-bold", {
-    text: unwrapTextLiteral(text, ctx.target.escapeText),
+    text: localizedText(call, ctx, "bold", '""'),
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -260,10 +257,9 @@ export function emitItalic(
   ctx: WalkContext,
   depth: number,
 ): string {
-  const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-italic", {
-    text: unwrapTextLiteral(text, ctx.target.escapeText),
+    text: localizedText(call, ctx, "italic", '""'),
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -275,10 +271,9 @@ export function emitInlineCode(
   ctx: WalkContext,
   depth: number,
 ): string {
-  const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-inline-code", {
-    text: unwrapTextLiteral(text, ctx.target.escapeText),
+    text: localizedText(call, ctx, "code", '""'),
     testidAttr: testidAttr(call, ctx),
   });
 }

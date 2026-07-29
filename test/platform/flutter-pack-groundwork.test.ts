@@ -4,6 +4,7 @@ import {
   REQUIRED_PRIMITIVES,
 } from "../../src/generator/_packs/required-primitives.js";
 import { flutterPack } from "../../src/generator/flutter/pack.js";
+import { FLUTTER_INLINE_OR_DEFERRED } from "../../src/util/flutter-deferred-primitives.js";
 
 // ---------------------------------------------------------------------------
 // Flutter pack-format groundwork (flutter-mobile-implementation.md Track C —
@@ -13,25 +14,16 @@ import { flutterPack } from "../../src/generator/flutter/pack.js";
 // Pure TS — no Flutter/Dart SDK.
 // ---------------------------------------------------------------------------
 
-// The interactive / form family the walking skeleton renders inline or defers —
-// mirrors `FLUTTER_INLINE_OR_DEFERRED` in required-primitives.ts.
-const INLINE_OR_DEFERRED = new Set([
-  "primitive-form-of",
-  "primitive-modal",
-  "primitive-file-upload",
-  "primitive-field",
-  "primitive-multiline-field",
-  "primitive-number-field",
-  "primitive-password-field",
-  "primitive-select-field",
-  "primitive-toggle",
-  "primitive-tabs",
-]);
+// Primitives the flutter pack does NOT ship as a template — the seam-rendered
+// form family + Modal, plus the still-deferred FileUpload / NumberField / Tabs.
+// Imported (not hand-copied) so this test can't drift from the real set as
+// primitives gain renderers (Field/Toggle/… left it once the pack rendered them).
+const INLINE_OR_DEFERRED = FLUTTER_INLINE_OR_DEFERRED;
 
 const MISSING = /^\/\/ flutter pack: no renderer/;
 
 describe("flutter pack format groundwork", () => {
-  it("flutter required set is the display surface only — forms/inputs/modal render inline or are deferred", () => {
+  it("flutter required set is the display + controlled-input surface — forms/modal render inline, FileUpload/NumberField/Tabs deferred", () => {
     const flutter = new Set(flattenRequired(REQUIRED_PRIMITIVES.flutter));
     const tsx = new Set(flattenRequired(REQUIRED_PRIMITIVES.tsx));
 

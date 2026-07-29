@@ -41,7 +41,7 @@ describe("user-defined components", () => {
     // Body walked: Card with binary-op title + Stack child.
     expect(content).toMatch(/<Card withBorder padding="md">/);
     expect(content).toMatch(/<Title order=\{3\}>\{\("Hello, " \+ name\)\}<\/Title>/);
-    expect(content).toMatch(/<Text>Welcome!<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "Welcome!"\)\}<\/Text>/);
   });
 
   it("walker page can invoke a user component with positional args", async () => {
@@ -347,7 +347,9 @@ describe("user-defined components", () => {
     );
     // Caller can omit the optional slot.
     const home = files.get("web/src/pages/home.tsx")!;
-    expect(home).toMatch(/<Panel body=\{[\s\S]*?<Text>no heading provided<\/Text>[\s\S]*?\} \/>/);
+    expect(home).toMatch(
+      /<Panel body=\{[\s\S]*?<Text>\{t\("[^"]*", "no heading provided"\)\}<\/Text>[\s\S]*?\} \/>/,
+    );
     // The optional slot was NOT passed — should not appear as a prop attr.
     expect(home).not.toMatch(/<Panel[^>]*heading=/);
   });

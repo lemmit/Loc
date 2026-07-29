@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useNavigate, Link as RouterLink } from "react-router";
 import { CreateCustomerRequest, useCreateCustomer } from "../../api/customer";
+import { t } from "../../i18n";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Anchor, Breadcrumbs, Button, Card, Group, NumberInput, Stack, Text, TextInput, Title } from "@mantine/core";
@@ -17,11 +18,11 @@ export default function CustomerNew() {
   return (
     <Stack data-testid="customers-new-page">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Anchor component={RouterLink} to="/customers">Customers</Anchor>
-        <Text>New</Text>
+        <Anchor component={RouterLink} to="/">{t("page.New.anchor.n0mxf2", "Home")}</Anchor>
+        <Anchor component={RouterLink} to="/customers">{t("page.New.anchor.vweyym", "Customers")}</Anchor>
+        <Text>{t("page.New.text.2ludo1", "New")}</Text>
       </Breadcrumbs>
-      <Title order={2}>Create customer</Title>
+      <Title order={2}>{t("page.New.heading.m0eqrn", "Create customer")}</Title>
       <Card withBorder padding="md">
         <form onSubmit={handleSubmit(async (vals) => {
                   try {

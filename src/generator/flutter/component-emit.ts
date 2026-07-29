@@ -39,6 +39,7 @@ import {
   renderNotifierStmt,
   renderStateDataClass,
   stateCtx,
+  stateSetterMethods,
 } from "./riverpod-emit.js";
 
 /** Context the component walk needs — the same lookups the page walk threads. */
@@ -217,6 +218,16 @@ function renderStatefulComponent(
     return lines(`  ${sig} {`, "    setState(() {", ...body, "    });", "  }");
   });
 
+  // Per-state-field setters — the in-class write side of a controlled input's
+  // `bind:` (`set<Field>` / `set<Field>Text`; the pack emits a bare call that
+  // resolves here in a component, or to a page-shell tear-off on a page).  Dart
+  // flags unused LOCALS, not unused methods, so emitting one per cell is safe.
+  const setterLines = stateSetterMethods(stateFields, (assign) => [
+    "    setState(() {",
+    `      ${assign}`,
+    "    });",
+  ]);
+
   const stateClassName = `_${c.name}State`;
   const stateClassLines = lines(
     `class ${stateClassName} extends State<${c.name}> {`,
@@ -229,6 +240,7 @@ function renderStatefulComponent(
     `    state = ${modelCtor};`,
     "  }",
     ...actionMethods.flatMap((m) => ["", m]),
+    ...setterLines,
     "",
     "  @override",
     "  Widget build(BuildContext context) {",

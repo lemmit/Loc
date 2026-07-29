@@ -128,7 +128,7 @@ describe("expressions in text positions", () => {
     // Card title slot picks up the binary op (not the inner Text).
     expect(content).toMatch(/<Title order=\{3\}>\{\("Profile: " \+ name\)\}<\/Title>/);
     // Inner Text is the content child.
-    expect(content).toMatch(/<Text>hello<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "hello"\)\}<\/Text>/);
   });
 
   it("Card with state-ref title (no longer needs param-only fallback)", async () => {
@@ -153,7 +153,7 @@ describe("expressions in text positions", () => {
     `);
     const content = files.get("web/src/pages/s.tsx")!;
     expect(content).toMatch(/<Title order=\{3\}>\{label\}<\/Title>/);
-    expect(content).toMatch(/<Text>body<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "body"\)\}<\/Text>/);
     // State ref consumed → useState declaration emitted.
     expect(content).toMatch(/const \[label, setLabel\]/);
   });
@@ -180,7 +180,7 @@ describe("expressions in text positions", () => {
     const content = files.get("web/src/pages/plain.tsx")!;
     // No Title heading because the only positional was a call.
     expect(content).not.toMatch(/<Title/);
-    expect(content).toMatch(/<Text>just content<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "just content"\)\}<\/Text>/);
   });
 
   it("Text { 42 } emits the int literal as a JSX expr", async () => {

@@ -9,6 +9,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { ariaLabelAttr } from "../a11y-emit.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
+import { localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -77,7 +78,6 @@ export function emitButton(
   ctx: WalkContext,
   depth: number,
 ): string {
-  const label = firstPositionalContent(call, ctx) ?? '"Button"';
   void depth;
   // `onClick:` lambda named arg wires the button to
   // a multi-statement event handler.  Takes priority over `to:` if
@@ -153,7 +153,7 @@ export function emitButton(
     resolvedIconSvg = lookupBuiltinIcon(icon);
   }
   return renderPrimitive(ctx, "primitive-button", {
-    label: unwrapTextLiteral(label, ctx.target.escapeText),
+    label: localizedText(call, ctx, "button", '"Button"'),
     onClick: onClickHandler,
     hasOnClick: onClickHandler !== undefined,
     disabled,

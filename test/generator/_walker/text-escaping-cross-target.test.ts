@@ -268,12 +268,25 @@ const phoenixSystem = (): string => `
  *  `messages.en.json`, the i18n catalog — deliberately stores the raw
  *  source-language string a translator edits.  HTML-escaping is the frontend's
  *  job at render time, not the catalog's, so a raw `<` there is correct and
- *  must not count as a rendered-output leak. */
+ *  must not count as a rendered-output leak.
+ *
+ *  Also strips i18n `{t("<key>", "<default>")}` calls (M-T1.11 React runtime):
+ *  the default there is a JS STRING LITERAL passed to `t()` and rendered as a
+ *  JSX text node, which React entity-escapes at RUNTIME — so a raw `<` inside
+ *  that string is safe exactly like a `.loom/` catalog value, not a raw markup
+ *  leak. (A genuine leak would be raw payload in MARKUP position, which strips
+ *  nothing and still trips the assertions.) The default's `"` are JSON-escaped,
+ *  so the string body never contains a bare `"`. */
+const I18N_CALL = /\{t\("[^"]*", "(?:[^"\\]|\\.)*"\)\}/g;
+
 function renderedText(files: Map<string, string>): string {
   let all = "";
   for (const [path, content] of files) {
-    if (path.startsWith(".loom/")) continue;
-    all += `\n${content}`;
+    // `.loom/` review artifacts and the app's `src/locales/*.json` i18n
+    // catalogs are DATA (raw source-language strings a translator edits,
+    // escaped by the frontend at render time), never a raw markup position.
+    if (path.startsWith(".loom/") || path.includes("/locales/")) continue;
+    all += `\n${content.replace(I18N_CALL, "")}`;
   }
   return all;
 }

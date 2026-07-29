@@ -47,7 +47,7 @@ describe("shell primitives", () => {
     expect(tsx).toMatch(/<Breadcrumbs>/);
     expect(tsx).toMatch(/<Anchor[^>]*to="\/"/);
     expect(tsx).toMatch(/<Anchor[^>]*to="\/orders"/);
-    expect(tsx).toMatch(/<Text>Detail<\/Text>/);
+    expect(tsx).toMatch(/<Text>\{t\("[^"]*", "Detail"\)\}<\/Text>/);
     expect(tsx).toMatch(/<\/Breadcrumbs>/);
   });
 
@@ -60,7 +60,7 @@ describe("shell primitives", () => {
     const tsx = await emit(`Paper { Text { "body" } }`);
     expect(tsx).toMatch(/import \{[^}]*\bPaper\b/);
     expect(tsx).toMatch(/<Paper p="md">/);
-    expect(tsx).toMatch(/<Text>body<\/Text>/);
+    expect(tsx).toMatch(/<Text>\{t\("[^"]*", "body"\)\}<\/Text>/);
   });
 
   it("Paper padding: overrides the default", async () => {

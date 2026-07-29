@@ -88,6 +88,12 @@ export interface PageEmitContext {
    *  `PlatformSurface.emitProject`'s doc comment.  Absent means "record
    *  nothing" (the default, flag-off shape). */
   sourcemap?: SourceMapRecorder;
+  /** True when this UI has extractable user-visible strings and should emit
+   *  translation calls (M-T1.11 React runtime).  When set, each page/component
+   *  body walks with an `i18nPrefix` (`page.<Name>` / `component.<Name>`) so a
+   *  literal text slot emits `{t("<key>", "<default>")}` against the generated
+   *  `src/i18n.ts` shim; absent → raw text (byte-identical to pre-i18n). */
+  i18nEnabled?: boolean;
 }
 
 /** Compute the relative-path prefix from a page's emit
@@ -282,6 +288,8 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       ctx.authUi,
       // Named, typed component event handlers (Proposal A Stage 1).
       c.actions,
+      // i18n key prefix — `component.<Name>` matches the catalog.
+      ctx.i18nEnabled ? `component.${c.name}` : undefined,
     );
     out.set(componentPath, componentContent);
     ctx.sourcemap?.file(componentPath, componentContent, c.origin, componentConstruct);
@@ -338,6 +346,9 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
         // Named, typed page event handlers — hoisted as `const <name> = …`
         // and bound by bare `onSubmit: <name>` references.
         page.actions,
+        // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
+        // role-scoped `page.name`, e.g. `List`, not the emit name `OrderList`).
+        ctx.i18nEnabled ? `page.${page.name}` : undefined,
       );
       out.set(emitPath, pageContent);
       ctx.sourcemap?.file(emitPath, pageContent, page.origin, pageConstructId(ui.name, page));

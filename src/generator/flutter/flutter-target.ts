@@ -8,10 +8,12 @@
 // WALKING-SKELETON SCOPE (this file): the read/display path — List / Detail
 // pages.  Every REQUIRED seam emits real Dart; the expression leaves forward to
 // `DART_LEAVES` (`./dart-expr.ts`).  State follows the Riverpod convention: reads
-// dereference the projected state record (`state.<field>`), writes call a
-// Notifier method (`notifier.set<Field>(…)`) — the Riverpod projector (Track D)
-// binds the actual notifier, so the intent is emitted consistently with a
-// `TODO(flutter): notifier` marker where the binding lands.
+// dereference the projected state record (`state.<field>`), writes call the
+// Notifier's generated `set<Field>` method (`notifier.set<Field>(…)`) — emitted
+// per state cell by `riverpod-emit.ts`, so the top-level write resolves (a nested
+// `a.b.c := v` write still carries a TODO in `renderNestedStateWrite`).  The
+// standalone controlled inputs (Field / MultilineField / PasswordField / Toggle /
+// SelectField) write through the same setters, bound as a page-shell tear-off.
 //
 // FORMS (Track B): the three whole-primitive form overrides ship —
 // `renderCreateForm` / `renderOperationForm` / `renderDestroyForm` each emit a
@@ -130,10 +132,9 @@ export const flutterTarget: WalkerTarget = {
   // (`state.<field>`); the field keeps its source (camelCase) name.
   renderStateRead: (ref: StateRef, _pos: RenderPosition) => `state.${ref.name}`,
   // A `state.<field> := <value>` write inside an event handler calls the
-  // Notifier's generated setter.  The projector (Track D) binds `notifier`; the
-  // TODO marks where that binding lands.
-  renderStateWrite: (ref: StateRef, value: string) =>
-    `notifier.${setterName(ref.name)}(${value}) /* TODO(flutter): notifier */`,
+  // Notifier's generated `set<Field>` setter (emitted per state cell by
+  // `riverpod-emit.ts`; the page shell binds `notifier`).
+  renderStateWrite: (ref: StateRef, value: string) => `notifier.${setterName(ref.name)}(${value})`,
   // A multi-segment write (`order.shipping.zip := v`) → a Notifier update on the
   // root field; the projector fills the immutable rebuild.
   renderNestedStateWrite: (segments: readonly string[], valueJs: string) => {

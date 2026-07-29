@@ -58,9 +58,9 @@ describe("Tabs in walker stdlib", () => {
     expect(content).toMatch(/<Tabs\.Tab value="overview">Overview<\/Tabs\.Tab>/);
     expect(content).toMatch(/<Tabs\.Tab value="profile">Profile<\/Tabs\.Tab>/);
     expect(content).toMatch(/<Tabs\.Panel value="overview">/);
-    expect(content).toMatch(/<Title order=\{2\}>Stats<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Stats"\)\}<\/Title>/);
     expect(content).toMatch(/<Tabs\.Panel value="profile">/);
-    expect(content).toMatch(/<Text>user info<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "user info"\)\}<\/Text>/);
   });
 
   it("multi-word labels slugify to kebab-case", async () => {
@@ -121,9 +121,9 @@ describe("Tabs in walker stdlib", () => {
     expect(content).toMatch(/<Tabs defaultValue="a">/);
     // Each panel contains its own Stack subtree.
     expect(content).toMatch(/<Tabs\.Panel value="a">/);
-    expect(content).toMatch(/<Title order=\{2\}>Inner A<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Inner A"\)\}<\/Title>/);
     expect(content).toMatch(/<Tabs\.Panel value="b">/);
-    expect(content).toMatch(/<Title order=\{2\}>Inner B<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Inner B"\)\}<\/Title>/);
   });
 
   it("non-Tab child in Tabs { ... } renders directly as the panel body with an auto label", async () => {

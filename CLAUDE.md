@@ -327,10 +327,10 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - **Generated-backend build gates (per-PR):** `hono-build.yml` (`tsc --noEmit` + `tsup`), `dotnet-build.yml` (`dotnet build /warnaserror`), `java-build.yml` (`gradle testClasses bootJar`, main + emitted JUnit sources), `python-build.yml` (`uv sync` + `ruff` + `mypy --strict` + `pytest`), `elixir-vanilla-build.yml` (`mix compile --warnings-as-errors` in an Elixir docker image).
 - `corpus-build.yml` — compiles EVERY corpus feature fixture (`test/fixtures/corpus/*.ddd`, list from `manifest.ts` minus per-backend `COMPILE_SKIP`) on tsc/dotnet/java/python as matrix jobs. Per-PR — the cross-feature compile-regression net. `corpus-elixir-build.yml` is the fifth leg (`mix compile` per feature in the `hexpm/elixir` image + `LOOM_HEX_MIRROR`, sharded via `LOOM_CORPUS_ELIXIR_CASE`), split out because it needs the Elixir docker image + hex egress.
 - **Behavioral gates (per-PR):** `behavioral-e2e.yml` (Hono on PGlite, headless — api + unit tiers), `behavioral-e2e-{dotnet,elixir,java,python}.yml` (same emitted api suite against the real booted backend + postgres sidecar), `behavioral-e2e-mikroorm.yml` (the node/Hono backend on the MikroORM persistence adapter — booted against a real postgres sidecar since `@mikro-orm/postgresql` can't use PGlite; api tier), `behavioral-ui-e2e.yml` (React/Mantine `*.ui.spec.ts` Playwright round-trips against Hono-on-PGlite). `frontend-fullstack-e2e.yml` drives the NON-React frontends (vue/svelte/angular/feliz) through the same full round-trip — nightly / `frontend-fullstack` label.
-- **OIDC auth gates (main-push + dispatch + `run-e2e` PR label):** `{hono,dotnet,java,python}-oidc-e2e.yml` — native backend OIDC runtime e2e against dockerized Keycloak; `auth-oidc-compose-e2e.yml` + `elixir-oidc-e2e.yml` — the full generated compose stacks + bundled dev Keycloak, real token → User mapping. Each also asserts the **negative-authz** half (M-T3.13): a `requires`-gated find `403`s the authenticated-but-unauthorized caller and `401`s the unauthenticated one, so the emitted authz filter is proven to *enforce*, not just compile. Apply the `run-e2e` label to force all six legs on a PR before merge (they're otherwise main-push-only).
-- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-vanilla-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). Main-push + dispatch/label.
+- **OIDC auth gates (main-push + dispatch + `run-oidc` label):** `{hono,dotnet,java,python,elixir}-oidc-e2e.yml` — native backend OIDC runtime e2e against dockerized Keycloak; `auth-oidc-compose-e2e.yml` — the full generated compose stack + bundled dev Keycloak, real token → User mapping. Each also asserts the **negative-authz** half (M-T3.13): a `requires`-gated find `403`s the authenticated-but-unauthorized caller and `401`s the unauthenticated one, so the emitted authz filter is proven to *enforce*, not just compile. All six answer to the one `run-oidc` label (see "Forcing a post-merge gate before merge" below).
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-vanilla-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). Main-push + dispatch + `run-obs` label (one label fires all five).
 - `elixir-vanilla-vo-e2e.yml` — vanilla-Phoenix value-object wire round-trip against postgres (main-push + `run-e2e` label).
-- `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch.
+- `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch + `run-tenancy` label.
 - `migration-evolution-e2e.yml` — the runtime companion to the rename/baseline/data-migration language work (M-T2.13). Per SQL backend (5-cell matrix), against a postgres service: (1) migrate-chain schema ≡ fresh-create schema (order-independent fingerprint), and (2) seed v1 → regenerate `.ddd` to v2 → forward-migrate → the seeded row survives with correct values. Proves migrations **evolve** on data, not just emit/first-boot (the silent-data-loss class). Main-push + dispatch + the per-PR `run-migration-e2e` label.
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
 - `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
@@ -340,6 +340,24 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
 
 **Which gate catches what — and why `main` still goes red.** Branch protection requires only `tests-passed` (the fast vitest rollup); every heavy runtime/boot gate (`tenancy-e2e`, the `*-obs-e2e`, the `*-oidc-e2e`, `auth-oidc-compose-e2e`, `pages`, the deploy builds) is *non-required* and many don't run on a PR at all — so a change can be green on its PR and break `main` one merge later. [`docs/ci-gating.md`](docs/ci-gating.md) documents the tiers and the merge-queue path that fixes it; consult it before assuming a green PR means a green `main`.
+
+**Forcing a post-merge gate before merge (labels).** Because those heavy gates trigger on `push: [main]` only, an agent can't otherwise see them until after landing. The escape hatch: each carries a `pull_request: types: [labeled]` trigger gated (job-level `if`) on **one feature label** — add the label to your PR and that gate runs against your branch *before* merge. Labels name a **feature/blast-radius**, reused across every backend of that feature (not one label per workflow):
+
+| Label | Fires |
+|---|---|
+| `run-obs` | all five `*-obs-e2e` |
+| `run-oidc` | all five `*-oidc-e2e` + `auth-oidc-compose-e2e` |
+| `run-tenancy` | `tenancy-e2e` (10-leg matrix) |
+| `run-migration-e2e` | `migration-evolution-e2e` (5 SQL backends) |
+| `run-conformance` | `conformance-full` |
+| `run-channels` | `channels-e2e` |
+| `run-differential` | `differential-report` |
+| `run-e2e` | `phoenix-ui-e2e`, `playground-e2e`, `elixir-vanilla-vo-e2e` |
+| `frontend-fullstack` | `frontend-fullstack-e2e` |
+| `a11y` | `generated-a11y` |
+| `e2e-k8s` | `k8s-e2e` |
+
+This is a **manual pre-merge check**, not a replacement for the structural fix — `docs/ci-gating.md` positions the merge queue (triggers already present, switched off in branch protection) as the real answer; labels are the interim "80/20." When you add a new post-merge gate, wire it to the matching feature label (or mint a new `run-<feature>` one) and add a row here.
 
 ### Local enforcement (checked-in Claude Code hooks)
 

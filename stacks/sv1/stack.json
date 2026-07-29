@@ -1,18 +1,4 @@
 {
   "id": "sv1",
-  "description": "Svelte stack — Svelte 5 (runes) + SvelteKit 2 static SPA + Zod 4 family.",
-  "deps": {
-    "svelte": "5 (runes; ^5.0.0)",
-    "@sveltejs/kit": "2 (adapter-static SPA mode — ssr off, fallback index.html)",
-    "@sveltejs/adapter-static": "3",
-    "@sveltejs/vite-plugin-svelte": "7 (the Vite-8 + Svelte-5 line)",
-    "@tanstack/svelte-query": "6 (runes-native: createQuery(() => opts) returns a reactive object — same .data/.isPending/.mutate surface as the react packs' hooks)",
-    "zod": "4 (^4.0.0 — same family as stack v3 so wire schemas match the react packs)",
-    "typescript": "5.7 (svelte-check carries the .svelte type surface)",
-    "vite": "8 (matches the TSX stacks; SvelteKit 2 supports ^8)"
-  },
-  "bundler": {
-    "rdcShim": false,
-    "comment": "No in-browser playground bundling for svelte packs yet (svelte-frontend-plan.md defers playground preview), so no bundler policy beyond the defaults."
-  }
+  "description": "Svelte stack — Svelte 5 (runes) + SvelteKit 2 static SPA + Zod 4 family."
 }

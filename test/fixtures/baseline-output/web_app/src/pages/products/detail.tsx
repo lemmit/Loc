@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
 import { UpdateProductRequest, useUpdateProduct } from "../../api/product";
+import { t } from "../../i18n";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -73,11 +74,11 @@ export default function ProductDetail() {
   return (
     <Stack data-testid="products-detail">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Anchor component={RouterLink} to="/products">Products</Anchor>
-        <Text>Detail</Text>
+        <Anchor component={RouterLink} to="/">{t("page.Detail.anchor.n0mxf2", "Home")}</Anchor>
+        <Anchor component={RouterLink} to="/products">{t("page.Detail.anchor.kdfstp", "Products")}</Anchor>
+        <Text>{t("page.Detail.text.ei31dg", "Detail")}</Text>
       </Breadcrumbs>
-      <Title order={2}>Product detail</Title>
+      <Title order={2}>{t("page.Detail.heading.8ba34l", "Product detail")}</Title>
       <>
         { productById.isLoading && (
           <Stack gap="xs" aria-hidden="true">

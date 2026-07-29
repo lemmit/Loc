@@ -28,7 +28,9 @@ describe("KeyValueRow primitive", () => {
   it('emits <KeyValueRow label="…">child</KeyValueRow> with the runtime helper imported', async () => {
     const tsx = await emit(`KeyValueRow { "Status", Text { "active" } }`);
     expect(tsx).toMatch(/import \{[^}]*\bKeyValueRow\b[^}]*\} from "\.\.\/lib\/format"/);
-    expect(tsx).toMatch(/<KeyValueRow label="Status"><Text>active<\/Text><\/KeyValueRow>/);
+    expect(tsx).toMatch(
+      /<KeyValueRow label="Status"><Text>\{t\("[^"]*", "active"\)\}<\/Text><\/KeyValueRow>/,
+    );
   });
 
   it("testid: lands on the root <KeyValueRow>", async () => {

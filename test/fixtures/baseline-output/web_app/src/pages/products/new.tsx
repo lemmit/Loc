@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useNavigate, Link as RouterLink } from "react-router";
 import { CreateProductRequest, useCreateProduct } from "../../api/product";
+import { t } from "../../i18n";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Stack, Text, TextInput, Title } from "@mantine/core";
@@ -17,11 +18,11 @@ export default function ProductNew() {
   return (
     <Stack data-testid="products-new-page">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Anchor component={RouterLink} to="/products">Products</Anchor>
-        <Text>New</Text>
+        <Anchor component={RouterLink} to="/">{t("page.New.anchor.n0mxf2", "Home")}</Anchor>
+        <Anchor component={RouterLink} to="/products">{t("page.New.anchor.kdfstp", "Products")}</Anchor>
+        <Text>{t("page.New.text.2ludo1", "New")}</Text>
       </Breadcrumbs>
-      <Title order={2}>Create product</Title>
+      <Title order={2}>{t("page.New.heading.lcl3va", "Create product")}</Title>
       <Card withBorder padding="md">
         <form onSubmit={handleSubmit(async (vals) => {
                   try {

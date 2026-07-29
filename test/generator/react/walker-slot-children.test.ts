@@ -70,8 +70,8 @@ describe("Slot + children prop", () => {
     const content = files.get("web/src/pages/home.tsx")!;
     // PageBox emits as a wrapping element with title attr + nested children.
     expect(content).toMatch(/<PageBox title="Welcome">/);
-    expect(content).toMatch(/<Text>hi<\/Text>/);
-    expect(content).toMatch(/<Text>world<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "hi"\)\}<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "world"\)\}<\/Text>/);
     expect(content).toMatch(/<\/PageBox>/);
   });
 
@@ -127,7 +127,7 @@ describe("Slot + children prop", () => {
     const content = files.get("web/src/pages/x.tsx")!;
     // title from positional, color from named arg.
     expect(content).toMatch(/<Box title="Title" color="red">/);
-    expect(content).toMatch(/<Text>body<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "body"\)\}<\/Text>/);
   });
 
   it("zero-arg invocation of a Slot-using component emits a self-closing tag", async () => {

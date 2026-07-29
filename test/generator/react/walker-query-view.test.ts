@@ -123,7 +123,7 @@ describe("QueryView macro", () => {
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // Fragment opens immediately after Heading.
-    expect(tsx).toMatch(/<Title order=\{2\}>Orders<\/Title>[\s\S]*<>/);
+    expect(tsx).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Orders"\)\}<\/Title>[\s\S]*<>/);
     // Fragment closes before Stack closes.
     expect(tsx).toMatch(/<\/>[\s\S]*<\/Stack>/);
   });

@@ -49,6 +49,7 @@ import {
   collectPageWorkflowForms,
   renderFormsFile,
 } from "./forms-emit.js";
+import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
 import { flutterPack, usesIntl } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
@@ -76,7 +77,16 @@ export function generateFlutterForContexts(
 
   // Wire-model classes for every aggregate/VO/event reachable through this
   // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
-  out.set("lib/models.dart", renderDartModels(contexts));
+  // The fixed `FileRef` class is added only when a `File` field maps to it (the
+  // base render then references `FileRef`) or the ui hosts a `FileUpload` — so
+  // File-free projects stay byte-identical.
+  const usesFileUpload = uiUsesFileUpload(ui);
+  const baseModels = renderDartModels(contexts);
+  const needsFileRef = usesFileUpload || baseModels.includes("FileRef");
+  out.set(
+    "lib/models.dart",
+    needsFileRef ? renderDartModels(contexts, { fileRef: true }) : baseModels,
+  );
 
   // Aggregate + owning-bounded-context lookups, built once — threaded into the
   // walker (form seams resolve the aggregate's create-input / op params + the
@@ -170,7 +180,7 @@ export function generateFlutterForContexts(
     out.set("lib/pages/home_page.dart", renderHomePage(title, aggregates));
   }
 
-  out.set("pubspec.yaml", renderPubspec(pkg, deployable.name));
+  out.set("pubspec.yaml", renderPubspec(pkg, deployable.name, usesFileUpload));
   out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
   // Web platform scaffold — `flutter build web` refuses a project with no
   // `web/index.html` ("This project is not configured for the web").  Emit the
@@ -187,7 +197,7 @@ export function generateFlutterForContexts(
   // platform to an existing project" flow), keeping the generated tree lean and
   // the native capability a pure function of the SDK.  Web-vs-native is a build
   // target, not a modelling mode — both are always available.
-  out.set("Makefile", renderMakefile(pkg));
+  out.set("Makefile", renderMakefile(pkg, usesFileUpload));
   out.set("README.md", renderReadme(title, pkg));
   // Runtime e2e (Phase 4) — a headless `flutter_test` widget smoke that boots
   // the real app and asserts it renders.  Unlike an `integration_test` (needs a
@@ -403,7 +413,12 @@ function renderConsumerPage(
   }
   if (b.stateful) {
     if (b.usesState) bindings.push(`    final state = ref.watch(${providerName});`);
-    if (b.usedActions.size > 0) {
+    // Controlled-input setter tear-offs — each bound input dispatches a bare
+    // `set<Field>(v)` (or `set<Field>Text(v)` for NumberField), which resolves
+    // to one of these page-shell locals.  Only the bound setters (an unused
+    // `final` tear-off is a `flutter analyze` warning → CI red).
+    const boundSetters = collectBoundInputFields(page.body, new Set(page.state.map((s) => s.name)));
+    if (b.usedActions.size > 0 || boundSetters.length > 0) {
       bindings.push(`    final notifier = ref.read(${providerName}.notifier);`);
       for (const a of [...b.usedActions].sort()) {
         // An async-effect action's method takes the route id; bind it as an
@@ -414,6 +429,9 @@ function renderConsumerPage(
             : `    final ${a} = notifier.${a};`,
         );
       }
+      for (const { setter } of boundSetters) {
+        bindings.push(`    final ${setter} = notifier.${setter};`);
+      }
     }
   }
   const imports = [
@@ -423,20 +441,33 @@ function renderConsumerPage(
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
   if (b.usesComponent) imports.push("import '../components.dart';");
-  // A `match await` Notifier method decodes JSON, POSTs via `apiUri`, and reifies
-  // wire models — so the file needs dart:convert + http + config + models when the
-  // projection uses them.
-  if (projSource.includes("jsonDecode") || projSource.includes("jsonEncode")) {
+  // Content scan over BOTH the Notifier projection AND the rendered body: a
+  // `match await` method (projSource) decodes JSON + reifies wire models, and a
+  // `FileUpload` (bodyWidget) does the same inline plus references `FileRef` in
+  // the state class — so both positions can pull dart:convert / models / http /
+  // config / file_picker.
+  const scan = `${projSource}\n${bodyWidget}`;
+  if (scan.includes("jsonDecode") || scan.includes("jsonEncode")) {
     imports.push("import 'dart:convert';");
   }
-  if (projSource.includes(".fromJson(")) imports.push("import '../models.dart';");
-  // `Action(<instance>.<op>)` buttons and async-effect methods POST inline via
-  // `apiUri(` — import http + the base-URL helper when either references it.
-  if (bodyWidget.includes("apiUri(") || projSource.includes("apiUri(")) {
+  // Wire-model reifications (`X.fromJson(`) and the `FileRef` state type both
+  // live in `../models.dart`.
+  if (scan.includes(".fromJson(") || scan.includes("FileRef")) {
+    imports.push("import '../models.dart';");
+  }
+  // `Action(<instance>.<op>)` buttons, async-effect methods, and FileUpload POST
+  // inline via `apiUri(` — import http + the base-URL helper when either does.
+  if (scan.includes("apiUri(")) {
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
   if (usesIntl(bodyWidget) || usesIntl(projSource)) {
     imports.push("import 'package:intl/intl.dart';");
+  }
+  // A FileUpload primitive picks a file via file_picker (the http / config /
+  // models / dart:convert imports it also needs are added by the content scans
+  // above — the widget emits `apiUri(` / `FileRef.fromJson` / `jsonDecode`).
+  if (bodyWidget.includes("FilePicker.")) {
+    imports.push("import 'package:file_picker/file_picker.dart';");
   }
   return `${lines(
     ...imports,
@@ -494,7 +525,10 @@ function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
   )}\n`;
 }
 
-function renderPubspec(pkg: string, deployableName: string): string {
+function renderPubspec(pkg: string, deployableName: string, usesFileUpload: boolean): string {
+  // `file_picker` is only pulled when a FileUpload primitive is present, so a
+  // File-free app's pubspec stays byte-identical.
+  const filePicker = usesFileUpload ? "\n  file_picker: ^8.1.2" : "";
   return `name: ${pkg}
 description: "Generated Flutter app for ${deployableName} (Loom)."
 publish_to: "none"
@@ -508,7 +542,7 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_riverpod: ^2.5.1
-  intl: ^0.19.0
+  intl: ^0.19.0${filePicker}
 
 dev_dependencies:
   flutter_test:
@@ -528,11 +562,23 @@ const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
  *  see the emission note); `web` / `apk` / `ipa` build each surface from the one
  *  shared Dart source.  `API_BASE_URL` threads through as a `--dart-define`
  *  (mirrors the compose env the Dockerfile injects). */
-function renderMakefile(pkg: string): string {
+function renderMakefile(pkg: string, usesFileUpload: boolean): string {
+  // A `FileUpload` primitive pulls the `file_picker` native plugin, whose
+  // Android build needs compileSdk >= 36 (via `flutter_plugin_android_lifecycle`)
+  // — newer than the `flutter create` template default.  A reliable auto-fix is
+  // awkward (the app-level compileSdk doesn't reach plugin subprojects, and a
+  // root `subprojects { afterEvaluate }` runs too late under modern Flutter's
+  // Gradle ordering), so we note the one-line manual fix in a comment instead of
+  // shipping a fragile override.  Omitted when no FileUpload is present.
+  const filePickerNote = usesFileUpload
+    ? "# NOTE: this app uses FileUpload -> the `file_picker` plugin, whose Android\n" +
+      "# build needs compileSdk >= 36. If `make apk` fails on checkDebugAarMetadata,\n" +
+      "# set `compileSdk = 36` in android/app/build.gradle.kts.\n"
+    : "";
   return `# ${pkg} — Loom-generated Flutter app.
 # One Dart source, three build surfaces.  Override the API base with
 #   make apk API_BASE_URL=https://api.example.com/api
-API_BASE_URL ?= /api
+${filePickerNote}API_BASE_URL ?= /api
 DEFINE = --dart-define=API_BASE_URL=$(API_BASE_URL)
 
 .PHONY: prepare web apk ipa analyze clean

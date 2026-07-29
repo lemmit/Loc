@@ -9,9 +9,11 @@ name: Generated Flutter build
 # vitest suite (which only asserts emitted-string shape; no local Flutter SDK).
 #
 # Covers the full shipped interactive surface — display + Riverpod state/actions
-# + data reads (QueryView) + forms (Create/Operation/Destroy) + named routing.
-# Workflows/match-await and the native (non-web) surface remain deferred to
-# later parity and this gate grows with them.  `analyze` runs errors-only
+# + data reads (QueryView) + workflows + match-await + forms
+# (Create/Operation/Workflow/Destroy) + Modal + the pack inputs (Field /
+# MultilineField / PasswordField / NumberField / Toggle / SelectField /
+# FileUpload) + Tabs + named routing.  Only the native (non-web) surface remains
+# deferred.  `analyze` runs errors-only
 # (`--no-fatal-warnings --no-fatal-infos`) so lint-nits (prefer_const infos)
 # don't block; `flutter build web` is the load-bearing "is the Dart real"
 # check.  The .ddd is embedded here (not under examples/) so the other
@@ -106,7 +108,9 @@ jobs:
               }
             }
             storage db { type: postgres }
+            storage files { type: localDisk }
             resource catState { for: Cat, kind: state, use: db }
+            resource catFiles { for: Cat, kind: objectStore, use: files }
             ui MobileApp {
               framework: flutter
               api Shop: ShopApi
@@ -145,7 +149,33 @@ jobs:
                   Button { "Add product", to: "/products/new" }
                 }
               }
+              // EVERY page primitive renders on Flutter: the controlled inputs
+              // (Field / MultilineField / PasswordField / NumberField / Toggle /
+              // SelectField) + FileUpload via the flutter pack, Tabs as a
+              // container, and Forms (Create/Operation/Workflow/Destroy) + Modal
+              // via the flutterTarget walker SEAMS.  The Preferences page below
+              // exercises the pack inputs + Tabs + FileUpload in one place.
               page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+              page Preferences {
+                route: "/preferences"
+                state { notify: bool = false  displayName: string = ""  about: string = ""  secret: string = ""  themePref: string = "system"  perPage: int = 20  avatar: File }
+                body: Stack {
+                  Heading { "Preferences", level: 1 },
+                  Tabs {
+                    Tab { "Profile", Stack {
+                      Field { "Display name", bind: displayName },
+                      MultilineField { "About", bind: about },
+                      PasswordField { "Secret", bind: secret },
+                      FileUpload { "Avatar", bind: avatar }
+                    } },
+                    Tab { "Settings", Stack {
+                      Toggle { "Notifications", bind: notify },
+                      SelectField { "Theme", bind: themePref, options: ["system", "light", "dark"] },
+                      NumberField { "Rows per page", bind: perPage }
+                    } }
+                  }
+                }
+              }
               page RestockProduct {
                 route: "/products/:id/restock"
                 state { note: string = "" }
@@ -165,7 +195,7 @@ jobs:
                 DestroyForm { of: Product }
               } }
             }
-            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+            deployable api { platform: node contexts: [Cat] dataSources: [catState, catFiles] serves: ShopApi port: 3000 }
             deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 }
           }
           DDD
@@ -185,19 +215,66 @@ jobs:
       - name: flutter build web (the real compile gate)
         working-directory: ${{ steps.proj.outputs.dir }}
         run: flutter build web --release
-      # Native mobile surface (Phase 3) — prove the SAME emitted Dart source
-      # compiles for Android too.  `make prepare` (flutter create --platforms)
-      # materialises the native folders the SDK owns; `flutter build apk` is the
-      # native "is the Dart real" gate.  Java 17 + the Android SDK are set up here
-      # (subosito/flutter-action provides Flutter; the app runs no native plugins
-      # so a stock SDK + debug build suffice).  iOS needs a macOS host — deferred.
+      # Native mobile surface (Phase 3) — prove the SAME kind of emitted Dart
+      # source compiles for Android too.  `flutter build apk` is the native "is
+      # the Dart real" gate.  It builds a SEPARATE, minimal Loom app (no
+      # FileUpload) rather than the full showcase: the showcase's FileUpload pulls
+      # the third-party `file_picker` native plugin, whose Android build needs a
+      # newer compileSdk than the stock `flutter create` template ships — that's
+      # a file_picker packaging requirement, not a Loom codegen concern, and
+      # FileUpload's Dart is already compile-proven by `flutter analyze` +
+      # `flutter build web` above.  Java 17 + the Android SDK are set up here.
+      # iOS needs a macOS host — deferred.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: flutter create android platform + build apk
-        working-directory: ${{ steps.proj.outputs.dir }}
+      - name: Generate a minimal (FileUpload-free) app for the native apk gate
         run: |
+          mkdir -p ci-flutter-apk
+          cat > ci-flutter-apk/apk.ddd <<'DDD'
+          system ApkSmoke {
+            api ShopApi from Cat
+            subdomain Cat { context C {
+              aggregate Product {
+                name: string
+                price: int
+                operation rename(newName: string) { name := newName }
+              }
+              repository Products for Product { }
+            } }
+            storage db { type: postgres }
+            resource st { for: C, kind: state, use: db }
+            ui MobileApp {
+              framework: flutter
+              api Shop: ShopApi
+              page Home {
+                route: "/"
+                state { note: string = "" }
+                body: Stack {
+                  Heading { "Products", level: 1 },
+                  QueryView {
+                    of: Shop.Product.all,
+                    loading: Text { "Loading" }, error: Text { "Failed" }, empty: Text { "None" },
+                    data: rows => Stack { For { each: rows, p => Card { p.name, Text { p.price } } } }
+                  },
+                  Field { "Note", bind: note },
+                  CreateForm { of: Product },
+                  Button { "New", to: "/new" }
+                }
+              }
+              page New { route: "/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
+            }
+            deployable api { platform: node contexts: [C] dataSources: [st] serves: ShopApi port: 3000 }
+            deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter-apk/apk.ddd -o ci-flutter-apk/out
+      - name: flutter create android platform + build apk
+        run: |
+          APK_DIR="$(dirname "$(find ci-flutter-apk/out -name pubspec.yaml | head -1)")"
+          cd "$APK_DIR"
+          flutter pub get
           flutter create --platforms=android .
           flutter build apk --debug

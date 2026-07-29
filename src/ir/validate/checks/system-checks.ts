@@ -10,6 +10,7 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
+import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
 import { lowerFirst, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
@@ -287,6 +288,68 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${framework}' has no realtime consumption, so the handlers are silently dropped.`,
         source: d.name,
       });
+    }
+  }
+}
+
+// Honesty gate for the Flutter-UNRENDERED page primitives
+// (`loom.flutter-primitive-unsupported`).  The Flutter pack renders the display
+// / layout primitives, the controlled inputs (Field / MultilineField /
+// PasswordField / NumberField / Toggle / SelectField), and Tabs; the form family
+// + Modal render via the walker SEAMS.  The one primitive with NO renderer yet
+// is `FLUTTER_DEFERRED_BUILDER_NAMES`, derived once from the
+// `FLUTTER_UNRENDERED_PRIMITIVES` set in `src/util/flutter-deferred-primitives.ts`
+// (FileUpload — a standalone multipart upload needs the File-type-on-Flutter
+// foundation).  Because frontends validate against the target-AGNOSTIC
+// walker-stdlib, a page using it while targeting a `platform: flutter` deployable
+// type-checks and validates clean — then the Flutter walker emits a `// flutter
+// pack: no renderer for "X"` comment (valid Dart, so `generated-flutter-build.yml`
+// stays green) where the widget should be, and the UI element silently VANISHES.
+//
+// This fails fast at compile time instead — the frontend-target twin of
+// `loom.feliz-store-unsupported` / `loom.ui-realtime-unsupported`.  Flutter is a
+// self-hosting frontend platform (`platform: flutter` only ever serves the
+// `framework: flutter` bundle), so the deployable platform is the reliable
+// target detector.  DERIVED from the unrendered set: when FileUpload grows a
+// real Flutter renderer and leaves `FLUTTER_UNRENDERED_PRIMITIVES`, the gate
+// auto-closes with no edit here (as Field / Toggle / NumberField / Tabs did).
+export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    if (d.platform !== "flutter") continue;
+    const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+    for (const uiName of uiNames) {
+      const ui = sys.uis.find((u) => u.name === uiName);
+      if (!ui) continue;
+      const hosts: { where: string; body?: ExprIR }[] = [
+        ...ui.pages.map((p) => ({ where: `page '${p.name}'`, body: p.body })),
+        ...ui.components.map((c) => ({ where: `component '${c.name}'`, body: c.body })),
+      ];
+      for (const host of hosts) {
+        // One diagnostic per (host, primitive-name) — a page repeating the same
+        // unrendered primitive shouldn't spam the report.
+        const flagged = new Set<string>();
+        walkExpr(host.body, (e) => {
+          if (e.kind !== "call" || !FLUTTER_DEFERRED_BUILDER_NAMES.has(e.name)) return;
+          if (flagged.has(e.name)) return;
+          flagged.add(e.name);
+          const where = `${host.where} on ui '${uiName}'`;
+          diags.push({
+            severity: "error",
+            code: "loom.flutter-primitive-unsupported",
+            message:
+              `${where}: uses the '${e.name}' primitive, but the Flutter frontend has no renderer ` +
+              `for it yet (FileUpload is the one deferred primitive — a standalone multipart upload ` +
+              `needs the File-type-on-Flutter foundation) — so hosting deployable '${d.name}' ` +
+              `(platform 'flutter') would emit a \`// flutter pack: no renderer\` comment where the ` +
+              `widget should be and the element would silently vanish.  Host this page on an SPA ` +
+              `frontend (react / vue / svelte / angular) or a Feliz/Phoenix deployable, or use the ` +
+              `supported primitives (display / layout, the Field/MultilineField/PasswordField/` +
+              `NumberField/Toggle/SelectField inputs, Tabs, forms, and Modal) until '${e.name}' ` +
+              `gains a Flutter renderer.`,
+            source: where,
+          });
+        });
+      }
     }
   }
 }
