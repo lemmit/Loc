@@ -40,6 +40,13 @@ Note: `generated-react-build` already emits a **slim** matrix on PRs
 `merge_group` — the per-PR/pre-land split the tiers call for is already built
 into its `configure` job.
 
+The playground suite is split the same way. `playground-e2e` (the whole
+Playwright suite, including the network-gated bundle/boot specs) stays
+post-merge / nightly / `run-e2e`-label; `playground-e2e-no-network` runs the
+network-free subset (workspace, history, builder, requirements, editor) on
+every PR touching `web/**` or `src/**`, so file-management and builder
+regressions are caught before merge.
+
 ## Enabling the merge queue (the structural fix)
 
 The `merge_group:` triggers are already present on `test.yml`, `tenancy-e2e`,

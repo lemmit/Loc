@@ -18,8 +18,14 @@ name: Playground e2e
 # Branch-protection (configured separately in repo settings) decides
 # whether the post-merge run is a required check.
 #
-# To re-enable per-PR gating, add back a `pull_request:` block with the
-# same `paths:` filter as `push:` below.
+# The network-free half of the suite IS gated per-PR, by the sibling
+# `playground-e2e-no-network.yml` (workspace / history / builder /
+# requirements / editor specs — everything that stops at Generate).  A
+# spec added there must not grow a Bundle/Boot step; one added here is
+# free to.
+#
+# To re-enable per-PR gating of the FULL suite, add back a
+# `pull_request:` block with the same `paths:` filter as `push:` below.
 
 on:
   push:

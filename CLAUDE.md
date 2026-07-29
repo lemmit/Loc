@@ -335,7 +335,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
 - `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
-- `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
+- `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview). Post-merge / nightly / `run-e2e` label, because the bundle/boot specs hit esm.sh + jsdelivr. `playground-e2e-no-network.yml` is its **per-PR** sibling: the network-free subset (workspace/history/persistence, the system + mobile builders, requirements, editor) on every PR touching `web/**` or `src/**` — no npm mirror, no bundle/boot, 30-min cap.
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader nightly / `run-conformance`-label run against a docker stack).
 - `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
 

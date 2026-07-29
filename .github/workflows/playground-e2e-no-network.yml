@@ -1,0 +1,147 @@
+name: Playground e2e (no-network)
+
+# The per-PR half of `playground-e2e.yml`.
+#
+# That workflow runs the FULL Playwright suite and is post-merge-only
+# (push:main + nightly cron + the `run-e2e` label), because its
+# bundle/boot specs cold-fetch npm tarballs and PGlite's WASM from
+# esm.sh / jsdelivr — flaky enough that gating every PR on them cost
+# more than it caught.
+#
+# But most of the suite never touches the network: the workspace /
+# history / builder / requirements / editor specs stop at Generate,
+# which runs entirely in the build worker against the in-bundle VFS.
+# Those are exactly the specs that catch file-management and builder
+# regressions, and there is no reason to learn about such a regression
+# one merge AFTER it lands.  This workflow runs that subset per-PR.
+#
+# Invariants that keep this lane deterministic:
+#   * SPEC LIST — every spec below imports only the network-free helpers
+#     (`waitForPlaygroundReady` / `selectExample` / `clickWorkspaceCreate` /
+#     `fatalConsoleErrors`).  None imports `browserCanReachNetwork` or
+#     `waitForBundle`, and none clicks Bundle / Boot / Run.  A spec that
+#     grows a bundle/boot step belongs in `playground-e2e.yml`, not here.
+#   * NO npm MIRROR — `playground-e2e.yml` prebuilds `web/public/npm-mirror/`
+#     for the IN-BROWSER installs its runtime specs perform.  The host
+#     `vite build` never reads it (it is a `public/` asset copied into
+#     `dist/`), so this lane skips that step entirely — which is also what
+#     makes it fast.
+#   * Playwright's default `chromium` project already `testIgnore`s the
+#     heavy bundle/boot specs; `--project=chromium` pins that lane.
+#
+# The full suite stays the authority for the network-gated pipeline;
+# this is purely additive early warning.
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - '.github/workflows/playground-e2e-no-network.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Stable job name — safe to add to branch protection later.
+  no-network-e2e:
+    name: playground-e2e-no-network
+    runs-on: ubuntu-latest
+    # Minutes, not the full suite's 75: no in-browser npm install and no
+    # PGlite boot, so the wall clock is `vite build` + a few dozen DOM-level
+    # specs (with the config's CI retry budget for the known builder-canvas
+    # flakes).
+    timeout-minutes: 30
+    env:
+      # Keep the list in ONE place: the existence guard and the Playwright
+      # invocation read the same variable, so a renamed spec fails loudly
+      # instead of silently shrinking the lane.
+      SPECS: >-
+        e2e/editor.spec.ts
+        e2e/workspace-history.spec.ts
+        e2e/workspace-persistence.spec.ts
+        e2e/requirements-pane.spec.ts
+        e2e/builder-page.spec.ts
+        e2e/system-builder.spec.ts
+        e2e/system-builder-v2.spec.ts
+        e2e/system-builder-v2-mobile.spec.ts
+        e2e/mobile-builder.spec.ts
+        e2e/mobile-model-builder.spec.ts
+        e2e/mobile-requirements.spec.ts
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate) which
+      # produces src/language/generated/ — the playground build imports that
+      # path via toolchain re-exports.
+      - name: Install Loom toolchain (root)
+        run: npm ci
+
+      - name: Install playground deps
+        working-directory: web
+        run: npm ci
+
+      # A spec renamed or deleted upstream would otherwise make Playwright
+      # run FEWER tests and still pass — the gate would quietly hollow out.
+      - name: Every listed spec exists
+        working-directory: web
+        run: |
+          missing=0
+          for f in $SPECS; do
+            if [ ! -f "$f" ]; then
+              echo "::error::listed spec not found: web/$f"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "all listed specs present"
+
+      # Same cache key as playground-e2e.yml, so the two lanes share the
+      # ~100MB browser download.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      # `--with-deps` only installs OS deps when binaries are downloaded; on a
+      # cache hit we still need them (cheap when already present).
+      - name: Install Chromium OS deps (cache-hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+
+      # NOTE: deliberately no `npm run build:npm-mirror` here — see the
+      # header.  The webServer command in playwright.config.ts does the
+      # `vite build` + `vite preview`.
+      - name: Run no-network Playwright specs
+        working-directory: web
+        run: npx playwright test --project=chromium $SPECS
+
+      - name: Upload Playwright report on failure or timeout
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-no-network
+          path: web/playwright-report/
+          retention-days: 2
+          compression-level: 9
