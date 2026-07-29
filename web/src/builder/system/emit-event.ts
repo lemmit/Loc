@@ -7,16 +7,12 @@ import type {
   Statement,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
-import { isWorkflowCreateDecl } from "../../../../src/language/generated/ast.js";
-
-/** A2-S5f: sequential workflow statements live in the primary `create(...)`
- *  starter; the emit editor scopes to that body (reactor emits are separate). */
-function wfStatements(wf: Workflow): readonly Statement[] {
-  const creates = wf.members.filter(isWorkflowCreateDecl);
-  return (creates.find((c) => !c.name) ?? creates[0])?.body ?? [];
-}
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
+// A2-S5f: sequential workflow statements live in the primary `create(...)`
+// starter; the emit editor scopes to that body (reactor emits are separate).
+// The "which create is primary" rule lives once, in `body.ts`.
+import { primaryWorkflowStatements as wfStatements } from "./body";
 import type { NodeKind } from "./model";
 
 // ---------------------------------------------------------------------------

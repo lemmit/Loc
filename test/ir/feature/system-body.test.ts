@@ -60,13 +60,13 @@ describe("System builder — operation/workflow body editing", () => {
     expect(wf[1]).toMatch(/^let order = Order\.create\(\{/);
   });
 
-  it("structures an assignment into target / op / value, preconditions verbatim", () => {
+  it("structures an assignment into target / op / value, preconditions typed", () => {
     const views = listStatementViews(parse(sales), confirm)!;
-    expect(views[0]).toEqual({ kind: "other", src: "precondition isMutable()" });
+    expect(views[0]).toEqual({ kind: "precondition", expr: "isMutable()" });
     expect(views[2]).toEqual({ kind: "assign", target: "status", op: ":=", value: "Confirmed" });
-    // A `let` workflow statement stays a single-expression text row.
+    // A `let` workflow statement is a structured name + value row.
     const wf = listStatementViews(parse(sales), placeOrder)!;
-    expect(wf[0].kind).toBe("other");
+    expect(wf[0].kind).toBe("let");
   });
 
   it("structures an emit statement into its event + named fields", () => {
