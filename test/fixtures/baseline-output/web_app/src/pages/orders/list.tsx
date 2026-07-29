@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useState } from "react";
 import { useNavigate, Link as RouterLink } from "react-router";
+import { t } from "../../i18n";
 import { DateTimeValue, IdValue } from "../../lib/format";
 import { Alert, Anchor, Badge, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, TextInput, Title } from "@mantine/core";
 import { useAllOrders, useByCustomerOrder } from "../../api/order";
@@ -16,12 +17,12 @@ export default function OrderList() {
   return (
     <Stack data-testid="orders-list">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Text>Orders</Text>
+        <Anchor component={RouterLink} to="/">{t("page.List.anchor.n0mxf2", "Home")}</Anchor>
+        <Text>{t("page.List.text.xf3i18", "Orders")}</Text>
       </Breadcrumbs>
       <Group justify="space-between" role="toolbar" aria-label="Actions">
-        <Title order={2}>Orders</Title>
-        <Button onClick={() => navigate("/orders/new")} data-testid="orders-list-create">New order</Button>
+        <Title order={2}>{t("page.List.heading.xf3i18", "Orders")}</Title>
+        <Button onClick={() => navigate("/orders/new")} data-testid="orders-list-create">{t("page.List.button.i38a1x", "New order")}</Button>
       </Group>
       <Group>
         <TextInput label="Customer Id" value={byCustomerCustomerId} onChange={(e) => setByCustomerCustomerId(e.currentTarget.value)} data-testid="orders-filter-by_customer_customer_id" />
@@ -38,7 +39,7 @@ export default function OrderList() {
             <Alert color="red" variant="light">Couldn't load orders</Alert>
           ) }
           { orderByCustomer.data && orderByCustomer.data.length === 0 && (
-            <Center mih={200}><Text c="dimmed">No orders yet.</Text></Center>
+            <Center mih={200}><Text c="dimmed">{t("page.List.empty.louti1", "No orders yet.")}</Text></Center>
           ) }
           { orderByCustomer.data && orderByCustomer.data.length > 0 && (
             <Paper p="md">
@@ -79,7 +80,7 @@ export default function OrderList() {
             <Alert color="red" variant="light">Couldn't load orders</Alert>
           ) }
           { orderAll.data && orderAll.data.items.length === 0 && (
-            <Center mih={200}><Text c="dimmed">No orders yet.</Text></Center>
+            <Center mih={200}><Text c="dimmed">{t("page.List.empty.louti1", "No orders yet.")}</Text></Center>
           ) }
           { orderAll.data && orderAll.data.items.length > 0 && (
             <Paper p="md">

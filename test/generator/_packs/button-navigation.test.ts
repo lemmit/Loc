@@ -36,7 +36,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
     expect(content).toMatch(/const navigate = useNavigate\(\);/);
     // Button onClick lambda navigates to the literal path.
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\("\/orders"\)\}>Go to orders<\/Button>/,
+      /<Button onClick=\{\(\) => navigate\("\/orders"\)\}>\{t\("[^"]*", "Go to orders"\)\}<\/Button>/,
     );
   });
 
@@ -67,9 +67,11 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
     const matches = content.match(/const navigate = useNavigate\(\);/g) ?? [];
     expect(matches).toHaveLength(1);
     // Both buttons emit their onClick.
-    expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/orders"\)\}>Orders<\/Button>/);
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\("\/settings"\)\}>Settings<\/Button>/,
+      /<Button onClick=\{\(\) => navigate\("\/orders"\)\}>\{t\("[^"]*", "Orders"\)\}<\/Button>/,
+    );
+    expect(content).toMatch(
+      /<Button onClick=\{\(\) => navigate\("\/settings"\)\}>\{t\("[^"]*", "Settings"\)\}<\/Button>/,
     );
   });
 
@@ -93,7 +95,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
       }
     `);
     const content = files.get("web/src/pages/home.tsx")!;
-    expect(content).toMatch(/<Button>Click me<\/Button>/);
+    expect(content).toMatch(/<Button>\{t\("[^"]*", "Click me"\)\}<\/Button>/);
     expect(content).not.toMatch(/onClick=/);
     expect(content).not.toMatch(/useNavigate/);
   });
@@ -123,7 +125,9 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
     expect(content).toMatch(/import \{ useParams, useNavigate \} from "react-router";/);
     expect(content).toMatch(/const \{ slug \} = useParams<\{ slug: string \}>\(\);/);
     expect(content).toMatch(/const navigate = useNavigate\(\);/);
-    expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/"\)\}>Back<\/Button>/);
+    expect(content).toMatch(
+      /<Button onClick=\{\(\) => navigate\("\/"\)\}>\{t\("[^"]*", "Back"\)\}<\/Button>/,
+    );
   });
 
   it("Button { to: <param-ref> } interpolates the param via template literal", async () => {
@@ -147,7 +151,9 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     // Template literal interpolating the route param at render time.
-    expect(content).toMatch(/<Button onClick=\{\(\) => navigate\(`\$\{slug\}`\)\}>Open<\/Button>/);
+    expect(content).toMatch(
+      /<Button onClick=\{\(\) => navigate\(`\$\{slug\}`\)\}>\{t\("[^"]*", "Open"\)\}<\/Button>/,
+    );
     // Param consumed by the Button to: arg → destructured in shell.
     expect(content).toMatch(/const \{ slug \} = useParams/);
   });

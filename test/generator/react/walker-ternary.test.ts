@@ -46,10 +46,12 @@ describe("ternary conditional rendering in walker pages", () => {
     expect(content).toBeDefined();
     // Cond + parens-wrapped branches.
     expect(content).toMatch(/loading \? \(/);
-    expect(content).toMatch(/<Center mih=\{200\}><Text c="dimmed">Loading\.\.\.<\/Text><\/Center>/);
+    expect(content).toMatch(
+      /<Center mih=\{200\}><Text c="dimmed">\{t\("[^"]*", "Loading\.\.\."\)\}<\/Text><\/Center>/,
+    );
     expect(content).toMatch(/\) : \(/);
     expect(content).toMatch(/<Stack>/);
-    expect(content).toMatch(/<Title order=\{2\}>Done<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Done"\)\}<\/Title>/);
     expect(content).toMatch(/<\/Stack>/);
     // State usage detected → useState declaration.
     expect(content).toMatch(/const \[loading, setLoading\] = useState/);
@@ -111,8 +113,8 @@ describe("ternary conditional rendering in walker pages", () => {
     `);
     const content = files.get("web/src/pages/x.tsx")!;
     expect(content).toMatch(/\(count > limit\) \? \(/);
-    expect(content).toMatch(/<Title order=\{2\}>Over<\/Title>/);
-    expect(content).toMatch(/<Title order=\{2\}>Under<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Over"\)\}<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Under"\)\}<\/Title>/);
   });
 
   it("ternary cond accepts a route-param ref", async () => {

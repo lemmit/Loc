@@ -28,6 +28,7 @@ import {
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { collectUiMessages } from "../_walker/i18n-extract.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON,
@@ -37,6 +38,7 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
   REACT_LIB_STRICT_FIELD_MAP_TS,
 } from "./emit-templates.js";
+import { renderI18nModule, renderLocaleCatalog } from "./i18n-runtime.js";
 import { prepareNamedLayouts } from "./layouts-emitter.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
 import {
@@ -193,6 +195,14 @@ export function generateReactForContexts(
   // AND its target backend enforces auth (so `useSession()` / the verified claims
   // are available client-side).  Gates `page { requires … }` rendering below.
   const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
+  // i18n (M-T1.11 React runtime): when this UI has extractable user-visible
+  // strings, page/component bodies emit `{t("<key>", "<default>")}` for literal
+  // text slots (keyed to the catalog) and the app ships an `src/i18n.ts` shim +
+  // `src/locales/en.json`.  Empty catalog → no translation runtime, output
+  // byte-identical to pre-i18n.  User-visible text is escaped at RUNTIME by
+  // React (a `t()` return in a JSX text node), not at compile time — safe, and
+  // the reason the emitted default keeps its raw source form.
+  const i18nEnabled = collectUiMessages(ui).length > 0;
   const emitCtx = {
     sys,
     deployable,
@@ -202,7 +212,12 @@ export function generateReactForContexts(
     topLevelComponents: options.topLevelComponents ?? [],
     authUi,
     sourcemap: options.sourcemap,
+    i18nEnabled,
   };
+  if (i18nEnabled) {
+    out.set("src/locales/en.json", renderLocaleCatalog(ui));
+    out.set("src/i18n.ts", renderI18nModule());
+  }
   const pages = emitPagesForUi(ui, emitCtx);
   for (const [path, content] of pages) out.set(path, content);
   const pageObjects = emitPageObjectsForUi(ui, emitCtx);

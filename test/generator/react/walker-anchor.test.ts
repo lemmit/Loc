@@ -49,7 +49,9 @@ describe("Anchor primitive", () => {
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ Link as RouterLink \} from "react-router";/);
     expect(content).toMatch(/import \{ Anchor, Stack, Title \} from "@mantine\/core";/);
-    expect(content).toMatch(/<Anchor component=\{RouterLink\} to="\/orders">View orders<\/Anchor>/);
+    expect(content).toMatch(
+      /<Anchor component=\{RouterLink\} to="\/orders">\{t\("[^"]*", "View orders"\)\}<\/Anchor>/,
+    );
   });
 
   it("Anchor without to: emits a bare <Anchor> (no RouterLink import)", async () => {
@@ -73,7 +75,7 @@ describe("Anchor primitive", () => {
     `);
     const content = files.get("web/src/pages/plain.tsx")!;
     expect(content).not.toMatch(/react-router/);
-    expect(content).toMatch(/<Anchor>Bare link<\/Anchor>/);
+    expect(content).toMatch(/<Anchor>\{t\("[^"]*", "Bare link"\)\}<\/Anchor>/);
   });
 
   it("Anchor with route-param ref to: interpolates via template literal", async () => {

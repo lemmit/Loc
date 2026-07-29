@@ -29,7 +29,7 @@ async function emit(body: string): Promise<string> {
 describe("walker primitives — Heading", () => {
   it("Heading { text } emits <Title order={2}>text</Title> at default level", async () => {
     const tsx = await emit(`Heading { "Welcome" }`);
-    expect(tsx).toMatch(/<Title order=\{2\}[^>]*>Welcome<\/Title>/);
+    expect(tsx).toMatch(/<Title order=\{2\}[^>]*>\{t\("[^"]*", "Welcome"\)\}<\/Title>/);
   });
 
   it("Heading level: 1 overrides the default", async () => {
@@ -63,7 +63,7 @@ describe("walker primitives — Card", () => {
   it("Card { title, ...children } wraps children below the title", async () => {
     const tsx = await emit(`Card { "Bio", Text { "Hello" } }`);
     expect(tsx).toMatch(/<Title order=\{3\}>Bio<\/Title>/);
-    expect(tsx).toMatch(/<Text>Hello<\/Text>/);
+    expect(tsx).toMatch(/<Text>\{t\("[^"]*", "Hello"\)\}<\/Text>/);
   });
 
   it('Card { title, variant: "raised" } emits a shadow prop instead of withBorder', async () => {

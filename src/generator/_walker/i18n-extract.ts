@@ -41,13 +41,17 @@ export interface MessageEntry {
 
 /** The plain-string value of an expression, or undefined when it is not a
  *  bare string literal (a dynamic ref/expr, or an interpolated `+` chain). */
-function literalString(e: ExprIR | undefined): string | undefined {
+export function literalString(e: ExprIR | undefined): string | undefined {
   if (e && e.kind === "literal" && e.lit === "string") return e.value;
   return undefined;
 }
 
-/** The catalog key for an inline literal: `<prefix>.<role>.<hash>`. */
-function inlineKey(prefix: string, role: string, message: string): string {
+/** The catalog key for an inline literal: `<prefix>.<role>.<hash>`.
+ *  Exported so the React translation runtime (`i18n-emit.ts`) emits a
+ *  `<FormattedMessage id>` / `t(key)` whose key is IDENTICAL to the one the
+ *  extraction pass writes into `.loom/messages.en.json` — the two MUST agree,
+ *  so both call this one function rather than each re-deriving the shape. */
+export function messageKey(prefix: string, role: string, message: string): string {
   return `${prefix}.${role}.${contentHash(message)}`;
 }
 
@@ -64,7 +68,7 @@ function collectBody(body: ExprIR | undefined, prefix: string, out: MessageEntry
         slot.kind === "positional" ? positionals[slot.index] : namedArgValue(e, slot.name);
       const message = literalString(arg);
       if (message === undefined) continue;
-      out.push({ key: inlineKey(prefix, slot.role, message), message });
+      out.push({ key: messageKey(prefix, slot.role, message), message });
     }
   });
 }
@@ -80,7 +84,7 @@ export function collectUiMessages(ui: UiIR): MessageEntry[] {
     // Page title (`page X { title: "…" }`) — only when it is a plain literal
     // (a title that interpolates state/params is dynamic, not extractable).
     const title = literalString(page.title);
-    if (title !== undefined) out.push({ key: inlineKey(prefix, "title", title), message: title });
+    if (title !== undefined) out.push({ key: messageKey(prefix, "title", title), message: title });
     collectBody(page.body, prefix, out);
 
     // Per-page sidebar chrome — `menu { section: "…", label: "…" }` metadata.
@@ -88,7 +92,7 @@ export function collectUiMessages(ui: UiIR): MessageEntry[] {
       if (entry.name !== "section" && entry.name !== "label") continue;
       const message = literalString(entry.value);
       if (message === undefined) continue;
-      out.push({ key: inlineKey(prefix, `menu.${entry.name}`, message), message });
+      out.push({ key: messageKey(prefix, `menu.${entry.name}`, message), message });
     }
   }
 
@@ -99,16 +103,16 @@ export function collectUiMessages(ui: UiIR): MessageEntry[] {
   // UI-level `menu { section "…" { link "L" -> "url" } }` chrome.
   for (const section of ui.menu?.sections ?? []) {
     if (section.label) {
-      out.push({ key: inlineKey("menu", "section", section.label), message: section.label });
+      out.push({ key: messageKey("menu", "section", section.label), message: section.label });
     }
     for (const link of section.links) {
       if (link.kind === "external" && link.label) {
-        out.push({ key: inlineKey("menu", "link", link.label), message: link.label });
+        out.push({ key: messageKey("menu", "link", link.label), message: link.label });
       } else if (link.kind === "page") {
         const label = link.props.find((p) => p.name === "label");
         const message = literalString(label?.value);
         if (message !== undefined) {
-          out.push({ key: inlineKey("menu", "link", message), message });
+          out.push({ key: messageKey("menu", "link", message), message });
         }
       }
     }

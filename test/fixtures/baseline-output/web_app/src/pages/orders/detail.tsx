@@ -2,6 +2,7 @@
 import { useParams, Link as RouterLink } from "react-router";
 import { AddLineOrderRequest, ConfirmOrderRequest, UpdateOrderRequest, useAddLineOrder, useConfirmOrder, useUpdateOrder } from "../../api/order";
 import { useAllProducts } from "../../api/product";
+import { t } from "../../i18n";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { DateTimeValue, IdValue, KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -167,11 +168,11 @@ export default function OrderDetail() {
   return (
     <Stack data-testid="orders-detail">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Anchor component={RouterLink} to="/orders">Orders</Anchor>
-        <Text>Detail</Text>
+        <Anchor component={RouterLink} to="/">{t("page.Detail.anchor.n0mxf2", "Home")}</Anchor>
+        <Anchor component={RouterLink} to="/orders">{t("page.Detail.anchor.xf3i18", "Orders")}</Anchor>
+        <Text>{t("page.Detail.text.ei31dg", "Detail")}</Text>
       </Breadcrumbs>
-      <Title order={2}>Order detail</Title>
+      <Title order={2}>{t("page.Detail.heading.90lkpw", "Order detail")}</Title>
       <>
         { orderById.isLoading && (
           <Stack gap="xs" aria-hidden="true">
@@ -198,7 +199,7 @@ export default function OrderDetail() {
             </Card>
             <Card withBorder padding="md" data-testid="orders-detail-lines">
               <Stack>
-                <Title order={4}>Lines</Title>
+                <Title order={4}>{t("page.Detail.heading.2bghr0", "Lines")}</Title>
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>

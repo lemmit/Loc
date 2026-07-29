@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
 import { UpdateCustomerRequest, useUpdateCustomer } from "../../api/customer";
+import { t } from "../../i18n";
 import { applyServerErrors } from "../../lib/apply-server-errors";
 import { KeyValueRow } from "../../lib/format";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -68,11 +69,11 @@ export default function CustomerDetail() {
   return (
     <Stack data-testid="customers-detail">
       <Breadcrumbs>
-        <Anchor component={RouterLink} to="/">Home</Anchor>
-        <Anchor component={RouterLink} to="/customers">Customers</Anchor>
-        <Text>Detail</Text>
+        <Anchor component={RouterLink} to="/">{t("page.Detail.anchor.n0mxf2", "Home")}</Anchor>
+        <Anchor component={RouterLink} to="/customers">{t("page.Detail.anchor.vweyym", "Customers")}</Anchor>
+        <Text>{t("page.Detail.text.ei31dg", "Detail")}</Text>
       </Breadcrumbs>
-      <Title order={2}>Customer detail</Title>
+      <Title order={2}>{t("page.Detail.heading.hw9b7u", "Customer detail")}</Title>
       <>
         { customerById.isLoading && (
           <Stack gap="xs" aria-hidden="true">

@@ -125,7 +125,7 @@ describe("+= / -= in onClick mutations", () => {
     `);
     const content = files.get("web/src/pages/counter.tsx")!;
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ setA\(a \+ 1\); setB\(b - 1\); setC\(99\); \}\}>Mix<\/Button>/,
+      /<Button onClick=\{\(\) => \{ setA\(a \+ 1\); setB\(b - 1\); setC\(99\); \}\}>\{t\("[^"]*", "Mix"\)\}<\/Button>/,
     );
   });
 

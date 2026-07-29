@@ -50,8 +50,8 @@ describe("recursive layout walker", () => {
     expect(content).toMatch(/export default function Welcome\(\)/);
     // JSX shape: Stack > Title order={2} + Text.
     expect(content).toMatch(/<Stack>/);
-    expect(content).toMatch(/<Title order=\{2\}>Welcome to Acme<\/Title>/);
-    expect(content).toMatch(/<Text>Pick a destination\.<\/Text>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Welcome to Acme"\)\}<\/Title>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "Pick a destination\."\)\}<\/Text>/);
     expect(content).toMatch(/<\/Stack>/);
   });
 
@@ -99,7 +99,7 @@ describe("recursive layout walker", () => {
       }
     `);
     const content = files.get("web/src/pages/welcome.tsx")!;
-    expect(content).toMatch(/<Title order=\{1\}>Big<\/Title>/);
+    expect(content).toMatch(/<Title order=\{1\}>\{t\("[^"]*", "Big"\)\}<\/Title>/);
   });
 
   it('nested composition: Card { "Stats", Stack { Text { "a" }, Text { "b" } } }', async () => {
@@ -129,8 +129,8 @@ describe("recursive layout walker", () => {
     expect(content).toMatch(/<Card withBorder padding="md">/);
     expect(content).toMatch(/<Title order=\{3\}>Stats<\/Title>/);
     expect(content).toMatch(/<Stack>/);
-    expect(content).toMatch(/<Text>a<\/Text>/);
-    expect(content).toMatch(/<Text>b<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "a"\)\}<\/Text>/);
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "b"\)\}<\/Text>/);
   });
 
   it("Button emits unwired in v0 (no onClick)", async () => {
@@ -153,7 +153,7 @@ describe("recursive layout walker", () => {
       }
     `);
     const content = files.get("web/src/pages/welcome.tsx")!;
-    expect(content).toMatch(/<Button>Click me<\/Button>/);
+    expect(content).toMatch(/<Button>\{t\("[^"]*", "Click me"\)\}<\/Button>/);
     // No onClick wiring in v0.
     expect(content).not.toMatch(/onClick=/);
   });
@@ -178,7 +178,7 @@ describe("recursive layout walker", () => {
       }
     `);
     const content = files.get("web/src/pages/mixed.tsx")!;
-    expect(content).toMatch(/<Title order=\{2\}>Real<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Real"\)\}<\/Title>/);
     // Unknown component renders as a JSX comment placeholder, so
     // the file still compiles even with an unrecognised primitive
     // mid-tree.
@@ -211,10 +211,10 @@ describe("recursive layout walker", () => {
     const content = files.get("web/src/pages/nested.tsx")!;
     // Page top → h2 (chrome owns the h1); Section body → h3; Card inside
     // Section → h4; a top-level Card body → h3.  No level is skipped.
-    expect(content).toMatch(/<Title order=\{2\}>Top<\/Title>/);
-    expect(content).toMatch(/<Title order=\{3\}>In section<\/Title>/);
-    expect(content).toMatch(/<Title order=\{4\}>In card in section<\/Title>/);
-    expect(content).toMatch(/<Title order=\{3\}>In card<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Top"\)\}<\/Title>/);
+    expect(content).toMatch(/<Title order=\{3\}>\{t\("[^"]*", "In section"\)\}<\/Title>/);
+    expect(content).toMatch(/<Title order=\{4\}>\{t\("[^"]*", "In card in section"\)\}<\/Title>/);
+    expect(content).toMatch(/<Title order=\{3\}>\{t\("[^"]*", "In card"\)\}<\/Title>/);
   });
 
   // An explicit `level:` always wins over the derivation.
@@ -233,6 +233,6 @@ describe("recursive layout walker", () => {
       }
     `);
     const content = files.get("web/src/pages/explicit.tsx")!;
-    expect(content).toMatch(/<Title order=\{2\}>Pinned<\/Title>/);
+    expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Pinned"\)\}<\/Title>/);
   });
 });
