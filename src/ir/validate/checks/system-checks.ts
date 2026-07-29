@@ -2631,14 +2631,13 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 // stack trace.  This is the repo's HONEST-gap stance: a `loom.*` code the user
 // can read, not a silent mis-emit.
 //
-// Slice 3 removes "node" from the set below; slices 4-5 drain the rest.  When
-// the set empties, this check and its arm in every `render-expr.ts` go away.
+// Slice 3 removed "node" (the Hono client ships); slices 4-5 drain the rest.
+// When the set empties, this check and its arm in every `render-expr.ts` go away.
 // ---------------------------------------------------------------------------
 
 /** Backends with no typed in-system api client yet.  Emptying this is what
  *  "M-T4.8 is done" means. */
 const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([
-  "node",
   "dotnet",
   "java",
   "python",

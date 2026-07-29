@@ -519,16 +519,12 @@ function renderCall(
       // both derive the name via `workflowFnCamel`.
       return `${workflowFnCamel(e.wfScope!, e.name)}(${argList})`;
     case "remote-api-op": {
-      // M-T4.8 slice 2 lands the LOWERING; the per-backend typed clients are
-      // slices 3-5.  `loom.remote-api-op-unsupported` rejects the model before
-      // codegen, so this is unreachable — it throws rather than emitting a
-      // plausible-looking call that would 404 at runtime.
+      // A typed in-system call (M-T4.8).  The generated client module exports
+      // one `<resource>$<operationId>` per operation the callee exposes, with
+      // the response parsed at the boundary.  Awaited inline so it composes in
+      // any expression position, exactly like `resource-op`.
       const op = e.remoteApiOp!;
-      throw new Error(
-        `Typed api call '${op.resourceName}.${op.operationId}' reached the renderer, ` +
-          `but no typed client is emitted for this backend yet (M-T4.8 slices 3-5). ` +
-          `This should have been rejected by loom.remote-api-op-unsupported.`,
-      );
+      return `(await ${op.resourceName}$${op.operationId}(${argList}))`;
     }
     case "resource-op": {
       // A verb call on an ambient resource handle (Phase 4).  The
