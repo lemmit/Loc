@@ -39,16 +39,75 @@ function indent(s: string): string {
     .join("\n");
 }
 
+/** Indent EVERY line of a nested block by one level.  Exported so
+ *  `print-stmt.ts` shares the one implementation — a first-line-only `"  " + …`
+ *  prefix leaves a multi-line child's continuation lines and closing brace at
+ *  the parent's depth, which is the bug this replaces. */
+export const indentBlock = indent;
+
+// ---------------------------------------------------------------------------
+// The ambient print column.
+//
+// `wrapArgList` used to measure the one-line form from column 0, but its result
+// is then indented — by `print-structural.ts`'s `block`, by an enclosing
+// wrapped call, and again by the unfold code action's `memberIndent`.  A widget
+// call that measured 95 columns therefore landed at 105 (2026-07 unfold review,
+// defect 5).  Tracking the column ambiently rather than threading it through
+// ~60 printer signatures keeps the call sites readable; the printers are pure
+// and single-threaded, and every mutation is `finally`-restored.
+//
+// The budget is exact, not a guess.  A nested item is always printed at
+// `currentCol + 2` — the position it occupies IF its parent wraps.  If the item
+// came back multi-line the parent is forced to wrap (the `includes("\n")`
+// rule), so that is where it really lands; if it came back single-line the
+// parent's own check bounds the whole line.  Either way no line exceeds the
+// budget.
+let currentCol = 0;
+
+/** Print `fn`'s output as if it sat `delta` columns further right. */
+export function withColumn<T>(delta: number, fn: () => T): T {
+  currentCol += delta;
+  try {
+    return fn();
+  } finally {
+    currentCol -= delta;
+  }
+}
+
+/** Print `fn`'s output one indent level deeper — the nested-item case. */
+export function withIndent<T>(fn: () => T): T {
+  return withColumn(INDENT.length, fn);
+}
+
+/** Print `fn`'s output as if the whole sub-tree started at column `col`.  The
+ *  entry point for a caller that splices printed text in at a known indent
+ *  (the unfold code action). */
+export function atColumn<T>(col: number, fn: () => T): T {
+  const prev = currentCol;
+  currentCol = col;
+  try {
+    return fn();
+  } finally {
+    currentCol = prev;
+  }
+}
+
+/** True when `oneLine` still fits at the current print column. */
+function fitsOnOneLine(oneLine: string): boolean {
+  return !oneLine.includes("\n") && currentCol + oneLine.length <= LINE_WIDTH;
+}
+
 /** `<prefix><open><items, comma-joined><close>`, wrapped onto indented lines
- *  once the one-line form would exceed `LINE_WIDTH` or an item already spans
- *  multiple lines (an inner call already wrapped). `<prefix><open><close>`
- *  when there are no items. Exported so `print-stmt.ts` can wrap `LValue`
- *  call args / `emit` fields the same way — the flat single-line join is
- *  the same bug for any argument list, not just expression call chains. */
+ *  once the one-line form would exceed `LINE_WIDTH` *at the current print
+ *  column* or an item already spans multiple lines (an inner call already
+ *  wrapped). `<prefix><open><close>` when there are no items. Exported so
+ *  `print-stmt.ts` can wrap `LValue` call args / `emit` fields the same way —
+ *  the flat single-line join is the same bug for any argument list, not just
+ *  expression call chains. */
 export function wrapArgList(prefix: string, open: string, close: string, items: string[]): string {
   if (items.length === 0) return `${prefix}${open}${close}`;
   const oneLine = `${prefix}${open}${items.join(", ")}${close}`;
-  if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
+  if (fitsOnOneLine(oneLine)) return oneLine;
   return `${prefix}${open}\n${indent(items.join(",\n"))}\n${close}`;
 }
 
@@ -58,7 +117,7 @@ export function wrapArgList(prefix: string, open: string, close: string, items: 
 export function wrapBraced(prefix: string, items: string[]): string {
   if (items.length === 0) return `${prefix}{}`;
   const oneLine = `${prefix}{ ${items.join(", ")} }`;
-  if (!oneLine.includes("\n") && oneLine.length <= LINE_WIDTH) return oneLine;
+  if (fitsOnOneLine(oneLine)) return oneLine;
   return `${prefix}{\n${indent(items.join(",\n"))}\n}`;
 }
 
@@ -115,13 +174,14 @@ export function printExpr(node: Expression): string {
     case "ObjectLit":
       return wrapBraced(
         "",
-        node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`),
+        withIndent(() => node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`)),
       );
     case "ListLit": {
       // An empty list prints as `[ ]` (spaced) — the bare `[]` token is lexed
       // as the array-type marker, so an adjacent form wouldn't re-parse.
       const elems = node.elements ?? [];
-      return elems.length === 0 ? "[ ]" : `[${elems.map((e) => printExpr(e)).join(", ")}]`;
+      if (elems.length === 0) return "[ ]";
+      return `[${withIndent(() => elems.map((e) => printExpr(e))).join(", ")}]`;
     }
     case "MatchExpr":
       return printMatch(node);
@@ -210,13 +270,15 @@ function appendSuffix(base: string, s: PostfixSuffix): string {
 }
 
 function printCall(prefix: string, args: CallArg[]): string {
-  const items = args.map((a) => (a.name ? `${a.name}: ${printExpr(a.value)}` : printExpr(a.value)));
+  const items = withIndent(() =>
+    args.map((a) => (a.name ? `${a.name}: ${printExpr(a.value)}` : printExpr(a.value))),
+  );
   return wrapArgList(prefix, "(", ")", items);
 }
 
 function printBuilderCall(type: string, entries: { name?: string; value: Expression }[]): string {
-  const items = entries.map((e) =>
-    e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value),
+  const items = withIndent(() =>
+    entries.map((e) => (e.name ? `${e.name}: ${printExpr(e.value)}` : printExpr(e.value))),
   );
   return wrapBraced(`${type} `, items);
 }
@@ -226,28 +288,35 @@ function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
   if (!printStatement) {
     throw new Error("printExpr: statement printer not registered for lambda block body");
   }
-  const body = node.stmts.map((s) => printStatement!(s)).join("\n");
-  return node.stmts.length === 0 ? `${node.param} => {}` : `${node.param} => {\n${body}\n}`;
+  if (node.stmts.length === 0) return `${node.param} => {}`;
+  const body = indent(withIndent(() => node.stmts.map((s) => printStatement!(s))).join("\n"));
+  return `${node.param} => {\n${body}\n}`;
 }
 
 function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
   // Variant form (variant-match.md): a subject present ⇒ the arms are
   // `VariantType binding => value` rows over `node.varArms`.
   if (node.subject) {
-    const arms = node.varArms.map((arm) => {
-      const bind = arm.binding ? ` ${arm.binding}` : "";
-      return `${printTypeAtomLite(arm.varType)}${bind} => ${printExpr(arm.value)}`;
+    const arms = withIndent(() => {
+      const rows = node.varArms.map((arm) => {
+        const bind = arm.binding ? ` ${arm.binding}` : "";
+        return `${printTypeAtomLite(arm.varType)}${bind} => ${printExpr(arm.value)}`;
+      });
+      if (node.elseExpr) rows.push(`else => ${printExpr(node.elseExpr)}`);
+      return rows;
     });
-    if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
-    return `match ${printExpr(node.subject)} {\n${arms.join(",\n")}\n}`;
+    return `match ${printExpr(node.subject)} {\n${indent(arms.join(",\n"))}\n}`;
   }
-  const arms = node.arms.map((arm) => `${printExpr(arm.cond)} => ${printExpr(arm.value)}`);
-  if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
+  const arms = withIndent(() => {
+    const rows = node.arms.map((arm) => `${printExpr(arm.cond)} => ${printExpr(arm.value)}`);
+    if (node.elseExpr) rows.push(`else => ${printExpr(node.elseExpr)}`);
+    return rows;
+  });
   // Comma-separate arms: without separators a match-arm value expression
   // greedily consumes the next arm's condition (e.g. `... + name` followed
   // by `(visibility == ...)` parses as a call), so the printed form would
   // not round-trip.  The grammar accepts an optional comma between arms.
-  return `match {\n${arms.join(",\n")}\n}`;
+  return `match {\n${indent(arms.join(",\n"))}\n}`;
 }
 
 /** Minimal `TypeAtom` printer for a variant-match arm's type — inlined here

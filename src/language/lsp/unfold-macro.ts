@@ -49,7 +49,7 @@ import {
   type Ui,
   type WithClause,
 } from "../generated/ast.js";
-import { printStructural } from "../print/index.js";
+import { atColumn, joinDecls, printStructural } from "../print/index.js";
 
 const DEST_PROP = "$destination" as const;
 
@@ -347,26 +347,93 @@ function buildInsertEdit(
   }
   const memberIndent = " ".repeat(baseCol + 2);
   const baseIndent = " ".repeat(baseCol);
-  const printed = nodes.map((n) => indent(printStructural(n as never), memberIndent)).join("\n");
+  // `joinDecls` blank-line-separates multi-line members the way hand-written
+  // `.ddd` does — ejecting a whole scaffolded `ui` inserts five to seven pages,
+  // and a bare `\n` join runs them together as one wall.
+  //
+  // `atColumn(memberIndent.length, …)` tells the printers where this text will
+  // actually land, so the shared line-width budget accounts for the indent the
+  // splice adds.  Without it a widget call measured at 95 columns lands at 105.
+  const parts = atColumn(memberIndent.length, () => nodes.map((n) => printStructural(n as never)));
+  const printed = indent(joinDecls(parts), memberIndent);
+  const firstIsMultiline = (parts[0] ?? "").includes("\n");
   if (!preBraceContent) {
     // Own-line `}`: insert at line-start; the brace keeps its
-    // existing leading whitespace and lands on the next line.
+    // existing leading whitespace and lands on the next line.  Separate the
+    // insertion from the preceding member under the same rule `joinDecls`
+    // applies between members — a blank line when either side is multi-line —
+    // and never right after the block's own `{`, which would open the body
+    // with a gap.
+    const prev = precedingMember(text, lineStartOffset);
+    const lead = prev === "{" || (!firstIsMultiline && prev === "one-line") ? "" : "\n";
     return {
       range: {
         start: { line: bracePos.line, character: 0 },
         end: { line: bracePos.line, character: 0 },
       },
-      newText: `${printed}\n`,
+      newText: `${lead}${printed}\n`,
     };
   }
-  // Inline `}`: split it onto its own line by inserting the members
-  // (with surrounding newlines) immediately before the brace.  The
-  // `\n${baseIndent}` after `printed` lands the `}` at the host's
-  // original indent.
+  // Inline `}` — the whole body sits on one line.  Splitting only at the brace
+  // would strand the body's existing members up on the header line while every
+  // inserted member lands indented below them:
+  //
+  //     aggregate Order { subject: string
+  //       createdAt: datetime managed          ← inconsistent
+  //     }
+  //
+  // So when the block opens and closes on the SAME line, reflow it: the
+  // existing content moves down to member indent (as one line — its tokens are
+  // never re-wrapped, only relocated), then the printed members, then the `}`
+  // back at the host's indent.  For an empty `{ }` body this degenerates to the
+  // plain split, without leaving the brace's space behind as trailing
+  // whitespace.
+  const openOffset = findBodyBrace(text, document.textDocument.offsetAt(cst.range.start as never));
+  const openPos = openOffset >= 0 ? document.textDocument.positionAt(openOffset) : undefined;
+  if (openPos && openPos.line === bracePos.line) {
+    const existing = text.slice(openOffset + 1, braceOffset).trim();
+    // The relocated content is one line, so `joinDecls`' rule reduces to "blank
+    // line iff the first printed member is multi-line".
+    const gap = firstIsMultiline ? "\n\n" : "\n";
+    const body = existing ? `${memberIndent}${existing}${gap}${printed}` : printed;
+    return {
+      range: {
+        start: document.textDocument.positionAt(openOffset + 1),
+        end: bracePos,
+      },
+      newText: `\n${body}\n${baseIndent}`,
+    };
+  }
+  // The body already spans lines and only the `}` shares one — split at the
+  // brace, replacing the whitespace run before it so no trailing space is left.
+  let wsStart = braceOffset;
+  while (wsStart > 0 && (text[wsStart - 1] === " " || text[wsStart - 1] === "\t")) wsStart--;
   return {
-    range: { start: bracePos, end: bracePos },
+    range: { start: document.textDocument.positionAt(wsStart), end: bracePos },
     newText: `\n${printed}\n${baseIndent}`,
   };
+}
+
+/** Offset of the `{` that opens the declaration body starting at `startOffset`,
+ *  or -1.  A declaration header (`aggregate X with m(a: b) `, `ui U `, …) never
+ *  contains a brace, so the first one is the body opener. */
+function findBodyBrace(text: string, startOffset: number): number {
+  for (let i = startOffset; i < text.length; i++) {
+    if (text[i] === "{") return i;
+  }
+  return -1;
+}
+
+/** Classify what sits immediately before `offset` in the block body:
+ *  `"{"` — the block's own opening brace (the insertion is the first member),
+ *  `"multi-line"` — a member whose last line is a closing brace, or a blank
+ *  line already separating things, `"one-line"` — a plain single-line member. */
+function precedingMember(text: string, offset: number): "{" | "one-line" | "multi-line" {
+  let i = offset - 1;
+  while (i >= 0 && /\s/.test(text[i]!)) i--;
+  if (i < 0 || text[i] === "{") return "{";
+  // A member that ends in `}` spanned lines (an operation, a nested block).
+  return text[i] === "}" ? "multi-line" : "one-line";
 }
 
 /** Replace the host's existing `with` clause atomically with the
