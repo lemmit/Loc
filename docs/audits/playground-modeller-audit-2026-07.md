@@ -1,5 +1,13 @@
 # Playground modeller audit — 2026-07-29
 
+> **Status note:** the Part-1 upgrade needs and the *visibility* half of the
+> Part-2 gaps (read-only rendering + authz badges + workflow member picker)
+> were addressed on this same branch (PR #2290) immediately after this
+> audit. Part 3's wave-4 items — full *editing* surfaces for the newly
+> visible constructs, property modifiers, operation params/gates, and the
+> UI-level surface — remain open follow-on missions. The findings below are
+> the pre-fix snapshot.
+
 Snapshot-in-time audit of the browser playground's visual builders
 (`web/src/builder/`) against the language surface on `main` @ `2f5deb8`.
 Four surfaces were audited: the page builder (`builder/page/`), the two
