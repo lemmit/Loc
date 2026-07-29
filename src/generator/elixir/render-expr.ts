@@ -949,6 +949,18 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     // `<Store>.<action>()` call (Stage 5) — frontend-only; plain-call fall-through.
     case "free":
       return `${snake(e.name)}(${args.join(", ")})`;
+    case "remote-api-op": {
+      // M-T4.8 slice 2 lands the LOWERING; the per-backend typed clients are
+      // slices 3-5.  `loom.remote-api-op-unsupported` rejects the model before
+      // codegen, so this is unreachable — it throws rather than emitting a
+      // plausible-looking call that would 404 at runtime.
+      const op = e.remoteApiOp!;
+      throw new Error(
+        `Typed api call '${op.resourceName}.${op.operationId}' reached the renderer, ` +
+          `but no typed client is emitted for this backend yet (M-T4.8 slices 3-5). ` +
+          `This should have been rejected by loom.remote-api-op-unsupported.`,
+      );
+    }
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
       // helper function the Phoenix ResourceAdapter emits.  Routed by

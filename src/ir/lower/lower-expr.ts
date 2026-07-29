@@ -86,6 +86,7 @@ import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
+  findApiOperations,
   findDomainServiceByName,
   findEntityByName,
   findEventByName,
@@ -630,6 +631,44 @@ function applySuffixToRecv(
     // capability comes from the resource-verb registry; an unknown verb
     // still lowers (carrying the raw name) so the IR validator can emit
     // a precise diagnostic rather than the lowering silently dropping it.
+    // `<apiResource>.<operation>(args)` — a TYPED call on a resource that
+    // binds an in-system `api` (M-T4.8).  Resolved against the callee's
+    // derived operation set, so the result type is the callee's own response
+    // type rather than the untyped `json` the `get`/`post` verbs yield.
+    // Checked BEFORE the verb registry: an api-bound resource has no verb
+    // vocabulary, and falling through would silently produce an untyped call.
+    if (recv.kind === "ref" && recv.refKind === "resource" && recv.resourceApiName) {
+      const ops = findApiOperations(recv.resourceApiName);
+      const opDef = ops?.find((o) => o.id === ms.member);
+      if (opDef) {
+        const callIR: ExprIR = {
+          kind: "call",
+          callKind: "remote-api-op",
+          name: ms.member,
+          args,
+          ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
+          remoteApiOp: {
+            resourceName: recv.resourceName ?? recv.name,
+            apiName: recv.resourceApiName,
+            operationId: opDef.id,
+            method: opDef.method,
+            path: opDef.path,
+            params: opDef.params.map((p) => ({ name: p.name, location: p.location })),
+            errorStatuses: [...opDef.errorStatuses],
+          },
+        };
+        // A 204 (destroy) has no success body.  There is no `void` primitive in
+        // the IR, so it falls back to `string` exactly as the existing void
+        // resource verbs (`put` / `enqueue` / `send`) do in `verbResultType`.
+        // Consistent, but a known wart: `let x = orders.destroyOrder(id)` will
+        // type-check against a value that isn't there.  Minting a real `void`
+        // primitive touches every backend's TypeTarget — its own change.
+        const resultType: TypeIR = opDef.responseType ?? { kind: "primitive", name: "string" };
+        return { recv: callIR, recvType: resultType };
+      }
+      // Unknown operation: fall through so the call lowers as a `free` call and
+      // the IR validator reports it precisely, rather than lowering silently.
+    }
     if (recv.kind === "ref" && recv.refKind === "resource" && recv.resourceKind) {
       const verbDef = findVerb(recv.resourceKind, ms.member);
       const callIR: ExprIR = {
@@ -1446,12 +1485,14 @@ function resolveNameRef(name: string, env: Env): ExprIR {
   // `resource-op` (see `applySuffixToRecv`).
   const resourceKind = env.resources?.get(name);
   if (resourceKind) {
+    const boundApi = env.resourceApis?.get(name);
     return {
       kind: "ref",
       name,
       refKind: "resource",
       resourceName: name,
       resourceKind,
+      ...(boundApi ? { resourceApiName: boundApi } : {}),
       type: { kind: "entity", name: RESOURCE_HANDLE_SHAPE },
     };
   }
@@ -1772,6 +1813,27 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
       return curType;
     }
     // Probe: `Pricing.quote(...)` domain-service member call — head is a
+    // `NameRef` resolving to an api-bound resource, first suffix is a call
+    // MemberSuffix naming one of the callee's operations (M-T4.8).  The result
+    // type is the callee's declared response type.  Same reason as the
+    // domain-service arm below: `inferExprType` is a SECOND inference pass the
+    // lowering arm's `recvType` does not feed, so without this a
+    // `let o = orders.getOrderById(id)` binds as `string` and the next line's
+    // `o.code` silently degrades — the untyped behaviour this feature exists
+    // to remove.
+    if (first && isMemberSuffix(first) && first.call && isNameRef(expr.head)) {
+      const boundApi = env.resourceApis?.get(expr.head.name);
+      const opDef = boundApi
+        ? findApiOperations(boundApi)?.find((o) => o.id === first.member)
+        : undefined;
+      if (opDef) {
+        curType = opDef.responseType ?? { kind: "primitive", name: "string" };
+        for (let i = 1; i < expr.suffixes.length; i++) {
+          curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+        }
+        return curType;
+      }
+    }
     // `NameRef` resolving to a `domainService`, first suffix is a call
     // MemberSuffix naming an operation.  The result type is the operation's
     // declared return type (an `or`-union for an exception-less op, so a

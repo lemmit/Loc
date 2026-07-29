@@ -3328,6 +3328,7 @@ export type CallKind =
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "remote-api-op" // a TYPED call on an in-system api-bound resource (M-T4.8)
   | "repo-read" // a read-only repository query in a `reading` domain-service body (domain-services.md rev. 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "action" // a bare call to a SIBLING page/component `action` (Proposal A Stage 1)
@@ -3405,6 +3406,10 @@ export type ExprIR =
        *  lower to a `resource-op` without re-resolving (Phase 4). */
       resourceName?: string;
       resourceKind?: DataSourceKind;
+      /** Populated when the resource binds an in-system `api` (M-T4.8) — a
+       *  `.op(...)` call on it resolves against that api's derived operation
+       *  set, not the closed per-kind verb registry. */
+      resourceApiName?: string;
       /** Populated when `refKind === "store-field"` — the declaring store's
        *  name, so a `<Store>.<field>` read renders against the right store
        *  module without re-resolving the receiver (Stage 5).  `name` is the
@@ -3478,6 +3483,25 @@ export type ExprIR =
         verb: string;
         capability: string;
         interface?: LoomInterface;
+      };
+      /** Populated when `callKind === "remote-api-op"` (M-T4.8) — a typed call
+       *  on a resource that binds an in-system `api`.  Fully resolved at
+       *  lowering: the caller's emitter needs no knowledge of how the CALLEE
+       *  mounts its routers, because `path` is already absolute and the
+       *  parameter locations are decided.  `errorStatuses` is what lets a
+       *  client type its failure union instead of collapsing every non-2xx
+       *  into a throw. */
+      remoteApiOp?: {
+        /** The binding resource — names the `<RESOURCE>_URL` env seam. */
+        resourceName: string;
+        apiName: string;
+        /** `ApiOperationIR.id` — the cross-backend operation identity. */
+        operationId: string;
+        method: string;
+        /** Absolute wire path, `API_BASE_PATH` included (`/api/orders/{id}`). */
+        path: string;
+        params: readonly { name: string; location: "path" | "query" | "body" }[];
+        errorStatuses: readonly number[];
       };
       /** Populated when `callKind === "domain-service"` (domain-services.md)
        *  — the resolved `domainService` name and the operation invoked.

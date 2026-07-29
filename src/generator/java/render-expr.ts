@@ -740,6 +740,18 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
       // A workflow's own helper — a `private` method on the shared
       // `<Ctx>Workflows` bean, scoped by workflow (two workflows share the class).
       return `${ctx.thisName}.${workflowFnCamel(e.wfScope!, e.name)}(${argList})`;
+    case "remote-api-op": {
+      // M-T4.8 slice 2 lands the LOWERING; the per-backend typed clients are
+      // slices 3-5.  `loom.remote-api-op-unsupported` rejects the model before
+      // codegen, so this is unreachable — it throws rather than emitting a
+      // plausible-looking call that would 404 at runtime.
+      const op = e.remoteApiOp!;
+      throw new Error(
+        `Typed api call '${op.resourceName}.${op.operationId}' reached the renderer, ` +
+          `but no typed client is emitted for this backend yet (M-T4.8 slices 3-5). ` +
+          `This should have been rejected by loom.remote-api-op-unsupported.`,
+      );
+    }
     case "resource-op": {
       const op = e.resourceOp!;
       const cls = ctx.resourceClasses?.get(op.resourceName);

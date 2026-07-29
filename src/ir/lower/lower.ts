@@ -161,6 +161,7 @@ import type {
   WorkflowIR,
 } from "../types/loom-ir.js";
 import { lit } from "../types/loom-ir.js";
+import { type ApiOperationIR, deriveContextOperations } from "../util/api-surface.js";
 import { classifyPage, type PageKind, type PageNameCtx } from "../util/page-kind.js";
 import { computePermissionClosures, type PermissionEdge } from "../util/permission-closure.js";
 import { lowerAuth } from "./lower-auth.js";
@@ -322,7 +323,29 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     enums: ambientEnums,
     entities: ambientEntities,
     domainServices: ambientDomainServices,
+    apiOperations: new Map(),
   });
+  // M-T4.8 structural pre-pass — the operation set of every `api` an
+  // api-bound resource targets, so a typed remote call can resolve its
+  // RESULT TYPE at the moment it lowers (`let o = orders.getById(id)` must be
+  // typed before the next statement's `o.code` lowers).
+  //
+  // Runs AFTER the ambient decl index is installed (the pre-lowering below
+  // resolves cross-document names through it) and BEFORE any body is lowered.
+  // `lowerContext` is pure w.r.t. global state, so lowering a target context
+  // twice is safe — the pre-pass result is discarded, and only contexts behind
+  // a BOUND api pay for it.  A system with no api-bound resource skips this
+  // entirely and lowers byte-identically.
+  const apiOperations = preLowerBoundApiOperations(allMembers);
+  if (apiOperations.size > 0) {
+    setAmbientDeclIndex({
+      valueObjects: ambientVOs,
+      enums: ambientEnums,
+      entities: ambientEntities,
+      domainServices: ambientDomainServices,
+      apiOperations,
+    });
+  }
   const systemNodes = allMembers.filter(isSystem);
   // Every top-level system-scoped declaration across the import graph —
   // domain (Tier 1: subdomain / context) plus deployment (Tier 2:
@@ -1063,6 +1086,57 @@ function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
   };
 }
 
+/** M-T4.8 — operation sets for the apis that some `resource { kind: api,
+ *  use: <Api> }` binds, keyed by api name.
+ *
+ *  Why a pre-pass at all: `deriveContextOperations` needs a lowered
+ *  `BoundedContextIR`, but a typed remote call needs its result type DURING
+ *  lowering — the callee may be lowered after the caller (or never, if it lives
+ *  in another deployable's context), so there is no ordering that makes the
+ *  single pass sufficient.  Pre-lowering the few target contexts is the cheap
+ *  fix: `lowerContext` is pure, the IR here is thrown away, and only contexts
+ *  behind a bound api are touched.
+ *
+ *  Returns an empty map when nothing binds an api — the gate that keeps every
+ *  existing system on the original single-pass path. */
+function preLowerBoundApiOperations(
+  allMembers: readonly AstNode[],
+): Map<string, readonly ApiOperationIR[]> {
+  const out = new Map<string, readonly ApiOperationIR[]>();
+  // Which apis are actually BOUND by a resource — not every api in the model.
+  // An api nobody calls costs nothing.
+  const boundApis = new Map<string, Api>();
+  const visit = (members: readonly AstNode[]): void => {
+    for (const m of members) {
+      if (isResource(m) && m.kind === "api") {
+        const target = m.use?.ref;
+        if (target && isApi(target) && !boundApis.has(target.name)) {
+          boundApis.set(target.name, target);
+        }
+      }
+      if ("members" in m && Array.isArray((m as { members?: unknown }).members)) {
+        visit((m as { members: AstNode[] }).members);
+      }
+    }
+  };
+  visit(allMembers);
+  if (boundApis.size === 0) return out;
+
+  for (const [name, api] of boundApis) {
+    const subdomain = api.source?.ref;
+    if (!subdomain) continue;
+    const ops: ApiOperationIR[] = [];
+    for (const ctx of subdomain.contexts) {
+      // Structural lower only — no user shape, no module permissions.  The
+      // derivation reads aggregates, their operations and finds; it does not
+      // read enrichment output, so an un-enriched context is enough.
+      ops.push(...deriveContextOperations(lowerContext(ctx)));
+    }
+    out.set(name, ops);
+  }
+  return out;
+}
+
 function lowerContext(
   ctx: BoundedContext,
   user?: UserIR,
@@ -1082,15 +1156,26 @@ function lowerContext(
   // keyed by name → infra kind.  Workflow bodies resolve `files.put(…)`
   // against this map.  Empty for loose contexts (no enclosing system).
   const resources = new Map<string, DataSourceKind>();
+  // Which of those handles is an in-system api binding (M-T4.8) — the subset
+  // whose `.op(...)` calls resolve against a served api's operation set rather
+  // than the closed per-kind verb registry.
+  const resourceApis = new Map<string, string>();
   const sys = AstUtils.getContainerOfType(ctx, isSystem);
   if (sys) {
     for (const m of sys.members) {
       if (isResource(m) && m.context?.ref === ctx && m.kind) {
         resources.set(m.name, m.kind as DataSourceKind);
+        const target = m.use?.ref;
+        if (m.kind === "api" && target && isApi(target)) {
+          resourceApis.set(m.name, target.name);
+        }
       }
     }
   }
-  const env = newEnv(ctx, user, modulePermissions, resources);
+  const env: Env = {
+    ...newEnv(ctx, user, modulePermissions, resources),
+    ...(resourceApis.size > 0 ? { resourceApis } : {}),
+  };
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];

@@ -73,6 +73,7 @@ import {
   validateQueryTimeProjectionBackend,
   validateReactIdReferences,
   validateRelayTargetNotSubscribed,
+  validateRemoteApiOpSupport,
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
@@ -165,6 +166,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
     validateApiResourceBindings(sys, diags);
+    validateRemoteApiOpSupport(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);

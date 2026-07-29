@@ -33,6 +33,7 @@ import type {
   ExprIR,
   FunctionIR,
   OperationIR,
+  Platform,
   SavingShape,
   StmtIR,
   SubdomainIR,
@@ -59,7 +60,7 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
-import { walkExprDeep } from "../../util/walk.js";
+import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
 import { walkExpr } from "./shared.js";
@@ -2618,6 +2619,60 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
           `'${need.contextName}' for kind '${need.kind}'.`,
         source: `${sys.name}/${resource.name}`,
       });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Typed remote-call backend support (M-T4.8).  Slice 2 lands the LOWERING —
+// `orders.getOrderById(id)` resolves against the callee's derived operation set
+// and types its result — but no backend emits the typed client yet (slices
+// 3-5).  Without this gate, such a model reaches the renderer and dies on a
+// stack trace.  This is the repo's HONEST-gap stance: a `loom.*` code the user
+// can read, not a silent mis-emit.
+//
+// Slice 3 removes "node" from the set below; slices 4-5 drain the rest.  When
+// the set empties, this check and its arm in every `render-expr.ts` go away.
+// ---------------------------------------------------------------------------
+
+/** Backends with no typed in-system api client yet.  Emptying this is what
+ *  "M-T4.8 is done" means. */
+const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([
+  "node",
+  "dotnet",
+  "java",
+  "python",
+  "elixir",
+]);
+
+export function validateRemoteApiOpSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  // Cheap exit: no api-bound resource ⇒ no typed call can exist.
+  if (!sys.dataSources.some((r) => r.apiName)) return;
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const dep of sys.deployables) {
+    if (!REMOTE_API_OP_UNSUPPORTED.has(dep.platform)) continue;
+    for (const cn of dep.contextNames) {
+      const ctx = ctxByName.get(cn);
+      if (!ctx) continue;
+      for (const wf of ctx.workflows) {
+        for (const st of wf.statements) {
+          walkWorkflowStmtExprsDeep(st, (e) => {
+            if (e.kind !== "call" || e.callKind !== "remote-api-op") return;
+            const op = e.remoteApiOp;
+            if (!op) return;
+            diags.push({
+              severity: "error",
+              code: "loom.remote-api-op-unsupported",
+              message:
+                `workflow '${wf.name}' calls '${op.resourceName}.${op.operationId}' on the ` +
+                `in-system api '${op.apiName}', but deployable '${dep.name}' (platform ` +
+                `'${dep.platform}') emits no typed client for it yet (M-T4.8 slices 3-5).  ` +
+                `Use the untyped 'get'/'post' verbs over a 'storage restApi' binding until then.`,
+              source: `${sys.name}/${ctx.name}/${wf.name}`,
+            });
+          });
+        }
+      }
     }
   }
 }
