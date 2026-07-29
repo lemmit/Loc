@@ -39,6 +39,10 @@ Rules of thumb:
   to see the node address book you patch against.
 - Page bodies use only the closed primitive vocabulary — call
   \`loom_list_primitives\` before writing a \`ui\` page.
+- When you CHANGE an existing model, call \`loom_diff\` (the previous source as
+  \`baseline\`, your new source) to surface the schema migration + any breaking
+  wire-contract change before reporting done — a \`destructive\`/\`breaking\` result
+  means data loss the user must confirm.
 - Keep answers short. Show the model, not a description of it.
 
 Available tools:

@@ -1677,10 +1677,16 @@ pure functions of `source`): `loom_validate` `{source}→ValidateReport`,
 addressing): `loom_find_symbol` / `loom_references` / `loom_hover` /
 `loom_rename` / `loom_quickfix` / `loom_unfold_macro` — **edits returned as an
 LSP `WorkspaceEdit`, never applied to disk** (consistent with pure tools).
+(c) **Evolution** (pure functions surfacing the derived-artifact deltas the
+playground's Migrations dock shows a human): `loom_snapshot` `{source}→SnapshotReport`
+(the `ddd snapshot` provenance capture, returned as data — **no file emission**)
+and `loom_diff` `{source,baseline?}→DiffReport` (the schema-migration + wire-
+contract delta a change implies, with the destructive/breaking gate surfaced).
 Folded from the superseded `language-services-and-agent-tools` proposal; the
 navigational verbs gate on fixing the LSP providers' real bugs (operation
-rename) first. `loom_verify` / `loom_read_model` / `loom_list_primitives` follow
-as their toolkit ops land. New diagnostic→fix mappings are
+rename) first. `loom_read_model` / `loom_list_primitives` / `loom_snapshot` /
+`loom_diff` have shipped; `loom_verify` follows once the playground can run the
+emitted suites in-browser (M-T8.3 / M-T8.6). New diagnostic→fix mappings are
 `src/language/fix-hints.ts` providers (one `ModelPatch` → both the LSP
 code-action and `loom_quickfix`), not duplicated bespoke verbs.
 

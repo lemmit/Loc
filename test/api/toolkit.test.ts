@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { applyPatches, generate, validate } from "../../src/api/index.js";
+import { applyPatches, diff, generate, snapshot, validate } from "../../src/api/index.js";
 
 // ---------------------------------------------------------------------------
 // The transport-neutral toolkit API (src/api/) — the one core every surface
@@ -59,6 +59,98 @@ describe("toolkit: generate", () => {
     const r = await generate(BARE);
     expect(r.ok).toBe(false);
     expect(r.deployables).toEqual([]);
+  });
+});
+
+// A minimal two-deployable system with a SQL backend, in two versions: `SYS_V2`
+// adds an optional `note` column to `SYS_V1` — an additive, non-destructive
+// change (the reverse direction drops it, which is destructive).
+const SYS_V1 = `system Shop {
+  storage primary { type: postgres }
+  deployable api { platform: node, contexts: [Sales] }
+
+  subdomain Selling {
+    context Sales {
+      aggregate Order with crudish {
+        reference: string
+        total: int
+      }
+      repository Orders for Order { }
+    }
+  }
+}
+`;
+
+const SYS_V2 = SYS_V1.replace(
+  "        total: int\n",
+  "        total: int\n        note: string?\n",
+);
+
+describe("toolkit: diff (evolution)", () => {
+  it("an added optional field is an additive, non-breaking migration + wire change", async () => {
+    const r = await diff(SYS_V2, SYS_V1);
+    expect(r.ok).toBe(true);
+    expect(r.hasBaseline).toBe(true);
+    expect(r.breaking).toBe(false);
+    const mig = r.migrations.find((m) => m.steps.some((s) => s.op === "addColumn"));
+    expect(mig).toBeDefined();
+    expect(mig?.destructive).toBe(false);
+    expect(mig?.steps.some((s) => /note/i.test(s.sql))).toBe(true);
+    const wc = r.wireChanges.find((c) => c.field === "note");
+    expect(wc?.breaking).toBe(false);
+  });
+
+  it("dropping a field is a destructive, breaking migration", async () => {
+    const r = await diff(SYS_V1, SYS_V2);
+    expect(r.ok).toBe(true);
+    expect(r.breaking).toBe(true);
+    const mig = r.migrations.find((m) => m.steps.some((s) => s.op === "dropColumn"));
+    expect(mig?.destructive).toBe(true);
+    expect(typeof mig?.destructiveMessage).toBe("string");
+  });
+
+  it("with no baseline every system reads Initial and the wire diff is skipped", async () => {
+    const r = await diff(SYS_V2);
+    expect(r.ok).toBe(true);
+    expect(r.hasBaseline).toBe(false);
+    expect(r.migrations.every((m) => m.name === "Initial")).toBe(true);
+    expect(r.wireChanges).toEqual([]);
+  });
+
+  it("a source with no system block is ok but has nothing to evolve", async () => {
+    const r = await diff(CLEAN);
+    expect(r.ok).toBe(true);
+    expect(r.migrations).toEqual([]);
+    expect(r.diagnostics.some((d) => d.code === "loom.no-system")).toBe(true);
+  });
+
+  it("a broken current source is not ok and carries its diagnostics", async () => {
+    const r = await diff(BARE);
+    expect(r.ok).toBe(false);
+    expect(r.migrations).toEqual([]);
+    expect(r.diagnostics.length).toBeGreaterThan(0);
+  });
+});
+
+describe("toolkit: snapshot (provenance capture)", () => {
+  it("captures a rule snapshot for a model with a provenanced field", async () => {
+    const prov = fs.readFileSync(
+      path.join(repoRoot, "web", "src", "examples", "provenance-system.ddd"),
+      "utf8",
+    );
+    const r = await snapshot(prov);
+    expect(r.ok).toBe(true);
+    expect(r.files.length).toBeGreaterThan(0);
+    for (const f of r.files) {
+      expect(f.path).toMatch(/\.loom\/snapshots\/.*\.loomsnap\.json$/);
+      expect(() => JSON.parse(f.content)).not.toThrow();
+    }
+  });
+
+  it("a model with no provenanced field captures nothing (still ok)", async () => {
+    const r = await snapshot(SYS_V2);
+    expect(r.ok).toBe(true);
+    expect(r.files).toEqual([]);
   });
 });
 

@@ -7,6 +7,8 @@ import { AuthConfigPanel } from "./AuthConfigPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
 import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
+import { MigrationsBody, migrationsDot } from "./MigrationsPanel";
+import { agentDot, ChatBody } from "./ChatPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
 import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 
@@ -28,7 +30,9 @@ const TAB_VALUES: readonly MobileTab[] = [
   "output",
   "backend",
   "tests",
+  "migrations",
   "history",
+  "agent",
   "auth",
 ] as const;
 
@@ -49,6 +53,8 @@ function isMobileTab(v: string | null): v is MobileTab {
 export function MobileShell({ ctx }: Props): JSX.Element {
   const { activeTab, setActiveTab, codeView, setCodeView } = ctx;
   const outputDot = outputAggregateDot(ctx);
+  const migrDot = migrationsDot(ctx);
+  const agtDot = agentDot(ctx);
 
   return (
     <Tabs
@@ -156,8 +162,18 @@ export function MobileShell({ ctx }: Props): JSX.Element {
       <Tabs.Panel value="tests">
         <TestsBody ctx={ctx} active={activeTab === "tests"} />
       </Tabs.Panel>
+      <Tabs.Panel value="migrations">
+        {/* Evolution lifecycle — schema migrations, wire-contract breaking
+            changes, and provenance-snapshot capture against a pinned git
+            baseline.  Desktop parity (the dock's Migrations tab); the async
+            git reads are gated on visibility. */}
+        <MigrationsBody ctx={ctx} active={activeTab === "migrations"} />
+      </Tabs.Panel>
       <Tabs.Panel value="history">
         <HistoryBody ctx={ctx} active={activeTab === "history"} />
+      </Tabs.Panel>
+      <Tabs.Panel value="agent">
+        <ChatBody ctx={ctx} />
       </Tabs.Panel>
       <Tabs.Panel value="auth">
         <AuthConfigPanel ctx={ctx} />
@@ -180,7 +196,19 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         </Tabs.Tab>
         <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Runtime</Tabs.Tab>
         <Tabs.Tab value="tests" data-testid="mobile-tab-tests">Tests</Tabs.Tab>
+        <Tabs.Tab value="migrations" data-testid="mobile-tab-migrations">
+          {/* Red on any breaking/destructive change, yellow on non-breaking
+              schema/wire deltas — mirrors the desktop dock's Migrations dot. */}
+          <Indicator size={6} color={migrDot ?? "red"} disabled={migrDot === null} offset={-2}>
+            <Box>Migrate</Box>
+          </Indicator>
+        </Tabs.Tab>
         <Tabs.Tab value="history" data-testid="mobile-tab-history">History</Tabs.Tab>
+        <Tabs.Tab value="agent" data-testid="mobile-tab-agent">
+          <Indicator size={6} color={agtDot ?? "green"} disabled={agtDot === null} offset={-2}>
+            <Box>Agent</Box>
+          </Indicator>
+        </Tabs.Tab>
         <Tabs.Tab value="auth" data-testid="mobile-tab-auth">Auth</Tabs.Tab>
       </Tabs.List>
     </Tabs>
