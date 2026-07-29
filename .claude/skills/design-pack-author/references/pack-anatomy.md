@@ -176,7 +176,8 @@ a partial under its logical name, so higher-level templates compose primitives v
 **Stack wiring:** `package-json.hbs` carries only pack-specific deps and pulls
 framework deps via `{{> stack-package-deps}}` / `{{> stack-package-devdeps}}`.
 Do NOT restate React/Vue/Svelte/Angular/router/zod/Vite/TS — they live in
-`stacks/<id>/stack.json` + the two `*.hbs` partials.
+the two `stacks/<id>/*.hbs` partials (`stack.json` is just an `id`+`description`
+label; codegen never reads it).
 
 ## Registration points (all formats)
 
@@ -199,6 +200,6 @@ Reference files worth reading directly:
 - `src/generator/_packs/loader.ts` (`compilePack`) — the gate.
 - `src/generator/_packs/loader-fs.ts` (`resolvePackDir`) — resolution.
 - `src/generator/_walker/registry.ts` (`WALKER_PRIMITIVES`) — the dispatch table.
-- `stacks/<id>/stack.json` — stack deps.
+- `stacks/<id>/stack-package-deps.hbs` — the real stack dep pins.
 - `docs/design-packs.md` — the long-form contract (§2 manifest, §2a stacks, §3
   required emits, §12 new-version recipe).
