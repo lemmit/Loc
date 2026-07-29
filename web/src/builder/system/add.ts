@@ -154,3 +154,71 @@ export function addSubdomainSource(source: string): string | null {
   const next = insertIntoBlock(source, system, text);
   return parseDdd(next).parserErrors.length === 0 ? next : null;
 }
+
+// ---------------------------------------------------------------------------
+// System-scope construct kinds the v2 view now renders but aren't in v1's
+// `NodeKind` union (see `./model`) — so they get their own sibling function
+// rather than widening `addConstructSource`'s switch. `resource` /
+// `channelSource` / `timerSource` each carry a mandatory cross-ref
+// (`for:` a context / channel / event respectively); the add targets the
+// first suitable construct already in the model and returns null when none
+// exists, same convention as `repository` / `api` above. `capability` has no
+// mandatory ref.
+// ---------------------------------------------------------------------------
+
+export type SystemExtraKind = "resource" | "channelSource" | "timerSource" | "capability";
+
+const SYSTEM_EXTRA_BASE: Record<SystemExtraKind, string> = {
+  resource: "Resource",
+  channelSource: "ChannelSource",
+  timerSource: "TimerSource",
+  capability: "Capability",
+};
+
+function firstOfType(ast: Model, type: string): string | undefined {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === type) return (n as { name?: string }).name;
+  }
+  return undefined;
+}
+
+function systemExtraTemplate(kind: SystemExtraKind, name: string, ast: Model): string | null {
+  switch (kind) {
+    case "resource": {
+      const ctx = contexts(ast)[0]?.name;
+      const storage = firstOfType(ast, "Storage");
+      return ctx && storage
+        ? `\n  resource ${name} {\n    for: ${ctx},\n    kind: state,\n    use: ${storage}\n  }\n`
+        : null;
+    }
+    case "channelSource": {
+      const channel = firstOfType(ast, "Channel");
+      return channel ? `\n  channelSource ${name} {\n    for: ${channel}\n  }\n` : null;
+    }
+    case "timerSource": {
+      const event = firstOfType(ast, "EventDecl");
+      return event
+        ? `\n  timerSource ${name} {\n    for: ${event},\n    cron: "0 0 * * *"\n  }\n`
+        : null;
+    }
+    case "capability":
+      return `\n  capability ${name} {\n  }\n`;
+    default:
+      return null;
+  }
+}
+
+/** Add a system-scope construct from the v2-only kind set (resource /
+ *  channelSource / timerSource / capability). `resource` needs an existing
+ *  context and storage, `channelSource` an existing channel, `timerSource` an
+ *  existing event — returns null when the mandatory target is absent. */
+export function addSystemExtraSource(source: string, kind: SystemExtraKind): string | null {
+  const ast = parseDdd(source).ast;
+  const system = ast.members.find((m): m is System => m.$type === "System");
+  if (!system) return null;
+  const name = freshName(ast, SYSTEM_EXTRA_BASE[kind]);
+  const text = systemExtraTemplate(kind, name, ast);
+  if (!text) return null;
+  const next = insertIntoBlock(source, system, text);
+  return parseDdd(next).parserErrors.length === 0 ? next : null;
+}
