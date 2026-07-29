@@ -17,6 +17,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { ExprIR, WorkflowStmtIR } from "../../src/ir/types/loom-ir.js";
 import { walkWorkflowStmtExprsDeep } from "../../src/ir/util/walk.js";
+import { REMOTE_API_OP_UNSUPPORTED } from "../../src/ir/validate/checks/system-checks.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
 
@@ -139,19 +140,27 @@ describe("typed in-system api call — the pre-pass gate", () => {
 });
 
 describe("typed in-system api call — backend support gate", () => {
-  it("rejects the call on a backend with no typed client yet", async () => {
-    // Slice 3 shipped the Hono client, so `node` is supported now.  The gate
-    // still guards the four backends whose emitters land in slices 4-5 — which
-    // is the point of keeping it: an unsupported backend must say so rather
-    // than reach the renderer.
-    const diags = validateLoomModel(await lower(system(TYPED_CALL, { callerPlatform: "python" })));
-    const d = diags.find((x) => x.code === "loom.remote-api-op-unsupported");
-    expect(d?.severity).toBe("error");
-    expect(d?.message).toContain("getOrderById");
-    expect(d?.message).toContain("shippingSvc");
-  });
+  // DERIVED, not hardcoded.  This assertion has already broken twice by naming
+  // a platform that a later slice made supported (node in slice 3, python in
+  // 4a) — the test was pinning a temporary state instead of a behaviour.  It
+  // now picks whatever is still on the list, and disappears on its own when the
+  // list empties and the gate is deleted.
+  const stillUnsupported = [...REMOTE_API_OP_UNSUPPORTED][0];
 
-  it("accepts the call on node, whose typed client ships", async () => {
+  it.skipIf(!stillUnsupported)(
+    "rejects the call on a backend with no typed client yet",
+    async () => {
+      const diags = validateLoomModel(
+        await lower(system(TYPED_CALL, { callerPlatform: stillUnsupported as string })),
+      );
+      const d = diags.find((x) => x.code === "loom.remote-api-op-unsupported");
+      expect(d?.severity).toBe("error");
+      expect(d?.message).toContain("getOrderById");
+      expect(d?.message).toContain("shippingSvc");
+    },
+  );
+
+  it("accepts the call on a backend whose typed client ships", async () => {
     const diags = validateLoomModel(await lower(system(TYPED_CALL)));
     expect(diags.filter((d) => d.code === "loom.remote-api-op-unsupported")).toEqual([]);
   });

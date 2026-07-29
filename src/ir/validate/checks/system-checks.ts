@@ -2637,7 +2637,7 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 
 /** Backends with no typed in-system api client yet.  Emptying this is what
  *  "M-T4.8 is done" means. */
-const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([
+export const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([
   "dotnet",
   "java",
   "elixir",
