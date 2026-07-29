@@ -36,6 +36,7 @@ import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
 import { ifParses, spliceNodeIfParses } from "../edit-engine";
 import { RefusalLine, useRefusal } from "../refusal";
+import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
 import {
   printRequirementText,
   printSolutionText,
@@ -236,7 +237,24 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   // forms with the canonical text.  Mirrors `BuilderPane`'s `rev` pattern.
   const [rev, setRev] = useState(0);
   const refusal = useRefusal();
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  // Deriving on `ctx` re-parsed the source AND (below) re-ran `lowerModel` +
+  // `enrichLoomModel` synchronously on the render path for every unrelated app
+  // tick — a pipeline step, a diagnostic, an agent token, a test result.  Both
+  // now hang off the same source-change signals the other builder panes use:
+  // this pane's own `rev`, the debounced editor tick, and the external-reseed
+  // signals (see `SystemBuilderPane` for the dep-by-dep rationale).
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  const externalTick = useExternalSourceTick(
+    ctx.initialSource,
+    ctx.activeSourcePath,
+    ctx.sourceEpoch,
+  );
+  const getSource = ctx.getSource;
+  const parsed = useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
+    () => parseDdd(getSource()),
+    [getSource, rev, liveTick, externalTick],
+  );
   const trace = useMemo(() => collect(parsed.ast), [parsed]);
   const [selected, setSelected] = useState<Selection | null>(null);
 

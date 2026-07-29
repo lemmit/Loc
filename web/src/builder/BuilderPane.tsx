@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Box, Group, Text } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
@@ -8,6 +8,7 @@ import { isAggregate, isOperation, isPage, isWorkflow } from "../../../src/langu
 import { parseDdd } from "./parse";
 import { ifParses, spliceNodeIfParses } from "./edit-engine";
 import { RefusalLine, useRefusal } from "./refusal";
+import { useLiveSourceTick } from "./use-live-source-tick";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
@@ -95,43 +96,18 @@ function annotateDiagnostics(tree: BuilderNode, diagnostics: readonly { range: {
   }
 }
 
-// Debounce window for the text→canvas live re-seed.  300ms is the lower
-// bound the task gave; long enough to coalesce a typing storm in Monaco,
-// short enough that an edit feels "live" to the user watching the canvas.
-const LIVE_SYNC_DEBOUNCE_MS = 350;
-
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
-  // Debounced mirror of `ctx.editorSourceTick`.  Bumped after the user
-  // has stopped typing for `LIVE_SYNC_DEBOUNCE_MS`; that drives the live
-  // canvas re-seed (separate from `rev`, which is the Apply-path counter
-  // that fully remounts the craft Editor — the live path mustn't remount,
-  // or the user's selection / open inputs would tear down).
-  //
-  // The very first editor tick observed by this BuilderPane instance is
-  // captured in `firstSeenTickRef` and ignored: the initial canvas seed
-  // already reflects whatever source the user typed before opening the
-  // builder, so re-running the seed on that pre-mount tick would clobber
-  // a selection / settings-panel edit the user started during the
-  // debounce window after switching tabs.  Only ticks that *advance*
-  // beyond that baseline schedule a re-seed.
-  const [liveTick, setLiveTick] = useState(0);
-  const firstSeenTickRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (firstSeenTickRef.current === null) {
-      firstSeenTickRef.current = ctx.editorSourceTick;
-      return;
-    }
-    if (ctx.editorSourceTick <= firstSeenTickRef.current) return;
-    const t = window.setTimeout(() => setLiveTick((n) => n + 1), LIVE_SYNC_DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [ctx.editorSourceTick]);
-  // `rev` re-reads on Apply (full remount); `liveTick` re-reads on the
-  // debounced editor change (in-place re-seed inside PageBuilder).  Don't
-  // depend on `ctx` here — ctx is a fresh object every App render, but the
-  // underlying source only changes when one of these counters bumps, and
-  // re-parsing on every render makes `liveNodes` a new reference each
+  // Debounced mirror of `ctx.editorSourceTick` — bumped after the user has
+  // stopped typing.  Separate from `rev` (the Apply-path counter that fully
+  // remounts the craft Editor); the live path must NOT remount or the user's
+  // selection / open inputs would tear down.  See `use-live-source-tick.ts`
+  // for the baseline rule (the first tick a pane sees is not a change).
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  // `rev` re-reads on Apply; `liveTick` re-reads on the debounced editor
+  // change (in-place re-seed inside PageBuilder).  Don't depend on `ctx`
+  // here — re-parsing on every render makes `liveNodes` a new reference each
   // time, which would echo into a deserialize that clobbers the user's
   // in-flight settings-panel edits.
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -152,10 +152,17 @@ const ERROR_TITLE: Record<WorkspaceSourcesError["op"], string> = {
   "delete-folder": "Could not delete the folder",
 };
 
+/** Shared empty-set identity for the optional `emptyFolders` prop. */
+const NO_EMPTY_FOLDERS: ReadonlySet<string> = new Set<string>();
+
 export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   const variant = props.variant ?? "accordion";
   const persistent = props.persistent ?? true;
-  const emptyFolders = props.emptyFolders ?? new Set<string>();
+  // Module-level fallback, not `new Set()` inline: an inline literal is a fresh
+  // identity every render, which makes the `root` memo below miss every single
+  // time (a full workspace-tree rebuild per render) for every caller that
+  // doesn't pass `emptyFolders`.
+  const emptyFolders = props.emptyFolders ?? NO_EMPTY_FOLDERS;
   const root = useMemo(
     () => workspaceTree(props.files, props.activePath, emptyFolders),
     [props.files, props.activePath, emptyFolders],

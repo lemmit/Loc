@@ -63,6 +63,7 @@ import {
 import { fnv1a32 } from "./util/hash";
 import { downloadBytes, makeZip } from "./util/zip";
 import { usePersistedState } from "./util/usePersistedState";
+import { useStableFns } from "./util/useStableFns";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
 import {
   bootError as selBootError,
@@ -101,6 +102,9 @@ import type { LogLine } from "./util/log-line";
 const LOG_CAP = 1000;
 const capLog = (lines: LogLine[]): LogLine[] =>
   lines.length > LOG_CAP ? lines.slice(-LOG_CAP) : lines;
+
+/** Shared "no generated files yet" identity — see the `files` derivation. */
+const EMPTY_FILES: VirtualFile[] = [];
 
 /** Per-deployable summary derived from the generated file tree.
  *  The playground only knows how to bundle + boot Hono backends and
@@ -875,12 +879,14 @@ export default function App(): JSX.Element {
   const bootErrorMessage = selBootError(pipeline);
   const dispatchSlot = pipeline.dispatch.kind === "result" ? pipeline.dispatch.result : null;
 
-  const reactBundleStatus: ReactBundleStatus = (() => {
+  // Memoised: this is a fresh object per render otherwise, which would make
+  // the `ctx` memo below miss on every single render.
+  const reactBundleStatus = useMemo<ReactBundleStatus>(() => {
     if (pipeline.bundle.kind !== "result") return { kind: "pending" };
     const r = pipeline.bundle.react;
     if (r === null) return { kind: "absent" };
     return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
-  })();
+  }, [pipeline.bundle]);
 
   // Last-good preview retention.  The preview now refreshes in place,
   // so it must stay mounted across the live-mode regenerate cascade —
@@ -1375,7 +1381,10 @@ export default function App(): JSX.Element {
     })();
   }
 
-  const files: VirtualFile[] = generateSuccess?.files ?? [];
+  // `?? EMPTY_FILES` (module-level), not `?? []`: a fresh array literal per
+  // render made the three memos below — and the `ctx` memo — miss every render
+  // for the entire pre-generate lifetime of the app.
+  const files: VirtualFile[] = generateSuccess?.files ?? EMPTY_FILES;
   // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
   // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
   const tree = useMemo(
@@ -1596,21 +1605,32 @@ export default function App(): JSX.Element {
     setAgentMessages([]);
   }
 
-  // Bundle every piece of state + every action into a single ctx
-  // object that the shell + its panes consume.  Children destructure
-  // what they need; no React context, no prop drilling.
-  const ctx: LayoutCtx = {
-    isDesktop,
-    exampleId,
+  // ---------------------------------------------------------------------
+  // ctx — the state + actions bundle the shell and its panes consume.
+  //
+  // Identity matters here.  `ctx` used to be a fresh object literal on every
+  // App render, and three heavy panes (the v1 / v2 system builders and the
+  // requirements pane) keyed their derivations off that identity — so ANY app
+  // state tick (a pipeline step, a diagnostic arriving, an agent token
+  // streaming, a test result landing) re-ran a main-thread Langium parse, a
+  // graph rebuild and a React Flow reflow.  On a memory-constrained phone that
+  // churn is the OOM feeder.
+  //
+  // Two halves make the memo below actually hit:
+  //   * every CALLBACK goes through `useStableFns`, which hands back wrappers
+  //     with a fixed identity that forward to the newest render's closure (so
+  //     nothing is frozen on a stale snapshot — the failure mode a hand-written
+  //     `useCallback` dep list invites), and
+  //   * every VALUE is listed in the dep array below, in field order.
+  //
+  // The three `*Ref.current` reads are deliberate deps: they mutate without a
+  // render, and listing them reproduces exactly the old behaviour (ctx picks
+  // the latest ref value up on whatever render happens next).
+  // ---------------------------------------------------------------------
+  const ctxFns = useStableFns({
     setExampleId,
     createWorkspaceFromExample,
-    augmentedExamplesList,
-    initialSource,
-    getSource: () => sourceRef.current,
-    workspace,
-    activeSourcePath: sources.activePath,
-    sourceFiles: sources.files,
-    sourceEpoch: sources.epoch,
+    getSource: (): string => sourceRef.current,
     setActiveSourcePath: sources.setActivePath,
     // New-file: seed the VFS with a stub body, and only once that write
     // has LANDED flip the active path + schedule a regenerate (matching
@@ -1620,7 +1640,7 @@ export default function App(): JSX.Element {
     // tree row that evaporated on the next refresh, and a successful one
     // never reached the generator.  `createFile` reports both failure
     // modes on the controller's error channel, which the tree renders.
-    createSourceFile: (path: string) => {
+    createSourceFile: (path: string): void => {
       void (async () => {
         if (await sourcesRef.current.controller.createFile(path, NEW_FILE_SEED)) {
           scheduleAutoGenerate();
@@ -1630,19 +1650,11 @@ export default function App(): JSX.Element {
     deleteSourceFile: sources.delete,
     renameSourceFile,
     deleteSourceFolder,
-    emptySourceFolders: sources.emptyFolders,
     createEmptySourceFolder: sources.createEmptyFolder,
     deleteEmptySourceFolder: sources.deleteEmptyFolder,
-    sourcesPersistent: sources.persistent,
-    sourceError: sources.lastError,
     clearSourceError: sources.clearError,
-    lspClient: lspClientRef.current,
-    buildClient: buildClientRef.current,
-    engine: engineRef.current,
-    authedRuntime,
-    authStub,
     setAuthStub,
-    onSourceChange: (text, origin) => {
+    onSourceChange: (text: string, origin?: "editor" | "builder"): void => {
       sourceRef.current = text;
       // A real source change (typing in Monaco or a Builder Apply) — from
       // here on, mobile auto-generate is allowed (see hasUserEditedRef).
@@ -1671,96 +1683,201 @@ export default function App(): JSX.Element {
       // LSP — keeping the source tab and Problems panel in sync.
       if (origin !== "editor") editorHandleRef.current?.setSource(text);
     },
-    editorSourceTick,
     onDiagnosticsChange: setDiagnostics,
     scheduleAutoGenerate,
-    editorHandleRef,
-    diagnostics,
-    errorCount,
-    generatedConflicts,
-    warningCount,
-    pipeline,
-    generateResult,
-    generateSuccess,
-    honoBundleResult,
-    reactBundleResult,
-    reactBundleStatus,
-    honoBundle,
-    reactBundle,
-    previewBundle,
-    previewBooted,
-    previewProblem,
-    ddl,
-    persistent,
-    migrated,
-    bootErrorMessage,
-    dispatchSlot,
-    files,
-    tree,
-    selectedFile,
-    selectedPath,
     setSelectedPath,
-    unsupportedDeployables: deployableAnalysis.unsupported,
-    reqMethod,
     setReqMethod,
-    reqPath,
     setReqPath,
-    reqBody,
     setReqBody,
-    apiEndpoints,
-    selectedOpId,
-    selectedEndpoint,
     runSelectEndpoint,
-    pathParamValues,
     setPathParam,
-    queryParamValues,
     setQueryParam,
     runGenerateExample,
     runQuery,
-    liveMode,
     setLiveMode,
-    activeTab,
     setActiveTab,
-    dockTab,
     setDockTab,
-    codeView,
     setCodeView,
-    testResults,
     setTestResults,
-    outputStream,
     setOutputStream,
-    backendLog,
-    appLog,
     appendAppLog,
     getAppLog,
     clearBackendLog,
     clearAppLog,
-    copied,
     copyShareLink,
-    agentMessages,
-    agentRunning,
-    runAgentDemo: () => void runAgentDemo(),
-    agentSettings,
+    runAgentDemo: (): void => void runAgentDemo(),
     setAgentSettings,
-    sendAgentMessage: (text: string) => void sendAgentMessage(text),
+    sendAgentMessage: (text: string): void => void sendAgentMessage(text),
     clearAgentChat,
-    runGenerate: () => void runGenerate(true),
-    runBundle: () => void runBundle(),
-    runBoot: () => void runBoot(),
-    runResetData: () => void runResetData(),
-    runWipe: () => void runWipe(),
-    runDispatch: () => void runDispatch(),
-    runFull: () => void runFull(),
-    evolution,
-    evolutionRunning,
-    runEvolutionDiff: (ref?: string) => void runEvolutionDiff(ref),
-    evolutionBaselineRef,
+    runGenerate: (): void => void runGenerate(true),
+    runBundle: (): void => void runBundle(),
+    runBoot: (): void => void runBoot(),
+    runResetData: (): void => void runResetData(),
+    runWipe: (): void => void runWipe(),
+    runDispatch: (): void => void runDispatch(),
+    runFull: (): void => void runFull(),
+    runEvolutionDiff: (ref?: string): void => void runEvolutionDiff(ref),
     pinEvolutionBaseline,
-    snapshotResult,
-    snapshotRunning,
-    runCaptureSnapshot: () => void runCaptureSnapshot(),
+    runCaptureSnapshot: (): void => void runCaptureSnapshot(),
     runDownloadZip,
-  };
+  });
+
+  const lspClient = lspClientRef.current;
+  const buildClient = buildClientRef.current;
+  const engine = engineRef.current;
+  const unsupportedDeployables = deployableAnalysis.unsupported;
+  const activeSourcePath = sources.activePath;
+  const sourceFiles = sources.files;
+  const sourceEpoch = sources.epoch;
+  const emptySourceFolders = sources.emptyFolders;
+  const sourcesPersistent = sources.persistent;
+  const sourceError = sources.lastError;
+
+  const ctx: LayoutCtx = useMemo(
+    () => ({
+      isDesktop,
+      exampleId,
+      augmentedExamplesList,
+      initialSource,
+      workspace,
+      activeSourcePath,
+      sourceFiles,
+      sourceEpoch,
+      emptySourceFolders,
+      sourcesPersistent,
+      sourceError,
+      lspClient,
+      buildClient,
+      engine,
+      authedRuntime,
+      authStub,
+      editorSourceTick,
+      editorHandleRef,
+      diagnostics,
+      errorCount,
+      generatedConflicts,
+      warningCount,
+      pipeline,
+      generateResult,
+      generateSuccess,
+      honoBundleResult,
+      reactBundleResult,
+      reactBundleStatus,
+      honoBundle,
+      reactBundle,
+      previewBundle,
+      previewBooted,
+      previewProblem,
+      ddl,
+      persistent,
+      migrated,
+      bootErrorMessage,
+      dispatchSlot,
+      files,
+      tree,
+      selectedFile,
+      selectedPath,
+      unsupportedDeployables,
+      reqMethod,
+      reqPath,
+      reqBody,
+      apiEndpoints,
+      selectedOpId,
+      selectedEndpoint,
+      pathParamValues,
+      queryParamValues,
+      liveMode,
+      activeTab,
+      dockTab,
+      codeView,
+      testResults,
+      outputStream,
+      backendLog,
+      appLog,
+      copied,
+      agentMessages,
+      agentRunning,
+      agentSettings,
+      evolution,
+      evolutionRunning,
+      evolutionBaselineRef,
+      snapshotResult,
+      snapshotRunning,
+      ...ctxFns,
+    }),
+    // Exhaustive over every VALUE field above, in the same order.  `ctxFns`
+    // and `editorHandleRef` are identity-stable by construction.
+    [
+      ctxFns,
+      isDesktop,
+      exampleId,
+      augmentedExamplesList,
+      initialSource,
+      workspace,
+      activeSourcePath,
+      sourceFiles,
+      sourceEpoch,
+      emptySourceFolders,
+      sourcesPersistent,
+      sourceError,
+      lspClient,
+      buildClient,
+      engine,
+      authedRuntime,
+      authStub,
+      editorSourceTick,
+      diagnostics,
+      errorCount,
+      generatedConflicts,
+      warningCount,
+      pipeline,
+      generateResult,
+      generateSuccess,
+      honoBundleResult,
+      reactBundleResult,
+      reactBundleStatus,
+      honoBundle,
+      reactBundle,
+      previewBundle,
+      previewBooted,
+      previewProblem,
+      ddl,
+      persistent,
+      migrated,
+      bootErrorMessage,
+      dispatchSlot,
+      files,
+      tree,
+      selectedFile,
+      selectedPath,
+      unsupportedDeployables,
+      reqMethod,
+      reqPath,
+      reqBody,
+      apiEndpoints,
+      selectedOpId,
+      selectedEndpoint,
+      pathParamValues,
+      queryParamValues,
+      liveMode,
+      activeTab,
+      dockTab,
+      codeView,
+      testResults,
+      outputStream,
+      backendLog,
+      appLog,
+      copied,
+      agentMessages,
+      agentRunning,
+      agentSettings,
+      evolution,
+      evolutionRunning,
+      evolutionBaselineRef,
+      snapshotResult,
+      snapshotRunning,
+    ],
+  );
 
   return (
     <AppShell

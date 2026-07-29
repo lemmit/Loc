@@ -26,6 +26,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
+import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
 import {
   addStatement,
   deleteStatement,
@@ -373,8 +374,23 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // index (+ optional field index for emit fields / call args). Mirrors v1.
   const [structuredKey, setStructuredKey] = useState<string | null>(null);
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
-  // Re-parse after every commit by depending on `rev` (`apply` bumps it).
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  // Re-parse after every commit by depending on `rev` (`apply` bumps it) —
+  // plus the debounced editor tick and the external-reseed signals.  This used
+  // to depend on `ctx`, whose identity churned on every app tick, so a
+  // pipeline step / diagnostic / agent token re-ran the parse AND the whole
+  // view-graph build.  See `SystemBuilderPane` for the dep-by-dep rationale.
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  const externalTick = useExternalSourceTick(
+    ctx.initialSource,
+    ctx.activeSourcePath,
+    ctx.sourceEpoch,
+  );
+  const getSource = ctx.getSource;
+  const parsed = useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
+    () => parseDdd(getSource()),
+    [getSource, rev, liveTick, externalTick],
+  );
   // Same parse gate v1 carries (`SystemBuilderPane`): a recovered AST would
   // otherwise yield a silently-partial graph whose delete/rename handlers
   // splice CST ranges that no longer describe the user's source.  The gate has

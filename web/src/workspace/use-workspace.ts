@@ -20,7 +20,7 @@
 //     a build-pipeline concern.  App.tsx wires the two together.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { requestPersistentStorage } from "../vfs/legacy-idb.js";
 import { DEFAULT_GIT_DB, GitStore, openGitFs } from "./git/index.js";
 import { importLegacyIdbWorkspace } from "./git/import-legacy.js";
@@ -152,16 +152,35 @@ export function useWorkspace(): WorkspaceState {
     }
   }, []);
 
-  return {
-    store,
-    loaded,
-    persistedSource,
-    workspaces: registry.workspaces,
-    activeId: registry.activeId,
-    activeName: active.name,
-    switchWorkspace,
-    createWorkspace,
-    renameWorkspace,
-    deleteWorkspace,
-  };
+  // Memoised so the returned object has a STABLE identity between renders that
+  // changed nothing here.  App.tsx hands this straight through as
+  // `ctx.workspace`; a fresh object per render would defeat the `ctx` memo (and
+  // with it every consumer's re-render bailout) no matter how careful the dep
+  // list there is.  All four actions are already `useCallback`-stable.
+  return useMemo(
+    () => ({
+      store,
+      loaded,
+      persistedSource,
+      workspaces: registry.workspaces,
+      activeId: registry.activeId,
+      activeName: active.name,
+      switchWorkspace,
+      createWorkspace,
+      renameWorkspace,
+      deleteWorkspace,
+    }),
+    [
+      store,
+      loaded,
+      persistedSource,
+      registry.workspaces,
+      registry.activeId,
+      active.name,
+      switchWorkspace,
+      createWorkspace,
+      renameWorkspace,
+      deleteWorkspace,
+    ],
+  );
 }
