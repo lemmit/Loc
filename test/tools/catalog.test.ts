@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type {
+  DiffReport,
   GenerateReport,
   ModelView,
   Outline,
   PatchResult,
   PrimitiveCatalog,
+  SnapshotReport,
   ValidateReport,
 } from "../../src/api/index.js";
 import { callTool, TOOLS, TOOLS_BY_NAME } from "../../src/tools/index.js";
@@ -123,6 +125,34 @@ describe("agent-tool catalog", () => {
     expect(applied.ok).toBe(true);
     const after = (await callTool("loom_validate", { source: applied.text })) as ValidateReport;
     expect(after.ok).toBe(true);
+  });
+
+  it("loom_diff surfaces the migration + wire delta a change implies", async () => {
+    const v1 = `system Shop {
+  storage primary { type: postgres }
+  deployable api { platform: node, contexts: [Sales] }
+  subdomain Selling { context Sales {
+    aggregate Order with crudish { reference: string }
+    repository Orders for Order { }
+  } }
+}
+`;
+    const v2 = v1.replace("reference: string", "reference: string\n    note: string?");
+    const r = (await callTool("loom_diff", { source: v2, baseline: v1 })) as DiffReport;
+    expect(r.ok).toBe(true);
+    expect(r.hasBaseline).toBe(true);
+    expect(r.breaking).toBe(false);
+    expect(r.migrations.some((m) => m.steps.some((s) => s.op === "addColumn"))).toBe(true);
+    // Omitting the baseline derives the first-run ("Initial") migration.
+    const first = (await callTool("loom_diff", { source: v2 })) as DiffReport;
+    expect(first.hasBaseline).toBe(false);
+    expect(first.migrations.every((m) => m.name === "Initial")).toBe(true);
+  });
+
+  it("loom_snapshot captures nothing for a model with no provenanced field", async () => {
+    const r = (await callTool("loom_snapshot", { source: CLEAN })) as SnapshotReport;
+    expect(r.ok).toBe(true);
+    expect(r.files).toEqual([]);
   });
 
   it("rejects unknown tools and bad args", async () => {

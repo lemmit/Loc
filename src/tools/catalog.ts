@@ -18,6 +18,7 @@
 
 import {
   applyPatches,
+  diff,
   findSymbol,
   generate,
   hover,
@@ -27,6 +28,7 @@ import {
   readModel,
   references,
   rename,
+  snapshot,
   unfoldMacro,
   validate,
 } from "../api/index.js";
@@ -268,6 +270,35 @@ export const TOOLS: ToolDef[] = [
     },
     handler: (args) =>
       unfoldMacro(reqString(args, "source"), reqString(args, "macro"), reqString(args, "on")),
+  },
+  {
+    name: "loom_snapshot",
+    description:
+      "Capture the provenance rule snapshots a .ddd model would write — the toolkit equivalent of the CLI `ddd snapshot` prebuild step (and the playground's snapshot button). Returns immutable `.loom/snapshots/*.loomsnap.json` files (path + content); `files` is empty (still ok) when the model writes no `provenanced` field, so there is nothing to snapshot. Writes nothing to disk.",
+    inputSchema: SOURCE_SCHEMA,
+    handler: (args) => snapshot(reqString(args, "source")),
+  },
+  {
+    name: "loom_diff",
+    description:
+      "The evolution diff between a previous `.ddd` source (`baseline`) and the new one (`source`) — the same signals the playground's Migrations dock surfaces for a human. Returns (a) the schema migrations the change implies per module, rendered to Postgres SQL, with each migration's `destructive` data-loss flag (the `--allow-destructive` gate), and (b) the wire-contract delta classified breaking vs additive. `breaking` is true on ANY breaking wire change or destructive migration. Omit `baseline` to derive the first-run (\"Initial\") migration with the wire diff skipped. A broken `source` returns ok:false with diagnostics — repair with loom_validate first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: {
+          type: "string",
+          description: "The NEW (current) .ddd model source — the target of the diff.",
+        },
+        baseline: {
+          type: "string",
+          description:
+            "The PREVIOUS .ddd model source to diff against. Omit for the first-run migration (everything reads 'Initial', wire diff skipped).",
+        },
+      },
+      required: ["source"],
+      additionalProperties: false,
+    },
+    handler: (args) => diff(reqString(args, "source"), optString(args, "baseline")),
   },
 ];
 
