@@ -38,11 +38,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
-import {
-  exprUsesCurrentUser,
-  isMaterializedProjection,
-  isQueryTimeProjection,
-} from "../../types/loom-ir.js";
+import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
 import { backendServesRealtime } from "../../util/channels.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
@@ -146,46 +142,6 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
           severity: "error",
           code: "loom.projection-query-time-unsupported",
           message: `projection '${p.name}' uses the query-time comprehension ('from'/'where'/'join'/'select'), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Express the read as a folded 'projection', or host it on a supported deployable.`,
-          source: `${c.name}/${p.name}`,
-        });
-      }
-    }
-  }
-}
-
-// A FOLDED (materialized) projection emits its `<Proj>Row` read-model table, the
-// fold upsert, and the `GET /projections/<name>` read routes only through each
-// backend's DEFAULT persistence adapter (drizzle on node, EF Core on dotnet).
-// The MikroORM adapter (`persistence: mikroorm`) emits NO projection wiring at
-// all — no read-model entity, no fold, no route — so a read 404s; the .NET Dapper
-// adapter (`persistence: dapper`) emits a projection read controller that is
-// EF-Core-coupled (it imports `Microsoft.EntityFrameworkCore` + takes the
-// `AppDbContext`), so it won't compile under raw-Npgsql Dapper. Gate the
-// combination HONESTLY (a clear compile-time error) rather than emit code that
-// 404s or fails to build. These adapter names are platform-unique, so a bare
-// `d.persistence` membership test suffices. The behavioural `MIKRO_SKIP` /
-// `DAPPER_SKIP` entries are the runtime backstop; both this gate and those skips
-// re-arm the moment the adapter's projection emitter lands.
-const FOLDED_PROJECTION_UNSUPPORTED_PERSISTENCE = new Set(["mikroorm", "dapper"]);
-
-export function validateFoldedProjectionPersistence(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
-  for (const d of sys.deployables) {
-    if (!d.persistence || !FOLDED_PROJECTION_UNSUPPORTED_PERSISTENCE.has(d.persistence)) continue;
-    for (const cn of d.contextNames) {
-      const c = ctxByName.get(cn);
-      if (!c) continue;
-      for (const p of c.projections ?? []) {
-        if (!isMaterializedProjection(p)) continue;
-        diags.push({
-          severity: "error",
-          code: "loom.projection-persistence-unsupported",
-          message:
-            `folded projection '${p.name}' isn't emitted on the '${d.persistence}' persistence ` +
-            `adapter yet — only each backend's default adapter (drizzle on node, EF Core on ` +
-            `dotnet) wires the read-model table, fold, and read route. Deployable '${d.name}' ` +
-            `would ${d.persistence === "dapper" ? "fail to compile the read controller" : "404 the projection read"}. ` +
-            `Host this deployable on its default persistence adapter, or drop the folded projection from its contexts.`,
           source: `${c.name}/${p.name}`,
         });
       }

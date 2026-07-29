@@ -57,7 +57,6 @@ import {
   validateFileFieldObjectStorage,
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
-  validateFoldedProjectionPersistence,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
   validateJavaStampSupport,
@@ -170,7 +169,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRelayTargetNotSubscribed(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
-    validateFoldedProjectionPersistence(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

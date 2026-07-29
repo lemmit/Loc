@@ -1,11 +1,13 @@
-// Folded-projection persistence-adapter gate (`loom.projection-persistence-unsupported`).
+// Folded-projection persistence-adapter parity (formerly the
+// `loom.projection-persistence-unsupported` gate).
 //
 // A FOLDED (materialized) projection emits its read-model table + fold + read
-// route only through each backend's DEFAULT persistence adapter (drizzle on
-// node, EF Core on dotnet). The MikroORM adapter emits no projection wiring
-// (a read 404s) and the .NET Dapper adapter's read controller is EF-Core-coupled
-// (won't compile). The gate rejects `folded projection` + `persistence:
-// mikroorm|dapper` HONESTLY at compile time instead of emitting broken code.
+// route on EVERY persistence adapter now: each backend's default (drizzle on
+// node, EF Core on dotnet) AND the two alternatives that once lacked it — the
+// node MikroORM adapter (read-model EntitySchema + `em.upsert` fold + `em.find`
+// routes) and the .NET Dapper adapter (raw-Npgsql fold store + an AppDbContext-
+// decoupled read controller).  The honesty gate is GONE; this pins that a folded
+// projection compiles clean on all four so the gate can't silently creep back.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -51,34 +53,34 @@ async function errorCodes(platformClause: string): Promise<string[]> {
     .map((d) => d.code ?? "");
 }
 
-describe("folded-projection persistence-adapter gate", () => {
-  it("rejects a folded projection on the node MikroORM adapter", async () => {
-    expect(await errorCodes("node { persistence: mikroorm }")).toContain(
+describe("folded-projection persistence-adapter parity", () => {
+  it("accepts a folded projection on the node MikroORM adapter", async () => {
+    expect(await errorCodes("node { persistence: mikroorm }")).not.toContain(
       "loom.projection-persistence-unsupported",
     );
   });
 
-  it("rejects a folded projection on the .NET Dapper adapter", async () => {
-    expect(await errorCodes("dotnet { persistence: dapper }")).toContain(
+  it("accepts a folded projection on the .NET Dapper adapter", async () => {
+    expect(await errorCodes("dotnet { persistence: dapper }")).not.toContain(
       "loom.projection-persistence-unsupported",
     );
   });
 
-  it("allows a folded projection on the node default (drizzle) adapter", async () => {
+  it("accepts a folded projection on the node default (drizzle) adapter", async () => {
     expect(await errorCodes("node")).not.toContain("loom.projection-persistence-unsupported");
     expect(await errorCodes("node { persistence: drizzle }")).not.toContain(
       "loom.projection-persistence-unsupported",
     );
   });
 
-  it("allows a folded projection on the .NET default (EF Core) adapter", async () => {
+  it("accepts a folded projection on the .NET default (EF Core) adapter", async () => {
     expect(await errorCodes("dotnet")).not.toContain("loom.projection-persistence-unsupported");
     expect(await errorCodes("dotnet { persistence: efcore }")).not.toContain(
       "loom.projection-persistence-unsupported",
     );
   });
 
-  it("does not fire on the other first-class backends", async () => {
+  it("accepts a folded projection on the other first-class backends", async () => {
     for (const platform of ["python", "java", "elixir"]) {
       expect(await errorCodes(platform)).not.toContain("loom.projection-persistence-unsupported");
     }

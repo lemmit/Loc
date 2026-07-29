@@ -15,7 +15,12 @@ import {
   projectToResponse,
   wireType,
 } from "./dto-mapping.js";
-import { projectionRowClass, projectionRowDbSet } from "./projection-state-emit.js";
+import { dapperProjectionColumns } from "./emit/dapper-workflow.js";
+import {
+  projectionRowClass,
+  projectionRowDbSet,
+  projectionRowTable,
+} from "./projection-state-emit.js";
 import { collectCsExprUsings } from "./render-expr.js";
 import { renderExprWithEventParam } from "./workflow-emit.js";
 
@@ -164,7 +169,7 @@ export function emitProjectionReads(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string },
+  options?: { routePrefix?: string; usingDapper?: boolean },
 ): void {
   // FOLDED (materialized) projections only — the event-folded read model with a
   // physical `<Proj>Row` table.  Query-time projections (read-path-architecture.md
@@ -179,7 +184,7 @@ export function emitProjectionReads(
   }
   out.set(
     `Api/${ctx.name}ProjectionsController.cs`,
-    renderProjectionsController(ctx, ns, options?.routePrefix),
+    renderProjectionsController(ctx, ns, options?.routePrefix, !!options?.usingDapper),
   );
 }
 
@@ -208,17 +213,29 @@ public sealed record ${upperFirst(proj.name)}Response(${params});
 }
 
 /** One controller per context exposing every projection as GET
- *  projections/<snake> + /<snake>/{key}, reading the EF-mapped read-model DbSet
- *  and projecting each row through the projection wireShape. */
+ *  projections/<snake> + /<snake>/{key}, projecting each read-model row through
+ *  the projection wireShape.
+ *
+ *  Persistence-gated (`usingDapper`, mirrors `emitWorkflowInstanceReads`): the EF
+ *  path reads the EF-mapped `<Proj>Row` DbSet off the concrete `AppDbContext`;
+ *  the Dapper path reads the `<Proj>Row` table with raw Npgsql SQL into a private
+ *  `Row` DTO + `Map` to the same read-model POCO — the `wireShape` projection,
+ *  operationIds, and route paths stay identical, so cross-backend OpenAPI parity
+ *  holds. */
 function renderProjectionsController(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   routePrefix?: string,
+  usingDapper = false,
 ): string {
   const className = `${ctx.name}ProjectionsController`;
   const route = `${routePrefix ?? ""}projections`;
   const usings = new Set<string>();
   const blocks: string[] = [];
+  // Dapper reads through NpgsqlDataSource with raw SQL: each projection SELECTs
+  // its read-model table into a private `<T>DbRow` + `Map<T>` to the POCO (the
+  // same `dapperProjectionColumns` shape the fold store persists — M-T6.9).
+  const rowMapDecls: string[] = [];
   for (const proj of ctx.projections.filter(isMaterializedProjection)) {
     const slug = snake(proj.name);
     const T = upperFirst(proj.name);
@@ -236,34 +253,80 @@ function renderProjectionsController(
       shape
         .map((f) => projectToResponse(`${rowVar}.${upperFirst(f.name)}`, wireFieldType(f), ctx))
         .join(", ");
+    let listBody: string;
+    let byIdBody: string;
+    if (usingDapper) {
+      const cols = dapperProjectionColumns(proj);
+      const pkCol = snake(proj.correlationField as string);
+      const table = projectionRowTable(proj);
+      const pocoFqn = `global::${ns}.Infrastructure.Persistence.Projections.${projectionRowClass(proj)}`;
+      const rowCls = `${T}DbRow`;
+      const mapFn = `Map${T}`;
+      rowMapDecls.push(
+        `    private sealed class ${rowCls}\n    {\n` +
+          cols
+            .map(
+              (c) =>
+                `        public ${c.rowCs} ${c.col} { get; set; }${c.nullable ? "" : " = default!;"}`,
+            )
+            .join("\n") +
+          `\n    }\n` +
+          `    private static ${pocoFqn} ${mapFn}(${rowCls} r) => new()\n    {\n` +
+          cols.map((c) => `        ${c.stateProp} = ${c.hydrate},`).join("\n") +
+          `\n    };`,
+      );
+      const selCols = cols.map((c) => c.col).join(", ");
+      listBody =
+        `        await using var conn = await _db.OpenConnectionAsync();\n` +
+        `        var rows = (await conn.QueryAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table}"))).Select(${mapFn});\n` +
+        `        return Ok(rows.Select(x => new ${T}Response(${proj_("x")})));\n`;
+      byIdBody =
+        `        await using var conn = await _db.OpenConnectionAsync();\n` +
+        `        var __row = await conn.QuerySingleOrDefaultAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table} WHERE ${pkCol} = @key", new { key }));\n` +
+        `        if (__row is null) return NotFound();\n` +
+        `        var x = ${mapFn}(__row);\n` +
+        `        return Ok(new ${T}Response(${proj_("x")}));\n`;
+    } else {
+      listBody =
+        `        var rows = await _db.${dbSet}.AsNoTracking().ToListAsync();\n` +
+        `        return Ok(rows.Select(x => new ${T}Response(${proj_("x")})));\n`;
+      byIdBody =
+        `        var __key = new ${targetName}Id(key);\n` +
+        `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
+        `        if (x is null) return NotFound();\n` +
+        `        return Ok(new ${T}Response(${proj_("x")}));\n`;
+    }
     blocks.push(
       `    [HttpGet("${slug}")]\n` +
         `    [ProducesResponseType(typeof(IEnumerable<${T}Response>), 200)]\n` +
         `    public async Task<IActionResult> List${T}()\n` +
         `    {\n` +
-        `        var rows = await _db.${dbSet}.AsNoTracking().ToListAsync();\n` +
-        `        return Ok(rows.Select(x => new ${T}Response(${proj_("x")})));\n` +
+        listBody +
         `    }\n` +
         `    [HttpGet("${slug}/{key}")]\n` +
         `    [ProducesResponseType(typeof(${T}Response), 200)]\n` +
         `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
         `    public async Task<IActionResult> Get${T}(${corrClr} key)\n` +
         `    {\n` +
-        `        var __key = new ${targetName}Id(key);\n` +
-        `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
-        `        if (x is null) return NotFound();\n` +
-        `        return Ok(new ${T}Response(${proj_("x")}));\n` +
+        byIdBody +
         `    }\n`,
     );
   }
   const extraUsings = [...usings].sort().map((n) => `using ${n};`);
+  const persistenceUsings = usingDapper
+    ? "using Dapper;\nusing Npgsql;"
+    : "using Microsoft.EntityFrameworkCore;";
+  const ctorField = usingDapper
+    ? `    private readonly NpgsqlDataSource _db;\n    public ${className}(NpgsqlDataSource db) => _db = db;`
+    : `    private readonly AppDbContext _db;\n    public ${className}(AppDbContext db) => _db = db;`;
+  const memberDecls = usingDapper && rowMapDecls.length > 0 ? `${rowMapDecls.join("\n")}\n\n` : "";
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
+${persistenceUsings}${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
 using ${ns}.Application.Workflows;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
@@ -276,10 +339,9 @@ namespace ${ns}.Api;
 [Route("${route}")]
 public sealed class ${className} : ControllerBase
 {
-    private readonly AppDbContext _db;
-    public ${className}(AppDbContext db) => _db = db;
+${ctorField}
 
-${blocks.join("\n")}
+${memberDecls}${blocks.join("\n")}
 }
 `;
 }

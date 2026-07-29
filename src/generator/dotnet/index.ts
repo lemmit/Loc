@@ -461,8 +461,12 @@ function emitProjectFromContexts(
       usingDapper: system?.deployable.persistence === "dapper",
     });
     // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
-    // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
-    emitProjectionReads(ctx, ns, out, { routePrefix });
+    // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet (EF) or
+    // raw Npgsql (dapper — decoupled from AppDbContext).
+    emitProjectionReads(ctx, ns, out, {
+      routePrefix,
+      usingDapper: system?.deployable.persistence === "dapper",
+    });
     // Query-time projections (read-path-architecture.md rev.13) — a live read
     // (source find + join bulk-loads + select) with no folded read-model table.
     emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
