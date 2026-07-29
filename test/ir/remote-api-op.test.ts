@@ -20,8 +20,9 @@ import { walkWorkflowStmtExprsDeep } from "../../src/ir/util/walk.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
 
-function system(body: string, opts: { bindApi?: boolean } = {}): string {
+function system(body: string, opts: { bindApi?: boolean; callerPlatform?: string } = {}): string {
   const bindApi = opts.bindApi ?? true;
+  const callerPlatform = opts.callerPlatform ?? "node";
   return `
 system Acme {
   subdomain Core {
@@ -47,7 +48,7 @@ ${body}
     platform: node contexts: [Orders] dataSources: [ordersState] serves: OrdersApi port: 3000
   }
   deployable shippingSvc {
-    platform: node contexts: [Shipping] dataSources: [shippingState, orders] port: 3001
+    platform: ${callerPlatform} contexts: [Shipping] dataSources: [shippingState, orders] port: 3001
   }
 }
 `;
@@ -138,12 +139,21 @@ describe("typed in-system api call — the pre-pass gate", () => {
 });
 
 describe("typed in-system api call — backend support gate", () => {
-  it("rejects the call while no backend emits a typed client", async () => {
-    const diags = validateLoomModel(await lower(system(TYPED_CALL)));
+  it("rejects the call on a backend with no typed client yet", async () => {
+    // Slice 3 shipped the Hono client, so `node` is supported now.  The gate
+    // still guards the four backends whose emitters land in slices 4-5 — which
+    // is the point of keeping it: an unsupported backend must say so rather
+    // than reach the renderer.
+    const diags = validateLoomModel(await lower(system(TYPED_CALL, { callerPlatform: "python" })));
     const d = diags.find((x) => x.code === "loom.remote-api-op-unsupported");
     expect(d?.severity).toBe("error");
     expect(d?.message).toContain("getOrderById");
     expect(d?.message).toContain("shippingSvc");
+  });
+
+  it("accepts the call on node, whose typed client ships", async () => {
+    const diags = validateLoomModel(await lower(system(TYPED_CALL)));
+    expect(diags.filter((d) => d.code === "loom.remote-api-op-unsupported")).toEqual([]);
   });
 
   it("stays silent for a system with no api-bound resource", async () => {
