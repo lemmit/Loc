@@ -43,8 +43,9 @@ import {
   type ElixirChannelsCfg,
   type ElixirConsumerRoute,
   emitElixirChannelFiles,
+  emitElixirStandaloneOutbox,
 } from "../channels-emit.js";
-import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
+import { contextHasDispatcher, emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import { emitDomainServices } from "../domain-service-emit.js";
 import { renderEventModule } from "../events-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
@@ -168,6 +169,12 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       .flatMap((b) => b.events)
       .filter((ev) => hostedDurable.has(ev)),
   );
+  // Standalone (no-broker) outbox tier (dispatch-delivery-semantics.md §1-2):
+  // a durable channel with NO `channelSource` still gets crash-safe in-process
+  // delivery (record → LocalOutboxRelay redelivers), parity with the other
+  // backends.  Only when the deployable wires no broker at all — so exactly one
+  // relay drains __loom_outbox.  Routes the emit seams through `<App>.Channels`.
+  const standaloneOutbox = !hasChannels && hostedDurable.size > 0;
   const hostedChannelNames = new Set(
     contexts.flatMap((c) => c.channels ?? []).map((ch) => ch.name),
   );
@@ -211,7 +218,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
         brokerEvents: new Set(channelBindings.flatMap((b) => b.events)),
         foreignEventModules: eventOwnerModule,
       }
-    : undefined;
+    : standaloneOutbox
+      ? // Route the emit seams through the standalone `<App>.Channels` tee (no
+        // broker widening / foreign structs — every durable event is hosted).
+        { appModule, brokerEvents: new Set(), foreignEventModules: new Map() }
+      : undefined;
 
   // Per-context emit: schema, changeset, repository, context module,
   // controllers.  Changeset before Repository so the latter can alias it.
@@ -608,6 +619,26 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       carriedEventIrs,
       [...routeMap.values()],
       { durableBroker: durableBrokerEvents.size > 0 },
+    );
+    for (const [path, content] of emission.files) out.set(path, content);
+    channelChildren = emission.children;
+  } else if (standaloneOutbox) {
+    // Standalone (no-broker) outbox: the `<App>.Channels` tee records durable
+    // events; `LocalOutboxRelay` drains → decodes → broadcasts to the hosted
+    // context dispatchers post-commit.
+    const durableEventIrs = contexts.flatMap((c) =>
+      c.events
+        .filter((e) => hostedDurable.has(e.name))
+        .map((e) => ({ ev: e, ctxModule: `${appModule}.${upperFirst(c.name)}` })),
+    );
+    const hostedDispatchers = contexts
+      .filter((c) => contextHasDispatcher(c))
+      .map((c) => `${appModule}.${upperFirst(c.name)}.Dispatcher`);
+    const emission = emitElixirStandaloneOutbox(
+      appName,
+      appModule,
+      durableEventIrs,
+      hostedDispatchers,
     );
     for (const [path, content] of emission.files) out.set(path, content);
     channelChildren = emission.children;

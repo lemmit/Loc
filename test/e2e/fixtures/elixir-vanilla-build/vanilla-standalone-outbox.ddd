@@ -1,0 +1,28 @@
+// Standalone (no-broker) outbox on vanilla Phoenix (dispatch-delivery-semantics.md
+// §1-2): a durable channel (retention: log) with NO channelSource. Gates that the
+// `<App>.Channels` tee (record durable → __loom_outbox), `LoomOutbox` schema, and
+// `LocalOutboxRelay` (drain → decode → broadcast to the hosted dispatcher) compile
+// under `mix compile --warnings-as-errors`.
+system Acme {
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+        operation place() { precondition status == "Draft"  status := "Placed"  emit OrderPlaced { order: id } }
+      }
+      repository Orders for Order {}
+      event OrderPlaced { order: Order id }
+      channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: log }
+      workflow Fulfil {
+        orderId: Order id
+        status: string
+        create(p: OrderPlaced) by p.order { status := "Pending" }
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable salesApi { platform: elixir contexts: [Orders] dataSources: [ordersState] serves: OrdersApi port: 4000 }
+}

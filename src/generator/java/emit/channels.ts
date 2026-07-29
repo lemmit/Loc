@@ -1475,3 +1475,228 @@ export function renderJavaOutboxFiles(
     },
   ];
 }
+
+/** The STANDALONE (no-broker) transactional-outbox tier
+ *  (dispatch-delivery-semantics.md §1-2): the Java analogue of node's
+ *  `createOutboxDispatcher`/`startOutboxRelay`.  A durable (`retention: log |
+ *  work`) channel with NO `channelSource` broker still gets crash-safe delivery:
+ *
+ *   - `LoomEventOutbox` (@EventListener) records a durable domain event in
+ *     `__loom_outbox` inside the producer's @Transactional write (so it commits
+ *     atomically) instead of it being fanned out inline — closing the crash
+ *     window.  The payload is a generic Jackson map (the row round-trips
+ *     java→db→java only, so no bespoke wire codec is needed).  Ephemeral events
+ *     are ignored here — Spring's local fan-out already reaches their listeners.
+ *   - the reactor handlers for these events DROP their inline @EventListener
+ *     (DispatchCtx.localDurableEvents), so the ONLY delivery is post-commit.
+ *   - `LocalOutboxRelay` (SmartLifecycle poll loop) drains undispatched rows,
+ *     reconstructs the event, and INVOKES the reactor methods directly
+ *     (at-least-once — the row id rides `OutboxDelivery` so the saga marker
+ *     no-ops on redelivery).  A reactor's own durable emit re-enters the bus →
+ *     the tee → the next drain, so choreography chains ride the outbox.
+ *
+ *  Emitted only when hosted durable events ride NO broker (the broker path owns
+ *  the `channels:`-wired case). */
+export function renderJavaStandaloneOutboxFiles(
+  basePkg: string,
+  opts: {
+    durableEvents: string[];
+    handlers: ChannelConsumerHandler[];
+    configPkg: string;
+    entityPkg: string;
+    repoPkg: string;
+  },
+): { name: string; category: "config"; content: string }[] {
+  const durable = [...opts.durableEvents].sort();
+  const byEvent = new Map<string, ChannelConsumerHandler[]>();
+  for (const h of opts.handlers) {
+    const list = byEvent.get(h.event) ?? [];
+    list.push(h);
+    byEvent.set(h.event, list);
+  }
+  const dispatchers = [
+    ...new Map(opts.handlers.map((h) => [h.dispatcherClass, h] as const)).values(),
+  ].sort((a, b) => a.dispatcherClass.localeCompare(b.dispatcherClass));
+  const arms = [...byEvent.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([event, hs]) =>
+      [
+        `            case ${JSON.stringify(event)} -> {`,
+        `                var e = mapper.convertValue(payload, ${event}.class);`,
+        ...hs.map((h) => `                ${lowerFirst(h.dispatcherClass)}.${h.method}(e);`),
+        `            }`,
+      ].join("\n"),
+    );
+  return [
+    {
+      name: "LoomEventOutbox.java",
+      category: "config",
+      content: lines(
+        `package ${opts.configPkg};`,
+        ``,
+        `import java.util.Map;`,
+        `import java.util.Set;`,
+        ``,
+        `import org.springframework.context.event.EventListener;`,
+        `import org.springframework.stereotype.Component;`,
+        ``,
+        `import com.fasterxml.jackson.databind.ObjectMapper;`,
+        ``,
+        `import ${basePkg}.domain.events.DomainEvent;`,
+        `import ${opts.entityPkg}.LoomOutboxMessage;`,
+        `import ${opts.repoPkg}.LoomOutboxRepository;`,
+        ``,
+        `/** Standalone transactional-outbox tee (dispatch-delivery-semantics.md §1):`,
+        ` *  a durable domain event is recorded in __loom_outbox inside the producer's`,
+        ` *  @Transactional write instead of being fanned out inline; LocalOutboxRelay`,
+        ` *  redelivers it post-commit.  Ephemeral events keep Spring's local fan-out. */`,
+        `@Component`,
+        `public class LoomEventOutbox {`,
+        `    private static final Set<String> DURABLE = Set.of(${durable
+          .map((t) => JSON.stringify(t))
+          .join(", ")});`,
+        ``,
+        `    private final LoomOutboxRepository outbox;`,
+        `    // Self-constructed (no ObjectMapper bean in the generated context); the`,
+        `    // row round-trips java→db→java with this same mapper, so the format is`,
+        `    // internal.  findAndRegisterModules() picks up jsr310 (datetimes).`,
+        `    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();`,
+        ``,
+        `    public LoomEventOutbox(LoomOutboxRepository outbox) {`,
+        `        this.outbox = outbox;`,
+        `    }`,
+        ``,
+        `    @EventListener`,
+        `    public void on(DomainEvent event) {`,
+        `        var type = event.getClass().getSimpleName();`,
+        `        if (!DURABLE.contains(type)) {`,
+        `            return;`,
+        `        }`,
+        `        @SuppressWarnings("unchecked")`,
+        `        var payload = (Map<String, Object>) mapper.convertValue(event, Map.class);`,
+        `        outbox.save(new LoomOutboxMessage(type, payload));`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    },
+    {
+      name: "LocalOutboxRelay.java",
+      category: "config",
+      content: lines(
+        `package ${opts.configPkg};`,
+        ``,
+        `import java.time.Instant;`,
+        `import java.util.Map;`,
+        `import java.util.concurrent.ExecutorService;`,
+        `import java.util.concurrent.Executors;`,
+        ``,
+        `import org.springframework.context.SmartLifecycle;`,
+        `import org.springframework.stereotype.Component;`,
+        ``,
+        `import com.fasterxml.jackson.databind.ObjectMapper;`,
+        ``,
+        `import ${basePkg}.domain.common.OutboxDelivery;`,
+        `import ${basePkg}.domain.events.*;`,
+        `import ${opts.repoPkg}.LoomOutboxRepository;`,
+        ...dispatchers
+          .filter((h) => h.dispatcherPkg !== opts.configPkg)
+          .map((h) => `import ${h.dispatcherPkg}.${h.dispatcherClass};`),
+        ``,
+        `/** Drains __loom_outbox to the LOCAL reactors at-least-once`,
+        ` *  (dispatch-delivery-semantics.md §2): the row id rides OutboxDelivery so a`,
+        ` *  saga handler no-ops on a redelivery.  Rows that exhaust MAX_ATTEMPTS stay`,
+        ` *  in the table and log event_dead_lettered once.  The reactor methods are`,
+        ` *  invoked directly (not via the bus), so the tee never re-records them. */`,
+        `@Component`,
+        `public class LocalOutboxRelay implements SmartLifecycle {`,
+        `    private static final int MAX_ATTEMPTS = 5;`,
+        `    private static final long INTERVAL_MS = 500;`,
+        ``,
+        `    private final LoomOutboxRepository outbox;`,
+        `    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();`,
+        ...dispatchers.map(
+          (h) => `    private final ${h.dispatcherClass} ${lowerFirst(h.dispatcherClass)};`,
+        ),
+        `    private final ExecutorService executor = Executors.newSingleThreadExecutor();`,
+        `    private volatile boolean running;`,
+        ``,
+        `    public LocalOutboxRelay(LoomOutboxRepository outbox${dispatchers
+          .map((h) => `, ${h.dispatcherClass} ${lowerFirst(h.dispatcherClass)}`)
+          .join("")}) {`,
+        `        this.outbox = outbox;`,
+        ...dispatchers.map(
+          (h) =>
+            `        this.${lowerFirst(h.dispatcherClass)} = ${lowerFirst(h.dispatcherClass)};`,
+        ),
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public void start() {`,
+        `        running = true;`,
+        `        executor.submit(() -> {`,
+        `            while (running) {`,
+        `                try {`,
+        `                    drain();`,
+        `                } catch (RuntimeException e) {`,
+        `                    CatalogLog.event("outbox_relay_error", "warn", "error", String.valueOf(e.getMessage()));`,
+        `                }`,
+        `                try {`,
+        `                    Thread.sleep(INTERVAL_MS);`,
+        `                } catch (InterruptedException e) {`,
+        `                    Thread.currentThread().interrupt();`,
+        `                    return;`,
+        `                }`,
+        `            }`,
+        `        });`,
+        `    }`,
+        ``,
+        `    private void drain() {`,
+        `        var rows = outbox.findTop50ByDispatchedAtIsNullAndAttemptsLessThanOrderByOccurredAtAsc(`,
+        `                MAX_ATTEMPTS);`,
+        `        for (var row : rows) {`,
+        `            try {`,
+        `                OutboxDelivery.setCurrentEventId(row.getId().toString());`,
+        `                try {`,
+        `                    deliver(row.getType(), row.getPayload());`,
+        `                } finally {`,
+        `                    OutboxDelivery.clear();`,
+        `                }`,
+        `                row.setDispatchedAt(Instant.now());`,
+        `                outbox.save(row);`,
+        `            } catch (RuntimeException e) {`,
+        `                row.setAttempts(row.getAttempts() + 1);`,
+        `                outbox.save(row);`,
+        `                if (row.getAttempts() >= MAX_ATTEMPTS) {`,
+        `                    CatalogLog.event("event_dead_lettered", "warn", "type", row.getType(),`,
+        `                            "attempts", String.valueOf(row.getAttempts()),`,
+        `                            "error", String.valueOf(e.getMessage()));`,
+        `                }`,
+        `            }`,
+        `        }`,
+        `    }`,
+        ``,
+        `    private void deliver(String type, Map<String, Object> payload) {`,
+        `        switch (type) {`,
+        ...arms,
+        `            default -> {`,
+        `            }`,
+        `        }`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public void stop() {`,
+        `        running = false;`,
+        `        executor.shutdown();`,
+        `    }`,
+        ``,
+        `    @Override`,
+        `    public boolean isRunning() {`,
+        `        return running;`,
+        `    }`,
+        `}`,
+        ``,
+      ),
+    },
+  ];
+}
