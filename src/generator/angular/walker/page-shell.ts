@@ -814,12 +814,26 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     // shared variant-match envelope records) rewrites one level deeper.  The
     // Angular renderers that add api imports directly already spell `../../api/`,
     // so this only lifts the framework-neutral single-dot entries.
-    const rewritten = from.replace(/^\.\.\/api\//, "../../api/");
+    // The i18n runtime lives at `src/lib/i18n.ts`, two hops up from
+    // `src/app/pages/` — the walker's `../i18n` seam import rewrites to
+    // `../../lib/i18n` (M-T1.11), same lift as the `../api/` entries.
+    const rewritten = from
+      .replace(/^\.\.\/api\//, "../../api/")
+      .replace(/^\.\.\/i18n$/, "../../lib/i18n");
     const sorted = [...names].sort();
     imports.push(`import { ${sorted.join(", ")} } from ${JSON.stringify(rewritten)};`);
     for (const n of sorted) {
       if (n.endsWith("Module")) componentImports.add(n);
     }
+  }
+
+  // i18n `t()` lift (M-T1.11) — the walked body emits `{{ t(key, default, …) }}`
+  // interpolations, which Angular resolves against the component instance, so
+  // re-expose the imported `t` as a member (same lift `FORMAT_HELPERS` uses).
+  // The import line itself rides `result.imports` (drained + path-rewritten
+  // above); this only adds the member so the template binding resolves.
+  if (result.imports.has("../i18n")) {
+    members.push(`  protected readonly t = t;`);
   }
   const componentImportsList = [...componentImports].sort();
 
