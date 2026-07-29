@@ -27,7 +27,6 @@ import "@xyflow/react/dist/style.css";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
 import {
-  addStatement,
   aggregateBody,
   deleteStatement,
   editStatement,
@@ -38,9 +37,8 @@ import {
   type BodyLocator,
   type BodyRef,
   type StmtPath,
-  type StmtView,
 } from "../system/body";
-import { BodyEditor, type NestedExprEditors } from "../system/BodyEditor";
+import type { NestedExprEditors } from "../system/BodyEditor";
 import { setEmitEvent } from "../system/emit-event";
 import { deleteField, listFields } from "../system/fields";
 import { seedExpr } from "../system/expr-model";
@@ -95,6 +93,7 @@ import {
   type ViewGraph,
   type ViewKind,
   type ViewPath,
+  type ViewStep,
 } from "./view-graph";
 import {
   clearPersisted,
@@ -162,6 +161,10 @@ const KIND_COLOR: Record<ViewKind, string> = {
   create: "var(--mantine-color-orange-7)",
   destroy: "var(--mantine-color-red-7)",
   apply: "var(--mantine-color-grape-8)",
+  // `body` is a path-step kind only — the drilled view's root banner wears the
+  // member's own create / destroy / apply tint, so no node ever renders as
+  // one. The entry exists to keep this map total over `ViewKind`.
+  body: "var(--mantine-color-orange-7)",
   // `stmt` is rendered by a custom React Flow node, not styled here; the value
   // is a placeholder to satisfy the kind union.
   stmt: "transparent",
@@ -332,37 +335,42 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   timer: "TimerSource",
 };
 
-/** Derive the `BodyLocator` for the operation / workflow currently in focus
- *  (the last step of the path), or null otherwise. Operation needs the
- *  containing aggregate step immediately above it. `member` selects one
- *  statement-bearing member (`listBodies` key): on a workflow one of its
- *  creates / handles / reactors, on an aggregate one of the `create` /
- *  `destroy` / `apply` lifecycle bodies an operation name cannot address.
- *  Omitted, a workflow resolves to its primary `create(...)` starter and an
- *  aggregate to the operation the path names — the historical locator, byte
- *  for byte, so every pre-existing expression-slot key still resolves. */
+/** Path-leaf kinds whose view is a statement flow over ONE body of the
+ *  aggregate the step above names — an operation, or a lifecycle `body` step
+ *  carrying its `listBodies` key. Both take the same picker, palette and
+ *  editing plumbing; only how the body is addressed differs. */
+const AGG_BODY_LEAF: ReadonlySet<string> = new Set(["operation", "body"]);
+
+/** Derive the `BodyLocator` for the body currently in focus (the last step of
+ *  the path), or null when the leaf isn't a body view. An operation / lifecycle
+ *  `body` step needs the containing aggregate step immediately above it.
+ *  `member` selects one statement-bearing member of a WORKFLOW (a `listBodies`
+ *  key: one of its creates / handles / reactors); omitted, the workflow
+ *  resolves to its primary `create(...)` starter. An operation leaf always
+ *  resolves to the historical member-less locator, byte for byte, so every
+ *  pre-existing expression-slot key still resolves; a lifecycle body carries
+ *  its key in the path step instead of in an override. */
 function leafBodyLocator(path: ViewPath, member?: BodyKey): BodyLocator | null {
   const last = path[path.length - 1];
   if (!last) return null;
   if (last.kind === "workflow") {
     return { kind: "workflow", name: last.name, ...(member ? { member } : {}) };
   }
-  if (last.kind === "operation") {
-    const agg = path[path.length - 2];
-    if (agg?.kind !== "aggregate") return null;
-    return member
-      ? aggregateBody(agg.name, member)
-      : { kind: "operation", aggregate: agg.name, op: last.name };
-  }
-  return null;
+  if (!AGG_BODY_LEAF.has(last.kind)) return null;
+  const agg = path[path.length - 2];
+  if (agg?.kind !== "aggregate") return null;
+  return last.kind === "body"
+    ? aggregateBody(agg.name, last.name)
+    : { kind: "operation", aggregate: agg.name, op: last.name };
 }
 
 /** The `listBodies` key the body picker highlights when nothing has been
- *  chosen explicitly: a workflow's primary `create` starter, an aggregate's
- *  operation the drill path already names. */
+ *  chosen explicitly: a workflow's primary `create` starter, the operation or
+ *  lifecycle body the drill path already names. */
 function primaryBodyKey(path: ViewPath, members: readonly BodyRef[]): BodyKey | undefined {
   const last = path[path.length - 1];
   if (last?.kind === "operation") return `op:${last.name}`;
+  if (last?.kind === "body") return last.name;
   return members.find((b) => b.key.startsWith("create"))?.key;
 }
 
@@ -565,16 +573,16 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   // The statement-bearing members of the container at the path leaf, for the
   // picker below the breadcrumb: a workflow's creates / handles / reactors, or
-  // — on an operation leaf — every body of the aggregate that owns it, so the
-  // `create` / `destroy` / `apply` bodies no operation name can address become
-  // reachable. Empty at every other level.
+  // — on an operation / lifecycle-`body` leaf — every body of the aggregate
+  // that owns it, so the whole member list is one click away from any of them.
+  // Empty at every other level.
   const bodyMembers: BodyRef[] = useMemo(() => {
     const last = path[path.length - 1];
     if (last?.kind === "workflow") {
       const wf = findWorkflow(parsed.ast, last.name);
       return wf ? listBodies(wf) : [];
     }
-    if (last?.kind === "operation") {
+    if (last && AGG_BODY_LEAF.has(last.kind)) {
       const aggStep = path[path.length - 2];
       if (aggStep?.kind !== "aggregate") return [];
       const agg = findAggregate(parsed.ast, aggStep.name);
@@ -589,12 +597,6 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   }, [path]);
   const primaryMemberKey = primaryBodyKey(path, bodyMembers);
   const leafKind = path[path.length - 1]?.kind;
-  // An aggregate LIFECYCLE body (`create` / `destroy` / `apply:E`) selected in
-  // the picker. `view-graph.ts` builds a statement flow for operations and
-  // workflows only, so these bodies get the shared list editor instead of the
-  // canvas — same rows, same `ƒx` editors, just not laid out as a flow.
-  const lifecycleBody =
-    leafKind === "operation" && bodyMember !== undefined && !bodyMember.startsWith("op:");
 
   /** Single choke-point for source edits — bump `rev` so the next render
    *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
@@ -736,6 +738,19 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           apply(next);
           return true;
         },
+        // Row commands, the flow twin of the list editor's ↑ / ↓ / × — without
+        // them the flow view could only rewrite statements, never reorder or
+        // remove one.
+        onDelete: () => {
+          const next = deleteStatement(ctx.getSource(), leafLoc, i);
+          if (next != null) apply(next);
+        },
+        onMove: (dir) => {
+          const next = moveStatement(ctx.getSource(), leafLoc, i, dir);
+          if (next != null) apply(next);
+        },
+        canMoveUp: i > 0,
+        canMoveDown: i < views.length - 1,
         valueEditor: renderEditor(i, []),
         onToggleEditor: () => toggle(i, []),
         renderArgEditor: (a) => renderEditor(i, [], a),
@@ -1162,20 +1177,24 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     });
   };
 
-  /** Pick a body member: another OPERATION is a sibling navigation (the
-   *  view-graph builds its statement flow from the path), so the path's leaf is
-   *  replaced and the override cleared — which keeps the operation's locator
-   *  and expression-slot keys member-less, exactly as before the picker
-   *  existed. A lifecycle body has no flow view, so it is an override. */
+  /** Pick a body member. Inside an aggregate every member — operation and
+   *  lifecycle body alike — is SIBLING NAVIGATION: the view-graph builds the
+   *  statement flow from the path, so the leaf step is swapped and the override
+   *  cleared. An operation keeps its `{kind:"operation"}` step, which keeps its
+   *  locator and expression-slot keys member-less, exactly as before the picker
+   *  existed; a lifecycle body rides a `body` step carrying its `listBodies`
+   *  key. A workflow member has no step of its own, so it stays an override. */
   const pickBodyMember = (key: BodyKey): void => {
-    if (leafKind === "operation" && key.startsWith("op:")) {
-      const opName = key.slice(3);
+    if (leafKind && AGG_BODY_LEAF.has(leafKind)) {
+      const step: ViewStep = key.startsWith("op:")
+        ? { kind: "operation", name: key.slice(3) }
+        : { kind: "body", name: key };
       setBodyMember(undefined);
       setPath((p) => {
         const last = p[p.length - 1];
-        if (!last || last.name === opName) return p;
+        if (!last || (last.kind === step.kind && last.name === step.name)) return p;
         animateNextFit.current = true;
-        return [...p.slice(0, -1), { kind: last.kind, name: opName }];
+        return [...p.slice(0, -1), step];
       });
       return;
     }
@@ -1340,88 +1359,47 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       )}
       {opInspector}
       <AddPalette path={path} source={ctx.getSource()} onChange={apply} bodyMember={bodyMember} />
-      {lifecycleBody && leafLoc && bodySurface ? (
-        // `view-graph.ts` renders a statement FLOW for operations and workflows
-        // only — an aggregate's create / destroy / apply bodies have none, so
-        // the shared list editor stands in. Same rows, same slots, same `ƒx`
-        // (nested included); only the layout differs.
-        <Box
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 8 }}
-          data-testid="c4system-v2-body-panel"
+      <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onReconnect={onReconnect}
+          onNodeDragStop={handleNodeDragStop}
+          onNodeClick={(_, n) => drill(n.id)}
+          fitView
+          minZoom={0.1}
+          proOptions={{ hideAttribution: true }}
         >
-          <BodyEditor
-            statements={bodySurface.views}
-            targets={bodySurface.targets}
-            headCandidates={(i) => slotCandidates(parsed.ast, bodySurface.slotFor(i, []))}
-            onEdit={(i, text) => {
-              const next = editStatement(ctx.getSource(), leafLoc, i, text);
-              if (next == null) return false;
-              apply(next);
-              return true;
-            }}
-            onDelete={(i) => {
-              const next = deleteStatement(ctx.getSource(), leafLoc, i);
-              if (next != null) apply(next);
-            }}
-            onMove={(i, dir) => {
-              const next = moveStatement(ctx.getSource(), leafLoc, i, dir);
-              if (next != null) apply(next);
-            }}
-            onAdd={(text) => {
-              const next = addStatement(ctx.getSource(), leafLoc, text);
-              if (next == null) return false;
-              apply(next);
-              return true;
-            }}
-            hasValueEditor={(i, f) => bodySurface.hasEditor(i, [], f)}
-            renderValueEditor={(i, f) => bodySurface.renderEditor(i, [], f)}
-            onToggleValueEditor={(i, f) => bodySurface.toggle(i, [], f)}
-            nested={(i) => bodySurface.nestedFor(i)}
-          />
-        </Box>
-      ) : (
-        <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={NODE_TYPES}
-            edgeTypes={EDGE_TYPES}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onReconnect={onReconnect}
-            onNodeDragStop={handleNodeDragStop}
-            onNodeClick={(_, n) => drill(n.id)}
-            fitView
-            minZoom={0.1}
-            proOptions={{ hideAttribution: true }}
+          <Background />
+          <Controls />
+        </ReactFlow>
+        {hasPersisted && (
+          <Button
+            size="compact-xs"
+            variant="default"
+            onClick={resetLayout}
+            data-testid="c4system-v2-reset-layout"
+            title="Discard hand-dragged positions for this view and restore the derived layout"
+            style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
           >
-            <Background />
-            <Controls />
-          </ReactFlow>
-          {hasPersisted && (
-            <Button
-              size="compact-xs"
-              variant="default"
-              onClick={resetLayout}
-              data-testid="c4system-v2-reset-layout"
-              title="Discard hand-dragged positions for this view and restore the derived layout"
-              style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
-            >
-              Reset layout
-            </Button>
-          )}
-          {graph.nodes.length === 0 && (
-            <Text
-              size="xs"
-              c="dimmed"
-              style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}
-              data-testid="c4system-v2-empty"
-            >
-              Nothing to show at {graph.title}. Use the breadcrumb to go back.
-            </Text>
-          )}
-        </Box>
-      )}
+            Reset layout
+          </Button>
+        )}
+        {graph.nodes.length === 0 && (
+          <Text
+            size="xs"
+            c="dimmed"
+            style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}
+            data-testid="c4system-v2-empty"
+          >
+            Nothing to show at {graph.title}. Use the breadcrumb to go back.
+          </Text>
+        )}
+      </Box>
     </Box>
   );
 }

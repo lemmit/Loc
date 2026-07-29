@@ -37,8 +37,9 @@ interface Props {
   path: ViewPath;
   source: string;
   onChange: (next: string) => void;
-  /** Selected body member of the workflow / aggregate at the path leaf;
-   *  undefined = the primary body (a workflow's `create`, an operation's own). */
+  /** Selected member of the WORKFLOW at the path leaf; undefined = its primary
+   *  `create` starter. An aggregate's members each have a path step of their
+   *  own (`operation` / `body`), so they need no override here. */
   bodyMember?: BodyKey;
 }
 
@@ -129,17 +130,17 @@ export default function AddPalette({ path, source, onChange, bodyMember }: Props
     );
   }
 
-  if (last.kind === "operation" || last.kind === "workflow") {
+  if (last.kind === "operation" || last.kind === "workflow" || last.kind === "body") {
     const loc: BodyLocator =
       last.kind === "workflow"
         ? { kind: "workflow", name: last.name, member: bodyMember }
         : (() => {
             const agg = path[path.length - 2];
-            // A selected member reaches the aggregate's create / destroy /
-            // apply bodies; without one the locator names the operation, the
-            // shape it has always had.
-            return bodyMember
-              ? aggregateBody(agg?.name ?? "", bodyMember)
+            // A `body` step carries the aggregate's `listBodies` key, which
+            // reaches its create / destroy / apply bodies; an `operation` step
+            // names the operation, the shape this locator has always had.
+            return last.kind === "body"
+              ? aggregateBody(agg?.name ?? "", last.name)
               : { kind: "operation", aggregate: agg?.name ?? "", op: last.name };
           })();
     return (
