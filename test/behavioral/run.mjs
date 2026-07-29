@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEV_CLAIMS, featureCases, sharedSystemCases } from "./cases.mjs";
+import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -102,6 +103,7 @@ function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerT
   }
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
+${recorderPreamble()}
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};
 import { loadApiTests } from ${J(join(REPO, "web/src/testing/run-api-tests.ts"))};
 import { createHarness, runTests } from ${J(join(REPO, "web/src/testing/harness.ts"))};
@@ -130,12 +132,13 @@ export async function run() {
   ${authRegister}
   const app = createApp(db);
 
-  const dispatch = async (req) => {
+  // Recorded at the ONE dispatch chokepoint — see wire-differential.mjs.
+  const dispatch = __record(async (req) => {
     const r = await app.fetch(new Request(req.url, { method: req.method, headers: req.headers, body: req.body ?? undefined }));
     const headers = {};
     r.headers.forEach((v, k) => { headers[k] = v; });
     return { ok: true, response: { status: r.status, statusText: r.statusText, headers, body: await r.text() }, durationMs: 0 };
-  };
+  });
 
   const out = [];
   if (E2E_FILE) {
@@ -172,7 +175,7 @@ export async function run() {
     /* no traceability emitted — verification stays null */
   }
 
-  return { results: out, verification };
+  return { results: out, verification, wire: __wire };
 }
 `;
 }
@@ -229,11 +232,14 @@ const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 // truth (manifest.ts + the `.ddd`), swapped to `node` in-process. No allowlist.
 const features = await featureCases("node", "node", WORK);
 
-// Shared tokenized systems (systems/*.ddd) — run on every backend.  Node skips
-// `sales`: it gets the Sales domain from the richer UI-carrying example below
-// (which also drives the requirements-verification rollup), so pulling the
-// tokenized sales too would just run it twice.
-const shared = sharedSystemCases("node").filter((c) => c.name !== "sales");
+// Shared tokenized systems (systems/*.ddd) — run on every backend.  ALL of them
+// run here, `sales` included: node is the ORACLE the wire goldens are captured
+// from (M-T9.11), so it must exercise every shared case the other four backends
+// are gated against — an oracle with a blind spot is the coverage hole this
+// gate exists to close.  (The richer UI-carrying `sales-system` example below
+// still runs too; it drives the requirements-verification rollup.  The overlap
+// costs one extra in-process PGlite case.)
+const shared = sharedSystemCases("node");
 
 // Example cases — the small curated set of broad, multi-aggregate systems that
 // aren't single-feature corpus fixtures; the one thing left in corpus.json. Its
@@ -260,6 +266,11 @@ if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
 // aggregate `test`). A boot/infra error, or a FAILING requirement in the
 // Definition-of-Done rollup, fails the case.
 let pass = 0, fail = 0, errored = 0, reqFailing = 0;
+// Cross-backend runtime wire differential (M-T9.11): every request this tier
+// makes is recorded at the dispatch chokepoint and compared to the committed
+// canonical golden.  node is the ORACLE the goldens are captured from, so here
+// the gate doubles as "the golden still describes the reference backend".
+const wire = makeWireGate("node", WORK);
 for (const c of corpus) {
   process.stdout.write(`\n▶ ${c.name}\n`);
   let out;
@@ -290,10 +301,13 @@ for (const c of corpus) {
       if (r.verdict === "FAILING") process.stdout.write(`      ✗ ${id} FAILING (${r.failingTestCaseIds.join(", ")})\n`);
     }
   }
+  await wire.check(c.name, out.wire, out.results);
 }
 
 await oidc?.stop();
 
+const wireBad = await wire.finish();
+
 const reqTail = reqFailing ? `, ${reqFailing} requirement(s) FAILING` : "";
 process.stdout.write(`\n${pass} passed, ${fail} failed${reqTail}${errored ? `, ${errored} cases errored` : ""}\n`);
-process.exit(fail > 0 || errored > 0 || reqFailing > 0 ? 1 : 0);
+process.exit(fail > 0 || errored > 0 || reqFailing > 0 || wireBad > 0 ? 1 : 0);

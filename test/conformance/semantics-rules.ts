@@ -197,16 +197,18 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "A created `versioned` aggregate reads back at version 1",
     trigger: "a `versioned` aggregate created via POST, then read back",
     observable:
-      "the optimistic-concurrency `version` on the first read is 1 — the `versioned` capability declares `version: int token = 1` (src/macros/prelude.ts), mirrored to `version INTEGER NOT NULL DEFAULT 1`. node honors the default; dotnet/java/python currently seed 0 (they drop the `= 1` on the create/insert path).",
+      "the optimistic-concurrency `version` on the first read is 1 — the `versioned` capability declares `version: int token = 1` (src/macros/prelude.ts), mirrored to `version INTEGER NOT NULL DEFAULT 1`. All five backends honor it: node stamps it in its versioned save, elixir carries the Ecto `default: 1`, and dotnet/java/python seed it in the domain `create` factory (`constructionSeededDefaults`) since a `token` field is dropped from the create body.",
     // Canonical value is 1 per the capability's `= 1` default — NOT a majority
-    // vote (three backends agree on the WRONG value). node conforms; the other
-    // three are the fix targets. Divergence is uniform across every seeded row.
-    conforms: ["node"],
-    targets: ["dotnet", "java", "python"],
+    // vote (three backends agreed on the WRONG value).  Closed by M-T6.11
+    // (#2255); re-verified per-PR by the M-T9.11 wire-golden gate, which pins
+    // `version: 1` on the `payments` create→read round-trip on every backend.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "M-T9.11 differential run 30277275068",
       "PR #2220",
       "src/macros/prelude.ts (versioned `= 1`)",
+      "fixed by M-T6.11 (PR #2255)",
+      "pinned per-PR by the wire-golden gate (payments)",
     ],
     tier: "behavioral",
   },
@@ -215,14 +217,55 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "Money wire scale is consistent across backends",
     trigger: "a money-typed field serialized to the wire (e.g. `costFloor`)",
     observable:
-      'the money JSON string has the same scale on every backend. Today it does NOT: dotnet/java/python preserve scale (`"0.00"` via toPlainString / format(d,"f") / invariant decimal); node\'s decimal.js `.toString()` normalizes to `"0"`. Unlike RS-11 there is no spec-mandated scale — and java itself drops the scale in DERIVED string contexts (the deferred `seqTag` finding) — so the canonical money wire format is an OPEN owner decision, not a settled node-only bug.',
-    // Provisional direction: majority + "money carries scale" convention put
-    // dotnet/java/python as conforming and node as target, but this is a
-    // CONVENTION call pending an owner decision on the canonical format — flip
-    // if "0" (natural decimal.js) is chosen instead. Uniform across seeded rows.
-    conforms: ["dotnet", "java", "python"],
-    targets: ["node"],
-    provenance: ["M-T9.11 differential run 30277275068", "PR #2220"],
+      'a money-typed field serializes at a FIXED scale of 4 on every backend — the canonical NUMERIC(19,4) storage scale (`MONEY_WIRE_SCALE`, src/generator/money-scale.ts). `12.5`, `12.50` and `12` all read back as `"12.5000"`, stored or derived. Each backend formats at the wire boundary: node `.toFixed(4)`, .NET `ToString("F4")`, Java `setScale(4, HALF_UP)`, Python `quantize(1e-4, ROUND_HALF_UP)`, Elixir `__money_round/1`.',
+    // Owner decision (2026-07-27, refined 07-28): fixed scale 4, NOT "preserve
+    // the submitted scale" — node's decimal.js normalizes at parse time and so
+    // cannot echo a submitted scale at all, making a fixed scale the only
+    // representable consistent choice.  Closed by M-T6.22 (#2255).
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "M-T9.11 differential run 30277275068",
+      "PR #2220",
+      "owner decision 2026-07-27 (fixed scale 4)",
+      "fixed by M-T6.22 (PR #2255)",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-13",
+    title: "A create POST returns the id envelope, not the whole aggregate",
+    trigger: "any aggregate created via `POST /api/<plural>`",
+    observable:
+      'the 201 body is the id envelope `{"id": …}` and nothing else. Elixir instead returns the FULL aggregate (`{"id":…,"owner":"alice","balance":0}`), so a client written against the declared create response reads fields on one backend it cannot read on the other four — and every declared-but-unreturned field is a silent contract break the OpenAPI spec-diff cannot see (the spec agrees; only the BYTES differ).',
+    // Found by the M-T9.11 per-PR wire-golden gate on the shared `ledger` /
+    // `payments` / `sales` / `shapes` systems: four backends agree on the id
+    // envelope and elixir is the outlier.  Here the majority and the oracle
+    // coincide — the emitted OpenAPI create response is the id envelope, so
+    // elixir is over-returning against its OWN published contract.
+    conforms: ["node", "dotnet", "java", "python"],
+    targets: ["elixir"],
+    provenance: [
+      "M-T9.11 slice (c) wire-golden gate",
+      "test/behavioral/wire-golden/{ledger,payments,sales,shapes}.json",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-14",
+    title: "`version` increments on every persisted mutation, document shapes included",
+    trigger:
+      "a `versioned` aggregate with `shape: document` (jsonb-stored): create, invoke an operation, read back",
+    observable:
+      "the optimistic-concurrency `version` reads back 1 + one per persisted mutation, for EVERY `shape:`. node and python do. The other three each drop the bump on a DIFFERENT shape, which is why no single fixture caught it — document `Cart` / embedded `Wishlist` / plain `Order` (2 / 2 / 3 canonical) read back 1 / 2 / 3 on dotnet+java and 2 / 1 / 1 on elixir. dotnet/java: the ORM concurrency token is bound to a mapped column and a document aggregate's `version` lives inside the jsonb blob — the `dapper` persistence adapter (raw Npgsql, same .NET emitters, hand-rolled document SQL) increments correctly, which localizes the gap to the EF/JPA mapping rather than the .NET/Java wire emitters. elixir: the mirror image — the document path bumps, but an operation on an embedded/plain aggregate persists without touching `version` at all.",
+    // RS-11 covered version at CREATE only; this is the INCREMENT path, and it
+    // is shape-dependent AND inverted between backends.  Exactly the class the
+    // differential exists to find: a field no test author thought to assert.
+    conforms: ["node", "python"],
+    targets: ["dotnet", "java", "elixir"],
+    provenance: [
+      "M-T9.11 slice (c) wire-golden gate",
+      "test/behavioral/wire-golden/shapes.json seq #3/#7; sales.json seq #12",
+    ],
     tier: "behavioral",
   },
 ];

@@ -267,6 +267,49 @@ the conforming backends, and the fix that established it.
 - **Provenance.** M-T9.11 differential (run 30277275068, PR #2220); owner
   decision. Fixed by M-T6.11. Tier: **behavioral**.
 
+### RS-13 · A create `POST` returns the id envelope, not the whole aggregate
+- **Guarantee.** A create `POST /api/<plural>` answers `201` with the id
+  envelope `{"id": …}` — nothing else. That envelope is what every backend's
+  emitted OpenAPI declares for the create response.
+- **Trigger.** Any aggregate created via `POST /api/<plural>`.
+- **Observable.** node, dotnet, java and python return `{"id":…}`. **Elixir
+  returns the FULL aggregate** (`{"id":…,"owner":"alice","balance":0}`), on
+  every create, in every shared system. A client written against the declared
+  create response reads fields on Elixir it cannot read on the other four.
+  The OpenAPI spec-diff is blind to this by construction: the *specs* agree —
+  only the bytes differ. Here the majority and the oracle coincide, and the
+  oracle is not the vote: Elixir over-returns against **its own published
+  contract**, so the emitted spec settles it without appeal to the other four.
+- **Conforms.** node, dotnet, java, python. **Target:** elixir.
+- **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate on its
+  first five-backend run (`test/behavioral/wire-golden/{ledger,payments,sales,
+  shapes}.json`); waived in `test/_helpers/wire-waivers.ts` until fixed. Tier:
+  **behavioral**.
+
+### RS-14 · `version` increments on every persisted mutation, document shapes included
+- **Guarantee.** A `versioned` aggregate reads back `version: 2` after one
+  post-create mutation — `1` at create (RS-11), `+1` per persisted mutation —
+  **regardless of `shape:`**.
+- **Trigger.** A `versioned` aggregate with `shape: document` (jsonb-stored):
+  create, invoke an operation, read back.
+- **Observable.** node, python and elixir read back `2`. **dotnet and java read
+  back `1`** on a document-shaped aggregate: their optimistic-concurrency token
+  is bound to a mapped column, and a document aggregate's `version` lives
+  inside the jsonb blob, so the mutation persists without bumping it. The
+  **`dapper` persistence adapter increments correctly** — same .NET emitters,
+  raw Npgsql with hand-rolled document SQL — which localizes the gap to the
+  EF/JPA mapping, not to the .NET/Java wire emitters. The
+  EMBEDDED-shape aggregate in the *same* system increments correctly on all
+  five — which is exactly why this survived every existing gate: the
+  behavioral tiers assert locally (each backend passes its own emitted
+  asserts), and no test author thought to assert `version` after an operation.
+- **Conforms.** node, python, elixir. **Targets:** dotnet, java.
+- **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate
+  (`test/behavioral/wire-golden/shapes.json` seq #3, `GET /api/carts/{id}`);
+  waived in `test/_helpers/wire-waivers.ts` until fixed. Note RS-11 covered
+  version at **create** only — this is the **increment** path, and it is
+  shape-dependent. Tier: **behavioral**.
+
 ---
 
 ## Adding a rule
