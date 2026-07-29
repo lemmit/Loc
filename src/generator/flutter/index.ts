@@ -197,7 +197,7 @@ export function generateFlutterForContexts(
   // platform to an existing project" flow), keeping the generated tree lean and
   // the native capability a pure function of the SDK.  Web-vs-native is a build
   // target, not a modelling mode — both are always available.
-  out.set("Makefile", renderMakefile(pkg));
+  out.set("Makefile", renderMakefile(pkg, usesFileUpload));
   out.set("README.md", renderReadme(title, pkg));
   // Runtime e2e (Phase 4) — a headless `flutter_test` widget smoke that boots
   // the real app and asserts it renders.  Unlike an `integration_test` (needs a
@@ -562,7 +562,17 @@ const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
  *  see the emission note); `web` / `apk` / `ipa` build each surface from the one
  *  shared Dart source.  `API_BASE_URL` threads through as a `--dart-define`
  *  (mirrors the compose env the Dockerfile injects). */
-function renderMakefile(pkg: string): string {
+function renderMakefile(pkg: string, usesFileUpload: boolean): string {
+  // A `FileUpload` primitive pulls the `file_picker` native plugin, whose
+  // transitive `flutter_plugin_android_lifecycle` requires Android compileSdk
+  // >= 36 — newer than the `flutter create` template default.  Bump the
+  // generated Gradle config after materialising the platform folders (portable
+  // perl -i; guarded so a missing perl doesn't fail `prepare`).  Omitted when no
+  // FileUpload is present, so File-free Makefiles stay byte-identical.
+  const compileSdkBump = usesFileUpload
+    ? "\t# file_picker's native side needs compileSdk >= 36\n" +
+      "\tfind android -name 'build.gradle*' -exec perl -pi -e 's/flutter\\.compileSdkVersion/36/g' {} + 2>/dev/null || true\n"
+    : "";
   return `# ${pkg} — Loom-generated Flutter app.
 # One Dart source, three build surfaces.  Override the API base with
 #   make apk API_BASE_URL=https://api.example.com/api
@@ -575,7 +585,7 @@ DEFINE = --dart-define=API_BASE_URL=$(API_BASE_URL)
 # not vendored here).  Idempotent — re-running only fills what's missing.
 prepare:
 	flutter create --platforms=android,ios .
-
+${compileSdkBump}
 web:
 	flutter build web --release $(DEFINE)
 
