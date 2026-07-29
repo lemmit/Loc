@@ -209,7 +209,10 @@ jobs:
       - name: flutter analyze (errors)
         working-directory: ${{ steps.proj.outputs.dir }}
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
-      - name: flutter test (headless runtime smoke)
+      # Runs the whole test/ dir: the boot smoke (widget_test.dart) AND the
+      # runtime a11y gate (a11y_test.dart — WCAG meetsGuideline matchers, the
+      # axe analogue for Flutter's canvas render).  See the Flutter a11y audit.
+      - name: flutter test (runtime smoke + a11y guidelines)
         working-directory: ${{ steps.proj.outputs.dir }}
         run: flutter test
       - name: flutter build web (the real compile gate)

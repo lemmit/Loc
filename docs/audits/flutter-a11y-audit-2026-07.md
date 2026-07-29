@@ -10,13 +10,17 @@
 > (`ddd generate system` → the Dart in §4). **When this prose and the cited
 > lines disagree, the code wins.**
 >
-> **Update 2026-07-29 — Phase A + B landed in the same change.** The five 🔴
-> derived-drop findings below are **fixed**: `flutter/pack.ts` now wraps
+> **Update 2026-07-29 — Phases A, B, and C all landed in the same change.** The
+> five 🔴 derived-drop findings below are **fixed**: `flutter/pack.ts` now wraps
 > `Heading`/`Alert`/`Loader`/`Toolbar`/`Avatar` in the right Dart `Semantics`,
 > pinned by `test/generator/flutter/a11y.test.ts`. The matrix and §4 below are
 > preserved as the *diagnosis*; the 🔴 verdicts are annotated **✅ fixed** and
-> the post-fix Dart is in §4. Phase C (a runtime `flutter_test` a11y gate)
-> remains open.
+> the post-fix Dart is in §4. **Phase C also shipped:** the generated app now
+> emits `test/a11y_test.dart` — a runtime `flutter_test` gate asserting Flutter's
+> built-in WCAG `meetsGuideline(...)` matchers on the booted app — which runs in
+> the existing `flutter test` step of `generated-flutter-build.yml`. **Verified
+> in a real Flutter SDK container** (`flutter analyze` clean + `flutter test`
+> green, all four guidelines including text-contrast passing).
 >
 > Sibling reading: [`accessibility.md`](../old/proposals/accessibility.md) (the
 > proposal), [`frontend-parity-audit-2026-07.md`](frontend-parity-audit-2026-07.md)
@@ -149,7 +153,8 @@ not an a11y finding; the `semanticLabel` wiring on top of it is correct.)
 | `generated-a11y.yml` (axe-core) | ❌ | matrix is 11 JSX/markup packs + `feliz`; `grep -c flutter` → 0. Structurally can't (canvas render). |
 | `a11y-contract-cross-pack.test.ts` | ❌ | `PACKS` list excludes the two non-Handlebars targets (Feliz, Flutter); `grep -c flutter` → 0 |
 | `generated-a11y-e2e.test.ts` | ❌ | has a `feliz` profile; no `flutter` profile |
-| `test/generator/flutter/a11y.test.ts` | ✅ (added Phase B) | 11 assertions pinning the `Semantics(`/`semanticLabel:`/`ExcludeSemantics` emit per primitive |
+| `test/generator/flutter/a11y.test.ts` | ✅ (added Phase B) | 13 assertions pinning the `Semantics(`/`semanticLabel:`/`ExcludeSemantics` emit per primitive + the emitted runtime gate |
+| `test/a11y_test.dart` runtime gate (in `generated-flutter-build.yml`) | ✅ (added Phase C) | `meetsGuideline(...)` WCAG matchers on the booted app — the axe analogue Flutter can carry (per-PR) |
 
 Before this change the three 🟢 rows that *did* work (Image/Icon/Button) were
 also **unpinned** — a refactor of `pack.ts` could drop them with zero CI
@@ -186,12 +191,12 @@ touch the framework-neutral contract, which is already correct. The idiom is
 **Phase B — pin what exists so it can't regress — ✅ landed:**
 6. `test/generator/flutter/a11y.test.ts` — 11 assertions over the `Semantics(`/`semanticLabel:`/`ExcludeSemantics` emit per primitive, the Flutter analogue of the per-pack a11y unit tests. The only gate Flutter can realistically carry (axe is out).
 
-**Phase C — runtime (optional, heavier) — open:**
-7. Emit a `flutter_test` using `SemanticsTester` / `meetsGuideline(textContrastGuideline, labeledTapTargetGuideline)` over the scaffold pages, run in `generated-flutter-build.yml` (which already boots a headless `flutter test` per M-T1.18 Phase 4). This is the closest Flutter analogue to the axe tripwire.
+**Phase C — runtime a11y gate — ✅ landed:**
+7. The generated app emits `test/a11y_test.dart`: it calls `tester.ensureSemantics()`, boots the real `App`, and asserts the four built-in WCAG guidelines on the first frame — `androidTapTargetGuideline` / `iOSTapTargetGuideline` (tap-target size), `labeledTapTargetGuideline` (every tappable has a name), and `textContrastGuideline` (WCAG-AA text contrast). It rides the existing `flutter test` step in `generated-flutter-build.yml` (no workflow matrix change), so it's a **per-PR** gate — the closest analogue to the axe tripwire the canvas render blocks. `NetworkImage` HTTP-400s (flutter_test blocks all HTTP) are drained via `takeException()` so they can't false-red the assertion; the same drain was added to the boot smoke (`widget_test.dart`), which had the latent version of that fragility. Empirically verified against a real Flutter SDK (container): `analyze` clean, all four guidelines green on both image-free and image-bearing pages.
 
-Phase A was small and self-contained (five `Semantics` wraps + tests), removed
-the entire silent-drop set, and brings the sixth frontend up to the floor the
-other five already clear — the natural next slice of M-T1.12.
+Phases A–C were self-contained (five `Semantics` wraps + a runtime gate + tests),
+removed the entire silent-drop set, and bring the sixth frontend up to the floor
+the other five already clear — closing the Flutter tail of M-T1.12.
 
 ## Appendix — reproduction
 

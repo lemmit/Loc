@@ -110,3 +110,29 @@ describe("flutter a11y — author-hint facts (Image / Avatar / Icon / Button)", 
     expect(dart).toContain("Semantics(label: 'Refresh products', child: ElevatedButton(");
   });
 });
+
+describe("flutter a11y — the runtime guideline gate (Phase C)", () => {
+  it("emits test/a11y_test.dart asserting the WCAG meetsGuideline matchers", async () => {
+    const files = await generateSystemFiles(system(`Heading { "Home", level: 1 }`));
+    const key = [...files.keys()].find((k) => k.endsWith("test/a11y_test.dart"));
+    expect(key, `no test/a11y_test.dart in: ${[...files.keys()].join(", ")}`).toBeDefined();
+    const dart = files.get(key!)!;
+    // Enables the semantics tree and boots the real App.
+    expect(dart).toContain("tester.ensureSemantics()");
+    expect(dart).toContain("await tester.pumpWidget(const App())");
+    // The four built-in WCAG guidelines — the axe analogue Flutter can carry.
+    expect(dart).toContain("meetsGuideline(androidTapTargetGuideline)");
+    expect(dart).toContain("meetsGuideline(iOSTapTargetGuideline)");
+    expect(dart).toContain("meetsGuideline(labeledTapTargetGuideline)");
+    expect(dart).toContain("meetsGuideline(textContrastGuideline)");
+    // NetworkImage 400s under flutter_test are drained, not fatal.
+    expect(dart).toContain("while (tester.takeException() != null) {}");
+  });
+
+  it("hardens the boot smoke test against NetworkImage HTTP 400 too", async () => {
+    const files = await generateSystemFiles(system(`Heading { "Home", level: 1 }`));
+    const key = [...files.keys()].find((k) => k.endsWith("test/widget_test.dart"));
+    expect(key).toBeDefined();
+    expect(files.get(key!)!).toContain("while (tester.takeException() != null) {}");
+  });
+});
