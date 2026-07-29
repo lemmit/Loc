@@ -20,6 +20,12 @@ import {
   E2E_TSCONFIG_JSON,
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
+// The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
+// default, values?)` over `./locales/en.json` with `{name}` substitution — so
+// the Svelte generator reuses the React module verbatim (same sharing pattern
+// as Vue).  Runtime files land under `src/lib/` and the body-walker seam's
+// `../i18n` import is rewritten to the depth-agnostic `$lib/i18n` specifier.
+import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -28,12 +34,6 @@ import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
-// The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
-// default, values?)` over `./locales/en.json` with `{name}` substitution — so
-// the Svelte generator reuses the React module verbatim (same sharing pattern
-// as Vue).  Runtime files land under `src/lib/` and the body-walker seam's
-// `../i18n` import is rewritten to the depth-agnostic `$lib/i18n` specifier.
-import { renderI18nModule, renderLocaleCatalog } from "../react/i18n-runtime.js";
 import { buildSvelteApiModule } from "./api-builder.js";
 import {
   SVELTE_APP_DTS,
