@@ -112,13 +112,19 @@ describe(".NET document-persistence emission (normalised(false))", () => {
   it("repository (de)serialises Data via the snapshot + bumps Version", () => {
     const repo = files.get("Infrastructure/Repositories/CartRepository.cs")!;
     // Save: serialise ToSnapshot, insert with Version 1 or bump existing.
+    // RS-14: `versioned` is default-on, so the next version is resolved BEFORE
+    // serialising and stamped into the snapshot — the wire `version` of a
+    // document aggregate comes from `data`, so bumping only the row left it
+    // frozen at its created value forever.  `data.version` and the column can
+    // no longer disagree.
+    expect(repo).toContain("var __nextVersion = __existing == null ? 1 : __existing.Version + 1;");
     expect(repo).toContain(
-      "var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
+      "var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot() with { Version = __nextVersion }, __json);",
     );
     expect(repo).toContain(
-      "_db.Carts.Add(new CartDocument { Id = aggregate.Id.Value, Data = __data, Version = 1 });",
+      "_db.Carts.Add(new CartDocument { Id = aggregate.Id.Value, Data = __data, Version = __nextVersion });",
     );
-    expect(repo).toContain("__existing.Version += 1;");
+    expect(repo).toContain("__existing.Version = __nextVersion;");
     // Load: deserialise + FromSnapshot.
     expect(repo).toContain(
       "return Cart.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<CartSnapshot>(__doc.Data, __json)!);",

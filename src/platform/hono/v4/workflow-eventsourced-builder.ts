@@ -1,3 +1,4 @@
+import { eventRowClassOf } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { tsParamType } from "../../../generator/typescript/repository-document-builder.js";
 import {
@@ -131,7 +132,16 @@ function renderApplierStmt(s: StmtIR, indent: string): string {
 export function emitWorkflowFoldHelpers(
   wf: WorkflowIR,
   ctx: EnrichedBoundedContextIR,
-  opts: { readOnly?: boolean; resolveStreamContext?: (name: string) => string | undefined } = {},
+  opts: {
+    readOnly?: boolean;
+    resolveStreamContext?: (name: string) => string | undefined;
+    /** `persistence: mikroorm` — read/append the `<ctx>_events` stream through
+     *  the EntityManager instead of Drizzle.  Without this branch the helpers
+     *  emitted `drizzle-orm` calls unconditionally, so a mikroorm project (which
+     *  does not install drizzle) died at import: `Cannot find package
+     *  'drizzle-orm' imported from http/workflows.ts`. */
+    usingMikro?: boolean;
+  } = {},
 ): string[] {
   const T = upperFirst(wf.name);
   const corr = wf.correlationField as string;
@@ -144,6 +154,12 @@ export function emitWorkflowFoldHelpers(
   // shared per-context event log — mirrors the ES aggregate repo's
   // `stream_type = "<Agg>"`.
   const streamType = T;
+  // MikroORM branch: the same stream, reached through the EntityManager over the
+  // generated `<Ctx>EventRow` entity (db/entities.ts) rather than the drizzle
+  // table const.  `dbT` types every helper's `db` param accordingly.
+  const mikro = opts.usingMikro === true;
+  const eventRow = eventRowClassOf(owner);
+  const dbT = mikro ? "EntityManager" : "NodePgDatabase<typeof schema>";
   const out: string[] = [];
 
   // State type — every saga state field (the correlation key + folded state).
@@ -190,16 +206,24 @@ export function emitWorkflowFoldHelpers(
   // it to keep the read-model file free of dead declarations.
   if (!opts.readOnly) {
     out.push(`async function load${T}Events(`);
-    out.push(`  db: NodePgDatabase<typeof schema>,`);
+    out.push(`  db: ${dbT},`);
     out.push(`  key: string,`);
     out.push(`): Promise<Events.DomainEvent[]> {`);
-    out.push(`  const rows = await db`);
-    out.push(`    .select()`);
-    out.push(`    .from(${table})`);
-    out.push(
-      `    .where(and(eq(${table}.streamType, "${streamType}"), eq(${table}.streamId, key)))`,
-    );
-    out.push(`    .orderBy(${table}.version);`);
+    if (mikro) {
+      out.push(`  const rows = await db.find(`);
+      out.push(`    ${eventRow},`);
+      out.push(`    { streamType: "${streamType}", streamId: key },`);
+      out.push(`    { orderBy: { version: "asc" } },`);
+      out.push(`  );`);
+    } else {
+      out.push(`  const rows = await db`);
+      out.push(`    .select()`);
+      out.push(`    .from(${table})`);
+      out.push(
+        `    .where(and(eq(${table}.streamType, "${streamType}"), eq(${table}.streamId, key)))`,
+      );
+      out.push(`    .orderBy(${table}.version);`);
+    }
     out.push(`  return rows.map((r) => rowToEvent({ type: r.type, data: r.data }));`);
     out.push(`}`);
   }
@@ -208,13 +232,21 @@ export function emitWorkflowFoldHelpers(
   // instance-LIST read body (workflow-instance-visibility.md) mirrors the
   // event-sourced AGGREGATE's `_loadAll` group-fold.
   out.push(`async function loadAll${T}(`);
-  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  db: ${dbT},`);
   out.push(`): Promise<${T}State[]> {`);
-  out.push(`  const rows = await db`);
-  out.push(`    .select()`);
-  out.push(`    .from(${table})`);
-  out.push(`    .where(eq(${table}.streamType, "${streamType}"))`);
-  out.push(`    .orderBy(${table}.streamId, ${table}.version);`);
+  if (mikro) {
+    out.push(`  const rows = await db.find(`);
+    out.push(`    ${eventRow},`);
+    out.push(`    { streamType: "${streamType}" },`);
+    out.push(`    { orderBy: { streamId: "asc", version: "asc" } },`);
+    out.push(`  );`);
+  } else {
+    out.push(`  const rows = await db`);
+    out.push(`    .select()`);
+    out.push(`    .from(${table})`);
+    out.push(`    .where(eq(${table}.streamType, "${streamType}"))`);
+    out.push(`    .orderBy(${table}.streamId, ${table}.version);`);
+  }
   out.push(`  const byStream = new Map<string, Events.DomainEvent[]>();`);
   out.push(`  for (const r of rows) {`);
   out.push(`    const list = byStream.get(r.streamId) ?? [];`);
@@ -231,17 +263,23 @@ export function emitWorkflowFoldHelpers(
 
   // append<T>Events — gap-free append of the workflow's own (folded) events.
   out.push(`async function append${T}Events(`);
-  out.push(`  db: NodePgDatabase<typeof schema>,`);
+  out.push(`  db: ${dbT},`);
   out.push(`  key: string,`);
   out.push(`  events: Events.DomainEvent[],`);
   out.push(`): Promise<void> {`);
   out.push(`  if (events.length === 0) return;`);
-  out.push(`  const prior = await db`);
-  out.push(`    .select({ version: ${table}.version })`);
-  out.push(`    .from(${table})`);
-  out.push(
-    `    .where(and(eq(${table}.streamType, "${streamType}"), eq(${table}.streamId, key)));`,
-  );
+  if (mikro) {
+    out.push(
+      `  const prior = await db.find(${eventRow}, { streamType: "${streamType}", streamId: key });`,
+    );
+  } else {
+    out.push(`  const prior = await db`);
+    out.push(`    .select({ version: ${table}.version })`);
+    out.push(`    .from(${table})`);
+    out.push(
+      `    .where(and(eq(${table}.streamType, "${streamType}"), eq(${table}.streamId, key)));`,
+    );
+  }
   out.push(`  let version = prior.reduce((m, r) => Math.max(m, r.version), 0);`);
   out.push(`  const rows = events.map((event) => ({`);
   out.push(`    streamType: "${streamType}",`);
@@ -250,7 +288,16 @@ export function emitWorkflowFoldHelpers(
   out.push(`    type: event.type,`);
   out.push(`    data: eventToData(event),`);
   out.push(`  }));`);
-  out.push(`  await db.insert(${table}).values(rows);`);
+  if (mikro) {
+    // `occurredAt` is NOT NULL on the entity and has no DB default (the drizzle
+    // table defaults it), so the EntityManager path supplies it explicitly.
+    out.push(
+      `  for (const row of rows) db.persist(db.create(${eventRow}, { ...row, occurredAt: new Date() }));`,
+    );
+    out.push(`  await db.flush();`);
+  } else {
+    out.push(`  await db.insert(${table}).values(rows);`);
+  }
   out.push(`}`);
 
   // The event types this workflow folds (own-events appended to its stream;

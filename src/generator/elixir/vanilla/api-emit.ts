@@ -412,6 +412,16 @@ ${GUARD_RESCUE}
   // its router route + OpenAPI `post` — an aggregate with no canonical create
   // emits no create action (rather than an orphaned `def create` no route
   // reaches, mirroring how `delete` is `emitsRestDelete`-gated below).
+  //
+  // RS-13 — the 201 body is the ID ENVELOPE (`%{"id" => record.id}`), NOT the
+  // serialized aggregate.  That is what this backend's own OpenAPI declares
+  // (`Create<Agg>Response`, openapi-emit.ts: "the create endpoint returns just
+  // the new id") and what the other four backends send.  Serializing the whole
+  // record here was a runtime-only divergence the spec-diff is structurally
+  // blind to — the specs AGREED; only the bytes differed — so it took the
+  // M-T9.11 wire-golden differential to surface it.  The string-keyed map
+  // matches the serializer's own `"id" => …` entry, so the id's wire form is
+  // identical on the create and read paths.
   const createAction = !emitsRestCreate(agg)
     ? ""
     : auditCreate
@@ -448,7 +458,7 @@ ${auditRecordCall({
 
         conn
         |> put_status(201)
-        |> json(serialize(record))
+        |> json(%{"id" => record.id})
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
@@ -465,7 +475,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
 
         conn
         |> put_status(201)
-        |> json(serialize(record))
+        |> json(%{"id" => record.id})
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)

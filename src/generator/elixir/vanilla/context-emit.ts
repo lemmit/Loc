@@ -864,6 +864,22 @@ function renderNamedOpFunction(
   const persistBase = mutatesEmbeddedContainment ? "record_before" : "record";
   const captureBase = mutatesEmbeddedContainment ? "    record_before = record\n" : "";
 
+  // RS-14 — a `versioned` aggregate must advance its optimistic-concurrency
+  // `version` on EVERY persisted mutation, not just on the generic PATCH update
+  // (which gets it from `optimistic_lock(:version)` in the update changeset).
+  // The operation path built its changeset from a bare `change(%{})`, so an op
+  // persisted the new state while leaving `version` frozen at its created value
+  // — `sales` Order read back 1 after TWO mutations where the golden reads 3.
+  // The DOCUMENT op path already did this (`change(%{version: row.version + 1})`
+  // in document-emit.ts); this brings the relational/embedded path in line.
+  //
+  // A plain bump, not `optimistic_lock/2`: it mirrors the document path in this
+  // same backend and stays confined to the wire divergence.  Arming the CAS
+  // guard on op writes (a stale write raising Ecto.StaleEntryError → 409) is a
+  // real but separate behavioural change, and belongs with the cross-backend
+  // expected-version work rather than a wire-parity fix.
+  const opChangeMap = aggregateIsVersioned(agg) ? `%{version: ${persistBase}.version + 1}` : "%{}";
+
   // Operation persistence re-runs the aggregate's cross-field invariants (the
   // audit's "operation persist skips validation"): the plain `change(%{})` +
   // `put_change` path bypasses every changeset validator, so a `handle := …`
@@ -915,7 +931,7 @@ function renderNamedOpFunction(
         // rollback drops the events too.
         `    changeset =
       ${persistBase}
-      |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
+      |> Ecto.Changeset.change(${opChangeMap})${putBlock6}${invPipe6}
 
     tx_result =
       ${appModule}.Repo.transaction(fn ->
@@ -939,7 +955,7 @@ ${dispatchBlock}
     end`
       : `    changeset =
       ${persistBase}
-      |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
+      |> Ecto.Changeset.change(${opChangeMap})${putBlock6}${invPipe6}
 
     ${appModule}.Repo.transaction(fn ->
       case ${repoMod}.persist_change(changeset) do
@@ -958,7 +974,7 @@ ${txTail.join("\n")}
         // reaches the context Dispatcher (saga seam) + the raw broadcast.
         `    changeset =
       ${persistBase}
-      |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
+      |> Ecto.Changeset.change(${opChangeMap})${putBlock6}${invPipe6}
 
     case ${repoMod}.persist_change(changeset) do
       {:ok, saved} ->
@@ -969,7 +985,7 @@ ${dispatchBlock}
         {:error, reason}
     end`
       : `    ${persistBase}
-    |> Ecto.Changeset.change(%{})${putBlock}${invPipe}
+    |> Ecto.Changeset.change(${opChangeMap})${putBlock}${invPipe}
     |> ${repoMod}.persist_change()`;
   }
 

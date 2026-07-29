@@ -102,7 +102,10 @@ const rowClassOf = (aggName: string): string => `${aggName}Row`;
 /** Row-entity class name for the shared per-context event-log stream row
  *  (`<Ctx>EventRow`) — one table for every `persistedAs(eventLog)` aggregate in
  *  the context, discriminated by `streamType`. */
-const eventRowClassOf = (ctxName: string): string => `${upperFirst(ctxName)}EventRow`;
+/** The MikroORM entity class for a context's shared `<ctx>_events` stream —
+ *  exported so the ES-workflow fold helpers (workflow-eventsourced-builder.ts)
+ *  can name it in their EntityManager branch. */
+export const eventRowClassOf = (ctxName: string): string => `${upperFirst(ctxName)}EventRow`;
 
 /** Pivot Row-entity class for an `Id[]` reference-collection association
  *  (`trainer_party` join table → `TrainerPartyRow`).  A plain composite-PK
@@ -604,7 +607,16 @@ export function renderMikroEntities(
   // after the per-aggregate walk; MikroORM owns the schema (via
   // `updateSchema()`), so the composite `(stream_type, stream_id, version)` PK
   // + inert `seq` cursor land as real columns.
-  const hasEventLog = aggs.some((agg) => agg.persistedAs === "eventLog");
+  // An event-sourced WORKFLOW folds the same `<ctx>_events` stream (it has no
+  // state table — see the correlation-row loop below), so it needs the stream
+  // entity even when no AGGREGATE is event-sourced.  Gating on aggregates alone
+  // meant a context whose only event-sourced thing was a workflow emitted no
+  // entity at all, and the generated `http/workflows.ts` fell back to the
+  // drizzle event store — importing `drizzle-orm`, which a `persistence:
+  // mikroorm` project does not install, so the server died at import.
+  const hasEventLog =
+    aggs.some((agg) => agg.persistedAs === "eventLog") ||
+    (ctx.workflows ?? []).some((wf) => wf.eventSourced);
   for (const agg of aggs) {
     if (agg.persistedAs === "eventLog") continue;
     // TPH concretes (aggregate-inheritance.md, sharedTable) own no Row — their
