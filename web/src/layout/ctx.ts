@@ -159,6 +159,12 @@ export interface LayoutCtx {
    *  workspace-sources controller (Phase 2a).  Drives the Files
    *  tab strip above the editor. */
   sourceFiles: ReadonlyMap<string, string>;
+  /** Bumped by the sources controller whenever the active file's content
+   *  changed EXTERNALLY (history restore, import, another tab).  Part of
+   *  the editor's remount key so Monaco reseeds from the fresh
+   *  `initialSource` instead of holding — and then writing back — a
+   *  buffer the store has already moved past. */
+  sourceEpoch: number;
   /** Switch which file the editor shows.  Wired to the controller's
    *  `setActivePath` in Phase 2b2; a no-op when the platform isn't
    *  multi-file (e.g. tests passing a stub ctx). */
@@ -209,7 +215,7 @@ export interface LayoutCtx {
    *  Apply path can't echo-loop into the re-seed. */
   editorSourceTick: number;
   onDiagnosticsChange: (items: Diagnostic[]) => void;
-  scheduleAutoGenerate: () => void;
+  scheduleAutoGenerate: (delayMs?: number) => void;
   /** Imperative handle to the live Monaco model (set while the editor is
    *  mounted), so Builder edits reflect into the source tab + LSP immediately. */
   editorHandleRef: MutableRefObject<EditorHandle | null>;

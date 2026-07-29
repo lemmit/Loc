@@ -32,6 +32,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     isDesktop,
     editorHandleRef,
     activeSourcePath,
+    sourceEpoch,
     sourceFiles,
     setActiveSourcePath,
     createSourceFile,
@@ -68,9 +69,11 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
       <LoomEditor
         // Remount on a project change so the editor reseeds from
         // `initialSource`: the active workspace (switch), whether its
-        // content has finished loading, the last-imported example, and
-        // the active file path.
-        key={`${workspace.activeId}:${workspace.loaded ? 1 : 0}:${exampleId}::${activeSourcePath}`}
+        // content has finished loading, the last-imported example, the
+        // active file path — and `sourceEpoch`, which covers the changes
+        // identity alone can't see (a history restore or another writer
+        // replacing the active file's CONTENT under the same path).
+        key={`${workspace.activeId}:${workspace.loaded ? 1 : 0}:${exampleId}:${sourceEpoch}:${activeSourcePath}`}
         client={lspClient}
         initialValue={initialSource}
         isMobile={!isDesktop}

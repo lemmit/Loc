@@ -1,4 +1,5 @@
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -19,9 +20,15 @@ import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
 // "History" dock tab — a visible timeline of the git-backed workspace.
 // Commits accrue from the debounced autosave ("autosave workspace"),
 // intentional generates ("regenerate") and first boot ("import legacy
-// workspace").  Read-only: lists commits and, on expand, the files each
-// changed (via `store.commitChanges`).  No restore/checkout — that write
-// path was deliberately removed.
+// workspace").  Lists commits and, on expand, the files each changed
+// (via `store.commitChanges`).
+//
+// The one write path is "Restore this version": `store.restoreCommit`
+// rewrites the working tree (and re-baselines the generated-merge ref),
+// which is committed as a NEW commit — history stays linear, nothing is
+// rewritten.  The restore has to be VISIBLE, so it also schedules a
+// regenerate; the editor follows through the sources controller's
+// external-content epoch (see `workspace-sources.ts`).
 
 const WORKSPACE_PREFIX = "/workspace/";
 const STATUS_COLOR: Record<CommitFileChange["status"], string> = {
@@ -49,6 +56,7 @@ export function HistoryBody({
   // Inline "restore this version" confirm + in-flight state, keyed by oid.
   const [confirmOid, setConfirmOid] = useState<string | null>(null);
   const [restoringOid, setRestoringOid] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   // Re-render periodically so relative timestamps stay fresh.
   const [, setNowTick] = useState(0);
 
@@ -79,10 +87,15 @@ export function HistoryBody({
       if (timer) clearTimeout(timer);
       timer = setTimeout(load, 400);
     });
+    // File events alone leave the list stale: autosave commits land ~1.1 s
+    // AFTER the debounce above has already reloaded.  Commits have their
+    // own channel (reads only — it can't feed back into a commit).
+    const unsubscribeCommits = store.subscribeCommits(load);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
       unsubscribe();
+      unsubscribeCommits();
     };
   }, [active, store]);
 
@@ -109,16 +122,20 @@ export function HistoryBody({
   const restore = (oid: string): void => {
     if (!store) return;
     setRestoringOid(oid);
+    setRestoreError(null);
     void (async () => {
       try {
         await store.restoreCommit(oid);
         await commitOnSave(store, `restore to ${shortOid(oid)}`);
+        // The editor follows via the sources controller's external-content
+        // epoch; the generated files + preview only follow if something
+        // asks for them — a restore is exactly such a request.
+        ctx.scheduleAutoGenerate(200);
+        setConfirmOid(null);
       } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("restore failed:", err);
+        setRestoreError(err instanceof Error ? err.message : String(err));
       } finally {
         setRestoringOid(null);
-        setConfirmOid(null);
       }
     })();
   };
@@ -149,6 +166,21 @@ export function HistoryBody({
           data-testid="history-hide-autosaves"
         />
       </Group>
+      {restoreError && (
+        <Alert
+          color="red"
+          variant="light"
+          mx="sm"
+          mb={4}
+          withCloseButton
+          onClose={() => setRestoreError(null)}
+          title="Restore failed"
+          data-testid="history-restore-error"
+          style={{ flexShrink: 0 }}
+        >
+          <Text size="xs">{restoreError}</Text>
+        </Alert>
+      )}
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <Stack gap={2} px="sm" pb="sm" data-testid="history-list">
           {loaded && shown.length === 0 && (

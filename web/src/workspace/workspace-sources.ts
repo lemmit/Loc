@@ -43,6 +43,17 @@ export interface WorkspaceSourcesSnapshot {
    *  `audit/log`, … */
   emptyFolders: ReadonlySet<string>;
   activePath: string;
+  /** Monotonic counter bumped whenever the ACTIVE file's content
+   *  changed underneath us — a restore, a pack/legacy import, another
+   *  tab.  Own writes (`write`) don't bump it: they land in the
+   *  resident snapshot before the store is touched, so the refresh
+   *  their notification triggers sees no diff.
+   *
+   *  Consumers that hold their own copy of the active file's text
+   *  (the Monaco buffer) key their reseed on this — without it an
+   *  external write is structurally invisible and the next keystroke
+   *  writes the stale buffer back over it. */
+  epoch: number;
 }
 
 /** True iff `path` is a `.ddd` source under `/workspace/` (not e.g.
@@ -141,6 +152,16 @@ export class WorkspaceSourcesController {
    *  slower earlier read can't clobber the resident snapshot with stale
    *  data (the async-refresh race). */
   private refreshSeq = 0;
+  private epoch = 0;
+  /** False until the first refresh has populated the snapshot.  That
+   *  first read isn't an external CHANGE (nobody has seen the previous,
+   *  empty snapshot as content yet), so it must not bump the epoch — a
+   *  boot-time bump would remount the editor over its own seed. */
+  private hydrated = false;
+  /** Own writes still awaiting the store, per path.  A refresh that
+   *  lands inside that window is our own echo, never an external
+   *  change — see `write`. */
+  private readonly inFlightWrites = new Map<string, number>();
   private readonly readyPromise: Promise<void>;
 
   constructor(private readonly store: GitStore | null) {
@@ -177,8 +198,20 @@ export class WorkspaceSourcesController {
     // Drop this result if a newer refresh started while we were reading —
     // it observed at least as recent a state and will emit.
     if (this.disposed || seq !== this.refreshSeq) return;
+    const before = this.files.get(this.activePath);
     this.files = files;
     this.emptyFolders = emptyFolders;
+    const after = files.get(this.activePath);
+    if (this.hydrated && after !== before && !this.inFlightWrites.has(this.activePath)) {
+      this.epoch++;
+    }
+    // Externally deleted (restore, another tab): run the same fallback
+    // `delete` runs, or `activePath` dangles and the next editor write
+    // recreates the file that was just removed.
+    if (before !== undefined && after === undefined) {
+      this.activePath = pickFallbackActivePath(files.keys());
+    }
+    this.hydrated = true;
     this.emit();
   }
 
@@ -208,6 +241,7 @@ export class WorkspaceSourcesController {
       files: this.files,
       emptyFolders: this.emptyFolders,
       activePath: this.activePath,
+      epoch: this.epoch,
     };
   }
 
@@ -229,8 +263,23 @@ export class WorkspaceSourcesController {
       );
     }
     if (!this.store) return;
-    await this.store.writeFile(path, content);
-    await this.refresh();
+    // Record our own write in the resident snapshot BEFORE touching the
+    // store: `writeFile` notifies synchronously, and the refresh that
+    // notification drives must see no content diff or it would read our
+    // own write as an external change and bump the epoch.  The in-flight
+    // count covers the rest of that window — with two writes racing, a
+    // refresh can observe the store mid-way and disagree with the
+    // resident snapshot without anything external having happened.
+    this.files = new Map(this.files).set(path, content);
+    this.inFlightWrites.set(path, (this.inFlightWrites.get(path) ?? 0) + 1);
+    try {
+      await this.store.writeFile(path, content);
+    } finally {
+      await this.refresh();
+      const left = (this.inFlightWrites.get(path) ?? 1) - 1;
+      if (left > 0) this.inFlightWrites.set(path, left);
+      else this.inFlightWrites.delete(path);
+    }
   }
 
   /** Create an empty folder via the store's first-class `mkdir`.

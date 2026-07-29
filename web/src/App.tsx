@@ -1592,6 +1592,7 @@ export default function App(): JSX.Element {
     workspace,
     activeSourcePath: sources.activePath,
     sourceFiles: sources.files,
+    sourceEpoch: sources.epoch,
     setActiveSourcePath: sources.setActivePath,
     // New-file: seed VFS with a stub body so the editor has
     // something non-empty to mount against, then flip the active

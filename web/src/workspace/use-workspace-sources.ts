@@ -109,6 +109,7 @@ export function useWorkspaceSources(store: GitStore | null): WorkspaceSourcesApi
       files: snapshot.files,
       emptyFolders: snapshot.emptyFolders,
       activePath: snapshot.activePath,
+      epoch: snapshot.epoch,
       setActivePath,
       write,
       delete: del,

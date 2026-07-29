@@ -203,6 +203,112 @@ describe("WorkspaceSourcesController", () => {
     c.dispose();
   });
 
+  // The store→editor direction of the sync: the editor holds its own copy
+  // of the active file's text and only reseeds on remount, so an external
+  // write (history restore, import, another tab) is invisible unless the
+  // controller says "this content moved under you".
+  describe("external-content epoch", () => {
+    it("an external write to the ACTIVE file bumps the epoch", async () => {
+      const store = await freshStore({ "/workspace/main.ddd": "old" });
+      const c = await makeController(store);
+      const before = c.snapshot().epoch;
+      await store.writeFile("/workspace/main.ddd", "restored");
+      await vi.waitFor(() => {
+        expect(c.snapshot().files.get("/workspace/main.ddd")).toBe("restored");
+        expect(c.snapshot().epoch).toBeGreaterThan(before);
+      });
+      c.dispose();
+    });
+
+    it("the controller's OWN write does not bump the epoch", async () => {
+      const store = await freshStore({ "/workspace/main.ddd": "old" });
+      const c = await makeController(store);
+      const before = c.snapshot().epoch;
+      await c.write("/workspace/main.ddd", "typed by the user");
+      // Let the store notification's refresh land too — it must agree.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(c.snapshot().files.get("/workspace/main.ddd")).toBe("typed by the user");
+      expect(c.snapshot().epoch).toBe(before);
+      c.dispose();
+    });
+
+    it("a burst of own writes does not bump the epoch", async () => {
+      const store = await freshStore({ "/workspace/main.ddd": "old" });
+      const c = await makeController(store);
+      const before = c.snapshot().epoch;
+      await Promise.all([
+        c.write("/workspace/main.ddd", "a"),
+        c.write("/workspace/main.ddd", "ab"),
+        c.write("/workspace/main.ddd", "abc"),
+      ]);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(c.snapshot().epoch).toBe(before);
+      c.dispose();
+    });
+
+    it("an external write to a NON-active file does not bump the epoch", async () => {
+      const store = await freshStore({
+        "/workspace/main.ddd": "m",
+        "/workspace/orders.ddd": "o",
+      });
+      const c = await makeController(store);
+      const before = c.snapshot().epoch;
+      await store.writeFile("/workspace/orders.ddd", "changed elsewhere");
+      await vi.waitFor(() =>
+        expect(c.snapshot().files.get("/workspace/orders.ddd")).toBe("changed elsewhere"),
+      );
+      expect(c.snapshot().epoch).toBe(before);
+      c.dispose();
+    });
+
+    it("hydrating the initial snapshot is not an external change", async () => {
+      const store = await freshStore({ "/workspace/main.ddd": "seeded" });
+      const c = await makeController(store);
+      expect(c.snapshot().files.get("/workspace/main.ddd")).toBe("seeded");
+      expect(c.snapshot().epoch).toBe(0);
+      c.dispose();
+    });
+  });
+
+  it("an external delete of the active file re-points activePath", async () => {
+    // A restore that drops the open file bypasses `delete`, so the
+    // fallback has to run from the refresh — otherwise `activePath`
+    // dangles and the next editor write recreates the deleted file.
+    const store = await freshStore({
+      "/workspace/main.ddd": "m",
+      "/workspace/orders.ddd": "o",
+    });
+    const c = await makeController(store);
+    c.setActivePath("/workspace/orders.ddd");
+    await store.deleteFile("/workspace/orders.ddd");
+    await vi.waitFor(() => expect(c.snapshot().activePath).toBe(DEFAULT_PATH));
+    c.dispose();
+  });
+
+  it("an external delete of a NON-active file leaves activePath alone", async () => {
+    const store = await freshStore({
+      "/workspace/main.ddd": "m",
+      "/workspace/orders.ddd": "o",
+    });
+    const c = await makeController(store);
+    await store.deleteFile("/workspace/orders.ddd");
+    await vi.waitFor(() => expect([...c.snapshot().files.keys()]).toEqual(["/workspace/main.ddd"]));
+    expect(c.snapshot().activePath).toBe(DEFAULT_PATH);
+    c.dispose();
+  });
+
+  it("does not re-point activePath at a file that never existed yet", async () => {
+    // The create flow flips the active path before the seed write lands;
+    // a refresh in that window must not steal it back.
+    const store = await freshStore({ "/workspace/main.ddd": "m" });
+    const c = await makeController(store);
+    c.setActivePath("/workspace/brand-new.ddd");
+    await store.writeFile("/workspace/other.ddd", "unrelated");
+    await vi.waitFor(() => expect(c.snapshot().files.has("/workspace/other.ddd")).toBe(true));
+    expect(c.snapshot().activePath).toBe("/workspace/brand-new.ddd");
+    c.dispose();
+  });
+
   it("design-pack writes under /workspace/design/ don't appear in `files`", async () => {
     const store = await freshStore();
     const c = await makeController(store);
