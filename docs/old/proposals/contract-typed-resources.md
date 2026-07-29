@@ -1,7 +1,31 @@
 # RFC: `contract` — typed resources you create and call
 
-**Status:** Draft / Proposed (design only — no grammar, IR, or generator
-work scheduled).
+**Status:** Draft / Proposed — **inbound half only**.
+
+> **[2026-07-29 status audit — half of this RFC has shipped.]** The
+> **outbound** direction proposed below is **done**, under different names:
+> `api X with scaffoldApi(of: Sub)` splices literal `route <METHOD> "<path>"
+> -> <Ctx>.<Handler>` lines (`src/macros/stdlib/scaffold/scaffoldApi.macro.ts`)
+> and `context X with scaffoldHandlers` splices literal
+> `response`/`command`/`query` `PayloadDecl` records
+> (`src/macros/api/factories.ts`, `scaffold/_contracts-shared.ts`) — both
+> `unfold` to real `.ddd`, and all five backends read the explicit routes and
+> the *declared* response record rather than re-deriving from `wireShape`
+> (M-T5.10 PR1–PR7: #1900, #1905, #1909–#1912). So §1's outbound problem
+> statement and §3's outbound projection are **stale**, and §6's "widen the
+> Layer-2 definition" would now be a *rename of shipped surface* for no new
+> capability. The **inbound** direction is untouched and the case for it
+> stands: `kind: api` still offers only the untyped `get(path): json` /
+> `post(path, body): json` pair (`src/ir/resource-verbs.ts`), and nothing in
+> `src/` reads a foreign spec. Two further corrections: §3's `record Foo { … }`
+> must be spelled with the shipped payload vocabulary
+> (`payload`/`command`/`query`/`response`/`error`), and the RFC never decides
+> **where the spec is read** — a live `openapi("…")` macro head would put an
+> fs read + an OpenAPI parser on the browser-safe `src/api/` path.
+> `contract` is still a free keyword (§8 holds). Scheduled as **M-T4.8**;
+> the rescope + slicing live in
+> [`../../new-plan/missions/M-T4.8-contract-typed-resources-design.md`](../../new-plan/missions/M-T4.8-contract-typed-resources-design.md),
+> which supersedes §§1, 3, 6, 7 below.
 
 **Scope:** Introduce a single declaration, `contract`, for a **typed REST
 resource**: a named set of operations and their I/O records. One keyword

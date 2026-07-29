@@ -24,7 +24,7 @@
 | capability-emission-dedup.md | partial (`ignoring` shipped) | M-T5.12 |
 | channels.md | partial | M-T1.10 (realtime), M-T4.4 (brokers), M-T4.9 (caching) |
 | connection-secret-wiring.md | proposed (draft 2026-07-19) *(added 2026-07-21)* | **no mission yet** — resource/config family (M-T2.9, M-T4.8); see Known unmapped items |
-| contract-typed-resources.md | proposed | M-T4.8 |
+| contract-typed-resources.md | proposed — **inbound half only**; outbound shipped as `scaffoldApi`/`scaffoldHandlers` *(audited 2026-07-29)* | M-T4.8 |
 | criterion-everywhere.md | superseded (by reified-criteria) | residue → M-T5.4 |
 | criterion.md | partial | M-T5.4 |
 | cross-stack-static-analysis.md | partial | M-T8.9 |
