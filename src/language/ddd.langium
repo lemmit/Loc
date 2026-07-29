@@ -333,10 +333,17 @@ Deployable:
 // parameter (the `Sales` declared as `api Sales: SalesApi` in the ui block)
 // to the backend deployable that supplies that contract.  Validator enforces
 // that `salesApi.serves: SalesApi`.
+// The trailing `','?` matches every other deployable member (`port:`,
+// `targets:`, `serves:`, and `UiSugarBinding`).  Without it, `ui: WebApp {
+// Sales: api }, port: 3001` was a PARSE ERROR — Langium error-recovered into a
+// usable AST, so any caller that doesn't inspect diagnostics (the test helper
+// `generateSystemFiles`, the playground) silently accepted it while `ddd parse`
+// and `parseValid` rejected it.  ~30 fixtures were parsing with that hidden
+// error.
 UiComposeBinding:
     'ui' ':' ref=[Ui:ID] '{'
         (bindings+=UiParamBinding (',' bindings+=UiParamBinding)* ','?)?
-    '}';
+    '}' ','?;
 
 UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
