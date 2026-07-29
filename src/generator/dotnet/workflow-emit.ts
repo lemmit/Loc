@@ -115,6 +115,22 @@ function workflowResourceOps(wf: WorkflowIR): { resourceName: string }[] {
   return out;
 }
 
+/** True when any of these statements issues a typed in-system api call — the
+ *  gate for the `<ns>.Resources` using.  Separate from `usesResourceOp`
+ *  because an api-bound resource has NO sourceType-routed helper class, so
+ *  `resourceClasses` is empty for it and the resource-op gate never fires.
+ *  Uses the DEEP walker: a typed call nested inside another expression is
+ *  legal, and the shallow statement shapes would miss it. */
+function usesRemoteApiOp(statements: readonly WorkflowStmtIR[]): boolean {
+  let found = false;
+  for (const st of statements) {
+    walkWorkflowStmtExprsDeep(st, (e) => {
+      if (e.kind === "call" && e.callKind === "remote-api-op") found = true;
+    });
+  }
+  return found;
+}
+
 function workflowUsesResourceOp(wf: WorkflowIR): boolean {
   return workflowResourceOps(wf).length > 0;
 }
@@ -565,7 +581,8 @@ function renderEventReactorHandler(
       st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
     return call?.kind === "call" && call.callKind === "resource-op";
   });
-  if (resourceClasses.size > 0 && usesResourceOp) usings.add(`${ns}.Resources`);
+  if ((resourceClasses.size > 0 && usesResourceOp) || usesRemoteApiOp(statements))
+    usings.add(`${ns}.Resources`);
   const renderArg = (e: ExprIR): string => {
     collectCsExprUsings(e, usings, ns);
     return renderExprWithEventParam(e, paramName, resourceClasses, thisName);
@@ -939,7 +956,8 @@ function renderMergedEventSourcedHandler(
       st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
     return call?.kind === "call" && call.callKind === "resource-op";
   });
-  if (resourceClasses.size > 0 && usesResourceOp) usings.add(`${ns}.Resources`);
+  if ((resourceClasses.size > 0 && usesResourceOp) || usesRemoteApiOp(mergedStatements))
+    usings.add(`${ns}.Resources`);
 
   const corr = wf.correlationField as string;
   const corrPascal = upperFirst(corr);
@@ -1321,7 +1339,8 @@ function renderHandler(
   // built from the system's resources + storages.  Empty when the
   // deployable wires no consumable resources.
   const resourceClasses = buildResourceClasses(sys);
-  if (resourceClasses.size > 0 && workflowUsesResourceOp(wf)) usings.add(`${ns}.Resources`);
+  if ((resourceClasses.size > 0 && workflowUsesResourceOp(wf)) || usesRemoteApiOp(wf.statements))
+    usings.add(`${ns}.Resources`);
   const renderArg = (e: import("../../ir/types/loom-ir.js").ExprIR): string => {
     // Collect the rendered expression's non-implicit namespaces adjacent
     // to rendering (`renderArg` is the single choke point for every

@@ -1,0 +1,128 @@
+name: API call (typed in-system call runtime e2e)
+
+# Runtime e2e for the typed in-system service-to-service call (M-T4.8):
+# `resource r { kind: api, use: <SomeApi> }` bound to an api a SIBLING
+# deployable `serves:`, called from domain code as `r.someOperation(...)`.
+#
+# Every other gate on this feature proves the generated code COMPILES —
+# `tsc --noEmit` on the Hono client, `mypy --strict` + ruff on the Python one,
+# the vitest-tier emitter pins. None of them prove it RUNS. That gap is not
+# hypothetical: six defects in this feature were invisible to the vitest tier
+# and visible only to a real compiler, and a compiler still cannot see a wrong
+# URL, a path built from the router-relative fragment instead of the absolute
+# one, or a response schema that parses but drops a field.
+#
+# So this workflow boots the real thing: two GENERATED backends as separate
+# processes with SEPARATE DATABASES, and asserts the caller persists a value
+# it could only have learned over HTTP from the callee. The assertion is
+# deliberately indirect — `orderCode` on the caller's own row is copied out of
+# the callee's response body, and the code was only ever POSTed to the callee,
+# so a stubbed client, a 404-swallowing client, or a response schema that
+# silently dropped `code` all fail it.
+#
+# It also exercises the `<RESOURCE>_URL` seam end to end: the suite injects
+# `ORDERS_URL` exactly the way `src/system/index.ts` writes it into compose, so
+# a drift between `resourceEnvUrlVar` and what the emitted client reads shows
+# up here as a connection failure rather than as a silent localhost fallback.
+#
+# MATRIX — one leg per backend that ships a typed client, keyed on the CALLER
+# (`shippingSvc`); the callee stays Hono throughout, because the point under
+# test is the caller's generated client, not the callee's routes (those are
+# already gated per-PR by the conformance/parity tier). Legs get added here as
+# slices 4b-4d land the .NET / Java / Elixir clients — the suite reads the
+# caller platform from LOOM_API_CALL_CALLER, so a new leg is a matrix row plus
+# that backend's toolchain setup step, not a new suite.
+#
+# Triggers `push: main` + manual dispatch + an on-demand `run-api-call` label,
+# NOT per-PR — the same docker-heavy-suite pattern as channels-e2e.yml /
+# tenancy-e2e.yml (booting two backends on every PR is a runner burst for a
+# regression that is acceptable to catch one merge later; the compile and
+# emitter tiers already gate per-PR). Apply the label to run it pre-merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/platform/hono/v4/adapters/api-client.ts'
+      - 'src/generator/python/api-client.ts'
+      - 'src/ir/util/api-surface.ts'
+      - 'src/ir/util/api-resource-binding.ts'
+      - 'src/ir/util/foreign-ids.ts'
+      - 'src/util/resource-env.ts'
+      - 'src/ir/lower/lower.ts'
+      - 'src/ir/lower/lower-expr.ts'
+      - 'src/system/index.ts'
+      - 'test/e2e/api-call-e2e.test.ts'
+      - 'package.json'
+      - '.github/workflows/api-call-e2e.yml'
+  workflow_dispatch:
+  # On-demand per-PR run: apply the `run-api-call` label to a PR to run this
+  # otherwise push:main-only suite against that branch before merge.
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-call-e2e:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-api-call'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        caller: [node, python]
+    name: api-call-e2e (caller=${{ matrix.caller }})
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up uv (python)
+        if: matrix.caller == 'python'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # Separate databases are load-bearing, not hygiene: if both deployables
+      # shared one, the caller could read the callee's row locally and the
+      # round-trip assertion would pass without any HTTP happening at all.
+      - name: Create per-deployable databases
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres \
+            -c "CREATE DATABASE orders_svc;" -c "CREATE DATABASE shipping_svc;"
+
+      - name: Run typed in-system api call runtime e2e (caller=${{ matrix.caller }})
+        env:
+          LOOM_API_CALL_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          LOOM_API_CALL_CALLER: ${{ matrix.caller }}
+        run: npm run test:api-call -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo "## Typed in-system api call runtime e2e failed (caller=${{ matrix.caller }})" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'Boots the generated callee (ordersSvc, Hono) and the generated caller (shippingSvc, ${{ matrix.caller }}) as separate processes against separate databases, and asserts the caller'"'"'s workflow reaches the callee over real HTTP through the `<RESOURCE>_URL` seam, validates the response at its boundary, and persists a field value its own database never saw. Also asserts a callee 404 surfaces as a FAILED call rather than a silently-persisted Shipment built from an absent body.' >> $GITHUB_STEP_SUMMARY

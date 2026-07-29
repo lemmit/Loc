@@ -20,6 +20,7 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
+import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { directParentName } from "../../ir/util/containment-parent.js";
@@ -49,6 +50,7 @@ import { generateFelizForContexts } from "../feliz/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
+import { emitDotnetApiClients } from "./adapters/api-client.js";
 import {
   byLayerLayoutAdapter,
   type DotnetArtifact,
@@ -938,6 +940,18 @@ function emitProjectFromContexts(
   // resources — the csproj stays byte-identical.
   const resourceEmission = emitDotnetResourceFiles(system?.sys, ns);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
+  // Typed in-system api clients (M-T4.8).  Separate from the sourceType-routed
+  // resource adapters above on purpose: an api-bound resource has no `storage`,
+  // so it never reaches a ResourceAdapter at all.  Undefined — hence no file —
+  // when this deployable binds no in-system api.
+  if (system) {
+    const apiClients = emitDotnetApiClients(
+      apiResourceBindings(system.deployable, system.sys),
+      system.sys,
+      ns,
+    );
+    if (apiClients) out.set("Resources/ApiClients.cs", apiClients);
+  }
   // TimerSource scheduling (scheduling.md, M-T4.1).  A timer's emit owner is
   // DERIVED: the deployable whose subdomain `migrationsOwner` owns the
   // for-event's context (single-fire lock owner == DB owner).  Filter the

@@ -8,6 +8,7 @@ import type {
 import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { resourceEnvBase } from "../../util/resource-env.js";
 import { supportsSurfaceKind } from "../../util/source-types.js";
 
 // ---------------------------------------------------------------------------
@@ -46,10 +47,9 @@ function cfg(store: StorageIR | undefined, key: string): string | undefined {
   return entry && entry.value.kind === "string" ? entry.value.value : undefined;
 }
 
-/** `salesFiles` → `SALES_FILES` (the env-var stem). */
-function envVar(resourceName: string): string {
-  return resourceName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
-}
+/** `salesFiles` → `SALES_FILES` (the env-var stem).  Shared with compose so
+ *  the injected name and the read name cannot drift. */
+const envVar = resourceEnvBase;
 
 function storeOf(resource: DataSourceIR, stores: readonly StorageIR[]): StorageIR | undefined {
   return stores.find((s) => s.name === resource.storageName);

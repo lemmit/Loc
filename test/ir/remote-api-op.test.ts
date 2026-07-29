@@ -99,7 +99,12 @@ describe("typed in-system api call — lowering", () => {
     // mounts its sub-routers.  This is the exact bug the untyped path allowed:
     // a hand-written "/orders/{id}" compiled clean and 404'd at runtime.
     expect(op?.path).toBe("/api/orders/{id}");
-    expect(op?.params).toEqual([{ name: "id", location: "path" }]);
+    // `type` rides along too: a backend whose ids are not strings (.NET) has
+    // to coerce the argument at the call site, and must decide that from the
+    // same source the client's parameter type is derived from.
+    expect(op?.params).toEqual([
+      { name: "id", location: "path", type: { kind: "primitive", name: "guid" } },
+    ]);
   });
 
   it("types the result as the callee's response, so a field read resolves", async () => {

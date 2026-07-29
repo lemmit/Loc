@@ -653,7 +653,7 @@ function applySuffixToRecv(
             operationId: opDef.id,
             method: opDef.method,
             path: opDef.path,
-            params: opDef.params.map((p) => ({ name: p.name, location: p.location })),
+            params: opDef.params.map((p) => ({ name: p.name, location: p.location, type: p.type })),
             errorStatuses: [...opDef.errorStatuses],
           },
         };

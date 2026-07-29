@@ -3500,7 +3500,17 @@ export type ExprIR =
         method: string;
         /** Absolute wire path, `API_BASE_PATH` included (`/api/orders/{id}`). */
         path: string;
-        params: readonly { name: string; location: "path" | "query" | "body" }[];
+        /** The callee's declared parameters, in call-argument order.  `type` is
+         *  carried, not just the name/location, because a backend whose id
+         *  representation is not a string (.NET's `readonly record struct`)
+         *  has to coerce an id argument at the CALL SITE, and it must decide
+         *  that from the same source the client's parameter type is derived
+         *  from — otherwise the two can disagree silently. */
+        params: readonly {
+          name: string;
+          location: "path" | "query" | "body";
+          type: TypeIR;
+        }[];
         errorStatuses: readonly number[];
       };
       /** Populated when `callKind === "domain-service"` (domain-services.md)

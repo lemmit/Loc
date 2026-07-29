@@ -904,16 +904,23 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
       // handler/reactor classes, so a static class avoids a receiver + dupes).
       return `${upperFirst(e.wfScope!)}Functions.${upperFirst(e.name)}(${argList})`;
     case "remote-api-op": {
-      // M-T4.8 slice 2 lands the LOWERING; the per-backend typed clients are
-      // slices 3-5.  `loom.remote-api-op-unsupported` rejects the model before
-      // codegen, so this is unreachable — it throws rather than emitting a
-      // plausible-looking call that would 404 at runtime.
+      // A typed in-system call (M-T4.8).  `Resources/ApiClients.cs` exposes one
+      // `<Resource>_<OperationId>` static per operation the callee exposes.
+      // Self-awaiting and parenthesised — like `repo-read` — so it composes in
+      // any expression position without every await site having to know about
+      // this call kind (the enclosing workflow handler is already `async`).
       const op = e.remoteApiOp!;
-      throw new Error(
-        `Typed api call '${op.resourceName}.${op.operationId}' reached the renderer, ` +
-          `but no typed client is emitted for this backend yet (M-T4.8 slices 3-5). ` +
-          `This should have been rejected by loom.remote-api-op-unsupported.`,
-      );
+      // An id ARGUMENT needs an explicit `.ToString()`.  C# ids are
+      // `readonly record struct OrderId(Guid Value)` with `ToString()`
+      // overridden to the raw value, while the client's parameter is the WIRE
+      // type (`string`).  TS and Python get this for free — their branded ids
+      // ARE strings — so the coercion is .NET-specific.
+      //
+      // Keyed off the argument's resolved type, not the callee's parameter
+      // type: a path id rides the wire as `guid`/`string`, so the parameter
+      // side cannot tell an id apart from a plain string.
+      const coerced = args.map((a, i) => (isIdTyped(e.args[i]) ? `${a}.ToString()` : a));
+      return `(await ${API_CLIENT_CLASS}.${upperFirst(op.resourceName)}_${upperFirst(op.operationId)}(${coerced.join(", ")}))`;
     }
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
@@ -1092,6 +1099,24 @@ const CS_TYPE_TARGET: TypeTarget = {
   // union DTO emitter), never as a standalone C# type — defensive.
   none: () => "object",
 };
+
+/** The static class `Resources/ApiClients.cs` declares — the call target for a
+ *  typed in-system api call.  Declared here rather than in the emitter so the
+ *  emitter (which imports `renderCsType`) and this renderer are not mutually
+ *  importing. */
+/** True when an argument expression is statically an aggregate id.  Covers the
+ *  shapes an id actually arrives in — a `let`/param ref, a member read, and the
+ *  bare `id` of the enclosing aggregate — and answers `false` when the IR
+ *  carries no resolved type rather than guessing. */
+function isIdTyped(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "id") return true;
+  if (e.kind === "ref") return e.type?.kind === "id";
+  if (e.kind === "member") return e.memberType.kind === "id";
+  return false;
+}
+
+export const API_CLIENT_CLASS = "ApiClients";
 
 export function renderCsType(t: TypeIR): string {
   return renderTypeWith(t, CS_TYPE_TARGET);
