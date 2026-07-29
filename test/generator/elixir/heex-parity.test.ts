@@ -56,7 +56,20 @@ import { WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
 // (the last gap) landed a parallel HEEx `<details>` disclosure over the
 // co-located `<field>_provenance` jsonb column read straight off the Ecto struct
 // (M-T1.19, renderProvenanceInfo in heex-primitives.ts).
-const KNOWN_HEEX_GAPS: Record<string, string> = {};
+const KNOWN_HEEX_GAPS: Record<string, string> = {
+  // DEFERRED — DataGrid is a TanStack-Table-backed grid (multi-column sort,
+  // per-column filters, column visibility).  It is not a markup mapping: the
+  // React emission is a hook-bearing CHILD COMPONENT holding client-side row
+  // model state, and LiveView has no client row model — every interaction
+  // would be a `handle_event` round-trip re-querying the server, which is a
+  // different design (and needs backend support for multi-column ORDER BY,
+  // which `list/4`'s single sort/dir pair does not have).
+  //
+  // Phoenix is NOT left silently degraded: `Table` on HEEx gained real
+  // server-driven sort + pagination (M-T1.1 slice 8), and a `DataGrid` on a
+  // non-React frontend is a compile error, not a blank space.
+  DataGrid: "TanStack client row model has no LiveView analogue; use Table (server-driven on HEEx)",
+};
 
 describe("HEEx walker parity (finding #5)", () => {
   it("the TSX-rendered-without-HEEx gap matches the pinned list", () => {

@@ -65,7 +65,13 @@ const REGISTERED: Ratchet[] = [
     file: "test/generator/elixir/heex-parity.test.ts",
     name: "KNOWN_HEEX_GAPS",
     kind: "record",
-    max: 0,
+    // 1 = `DataGrid`.  Raised 0→1 deliberately: DataGrid is TanStack-backed
+    // and holds a CLIENT row model, which LiveView has no analogue for (every
+    // interaction would be a server round-trip, and multi-column ORDER BY has
+    // no backend support).  Phoenix is not left degraded — `Table` gained real
+    // server-driven sort + pagination on HEEx, and a DataGrid on a non-React
+    // frontend is a compile error (`loom.datagrid-unsupported-target`).
+    max: 1,
   },
   // Per-backend corpus compile-tier skips (a widening gate FIXES the emitter
   // and drops the entry — see each file's header).

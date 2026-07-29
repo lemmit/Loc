@@ -214,6 +214,17 @@ export interface WalkResult {
    *  page shell emits it after the route-id / mutation declarations it reads).
    *  Optional — only the hoisting targets write it. */
   hoistedHandlers?: string[];
+  /** Fully-rendered declarations a primitive hoisted to MODULE scope — emitted
+   *  between the import block and `export default function <Page>()`.
+   *
+   *  Distinct from `hoistedHandlers`, which lands *inside* the component.  A
+   *  primitive needs this when what it emits cannot legally live in the page
+   *  component at all: `DataGrid` emits its own child component, because
+   *  `useReactTable` is a hook and the grid renders inside `QueryView`'s
+   *  conditional slot (hooks can't run there), while a component declared
+   *  *inside* the page would be a fresh identity every render and remount its
+   *  subtree.  Optional — only hoisting primitives write it. */
+  hoistedModuleDecls?: string[];
   /** True when any walked node emitted a `CodeBlock`
    *  primitive.  The React generator's orchestrator aggregates this
    *  across every page in the deployable and threads the result into
@@ -443,6 +454,11 @@ export function walkBody(
     // `WalkResult` returns.  Only the target knows the shape (Angular fills an
     // `AngularWalkerSink`).
     sink: {},
+    // Same shared-reference discipline as `sink`: created once here so every
+    // `{ ...ctx }` child spread carries the SAME array, and a primitive hoisting
+    // from a nested walk (a DataGrid inside a QueryView's `data:` lambda) lands
+    // in the array this root's `WalkResult` returns.
+    hoistedModuleDecls: [],
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -473,6 +489,7 @@ export function walkBody(
     sink: ctx.sink,
     actionMutations: ctx.actionMutations,
     hoistedHandlers: ctx.hoistedHandlers,
+    hoistedModuleDecls: ctx.hoistedModuleDecls,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
     usesFileUpload: ctx.usesFileUpload,
@@ -634,6 +651,12 @@ export interface Sink {
   /** Rendered `<script setup>` handler lines hoisted out of template position
    *  (Vue `DestroyForm`); see the `WalkResult` field. Lazily created. */
   hoistedHandlers?: string[];
+  /** Module-scope declarations hoisted by a primitive; see the `WalkResult`
+   *  field.  Created EAGERLY on the root context in `walkBody` — child
+   *  contexts are `{ ...ctx }` spreads, so a lazily-created (`??=`) array on a
+   *  nested context would be a fresh array the root never sees, and the
+   *  declaration would be silently dropped. */
+  hoistedModuleDecls?: string[];
   /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
