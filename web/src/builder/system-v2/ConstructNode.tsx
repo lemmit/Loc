@@ -7,7 +7,7 @@
 import { Box, Button, Group, MultiSelect, Stack, Text, TextInput } from "@mantine/core";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ViewKind } from "./view-graph";
+import type { VBadge, ViewKind } from "./view-graph";
 
 /** A small inline multi-select on the node — used for multi-valued bindings
  *  (a deployable's modules / serves) that can't be expressed as a single
@@ -48,7 +48,20 @@ export interface ConstructNodeData {
    *  background, switches the border to dashed, and pins a small ⚠ next
    *  to the name so the user can spot the dead reference at a glance. */
   unused?: boolean;
+  /** Read-only detail lines under the name (a projection's `select`, a
+   *  channel's carried events, …). Purely derived — no edit affordance. */
+  summary?: string[];
+  /** Authorization / redaction chips (`requires` / `when` / `mask`). */
+  badges?: VBadge[];
 }
+
+/** Chip glyph per badge label. The lock reads as "gated"; the cog as
+ *  "conditionally applicable" (a `when` guard isn't an authz decision). */
+const BADGE_ICON: Record<VBadge["label"], string> = {
+  requires: "🔒",
+  when: "⚙",
+  mask: "🔒",
+};
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
   const d = data as unknown as ConstructNodeData;
@@ -106,9 +119,15 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               ? d.compact
                 ? 210
                 : 240
-              : d.compact
-                ? 150
-                : 170,
+              : // Read-only construct detail needs room for a `from Order as o`
+                // / `allow deep on Invoice` line without wrapping every word.
+                d.summary && d.summary.length > 0
+                ? d.compact
+                  ? 200
+                  : 230
+                : d.compact
+                  ? 150
+                  : 170,
         minWidth: d.isRoot ? (d.compact ? 200 : 280) : undefined,
         position: "relative",
         cursor: d.drillable ? "pointer" : "default",
@@ -177,6 +196,55 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         >
           {d.name}
         </Text>
+      )}
+      {d.badges && d.badges.length > 0 && (
+        <Group gap={3} mt={3}>
+          {d.badges.map((b) => (
+            <Text
+              key={b.label}
+              size="xs"
+              // The gate expression itself is the tooltip — the chip only says
+              // THAT the construct is guarded, hovering says by what.
+              title={`${b.label} ${b.detail}`}
+              data-testid="c4system-v2-badge"
+              data-badge-label={b.label}
+              style={{
+                fontSize: 9,
+                lineHeight: 1.4,
+                padding: "0 4px",
+                borderRadius: 8,
+                background: "rgba(0,0,0,0.3)",
+                border: "1px solid rgba(255,255,255,0.3)",
+              }}
+            >
+              {BADGE_ICON[b.label]} {b.label}
+            </Text>
+          ))}
+        </Group>
+      )}
+      {d.summary && d.summary.length > 0 && (
+        <Stack gap={0} mt={3}>
+          {d.summary.map((line, i) => (
+            <Text
+              // Two summary lines CAN repeat (a projection with two identical
+              // join clauses), so the index disambiguates the React key.
+              key={`${i}-${line}`}
+              size="xs"
+              title={line}
+              data-testid="c4system-v2-summary"
+              style={{
+                fontSize: 9,
+                lineHeight: 1.5,
+                opacity: 0.75,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {line}
+            </Text>
+          ))}
+        </Stack>
       )}
       {(d.onRename || d.onDelete || d.onToggleExpression) && !editing && (
         <Group
