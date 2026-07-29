@@ -5,6 +5,7 @@
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { toolbarA11yAttr } from "../a11y-emit.js";
+import { localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   namedArgValue,
@@ -12,16 +13,9 @@ import {
   positionalArgs,
   slugify,
   stringNamed,
-  unwrapTextLiteral,
 } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
-import {
-  positionalChildren,
-  renderTextContent,
-  styleAttr,
-  testidAttr,
-  walk,
-} from "../walker-core.js";
+import { positionalChildren, styleAttr, testidAttr, walk } from "../walker-core.js";
 
 /** Run `fn` with the walk one semantic heading-nesting level deeper — used
  *  by the `nesting: true` a11y-contract containers (`Section` / `Card`) so a
@@ -307,10 +301,11 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const contentExpr: ExprIR | undefined = titleIsTextLike ? positionals[1] : positionals[0];
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
+  // The card title is a user-visible text slot (positional 0, only when the
+  // first arg is text-like rather than the body) — translate a plain literal
+  // through `t()` under i18n; dynamic / non-i18n stays byte-identical.
   const titleText =
-    titleIsTextLike && titleArg
-      ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""', ctx.target.escapeText)
-      : undefined;
+    titleIsTextLike && titleArg ? localizedText(call, ctx, "cardTitle", '""', 0) : undefined;
   // `Card` is a `nesting: true` container in the a11y contract — its body
   // `Heading`s derive one rank deeper (accessibility.md Phase 2).  The card
   // title itself is not a `Heading` primitive, so it is unaffected.

@@ -102,13 +102,15 @@ describe("shell primitives", () => {
   it("Alert { message } emits a default-color alert", async () => {
     const tsx = await emit(`Alert { "Couldn't load" }`);
     expect(tsx).toMatch(/import \{[^}]*\bAlert\b/);
-    expect(tsx).toMatch(/<Alert color="red" variant="light">Couldn't load<\/Alert>/);
+    expect(tsx).toMatch(
+      /<Alert color="red" variant="light">\{t\("[^"]*", "Couldn't load"\)\}<\/Alert>/,
+    );
   });
 
   it('Alert { message, color: "yellow", title: "Heads up" } threads both', async () => {
     const tsx = await emit(`Alert { "Disk almost full", color: "yellow", title: "Heads up" }`);
     expect(tsx).toMatch(
-      /<Alert color="yellow"[^>]*title="Heads up"[^>]*>Disk almost full<\/Alert>/,
+      /<Alert color="yellow"[^>]*title="Heads up"[^>]*>\{t\("[^"]*", "Disk almost full"\)\}<\/Alert>/,
     );
   });
 

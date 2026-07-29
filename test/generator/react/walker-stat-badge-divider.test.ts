@@ -34,8 +34,9 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
     const content = files.get("web/src/pages/dashboard.tsx")!;
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ Stack, Text \} from "@mantine\/core";/);
-    expect(content).toMatch(/<Text size="sm" c="dimmed">Active orders<\/Text>/);
-    expect(content).toMatch(/<Text fw=\{700\} size="xl">47<\/Text>/);
+    // Stat's label + value are user-visible slots → translated under i18n.
+    expect(content).toMatch(/<Text size="sm" c="dimmed">\{t\("[^"]*", "Active orders"\)\}<\/Text>/);
+    expect(content).toMatch(/<Text fw=\{700\} size="xl">\{t\("[^"]*", "47"\)\}<\/Text>/);
   });
 
   it("Stat accepts route-param refs in either slot", async () => {
@@ -85,7 +86,7 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toMatch(/import \{ Badge, Stack, Title \} from "@mantine\/core";/);
-    expect(content).toMatch(/<Badge>Live<\/Badge>/);
+    expect(content).toMatch(/<Badge>\{t\("[^"]*", "Live"\)\}<\/Badge>/);
   });
 
   it("Divider {} emits a self-closing Divider", async () => {
@@ -166,8 +167,8 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
       /import \{ Badge, Divider, Stack, Text, Title \} from "@mantine\/core";/,
     );
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Dashboard"\)\}<\/Title>/);
-    expect(content).toMatch(/<Text fw=\{700\} size="xl">\$12\.5k<\/Text>/);
+    expect(content).toMatch(/<Text fw=\{700\} size="xl">\{t\("[^"]*", "\$12\.5k"\)\}<\/Text>/);
     expect(content).toMatch(/<Divider \/>/);
-    expect(content).toMatch(/<Badge>Live<\/Badge>/);
+    expect(content).toMatch(/<Badge>\{t\("[^"]*", "Live"\)\}<\/Badge>/);
   });
 });

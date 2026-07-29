@@ -182,10 +182,10 @@ export default function OrderDetail() {
     </Stack>
         ) }
         { orderById.isError && (
-          <Alert color="red" variant="light">Couldn't load order</Alert>
+          <Alert color="red" variant="light">{t("page.Detail.alert.4exfgx", "Couldn't load order")}</Alert>
         ) }
         { !orderById.isLoading && !orderById.isError && !orderById.data && (
-          <Alert color="yellow" variant="light">No order matches that id.</Alert>
+          <Alert color="yellow" variant="light">{t("page.Detail.alert.fobqop", "No order matches that id.")}</Alert>
         ) }
         { orderById.data && (
           <Stack>

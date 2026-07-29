@@ -88,10 +88,10 @@ export default function ProductDetail() {
     </Stack>
         ) }
         { productById.isError && (
-          <Alert color="red" variant="light">Couldn't load product</Alert>
+          <Alert color="red" variant="light">{t("page.Detail.alert.5gt0mm", "Couldn't load product")}</Alert>
         ) }
         { !productById.isLoading && !productById.isError && !productById.data && (
-          <Alert color="yellow" variant="light">No product matches that id.</Alert>
+          <Alert color="yellow" variant="light">{t("page.Detail.alert.1s47jw", "No product matches that id.")}</Alert>
         ) }
         { productById.data && (
           <Stack>
