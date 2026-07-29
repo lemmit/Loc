@@ -30,9 +30,12 @@ import {
   addStatement,
   deleteStatement,
   editStatement,
+  listBodies,
   listStatementViews,
   moveStatement,
+  type BodyKey,
   type BodyLocator,
+  type BodyRef,
   type StmtView,
 } from "../system/body";
 import { setEmitEvent } from "../system/emit-event";
@@ -66,7 +69,15 @@ import {
   rebindDeployableEdgeTarget,
 } from "./deployable-edge-rebind";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
-import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
+import {
+  buildViewGraph,
+  deleteContainment,
+  findAggregate,
+  findWorkflow,
+  type ViewGraph,
+  type ViewKind,
+  type ViewPath,
+} from "./view-graph";
 import {
   clearPersisted,
   loadPersisted,
@@ -96,6 +107,43 @@ const KIND_COLOR: Record<ViewKind, string> = {
   storage: "var(--mantine-color-gray-7)",
   ui: "var(--mantine-color-violet-7)",
   deployable: "var(--mantine-color-red-8)",
+  // ---- read-only constructs -------------------------------------------
+  // Colour by FAMILY, not by declaration, so the canvas stays readable at a
+  // glance: read models cyan-ish, application/behaviour orange, authz yellow,
+  // vocabulary grape, infrastructure indigo, capability/test gray.
+  projection: "var(--mantine-color-cyan-8)",
+  domainservice: "var(--mantine-color-orange-7)",
+  commandhandler: "var(--mantine-color-orange-9)",
+  queryhandler: "var(--mantine-color-cyan-9)",
+  dsoperation: "var(--mantine-color-orange-8)",
+  criterion: "var(--mantine-color-lime-8)",
+  retrieval: "var(--mantine-color-lime-9)",
+  channel: "var(--mantine-color-grape-8)",
+  payload: "var(--mantine-color-grape-9)",
+  enum: "var(--mantine-color-grape-6)",
+  seed: "var(--mantine-color-green-9)",
+  policy: "var(--mantine-color-yellow-9)",
+  permissions: "var(--mantine-color-yellow-7)",
+  auth: "var(--mantine-color-yellow-9)",
+  tenancy: "var(--mantine-color-yellow-8)",
+  user: "var(--mantine-color-yellow-7)",
+  filter: "var(--mantine-color-gray-8)",
+  stamp: "var(--mantine-color-gray-8)",
+  implements: "var(--mantine-color-gray-8)",
+  with: "var(--mantine-color-gray-8)",
+  capability: "var(--mantine-color-gray-6)",
+  unique: "var(--mantine-color-gray-8)",
+  test: "var(--mantine-color-green-8)",
+  teste2e: "var(--mantine-color-green-7)",
+  migration: "var(--mantine-color-red-9)",
+  theme: "var(--mantine-color-violet-8)",
+  layout: "var(--mantine-color-violet-9)",
+  resource: "var(--mantine-color-indigo-9)",
+  channelsource: "var(--mantine-color-indigo-6)",
+  timer: "var(--mantine-color-blue-8)",
+  create: "var(--mantine-color-orange-7)",
+  destroy: "var(--mantine-color-red-7)",
+  apply: "var(--mantine-color-grape-8)",
   // `stmt` is rendered by a custom React Flow node, not styled here; the value
   // is a placeholder to satisfy the kind union.
   stmt: "transparent",
@@ -241,15 +289,42 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   storage: "Storage",
   ui: "Ui",
   deployable: "Deployable",
+  // Read-only constructs whose declared name is a plain `ID` the Langium
+  // NameProvider can rename (and whose whole declaration is a self-contained
+  // splice) get the same rename + delete affordances as `valueobject`. The
+  // rest of the new kinds stay ACTION-LESS on purpose: the unnamed forms
+  // (`filter` / `stamp` / `unique` / `with` / block-form `policy` / `seed` /
+  // `tenancy` / `auth` / `user` / `theme` / `permissions`) have no name to
+  // rewrite and no unambiguous by-name lookup to splice, and the STRING-named
+  // ones (`test` / `teste2e` / `migration`) would have their quotes eaten by a
+  // bare-identifier rename.
+  projection: "Projection",
+  domainservice: "DomainService",
+  channel: "Channel",
+  criterion: "Criterion",
+  retrieval: "Retrieval",
+  payload: "PayloadDecl",
+  enum: "EnumDecl",
+  commandhandler: "CommandHandler",
+  queryhandler: "QueryHandler",
+  capability: "Capability",
+  layout: "Layout",
+  resource: "Resource",
+  channelsource: "ChannelSource",
+  timer: "TimerSource",
 };
 
 /** Derive the `BodyLocator` for the operation / workflow currently in focus
  *  (the last step of the path), or null otherwise. Operation needs the
- *  containing aggregate step immediately above it. */
-function leafBodyLocator(path: ViewPath): BodyLocator | null {
+ *  containing aggregate step immediately above it. `member` selects one of a
+ *  workflow's statement-bearing members (`listBodies` key); omitted, the
+ *  locator resolves to the primary `create(...)` starter. */
+function leafBodyLocator(path: ViewPath, member?: BodyKey): BodyLocator | null {
   const last = path[path.length - 1];
   if (!last) return null;
-  if (last.kind === "workflow") return { kind: "workflow", name: last.name };
+  if (last.kind === "workflow") {
+    return { kind: "workflow", name: last.name, ...(member ? { member } : {}) };
+  }
   if (last.kind === "operation") {
     const agg = path[path.length - 2];
     if (agg?.kind !== "aggregate") return null;
@@ -366,9 +441,33 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // index (+ optional field index for emit fields / call args). Mirrors v1.
   const [structuredKey, setStructuredKey] = useState<string | null>(null);
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
+  // W2-E: which statement-bearing member of the workflow at the path leaf the
+  // statement flow is showing. `undefined` = the primary `create(...)` starter
+  // (the historical single body), so the default view is unchanged.
+  const [wfMember, setWfMember] = useState<BodyKey | undefined>(undefined);
   // Re-parse after every commit by depending on `rev` (`apply` bumps it).
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
-  const graph = useMemo(() => buildViewGraph(parsed.ast, path), [parsed, path]);
+  const graph = useMemo(
+    () => buildViewGraph(parsed.ast, path, { workflowMember: wfMember }),
+    [parsed, path, wfMember],
+  );
+
+  // The workflow's members, for the picker below the breadcrumb. Empty for
+  // every other level (and for a workflow with no statement-bearing member).
+  const wfMembers: BodyRef[] = useMemo(() => {
+    const last = path[path.length - 1];
+    if (last?.kind !== "workflow") return [];
+    const wf = findWorkflow(parsed.ast, last.name);
+    return wf ? listBodies(wf) : [];
+  }, [parsed, path]);
+  // Leaving the workflow (or drilling into another one) drops back to its
+  // primary create — a member key from the previous workflow means nothing here.
+  useEffect(() => {
+    setWfMember(undefined);
+  }, [path]);
+  /** The key the picker highlights when nothing has been chosen explicitly —
+   *  the primary `create` starter `listBodies` reports first. */
+  const primaryMemberKey = wfMembers.find((b) => b.key.startsWith("create"))?.key;
 
   /** Single choke-point for source edits — bump `rev` so the next render
    *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
@@ -381,7 +480,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // views + per-statement editor handlers and pass them through the stmt node's
   // `data`. The pure view-graph already laid out the column; here we layer in
   // editing.
-  const leafLoc = useMemo(() => leafBodyLocator(path), [path]);
+  const leafLoc = useMemo(() => leafBodyLocator(path, wfMember), [path, wfMember]);
   useEffect(() => {
     // Switching to a different operation / workflow / non-leaf collapses any
     // inline `ƒx` editor that was open in the previous body.
@@ -402,7 +501,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           })()
         : [];
 
-    const base = leafLoc.kind === "operation" ? `${leafLoc.aggregate}.${leafLoc.op}` : leafLoc.name;
+    // The structured-editor key is scoped per BODY, member included — two
+    // members of the same workflow both have a statement 0.
+    const base =
+      leafLoc.kind === "operation"
+        ? `${leafLoc.aggregate}.${leafLoc.op}`
+        : `${leafLoc.name}${leafLoc.member ? `#${leafLoc.member}` : ""}`;
     const keyFor = (index: number, field?: number): string => `${base}:${index}:${field ?? ""}`;
     const slotFor = (index: number, field?: number): ExprSlot =>
       leafLoc.kind === "operation"
@@ -417,6 +521,10 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             kind: "wfStmt",
             owner: leafLoc.name,
             index,
+            // Only set for a NON-primary member — the primary create's slots
+            // are keyed without one (see `expr-slots.ts`), so leaving it off
+            // keeps the default workflow body's editing path unchanged.
+            ...(leafLoc.member ? { member: leafLoc.member } : {}),
             ...(field !== undefined ? { field } : {}),
           };
     const renderEditor = (index: number, field?: number): ReactNode => {
@@ -473,7 +581,10 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onToggleField: (f) => toggle(i, f),
         events,
         onRepointEvent:
-          view.kind === "emit"
+          // `setEmitEvent` addresses a workflow's PRIMARY create body only, so
+          // the inline event Select is withheld while a non-primary member is
+          // selected rather than repointing an emit in the wrong body.
+          view.kind === "emit" && !(leafLoc.kind === "workflow" && leafLoc.member)
             ? (eventName: string) => {
                 const next = setEmitEvent(
                   ctx.getSource(),
@@ -617,7 +728,15 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 const next = deleteField(ctx.getSource(), "aggregate", aggName, idx);
                 if (next != null) apply(next);
               }
-            : undefined;
+            : () => {
+                // Containment ids are `containment:<field>` — the display
+                // name embeds the entity type ("lines : OrderLine") but the
+                // id keeps the plain field name (see aggregateLayout in
+                // view-graph.ts).
+                const fieldName = n.id.slice("containment:".length);
+                const next = deleteContainment(ctx.getSource(), aggName, fieldName);
+                if (next != null) apply(next);
+              };
         m.set(n.id, {
           kind: n.kind,
           name: n.name,
@@ -626,6 +745,8 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           onRename,
           onDelete,
           compact,
+          // A `mask unless` chip rides along on the field leaf.
+          badges: n.badges,
         });
         continue;
       }
@@ -717,6 +838,8 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onToggleExpression,
         compact,
         unused: n.unused,
+        summary: n.summary,
+        badges: n.badges,
       });
     }
     return m;
@@ -852,7 +975,37 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={jumpTo} />
-      <AddPalette path={path} source={ctx.getSource()} onChange={apply} />
+      {wfMembers.length > 0 && (
+        <Group
+          gap={4}
+          px={6}
+          py={4}
+          bg="dark.7"
+          wrap="wrap"
+          style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+          data-testid="c4system-v2-wf-members"
+        >
+          <Text size="xs" c="dimmed" mr={2}>
+            member
+          </Text>
+          {wfMembers.map((b) => (
+            <Button
+              key={b.key}
+              size="compact-xs"
+              variant={(wfMember ?? primaryMemberKey) === b.key ? "light" : "subtle"}
+              data-testid={`c4system-v2-wf-member-${b.key}`}
+              title={`${b.label} — ${b.count} statement${b.count === 1 ? "" : "s"}`}
+              // Selecting the primary create clears the override rather than
+              // pinning its key, so the default body keeps its member-less
+              // locator (and its existing expression-slot keys).
+              onClick={() => setWfMember(b.key === primaryMemberKey ? undefined : b.key)}
+            >
+              {b.label} ({b.count})
+            </Button>
+          ))}
+        </Group>
+      )}
+      <AddPalette path={path} source={ctx.getSource()} onChange={apply} wfMember={wfMember} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
           nodes={nodes}

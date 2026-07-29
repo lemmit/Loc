@@ -1,7 +1,6 @@
 import { AstUtils, type AstNode } from "langium";
 import {
   isBoundedContext,
-  isWorkflowCreateDecl,
   type Aggregate,
   type AssignOrCallStmt,
   type BoundedContext,
@@ -28,7 +27,6 @@ import {
   type UnaryExpr,
   type ValueObject,
   type Workflow,
-  type WorkflowCreateDecl,
 } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 import {
@@ -43,7 +41,13 @@ import { calleeSignature, envForNode, membersOfType, typeAfterSuffix, typeOf } f
 import { applyEdits } from "../edit-engine";
 import { buildLinkedModel } from "./linked-doc";
 import { parseDdd } from "../parse";
-import { listFunctions } from "./body";
+import {
+  listBodies,
+  listFunctions,
+  workflowBodyParamNames,
+  workflowBodyStatements,
+  type BodyKey,
+} from "./body";
 
 // Single-expression slots editable by the structured expression editor:
 //   function …(): T = <expr>   (FunctionDecl.body)
@@ -58,7 +62,10 @@ export type ExprSlot =
   | { kind: "invariant"; owner: string; index: number }
   | { kind: "findFilter"; owner: string; name: string }
   | { kind: "stmtExpr"; owner: string; op: string; index: number; field?: number }
-  | { kind: "wfStmt"; owner: string; index: number; field?: number };
+  // `member` addresses one statement-bearing workflow member (`handle:confirm`,
+  // `on:PaymentReceived`, `apply:OrderPlaced`, `create:Name`); omitted = the
+  // primary `create` starter, so pre-existing slots keep resolving unchanged.
+  | { kind: "wfStmt"; owner: string; member?: BodyKey; index: number; field?: number };
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -100,6 +107,7 @@ function stmtSlotExpr(stmt: Statement, field?: number): Expression | null {
   if (stmt.$type === "PreconditionStmt" || stmt.$type === "RequiresStmt" || stmt.$type === "LetStmt") {
     return (stmt as { expr: Expression }).expr;
   }
+  if (stmt.$type === "ReturnStmt") return (stmt as { value: Expression }).value;
   if (stmt.$type === "AssignOrCallStmt") {
     const a = stmt as AssignOrCallStmt;
     if (a.value) return a.value; // assignment right-hand value
@@ -122,6 +130,7 @@ function stmtLabel(stmt: Statement, expr: Expression): string {
   if (stmt.$type === "LetStmt") return `let ${(stmt as { name: string }).name} = ${printExpr(expr)}`;
   if (stmt.$type === "RequiresStmt") return `requires ${printExpr(expr)}`;
   if (stmt.$type === "PreconditionStmt") return `precondition ${printExpr(expr)}`;
+  if (stmt.$type === "ReturnStmt") return `return ${printExpr(expr)}`;
   if (stmt.$type === "AssignOrCallStmt") {
     const a = stmt as AssignOrCallStmt;
     return `${a.target?.$cstNode?.text ?? ""} ${a.op ?? "="} ${printExpr(expr)}`;
@@ -177,17 +186,6 @@ function findWorkflow(ast: Model, name: string): Workflow | null {
   return null;
 }
 
-/** A2-S5f: a workflow body is members-only; its sequential statements + params
- *  live in the primary `create(...)` starter (unnamed, command-triggered).  The
- *  statement editor / slot indices operate on that create body. */
-function primaryWfCreate(wf: Workflow): WorkflowCreateDecl | undefined {
-  const creates = wf.members.filter(isWorkflowCreateDecl);
-  return creates.find((c) => !c.name) ?? creates[0];
-}
-function wfStatements(wf: Workflow): Statement[] {
-  return primaryWfCreate(wf)?.body ?? [];
-}
-
 function findRepo(ast: Model, name: string): Repository | null {
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === "Repository" && (n as Repository).name === name) return n as Repository;
@@ -207,7 +205,7 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   }
   if (slot.kind === "wfStmt") {
     const wf = findWorkflow(ast, slot.owner);
-    const stmt = wf ? wfStatements(wf)[slot.index] : undefined;
+    const stmt = wf ? workflowBodyStatements(wf, slot.member)[slot.index] : undefined;
     return stmt ? stmtSlotExpr(stmt, slot.field) : null;
   }
   const owner = findOwner(ast, slot.owner);
@@ -261,19 +259,36 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
   return out;
 }
 
-/** Editable statement expressions in a workflow body — precondition / requires /
- *  let / assignment value / emit field values. */
+/** Editable statement expressions across EVERY statement-bearing member of a
+ *  workflow — the primary + named `create`s, `handle`s, `on` reactors and
+ *  `apply` folds — precondition / requires / let / return / assignment value /
+ *  emit field values.  The primary create's slots keep their bare `wf:<index>`
+ *  option value (and member-less slot) so existing pickers are unaffected. */
 export function workflowSlotOptions(node: AstNode): SlotOption[] {
   if (node.$type !== "Workflow") return [];
   const wf = node as Workflow;
   const out: SlotOption[] = [];
-  pushStatementOptions(
-    out,
-    wfStatements(wf),
-    "",
-    (index, field) => ({ kind: "wfStmt", owner: wf.name, index, ...(field !== undefined ? { field } : {}) }),
-    (index, field) => (field !== undefined ? `wf:${index}:${field}` : `wf:${index}`),
-  );
+  const primary = workflowBodyStatements(wf);
+  for (const body of listBodies(wf)) {
+    const statements = workflowBodyStatements(wf, body.key);
+    const isPrimary = statements === primary;
+    pushStatementOptions(
+      out,
+      statements,
+      isPrimary ? "" : `${body.label}: `,
+      (index, field) => ({
+        kind: "wfStmt",
+        owner: wf.name,
+        ...(isPrimary ? {} : { member: body.key }),
+        index,
+        ...(field !== undefined ? { field } : {}),
+      }),
+      (index, field) => {
+        const head = isPrimary ? "wf" : `wf@${body.key}`;
+        return field !== undefined ? `${head}:${index}:${field}` : `${head}:${index}`;
+      },
+    );
+  }
   return out;
 }
 
@@ -310,11 +325,11 @@ function findAgg(ast: Model, name: string | undefined): Aggregate | null {
 // the source aggregate, find filters on the repo's aggregate + param locals).
 // The IR's own builders (`newEnv`/`inAggregate`/`withLocal`) and rules
 // (`inScopeNames`) are reused so scope knowledge stays in one place.
-function withParamsAndLets(env: Env, params: Parameter[], lets: string[]): Env {
+function withParamsAndLets(env: Env, params: string[], lets: string[]): Env {
   // Only the names matter for enumeration; skip `lowerType` (it would deref
   // `X id` targets, which the main-thread parse can't link).
   let next = env;
-  for (const p of params) next = withLocal(next, p.name, "param", { kind: "primitive", name: "string" });
+  for (const name of params) next = withLocal(next, name, "param", { kind: "primitive", name: "string" });
   for (const name of lets) next = withLocal(next, name, "let", { kind: "primitive", name: "string" });
   return next;
 }
@@ -330,8 +345,8 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
     if (!wf) return null;
     const ctx = AstUtils.getContainerOfType(wf, isBoundedContext);
     const base: Env = ctx ? newEnv(ctx) : { ctx: undefined, locals: new Map() };
-    const create = primaryWfCreate(wf);
-    return withParamsAndLets(base, create?.params ?? [], letsBefore(create?.body ?? [], slot.index));
+    const body = workflowBodyStatements(wf, slot.member);
+    return withParamsAndLets(base, workflowBodyParamNames(wf, slot.member), letsBefore(body, slot.index));
   }
 
   let owner: AstNode | null = null;
@@ -362,7 +377,7 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   const ctx = ctxNode ? AstUtils.getContainerOfType(ctxNode, isBoundedContext) : undefined;
   const base: Env = ctx ? newEnv(ctx as BoundedContext) : { ctx: undefined, locals: new Map() };
   const owned = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
-  return withParamsAndLets(owned, params, lets);
+  return withParamsAndLets(owned, params.map((p) => p.name), lets);
 }
 
 /** In-scope bare names for a slot's expression — drives the editor's name

@@ -7,6 +7,7 @@ import type { LoomModel, TraceabilityIR, TypeIR, WireField } from "../../../../s
 import type {
   Aggregate,
   Api,
+  BoundedContext,
   Deployable,
   EmitStmt,
   EventDecl,
@@ -118,6 +119,7 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
   for (const node of AstUtils.streamAst(ast)) {
     switch (node.$type) {
       case "Subdomain": addNode("subdomain", (node as Subdomain).name, node); break;
+      case "BoundedContext": addNode("context", (node as BoundedContext).name, node); break;
       case "Aggregate": addNode("aggregate", (node as Aggregate).name, node); break;
       case "ValueObject": addNode("valueobject", (node as ValueObject).name, node); break;
       case "EventDecl": addNode("event", (node as EventDecl).name, node); break;
@@ -226,6 +228,8 @@ export function typeLabel(t: TypeIR): string {
     case "slot":
       return "slot";
     case "action":
+      // Function-valued component-param marker; match the source-faithful
+      // `action` / `action(<arg>)` label the AST printer emits.
       return t.arg ? `action(${typeLabel(t.arg)})` : "action";
     case "genericInstance":
       return `${typeLabel(t.arg)} ${t.ctor}`;
@@ -233,10 +237,6 @@ export function typeLabel(t: TypeIR): string {
       return t.variants.map(typeLabel).join(" or ");
     case "none":
       return "none";
-    case "action":
-      // Function-valued component-param marker; match the source-faithful
-      // `action` / `action(<arg>)` label the AST printer emits.
-      return t.arg ? `action(${typeLabel(t.arg)})` : "action";
   }
 }
 

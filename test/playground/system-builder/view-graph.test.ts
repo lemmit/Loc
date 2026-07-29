@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildViewGraph } from "../../../web/src/builder/system-v2/view-graph.js";
-import { parseRaw as parse } from "../../_helpers/index.js";
+import {
+  buildViewGraph,
+  deleteContainment,
+} from "../../../web/src/builder/system-v2/view-graph.js";
+import { parseRaw as parse, parseRawOk } from "../../_helpers/index.js";
 
 // A canonical multi-level system used by the per-level snapshots below.
 const SRC = `system Sales {
@@ -250,6 +253,40 @@ describe("Model v2 — view-graph per level", () => {
     expect(derivedReads).toEqual(["derived:double->field:qty"]);
   });
 
+  it("entity drill resolves the entity part owned by the current aggregate, not a same-named part on another aggregate", () => {
+    // Both `Order` and `Invoice` declare an entity part named `Line`, with
+    // different fields — a real cross-aggregate name collision. `ddd-scope.ts`
+    // restricts each `contains` clause's `partType` to entity parts declared
+    // in the SAME aggregate, so the drill path (aggregate:Order →
+    // entity:Line) is enough to disambiguate which `Line` is meant.
+    const D = `context C {
+  aggregate Order {
+    contains items: Line[]
+    entity Line {
+      sku: string
+    }
+  }
+  aggregate Invoice {
+    contains items: Line[]
+    entity Line {
+      amount: decimal
+    }
+  }
+}`;
+    const ast = parse(D);
+    const orderLine = buildViewGraph(ast, [
+      { kind: "aggregate", name: "Order" },
+      { kind: "entity", name: "Line" },
+    ]);
+    expect(childNodes(orderLine).map((n) => n.id)).toEqual(["field:sku"]);
+
+    const invoiceLine = buildViewGraph(ast, [
+      { kind: "aggregate", name: "Invoice" },
+      { kind: "entity", name: "Line" },
+    ]);
+    expect(childNodes(invoiceLine).map((n) => n.id)).toEqual(["field:amount"]);
+  });
+
   it("aggregate view emits `constrains` edges from invariants to the fields they reference", () => {
     const D = `context C {
   aggregate Money {
@@ -371,5 +408,39 @@ describe("Model v2 — view-graph per level", () => {
         "deployable:webApp -ui-> ui:Web",
       ]),
     );
+  });
+});
+
+describe("Model v2 — deleteContainment", () => {
+  const D = `context C {
+  aggregate Order {
+    status: string
+    contains lines: OrderLine[]
+    entity OrderLine {
+      qty: int
+    }
+  }
+}`;
+
+  it("removes the containment and leaves the rest of the source parseable", () => {
+    const next = deleteContainment(D, "Order", "lines");
+    expect(next).not.toBeNull();
+    expect(next).not.toContain("contains lines");
+    expect(parseRawOk(next!)).toBe(true);
+    // The status field and the entity declaration survive untouched.
+    expect(next).toContain("status: string");
+    expect(next).toContain("entity OrderLine {");
+    // The now-empty containment slot isn't drillable in the resulting graph.
+    const g = buildViewGraph(parse(next!), [{ kind: "aggregate", name: "Order" }]);
+    expect(g.nodes.some((n) => n.kind === "containment")).toBe(false);
+  });
+
+  it("returns null for an unknown aggregate or an unknown field", () => {
+    expect(deleteContainment(D, "NoSuchAggregate", "lines")).toBeNull();
+    expect(deleteContainment(D, "Order", "noSuchField")).toBeNull();
+  });
+
+  it("returns null on unparseable source", () => {
+    expect(deleteContainment("aggregate {{{", "Order", "lines")).toBeNull();
   });
 });

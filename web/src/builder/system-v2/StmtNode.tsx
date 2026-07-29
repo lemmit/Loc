@@ -1,12 +1,12 @@
 // Custom React Flow node for a body statement in the v2 operation / workflow
-// view. Phase 2b reuses v1's inline editor rows (AssignRow / CallRow / EmitRow
-// / OtherRow) so edits happen right in the node — same controls, same `ƒx`
+// view. Phase 2b reuses v1's inline editor rows (the shared `StmtRow`
+// dispatcher) so edits happen right in the node — same controls, same `ƒx`
 // expansion, just laid out as a flow instead of a list.
 
 import { Box, Text } from "@mantine/core";
 import { useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { AssignRow, CallRow, EmitRow, OtherRow } from "../system/BodyEditor";
+import { StmtRow } from "../system/BodyEditor";
 import type { StmtView } from "../system/body";
 import type { ReactNode } from "react";
 
@@ -34,50 +34,44 @@ export interface StmtNodeData {
   compact?: boolean;
 }
 
-// Substatement kinds we discriminate for `"other"` rows — the leading keyword
-// gets its own colour + label so a precondition reads differently from a `let`
-// binding at a glance.
-type OtherSubKind = "precondition" | "requires" | "let" | "stmt";
-
-function detectOtherKind(src: string): OtherSubKind {
-  const head = src.trimStart().split(/\s+/)[0];
-  if (head === "precondition") return "precondition";
-  if (head === "requires") return "requires";
-  if (head === "let") return "let";
-  return "stmt";
-}
-
-const KIND_LABEL: Record<StmtView["kind"] | OtherSubKind, string> = {
+// Label + tint per statement form. The kind comes straight off the AST node
+// type (`stmtView` structures every grammar form), so the node no longer sniffs
+// the leading keyword out of a verbatim `other` row to tell a precondition from
+// a `let`; `other` is only what the grammar has no structured row for.
+const KIND_LABEL: Record<StmtView["kind"], string> = {
   assign: "assign",
   call: "call",
   emit: "emit",
-  other: "stmt",
+  let: "let",
+  return: "return",
   precondition: "precondition",
   requires: "requires",
-  let: "let",
-  stmt: "stmt",
+  for: "for",
+  ifLet: "if let",
+  match: "match",
+  other: "stmt",
 };
 
-const KIND_TINT: Record<StmtView["kind"] | OtherSubKind, string> = {
+const KIND_TINT: Record<StmtView["kind"], string> = {
   assign: "var(--mantine-color-teal-9)",
   call: "var(--mantine-color-blue-9)",
   emit: "var(--mantine-color-grape-9)",
-  other: "var(--mantine-color-dark-5)",
-  // Substatement-specific tints — give preconditions / requires / let their
-  // own visual identity instead of all reading as a uniform "stmt".
+  // Form-specific tints — a precondition / requires / let / control-flow block
+  // each reads differently at a glance instead of a uniform "stmt".
   precondition: "var(--mantine-color-yellow-9)",
   requires: "var(--mantine-color-orange-9)",
   let: "var(--mantine-color-cyan-9)",
-  stmt: "var(--mantine-color-dark-5)",
+  return: "var(--mantine-color-lime-9)",
+  for: "var(--mantine-color-indigo-9)",
+  ifLet: "var(--mantine-color-violet-9)",
+  match: "var(--mantine-color-pink-9)",
+  other: "var(--mantine-color-dark-5)",
 };
 
 export default function StmtNode({ data }: NodeProps): JSX.Element {
   const d = data as unknown as StmtNodeData;
   const { view } = d;
-  // For "other" rows, look at the leading keyword so a precondition / requires
-  // / let each get their own tint + label.
-  const subKind: StmtView["kind"] | OtherSubKind =
-    view.kind === "other" ? detectOtherKind(view.src) : view.kind;
+  const kind = view.kind;
   // Local error flag — each row's onCommit returns false on a parse failure;
   // the row's `error` prop drives the `invalid` styling. Cleared on focus.
   const [error, setError] = useState(false);
@@ -86,56 +80,24 @@ export default function StmtNode({ data }: NodeProps): JSX.Element {
   };
   const clear = (): void => setError(false);
 
-  let body: JSX.Element;
-  if (view.kind === "assign") {
-    body = (
-      <AssignRow
-        view={view}
-        targets={d.targets}
-        valueEditor={d.valueEditor}
-        onToggleEditor={d.onToggleEditor}
-        error={error}
-        onCommit={commit}
-        onClearError={clear}
-      />
-    );
-  } else if (view.kind === "call") {
-    body = (
-      <CallRow
-        view={view}
-        headCandidates={d.headCandidates}
-        error={error}
-        onCommit={commit}
-        onClearError={clear}
-        renderArgEditor={d.renderArgEditor}
-        onToggleArg={d.onToggleArg}
-      />
-    );
-  } else if (view.kind === "emit") {
-    body = (
-      <EmitRow
-        view={view}
-        error={error}
-        onCommit={commit}
-        onClearError={clear}
-        renderFieldEditor={d.renderFieldEditor}
-        onToggleField={d.onToggleField}
-        events={d.events}
-        onRepointEvent={d.onRepointEvent}
-      />
-    );
-  } else {
-    body = (
-      <OtherRow
-        src={view.src}
-        valueEditor={d.valueEditor}
-        onToggleEditor={d.onToggleEditor}
-        error={error}
-        onCommit={commit}
-        onClearError={clear}
-      />
-    );
-  }
+  const body = (
+    <StmtRow
+      view={view}
+      targets={d.targets}
+      headCandidates={d.headCandidates}
+      error={error}
+      onCommit={commit}
+      onClearError={clear}
+      valueEditor={d.valueEditor}
+      onToggleEditor={d.onToggleEditor}
+      renderArgEditor={d.renderArgEditor}
+      onToggleArg={d.onToggleArg}
+      renderFieldEditor={d.renderFieldEditor}
+      onToggleField={d.onToggleField}
+      events={d.events}
+      onRepointEvent={d.onRepointEvent}
+    />
+  );
 
   return (
     <Box
@@ -144,19 +106,19 @@ export default function StmtNode({ data }: NodeProps): JSX.Element {
       className="nodrag nopan"
       style={{
         background: "var(--mantine-color-dark-6)",
-        border: `1px solid ${KIND_TINT[subKind]}`,
-        borderLeft: `4px solid ${KIND_TINT[subKind]}`,
+        border: `1px solid ${KIND_TINT[kind]}`,
+        borderLeft: `4px solid ${KIND_TINT[kind]}`,
         borderRadius: 6,
         padding: "8px 10px",
         width: d.compact ? 320 : 380,
       }}
       data-testid="c4system-v2-stmt"
-      data-stmt-kind={view.kind}
-      data-stmt-subkind={subKind}
+      data-stmt-kind={kind}
+      data-stmt-subkind={kind}
     >
       <Handle type="target" position={Position.Top} style={{ background: "var(--mantine-color-dark-3)" }} />
       <Text size="xs" tt="uppercase" c="dimmed" mb={4}>
-        {KIND_LABEL[subKind]}
+        {KIND_LABEL[kind]}
       </Text>
       {body}
       <Handle type="source" position={Position.Bottom} style={{ background: "var(--mantine-color-dark-3)" }} />

@@ -56,6 +56,21 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return <span style={{ fontWeight: 700, fontSize: 22 - (Number(p.level ?? 2) - 1) * 2 }}>{disp(p.text) || "Heading"}</span>;
     case "Text":
       return <span>{disp(p.text) || "Text"}</span>;
+    case "Bold":
+      return <span style={{ fontWeight: 700 }}>{disp(p.text) || "Bold"}</span>;
+    case "Italic":
+      return <span style={{ fontStyle: "italic" }}>{disp(p.text) || "Italic"}</span>;
+    case "InlineCode":
+      return <code style={{ fontFamily: "monospace", background: "var(--mantine-color-dark-5)", borderRadius: 3, padding: "0 4px" }}>{disp(p.text) || "code"}</code>;
+    case "CodeBlock":
+      return (
+        <div style={{ fontFamily: "monospace", fontSize: 11, whiteSpace: "pre-wrap", background: "var(--mantine-color-dark-5)", borderRadius: 4, padding: 4 }}>
+          <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)" }}>{disp(p.title) || "CodeBlock"}{p.language ? ` · ${disp(p.language)}` : ""}</div>
+          {disp(p.source) || disp(p.code) || "…"}
+        </div>
+      );
+    case "Icon":
+      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>◆ {disp(p.name) || (p.svg ? "svg" : "icon")}</span>;
     case "Empty":
       return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>{disp(p.message) || "Empty"}</span>;
     case "Alert":
@@ -76,6 +91,12 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return pill(disp(p.value) || "enum", "var(--mantine-color-grape-7)");
     case "IdLink":
       return <a style={{ color: "var(--mantine-color-blue-4)" }}>{disp(p.id) || "id"}{p.of ? ` → ${disp(p.of)}` : ""}</a>;
+    case "FileLink":
+      return <a style={{ color: "var(--mantine-color-blue-4)" }}>⇩ {disp(p.value) || "file"}</a>;
+    case "ProvenanceInfo":
+      return <span style={{ color: "var(--mantine-color-dimmed)" }}>ⓘ {disp(p.of) || "record"}{p.field ? `.${disp(p.field)}` : ""}</span>;
+    case "DestroyForm":
+      return pill(`Delete ${disp(p.of) || "…"}`, "var(--mantine-color-red-8)");
     case "Image":
       return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>image{p.src ? ` ${p.src}` : ""}</span>;
     case "Avatar":
@@ -90,6 +111,12 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
     case "NumberField":
     case "PasswordField":
       return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
+    case "MultilineField":
+      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, height: 18, border: "1px solid var(--mantine-color-dark-3)", borderRadius: 3, verticalAlign: "middle" }} /></span>;
+    case "SelectField":
+      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /> ▾</span>;
+    case "FileUpload":
+      return <span>{disp(p.label) || name}: <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>choose file…</span></span>;
     case "Toggle":
       return <span>◯ {disp(p.label) || "Toggle"}</span>;
     case "Stmt": {
