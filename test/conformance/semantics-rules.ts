@@ -236,18 +236,18 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "A create POST returns the id envelope, not the whole aggregate",
     trigger: "any aggregate created via `POST /api/<plural>`",
     observable:
-      'the 201 body is the id envelope `{"id": …}` and nothing else. Elixir instead returns the FULL aggregate (`{"id":…,"owner":"alice","balance":0}`), so a client written against the declared create response reads fields on one backend it cannot read on the other four — and every declared-but-unreturned field is a silent contract break the OpenAPI spec-diff cannot see (the spec agrees; only the BYTES differ).',
+      'the 201 body is the id envelope `{"id": …}` and nothing else, on every backend. Elixir used to return the FULL aggregate (`{"id":…,"owner":"alice","balance":0}`) — a client written against the declared create response could read fields on one backend it cannot read on the other four. The OpenAPI spec-diff was structurally blind to it: the specs AGREED (elixir publishes the `{id}` envelope too); only the bytes differed.',
     // Found by the M-T9.11 per-PR wire-golden gate on the shared `ledger` /
     // `payments` / `sales` / `shapes` systems: four backends agree on the id
     // envelope and elixir is the outlier.  Here the majority and the oracle
     // coincide — the emitted OpenAPI create response is the id envelope, so
     // elixir is over-returning against its OWN published contract.
-    conforms: ["node", "dotnet", "java", "python"],
-    targets: ["elixir"],
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "M-T9.11 slice (c) wire-golden gate",
       "test/behavioral/wire-golden/{ledger,payments,sales,shapes}.json",
-      "elixir `create_result/2` json(serialize(record)) vs the emitted Create<Agg>Response `{id}` schema (openapi-emit.ts)",
+      "found: elixir `create_result/2` json(serialize(record)) vs its own Create<Agg>Response `{id}` schema (openapi-emit.ts)",
+      'fixed: elixir create actions now answer `%{"id" => record.id}` (api-emit.ts x2, eventsourced-emit.ts)',
     ],
     tier: "behavioral",
   },
@@ -257,15 +257,17 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     trigger:
       "a `versioned` aggregate with `shape: document` (jsonb-stored): create, invoke an operation, read back",
     observable:
-      "the optimistic-concurrency `version` reads back 1 + one per persisted mutation, for EVERY `shape:`. node and python do. The other three each drop the bump on a DIFFERENT shape, which is why no single fixture caught it — document `Cart` / embedded `Wishlist` / plain `Order` (2 / 2 / 3 canonical) read back 1 / 2 / 3 on dotnet+java and 2 / 1 / 1 on elixir. dotnet/java: the ORM concurrency token is bound to a mapped column and a document aggregate's `version` lives inside the jsonb blob — the `dapper` persistence adapter (raw Npgsql, same .NET emitters, hand-rolled document SQL) increments correctly, which localizes the gap to the EF/JPA mapping rather than the .NET/Java wire emitters. elixir: the mirror image — the document path bumps, but an operation on an embedded/plain aggregate persists without touching `version` at all.",
+      "the optimistic-concurrency `version` reads back 1 + one per persisted mutation, for EVERY `shape:`. every backend now does. Historically the other three each dropped the bump on a DIFFERENT shape, which is why no single fixture caught it — document `Cart` / embedded `Wishlist` / plain `Order` (2 / 2 / 3 canonical) read back 1 / 2 / 3 on dotnet+java and 2 / 1 / 1 on elixir. dotnet/java: the ORM concurrency token is bound to a mapped column and a document aggregate's `version` lives inside the jsonb blob — the `dapper` persistence adapter (raw Npgsql, same .NET emitters, hand-rolled document SQL) increments correctly, which localizes the gap to the EF/JPA mapping rather than the .NET/Java wire emitters. elixir: the mirror image — the document path bumps, but an operation on an embedded/plain aggregate persists without touching `version` at all.",
     // RS-11 covered version at CREATE only; this is the INCREMENT path, and it
     // is shape-dependent AND inverted between backends.  Exactly the class the
     // differential exists to find: a field no test author thought to assert.
-    conforms: ["node", "python"],
-    targets: ["dotnet", "java", "elixir"],
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "M-T9.11 slice (c) wire-golden gate",
       "test/behavioral/wire-golden/shapes.json seq #3/#7; sales.json seq #12",
+      "fixed (dotnet): the document SaveAsync resolves the next version first and stamps it into the serialized snapshot (`ToSnapshot() with { Version = … }`, emit/repository.ts)",
+      "fixed (java): the document upsert writes the incremented counter back into the blob via `jsonb_set(excluded.data, '{version}', …)` (emit/document-store.ts)",
+      "fixed (elixir): the relational/embedded operation persist path bumps `version` like the document path already did (context-emit.ts)",
     ],
     tier: "behavioral",
   },

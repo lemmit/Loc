@@ -3,6 +3,7 @@ import {
   aggregateUsesPrincipalContextFilter,
   exprUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { bypassDrops, type FilterBypass } from "../capability-filter.js";
@@ -237,7 +238,24 @@ export function renderJavaDocumentRepositoryImpl(
     `        try {`,
     `            jdbc.update(`,
     `                "insert into ${table} (id, data, version) values (?, ?::jsonb, 1) "`,
-    `                    + "on conflict (id) do update set data = excluded.data, version = ${bare}.version + 1",`,
+    // RS-14 — the wire `version` of a document aggregate is served out of the
+    // `data` jsonb (the serialized aggregate), while the concurrency counter
+    // lives in the `version` COLUMN.  Bumping only the column left the wire
+    // value frozen at its created value forever (golden 2, we read 1).  Since
+    // the aggregate is serialized BEFORE the next version is known, stamp it in
+    // the upsert itself: `jsonb_set` writes the incremented counter back into
+    // `data.version`, so the blob and the column can never disagree.  Guarded on
+    // `versioned` — without the capability there is no `version` key in `data`
+    // and `jsonb_set` would CREATE one (a wire field out of thin air).
+    ...(aggregateIsVersioned(agg)
+      ? [
+          `                    + "on conflict (id) do update set "`,
+          `                    + "data = jsonb_set(excluded.data, '{version}', to_jsonb(${bare}.version + 1)), "`,
+          `                    + "version = ${bare}.version + 1",`,
+        ]
+      : [
+          `                    + "on conflict (id) do update set data = excluded.data, version = ${bare}.version + 1",`,
+        ]),
     `                aggregate.id().value(), JSON.writeValueAsString(aggregate));`,
     `        } catch (tools.jackson.core.JacksonException e) {`,
     `            throw new IllegalStateException("document serialization failed", e);`,

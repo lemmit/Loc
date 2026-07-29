@@ -47,9 +47,15 @@ describe("java generator — shape: document", () => {
     expect(impl).toContain(
       '"insert into cms.articles (id, data, version) values (?, ?::jsonb, 1) "',
     );
+    // RS-14: `versioned` is default-on, so the upsert writes the incremented
+    // counter back INTO the blob (`data.version`) as well as the column — the
+    // wire `version` of a document aggregate is served out of `data`, and
+    // bumping only the column left it frozen at its created value forever.
+    expect(impl).toContain('+ "on conflict (id) do update set "');
     expect(impl).toContain(
-      '+ "on conflict (id) do update set data = excluded.data, version = articles.version + 1"',
+      `+ "data = jsonb_set(excluded.data, '{version}', to_jsonb(articles.version + 1)), "`,
     );
+    expect(impl).toContain('+ "version = articles.version + 1"');
     expect(impl).toContain("return JSON.readValue(data, Article.class);");
   });
 

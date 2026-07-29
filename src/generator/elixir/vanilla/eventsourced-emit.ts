@@ -514,6 +514,9 @@ export function renderEsController(
   // `GET /<plural>/<find>` actions — event-sourced finds run load-all + filter.
   const findActions = renderFindActions(appModule, ctxModule, agg, ctx);
 
+  // RS-13 — the 201 body is the ID ENVELOPE, not the serialized aggregate; see
+  // the matching note in api-emit.ts.  The event-sourced controller shares the
+  // divergence (and the fix) with the relational one.
   const create =
     (agg.creates ?? []).length > 0
       ? `
@@ -524,7 +527,7 @@ export function renderEsController(
   def create_result(conn, {:ok, record}) do
     conn
     |> put_status(201)
-    |> json(serialize(record))
+    |> json(%{"id" => record.id})
   end
 
   def create_result(conn, {:error, reason}), do: command_error(conn, reason)

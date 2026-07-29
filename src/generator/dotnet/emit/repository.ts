@@ -743,17 +743,43 @@ export function renderDocumentRepositoryImpl(
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
-      "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
-      `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
-      "        if (__existing == null)",
-      "        {",
-      `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = 1 });`,
-      "        }",
-      "        else",
-      "        {",
-      "            __existing.Data = __data;",
-      "            __existing.Version += 1;",
-      "        }",
+      // RS-14 — a document aggregate's `version` is served from the SNAPSHOT
+      // inside `data`, while the optimistic-concurrency counter EF bumps lives
+      // on the ROOT ROW.  Bumping only the row left the wire `version` frozen
+      // at its created value forever (golden 2, we read 1) — so a client could
+      // never observe a change, and lost-update detection had nothing to
+      // compare.  Fix: resolve the next version FIRST and stamp it into the
+      // serialized snapshot, so `data.version` and the row agree.  The
+      // relational path needs no equivalent — there the bumped column IS the
+      // wire value (see `versionGuardLines`).
+      ...(aggregateIsVersioned(agg)
+        ? [
+            `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
+            "        var __nextVersion = __existing == null ? 1 : __existing.Version + 1;",
+            "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot() with { Version = __nextVersion }, __json);",
+            "        if (__existing == null)",
+            "        {",
+            `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = __nextVersion });`,
+            "        }",
+            "        else",
+            "        {",
+            "            __existing.Data = __data;",
+            "            __existing.Version = __nextVersion;",
+            "        }",
+          ]
+        : [
+            "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
+            `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
+            "        if (__existing == null)",
+            "        {",
+            `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = 1 });`,
+            "        }",
+            "        else",
+            "        {",
+            "            __existing.Data = __data;",
+            "            __existing.Version += 1;",
+            "        }",
+          ]),
       "        await _db.SaveChangesAsync(cancellationToken);",
       `        ${renderDotnetLogCall("repositorySave", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },

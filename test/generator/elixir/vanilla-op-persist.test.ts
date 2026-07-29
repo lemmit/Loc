@@ -97,7 +97,12 @@ describe("vanilla named-op persistence (embedded containment put_embed)", () => 
     );
     // …and the changeset is built off that original, so put_embed(:items, <new>)
     // is a real diff against the OLD embed (a `record`-based base would drop it).
-    expect(add).toContain("record_before\n    |> Ecto.Changeset.change(%{})");
+    // RS-14: the op persist bumps `version` (default-on `versioned`) — the
+    // document op path always did; the relational/embedded one used to leave it
+    // frozen, so an operation persisted new state under a stale version.
+    expect(add).toContain(
+      "record_before\n    |> Ecto.Changeset.change(%{version: record_before.version + 1})",
+    );
     expect(add).toContain("|> Ecto.Changeset.put_embed(:items, record.items)");
   });
 });

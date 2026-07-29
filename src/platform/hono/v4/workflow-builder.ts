@@ -5,7 +5,10 @@ import {
   type WorkflowStmtTarget,
 } from "../../../generator/_workflow/stmt-target.js";
 import type { OpFragment } from "../../../generator/typescript/emit/aggregate.js";
-import { mikroWorkflowRowClass } from "../../../generator/typescript/emit/mikroorm.js";
+import {
+  eventRowClassOf,
+  mikroWorkflowRowClass,
+} from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr, renderTsType } from "../../../generator/typescript/render-expr.js";
 import { renderTsStatements } from "../../../generator/typescript/render-stmt.js";
 import {
@@ -185,7 +188,7 @@ export function buildWorkflowsFile(
     body.push(...emitWorkflowStreamSerializers(ctx));
     body.push("");
     for (const wf of esInstanceWorkflows) {
-      body.push(...emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext }));
+      body.push(...emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext, usingMikro }));
       body.push("");
       helperDone.add(wf.name);
     }
@@ -357,8 +360,16 @@ export function buildWorkflowsFile(
     .filter((w) => !w.eventSourced && !!w.correlationField)
     .map(mikroWorkflowRowClass)
     .filter((n) => new RegExp(`\\b${n}\\b`).test(bodyStr));
-  if (workflowRowsReferenced.length > 0)
-    imports.push(`import { ${workflowRowsReferenced.join(", ")} } from "../db/entities";`);
+  // An event-sourced workflow's fold helpers read/append the shared
+  // `<Ctx>EventRow` stream entity under the mikro branch — same body-scan gate,
+  // so a drizzle build never sees it.
+  const eventRowsReferenced = [...new Set(ctx.workflows.map((w) => w.name))]
+    .map(() => eventRowClassOf(ctx.name))
+    .filter((n, i, a) => a.indexOf(n) === i)
+    .filter((n) => new RegExp(`\\b${n}\\b`).test(bodyStr));
+  const entityImports = [...workflowRowsReferenced, ...eventRowsReferenced];
+  if (entityImports.length > 0)
+    imports.push(`import { ${entityImports.join(", ")} } from "../db/entities";`);
   // The persisted-workflow load helper filters by the correlation column.
   const drizzleOps = ["and", "asc", "eq", "isNull", "lt"].filter((op) =>
     new RegExp(`(?<!\\.)\\b${op}\\(`).test(bodyStr),
@@ -894,7 +905,7 @@ function emitSubscriptionHandlers(
     if (wf?.correlationField && !helperDone.has(wf.name)) {
       out.push(
         ...(wf.eventSourced
-          ? emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext })
+          ? emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext, usingMikro })
           : emitWorkflowStateHelpers(wf, usingMikro)),
       );
       out.push("");

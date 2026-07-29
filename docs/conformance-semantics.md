@@ -272,24 +272,26 @@ the conforming backends, and the fix that established it.
   envelope `{"id": …}` — nothing else. That envelope is what every backend's
   emitted OpenAPI declares for the create response.
 - **Trigger.** Any aggregate created via `POST /api/<plural>`.
-- **Observable.** node, dotnet, java and python return `{"id":…}`. **Elixir
-  returns the FULL aggregate** (`{"id":…,"owner":"alice","balance":0}`), on
-  every create, in every shared system. A client written against the declared
-  create response reads fields on Elixir it cannot read on the other four.
-  The OpenAPI spec-diff is blind to this by construction: the *specs* agree —
-  only the bytes differ. Here the majority and the oracle coincide, and the
-  oracle is not the vote: Elixir over-returns against **its own published
-  contract**, so the emitted spec settles it without appeal to the other four.
-  Confirmed at the source — the emitted schema
-  `Create<Agg>Response` declares `properties: %{ id: … }`
-  (`src/generator/elixir/vanilla/openapi-emit.ts`), while the generated
-  controller's `create_result/2` answers `201` with `json(serialize(record))`
-  (`api-emit.ts`) instead of the id envelope.
-- **Conforms.** node, dotnet, java, python. **Target:** elixir.
+- **Observable.** Every backend returns `{"id":…}`. **Elixir used to return the
+  FULL aggregate** (`{"id":…,"owner":"alice","balance":0}`), on every create, in
+  every shared system — so a client written against the declared create response
+  could read fields on Elixir it cannot read on the other four. The OpenAPI
+  spec-diff was blind to it by construction: the *specs* agreed — only the bytes
+  differed. The majority and the oracle happened to coincide, but the oracle was
+  not the vote: Elixir over-returned against **its own published contract**, so
+  the emitted spec settled it without appeal to the other four. Confirmed at the
+  source — the emitted `Create<Agg>Response` schema declares
+  `properties: %{ id: … }` (`openapi-emit.ts`) while the controller's
+  `create_result/2` answered `201` with `json(serialize(record))`.
+- **Fix.** The three Elixir create actions (`api-emit.ts` ×2 — audited and plain
+  — plus `eventsourced-emit.ts`) now answer `%{"id" => record.id}`. The
+  string-keyed map matches the serializer's own `"id" => …` entry, so the id's
+  wire form is identical on the create and read paths.
+- **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate on its
   first five-backend run (`test/behavioral/wire-golden/{ledger,payments,sales,
-  shapes}.json`); waived in `test/_helpers/wire-waivers.ts` until fixed. Tier:
-  **behavioral**.
+  shapes}.json`); fixed in the same PR, so the waiver is gone and the gate
+  enforces the envelope unconditionally. Tier: **behavioral**.
 
 ### RS-14 · `version` increments on every persisted mutation, document shapes included
 - **Guarantee.** A `versioned` aggregate reads back `version: 2` after one
@@ -297,23 +299,32 @@ the conforming backends, and the fix that established it.
   **regardless of `shape:`**.
 - **Trigger.** A `versioned` aggregate with `shape: document` (jsonb-stored):
   create, invoke an operation, read back.
-- **Observable.** node, python and elixir read back `2`. **dotnet and java read
-  back `1`** on a document-shaped aggregate: their optimistic-concurrency token
-  is bound to a mapped column, and a document aggregate's `version` lives
-  inside the jsonb blob, so the mutation persists without bumping it. The
-  **`dapper` persistence adapter increments correctly** — same .NET emitters,
-  raw Npgsql with hand-rolled document SQL — which localizes the gap to the
-  EF/JPA mapping, not to the .NET/Java wire emitters. The
-  EMBEDDED-shape aggregate in the *same* system increments correctly on all
-  five — which is exactly why this survived every existing gate: the
-  behavioral tiers assert locally (each backend passes its own emitted
-  asserts), and no test author thought to assert `version` after an operation.
-- **Conforms.** node, python, elixir. **Targets:** dotnet, java.
+- **Observable.** Every backend now reads back `2`. Historically each of three
+  dropped the bump on a **different** shape — document `Cart` / embedded
+  `Wishlist` / plain `Order` (canonically 2 / 2 / 3) read back **1 / 2 / 3** on
+  dotnet+java and **2 / 1 / 1** on elixir — which is exactly why this survived
+  every existing gate: the behavioral tiers assert *locally* (each backend
+  passes its own emitted asserts), and no test author thought to assert
+  `version` after an operation. The **`dapper` adapter incremented correctly**
+  throughout — same .NET emitters, raw Npgsql with hand-rolled document SQL —
+  which localized the dotnet/java half to the EF/JPA mapping rather than the
+  wire emitters.
+- **Fix.** *dotnet* — the document `SaveAsync` resolves the next version FIRST
+  and stamps it into the serialized snapshot (`ToSnapshot() with { Version = … }`),
+  so `data.version` and the row column can no longer disagree. *java* — the
+  document upsert writes the incremented counter back into the blob:
+  `jsonb_set(excluded.data, '{version}', to_jsonb(<t>.version + 1))`. *elixir* —
+  the relational/embedded operation persist path bumps `version` the way the
+  document path already did. (Each is guarded on the `versioned` capability; the
+  relational .NET/Java paths needed nothing, since there the bumped column IS
+  the wire value.)
+- **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate
   (`test/behavioral/wire-golden/shapes.json` seq #3, `GET /api/carts/{id}`);
-  waived in `test/_helpers/wire-waivers.ts` until fixed. Note RS-11 covered
-  version at **create** only — this is the **increment** path, and it is
-  shape-dependent. Tier: **behavioral**.
+  fixed in the same PR, so the waiver is gone and the gate enforces it
+  unconditionally on all five backends. Note RS-11 covered version at **create**
+  only — this is the **increment** path, and it is shape-dependent. Tier:
+  **behavioral**.
 
 ---
 
