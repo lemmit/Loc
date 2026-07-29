@@ -203,21 +203,22 @@ Each stack ships:
 
 ```
 stacks/<id>/
-├── stack.json                  # id, description, deps map, bundler hints
+├── stack.json                  # id + description only (a human label; not read by codegen)
 ├── stack-package-deps.hbs      # dep names + ranges injected into the pack's package.json
 └── stack-package-devdeps.hbs   # devDep names + ranges injected into the pack's package.json
 ```
 
-`stack.json` also carries **bundler hints** consumed by the playground
-sandbox (`rdcShim`, `importmapReactDomQuery`) so an in-browser preview
-of the same pack stays consistent with what the generated `npm install`
-would produce.
+`stack.json` is a two-field label (`id`, `description`).  The real
+dependency pins live in the `*.hbs` fragments — the only files the
+loader reads.  The playground bundler derives its React-runtime policy
+from the emitted `package.json` (the React major), not from any field
+in `stack.json`.
 
 ### How `stack` flows through the pipeline
 
 1. Pack manifest declares `"stack": "v3"`.
-2. The pack loader (`src/generator/_packs/`) resolves
-   `stacks/v3/stack.json` + the two `*.hbs` snippets.
+2. The pack loader (`src/generator/_packs/`) pulls the two `*.hbs`
+   snippets from `stacks/v3/` into the shared-partials map.
 3. When the bundler renders the pack's `package-json.hbs`, it
    injects the stack's deps/devDeps into the emitted `package.json` —
    the pack's own `package-json.hbs` only lists *pack-specific* deps
