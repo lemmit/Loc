@@ -55,8 +55,14 @@ describe("angular generator — walked pages", () => {
   it("renders the walked body markup (Stack → div.loom-stack, Heading → h2, Text → div)", async () => {
     const page = (await angularFiles()).get("src/app/pages/home.component.ts")!;
     expect(page).toContain('<div class="loom-stack">');
-    expect(page).toContain('<h2 data-testid="home-title">Welcome to Loom on Angular</h2>');
-    expect(page).toContain("<div>This page rendered through the shared walker.</div>");
+    // Text walks through the i18n seam (M-T1.11): the literal becomes a
+    // `t(key, default)` interpolation whose default preserves the source string.
+    expect(page).toContain(
+      '<h2 data-testid="home-title">{{ t("page.Home.heading.olot10", "Welcome to Loom on Angular") }}</h2>',
+    );
+    expect(page).toContain(
+      '<div>{{ t("page.Home.text.iygd5w", "This page rendered through the shared walker.") }}</div>',
+    );
   });
 
   it("mounts the page at its route + a wildcard NotFound (no synthetic Home when a page owns `/`)", async () => {
@@ -119,8 +125,13 @@ describe("angular generator — Material-module primitives (imports aggregation)
   it("renders Card → <mat-card> and Divider → <mat-divider>", async () => {
     const page = await cardPage();
     expect(page).toContain("<mat-card>");
-    expect(page).toContain("<mat-card-title>Summary</mat-card-title>");
-    expect(page).toContain("<mat-card-content><div>Inside the card.</div></mat-card-content>");
+    // Card title + inner Text walk through the i18n seam (M-T1.11).
+    expect(page).toContain(
+      '<mat-card-title>{{ t("page.Home.cardTitle.i4c62b", "Summary") }}</mat-card-title>',
+    );
+    expect(page).toContain(
+      '<mat-card-content><div>{{ t("page.Home.text.kvsmym", "Inside the card.") }}</div></mat-card-content>',
+    );
     expect(page).toContain("<mat-divider></mat-divider>");
   });
 
@@ -241,9 +252,12 @@ describe("angular generator — display + layout primitives", () => {
     expect(page).toContain('<div class="loom-toolbar" role="toolbar" aria-label="Actions">');
     expect(page).toContain('<div class="loom-group">');
     expect(page).toContain('<div class="loom-paper">');
-    expect(page).toContain('<span class="loom-badge">New</span>');
+    // Badge label + Stat label/value walk through the i18n seam (M-T1.11).
     expect(page).toContain(
-      '<div class="loom-stat"><div class="loom-stat-label">Orders</div><div class="loom-stat-value">42</div></div>',
+      '<span class="loom-badge">{{ t("page.Home.badge.2ludo1", "New") }}</span>',
+    );
+    expect(page).toContain(
+      '<div class="loom-stat"><div class="loom-stat-label">{{ t("page.Home.statLabel.xf3i18", "Orders") }}</div><div class="loom-stat-value">{{ t("page.Home.statValue.1pcryb", "42") }}</div></div>',
     );
     expect(page).toContain('<div class="loom-alert loom-alert-yellow" role="alert">');
     expect(page).toContain('<div class="loom-alert-title">Heads up</div>');
@@ -309,13 +323,18 @@ async function inlinePage(): Promise<string> {
 describe("angular generator — inline / media / layout primitives", () => {
   it("walks the inline + media primitives to their markup", async () => {
     const page = await inlinePage();
-    expect(page).toContain("<strong>bold</strong>");
-    expect(page).toContain("<em>italic</em>");
-    expect(page).toContain('<code class="loom-inline-code">.ddd</code>');
+    // Inline text primitives walk through the i18n seam (M-T1.11).
+    expect(page).toContain('<strong>{{ t("page.Home.bold.prdwty", "bold") }}</strong>');
+    expect(page).toContain('<em>{{ t("page.Home.italic.qw1oq5", "italic") }}</em>');
+    expect(page).toContain(
+      '<code class="loom-inline-code">{{ t("page.Home.code.rarma7", ".ddd") }}</code>',
+    );
     expect(page).toContain('<div class="loom-key-value-row">');
     expect(page).toContain('<img class="loom-avatar" src="/a.png" alt="user" />');
     expect(page).toContain('<img class="loom-image" src="/logo.png" alt="logo" />');
-    expect(page).toContain('<div class="loom-empty">Nothing here yet</div>');
+    expect(page).toContain(
+      '<div class="loom-empty">{{ t("page.Home.empty.j0zoai", "Nothing here yet") }}</div>',
+    );
   });
 
   it("inlines the builtin Icon SVG and unrolls the multi-Skeleton via range", async () => {
@@ -389,7 +408,10 @@ describe("angular generator — navigation + format-helper primitives", () => {
   it("routes Anchor/IdLink/Breadcrumbs via [routerLink] + registers RouterLink", async () => {
     const page = await navPage();
     expect(page).toContain('<nav class="loom-breadcrumbs">');
-    expect(page).toContain('<a class="loom-anchor" [routerLink]=\'"/about"\'>About</a>');
+    // Anchor label walks through the i18n seam (M-T1.11); routerLink unchanged.
+    expect(page).toContain(
+      '<a class="loom-anchor" [routerLink]=\'"/about"\'>{{ t("page.Home.anchor.onrqou", "About") }}</a>',
+    );
     expect(page).toContain('[routerLink]=\'"/orders/" + "abc12345def"\'');
     expect(page).toContain('import { RouterLink } from "@angular/router";');
     expect(page).toContain("imports: [RouterLink],");

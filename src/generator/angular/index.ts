@@ -26,6 +26,7 @@ import {
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
+import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
@@ -34,6 +35,7 @@ import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
@@ -160,6 +162,20 @@ export function generateAngularForContexts(
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
   const pages = (ui?.pages ?? []).filter((p) => p.route);
 
+  // i18n translation runtime (M-T1.11 — the React runtime ported to Angular).
+  // When the ui has extractable user-visible text, each page's body walk emits
+  // `t(key, default, values?)` (the key matches the `.loom/messages.en.json`
+  // catalog via the SHARED walker seam) and the app ships `src/lib/i18n.ts` +
+  // `src/lib/locales/en.json`.  The walker's `../i18n` seam import rewrites to
+  // `../../lib/i18n` in page-shell, and `t` is re-exposed as a component member
+  // (Angular templates resolve interpolations against the instance).  A
+  // string-less ui emits neither the runtime nor a prefix → byte-identical.
+  const i18nEnabled = ui ? collectUiMessages(ui).length > 0 : false;
+  if (i18nEnabled && ui) {
+    out.set("src/lib/i18n.ts", renderI18nModule());
+    out.set("src/lib/locales/en.json", renderLocaleCatalog(ui));
+  }
+
   // Extern frontend functions (extern-function-hook-escape-hatch.md §3): the
   // same two machine-owned files react / svelte emit — the wire-DTO-typed
   // signature (`src/lib/extern/<name>.signature.ts`; the Angular api modules
@@ -252,6 +268,9 @@ export function generateAngularForContexts(
         externFunctionNames,
         new Set(page.derived.map((d) => d.name)),
         authUi,
+        // i18n key prefix — `page.<Name>` matches the catalog; undefined when
+        // the ui has no extractable strings (byte-identical to pre-i18n).
+        i18nEnabled ? `page.${page.name}` : undefined,
       );
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page, pageCtx, authUi)
