@@ -565,13 +565,21 @@ const ANALYSIS_OPTIONS = `include: package:flutter_lints/flutter.yaml
 function renderMakefile(pkg: string, usesFileUpload: boolean): string {
   // A `FileUpload` primitive pulls the `file_picker` native plugin, whose
   // transitive `flutter_plugin_android_lifecycle` requires Android compileSdk
-  // >= 36 — newer than the `flutter create` template default.  Bump the
-  // generated Gradle config after materialising the platform folders (portable
-  // perl -i; guarded so a missing perl doesn't fail `prepare`).  Omitted when no
-  // FileUpload is present, so File-free Makefiles stay byte-identical.
+  // >= 36 — newer than the `flutter create` template default.  Bumping only the
+  // app module doesn't reach the plugin subprojects, so force it on ALL android
+  // subprojects in the root Gradle file (the documented workaround; Kotlin or
+  // Groovy).  Omitted when no FileUpload is present, so File-free Makefiles stay
+  // byte-identical.
+  // The Gradle blocks go in the printf FORMAT (not a `%s` arg) so the `\n`
+  // escapes expand to real newlines.  In this template literal `\\n` emits the
+  // two chars `\n` into the Makefile text, which printf then expands at run time.
+  const ktsFmt =
+    'subprojects {\\n    afterEvaluate {\\n        (extensions.findByName("android") as? com.android.build.gradle.BaseExtension)?.compileSdkVersion(36)\\n    }\\n}\\n';
+  const groovyFmt =
+    'subprojects {\\n    afterEvaluate { proj ->\\n        if (proj.extensions.findByName("android") != null) { proj.android { compileSdkVersion 36 } }\\n    }\\n}\\n';
   const compileSdkBump = usesFileUpload
-    ? "\t# file_picker's native side needs compileSdk >= 36\n" +
-      "\tfind android -name 'build.gradle*' -exec perl -pi -e 's/flutter\\.compileSdkVersion/36/g' {} + 2>/dev/null || true\n"
+    ? "\t# file_picker's native plugin needs compileSdk >= 36 on every subproject\n" +
+      `\t@if [ -f android/build.gradle.kts ]; then printf '\\n${ktsFmt}' >> android/build.gradle.kts; elif [ -f android/build.gradle ]; then printf '\\n${groovyFmt}' >> android/build.gradle; fi\n`
     : "";
   return `# ${pkg} — Loom-generated Flutter app.
 # One Dart source, three build surfaces.  Override the API base with

@@ -233,9 +233,13 @@ jobs:
         working-directory: ${{ steps.proj.outputs.dir }}
         run: |
           flutter create --platforms=android .
-          # file_picker's native side needs compileSdk >= 36; substitute the
-          # `flutter.compileSdkVersion` placeholder in the generated Gradle files
-          # (works for both the Kotlin `= flutter.compileSdkVersion` and Groovy
-          # `compileSdkVersion flutter.compileSdkVersion` forms).
-          find android -name 'build.gradle*' -print0 | xargs -0 sed -i 's/flutter\.compileSdkVersion/36/g'
+          # file_picker's native plugin (flutter_plugin_android_lifecycle) needs
+          # compileSdk >= 36. Bumping only the app module doesn't reach the plugin
+          # subprojects, so force it on ALL android subprojects in the root Gradle
+          # file (the documented workaround). Kotlin (build.gradle.kts) or Groovy.
+          if [ -f android/build.gradle.kts ]; then
+            printf '\nsubprojects {\n    afterEvaluate {\n        (extensions.findByName("android") as? com.android.build.gradle.BaseExtension)?.compileSdkVersion(36)\n    }\n}\n' >> android/build.gradle.kts
+          elif [ -f android/build.gradle ]; then
+            printf '\nsubprojects {\n    afterEvaluate { proj ->\n        if (proj.extensions.findByName("android") != null) { proj.android { compileSdkVersion 36 } }\n    }\n}\n' >> android/build.gradle
+          fi
           flutter build apk --debug
