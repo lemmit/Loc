@@ -1005,7 +1005,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           ))}
         </Group>
       )}
-      <AddPalette path={path} source={ctx.getSource()} onChange={apply} />
+      <AddPalette path={path} source={ctx.getSource()} onChange={apply} wfMember={wfMember} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
           nodes={nodes}
