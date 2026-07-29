@@ -116,6 +116,10 @@ export interface WalkResult {
    *  wires each into an `allow_upload/3` (mount) + `handle_<field>_progress/3`
    *  consumer.  Empty when the body has no FileUpload. */
   uploadBindings: UploadBinding[];
+  /** Interactive `Table(...)` controls in this body (M-T1.1 HEEx leg) — the
+   *  emitter hoists the matching sort/page `handle_event` clauses.  Empty when
+   *  no Table asked for sorting or paging. */
+  tableControls: TableControlBinding[];
 }
 
 /** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
@@ -165,6 +169,39 @@ export interface QueryBinding {
   /** Aggregate PascalCase name resolved from the `of:` query call,
    *  used to build the `<Ctx>.get_<agg>!` / `list_<agg>s` call. */
   aggregate: string;
+  /** Arguments of the `of:` query call, rendered as HANDLER-position Elixir
+   *  (state refs become `socket.assigns.<field>`, not `@<field>`) — the load
+   *  block is a function body, not a template.
+   *
+   *  The scaffold's paged list emits `<api>.<Agg>.all(pageNum, 10, sortKey,
+   *  sortDir)`; these are that arg list, forwarded to the repository's paged
+   *  `list/4`.  Dropping them (the pre-M-T1.1-slice-8 behaviour) silently fell
+   *  back to `list/4`'s defaults, pinning every Phoenix list to page 1 with no
+   *  way to reach row 11.  Empty/undefined for a bare `all` → `list_<agg>s()`,
+   *  byte-identical to before. */
+  listArgs?: string[];
+}
+
+/** Interactive controls a `Table(...)` in this body asked for — the HEEx leg of
+ *  M-T1.1.  Recorded by `renderTable` so the LiveView emitter can hoist the
+ *  matching `handle_event("loom-sort"/"loom-page", …)` clauses; the markup
+ *  (sortable header buttons, the pager) is emitted by `renderTable` itself.
+ *
+ *  Unlike the JSX targets — which sort and slice a bound array in the browser —
+ *  the Phoenix leg is SERVER-driven: a LiveView calls its context function
+ *  directly, so a sort/page change just re-runs `list_<agg>s/4` with different
+ *  arguments and lets the already-whitelisted `ORDER BY` + `LIMIT`/`OFFSET` do
+ *  the work.  Absent (no Table, or a Table with no control args) ⇒ no clauses,
+ *  byte-identical output. */
+export interface TableControlBinding {
+  /** snake-cased state assign holding the sorted field name, when the Table
+   *  carries `sortKey:`/`sortDir:` refs. */
+  sortKey?: string;
+  /** snake-cased state assign holding `"asc"` / `"desc"`. */
+  sortDir?: string;
+  /** snake-cased state assign holding the 1-based page number, when the Table
+   *  carries a `page:` ref. */
+  page?: string;
 }
 
 /** A `FileUpload { …, bind: <File state> }` in a page body — the LiveView
@@ -250,6 +287,11 @@ export interface WalkContext {
    *  consumer.  An array (mutation survives `{...ctx}` shallow copies, like the
    *  other accumulator arrays above). */
   uploadBindings: UploadBinding[];
+  /** Table control bindings discovered as the walker visits `Table(…)` calls
+   *  (heex-primitives.ts::renderTable).  Surfaced as `WalkResult.tableControls`;
+   *  drives the hoisted sort/page `handle_event` clauses.  An array (mutation
+   *  survives `{...ctx}` shallow copies, like the other accumulators above). */
+  tableControls: TableControlBinding[];
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
   /** Module-qualified bounded-context name keyed by entity-part name
@@ -362,6 +404,7 @@ export function walkBodyToHeex(
     tabSeq: { value: 0 },
     usedStores: new Set(),
     uploadBindings: [],
+    tableControls: [],
     position: "template",
     instanceTypes,
     authEnabled,
@@ -428,6 +471,7 @@ export function walkBodyToHeex(
     idOptionsBindings: [...ctx.idOptionsBindings],
     usedStores: [...ctx.usedStores],
     uploadBindings: ctx.uploadBindings,
+    tableControls: ctx.tableControls,
   };
 }
 
@@ -1712,6 +1756,7 @@ function renderRequiresGuardAt(
     tabSeq: { value: 0 },
     usedStores: new Set(),
     uploadBindings: [],
+    tableControls: [],
     position,
     partContextModule: new Map(),
     contextModuleByAggName: new Map(),
@@ -1723,6 +1768,47 @@ function renderRequiresGuardAt(
 // State field default values — type-aware.  Caller invokes
 // `defaultInitFor(field)` when the field has no explicit `= <init>`.
 // ---------------------------------------------------------------------------
+
+/** A page-state field's seed value for `mount/3`: its declared `= <init>`
+ *  (lowered into `StateFieldIR.init`) when present, else the type's zero value.
+ *
+ *  Every other frontend already honours `init` — React/Svelte/Angular from the
+ *  start, Vue since the M-T1.1 slice-6 page-shell fix.  Elixir did not, so the
+ *  scaffold list's 1-based `pageNum: int = 1` seeded as `0`; harmless while the
+ *  assign was unread, but `page = 0` drives `offset = (page - 1) * page_size`
+ *  negative once the value actually reaches `list/4`.
+ *
+ *  Only LITERAL inits render here.  A non-literal init on page state would need
+ *  the full expression renderer (and a walk context this function has no access
+ *  to); falling back to the type default keeps such a page byte-identical
+ *  rather than emitting something that might not compile. */
+export function stateInitFor(f: StateFieldIR): string {
+  if (f.init?.kind === "literal") return elixirLiteral(f.init.lit, f.init.value);
+  return defaultInitFor(f.type);
+}
+
+/** Render a lowered literal as an Elixir term.  Mirrors the store emitter's
+ *  private literal renderer; kept here because state seeding is this module's
+ *  concern (`defaultInitFor`'s neighbour). */
+function elixirLiteral(lit: string, value: string): string {
+  switch (lit) {
+    case "string":
+      return JSON.stringify(value);
+    case "int":
+    case "long":
+      return value;
+    case "bool":
+      return value === "true" ? "true" : "false";
+    case "decimal":
+    case "money":
+      // Decimal-backed — never a bare float literal (precision loss).
+      return `Decimal.new(${JSON.stringify(value)})`;
+    case "null":
+      return "nil";
+    default:
+      return JSON.stringify(value);
+  }
+}
 
 export function defaultInitFor(t: TypeIR): string {
   switch (t.kind) {

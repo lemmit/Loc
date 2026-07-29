@@ -263,8 +263,11 @@ defmodule ${webModule}.CoreComponents do
   attr :row_id, :any, default: nil, doc: "function that returns the id for the row"
   attr :row_click, :any, default: nil, doc: "function or {JS, …} to invoke on row click"
   attr :row_item, :any, default: &Function.identity/1, doc: "function to derive the row data shown to the slot"
+  attr :sort_key, :string, default: nil, doc: "currently-sorted field (drives the header indicator)"
+  attr :sort_dir, :string, default: nil, doc: "\\"asc\\" | \\"desc\\" for the sorted column"
   slot :col, required: true do
     attr :label, :string
+    attr :sort_field, :string, doc: "when set, the header is a button that sorts by this field"
   end
   slot :action, doc: "trailing per-row action column"
 
@@ -276,7 +279,22 @@ defmodule ${webModule}.CoreComponents do
       <table id={@id} class="min-w-full divide-y divide-zinc-200 text-sm">
         <thead class="bg-zinc-50">
           <tr>
-            <th :for={col <- @col} class="px-3 py-2 text-left font-semibold text-zinc-700">{col[:label]}</th>
+            <th
+              :for={col <- @col}
+              class="px-3 py-2 text-left font-semibold text-zinc-700"
+              aria-sort={sort_aria(col[:sort_field], @sort_key, @sort_dir)}
+            >
+              <button
+                :if={col[:sort_field]}
+                type="button"
+                phx-click="loom-sort"
+                phx-value-key={col[:sort_field]}
+                class="inline-flex items-center gap-1 font-semibold text-zinc-700 hover:text-zinc-900"
+              >
+                {col[:label]}<span aria-hidden="true">{sort_indicator(col[:sort_field], @sort_key, @sort_dir)}</span>
+              </button>
+              <span :if={!col[:sort_field]}>{col[:label]}</span>
+            </th>
             <th :if={@action != []} class="px-3 py-2 text-right font-semibold text-zinc-700">
               <span class="sr-only">Actions</span>
             </th>
@@ -294,6 +312,49 @@ defmodule ${webModule}.CoreComponents do
         </tbody>
       </table>
     </div>
+    """
+  end
+
+  # Screen-reader sort state for a column header.  Only the actively-sorted
+  # column reports a direction; every other sortable column is "none" so the
+  # header is still announced as sortable.  Non-sortable columns get nil (the
+  # attribute is omitted entirely).
+  defp sort_aria(nil, _key, _dir), do: nil
+  defp sort_aria(field, key, dir) when field == key, do: if(dir == "desc", do: "descending", else: "ascending")
+  defp sort_aria(_field, _key, _dir), do: "none"
+
+  # Visual sort caret, mirroring \`sort_aria/3\`.  Purely decorative — the
+  # \`aria-sort\` attribute above is what assistive tech reads.
+  defp sort_indicator(field, key, dir) when field == key, do: if(dir == "desc", do: " ▾", else: " ▴")
+  defp sort_indicator(_field, _key, _dir), do: ""
+
+  @doc "Pager for a server-paged list — Prev / position / Next."
+  attr :page, :integer, required: true
+  attr :total_pages, :integer, required: true
+
+  def pager(assigns) do
+    ~H"""
+    <nav class="flex items-center justify-between gap-4 px-3 py-2 text-sm" aria-label="Pagination">
+      <button
+        type="button"
+        phx-click="loom-page"
+        phx-value-page={@page - 1}
+        disabled={@page <= 1}
+        class="rounded border border-zinc-300 px-2 py-1 text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Previous
+      </button>
+      <span aria-live="polite">Page {@page} of {max(@total_pages, 1)}</span>
+      <button
+        type="button"
+        phx-click="loom-page"
+        phx-value-page={@page + 1}
+        disabled={@page >= @total_pages}
+        class="rounded border border-zinc-300 px-2 py-1 text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Next
+      </button>
+    </nav>
     """
   end
 
