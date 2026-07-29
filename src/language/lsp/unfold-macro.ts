@@ -49,7 +49,7 @@ import {
   type Ui,
   type WithClause,
 } from "../generated/ast.js";
-import { printStructural } from "../print/index.js";
+import { atColumn, joinDecls, printStructural } from "../print/index.js";
 
 const DEST_PROP = "$destination" as const;
 
@@ -347,26 +347,50 @@ function buildInsertEdit(
   }
   const memberIndent = " ".repeat(baseCol + 2);
   const baseIndent = " ".repeat(baseCol);
-  const printed = nodes.map((n) => indent(printStructural(n as never), memberIndent)).join("\n");
+  // `joinDecls` blank-line-separates multi-line members the way hand-written
+  // `.ddd` does — ejecting a whole scaffolded `ui` inserts five to seven pages,
+  // and a bare `\n` join runs them together as one wall.
+  //
+  // `atColumn(memberIndent.length, …)` tells the printers where this text will
+  // actually land, so the shared line-width budget accounts for the indent the
+  // splice adds.  Without it a widget call measured at 95 columns lands at 105.
+  const printed = indent(
+    atColumn(memberIndent.length, () => joinDecls(nodes.map((n) => printStructural(n as never)))),
+    memberIndent,
+  );
   if (!preBraceContent) {
     // Own-line `}`: insert at line-start; the brace keeps its
-    // existing leading whitespace and lands on the next line.
+    // existing leading whitespace and lands on the next line.  Separate the
+    // insertion from an existing preceding member with a blank line (but not
+    // from the block's own `{`, which would open the body with a gap).
+    const lead = endsBlockOpen(text, lineStartOffset) ? "" : "\n";
     return {
       range: {
         start: { line: bracePos.line, character: 0 },
         end: { line: bracePos.line, character: 0 },
       },
-      newText: `${printed}\n`,
+      newText: `${lead}${printed}\n`,
     };
   }
-  // Inline `}`: split it onto its own line by inserting the members
-  // (with surrounding newlines) immediately before the brace.  The
-  // `\n${baseIndent}` after `printed` lands the `}` at the host's
-  // original indent.
+  // Inline `}`: split it onto its own line by replacing the whitespace between
+  // the preceding content and the brace, so an empty `{ }` body doesn't leave a
+  // trailing space behind on the `{` line.  The `\n${baseIndent}` after
+  // `printed` lands the `}` at the host's original indent.
+  let wsStart = braceOffset;
+  while (wsStart > 0 && (text[wsStart - 1] === " " || text[wsStart - 1] === "\t")) wsStart--;
   return {
-    range: { start: bracePos, end: bracePos },
+    range: { start: document.textDocument.positionAt(wsStart), end: bracePos },
     newText: `\n${printed}\n${baseIndent}`,
   };
+}
+
+/** True when the last non-whitespace character before `offset` is the `{` that
+ *  opens the block — i.e. the insertion point is the block's first member, so
+ *  no separating blank line is wanted. */
+function endsBlockOpen(text: string, offset: number): boolean {
+  let i = offset - 1;
+  while (i >= 0 && /\s/.test(text[i]!)) i--;
+  return i < 0 || text[i] === "{";
 }
 
 /** Replace the host's existing `with` clause atomically with the

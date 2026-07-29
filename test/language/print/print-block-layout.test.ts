@@ -84,7 +84,9 @@ describe("printStmt — match statement arms", () => {
   it("re-parses (the `;` form did not)", () => {
     const printed = printStructural(firstAggregate(parseOk(SRC)));
     expectReparses(printed, (s) =>
-      inSystem(`  context C {\n    payload R = int | string\n${s}\n    repository As for A { }\n  }`),
+      inSystem(
+        `  context C {\n    payload R = int | string\n${s}\n    repository As for A { }\n  }`,
+      ),
     );
   });
 
@@ -184,6 +186,8 @@ describe("printStmt — nested blocks", () => {
 
   it("round-trips through a re-parse", () => {
     const printed = printStructural(firstAggregate(parseOk(SRC)));
-    expectReparses(printed, (s) => inSystem(`  context C {\n${s}\n    repository As for A { }\n  }`));
+    expectReparses(printed, (s) =>
+      inSystem(`  context C {\n${s}\n    repository As for A { }\n  }`),
+    );
   });
 });

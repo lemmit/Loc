@@ -4,6 +4,7 @@ import {
   printExpr,
   printTypeAtomLite,
   registerStatementPrinter,
+  withIndent,
   wrapArgList,
   wrapBraced,
 } from "./print-expr.js";
@@ -26,7 +27,8 @@ import {
 function stmtBlock(head: string, stmts: Statement[]): string {
   const prefix = head ? `${head} ` : "";
   if (stmts.length === 0) return `${prefix}{}`;
-  return `${prefix}{\n${indentBlock(stmts.map((s) => printStmt(s)).join("\n"))}\n}`;
+  const body = withIndent(() => stmts.map((s) => printStmt(s)).join("\n"));
+  return `${prefix}{\n${indentBlock(body)}\n}`;
 }
 
 export function printStmt(node: Statement): string {
@@ -38,7 +40,7 @@ export function printStmt(node: Statement): string {
     case "LetStmt":
       return `let ${node.name} = ${printExpr(node.expr)}`;
     case "EmitStmt": {
-      const fields = node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`);
+      const fields = withIndent(() => node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`));
       return wrapBraced(`emit ${node.event.$refText} `, fields);
     }
     case "AssignOrCallStmt": {
@@ -72,12 +74,14 @@ export function printStmt(node: Statement): string {
         }
         return stmtBlock("", stmts);
       };
-      const arms = node.varArms.map(
-        (a) =>
-          `${printTypeAtomLite(a.varType)}${a.binding ? ` ${a.binding}` : ""} => ${armText(a.body)}`,
-      );
-      const parts = [...arms];
-      if (node.elseBody.length > 0) parts.push(`else => ${armText(node.elseBody)}`);
+      const parts = withIndent(() => {
+        const rows = node.varArms.map(
+          (a) =>
+            `${printTypeAtomLite(a.varType)}${a.binding ? ` ${a.binding}` : ""} => ${armText(a.body)}`,
+        );
+        if (node.elseBody.length > 0) rows.push(`else => ${armText(node.elseBody)}`);
+        return rows;
+      });
       return `match ${printExpr(node.subject)} {\n${indentBlock(parts.join("\n"))}\n}`;
     }
     default: {
@@ -89,7 +93,14 @@ export function printStmt(node: Statement): string {
 
 function printLValue(lv: LValue): string {
   const path = [lv.head, ...lv.tail].join(".");
-  return lv.call ? wrapArgList(path, "(", ")", lv.args.map(printExpr)) : path;
+  return lv.call
+    ? wrapArgList(
+        path,
+        "(",
+        ")",
+        withIndent(() => lv.args.map((a) => printExpr(a))),
+      )
+    : path;
 }
 
 // Break the expr↔stmt cycle: print-expr calls back here for lambda blocks.

@@ -110,12 +110,30 @@ ejects 5–7 pages as one undifferentiated wall:
 
 The repo's own `.ddd` (e.g. `examples/acme.ddd`) blank-line-separates declarations.
 
-## Fix plan
+## Fix plan — all seven landed
 
 | # | Fix | Files |
 |---|---|---|
-| 1 | Print match-arm bodies as a real indented block; keep the one-line `{ stmt }` form only for a single statement. | `print-stmt.ts` |
-| 2–4 | Route every block body through the shared `indent()` helper instead of first-line prefixing. | `print-expr.ts`, `print-stmt.ts` |
-| 5 | Thread a starting column (`printExpr(node, col = 0)`); wrap on `col + oneLine.length > LINE_WIDTH`, recursing at `col + 2`. Default `0` keeps the playground Builder callers source-compatible. | `print-expr.ts`, `print-stmt.ts`, `print-structural.ts`, `unfold-macro.ts` |
-| 6 | Extend the insert edit's range left over trailing spaces/tabs after the `{`. | `unfold-macro.ts` |
-| 7 | Blank-line-separate declaration-shaped members; keep field/prop lists tight. | `print-structural.ts`, `unfold-macro.ts` |
+| 1 | Match-arm bodies print as a real indented block (`stmtBlock`); the one-line `{ stmt }` form survives only for a single single-line statement. | `print-stmt.ts` |
+| 2–4 | Every block body routes through the shared `indentBlock()` instead of first-line prefixing. | `print-expr.ts`, `print-stmt.ts` |
+| 5 | An ambient print column (`withIndent` / `atColumn` in `print-expr.ts`) that `wrapArgList`/`wrapBraced` budget against. The `block`/`declBlock`/`commaBlock` helpers take a THUNK so they can run the item printers inside their own indent; `unfold-macro.ts` seeds the column with `memberIndent.length`. | `print-expr.ts`, `print-stmt.ts`, `print-structural.ts`, `unfold-macro.ts` |
+| 6 | The inline-`}` insert replaces the whitespace before the brace instead of inserting at it. | `unfold-macro.ts` |
+| 7 | `joinDecls` blank-line-separates a member from its neighbour when either spans multiple lines; only declaration CONTAINERS opt in (`declBlock`), so page props and field runs stay tight. | `print-structural.ts`, `unfold-macro.ts` |
+
+### Why the column budget is exact, not a heuristic
+
+A nested item is always printed at `currentCol + 2` — where it lands *if* its
+parent wraps. If the item came back multi-line the parent is forced to wrap (the
+existing `includes("\n")` rule), so that is where it really sits; if it came back
+single-line, the parent's own `currentCol + oneLine.length <= LINE_WIDTH` check
+bounds the whole line. Neither branch can exceed the budget.
+
+## Tests
+
+- `test/language/print/print-block-layout.test.ts` — the three block-layout cases
+  the corpus round-trip gates never exercised (multi-statement match arm, lambda
+  block body, doubly-nested loop), each pinned to exact output plus a re-parse.
+- `test/macro/unfold-layout.test.ts` — runs the real code action over every
+  offered unfold and asserts: no trailing whitespace, blank-line-separated
+  declarations, no blank line opening a block, no line past 100 columns, and a
+  clean re-parse.

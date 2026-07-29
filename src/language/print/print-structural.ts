@@ -57,7 +57,7 @@ import type {
   ValueObject,
   Workflow,
 } from "../generated/ast.js";
-import { printExpr } from "./print-expr.js";
+import { printExpr, withIndent } from "./print-expr.js";
 import { printStmt } from "./print-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -87,17 +87,52 @@ function indent(s: string): string {
     .join("\n");
 }
 
+// The body helpers take a THUNK, not a printed array: they own the one-level
+// indent they apply, so running the item printers inside `withIndent` is what
+// keeps the shared line-width budget (`print-expr.ts`) aware of how far right
+// the text will actually land.  Passing pre-printed strings would measure every
+// nested widget call from column 0 (2026-07 unfold review, defect 5).
+type Items = () => string[];
+
 /** `<header> { <body-items, newline-joined> }`, indented; `<header> {}` empty. */
-function block(header: string, items: string[]): string {
-  if (items.length === 0) return `${header} {}`;
-  return `${header} {\n${indent(items.join("\n"))}\n}`;
+function block(header: string, items: Items): string {
+  const printed = withIndent(items);
+  if (printed.length === 0) return `${header} {}`;
+  return `${header} {\n${indent(printed.join("\n"))}\n}`;
+}
+
+/** Join declaration-shaped members the way hand-written `.ddd` does: a blank
+ *  line separates a member from its neighbour when either of them spans
+ *  multiple lines, while runs of one-liners (an aggregate's field list, a
+ *  capability's mixin members) stay tight.
+ *
+ *  Only declaration CONTAINERS opt into this (`declBlock` below) — a page's
+ *  `route:` / `body:` props stay glued even though `body:` is multi-line,
+ *  matching `examples/*.ddd`.  Without it, unfolding a `ui` ejects five to
+ *  seven pages as one undifferentiated wall (2026-07 unfold review, defect 7). */
+export function joinDecls(items: string[]): string {
+  let out = "";
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    if (i > 0) out += item.includes("\n") || items[i - 1]!.includes("\n") ? "\n\n" : "\n";
+    out += item;
+  }
+  return out;
+}
+
+/** Like `block`, but blank-line-separates multi-line members (`joinDecls`). */
+function declBlock(header: string, items: Items): string {
+  const printed = withIndent(items);
+  if (printed.length === 0) return `${header} {}`;
+  return `${header} {\n${indent(joinDecls(printed))}\n}`;
 }
 
 /** Like `block`, but the body items are comma-separated (enum values, event
  *  fields, permission decls — grammar rules that join with `,`). */
-function commaBlock(header: string, items: string[]): string {
-  if (items.length === 0) return `${header} {}`;
-  return `${header} {\n${indent(items.join(",\n"))}\n}`;
+function commaBlock(header: string, items: Items): string {
+  const printed = withIndent(items);
+  if (printed.length === 0) return `${header} {}`;
+  return `${header} {\n${indent(printed.join(",\n"))}\n}`;
 }
 
 function quote(s: string): string {
@@ -295,7 +330,7 @@ export function printStructural(node: AstNode): string {
 // ---------------------------------------------------------------------------
 
 function printSystem(node: System): string {
-  return block(`system ${node.name}`, node.members.map(printStructural));
+  return declBlock(`system ${node.name}`, () => node.members.map(printStructural));
 }
 
 function printSubdomain(node: Subdomain): string {
@@ -305,7 +340,7 @@ function printSubdomain(node: Subdomain): string {
     ...node.permissions.map(printPermissionsBlock),
     ...node.contexts.map(printBoundedContext),
   ];
-  return block(`subdomain ${node.name}`, items);
+  return declBlock(`subdomain ${node.name}`, () => items);
 }
 
 function printPermissionsBlock(node: PermissionsBlock): string {
@@ -321,17 +356,11 @@ function printPermissionsBlock(node: PermissionsBlock): string {
 }
 
 function printThemeBlock(node: ThemeBlock): string {
-  return block(
-    "theme",
-    node.props.map((p) => `${p.name}: ${quote(p.value)}`),
-  );
+  return block("theme", () => node.props.map((p) => `${p.name}: ${quote(p.value)}`));
 }
 
 function printUserBlock(node: UserBlock): string {
-  return block(
-    "user",
-    node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`),
-  );
+  return block("user", () => node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`));
 }
 
 function printAuthValue(v: AuthConfigValue): string {
@@ -349,7 +378,7 @@ function printAuthBlock(node: AuthBlock): string {
     if (o.clientSecret) oidcItems.push(`clientSecret: ${printAuthValue(o.clientSecret)}`);
     if (o.audience) oidcItems.push(`audience: ${printAuthValue(o.audience)}`);
     if (o.scopes.length) oidcItems.push(`scopes: [${o.scopes.map(quote).join(", ")}]`);
-    items.push(block("oidc", oidcItems));
+    items.push(block("oidc", () => oidcItems));
   }
   if (node.sessions) items.push(`sessions: ${node.sessions}`);
   if (node.claims) {
@@ -361,7 +390,7 @@ function printAuthBlock(node: AuthBlock): string {
     );
   }
   if (node.enforcement) items.push(`enforcement: ${node.enforcement}`);
-  return block("auth", items);
+  return block("auth", () => items);
 }
 
 function printTenancyDecl(node: import("../generated/ast.js").TenancyDecl): string {
@@ -381,10 +410,10 @@ function printLayout(node: Layout): string {
       items.push("main");
     } else {
       const named = slot as LayoutNamedSlot;
-      items.push(block(named.name, [printExpr(named.body)]));
+      items.push(block(named.name, () => [printExpr(named.body)]));
     }
   }
-  return block(`layout ${node.name}`, items);
+  return block(`layout ${node.name}`, () => items);
 }
 
 function printStorage(node: Storage): string {
@@ -393,7 +422,7 @@ function printStorage(node: Storage): string {
   if (node.connection) items.push(`connection: ${printConnectionSource(node.connection)}`);
   const cfg = printConfigItem(node.config);
   if (cfg) items.push(cfg);
-  return block(`storage ${node.name}`, items);
+  return block(`storage ${node.name}`, () => items);
 }
 
 function printConfigItem(
@@ -441,7 +470,7 @@ function printDataSource(node: import("../generated/ast.js").Resource): string {
   }
   const cfg = printConfigItem(node.config);
   if (cfg) items.push(cfg);
-  return block(`resource ${node.name}`, items);
+  return block(`resource ${node.name}`, () => items);
 }
 
 function printConnectionSource(node: import("../generated/ast.js").ConnectionSource): string {
@@ -472,7 +501,7 @@ function printApi(node: Api): string {
       `route ${r.method} ${JSON.stringify(r.path)} -> ${r.target.context.$refText}.${r.target.handler}`,
     );
   }
-  return items.length === 0 ? head : block(head, items);
+  return items.length === 0 ? head : block(head, () => items);
 }
 
 function printDeployable(node: Deployable): string {
@@ -483,7 +512,7 @@ function printDeployable(node: Deployable): string {
   const axes: string[] = [];
   if (node.persistence) axes.push(`persistence: ${node.persistence}`);
   if (node.directoryLayout) axes.push(`directoryLayout: ${node.directoryLayout}`);
-  const items: string[] = [axes.length > 0 ? block(platformLine, axes) : platformLine];
+  const items: string[] = [axes.length > 0 ? block(platformLine, () => axes) : platformLine];
   if (node.contextRefs.length > 0) {
     items.push(`contexts: [${node.contextRefs.map((r) => r.$refText).join(", ")}]`);
   }
@@ -504,18 +533,18 @@ function printDeployable(node: Deployable): string {
     items.push(`ui: ${node.uiSugar.ref.$refText}`);
   } else if (node.uiCompose) {
     const binds = node.uiCompose.bindings.map((b) => `${b.name}: ${b.source.$refText}`);
-    items.push(commaBlock(`ui: ${node.uiCompose.ref.$refText}`, binds));
+    items.push(commaBlock(`ui: ${node.uiCompose.ref.$refText}`, () => binds));
   }
   if (node.port !== undefined) items.push(`port: ${node.port}`);
   if (node.auth) items.push(`auth: ${node.auth}`);
   if (node.design) items.push(`design: ${enumOrString(node.design, DESIGN_KEYWORDS)}`);
-  return block(`deployable ${node.name}`, items);
+  return block(`deployable ${node.name}`, () => items);
 }
 
 function printTestE2E(node: TestE2E): string {
   const verifies = node.verifies ? ` verifies ${node.verifies.$refText}` : "";
   const header = `test e2e ${quote(node.name)} against ${node.deployable.$refText}${verifies}`;
-  return block(header, node.body.map(printTestStatement));
+  return block(header, () => node.body.map(printTestStatement));
 }
 
 // ---------------------------------------------------------------------------
@@ -523,8 +552,7 @@ function printTestE2E(node: TestE2E): string {
 // ---------------------------------------------------------------------------
 
 function printUi(node: Ui): string {
-  return block(
-    `ui ${node.name}${printWithClause(node.withClause)}`,
+  return declBlock(`ui ${node.name}${printWithClause(node.withClause)}`, () =>
     node.members.map(printStructural),
   );
 }
@@ -532,7 +560,7 @@ function printUi(node: Ui): string {
 /** `area <Name> { …pages / sub-areas… }` — members are Pages and nested
  *  Areas, each printed through the structural printer. */
 function printArea(node: import("../generated/ast.js").Area): string {
-  return block(`area ${node.name}`, node.members.map(printStructural));
+  return declBlock(`area ${node.name}`, () => node.members.map(printStructural));
 }
 
 function printUiApiParam(node: UiApiParam): string {
@@ -549,15 +577,14 @@ function printUiFunction(node: import("../generated/ast.js").UiFunction): string
 }
 
 function printUiNotification(node: import("../generated/ast.js").UiNotification): string {
-  return block(
-    `on ${node.param.$refText}.${node.event.$refText}(${node.bind})`,
+  return block(`on ${node.param.$refText}.${node.event.$refText}(${node.bind})`, () =>
     node.body.map(printStmt),
   );
 }
 
 function printPage(node: Page): string {
   const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
-  return block(`page ${node.name}${params}`, node.props.map(printPageProp));
+  return block(`page ${node.name}${params}`, () => node.props.map(printPageProp));
 }
 
 function printPageProp(node: PageProp): string {
@@ -573,10 +600,7 @@ function printPageProp(node: PageProp): string {
     case "StateBlock":
       return printStateBlock(node);
     case "PageMenuMeta":
-      return commaBlock(
-        "menu",
-        node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`),
-      );
+      return commaBlock("menu", () => node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`));
     case "LayoutProp":
       return `layout: ${node.value}`;
     case "DescriptionProp":
@@ -613,13 +637,13 @@ function printComponent(node: Component): string {
   // hand-written module at the `from` path.
   if (node.extern) {
     const header = `component ${node.name}(${params}) extern from ${quote(node.externPath ?? "")}`;
-    return block(header, node.decls.map(printComponentDecl));
+    return block(header, () => node.decls.map(printComponentDecl));
   }
   const items = [
     ...node.decls.map(printComponentDecl),
     `body: ${node.body ? printExpr(node.body) : ""}`,
   ];
-  return block(`component ${node.name}(${params})`, items);
+  return declBlock(`component ${node.name}(${params})`, () => items);
 }
 
 /** `store Name { state {…} action …(…) {…} }` — a shared client-side state
@@ -629,15 +653,13 @@ function printComponent(node: Component): string {
  *  §3.1) round-trips as a header modifier. */
 function printStore(node: import("../generated/ast.js").Store): string {
   const persist = node.lifetime ? ` persist: ${node.lifetime}` : "";
-  return block(
-    `store ${node.name}${persist}`,
+  return declBlock(`store ${node.name}${persist}`, () =>
     node.decls.map((d) => (d.$type === "ActionDecl" ? printActionDecl(d) : printStateBlock(d))),
   );
 }
 
 function printStateBlock(node: StateBlock): string {
-  return block(
-    "state",
+  return block("state", () =>
     node.fields.map((f) => {
       const init = f.init ? ` = ${printExpr(f.init)}` : "";
       return `${f.name}: ${printTypeRef(f.type)}${init}`;
@@ -646,7 +668,7 @@ function printStateBlock(node: StateBlock): string {
 }
 
 function printMenuBlock(node: MenuBlock): string {
-  return block("menu", node.sections.map(printMenuSection));
+  return block("menu", () => node.sections.map(printMenuSection));
 }
 
 function printMenuSection(node: MenuSection): string {
@@ -669,8 +691,7 @@ function printMenuLink(node: MenuLink): string {
 // ---------------------------------------------------------------------------
 
 function printBoundedContext(node: BoundedContext): string {
-  return block(
-    `context ${node.name}${printWithClause(node.withClause)}`,
+  return declBlock(`context ${node.name}${printWithClause(node.withClause)}`, () =>
     node.members.map((m) => printContextMember(m)),
   );
 }
@@ -679,10 +700,7 @@ function printBoundedContext(node: BoundedContext): string {
  * a pure-mixin bundle.  Every body member (`Property`/`FilterDecl`/
  * `StampDecl`) is itself printable, so it reuses `printStructural`. */
 function printCapability(node: import("../generated/ast.js").Capability): string {
-  return block(
-    `capability ${node.name}`,
-    node.members.map((m) => printStructural(m)),
-  );
+  return declBlock(`capability ${node.name}`, () => node.members.map((m) => printStructural(m)));
 }
 
 /** `filter <expr>` — applies to its aggregate, or every aggregate at context scope. */
@@ -692,8 +710,7 @@ function printFilterDecl(node: import("../generated/ast.js").FilterDecl): string
 
 /** `stamp <event> { ... }` */
 function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
-  return block(
-    `stamp ${node.event}`,
+  return block(`stamp ${node.event}`, () =>
     (node.assignments ?? []).map((a) => printStmt(a as never)),
   );
 }
@@ -707,8 +724,7 @@ function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl)
 function printSeed(node: import("../generated/ast.js").Seed): string {
   const dataset = node.dataset ? ` ${node.dataset}` : "";
   const raw = node.raw ? " raw" : "";
-  return block(
-    `seed${dataset}${raw}`,
+  return block(`seed${dataset}${raw}`, () =>
     node.rows.map((r) => `${r.aggregate.$refText} ${printExpr(r.value)}`),
   );
 }
@@ -724,8 +740,7 @@ function printPolicyDecl(node: import("../generated/ast.js").PolicyDecl): string
     return `policy ${node.name}(${params}): ${printTypeRef(node.returnType)} = ${node.body ? printExpr(node.body) : ""}`;
   }
   const name = node.name ? ` ${node.name}` : "";
-  return block(
-    `policy${name}`,
+  return block(`policy${name}`, () =>
     (node.rules ?? []).map((r) =>
       r.effect === "deny"
         ? `deny ${r.verb ? `${r.verb} ` : ""}on ${r.target}`
@@ -739,14 +754,11 @@ function printContextMember(node: ContextMember): string {
 }
 
 function printEnumDecl(node: EnumDecl): string {
-  return commaBlock(
-    `enum ${node.name}`,
-    node.values.map((v) => v.name),
-  );
+  return commaBlock(`enum ${node.name}`, () => node.values.map((v) => v.name));
 }
 
 function printValueObject(node: ValueObject): string {
-  return block(`valueobject ${node.name}`, node.members.map(printStructural));
+  return declBlock(`valueobject ${node.name}`, () => node.members.map(printStructural));
 }
 
 function printAggregate(node: Aggregate): string {
@@ -765,9 +777,9 @@ function printAggregate(node: Aggregate): string {
   const inheritanceUsing = node.inheritanceUsing
     ? ` inheritanceUsing: ${node.inheritanceUsing}`
     : "";
-  return block(
+  return declBlock(
     `${abstract}${crossTenant}aggregate ${node.name}${ext}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
-    node.members.map(printStructural),
+    () => node.members.map(printStructural),
   );
 }
 
@@ -805,11 +817,11 @@ function printMacroArgValue(v: import("../generated/ast.js").MacroArgValue): str
 }
 
 function printEntityPart(node: EntityPart): string {
-  return block(`entity ${node.name}`, node.members.map(printStructural));
+  return declBlock(`entity ${node.name}`, () => node.members.map(printStructural));
 }
 
 function printEventDecl(node: EventDecl): string {
-  return commaBlock(`event ${node.name}`, node.fields.map(printProperty));
+  return commaBlock(`event ${node.name}`, () => node.fields.map(printProperty));
 }
 
 /** Payload family (`command`/`query`/`response`/`error` <Name> { … }) —
@@ -820,7 +832,7 @@ function printPayloadDecl(node: import("../generated/ast.js").PayloadDecl): stri
   if (node.variants.length > 0) {
     return `${node.kind} ${node.name} = ${node.variants.map(printTypeAtom).join(" | ")}`;
   }
-  return commaBlock(`${node.kind} ${node.name}`, node.fields.map(printProperty));
+  return commaBlock(`${node.kind} ${node.name}`, () => node.fields.map(printProperty));
 }
 
 /** `channel <Name> { carries: … delivery: … retention: … key: … }`
@@ -830,7 +842,7 @@ function printChannel(node: import("../generated/ast.js").Channel): string {
   if (node.delivery) items.push(`delivery: ${node.delivery}`);
   if (node.retention) items.push(`retention: ${node.retention}`);
   if (node.key) items.push(`key: ${node.key}`);
-  return block(`channel ${node.name}`, items);
+  return block(`channel ${node.name}`, () => items);
 }
 
 /** `channelSource <Name> { for: <channel> use: <storage> }` — binds a
@@ -838,7 +850,7 @@ function printChannel(node: import("../generated/ast.js").Channel): string {
 function printChannelSource(node: import("../generated/ast.js").ChannelSource): string {
   const items: string[] = [`for: ${node.channel}`];
   if (node.use) items.push(`use: ${node.use.$refText}`);
-  return block(`channelSource ${node.name}`, items);
+  return block(`channelSource ${node.name}`, () => items);
 }
 
 function printTimerSource(node: import("../generated/ast.js").TimerSource): string {
@@ -849,12 +861,11 @@ function printTimerSource(node: import("../generated/ast.js").TimerSource): stri
   if (node.every) items.push(`every: ${node.every}`);
   if (node.timezone) items.push(`in: ${JSON.stringify(node.timezone)}`);
   if (node.overlap) items.push(`overlap: allow`);
-  return block(`timerSource ${node.name}`, items);
+  return block(`timerSource ${node.name}`, () => items);
 }
 
 function printRepository(node: Repository): string {
-  return block(
-    `repository ${node.name} for ${node.aggregate.$refText}`,
+  return block(`repository ${node.name} for ${node.aggregate.$refText}`, () =>
     node.finds.map(printFindDecl),
   );
 }
@@ -890,7 +901,7 @@ function printDomainService(node: import("../generated/ast.js").DomainService): 
   // `(operations | tests)*`); print operations first, then tests.  Source-order
   // interleaving isn't preserved (the AST doesn't retain it), but reparse is
   // stable — both spellings lower to the same two lists.
-  return block(`domainService ${node.name}`, [
+  return declBlock(`domainService ${node.name}`, () => [
     ...node.operations.map(printDomainServiceOperation),
     ...node.tests.map(printTestBlock),
   ]);
@@ -904,7 +915,7 @@ function printDomainServiceOperation(
 ): string {
   const params = node.params.map(printParameter).join(", ");
   const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
-  return block(`operation ${node.name}(${params})${ret}`, node.stmts.map(printStmt));
+  return block(`operation ${node.name}(${params})${ret}`, () => node.stmts.map(printStmt));
 }
 
 /** `retrieval <Name>[(<params>)] of <T>` — single-line `= <where>` when no
@@ -922,7 +933,7 @@ function printRetrieval(node: import("../generated/ast.js").Retrieval): string {
   if (node.loads.length > 0) {
     items.push(`loads: [${node.loads.map(printLoadPath).join(", ")}]`);
   }
-  return block(head, items);
+  return block(head, () => items);
 }
 
 function printSortItem(node: import("../generated/ast.js").SortItem): string {
@@ -941,8 +952,7 @@ function printWorkflow(node: Workflow): string {
   if (node.transactional) {
     head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
   }
-  return block(
-    head,
+  return declBlock(head, () =>
     node.members.map((m) =>
       m.$type === "WorkflowCreateDecl"
         ? printWorkflowCreateDecl(m)
@@ -966,21 +976,21 @@ function printWorkflowCreateDecl(node: import("../generated/ast.js").WorkflowCre
   const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
   // Authorization gate (authorization.md §11.3) — after `by`, before the body.
   const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
-  return block(`create${name}(${params})${by}${gate}`, node.body.map(printStmt));
+  return block(`create${name}(${params})${by}${gate}`, () => node.body.map(printStmt));
 }
 
 // `handle name(params) { … }` command-handler member (workflow-and-applier.md A2).
 function printHandleDecl(node: import("../generated/ast.js").HandleDecl): string {
   const params = node.params.map(printParameter).join(", ");
   const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
-  return block(`handle ${node.name}(${params})${gate}`, node.body.map(printStmt));
+  return block(`handle ${node.name}(${params})${gate}`, () => node.body.map(printStmt));
 }
 
 // `on(e: Event) [by <expr>] { … }` reactor member (workflow-and-applier.md A2).
 function printOnDecl(node: OnDecl): string {
   const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
   const head = `on(${node.param}: ${node.event.$refText})${by}`;
-  return block(head, node.body.map(printStmt));
+  return block(head, () => node.body.map(printStmt));
 }
 
 // `projection <Name>[(params)] [keyed by <field>] { … }` read model
@@ -1012,14 +1022,14 @@ function printProjection(node: import("../generated/ast.js").Projection): string
     const sels = node.selects.map((s) => `${s.field} = ${printExpr(s.expr)}`).join(", ");
     items.push(`select ${sels}`);
   }
-  return block(`projection ${node.name}${params}${keyed}`, items);
+  return declBlock(`projection ${node.name}${params}${keyed}`, () => items);
 }
 
 // `on(e: Event) [by <expr>] { … }` pure fold member of a projection.
 function printProjectionOn(node: import("../generated/ast.js").ProjectionOn): string {
   const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
   const head = `on(${node.param}: ${node.event.$refText})${by}`;
-  return block(head, node.body.map(printStmt));
+  return block(head, () => node.body.map(printStmt));
 }
 
 function printProperty(node: Property): string {
@@ -1055,7 +1065,7 @@ function printDerivedProp(node: DerivedProp): string {
  *  through the shared statement printer, exactly like an operation body. */
 function printActionDecl(node: ActionDecl): string {
   const params = node.params.map(printParameter).join(", ");
-  return block(`action ${node.name}(${params})`, node.stmts.map(printStmt));
+  return block(`action ${node.name}(${params})`, () => node.stmts.map(printStmt));
 }
 
 function printInvariant(node: Invariant): string {
@@ -1075,7 +1085,7 @@ function printFunctionDecl(node: FunctionDecl): string {
   // Block form (domain-services.md rev. 4) prints as `head { stmts }`; the
   // expression form keeps the `= expr` single-line shape.
   if (node.body === undefined) {
-    return block(head, node.block.map(printStmt));
+    return block(head, () => node.block.map(printStmt));
   }
   return `${head} = ${printExpr(node.body)}`;
 }
@@ -1096,7 +1106,7 @@ function printOperation(node: Operation): string {
   const when = node.when ? ` when ${printExpr(node.when)}` : "";
   return block(
     `${priv}operation ${node.name}(${params})${extern}${audited}${ret}${gate}${when}`,
-    node.body.map(printStmt),
+    () => node.body.map(printStmt),
   );
 }
 
@@ -1108,7 +1118,7 @@ function printCommandHandler(node: import("../generated/ast.js").CommandHandler)
   const params = node.params.map(printParameter).join(", ");
   const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
   const head = `${node.extern ? "extern " : ""}commandHandler ${node.name}(${params})${ret}`;
-  return node.extern ? `${head};` : block(head, node.body.map(printStmt));
+  return node.extern ? `${head};` : block(head, () => node.body.map(printStmt));
 }
 
 // `[extern] queryHandler name(params): T { … } | ;` application-layer context
@@ -1117,7 +1127,7 @@ function printCommandHandler(node: import("../generated/ast.js").CommandHandler)
 function printQueryHandler(node: import("../generated/ast.js").QueryHandler): string {
   const params = node.params.map(printParameter).join(", ");
   const head = `${node.extern ? "extern " : ""}queryHandler ${node.name}(${params}): ${printTypeRef(node.returnType)}`;
-  return node.extern ? `${head};` : block(head, node.body.map(printStmt));
+  return node.extern ? `${head};` : block(head, () => node.body.map(printStmt));
 }
 
 function printCreate(node: import("../generated/ast.js").Create): string {
@@ -1126,7 +1136,7 @@ function printCreate(node: import("../generated/ast.js").Create): string {
   const name = node.name ? ` ${node.name}` : "";
   const params = node.params.map(printParameter).join(", ");
   const audited = node.audited ? " audited" : "";
-  return block(`create${name}(${params})${audited}`, node.body.map(printStmt));
+  return block(`create${name}(${params})${audited}`, () => node.body.map(printStmt));
 }
 
 function printDestroy(node: import("../generated/ast.js").Destroy): string {
@@ -1136,20 +1146,22 @@ function printDestroy(node: import("../generated/ast.js").Destroy): string {
   const params = node.params.map(printParameter).join(", ");
   const paramClause = node.params.length > 0 || node.name ? `(${params})` : "";
   const audited = node.audited ? " audited" : "";
-  return block(`destroy${name}${paramClause}${audited}`, node.body.map(printStmt));
+  return block(`destroy${name}${paramClause}${audited}`, () => node.body.map(printStmt));
 }
 
 function printApply(node: import("../generated/ast.js").Apply): string {
   // `$refText` (not `.ref`) — the printer must work on detached / not-yet-linked
   // nodes (the round-trip harness re-parses without a workspace), and the source
   // reference text is exactly what we re-emit.
-  return block(`apply(${node.param}: ${node.event.$refText})`, node.body.map(printStmt));
+  return block(`apply(${node.param}: ${node.event.$refText})`, () => node.body.map(printStmt));
 }
 
 function printTestBlock(node: TestBlock): string {
   const forHead = node.target ? ` for ${node.target.$refText}` : "";
   const verifies = node.verifies ? ` verifies ${node.verifies.$refText}` : "";
-  return block(`test ${quote(node.name)}${forHead}${verifies}`, node.body.map(printTestStatement));
+  return block(`test ${quote(node.name)}${forHead}${verifies}`, () =>
+    node.body.map(printTestStatement),
+  );
 }
 
 /** TestStatement adds `expect` (with a method matcher) over the ordinary
@@ -1164,8 +1176,7 @@ function printTestStatement(node: TestStatement): string {
 // ---------------------------------------------------------------------------
 
 function printMigration(node: import("../generated/ast.js").Migration): string {
-  return block(
-    `migration ${JSON.stringify(node.name)}`,
+  return block(`migration ${JSON.stringify(node.name)}`, () =>
     node.steps.map((s) => {
       if (s.$type === "TableRename") return `${s.fromTable} -> ${s.toAggregate.$refText}`;
       if (s.$type === "SqlStep") return `sql ${JSON.stringify(s.sql)}`;
@@ -1179,8 +1190,7 @@ function printMigration(node: import("../generated/ast.js").Migration): string {
 
 function printRequirement(node: Requirement): string {
   const parent = node.parent ? ` parent ${node.parent.$refText}` : "";
-  return block(
-    `requirement ${node.name}${parent}`,
+  return block(`requirement ${node.name}${parent}`, () =>
     node.props.map((p) => `${p.name}: ${printExpr(p.value)}`),
   );
 }
@@ -1191,7 +1201,7 @@ function printSolution(node: Solution): string {
   if (node.entitles.length > 0) {
     items.push(`entitles [${node.entitles.map((e) => e.$refText).join(", ")}]`);
   }
-  return block(`solution ${node.name} for ${node.requirement.$refText}`, items);
+  return block(`solution ${node.name} for ${node.requirement.$refText}`, () => items);
 }
 
 function printTestCase(node: TestCase): string {
@@ -1200,7 +1210,7 @@ function printTestCase(node: TestCase): string {
   if (node.covers.length > 0) {
     items.push(`covers [${node.covers.map((c) => c.$refText).join(", ")}]`);
   }
-  return block(`testCase ${node.name} verifies ${node.requirement.$refText}`, items);
+  return block(`testCase ${node.name} verifies ${node.requirement.$refText}`, () => items);
 }
 
 // ---------------------------------------------------------------------------
