@@ -8,16 +8,15 @@
 //
 // This validator (phase ④) walks every page primitive and flags a `+`
 // concatenation sitting in one of its user-visible text slots
-// (src/util/user-visible-slots.ts). A template literal (`"Order ${order.id}"`)
+// (src/util/user-visible-slots.ts). A backtick template (`` `Order {order.id}` ``)
 // is a distinct AST node (`TemplateStr`), never a `BinaryChain`, so it is
 // always accepted — it IS the rewrite the diagnostic points to.
 //
-// SEVERITY — WARNING, not error (yet). The proposal specifies an error, but the
-// generators still emit concat correctly and template-literal rendering has
-// per-frontend gaps (e.g. a template hole leaks a JS cast in the Feliz view);
-// a hard error would force authors onto a not-yet-uniform path. It escalates to
-// an error once the template→ICU runtime lands (the React-runtime slice makes
-// interpolation the first-class, everywhere-rendered form).
+// SEVERITY — ERROR. The template→ICU runtime has landed (an interpolated
+// user-visible slot now extracts to an ICU catalog entry and renders through the
+// React `t()` shim), so interpolation is the first-class, translatable form and
+// concat in a user-visible slot is a hard mistake — it pins the variable to one
+// side of a fixed English string, which no translation can reorder.
 //
 // Only STRING concatenation is flagged: a `+` whose operands include a string
 // literal. A purely numeric `+` in a value slot (`Stat { "Total", count + 1 }`)
@@ -75,9 +74,9 @@ export function checkUserVisibleConcat(
       const chain = stringConcat(entry.value);
       if (!chain) continue;
       accept(
-        "warning",
+        "error",
         `String concatenation in a user-visible '${bc.type}' slot won't translate to languages with different word order, plural rules, or formatting. ` +
-          `Prefer template interpolation — e.g. "Order \${order.id}" rather than "Order " + order.id. See docs/old/proposals/i18n-strings.md.`,
+          'Use a backtick template interpolation — e.g. `Order {order.id}` rather than "Order " + order.id. See docs/old/proposals/i18n-strings.md.',
         { node: chain, code: "loom.user-visible-concat" },
       );
     }

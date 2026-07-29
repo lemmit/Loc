@@ -121,7 +121,7 @@ describe("function + method calls in walker bodies", () => {
           page X {
             route: "/x"
             state { count: int = 0 }
-            body:  Text { "doubled: " + double(count) }
+            body:  Text { \`doubled: {double(count)}\` }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -134,7 +134,10 @@ describe("function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<Text>\{\("doubled: " \+ double\(count\)\)\}<\/Text>/);
+    // The call hole gets a generated `arg0` placeholder in the ICU message.
+    expect(content).toMatch(
+      /<Text>\{t\("[^"]*", "doubled: \{arg0\}", \{ arg0: double\(count\) \}\)\}<\/Text>/,
+    );
   });
 
   it("method call with multiple args + state ref still emits placeholder", async () => {

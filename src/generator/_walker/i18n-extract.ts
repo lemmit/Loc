@@ -7,12 +7,12 @@
 // (`src/system/i18n-catalog.ts`) serialises them into `.loom/messages.en.json`,
 // the diffable source-language catalog every locale is merged against.
 //
-// SCOPE OF THIS SLICE — plain string literals only.  Interpolated UI strings
-// (`"Order ${o.id}"`) currently lower to a `binary "+"` chain (there is no ICU
-// message node in the IR yet), so they are intentionally skipped here; the
-// template→ICU lowering pass is a later slice, at which point this walk gains a
-// branch for the message node.  A dynamic slot (a `ref`, a computed expr) is
-// likewise not extractable and is skipped.
+// SCOPE — plain string literals AND interpolated backtick templates.  A
+// template (`` `Order {order.id}` ``) lowers to a `binary "+"` chain (no ICU
+// node in the IR — a template is indistinguishable from hand concat post-lower);
+// `icuFromConcat` re-detects that chain into an ICU message (`"Order {id}"`) so
+// it too becomes a translatable catalog entry.  A dynamic slot with no literal
+// text (a bare `ref`, `{count}` alone) has nothing to translate and is skipped.
 //
 // KEYS — D-I18N-KEY (PINNED).  Inline literals are content-hashed:
 // `page.<Page>.<role>.<hash>` / `component.<Comp>.<role>.<hash>` /
@@ -50,9 +50,102 @@ export function literalString(e: ExprIR | undefined): string | undefined {
  *  Exported so the React translation runtime (`i18n-emit.ts`) emits a
  *  `<FormattedMessage id>` / `t(key)` whose key is IDENTICAL to the one the
  *  extraction pass writes into `.loom/messages.en.json` — the two MUST agree,
- *  so both call this one function rather than each re-deriving the shape. */
+ *  so both call this one function rather than each re-deriving the shape.
+ *
+ *  For an ICU message the hash input is the POSITIONAL-normalized form
+ *  (`"Order {0}"`, {@link IcuMessage.positional}), not the named display form —
+ *  so renaming a field (`{id}` → `{number}`) keeps the same key and preserves
+ *  the translation (i18n-strings.md Option B). */
 export function messageKey(prefix: string, role: string, message: string): string {
   return `${prefix}.${role}.${contentHash(message)}`;
+}
+
+/** An interpolated user-visible string, re-derived from its lowered `+`-chain.
+ *  The two placeholder spaces are deliberate (i18n-strings.md Option B):
+ *  `display` is what translators read + what the app emits as the default;
+ *  `positional` is the rename-stable hash input. */
+export interface IcuMessage {
+  /** Named-placeholder ICU for the catalog + emitted default: `"Order {id}"`. */
+  display: string;
+  /** Positional-normalized form the key is hashed over: `"Order {0}"`. */
+  positional: string;
+  /** Interpolation holes in source order — the derived placeholder name and the
+   *  (string-wrapped) hole expression the React emitter renders into the values
+   *  object.  The catalog builder ignores `expr`. */
+  holes: { name: string; expr: ExprIR }[];
+}
+
+/** Flatten a left-associative string `+`-chain — the exact shape
+ *  `lowerTemplateString` folds a template into — back into its ordered operand
+ *  pieces (literal segments interleaved with holes). */
+function flattenConcatChain(e: ExprIR): ExprIR[] {
+  const out: ExprIR[] = [];
+  let cur: ExprIR = e;
+  while (cur.kind === "binary" && cur.op === "+") {
+    out.unshift(cur.right);
+    cur = cur.left;
+  }
+  out.unshift(cur);
+  return out;
+}
+
+/** Derive a translator-friendly placeholder name for an interpolation hole:
+ *  peel the string-coercion wraps lowering injects (`convert` / `.display`) and
+ *  a dotted path to its last segment (`order.id` → `id`).  Bare refs use their
+ *  name; anything else (a call, arithmetic) has no natural name → undefined, and
+ *  the caller falls back to a positional `argN`. */
+function holeName(expr: ExprIR): string | undefined {
+  let e = expr;
+  for (;;) {
+    if (e.kind === "convert" && e.target === "string") e = e.value;
+    else if (e.kind === "member" && e.member === "display") e = e.receiver;
+    else if (e.kind === "paren") e = e.inner;
+    else break;
+  }
+  if (e.kind === "member") return e.member;
+  if (e.kind === "ref") return e.name;
+  if (e.kind === "method-call") return e.member;
+  return undefined;
+}
+
+/** Re-detect an interpolated user-visible string from its lowered `+`-chain.
+ *  Returns undefined for anything that isn't `literal-text + hole` interpolation
+ *  — a purely numeric `count + 1` (no string segment), a bare `{x}` (no chain),
+ *  or a plain literal — so those keep their existing (raw / plain-literal) path.
+ *  Shared by the catalog builder and the React runtime so the emitted key +
+ *  default line up with the catalog entry. */
+export function icuFromConcat(expr: ExprIR | undefined): IcuMessage | undefined {
+  if (!expr || expr.kind !== "binary" || expr.op !== "+") return undefined;
+  const pieces = flattenConcatChain(expr);
+  let display = "";
+  let positional = "";
+  let hasLiteral = false;
+  const holes: { name: string; expr: ExprIR }[] = [];
+  const used = new Map<string, number>();
+  for (const piece of pieces) {
+    const lit = literalString(piece);
+    if (lit !== undefined) {
+      hasLiteral = true;
+      display += lit;
+      positional += lit;
+      continue;
+    }
+    const index = holes.length;
+    let name = holeName(piece) ?? `arg${index}`;
+    const seen = used.get(name);
+    if (seen === undefined) used.set(name, 1);
+    else {
+      const n = seen + 1;
+      used.set(name, n);
+      name = `${name}_${n}`;
+    }
+    holes.push({ name, expr: piece });
+    display += `{${name}}`;
+    positional += `{${index}}`;
+  }
+  // Needs both translatable text and at least one hole to be a message.
+  if (!hasLiteral || holes.length === 0) return undefined;
+  return { display, positional, holes };
 }
 
 /** Collect the user-visible strings from one render-body expression tree,
@@ -67,8 +160,16 @@ function collectBody(body: ExprIR | undefined, prefix: string, out: MessageEntry
       const arg =
         slot.kind === "positional" ? positionals[slot.index] : namedArgValue(e, slot.name);
       const message = literalString(arg);
-      if (message === undefined) continue;
-      out.push({ key: messageKey(prefix, slot.role, message), message });
+      if (message !== undefined) {
+        out.push({ key: messageKey(prefix, slot.role, message), message });
+        continue;
+      }
+      // Interpolated slot → an ICU entry keyed by its positional form, stored as
+      // the named display form (the React emitter derives the identical key).
+      const icu = icuFromConcat(arg);
+      if (icu) {
+        out.push({ key: messageKey(prefix, slot.role, icu.positional), message: icu.display });
+      }
     }
   });
 }
