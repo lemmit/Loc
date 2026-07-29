@@ -43,9 +43,12 @@ describe("walker primitive — For (list comprehension)", () => {
   });
 
   it("binds the item param inside the body (refs resolve to the loop var)", async () => {
-    const tsx = await emit(`Stack { For { each: [1, 2], n => Heading { "row " + n } } }`);
-    // The item ref `n` resolves to the emitted iteration variable.
-    expect(tsx).toMatch(/<Title order=\{2\}[^>]*>\{\("row " \+ n\)\}<\/Title>/);
+    const tsx = await emit(`Stack { For { each: [1, 2], n => Heading { \`row {n}\` } } }`);
+    // The item ref `n` resolves to the emitted iteration variable, threaded
+    // through the ICU t() call the interpolated template lowers to.
+    expect(tsx).toMatch(
+      /<Title order=\{2\}[^>]*>\{t\("[^"]*", "row \{n\}", \{ n: n \}\)\}<\/Title>/,
+    );
   });
 
   it("resolves a BARE loop-bound ref in text position (not a `/* ref */` comment)", async () => {

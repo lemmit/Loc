@@ -3,10 +3,10 @@ import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 
-// `loom.user-visible-concat` (M-T1.11, i18n-strings.md Phase 1) — string `+`
-// in a user-visible page slot is untranslatable and flagged (a WARNING for now,
-// see the validator header); a template literal (the intended rewrite) is
-// accepted. As a warning it never blocks `parseValid`/codegen — it only nudges.
+// `loom.user-visible-concat` (M-T1.11, i18n-strings.md) — string `+` in a
+// user-visible page slot is untranslatable and flagged an ERROR (the template→ICU
+// runtime has landed, so a backtick interpolation is the first-class, translatable
+// rewrite the diagnostic points to). A backtick template is accepted.
 
 async function diagsFor(body: string): Promise<{ code?: string | number; severity?: number }[]> {
   const services = createDddServices(NodeFileSystem);
@@ -34,18 +34,22 @@ const concat = async (body: string) =>
 const has = async (body: string) => (await concat(body)).length > 0;
 
 describe("loom.user-visible-concat", () => {
-  it("flags string concatenation in a Heading text slot — as a warning", async () => {
+  it("flags string concatenation in a Heading text slot — as an error", async () => {
     const diags = await concat(`Heading { "Order " + o.id }`);
     expect(diags).toHaveLength(1);
-    expect(diags[0]!.severity).toBe(2); // 2 === warning (never blocks codegen)
+    expect(diags[0]!.severity).toBe(1); // 1 === error (blocks codegen)
   });
 
   it("rejects string concatenation in a Button label slot", async () => {
     expect(await has(`Button { "View " + o.customerId }`)).toBe(true);
   });
 
-  it("accepts a template literal (the intended rewrite)", async () => {
-    expect(await has(`Heading { "Order \${o.id}" }`)).toBe(false);
+  it("accepts a backtick template interpolation (the intended rewrite)", async () => {
+    // The real rewrite is a backtick template with `{expr}` holes — a distinct
+    // AST node (`TemplateStr`), not a `BinaryChain`. (A double-quoted "…${x}…"
+    // is a plain literal, not interpolation, so it's also accepted but for a
+    // different reason — the backtick form is what the diagnostic points to.)
+    expect(await has("Heading { `Order {o.id}` }")).toBe(false);
   });
 
   it("accepts a plain string literal", async () => {

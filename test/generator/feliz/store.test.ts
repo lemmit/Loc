@@ -26,7 +26,7 @@ system P {
       action discard() { Cart.clear() }
       body: Stack {
         Heading { "Cart", level: 1 },
-        Text { "Items: " + Cart.count },
+        Text { \`Items: {Cart.count}\` },
         For { each: Cart.lines, line => Card { line } },
         Button { "Add", onClick: addOne }
       }

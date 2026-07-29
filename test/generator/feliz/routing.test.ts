@@ -29,7 +29,7 @@ system Shop {
       action inc() { count := count + 1 }
       body: Stack {
         Heading { "Home", level: 1 },
-        Text { "Clicks: " + count },
+        Text { \`Clicks: {count}\` },
         Button { "+", onClick: inc },
         Button { "Products", to: "/products" }
       }

@@ -101,7 +101,7 @@ describe("Field + Toggle with bind: state binding", () => {
               Heading { "Profile" },
               Field { "Your name", bind: name },
               Toggle { "Show welcome", bind: welcome },
-              Text { "Hello, " + name },
+              Text { \`Hello, {name}\` },
               Button { "Reset", onClick: e => { name := "" } }
             }
           }
@@ -124,8 +124,8 @@ describe("Field + Toggle with bind: state binding", () => {
     // Both controlled inputs wired.
     expect(content).toMatch(/<TextInput .+ value=\{name\}/);
     expect(content).toMatch(/<Switch .+ checked=\{welcome\}/);
-    // Text interpolation reads `name` via JSX expr.
-    expect(content).toMatch(/<Text>\{\("Hello, " \+ name\)\}<\/Text>/);
+    // Text interpolation reads `name` through the ICU t() call.
+    expect(content).toMatch(/<Text>\{t\("[^"]*", "Hello, \{name\}", \{ name: name \}\)\}<\/Text>/);
     // Button onClick :=  resets name.
     expect(content).toMatch(/setName\(""\);/);
   });

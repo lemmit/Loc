@@ -87,4 +87,32 @@ describe("React i18n runtime", () => {
     const home = await pageOf(files);
     expect(home).not.toContain("import { t }");
   });
+
+  it("emits an interpolated template as a 3-arg ICU t() call + catalog entry", async () => {
+    // A page param so the interpolation hole resolves to a real ref.
+    const withParam = SYSTEM("Heading { `Status: {code}` }").replace(
+      'page Home { route: "/"',
+      'page Home(code: string) { route: "/:code"',
+    );
+    const files = await generateSystemFiles(withParam);
+    const home = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
+    // Named-display default + a values object; keyed to the catalog.
+    expect(home).toMatch(
+      /<Title order=\{2\}>\{t\("[^"]*", "Status: \{code\}", \{ code: code \}\)\}<\/Title>/,
+    );
+    const locale = [...files].find(([p]) => p.endsWith("src/locales/en.json"))?.[1];
+    expect(Object.values(JSON.parse(locale!) as Record<string, string>)).toContain(
+      "Status: {code}",
+    );
+  });
+
+  it("upgrades the shim to a 3-arg signature with {name} substitution", async () => {
+    const files = await generateSystemFiles(SYSTEM(`Heading { "Hi" }`));
+    const i18n = [...files].find(([p]) => p.endsWith("src/i18n.ts"))![1];
+    // 3rd optional values arg + the interpolation replace.
+    expect(i18n).toMatch(/values\?: Record<string, string \| number>/);
+    expect(i18n).toContain("message.replace(");
+    // A plain 2-arg call (no values) still returns the message untouched.
+    expect(i18n).toContain("if (values === undefined) return message;");
+  });
 });

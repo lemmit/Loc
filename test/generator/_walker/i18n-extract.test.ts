@@ -7,11 +7,34 @@
 // plus role-in-key disambiguation and the dynamic-slot skip.
 
 import { describe, expect, it } from "vitest";
-import { collectUiMessages } from "../../../src/generator/_walker/i18n-extract.js";
+import { collectUiMessages, icuFromConcat } from "../../../src/generator/_walker/i18n-extract.js";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
+import type { ExprIR } from "../../../src/ir/types/loom-ir.js";
 import { buildMessageCatalog } from "../../../src/system/i18n-catalog.js";
 import { parseString } from "../../_helpers/parse.js";
+
+// Minimal ExprIR builders for direct `icuFromConcat` unit tests — a lowered
+// backtick template is a left-assoc `binary "+"` chain of string literals
+// interleaved with holes (see `lowerTemplateString`).
+const str = { kind: "primitive", name: "string" } as const;
+const lit = (value: string): ExprIR => ({ kind: "literal", lit: "string", value });
+const ref = (name: string): ExprIR => ({ kind: "ref", name, refKind: "param" }) as ExprIR;
+const member = (receiver: ExprIR, m: string): ExprIR => ({
+  kind: "member",
+  receiver,
+  member: m,
+  receiverType: str,
+  memberType: str,
+});
+const plus = (left: ExprIR, right: ExprIR): ExprIR => ({
+  kind: "binary",
+  op: "+",
+  left,
+  right,
+  leftType: str,
+  resultType: str,
+});
 
 async function catalogOf(source: string): Promise<Record<string, string>> {
   const { model } = await parseString(source, { validate: false });
@@ -118,5 +141,95 @@ describe("i18n message extraction", () => {
     );
     const ui = enrichLoomModel(lowerModel(model)).systems[0]!.uis[0]!;
     expect(collectUiMessages(ui)).toEqual(collectUiMessages(ui));
+  });
+});
+
+describe("icuFromConcat — interpolated-string detection (i18n-strings.md Option B)", () => {
+  it("derives named display + positional hash + ordered holes", () => {
+    // `Order {order.id}` → ["Order ", order.id]
+    const icu = icuFromConcat(plus(lit("Order "), member(ref("order"), "id")));
+    expect(icu).toEqual({
+      display: "Order {id}", // dotted path → last segment
+      positional: "Order {0}", // hash input — rename-stable
+      holes: [{ name: "id", expr: member(ref("order"), "id") }],
+    });
+  });
+
+  it("names bare refs by themselves and numbers holes positionally", () => {
+    // `You have {count} of {total}` → ["You have ", count, " of ", total]
+    const icu = icuFromConcat(
+      plus(plus(plus(lit("You have "), ref("count")), lit(" of ")), ref("total")),
+    );
+    expect(icu?.display).toBe("You have {count} of {total}");
+    expect(icu?.positional).toBe("You have {0} of {1}");
+    expect(icu?.holes.map((h) => h.name)).toEqual(["count", "total"]);
+  });
+
+  it("dedups a repeated placeholder name with _2/_3 suffixes", () => {
+    // `{a.id} vs {b.id}` → last segments collide on `id`
+    const icu = icuFromConcat(
+      plus(plus(member(ref("a"), "id"), lit(" vs ")), member(ref("b"), "id")),
+    );
+    expect(icu?.display).toBe("{id} vs {id_2}");
+    expect(icu?.positional).toBe("{0} vs {1}"); // positions never collide
+  });
+
+  it("is rename-stable — the positional hash ignores which field fills the hole", () => {
+    const a = icuFromConcat(plus(lit("Order "), member(ref("order"), "id")));
+    const b = icuFromConcat(plus(lit("Order "), member(ref("order"), "number")));
+    // Different display (translator-readable), identical hash input (stable key).
+    expect(a?.display).not.toBe(b?.display);
+    expect(a?.positional).toBe(b?.positional);
+  });
+
+  it("returns undefined for a non-interpolation — no text, no holes, or plain literal", () => {
+    expect(icuFromConcat(lit("Just text"))).toBeUndefined(); // not a chain
+    expect(icuFromConcat(plus(lit("a"), lit("b")))).toBeUndefined(); // no hole
+    // numeric `count + 1` (no string literal operand) is arithmetic, not a message
+    const numeric: ExprIR = {
+      kind: "binary",
+      op: "+",
+      left: ref("count"),
+      right: { kind: "literal", lit: "int", value: "1" },
+      resultType: { kind: "primitive", name: "int" },
+    };
+    expect(icuFromConcat(numeric)).toBeUndefined();
+  });
+});
+
+describe("i18n message extraction — interpolated (ICU) entries", () => {
+  const icuWrap = (uiBody: string) => `
+    system T {
+      subdomain S {
+        context S {
+          aggregate Order with crudish { status: string, ref: string }
+          repository Orders for Order { }
+        }
+      }
+      api SApi from S
+      ui Web { api S: SApi; ${uiBody} }
+    }
+  `;
+
+  it("extracts an interpolated template as a named-display catalog entry", async () => {
+    const { model } = await parseString(
+      icuWrap('page D(o: Order) { route: "/d/:id" body: Heading { `Order {o.status}` } }'),
+      { validate: false },
+    );
+    const cat = buildMessageCatalog(enrichLoomModel(lowerModel(model)).systems[0]!);
+    expect(Object.values(cat)).toContain("Order {status}"); // named display
+    expect(Object.keys(cat).some((k) => k.startsWith("page.D.heading."))).toBe(true);
+  });
+
+  it("keys the ICU entry over the positional form — a field rename keeps the key", async () => {
+    const keyOf = async (body: string) => {
+      const { model } = await parseString(icuWrap(body), { validate: false });
+      return Object.keys(buildMessageCatalog(enrichLoomModel(lowerModel(model)).systems[0]!))[0];
+    };
+    const a = await keyOf(
+      'page D(o: Order) { route: "/d/:id" body: Heading { `Ref {o.status}` } }',
+    );
+    const b = await keyOf('page D(o: Order) { route: "/d/:id" body: Heading { `Ref {o.ref}` } }');
+    expect(a).toBe(b); // same surrounding text ⇒ same key regardless of the field
   });
 });
