@@ -63,7 +63,12 @@ function posSpecs(spec: PrimitiveSpec): PropSpec[] {
 // The closed set the canvas understands.  Containers hold children (and may
 // also carry leading scalar props, e.g. a `Card` title); leaves carry only
 // string/int/ref props.  Everything else round-trips as Opaque.
-const SPECS = {
+//
+// Pinned against the language stdlib by
+// `test/playground/page-builder/spec-completeness.test.ts` — every name in
+// `src/util/walker-primitive-names.ts` needs an entry here (or a pinned
+// exception), so a new primitive can't silently regress to an opaque blob.
+export const SPECS = {
   Stack: { kind: "container" },
   Group: { kind: "container" },
   Grid: { kind: "container" },
@@ -79,8 +84,17 @@ const SPECS = {
   Card: { kind: "container", positional: ["title"] },
   Container: { kind: "container", named: [{ key: "size", kind: "string" }] },
   Paper: { kind: "container", named: [{ key: "padding", kind: "string" }] },
+  // Semantic-anchor / sticky-position wrappers: `Section`'s `id:` lands as the
+  // `<section id>` an `Anchor { to: "#…" }` jumps to; `Sticky`'s `top:` is the
+  // CSS offset.  Both hold their body as positional children.
+  Section: { kind: "container", named: [{ key: "id", kind: "string" }] },
+  Sticky: { kind: "container", named: [{ key: "top", kind: "string" }] },
   Heading: { kind: "leaf", positional: [{ key: "text", kind: "text" }], named: [{ key: "level", kind: "int" }] },
   Text: { kind: "leaf", positional: [{ key: "text", kind: "text" }] },
+  // Inline-emphasis spans — same one-positional-content shape as Text.
+  Bold: { kind: "leaf", positional: [{ key: "text", kind: "text" }] },
+  Italic: { kind: "leaf", positional: [{ key: "text", kind: "text" }] },
+  InlineCode: { kind: "leaf", positional: [{ key: "text", kind: "text" }] },
   Button: { kind: "leaf", positional: [{ key: "label", kind: "text" }], named: [{ key: "to", kind: "string" }] },
   // `Action(<operation>, then: <effect>)` — a button bound to an aggregate
   // operation, with an optional follow-up effect (`navigate(...)`/`toast(...)`).
@@ -99,9 +113,11 @@ const SPECS = {
   //   * CreateForm(of:)       — create-form for the aggregate
   //   * OperationForm(of:,op:) or OperationForm(<inst>.<op>) — op form
   //   * WorkflowForm(runs:)   — workflow-run form
+  //   * DestroyForm(of:)      — confirm-only delete of the routed record
   CreateForm: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
   OperationForm: { kind: "leaf", positional: [{ key: "operation", kind: "ref", options: "operation" }], named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "op", kind: "ref", options: "operation" }, { key: "testid", kind: "string" }] },
   WorkflowForm: { kind: "leaf", named: [{ key: "runs", kind: "ref", options: "workflow" }, { key: "testid", kind: "string" }] },
+  DestroyForm: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "then", kind: "expr" }, { key: "testid", kind: "string" }] },
   // Layout / no-arg primitives.
   Breadcrumbs: { kind: "container" },
   KeyValueRow: { kind: "container", positional: ["label"] },
@@ -116,11 +132,32 @@ const SPECS = {
   DateDisplay: { kind: "leaf", positional: [{ key: "value", kind: "expr" }] },
   EnumBadge: { kind: "leaf", positional: [{ key: "value", kind: "expr" }] },
   IdLink: { kind: "leaf", positional: [{ key: "id", kind: "expr" }], named: [{ key: "of", kind: "ref", options: "aggregate" }] },
+  // A download anchor over a `File`-typed expression — same positional-value
+  // shape as the other formatters (Money / DateDisplay / EnumBadge).
+  FileLink: { kind: "leaf", positional: [{ key: "value", kind: "expr" }] },
+  // The "?" lineage disclosure over a `provenanced` field: the record
+  // expression plus the field name it reads `<field>_provenance` from.
+  ProvenanceInfo: { kind: "leaf", named: [{ key: "of", kind: "expr" }, { key: "field", kind: "string" }] },
+  // Syntax-highlighted code.  Two admissible shapes (like OperationForm): a
+  // positional source literal (`CodeBlock { "const x = 1" }`) or the named
+  // `source:` arg — distinct prop keys so each re-emits in the shape it was
+  // written, rather than one normalising into the other.
+  CodeBlock: { kind: "leaf", positional: [{ key: "code", kind: "text" }], named: [{ key: "source", kind: "text" }, { key: "language", kind: "string" }, { key: "title", kind: "string" }] },
+  // An inline SVG icon — a builtin registry `name:` (any expression, so a
+  // component param like `name: iconName` stays editable) or a custom `svg:`
+  // literal, plus the a11y knobs the emitter reads.
+  Icon: { kind: "leaf", named: [{ key: "name", kind: "text" }, { key: "svg", kind: "string" }, { key: "size", kind: "string" }, { key: "label", kind: "string" }, { key: "decorative", kind: "expr" }] },
   // Form inputs — a label plus a `bind:` expression (usually a state var).
   Field: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   NumberField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   PasswordField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   Toggle: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
+  MultilineField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
+  // A controlled single-select: same bind shape plus the `options:` string-array
+  // expression (a list literal, a state field, or any `string[]` expression).
+  SelectField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }, { key: "options", kind: "expr" }] },
+  // A standalone upload input bound to a `File`-typed state field.
+  FileUpload: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   // Table holds Column children (sub-primitive) plus a `rows:` source and
   // optional callback lambdas (`onRowClick:` / `rowTestid:`) as named-arg child
   // slots.  A Column carries a header then an accessor lambda child.
@@ -131,6 +168,10 @@ const SPECS = {
   // `rows => …` lambda).  Modal pairs a `trigger:` node with its body child.
   QueryView: { kind: "container", named: [{ key: "of", kind: "expr" }], namedChildren: ["loading", "error", "empty", "data"] },
   Modal: { kind: "container", namedChildren: ["trigger"] },
+  // `For { each: <coll>, <item> => <markup>, empty?: <markup> }` — the item
+  // renderer is a positional lambda, so it rides the ordinary positional-child
+  // path (a `Lambda` node holding its body); `empty:` is a markup slot child.
+  For: { kind: "container", named: [{ key: "each", kind: "expr" }], namedChildren: ["empty"] },
 } satisfies Record<string, PrimitiveSpec>;
 
 // Synthetic nodes model expression-syntax constructs that aren't CallExpr-
