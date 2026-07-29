@@ -247,6 +247,7 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     provenance: [
       "M-T9.11 slice (c) wire-golden gate",
       "test/behavioral/wire-golden/{ledger,payments,sales,shapes}.json",
+      "elixir `create_result/2` json(serialize(record)) vs the emitted Create<Agg>Response `{id}` schema (openapi-emit.ts)",
     ],
     tier: "behavioral",
   },

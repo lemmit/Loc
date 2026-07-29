@@ -280,6 +280,11 @@ the conforming backends, and the fix that established it.
   only the bytes differ. Here the majority and the oracle coincide, and the
   oracle is not the vote: Elixir over-returns against **its own published
   contract**, so the emitted spec settles it without appeal to the other four.
+  Confirmed at the source — the emitted schema
+  `Create<Agg>Response` declares `properties: %{ id: … }`
+  (`src/generator/elixir/vanilla/openapi-emit.ts`), while the generated
+  controller's `create_result/2` answers `201` with `json(serialize(record))`
+  (`api-emit.ts`) instead of the id envelope.
 - **Conforms.** node, dotnet, java, python. **Target:** elixir.
 - **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate on its
   first five-backend run (`test/behavioral/wire-golden/{ledger,payments,sales,

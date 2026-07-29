@@ -58,7 +58,10 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
   //
   // dotnet/java: the ORM concurrency token is bound to a mapped column, and a
   // document aggregate's `version` lives inside the jsonb blob, so the mutation
-  // persists without bumping it.
+  // persists without bumping it.  The `dapper` leg — same .NET emitters, raw
+  // Npgsql, hand-rolled document SQL — increments CORRECTLY and needs no
+  // waiver, which localizes this to the EF/JPA mapping rather than the .NET or
+  // Java wire emitters.
   {
     backends: ["dotnet", "java"],
     cases: ["shapes"],

@@ -160,11 +160,12 @@ export async function reportStaleWaivers({ backend, ranCases, usedWaivers, workD
 }
 
 /**
- * The whole gate for one runner, as a two-call object — so all five runners
- * share ONE implementation instead of five copies of the same bookkeeping.
+ * The whole gate for one runner, as a two-call object — so all SEVEN runner
+ * legs (five backends + the dapper/mikroorm persistence adapters) share ONE
+ * implementation instead of seven copies of the same bookkeeping.
  *
  *   const wire = makeWireGate("java", WORK);
- *   …per case…  wire.check(c.name, out.wire)
+ *   …per case…  await wire.check(c.name, out.wire, out.results)
  *   …at the end… const bad = await wire.finish()   // fold into the exit code
  */
 export function makeWireGate(backend, workDir) {
