@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  LIVE_SYNC_DEBOUNCE_MS,
-  reseedDecision,
-} from "../../web/src/builder/live-source-tick.js";
+import { LIVE_SYNC_DEBOUNCE_MS, reseedDecision } from "../../web/src/builder/live-source-tick.js";
 
 // The builder panes used to re-derive (main-thread Langium parse + graph build
 // + React Flow reflow) on the `ctx` object identity, so every unrelated app
