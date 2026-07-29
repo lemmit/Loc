@@ -121,3 +121,69 @@ describe("realtime SSE wire — Python (delivery: broadcast)", () => {
     expect(main).not.toContain("realtime_router");
   });
 });
+
+// ─── Rooms + policy-derived routing v1 (tenant-scoped delivery) ─────────────
+
+const TENANT_SYSTEM = `
+system TenantShop {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Organization
+  subdomain Core {
+    context Fulfillment {
+      aggregate Order with tenantOwned, crudish { status: string }
+      repository Orders for Order { }
+      crossTenant aggregate Plan with crudish { title: string }
+      repository Plans for Plan { }
+      event OrderPlaced { order: Order id, at: datetime }
+      event PlanPublished { plan: Plan id, at: datetime }
+      channel Lifecycle { carries: OrderPlaced, PlanPublished  delivery: broadcast  retention: ephemeral }
+    }
+    context Accounts {
+      aggregate Organization with crudish { name: string }
+    }
+  }
+  api FulfillmentApi from Core
+  storage primary { type: postgres }
+  resource coreSt { for: Fulfillment, kind: state, use: primary }
+  resource acctSt { for: Accounts, kind: state, use: primary }
+  deployable backend {
+    platform: python
+    contexts: [Fulfillment, Accounts]
+    dataSources: [coreSt, acctSt]
+    serves: FulfillmentApi
+    port: 8080
+    auth: required
+  }
+}
+`;
+
+describe("realtime rooms — Python (tenant-scoped delivery)", () => {
+  it("keys the subscriber registry by tenant and scopes only tenantOwned events", async () => {
+    const rt = get(await generate(TENANT_SYSTEM), "app/realtime.py");
+    expect(rt).toContain(
+      'REALTIME_EVENT_TYPES: frozenset[str] = frozenset({"OrderPlaced", "PlanPublished"})',
+    );
+    expect(rt).toContain('TENANT_SCOPED_EVENT_TYPES: frozenset[str] = frozenset({"OrderPlaced"})');
+    // Per-tenant rooms + the tenant-key helper off the principal.
+    expect(rt).toContain("_rooms: dict[str, set[asyncio.Queue[str]]] = {}");
+    expect(rt).toContain("from app.auth.user import User, current_user");
+    expect(rt).toContain(
+      "return None if user is None or user.tenant_id is None else str(user.tenant_id)",
+    );
+    // Publish routes tenant-scoped events off the ambient current_user().
+    expect(rt).toContain("if name not in TENANT_SCOPED_EVENT_TYPES:");
+    expect(rt).toContain("tenant = _tenant_of(current_user())");
+    // Ticket degradation keeps only the id reference field.
+    expect(rt).toContain('data = json.dumps({"type": "OrderPlaced", "order": event.order})');
+    // The SSE endpoint joins the connecting principal's tenant room.
+    expect(rt).toContain('tenant = _tenant_of(getattr(request.state, "current_user", None))');
+    expect(rt).toContain("_rooms.setdefault(tenant, set()).add(queue)");
+  });
+
+  it("an untenanted broadcast context keeps the broadcast-to-all module (no rooms)", async () => {
+    const rt = get(await generate(system("python", BROADCAST)), "app/realtime.py");
+    expect(rt).not.toContain("TENANT_SCOPED_EVENT_TYPES");
+    expect(rt).not.toContain("_rooms");
+    expect(rt).not.toContain("current_user");
+  });
+});
