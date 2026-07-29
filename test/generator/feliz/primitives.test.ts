@@ -20,7 +20,7 @@ system ShowcaseApp {
         Heading { "Feliz primitives", level: 1 },
         Card { "Counter card",
           Stack {
-            Text { "Count: " + count },
+            Text { \`Count: {count}\` },
             Button { "+", onClick: inc }
           }
         },
