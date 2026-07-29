@@ -70,9 +70,9 @@ describe("flutterTarget — state seam", () => {
     expect(flutterTarget.renderStateRead(stateRef("step"), "template")).toBe("state.step");
   });
 
-  it("writes call a Notifier setter with the pinned TODO marker", () => {
+  it("writes call the Notifier's generated `set<Field>` setter", () => {
     const w = flutterTarget.renderStateWrite(stateRef("step"), "3");
-    expect(w).toBe("notifier.setStep(3) /* TODO(flutter): notifier */");
+    expect(w).toBe("notifier.setStep(3)");
   });
 
   it("nested writes call the root-field setter and note the path", () => {

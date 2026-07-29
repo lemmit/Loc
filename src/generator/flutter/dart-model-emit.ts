@@ -291,9 +291,42 @@ export function renderDartUnion(name: string, variants: TypeIR[], ctx: BoundedCo
  *  class name, concatenated into one Dart library body.  The integrator wires
  *  this into `flutter/index.ts`; the collectors above stay available for
  *  finer-grained use. */
-export function renderDartModels(contexts: readonly BoundedContextIR[]): string {
+/** The fixed `FileRef` wire object (`url`/`key`/`contentType`/`size`) — the Dart
+ *  shape a `File` field / a `FileUpload` `/files` response maps to.  Emitted into
+ *  `lib/models.dart` only when a File field or a FileUpload primitive is present
+ *  (`fileRef` option), so File-free projects stay byte-identical. */
+const FILE_REF_CLASS = lines(
+  "class FileRef {",
+  "  final String url;",
+  "  final String key;",
+  "  final String contentType;",
+  "  final int size;",
+  "",
+  "  const FileRef({required this.url, required this.key, required this.contentType, required this.size});",
+  "",
+  "  factory FileRef.fromJson(Map<String, dynamic> json) => FileRef(",
+  "        url: json['url'] as String,",
+  "        key: json['key'] as String,",
+  "        contentType: json['contentType'] as String,",
+  "        size: (json['size'] as num).toInt(),",
+  "      );",
+  "",
+  "  Map<String, dynamic> toJson() => {",
+  "        'url': url,",
+  "        'key': key,",
+  "        'contentType': contentType,",
+  "        'size': size,",
+  "      };",
+  "}",
+);
+
+export function renderDartModels(
+  contexts: readonly BoundedContextIR[],
+  opts: { fileRef?: boolean } = {},
+): string {
   const seen = new Set<string>();
   const blocks: string[] = [];
+  if (opts.fileRef) blocks.push(FILE_REF_CLASS);
   const addRecord = (r: DartRecord | null): void => {
     if (!r || seen.has(r.className)) return;
     seen.add(r.className);

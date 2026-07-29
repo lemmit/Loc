@@ -34,6 +34,12 @@ function dartPrimitive(name: PrimitiveName): string {
     case "json":
       // Opaque JSON blob — interior is not modelled, so it stays `dynamic`.
       return "dynamic";
+    case "File":
+      // The fixed `FileRef` wire object (url/key/contentType/size), always
+      // NULLABLE — a `File` holds a FileRef-or-nothing (unset until uploaded),
+      // so `File` and `File?` both spell `FileRef?`.  The `FileRef` Dart class is
+      // emitted into `lib/models.dart`.
+      return "FileRef?";
     default:
       // string, guid → String.
       return "String";
@@ -60,8 +66,12 @@ export function dartType(t: TypeIR): string {
       return t.name;
     case "array":
       return `List<${dartType(t.element)}>`;
-    case "optional":
-      return `${dartType(t.inner)}?`;
+    case "optional": {
+      // `File` already spells the nullable `FileRef?`, so `File?` must not
+      // double-up to `FileRef??`.
+      const inner = dartType(t.inner);
+      return inner.endsWith("?") ? inner : `${inner}?`;
+    }
     default:
       return "dynamic";
   }
@@ -75,8 +85,9 @@ export function isIdentityJson(t: TypeIR): boolean {
   switch (base.kind) {
     case "primitive":
       // Every scalar (incl. `double`/`int`/`bool`/`dynamic`) is JSON-native;
-      // only `datetime` needs ISO-string conversion.
-      return base.name !== "datetime";
+      // `datetime` needs ISO-string conversion and `File` is the `FileRef`
+      // object (`.toJson()` / `.fromJson`).
+      return base.name !== "datetime" && base.name !== "File";
     case "id":
     case "enum":
       return true;
@@ -107,6 +118,8 @@ export function dartFromJson(t: TypeIR, access: string): string {
           return `DateTime.parse(${access} as String)`;
         case "json":
           return access; // opaque — passed through as dynamic
+        case "File":
+          return `FileRef.fromJson(${access} as Map<String, dynamic>)`;
         default:
           return `${access} as String`;
       }
@@ -131,8 +144,8 @@ export function dartToJson(t: TypeIR, access: string): string {
   if (isIdentityJson(base)) return access;
   switch (base.kind) {
     case "primitive":
-      // The only non-identity primitive is datetime.
-      return `${access}.toIso8601String()`;
+      // Non-identity primitives: `File` (the `FileRef` object) and `datetime`.
+      return base.name === "File" ? `${access}.toJson()` : `${access}.toIso8601String()`;
     case "valueobject":
     case "entity":
       return `${access}.toJson()`;

@@ -81,6 +81,9 @@ function dartPrimitiveZero(name: PrimitiveName): string {
       return "false";
     case "datetime":
       return "null";
+    case "File":
+      // A `FileRef` starts unset — a FileUpload binds a `File?` state cell.
+      return "null";
     default:
       return "''"; // string, guid, json, duration → empty string default
   }

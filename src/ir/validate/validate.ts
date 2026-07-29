@@ -56,6 +56,7 @@ import {
   validateFileFieldObjectStorage,
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
+  validateFlutterPrimitiveSupport,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
   validateJavaStampSupport,
@@ -165,6 +166,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
     validateUiRealtimeSupport(sys, diags);
+    // Flutter defers the interactive input / form primitive family; a page
+    // using one on a `platform: flutter` target compiles to a silent
+    // `// flutter pack: no renderer` comment.  Fail fast instead.
+    validateFlutterPrimitiveSupport(sys, diags);
     validateRelayTargetNotSubscribed(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);

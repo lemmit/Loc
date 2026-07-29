@@ -31,6 +31,7 @@
 // part of the required surface because not every pack needs them.
 // ---------------------------------------------------------------------------
 
+import { FLUTTER_INLINE_OR_DEFERRED } from "../../util/flutter-deferred-primitives.js";
 import type { PackFormat } from "./loader.js";
 
 export interface RequiredSet {
@@ -134,25 +135,17 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
 
 // Primitives the Flutter walking-skeleton pack renders INLINE via the walker
 // seams (Track B/D) or DEFERS to full parity — never as a `flutter` pack
-// template.  Subtracted from the shared + TSX-only lists to form the
+// template.  Subtracted from the shared + TSX-only lists below to form the
 // `flutter` required surface (the display / layout primitives only).  Mirrors
 // how `angular` drops `primitive-form-of` / `primitive-modal`; Flutter drops
 // the whole interactive-input family too (`Field*` / `Toggle` / `Tabs` are
 // deferred Material `TextFormField` / `Switch` / `DefaultTabController` work).
-const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
-  "primitive-form-of",
-  "primitive-modal",
-  // FileUpload (M-T1.2 slice 4b) is a JSX/web primitive (multipart POST +
-  // bind); the Flutter mobile pack defers it alongside the other inputs.
-  "primitive-file-upload",
-  "primitive-field",
-  "primitive-multiline-field",
-  "primitive-number-field",
-  "primitive-password-field",
-  "primitive-select-field",
-  "primitive-toggle",
-  "primitive-tabs",
-]);
+//
+// SINGLE SOURCE OF TRUTH — the set is homed in `src/util/` (a layer the IR
+// validator can also import) so the `loom.flutter-primitive-unsupported` honest
+// gate rejects the same primitives this manifest subtracts.  Remove a primitive
+// there once it gets a real Flutter renderer and both this required-surface
+// subtraction and the validator gate update together.
 
 // Shell-level templates every pack must emit, regardless of format.
 const SHARED_SHELL: readonly string[] = [
