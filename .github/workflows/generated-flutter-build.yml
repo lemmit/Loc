@@ -9,9 +9,11 @@ name: Generated Flutter build
 # vitest suite (which only asserts emitted-string shape; no local Flutter SDK).
 #
 # Covers the full shipped interactive surface — display + Riverpod state/actions
-# + data reads (QueryView) + forms (Create/Operation/Destroy) + named routing.
-# Workflows/match-await and the native (non-web) surface remain deferred to
-# later parity and this gate grows with them.  `analyze` runs errors-only
+# + data reads (QueryView) + workflows + match-await + forms
+# (Create/Operation/Workflow/Destroy) + Modal + the pack inputs (Field /
+# MultilineField / PasswordField / NumberField / Toggle / SelectField /
+# FileUpload) + Tabs + named routing.  Only the native (non-web) surface remains
+# deferred.  `analyze` runs errors-only
 # (`--no-fatal-warnings --no-fatal-infos`) so lint-nits (prefer_const infos)
 # don't block; `flutter build web` is the load-bearing "is the Dart real"
 # check.  The .ddd is embedded here (not under examples/) so the other
@@ -106,7 +108,9 @@ jobs:
               }
             }
             storage db { type: postgres }
+            storage files { type: localDisk }
             resource catState { for: Cat, kind: state, use: db }
+            resource catFiles { for: Cat, kind: objectStore, use: files }
             ui MobileApp {
               framework: flutter
               api Shop: ShopApi
@@ -145,23 +149,24 @@ jobs:
                   Button { "Add product", to: "/products/new" }
                 }
               }
-              // Forms (Create/Operation/Workflow/Destroy) + Modal render via the
-              // flutterTarget walker SEAMS; the controlled inputs (Field /
-              // MultilineField / PasswordField / Toggle / SelectField) render via
-              // the flutter pack.  Only NumberField / FileUpload / Tabs remain
-              // deferred — loom.flutter-primitive-unsupported rejects those on a
-              // platform: flutter target, so the showcase avoids them.
+              // EVERY page primitive renders on Flutter: the controlled inputs
+              // (Field / MultilineField / PasswordField / NumberField / Toggle /
+              // SelectField) + FileUpload via the flutter pack, Tabs as a
+              // container, and Forms (Create/Operation/Workflow/Destroy) + Modal
+              // via the flutterTarget walker SEAMS.  The Preferences page below
+              // exercises the pack inputs + Tabs + FileUpload in one place.
               page NewProduct { route: "/products/new"  body: Stack { Heading { "New", level: 1 }, CreateForm { of: Product } } }
               page Preferences {
                 route: "/preferences"
-                state { notify: bool = false  displayName: string = ""  about: string = ""  secret: string = ""  themePref: string = "system"  perPage: int = 20 }
+                state { notify: bool = false  displayName: string = ""  about: string = ""  secret: string = ""  themePref: string = "system"  perPage: int = 20  avatar: File }
                 body: Stack {
                   Heading { "Preferences", level: 1 },
                   Tabs {
                     Tab { "Profile", Stack {
                       Field { "Display name", bind: displayName },
                       MultilineField { "About", bind: about },
-                      PasswordField { "Secret", bind: secret }
+                      PasswordField { "Secret", bind: secret },
+                      FileUpload { "Avatar", bind: avatar }
                     } },
                     Tab { "Settings", Stack {
                       Toggle { "Notifications", bind: notify },
@@ -190,7 +195,7 @@ jobs:
                 DestroyForm { of: Product }
               } }
             }
-            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+            deployable api { platform: node contexts: [Cat] dataSources: [catState, catFiles] serves: ShopApi port: 3000 }
             deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 }
           }
           DDD

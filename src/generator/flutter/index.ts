@@ -49,7 +49,7 @@ import {
   collectPageWorkflowForms,
   renderFormsFile,
 } from "./forms-emit.js";
-import { collectBoundInputFields } from "./inputs-emit.js";
+import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
 import { flutterPack, usesIntl } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
@@ -77,7 +77,16 @@ export function generateFlutterForContexts(
 
   // Wire-model classes for every aggregate/VO/event reachable through this
   // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
-  out.set("lib/models.dart", renderDartModels(contexts));
+  // The fixed `FileRef` class is added only when a `File` field maps to it (the
+  // base render then references `FileRef`) or the ui hosts a `FileUpload` — so
+  // File-free projects stay byte-identical.
+  const usesFileUpload = uiUsesFileUpload(ui);
+  const baseModels = renderDartModels(contexts);
+  const needsFileRef = usesFileUpload || baseModels.includes("FileRef");
+  out.set(
+    "lib/models.dart",
+    needsFileRef ? renderDartModels(contexts, { fileRef: true }) : baseModels,
+  );
 
   // Aggregate + owning-bounded-context lookups, built once — threaded into the
   // walker (form seams resolve the aggregate's create-input / op params + the
@@ -171,7 +180,7 @@ export function generateFlutterForContexts(
     out.set("lib/pages/home_page.dart", renderHomePage(title, aggregates));
   }
 
-  out.set("pubspec.yaml", renderPubspec(pkg, deployable.name));
+  out.set("pubspec.yaml", renderPubspec(pkg, deployable.name, usesFileUpload));
   out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
   // Web platform scaffold — `flutter build web` refuses a project with no
   // `web/index.html` ("This project is not configured for the web").  Emit the
@@ -447,6 +456,12 @@ function renderConsumerPage(
   if (usesIntl(bodyWidget) || usesIntl(projSource)) {
     imports.push("import 'package:intl/intl.dart';");
   }
+  // A FileUpload primitive picks a file via file_picker (the http / config /
+  // models / dart:convert imports it also needs are added by the content scans
+  // above — the widget emits `apiUri(` / `FileRef.fromJson` / `jsonDecode`).
+  if (bodyWidget.includes("FilePicker.")) {
+    imports.push("import 'package:file_picker/file_picker.dart';");
+  }
   return `${lines(
     ...imports,
     "",
@@ -503,7 +518,10 @@ function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
   )}\n`;
 }
 
-function renderPubspec(pkg: string, deployableName: string): string {
+function renderPubspec(pkg: string, deployableName: string, usesFileUpload: boolean): string {
+  // `file_picker` is only pulled when a FileUpload primitive is present, so a
+  // File-free app's pubspec stays byte-identical.
+  const filePicker = usesFileUpload ? "\n  file_picker: ^8.1.2" : "";
   return `name: ${pkg}
 description: "Generated Flutter app for ${deployableName} (Loom)."
 publish_to: "none"
@@ -517,7 +535,7 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_riverpod: ^2.5.1
-  intl: ^0.19.0
+  intl: ^0.19.0${filePicker}
 
 dev_dependencies:
   flutter_test:

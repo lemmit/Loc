@@ -137,3 +137,66 @@ describe("flutter NumberField + Tabs (generate system)", () => {
     expect(page).toContain("SizedBox(height: 360, child: TabBarView(children:");
   });
 });
+
+const FILE_SRC = `
+system FU {
+  subdomain S {
+    context Shop {
+      aggregate Product { name: string }
+      repository Products for Product { }
+    }
+  }
+  api ShopApi from S
+  ui MobileApp {
+    framework: flutter
+    api Shop: ShopApi
+    page Upload {
+      route: "/upload"
+      state { doc: File }
+      body: Stack { Heading { "Upload", level: 1 }, FileUpload { "Document", bind: doc } }
+    }
+  }
+  storage db { type: postgres }
+  storage files { type: localDisk }
+  resource obj { for: Shop, kind: objectStore, use: files }
+  resource st { for: Shop, kind: state, use: db }
+  deployable api1 { platform: node contexts: [Shop] dataSources: [st, obj] serves: ShopApi port: 8081 }
+  deployable app { platform: flutter targets: api1 ui: MobileApp { Shop: api1 } port: 3006 }
+}
+`;
+
+describe("flutter FileUpload (generate system)", () => {
+  it("renders a pick+multipart-upload button, a nullable FileRef state cell, the FileRef model, and the file_picker dep", async () => {
+    const files = await generateSystemFiles(FILE_SRC);
+    const key = [...files.keys()].find((k) => k.endsWith("app/lib/pages/upload_page.dart"));
+    expect(key, `no upload page in: ${[...files.keys()].join(", ")}`).toBeDefined();
+    const page = files.get(key!)!;
+
+    expect(page).not.toContain("no renderer");
+
+    // A File state cell is a nullable FileRef, null until uploaded.
+    expect(page).toContain("final FileRef? doc;");
+    expect(page).toContain("const UploadState(doc: null);");
+    expect(page).toContain("void setDoc(FileRef? v) {");
+
+    // The upload widget: pick with bytes, multipart POST to /files, write the FileRef.
+    expect(page).toContain("FilePicker.platform.pickFiles(withData: true)");
+    expect(page).toContain("http.MultipartRequest('POST', apiUri('/files'))");
+    expect(page).toContain("http.MultipartFile.fromBytes('file', f.bytes!, filename: f.name)");
+    expect(page).toContain(
+      "setDoc(FileRef.fromJson(jsonDecode(resp.body) as Map<String, dynamic>))",
+    );
+
+    // Imports pulled in by the content scan.
+    expect(page).toContain("import 'package:file_picker/file_picker.dart';");
+    expect(page).toContain("import 'package:http/http.dart' as http;");
+    expect(page).toContain("import '../config.dart';");
+
+    // The FileRef model is emitted, and file_picker is a dependency.
+    const models = files.get([...files.keys()].find((k) => k.endsWith("app/lib/models.dart"))!)!;
+    expect(models).toContain("class FileRef {");
+    expect(models).toContain("factory FileRef.fromJson(Map<String, dynamic> json)");
+    const pubspec = files.get([...files.keys()].find((k) => k.endsWith("app/pubspec.yaml"))!)!;
+    expect(pubspec).toContain("file_picker:");
+  });
+});

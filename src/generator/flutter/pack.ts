@@ -457,11 +457,11 @@ function primitiveButton(c: Ctx): string {
 //
 // NumberField parses via the generated `set<Field>Text` setter (the pack stays
 // type-agnostic); Tabs is the one container here (DefaultTabController + TabBar +
-// TabBarView).  Only FileUpload stays deferred (honest-gated by
-// `loom.flutter-primitive-unsupported`) — a standalone multipart upload needs
-// the File-type-on-Flutter foundation (M-T1.2 slice 4).  Forms
-// (Create/Operation/Workflow/Destroy) and Modal are NOT here — they render via
-// the `flutterTarget` walker SEAMS.
+// TabBarView); FileUpload picks a file (file_picker), POSTs it multipart to
+// `/files`, and writes the returned `FileRef` back to state.  EVERY page
+// primitive now renders — the `FLUTTER_UNRENDERED_PRIMITIVES` gate is empty.
+// Forms (Create/Operation/Workflow/Destroy) and Modal are NOT here — they render
+// via the `flutterTarget` walker SEAMS.
 // ---------------------------------------------------------------------------
 
 /** `state.<bind>` — the reactive read of a bound state field. */
@@ -517,6 +517,29 @@ function primitiveNumberField(c: Ctx): string {
   const init = c.hasBind ? `initialValue: '\${${boundRead(c)}}', ` : "";
   const onChanged = c.hasBind ? `(v) => ${String(c.setter)}Text(v)` : "null";
   return `TextFormField(${arg(testidKey(c))}${init}keyboardType: TextInputType.number, decoration: ${inputDecoration(c)}, onChanged: ${onChanged})`;
+}
+
+function primitiveFileUpload(c: Ctx): string {
+  const label = dartStr(String(c.labelText ?? "").trim());
+  const button = (onPressed: string) =>
+    `OutlinedButton.icon(${arg(testidKey(c))}icon: const Icon(Icons.upload_file), label: const Text('${label}'), onPressed: ${onPressed})`;
+  if (!c.hasBind) return button("null");
+  // Pick a file (with bytes — web needs `withData`), POST it as multipart to
+  // `/files`, and write the returned `FileRef` back through the setter.  The
+  // page-shell import scan keys off `FilePicker` / `apiUri(` / `FileRef.fromJson`
+  // / `jsonDecode` in this string to add file_picker / http / config / models /
+  // dart:convert.
+  const upload =
+    `() async { ` +
+    `final picked = await FilePicker.platform.pickFiles(withData: true); ` +
+    `if (picked == null || picked.files.isEmpty) return; ` +
+    `final f = picked.files.single; ` +
+    `if (f.bytes == null) return; ` +
+    `final req = http.MultipartRequest('POST', apiUri('/files'))..files.add(http.MultipartFile.fromBytes('file', f.bytes!, filename: f.name)); ` +
+    `final resp = await http.Response.fromStream(await req.send()); ` +
+    `if (resp.statusCode >= 200 && resp.statusCode < 300) { ${String(c.setter)}(FileRef.fromJson(jsonDecode(resp.body) as Map<String, dynamic>)); } ` +
+    `}`;
+  return button(upload);
 }
 
 function primitiveTabs(c: Ctx): string {
@@ -583,6 +606,8 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-toggle": primitiveToggle,
   "primitive-select-field": primitiveSelectField,
   "primitive-number-field": primitiveNumberField,
+  // Standalone file upload — pick + multipart POST to /files, write the FileRef.
+  "primitive-file-upload": primitiveFileUpload,
   // Container: a tab group (DefaultTabController + TabBar + TabBarView).
   "primitive-tabs": primitiveTabs,
 };

@@ -27,6 +27,7 @@ export const FLUTTER_BOUND_INPUT_NAMES: ReadonlySet<string> = new Set([
   "Toggle",
   "SelectField",
   "NumberField",
+  "FileUpload",
 ]);
 
 /** The Notifier/State setter method name a bound input dispatches to.  A
@@ -107,5 +108,27 @@ export function collectBoundInputFields(
     for (const c of exprChildren(e)) visit(c);
   };
   if (body) visit(body);
+  return found;
+}
+
+/** True when any page or component body in `ui` hosts a `FileUpload` primitive —
+ *  drives emitting the `FileRef` model + the `file_picker` dependency. */
+export function uiUsesFileUpload(
+  ui:
+    | { pages?: readonly { body?: ExprIR }[]; components?: readonly { body?: ExprIR }[] }
+    | undefined,
+): boolean {
+  if (!ui) return false;
+  let found = false;
+  const visit = (e: ExprIR): void => {
+    if (found) return;
+    if (e.kind === "call" && e.name === "FileUpload") {
+      found = true;
+      return;
+    }
+    for (const c of exprChildren(e)) visit(c);
+  };
+  for (const p of ui.pages ?? []) if (p.body) visit(p.body);
+  for (const c of ui.components ?? []) if (c.body) visit(c.body);
   return found;
 }
