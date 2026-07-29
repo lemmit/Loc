@@ -47,9 +47,13 @@ describe("user-defined components — Vue", () => {
     expect(comp).toContain("defineProps<{");
     expect(comp).toContain("name: string;");
     // Body walked through the vuetify pack: card + binary-op interpolation.
+    // With extractable strings the UI opts into i18n (M-T1.11), so the card
+    // title's `"Hello, " + name` template becomes a 3-arg ICU `t()` call (named
+    // default + values object) and the plain `"Welcome!"` a 2-arg `t()`.
     expect(comp).toContain('<v-card variant="outlined"');
-    expect(comp).toContain('{{ ("Hello, " + name) }}');
-    expect(comp).toContain("<div>Welcome!</div>");
+    expect(comp).toMatch(/\{\{ t\("[^"]*", "Hello, \{name\}", \{ name: name \}\) \}\}/);
+    expect(comp).toMatch(/<div>\{\{ t\("[^"]*", "Welcome!"\) \}\}<\/div>/);
+    expect(comp).toContain('import { t } from "../i18n";');
   });
 
   it("a page invoking a component imports the SFC and renders the tag", async () => {

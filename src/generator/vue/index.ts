@@ -34,6 +34,7 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral pieces that live react-side today (same sharing
 // pattern as the elixir theme-emit): the e2e harness constants, the
@@ -47,6 +48,12 @@ import {
   PLAYWRIGHT_CONFIG_TS,
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
+// The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
+// default, values?)` over `./locales/en.json` with `{name}` substitution — so
+// the Vue generator reuses the React module verbatim (same sharing pattern as
+// the page objects / emit-templates above; a candidate for a later `_frontend/`
+// move alongside them).
+import { renderI18nModule, renderLocaleCatalog } from "../react/i18n-runtime.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { prepareVueNamedLayouts } from "./layouts-emitter.js";
 import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
@@ -141,6 +148,18 @@ export function generateVueForContexts(
     throw new Error(
       `Vue deployable '${deployable.name}' references ui '${deployable.uiName}' but no such ui is declared in the system.`,
     );
+  }
+
+  // i18n (M-T1.11 Vue runtime — the React runtime ported to Vue): when this UI
+  // has extractable user-visible strings, page/component bodies emit
+  // `{{ t("<key>", "<default>") }}` for literal text slots (keyed identically to
+  // the catalog via the SHARED walker seam) and the app ships an `src/i18n.ts`
+  // shim + `src/locales/en.json`.  Empty catalog → no translation runtime, walk
+  // sites pass `undefined` and output stays byte-identical to pre-i18n.
+  const i18nEnabled = collectUiMessages(ui).length > 0;
+  if (i18nEnabled) {
+    out.set("src/locales/en.json", renderLocaleCatalog(ui));
+    out.set("src/i18n.ts", renderI18nModule());
   }
 
   // Per-aggregate api modules — 1:1 with the aggregate inventory,
@@ -264,6 +283,9 @@ export function generateVueForContexts(
       c.actions,
       // Store declarations — drives store-member binding (Stage 5).
       ui.stores,
+      // i18n key prefix — `component.<Name>` matches the catalog; undefined
+      // when the UI has no extractable strings (byte-identical to pre-i18n).
+      i18nEnabled ? `component.${c.name}` : undefined,
     );
     if (component.usesFormToast) hasFormToast = true;
     const componentPath = `src/components/${c.name}.vue`;
@@ -299,6 +321,10 @@ export function generateVueForContexts(
       externFunctionNames,
       derivedNames,
       authUi,
+      // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
+      // role-scoped `page.name`, e.g. `List`, not the router emit name);
+      // undefined when the UI has no extractable strings (byte-identical).
+      i18nEnabled ? `page.${page.name}` : undefined,
     );
     if (
       result.formOfs.some(
