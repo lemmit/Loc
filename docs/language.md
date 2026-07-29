@@ -921,6 +921,13 @@ surface.  Member-access chains describe the call shape:
 | `api.<aggregate>.getById(idExpr)` | `GET /<plural>/{id}`. |
 | `api.<aggregate>.<operation>(idExpr, body?)` | `POST /<plural>/{id}/<op_snake>` with the body (or `{}` if absent). |
 | `api.<aggregate>.<find>(args)` | `GET /<plural>/<find_snake>?…` with args as query string. |
+| `api.<projection>.byKey(keyExpr)` | `GET /projections/<proj_snake>/{key}` — one folded read-model row by its correlation key. |
+| `api.<projection>.list()` | `GET /projections/<proj_snake>` — every folded read-model row. |
+
+The projection verbs read a folded `projection`'s read model (see
+[`projection.md`](old/proposals/projection.md)), so a `test e2e` can
+assert the state an operation's events fold into (drive an operation,
+then `byKey` the row and `expect` its columns).
 
 When an argument is a previously bound `let` name (typically the result
 of a `create` call), `.id` is appended automatically — `api.x.getById(p)`
@@ -1094,6 +1101,10 @@ Warnings (non-fatal):
   starter whose event no `channel` carries (`loom.reactor-event-uncarried`):
   in-process dispatch is channel-routed, so the consumer would never fire —
   declare a `channel { carries: … }` for the event.
+- A `projection` `on(e: Event)` fold whose event no `channel` carries
+  (`loom.projection-event-uncarried`): the projection twin of the reactor rule —
+  the fold never runs and the read-model row is never written, so declare a
+  `channel { carries: … }` for the folded event.
 - A reactor / event-create whose event is carried by **more than one** channel
   in its context (`loom.reactor-channel-ambiguous`): in-process dispatch records
   the first channel by declaration order, so the binding is ambiguous — carry

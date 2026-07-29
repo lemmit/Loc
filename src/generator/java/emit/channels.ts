@@ -1129,6 +1129,7 @@ export function renderJavaChannelFiles(
         ...dispatchers
           .filter((h) => h.dispatcherPkg !== pkg)
           .map((h) => `import ${h.dispatcherPkg}.${h.dispatcherClass};`),
+        opts.durableBroker ? `import ${basePkg}.domain.common.OutboxDelivery;` : null,
         `import ${basePkg}.domain.events.*;`,
         ``,
         `/** Consumer loop — subscribes every wired address (competing-consumer`,
@@ -1173,11 +1174,21 @@ export function renderJavaChannelFiles(
         `        var bare = envelope.type().contains(".")`,
         `                ? envelope.type().substring(envelope.type().indexOf('.') + 1)`,
         `                : envelope.type();`,
+        // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): park
+        // the envelope id (= producer's outbox row id) so hosted saga handlers
+        // no-op on a redelivery of the same id.  Only where this deployable
+        // hosts the durable channel's context (its state rows carry
+        // last_event_id); foreign consumers keep the ack-semantics stance.
+        opts.durableBroker ? `        OutboxDelivery.setCurrentEventId(envelope.id());` : null,
+        opts.durableBroker ? `        try {` : null,
         `        switch (bare) {`,
         ...arms,
         `            default -> {`,
         `            }`,
         `        }`,
+        opts.durableBroker ? `        } finally {` : null,
+        opts.durableBroker ? `            OutboxDelivery.clear();` : null,
+        opts.durableBroker ? `        }` : null,
         `    }`,
         ``,
         `    @Override`,
@@ -1207,6 +1218,48 @@ export function renderJavaChannelFiles(
   return out;
 }
 
+/** The idempotent-consumer marker carrier (dispatch-delivery-semantics.md §3),
+ *  the Java analogue of dotnet's `OutboxDelivery` AsyncLocal.  The
+ *  ChannelConsumerService parks the received envelope's id (= the producer's
+ *  outbox row id) here around each dispatch; saga handlers compare/stamp their
+ *  `last_event_id` so at-least-once redelivery becomes effectively-once.  A
+ *  ThreadLocal is correct: the consumer invokes handlers on its own delivery
+ *  thread (the strict rabbit/kafka path) or a single-thread executor (redis).
+ *  Emitted whenever a hosted context carries a durable channel. */
+export function renderJavaOutboxDelivery(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `/** Ambient outbox-delivery context: the id of the outbox row being`,
+    ` *  delivered, or null for inline (ephemeral) dispatch.  Saga handlers no-op`,
+    ` *  when their state row already records this id (idempotent consumer —`,
+    ` *  at-least-once becomes effectively-once). */`,
+    `public final class OutboxDelivery {`,
+    `    private static final ThreadLocal<String> CURRENT = new ThreadLocal<>();`,
+    ``,
+    `    private OutboxDelivery() {`,
+    `    }`,
+    ``,
+    `    public static String currentEventId() {`,
+    `        return CURRENT.get();`,
+    `    }`,
+    ``,
+    `    public static void setCurrentEventId(String id) {`,
+    `        if (id == null) {`,
+    `            CURRENT.remove();`,
+    `        } else {`,
+    `            CURRENT.set(id);`,
+    `        }`,
+    `    }`,
+    ``,
+    `    public static void clear() {`,
+    `        CURRENT.remove();`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
 /** The transactional-outbox tier (M-T4.4 slice 7c — dispatch-delivery-
  *  semantics.md on java): the JPA entity mapped onto the MigrationsIR-owned
  *  `__loom_outbox` table, its Spring Data repository, and the polling relay
@@ -1214,11 +1267,9 @@ export function renderJavaChannelFiles(
  *  `renderJavaChannelFiles` is the recording half).  The payload stores the
  *  DSL-keyed `ChannelCodec.toData` map, so the relay builds envelopes
  *  without reconstructing event records.  Emitted only when hosted durable
- *  events ride a broker-bound channel.
- *
- *  Consumer-side saga `last_event_id` dedup is NOT wired on java yet — the
- *  documented in-mission residual; broker ack semantics + idempotent
- *  reactors carry redelivery (the slice-3 stance). */
+ *  events ride a broker-bound channel.  The envelope carries the row id as the
+ *  consumer-side idempotency key — the ChannelConsumerService parks it on
+ *  `OutboxDelivery` so a saga handler no-ops on a redelivery of the same id. */
 export function renderJavaOutboxFiles(
   basePkg: string,
   pkgs: { configPkg: string; entityPkg: string; repoPkg: string },

@@ -1,0 +1,23 @@
+system MoneyReturn {
+  subdomain Core {
+    context Billing {
+      aggregate Invoice with crudish {
+        subtotal: money
+        operation quote(): money {
+          return subtotal
+        }
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  api BillingApi from Core
+  storage pg { type: postgres }
+  resource st { for: Billing, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Billing]
+    dataSources: [st]
+    serves: BillingApi
+    port: 4000
+  }
+}

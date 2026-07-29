@@ -74,6 +74,7 @@ public sealed class Product
         e.Id = new ProductId(Guid.CreateVersion7());
         e.Sku = sku;
         e.Price = price;
+        e.Version = 1;
         e.AssertInvariants();
         return e;
     }

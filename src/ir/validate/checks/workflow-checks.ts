@@ -84,6 +84,30 @@ export function validateEventConsumersCarried(
         }
       }
     }
+    // A projection folds FOREIGN events, delivered through the same
+    // channel-routed in-process dispatch as a workflow reactor (projection.md
+    // `loom.projection-event-uncarried`, "reuses `loom.reactor-event-uncarried`").
+    // A fold whose event no channel carries never receives an event — its
+    // read-model row is never written.  Warn (not error), like the reactor twin:
+    // a model mid-construction, or one whose event arrives by a non-in-process
+    // transport, still builds.  Query-time projections have no folds, so this
+    // never fires for them.
+    for (const proj of c.projections) {
+      for (const h of proj.handlers) {
+        if (!carried.has(h.event)) {
+          diags.push({
+            severity: "warning",
+            code: "loom.projection-event-uncarried",
+            message:
+              `projection '${proj.name}': on(${h.param}: ${h.event}) folds event '${h.event}', but ` +
+              `no 'channel' carries it. In-process dispatch is channel-routed, so this fold never ` +
+              `runs and the read-model row is never written — declare a channel (e.g. ` +
+              `'channel C { carries: ${h.event} }') in the event's context.`,
+            source: `${c.name}/${proj.name}`,
+          });
+        }
+      }
+    }
   }
 }
 

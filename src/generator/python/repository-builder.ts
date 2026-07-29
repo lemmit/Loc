@@ -386,7 +386,9 @@ export function buildPyRepositoryFile(
     refersTo("PagedResult") ? "from app.domain.paging import PagedResult" : null,
     hasProv ? "from app.db.provenance import ProvenanceRecord" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
-    refersTo("iso") ? "from app.db.wire import iso" : null,
+    refersTo("iso") || refersTo("money_str")
+      ? `from app.db.wire import ${[refersTo("iso") ? "iso" : null, refersTo("money_str") ? "money_str" : null].filter(Boolean).join(", ")}`
+      : null,
     aggregateIsVersioned(agg)
       ? "from app.domain.errors import AggregateNotFoundError, ConcurrencyError"
       : "from app.domain.errors import AggregateNotFoundError",
@@ -1481,11 +1483,14 @@ function wireValue(
     return optional ? `(None if ${expr} is None else iso(${expr}))` : `iso(${expr})`;
   }
   if (t.kind === "primitive" && t.name === "money") {
-    // Money crosses the wire as its canonical decimal STRING on every
-    // backend (Hono `.toString()`, .NET/Java `ToString`, Phoenix
-    // `{type: string, format: decimal}`); a bare Decimal would JSON-encode
-    // as a number and diverge both the payload and the OpenAPI type.
-    return optional ? `(None if ${expr} is None else str(${expr}))` : `str(${expr})`;
+    // Money crosses the wire as its canonical decimal STRING via the shared
+    // `money_str` helper — the single python money→wire formatter (scalar op
+    // returns, workflows, and event-sourced payloads use it too), which pins
+    // the FIXED NUMERIC(19,4) wire scale (RS-12).  A bare Decimal would
+    // JSON-encode as a number and diverge both the payload and the OpenAPI
+    // type; a plain `str(...)` would leak a derived money's own scale
+    // (`money("0.00")` → `"0.00"`).
+    return optional ? `(None if ${expr} is None else money_str(${expr}))` : `money_str(${expr})`;
   }
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);

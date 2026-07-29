@@ -1,4 +1,5 @@
 import type { TypeIR } from "../../../ir/types/loom-ir.js";
+import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { javaValueTypeForId } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,12 @@ export function collectWireImports(t: TypeIR, into: Set<string>): Set<string> {
 export function domainToWire(t: TypeIR, expr: string): string {
   switch (t.kind) {
     case "primitive":
-      if (t.name === "money") return `${expr}.toPlainString()`;
+      // money → wire string at the FIXED money scale (RS-12): bare
+      // `toPlainString()` echoes the value's own scale (`12.5` vs `12.50`), so
+      // pin it to the canonical `NUMERIC(19,4)` scale for a wire value
+      // byte-consistent with the other backends.
+      if (t.name === "money")
+        return `${expr}.setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
       if (t.name === "datetime") return `${expr}.toString()`;
       return expr;
     case "id":
@@ -118,7 +124,8 @@ export function domainToWire(t: TypeIR, expr: string): string {
 function elementMapper(element: TypeIR): string | null {
   switch (element.kind) {
     case "primitive":
-      if (element.name === "money") return "__x -> __x.toPlainString()";
+      if (element.name === "money")
+        return `__x -> __x.setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
       if (element.name === "datetime") return "__x -> __x.toString()";
       return null;
     case "id":

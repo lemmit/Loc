@@ -101,7 +101,10 @@ describe("java generator — DTO records (S5)", () => {
     expect(dto).toContain(
       "public record OrderResponse(UUID id, String code, Status status, AddressResponse shipTo, String notes, String total, String placedAt, int version, List<LineItemResponse> lineItems, String lineTotal) {",
     );
-    expect(dto).toContain("value.total().toPlainString()");
+    // Money → wire string at the FIXED NUMERIC(19,4) scale (RS-12).
+    expect(dto).toContain(
+      "value.total().setScale(4, java.math.RoundingMode.HALF_UP).toPlainString()",
+    );
     expect(dto).toContain("value.placedAt().toString()");
     expect(dto).toContain("value.lineItems().stream().map(LineItemResponse::from).toList()");
   });

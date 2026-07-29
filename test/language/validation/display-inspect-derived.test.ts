@@ -157,6 +157,23 @@ describe("auto-injected `derived inspect`", () => {
     expect(u.inspectDerived?.name).toBe("inspect");
   });
 
+  it("rejects a non-string `derived inspect` type (loom.derived-inspect-not-string)", async () => {
+    // The `display` twin of this check is pinned above; `inspect` shares the
+    // interpolated `loom.derived-${name}-not-string` code path but was never
+    // asserted on its own (M-T9.19).
+    const { errors } = await parseString(`
+      context X {
+        aggregate Product {
+          qty: int
+          derived inspect: int = qty
+        }
+      }
+    `);
+    expect(errors.some((e) => /Reserved 'derived inspect'.*must have type 'string'/i.test(e))).toBe(
+      true,
+    );
+  });
+
   it("user-declared `derived inspect` overrides the auto-injected default", async () => {
     const loom = await buildLoomModel(`
       context X {

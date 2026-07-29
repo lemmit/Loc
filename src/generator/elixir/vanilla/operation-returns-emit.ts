@@ -31,6 +31,7 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { leafPath } from "../../_stmt/leaves.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
+import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
@@ -1096,8 +1097,17 @@ export function renderReturningOpControllerAction(
         ]
       : []),
   ];
+  // A scalar money RETURN carries the FIXED money wire scale (RS-12), same as a
+  // money field — a bare `%Decimal{}` Jason-encodes at its own scale.  Rounded
+  // inline (not via the wire-serialize `__money_round/1`, which is only emitted
+  // when the aggregate's own wire shape carries money) for parity with the
+  // node/.NET/java/python scalar-return path.
+  const scalarMoneyReturn = op.returnType?.kind === "primitive" && op.returnType.name === "money";
+  const okClause = scalarMoneyReturn
+    ? `  def ${resultFn}(conn, {:ok, success}), do: json(conn, Decimal.round(success, ${MONEY_WIRE_SCALE}))`
+    : `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`;
   const resultClauses = [
-    `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`,
+    okClause,
     ...errorVariantsOf(op, ctx).map(
       (v) => `  def ${resultFn}(conn, {:error, ${JSON.stringify(v.tag)}, data}),
     do: problem_variant(conn, ${v.status}, ${JSON.stringify(v.type)}, ${JSON.stringify(v.title)}, data)`,

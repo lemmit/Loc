@@ -71,6 +71,7 @@ import {
   isPrimitiveConversion,
   isPrimitiveType,
   isProperty,
+  isRepository,
   isRetrieval,
   isSlotType,
   isStringLit,
@@ -800,6 +801,26 @@ function typeOfPostfixChain(expr: PostfixChain, env: Env): DddType {
       return curType;
     }
   }
+  // `<Repository>.<method>(...)` — a repository read yields an aggregate (or a
+  // collection of them).  A workflow body binds `let s = Orders.getById(id)` and
+  // then calls operations on `s`; without this the bare repository NAME types
+  // `unknown` and every downstream `s.op(...)` is suppressed.  Recognised: a
+  // declared `find` (its `returnType`), the built-in single-loaders
+  // `getById`/`findById` (the aggregate), and `findAll`/`all` (an array of it).
+  // Writes and unrecognised methods stay `unknown` (fail open — no false type).
+  if (isNameRef(expr.head) && first && isMemberSuffix(first) && first.call) {
+    const repo = lookupRepositoryByName(expr.head.name, env);
+    if (repo) {
+      const t = repositoryMethodType(repo, first.member);
+      if (t.kind !== "unknown") {
+        curType = t;
+        for (let i = 1; i < expr.suffixes.length; i++) {
+          curType = typeAfterSuffix(curType, expr.suffixes[i]!, env);
+        }
+        return curType;
+      }
+    }
+  }
   curType = typeOf(expr.head, env);
   for (const s of expr.suffixes) {
     curType = typeAfterSuffix(curType, s, env);
@@ -1234,6 +1255,32 @@ function typeOfBuilderCall(expr: import("./generated/ast.js").BuilderCall, env: 
       ? { kind: "aggregate", ref: ent }
       : { kind: "entity", ref: ent };
   }
+  return T.unknown;
+}
+
+/** Resolve a bare repository name against the enclosing bounded context —
+ *  a workflow body reads through a repository by bare name (`Orders.getById(id)`). */
+function lookupRepositoryByName(name: string, env: Env): Repository | undefined {
+  const ctx = envContext(env);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isRepository(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** The type a `<Repository>.<method>(...)` read yields, or `unknown` for a write
+ *  / unrecognised method (fail open — leaves the receiver untyped).  A declared
+ *  `find` yields its `returnType`; the built-in single-loaders `getById` /
+ *  `findById` yield the repository's aggregate; `findAll` / `all` yield an array
+ *  of it (see docs/generators.md — every repository auto-emits these). */
+function repositoryMethodType(repo: Repository, method: string): DddType {
+  const declared = repo.finds.find((f) => f.name === method);
+  if (declared) return resolveTypeRef(declared.returnType);
+  const agg = repo.aggregate?.ref;
+  if (!agg) return T.unknown;
+  if (method === "getById" || method === "findById") return { kind: "aggregate", ref: agg };
+  if (method === "findAll" || method === "all") return T.array({ kind: "aggregate", ref: agg });
   return T.unknown;
 }
 

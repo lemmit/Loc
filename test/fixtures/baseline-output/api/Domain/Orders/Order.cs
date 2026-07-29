@@ -101,6 +101,7 @@ public sealed class Order
         e.CustomerId = customerId;
         e.Status = status;
         e.PlacedAt = placedAt;
+        e.Version = 1;
         e.AssertInvariants();
         return e;
     }

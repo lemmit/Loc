@@ -5,10 +5,11 @@
 Loom is a high-level DSL that lets you describe complete systems at the
 altitude of a no-code platform &mdash; and walk away with real, owned
 source code across five backends (**Hono**, **.NET**, **Phoenix
-LiveView**, **Java/Spring Boot**, **Python/FastAPI**) and four frontends
-(**React**, **Vue**, **Svelte**, **Angular**).  No vendor lock-in.  No
-scaling cliff.  No drift between layers.  Just the model, a visual
-builder, and full ownership of every line that's generated.
+LiveView**, **Java/Spring Boot**, **Python/FastAPI**) and six frontends
+(**React**, **Vue**, **Svelte**, **Angular**, **Feliz** (F#/Fable),
+**Flutter**).  No vendor lock-in.  No scaling cliff.  No drift between
+layers.  Just the model, a visual builder, and full ownership of every
+line that's generated.
 
 - All the speed of no-code
 - All the source you'd write by hand
@@ -25,8 +26,8 @@ in-browser test runner), and the full documentation set.
 | | |
 |---|---|
 | **Backends** | Hono · .NET · Phoenix LiveView · Java/Spring Boot · Python/FastAPI |
-| **Frontends** | React · Vue · Svelte · Angular |
-| **Design systems** | Mantine · shadcn/ui · MUI · Chakra (React) · Vuetify · shadcnVue (Vue) · shadcnSvelte · Flowbite (Svelte) · Angular Material · Phoenix HEEx — swap any time |
+| **Frontends** | React · Vue · Svelte · Angular · Feliz (F#/Fable) · Flutter |
+| **Design systems** | Mantine · shadcn/ui · MUI · Chakra (React) · Vuetify · shadcnVue (Vue) · shadcnSvelte · Flowbite (Svelte) · Angular Material · PrimeNG · Spartan/NG (Angular) · Phoenix HEEx (coreComponents, daisyui) — swap any time |
 | **Visual tools** | Typed editor · system builder · live preview · in-browser test runner |
 | **Quality story** | `requirement` → `solution` → `testCase` → `test` → `ddd verify` → per-requirement Definition-of-Done verdicts |
 | **LLM-safe** | One source of truth · validated before emission · refactor the model, regenerate the stack |
@@ -153,7 +154,7 @@ npm run langium:generate    # generate the parser from src/language/ddd.langium
 npm run build               # tsc -b
 ```
 
-Requires Node 18+.
+Requires Node 20+.
 
 ## CLI
 
@@ -163,7 +164,7 @@ ddd generate ts     <file.ddd> -o <out>    # single Hono project (legacy single-
 ddd generate dotnet <file.ddd> -o <out>    # single .NET project (legacy)
 ddd generate system <file.ddd> -o <out>    # full multi-deployable tree + docker-compose.yml
 ddd snapshot        <file.ddd> -o <out>    # capture immutable .loom/snapshots/<ts>-<guid>.loomsnap.json (provenance rule snapshot)
-ddd verify          <file.ddd> -o <out>    # run generated test suites + roll results into .loom/verification.{json,md}
+ddd verify          <file.ddd> --results <results.json>  # join existing test-results onto the requirements graph → .loom/verification.{json,md} (gates the exit code; does NOT run the suites)
 ```
 
 Common flags:
@@ -180,15 +181,19 @@ errors.
 
 ## What's in the box
 
-**Four runtimes from one source.** Hono (TypeScript), ASP.NET Core
-(.NET), Phoenix LiveView (Elixir, plain Ecto/Phoenix), React frontend.  Pick per
+**Five backends from one source.** Hono (TypeScript), ASP.NET Core
+(.NET), Phoenix LiveView (Elixir, plain Ecto/Phoenix), Spring Boot
+(Java), and FastAPI (Python).  Six frontends &mdash; React, Vue,
+Svelte, Angular, Feliz (F#/Fable/Elmish), Flutter.  Pick per
 deployable.  Switch any time.  Identical API contracts; idiomatic
 per-runtime output.
 
-**Five design packs.** Mantine, shadcn/ui, MUI, Chakra, and Phoenix
-HEEx ship in-tree.  The page DSL is identical; only the rendering
-changes.  Bring your own &mdash; design packs are just templates
-against a small page contract.
+**Thirteen design packs.** Mantine, shadcn/ui, MUI, Chakra (React),
+Vuetify, shadcnVue (Vue), Flowbite, shadcnSvelte (Svelte), Angular
+Material, PrimeNG, Spartan/NG (Angular), and the Phoenix HEEx packs
+(coreComponents, daisyui) ship in-tree.  The page DSL is identical;
+only the rendering changes.  Bring your own &mdash; design packs are
+just templates against a small page contract.
 
 **Browser playground.** Typed editor with LSP support, visual system
 builder for deployables and modules, live preview of the generated
@@ -212,7 +217,7 @@ emitted.
 factories, invariant checks, derived properties, domain events.
 Repositories with `find-by-id`, `save`, `find-all`, plus your finds,
 all with master-detail load/save.  HTTP routes per operation and find.
-Generated migrations (Drizzle / EF Core / Ecto).  Generated UI pages
+Generated migrations (Drizzle / EF Core / Ecto / JPA / SQLAlchemy).  Generated UI pages
 (list, detail, create) with a modal-form button per public operation.
 Generated end-to-end tests against the live stack &mdash; the same DSL
 test runs against whichever runtime you point it at.
@@ -240,24 +245,28 @@ src/
   macros/          # macro pipeline — expander, registry, authoring API, stdlib (scaffold/audit/softDelete/crudish)
   ir/              # IR types, lowering, enrichment, validation
   generator/
-    typescript/    # Hono backend (procedural emitters + builders)
+    typescript/    # shared TypeScript emitter (consumed by the Hono backend)
     dotnet/        # ASP.NET Core + EF Core + Mediator backend
-    phoenix-live-view/   # Phoenix LiveView backend (plain Ecto/Phoenix, HEEx walker)
-    react/         # React frontend + walker target + page-object generator
-    _packs/        # design-pack discovery + loader (Mantine/shadcn/MUI/Chakra/ashPhoenix)
+    java/          # Spring Boot + Spring Data JPA backend
+    python/        # FastAPI + SQLAlchemy backend
+    elixir/        # Phoenix LiveView backend (plain Ecto/Phoenix, HEEx walker)
+    react/ vue/ svelte/ angular/ feliz/ flutter/   # the six frontends + walker targets + page-object generators
+    _packs/        # design-pack discovery + loader (13 pack families)
     _walker/       # cross-framework walker registry + WalkerTarget contract
+    _expr/ _type/ _workflow/   # shared dispatchers + per-backend leaf tables
     _obs/          # observability catalog + per-backend log renderers
-  platform/        # PlatformSurface registry + version pinning (node@v4, dotnet, react, elixir)
+  platform/        # PlatformSurface registry + version pinning; Hono lives under platform/hono/v4 & v5
   system/          # multi-deployable orchestrator + docker-compose + .loom/ artifact bundle
   verify/          # ddd verify rollup (joins test results onto traceability)
+  mcp/ dap-server/ # MCP + DAP stdio-server cores (Node-only islands over src/tools + src/dap)
   cli/             # bin entry point
   util/            # naming + code-building helpers
 
-packages/          # published workspaces: @loom/core · @loom/backend-hono-v4 · @loom/ui-test-driver
+packages/          # published workspaces: @loom/core · @loom/backend-hono-v4 · @loom/backend-hono-v5 · @loom/ui-test-driver · ddd-mcp · ddd-dap
 web/               # browser playground (editor, system builder, live preview, test runner)
 vscode/            # VS Code extension (LSP client)
-designs/           # 5 design packs — mantine, shadcn, mui, chakra, ashPhoenix
-stacks/v{1,2,3}/   # versioned generated-project dependency manifests
+designs/           # 13 design-pack families (versioned) — mantine, mui, chakra, shadcn (React); vuetify, shadcnVue (Vue); flowbite, shadcnSvelte (Svelte); angularMaterial, primeng, spartanNg (Angular); coreComponents, daisyui (HEEx)
+stacks/            # versioned generated-project dependency manifests (v1, v3, vue1, sv1, ng1)
 test/              # vitest suites + opt-in docker e2e
 examples/          # sample .ddd sources
 docs/              # full reference documentation
@@ -300,8 +309,11 @@ The headline references:
 | [`tools.md`](docs/tools.md) | CLI usage, `.loomignore`, watch mode, Docker workflow, OpenAPI parity check, proxy CAs. |
 
 Per-feature references &mdash; [`auth.md`](docs/auth.md),
-[`views.md`](docs/views.md),
+[`tenancy.md`](docs/tenancy.md),
 [`workflow.md`](docs/workflow.md),
+[`payloads.md`](docs/payloads.md),
+[`inheritance.md`](docs/inheritance.md),
+[`channels.md`](docs/channels.md),
 [`extern.md`](docs/extern.md),
 [`capabilities.md`](docs/capabilities.md),
 [`scaffold-macros.md`](docs/scaffold-macros.md),
@@ -309,16 +321,19 @@ Per-feature references &mdash; [`auth.md`](docs/auth.md),
 [`observability.md`](docs/observability.md),
 [`traceability.md`](docs/traceability.md),
 [`conformance.md`](docs/conformance.md),
-[`migrations-design.md`](docs/migrations-design.md) &mdash; plus
+[`migrations.md`](docs/migrations.md),
+[`verify.md`](docs/verify.md),
+[`debugging.md`](docs/debugging.md) &mdash; plus
 [`macro-api.md`](docs/macro-api.md) for the macro authoring surface,
 [`loom-artifacts.md`](docs/loom-artifacts.md) for the `.loom/`
 derived-artifact directory, and
 [`license-faq.md`](docs/license-faq.md) for usage terms.
 
-In-flight design lives under [`docs/old/plans/`](docs/old/plans/); empirical
-snapshots live under [`docs/audits/`](docs/audits/); unadopted
-proposals live under `docs/old/proposals/` (not deployed to the docs
-site; [browse on GitHub](https://github.com/lemmit/Loc/tree/main/docs/old/proposals)).
+The live roadmap lives under [`docs/new-plan/`](docs/new-plan/) (tracks
++ agent-pickable missions); the archived design corpus &mdash; frozen
+proposals and plans &mdash; lives under `docs/old/` (not deployed to
+the docs site; [browse on GitHub](https://github.com/lemmit/Loc/tree/main/docs/old/));
+empirical snapshots live under [`docs/audits/`](docs/audits/).
 
 Plus [`experience_gathered.md`](experience_gathered.md) &mdash; running
 retrospective of design choices and gotchas; worth reading before
@@ -326,18 +341,21 @@ non-trivial changes.
 
 ## Status
 
-- **213 test files / 2,300+ tests** cover parsing, validation, all
-  four backends, the system orchestrator, the CLI, design-pack
-  rendering, and the cross-platform OpenAPI parity harness.
+- **1,300+ test files / 9,000+ tests** cover parsing, validation, all
+  five backends and six frontends, the system orchestrator, the CLI,
+  design-pack rendering, and the cross-platform OpenAPI parity harness.
 - **Opt-in suites** gated on `LOOM_E2E=1` /
   `LOOM_TS_BUILD=1` / `LOOM_REACT_BUILD=1` / `LOOM_DOTNET_BUILD=1` /
-  `LOOM_PHOENIX_BUILD=1` / `LOOM_OBS_E2E*=1` build and boot the
+  `LOOM_JAVA_BUILD=1` / `LOOM_PYTHON_BUILD=1` /
+  `LOOM_PHOENIX_VANILLA_BUILD=1` / `LOOM_OBS_E2E*=1` build and boot the
   generated stacks against real toolchains (vitest, tsup, tsc,
-  `dotnet build /warnaserror`, `mix compile --warnings-as-errors`).
+  `dotnet build /warnaserror`, `gradle testClasses bootJar`,
+  `uv sync` + ruff + mypy + pytest, `mix compile --warnings-as-errors`).
 - **CI matrix** generates every example against every design pack and
-  `tsc --noEmit`s the React output; .NET output is `dotnet build
-  /warnaserror`'d; Phoenix output is compiled against plain Ecto/Phoenix
-  in an Elixir docker image.
+  `tsc --noEmit`s the frontend output; the backends are compiled against
+  real toolchains &mdash; .NET `dotnet build /warnaserror`'d, Java built
+  with Gradle, Python type-checked with mypy, and Phoenix compiled
+  against plain Ecto/Phoenix in an Elixir docker image.
 
 ## License
 

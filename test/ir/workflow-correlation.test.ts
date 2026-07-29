@@ -161,6 +161,39 @@ describe("uncarried event consumer (channel-routed dispatch)", () => {
     const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
     expect(codes).not.toContain("loom.reactor-event-uncarried");
   });
+
+  // A projection fold is delivered through the same channel-routed in-process
+  // dispatch, so an uncarried folded event warns the same way a reactor does.
+  it("warns when no channel carries a projection fold's event", async () => {
+    const noChannel = `
+      system S { subdomain M { context C {
+        aggregate Order { total: int }
+        event OrderPlaced { order: Order id, customer: int }
+        projection OrderBook keyed by order {
+          order: Order id
+          on(e: OrderPlaced) { order := e.order }
+        }
+      }}}`;
+    const { model } = await parseString(noChannel, { validate: false });
+    const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
+    expect(codes).toContain("loom.projection-event-uncarried");
+  });
+
+  it("is silent when a channel carries the projection's folded event", async () => {
+    const withChannel = `
+      system S { subdomain M { context C {
+        aggregate Order { total: int }
+        event OrderPlaced { order: Order id, customer: int }
+        channel Book { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+        projection OrderBook keyed by order {
+          order: Order id
+          on(e: OrderPlaced) { order := e.order }
+        }
+      }}}`;
+    const { model } = await parseString(withChannel, { validate: false });
+    const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code ?? "");
+    expect(codes).not.toContain("loom.projection-event-uncarried");
+  });
 });
 
 describe("ambiguous channel routing (channel-routed dispatch)", () => {

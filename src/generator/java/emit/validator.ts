@@ -1,5 +1,10 @@
 import { emitsRestCreate, forCreateInput } from "../../../ir/enrich/wire-projection.js";
-import type { EnrichedAggregateIR, InvariantIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  InvariantIR,
+  TypeIR,
+  ValueObjectIR,
+} from "../../../ir/types/loom-ir.js";
 import {
   type ClassifyContext,
   classifyForWire,
@@ -64,13 +69,60 @@ interface CommandSpec {
   params: { name: string; type: TypeIR; optional?: boolean }[];
   invariants: InvariantIR[];
   available: ReadonlySet<string>;
+  /** VO-invariant → 422: the request's value-object-typed fields whose VO
+   *  carries its own invariant.  Each nest-invokes a `<VO>Validator` over the
+   *  wire request field (before the service constructs the throwing domain VO). */
+  voFields: { field: string; voClass: string; each: boolean }[];
 }
 
 function eff(t: TypeIR, optional: boolean): TypeIR {
   return optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
 }
 
-function commandSpecs(agg: EnrichedAggregateIR): CommandSpec[] {
+/** Resolve a (possibly array/optional-wrapped) type to the value object it
+ *  bears, plus whether the field is a collection (single vs `List<>`). */
+function voBorne(type: TypeIR): { name: string; each: boolean } | null {
+  switch (type.kind) {
+    case "valueobject":
+      return { name: type.name, each: false };
+    case "array": {
+      const e = voBorne(type.element);
+      return e ? { name: e.name, each: true } : null;
+    }
+    case "optional":
+      return voBorne(type.inner);
+    default:
+      return null;
+  }
+}
+
+/** True when a value object carries at least one wire-boundary rule. */
+export function voHasWireRules(vo: ValueObjectIR): boolean {
+  const available = new Set(vo.fields.map((f) => f.name));
+  return vo.invariants.some((inv) => classifyForWire(inv, { available }));
+}
+
+/** The VO-typed request fields whose VO carries wire rules — the nested
+ *  validators a command validator invokes (empty ⇒ none). */
+function voRequestFields(
+  params: { name: string; type: TypeIR }[],
+  voByName: ReadonlyMap<string, ValueObjectIR>,
+): { field: string; voClass: string; each: boolean }[] {
+  const out: { field: string; voClass: string; each: boolean }[] = [];
+  for (const p of params) {
+    const borne = voBorne(p.type);
+    if (!borne) continue;
+    const vo = voByName.get(borne.name);
+    if (!vo || !voHasWireRules(vo)) continue;
+    out.push({ field: p.name, voClass: `${borne.name}Validator`, each: borne.each });
+  }
+  return out;
+}
+
+function commandSpecs(
+  agg: EnrichedAggregateIR,
+  voByName: ReadonlyMap<string, ValueObjectIR>,
+): CommandSpec[] {
   const specs: CommandSpec[] = [];
   const createInputs = forCreateInput(agg.fields);
   // A create validator exists only when there's a field-derived Create<Agg>Request
@@ -85,6 +137,7 @@ function commandSpecs(agg: EnrichedAggregateIR): CommandSpec[] {
       params: createInputs.map((f) => ({ name: f.name, type: f.type, optional: f.optional })),
       invariants: agg.invariants,
       available: new Set(createInputs.map((f) => f.name)),
+      voFields: voRequestFields(createInputs, voByName),
     });
   }
   for (const op of agg.operations) {
@@ -106,20 +159,68 @@ function commandSpecs(agg: EnrichedAggregateIR): CommandSpec[] {
       // op.params` drops invariants over fields the op doesn't take.
       invariants: [...agg.invariants, ...preconditions],
       available: new Set(op.params.map((p) => p.name)),
+      voFields: voRequestFields(op.params, voByName),
     });
   }
   return specs;
+}
+
+/** Build the `<VO> → ValueObjectIR` lookup a validator emit needs to resolve a
+ *  request field's VO invariants. */
+function voLookup(vos: readonly ValueObjectIR[]): Map<string, ValueObjectIR> {
+  return new Map(vos.map((v) => [v.name, v]));
 }
 
 export function renderJavaCommandValidators(
   agg: EnrichedAggregateIR,
   pkg: string,
   basePkg: string,
+  /** The context's value objects — a VO-typed request field carrying its own
+   *  invariant nest-invokes a `<VO>Validator` (VO→422).  Defaults to none for
+   *  callers predating the VO path (behaviour-preserving). */
+  vos: readonly ValueObjectIR[] = [],
 ): JavaCommandValidator[] {
+  const voByName = voLookup(vos);
   const out: JavaCommandValidator[] = [];
-  for (const spec of commandSpecs(agg)) {
+  for (const spec of commandSpecs(agg, voByName)) {
     const content = renderValidatorClass(spec, pkg, basePkg);
     if (content) out.push({ className: spec.className, requestType: spec.requestType, content });
+  }
+  return out;
+}
+
+/** The `<VO>Validator implements Validator` classes for every value object
+ *  (used by this aggregate's requests) that carries its own invariant — the
+ *  nested validators the command validators invoke.  Reuses the command
+ *  validator renderer with the VO's own fields/invariants as the "command". */
+export function renderJavaVoValidators(
+  agg: EnrichedAggregateIR,
+  vos: readonly ValueObjectIR[],
+  pkg: string,
+  basePkg: string,
+): JavaCommandValidator[] {
+  const voByName = voLookup(vos);
+  const wanted = new Set<string>();
+  for (const spec of commandSpecs(agg, voByName))
+    for (const f of spec.voFields) wanted.add(f.voClass.slice(0, -"Validator".length));
+  const out: JavaCommandValidator[] = [];
+  for (const name of wanted) {
+    const vo = voByName.get(name);
+    if (!vo) continue;
+    const content = renderValidatorClass(
+      {
+        className: `${vo.name}Validator`,
+        requestType: `${vo.name}Request`,
+        params: vo.fields.map((f) => ({ name: f.name, type: f.type })),
+        invariants: vo.invariants,
+        available: new Set(vo.fields.map((f) => f.name)),
+        voFields: [],
+      },
+      pkg,
+      basePkg,
+    );
+    if (content)
+      out.push({ className: `${vo.name}Validator`, requestType: `${vo.name}Request`, content });
   }
   return out;
 }
@@ -130,18 +231,52 @@ export function renderJavaCommandValidators(
  *  mirroring the old `opHasWireValidator` render-and-check. */
 export function javaCommandValidatorNames(
   agg: EnrichedAggregateIR,
+  vos: readonly ValueObjectIR[] = [],
 ): { className: string; requestType: string }[] {
-  return renderJavaCommandValidators(agg, "_", "_").map(({ className, requestType }) => ({
+  return renderJavaCommandValidators(agg, "_", "_", vos).map(({ className, requestType }) => ({
     className,
     requestType,
   }));
+}
+
+/** The `<VO>Validator` nested-invoke blocks for a command's VO-typed fields —
+ *  each pushes the field's nested error path, runs the VO validator over the
+ *  wire request field, and pops (so a `qty.value` error surfaces as `/qty/value`).
+ *  A collection field iterates with an indexed nested path. */
+function voNestedInvokes(spec: CommandSpec): string[] {
+  const out: string[] = [];
+  for (const f of spec.voFields) {
+    const accessor = `request.${f.field}()`;
+    if (f.each) {
+      out.push(
+        `        if (${accessor} != null) {`,
+        `            for (int i = 0; i < ${accessor}.size(); i++) {`,
+        `                errors.pushNestedPath("${f.field}[" + i + "]");`,
+        `                ValidationUtils.invokeValidator(new ${f.voClass}(), ${accessor}.get(i), errors);`,
+        `                errors.popNestedPath();`,
+        `            }`,
+        `        }`,
+      );
+    } else {
+      out.push(
+        `        if (${accessor} != null) {`,
+        `            errors.pushNestedPath("${f.field}");`,
+        `            ValidationUtils.invokeValidator(new ${f.voClass}(), ${accessor}, errors);`,
+        `            errors.popNestedPath();`,
+        `        }`,
+      );
+    }
+  }
+  return out;
 }
 
 function renderValidatorClass(spec: CommandSpec, pkg: string, basePkg: string): string | null {
   const imports = new Set<string>();
   const regexFields = new Map<string, string>();
   const checks = buildChecks(spec, imports, regexFields);
-  if (checks.length === 0) return null;
+  const voInvokes = voNestedInvokes(spec);
+  if (checks.length === 0 && voInvokes.length === 0) return null;
+  if (voInvokes.length > 0) imports.add("org.springframework.validation.ValidationUtils");
 
   // Parse-locals only for fields the checks actually reference (bare names),
   // mirroring the service's wire→domain parse so predicates run over the domain
@@ -187,6 +322,7 @@ function renderValidatorClass(spec: CommandSpec, pkg: string, basePkg: string): 
     `        var request = (${spec.requestType}) target;`,
     ...lets,
     ...checks,
+    ...voInvokes,
     `    }`,
     `}`,
     ``,

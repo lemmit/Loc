@@ -36,6 +36,7 @@ import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderHelmChart } from "./helm.js";
+import { renderMessageCatalog } from "./i18n-catalog.js";
 import { renderKubernetesManifests } from "./kubernetes.js";
 import { renderVsCodeLaunchJson } from "./launch-config.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
@@ -333,6 +334,11 @@ function emitSystem(
   // Wire-spec artifact — diffable record of every aggregate / part /
   // value object's canonical wire shape.  See `wire-spec.ts`.
   out.set(".loom/wire-spec.json", renderWireSpec(sys));
+  // Source-language (English) i18n message catalog — every user-visible string
+  // extracted from the system's UIs, keyed by content-hash (D-I18N-KEY).  The
+  // diff surface `ddd i18n sync` merges each locale against.  See
+  // `i18n-catalog.ts` and docs/old/proposals/i18n.md.
+  out.set(".loom/messages.en.json", renderMessageCatalog(sys));
   // Mermaid views of the IR — a domain class diagram and a per-workflow
   // call flowchart.  The playground previews them inline; GitHub renders
   // them in fences.  See `mermaid.ts`.

@@ -37,11 +37,6 @@ import {
   opOperation,
 } from "../../ir/util/openapi-ids.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
-import {
-  classifyForWire,
-  type SingleFieldPattern,
-  singleFieldConstraints,
-} from "../../ir/validate/invariant-classify.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import {
   defaultErrorStatus,
@@ -49,12 +44,16 @@ import {
   errorTypeUri,
   resolveErrorStatus,
 } from "../../util/error-defaults.js";
-import { messageCode } from "../../util/message-code.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
+import {
+  createFieldConstraints,
+  createModelValidator,
+  withFieldConstraint,
+} from "./emit/wire-constraints.js";
 import { renderPyExpr } from "./render-expr.js";
 import { aggHasFieldMask, emittableFinds } from "./repository-builder.js";
 
@@ -489,128 +488,6 @@ function payloadFieldPyType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
  *  + classifier filtering Hono uses (`takeSingleFieldChain`); `&&` conjuncts
  *  on one field (e.g. `email.matches(r) && email.length <= 120`) become a
  *  single `Field(pattern=, max_length=)`. */
-function createFieldConstraints(
-  invariants: InvariantIR[],
-  available: ReadonlySet<string>,
-): Map<string, string> {
-  const byField = new Map<string, SingleFieldPattern[]>();
-  for (const inv of invariants) {
-    if (!classifyForWire(inv, { available })) continue;
-    // A messaged rule carries author text, so it routes through the
-    // `@model_validator` refine carrier (which has a message slot) rather
-    // than a native `Field(...)` constraint (whose message is Pydantic's
-    // default) — mirroring the .NET/Hono carriers.
-    if (inv.message) continue;
-    const cons = singleFieldConstraints(inv);
-    if (!cons) continue;
-    for (const { field, pattern } of cons) {
-      if (!available.has(field)) continue;
-      byField.set(field, [...(byField.get(field) ?? []), pattern]);
-    }
-  }
-  const out = new Map<string, string>();
-  for (const [field, patterns] of byField) {
-    const kwargs: string[] = [];
-    const seen = new Set<string>();
-    for (const p of patterns) {
-      for (const kw of pydanticKwargs(p)) {
-        const key = kw.slice(0, kw.indexOf("="));
-        if (seen.has(key)) continue; // first constraint wins on a duplicate key
-        seen.add(key);
-        kwargs.push(kw);
-      }
-    }
-    if (kwargs.length > 0) out.set(field, `Field(${kwargs.join(", ")})`);
-  }
-  return out;
-}
-
-function pydanticKwargs(p: SingleFieldPattern): string[] {
-  switch (p.kind) {
-    case "min":
-      // Exclusive (`weight > 0.5` on a decimal/money field) → pydantic's `gt=`;
-      // inclusive keeps `ge=`.
-      return [p.exclusive ? `gt=${p.n}` : `ge=${p.n}`];
-    case "max":
-      return [p.exclusive ? `lt=${p.n}` : `le=${p.n}`];
-    case "between":
-      return [`ge=${p.lo}`, `le=${p.hi}`];
-    case "len-min":
-      return [`min_length=${p.n}`];
-    case "len-max":
-      return [`max_length=${p.n}`];
-    case "len-eq":
-      return [`min_length=${p.n}`, `max_length=${p.n}`];
-    case "len-range":
-      return [`min_length=${p.lo}`, `max_length=${p.hi}`];
-    case "regex":
-      return [`pattern=${pyRawRegex(p.pattern)}`];
-  }
-}
-
-/** Render a regex source as a Python raw-string literal (backslashes are
- *  regex escapes, not string escapes).  Falls back to a JSON string only if
- *  the source contains both quote kinds (regexes effectively never do). */
-function pyRawRegex(src: string): string {
-  if (!src.includes('"')) return `r"${src}"`;
-  if (!src.includes("'")) return `r'${src}'`;
-  return JSON.stringify(src);
-}
-
-/** Splice a derived `Field(...)` onto a request-field declaration, folding any
- *  existing default (`= None` / `= False`) into `Field(default=…, …)` so the
- *  field's optionality is preserved. */
-function withFieldConstraint(name: string, decl: string, fieldExpr: string | undefined): string {
-  if (!fieldExpr) return `    ${name}: ${decl}`;
-  const eq = decl.indexOf(" = ");
-  if (eq === -1) return `    ${name}: ${decl} = ${fieldExpr}`;
-  const type = decl.slice(0, eq);
-  const dflt = decl.slice(eq + 3);
-  const inner = fieldExpr.slice("Field(".length, -1);
-  return `    ${name}: ${type} = Field(default=${dflt}, ${inner})`;
-}
-
-/** A Pydantic `@model_validator(mode="after")` enforcing the wire-scoped
- *  invariants that are NOT single-field shapes (cross-field comparisons like
- *  `handle != email`, or guarded predicates) — the refine fallback the other
- *  backends emit (Hono's `.refine`, Phoenix's `validate fn`).  Single-field
- *  invariants are handled by `Field(...)` constraints; this raises ValueError
- *  → FastAPI 422 for the rest, so a violation surfaces as 422 (not the
- *  domain's DomainError → 400).  Predicates render against the request DTO's
- *  verbatim camelCase fields (`self.handle`). */
-function createModelValidator(
-  invariants: InvariantIR[],
-  available: ReadonlySet<string>,
-  cls: string,
-): string | null {
-  const refines = invariants.filter(
-    (inv) =>
-      classifyForWire(inv, { available }) && (inv.message != null || !singleFieldConstraints(inv)),
-  );
-  if (refines.length === 0) return null;
-  const checks = refines.map((inv) => {
-    const pred = renderPyExpr(inv.expr, { thisName: "self", wireField: true });
-    const ok = inv.guard
-      ? `not (${renderPyExpr(inv.guard, { thisName: "self", wireField: true })}) or (${pred})`
-      : pred;
-    // A messaged rule raises PydanticCustomError so the wire error carries a
-    // stable content-hash `type` (surfaced as `errors[].code`, the i18n key) —
-    // and cleanly drops the "Value error, " prefix a bare ValueError adds. A
-    // message-less rule keeps `raise ValueError(...)`, byte-identical.
-    const raise = inv.message
-      ? `raise PydanticCustomError(${JSON.stringify(messageCode(inv.message.text))}, ${JSON.stringify(inv.message.text)})`
-      : `raise ValueError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
-    return lines(`        if not (${ok}):`, `            ${raise}`);
-  });
-  return lines(
-    "",
-    '    @model_validator(mode="after")',
-    `    def _check_invariants(self) -> "${cls}":`,
-    ...checks,
-    "        return self",
-  );
-}
-
 function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   // Event-sourced create: the request shape is the create ACTION's
   // params (the command), not the field set (appliers A2.2).

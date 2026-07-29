@@ -74,6 +74,7 @@ import {
   KAFKA_CLIENTS_VERSION,
   LETTUCE_CORE_VERSION,
   renderJavaChannelFiles,
+  renderJavaOutboxDelivery,
   renderJavaOutboxFiles,
 } from "./emit/channels.js";
 import {
@@ -181,7 +182,7 @@ import {
   renderJavaDomainUnionFiles,
   renderJavaUnionWireFiles,
 } from "./emit/unions.js";
-import { renderJavaCommandValidators } from "./emit/validator.js";
+import { renderJavaCommandValidators, renderJavaVoValidators } from "./emit/validator.js";
 import { referencedValueObjects } from "./emit/wire.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
 import {
@@ -350,6 +351,13 @@ function emitProjectFromContexts(
   // `queue`/`work` consumer relies on broker ack semantics + idempotent
   // reactors (the slice-3 stance).
   const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
+  // Idempotent-consumer marker carrier (dispatch-delivery-semantics.md §3): the
+  // saga dispatcher's handler preamble references OutboxDelivery whenever a
+  // hosted context carries a durable channel, so it must exist whether or not a
+  // broker is wired.  Byte-identical for channel-less / ephemeral-only projects.
+  if (hostedDurable.size > 0) {
+    place("OutboxDelivery.java", "domain-common", renderJavaOutboxDelivery(basePkg));
+  }
   const durableBrokerEvents = new Set(
     channelBindings
       .filter((b) => b.retention === "work" || b.retention === "log")
@@ -1608,7 +1616,12 @@ function emitAggregate(
   }
   // Wire-boundary validators — one Spring Validator per command shape, run at
   // the controller's `@Valid` seam (registered via @InitBinder in api.ts).
-  for (const v of renderJavaCommandValidators(agg, applicationPkg, basePkg)) {
+  for (const v of renderJavaCommandValidators(agg, applicationPkg, basePkg, ctx.valueObjects)) {
+    place(`${v.className}.java`, "service", v.content, agg.name, agg.origin, construct);
+  }
+  // VO-invariant → 422: the `<VO>Validator`s the command validators nest-invoke
+  // over each VO-typed wire request field (before the service builds domain VOs).
+  for (const v of renderJavaVoValidators(agg, ctx.valueObjects, applicationPkg, basePkg)) {
     place(`${v.className}.java`, "service", v.content, agg.name, agg.origin, construct);
   }
   place(

@@ -673,7 +673,15 @@ project (routing, RQ hooks, page objects, smoke tests) is identical.
 | `shadcn` | `designs/shadcn/` | v3, v4 | Tailwind + Radix primitives | `shadcn@v4` |
 | `mui` | `designs/mui/` | v5, v7 | `@mui/material` | `mui@v7` |
 | `chakra` | `designs/chakra/` | v2, v3 | `@chakra-ui/react` | `chakra@v3` |
-| `ashPhoenix` | `designs/ashPhoenix/` | v3 | HEEx components — Phoenix LiveView only | `ashPhoenix@v3` |
+| `vuetify` | `designs/vuetify/` | v1 | Vuetify 3 — Vue only | `vuetify@v1` |
+| `shadcnVue` | `designs/shadcnVue/` | v1 | Tailwind + Radix Vue primitives — Vue only | `shadcnVue@v1` |
+| `flowbite` | `designs/flowbite/` | v1 | Flowbite Svelte — Svelte only | `flowbite@v1` |
+| `shadcnSvelte` | `designs/shadcnSvelte/` | v1 | Tailwind + bits-ui primitives — Svelte only | `shadcnSvelte@v1` |
+| `angularMaterial` | `designs/angularMaterial/` | v1 | Angular Material — Angular only | `angularMaterial@v1` |
+| `primeng` | `designs/primeng/` | v1 | PrimeNG — Angular only | `primeng@v1` |
+| `spartanNg` | `designs/spartanNg/` | v1 | Spartan/ui + Tailwind — Angular only | `spartanNg@v1` |
+| `coreComponents` | `designs/coreComponents/` | v3 | HEEx core components (baseline) — Phoenix LiveView only | `coreComponents@v3` |
+| `daisyui` | `designs/daisyui/` | v1 | HEEx + daisyUI (Tailwind) — Phoenix LiveView only | `daisyui@v1` |
 
 Pack selection per platform when `design:` is omitted:
 
@@ -683,7 +691,7 @@ Pack selection per platform when `design:` is omitted:
 | `vue` | `vuetify` |
 | `svelte` | `shadcnSvelte` |
 | `angular` | `angularMaterial` |
-| `phoenixLiveView` | `ashPhoenix` (forced — only HEEx pack supported) |
+| `phoenixLiveView` | `coreComponents` (default; `daisyui` also available) |
 | `node`, backend-only `dotnet` | none (no UI mount) |
 
 Picking a pack also locks in a **stack** (a coherent React + router +
@@ -818,8 +826,9 @@ for server state — **TanStack Angular Query** (`injectQuery` / `injectMutation
 the senior-Angular-idiomatic caching layer, so reads share a query cache (dedup +
 caching) and mutations invalidate exactly the keys the generator knows they touch.
 Several walker seams fork the shared (React-shaped) emission rather than reuse it —
-each is opt-in (only `angularTarget` implements it), so the other three frontends
-stay byte-identical (`pipeline-layering` + the full suite gate this).
+each is opt-in (only `angularTarget` implements it), so the other JSX/markup
+frontends (React/Vue/Svelte) stay byte-identical (`pipeline-layering` + the full
+suite gate this).
 
 | Concern | Emission |
 |---|---|

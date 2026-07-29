@@ -1,5 +1,10 @@
 import type { BoundedContextIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import {
+  createFieldConstraints,
+  createModelValidator,
+  withFieldConstraint,
+} from "./wire-constraints.js";
 
 // ---------------------------------------------------------------------------
 // `app/http/wire_models.py` — one Pydantic model per value object,
@@ -78,24 +83,46 @@ function wireFieldType(
 }
 
 export function renderPyWireModels(ctx: BoundedContextIR): string {
-  const models = ctx.valueObjects.map((vo) =>
-    lines(
+  const models = ctx.valueObjects.map((vo) => {
+    // A VO's own `invariant`s ride the SAME wire carriers the aggregate
+    // command DTOs use (`Field(...)` + `@model_validator`).  Pydantic
+    // validates a nested VO model on request parse, so a malformed VO field
+    // is rejected at the wire boundary with 422 — matching the node (Zod
+    // `<VO>Schema`) and Elixir (VO changeset) backends, instead of falling
+    // through to the domain constructor's `DomainError` → 400.
+    const available = new Set(vo.fields.map((f) => f.name));
+    const constraints = createFieldConstraints(vo.invariants, available);
+    const validator = createModelValidator(vo.invariants, available, vo.name);
+    return lines(
       "",
       "",
       `class ${vo.name}(BaseModel):`,
-      vo.fields.map((f) => `    ${f.name}: ${wireFieldType(f.type, ctx, "request", "")}`),
-    ),
-  );
+      vo.fields.map((f) =>
+        withFieldConstraint(
+          f.name,
+          wireFieldType(f.type, ctx, "request", ""),
+          constraints.get(f.name),
+        ),
+      ),
+      validator,
+    );
+  });
   const body = models.join("");
   const uses = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(body);
   const enumNames = ctx.enums.map((e) => e.name).filter(uses);
+  const pydanticNames = [
+    "BaseModel",
+    uses("Field") ? "Field" : null,
+    uses("model_validator") ? "model_validator" : null,
+  ].filter((n): n is string => n != null);
   return lines(
     `"""Pydantic wire models for value objects.  Auto-generated."""`,
     "",
     uses("datetime") ? "from datetime import datetime" : null,
     uses("Decimal") ? "from decimal import Decimal" : null,
     uses("datetime") || uses("Decimal") ? "" : null,
-    ctx.valueObjects.length > 0 ? "from pydantic import BaseModel" : null,
+    ctx.valueObjects.length > 0 ? `from pydantic import ${pydanticNames.join(", ")}` : null,
+    uses("PydanticCustomError") ? "from pydantic_core import PydanticCustomError" : null,
     enumNames.length > 0 ? "" : null,
     enumNames.length > 0 ? `from app.domain.value_objects import ${enumNames.join(", ")}` : null,
     ctx.valueObjects.length === 0 ? "\n__all__: list[str] = []" : body,

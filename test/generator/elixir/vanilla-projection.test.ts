@@ -79,19 +79,23 @@ describe("elixir-vanilla projection runtime", () => {
       "case SalesApi.Repo.get(SalesApi.Orders.Projections.OrderBookRow, key) do",
     );
     expect(fold).toContain("nil -> %SalesApi.Orders.Projections.OrderBookRow{order: key}");
-    expect(fold).toContain("state = %{state | customer: event.customer}");
-    expect(fold).toContain("state = %{state | status: :Placed}");
+    // Folds persist through a CHANGE MAP passed to `change/2` — a bare
+    // `change(state)` after struct rebinds carries no changes, so an EXISTING-row
+    // update (the second event for a key) would be a silent no-op.
     expect(fold).toContain(
-      "{:ok, _} = SalesApi.Repo.insert_or_update(Ecto.Changeset.change(state))",
+      "{:ok, _} = SalesApi.Repo.insert_or_update(Ecto.Changeset.change(state, %{",
     );
-    // the correlation `:=` is skipped (immutable primary key)
-    expect(fold).not.toContain("state = %{state | order:");
+    expect(fold).toContain("customer: event.customer");
+    expect(fold).toContain("status: :Placed");
+    // the correlation `:=` is skipped (immutable primary key) — not in the changes
+    expect(fold).not.toContain("order: event.order");
+    expect(fold).not.toContain("state = %{state |");
     // pure fold — no saga route-or-drop machinery
     expect(fold).not.toContain("with_child_frame");
     expect(fold).not.toContain("event_unrouted");
 
     const shipped = file(await build(SRC), "orders/projections/order_book/on_order_shipped.ex");
-    expect(shipped).toContain("state = %{state | status: :Shipped}");
+    expect(shipped).toContain("Ecto.Changeset.change(state, %{status: :Shipped})");
   });
 
   it("fans each event to its projection fold in the context Dispatcher", async () => {

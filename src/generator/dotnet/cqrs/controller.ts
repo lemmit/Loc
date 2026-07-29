@@ -1,4 +1,4 @@
-import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
+import { emitsRestCreate, forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
@@ -22,6 +22,7 @@ import {
 import type { ControllerShape } from "../emit/api.js";
 import { renderController } from "../emit.js";
 import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
+import { requestVoValidatorName } from "../validator-emit.js";
 
 /** One arm of a return-typed operation's controller translation. */
 export interface ReturnUnionArm {
@@ -72,6 +73,12 @@ export function buildOperationSpec(
     // are lowerCamel in the IR — same form the JSON wire uses
     // (default ASP.NET JsonNamingPolicy.CamelCase).
     paramNames: op.params.map((p) => p.name),
+    requestValidator:
+      requestVoValidatorName(
+        `${upperFirst(op.name)}${agg.name}Request`,
+        op.params.map((p) => ({ name: p.name, type: p.type })),
+        ctx.valueObjects,
+      ) ?? undefined,
     guarded: operationIsGuarded(op),
     // `when` canCommand gate: 409 on the action + the GET can_<op>
     // companion (criterion.md use site 2).
@@ -203,6 +210,12 @@ export function emitController(
       idClrType: csIdValueClrType(agg.idValueType),
       createAction: createActionOverride ?? emitsRestCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
+      createRequestValidator:
+        requestVoValidatorName(
+          `Create${agg.name}Request`,
+          forCreateInput(agg.fields).map((f) => ({ name: f.name, type: f.type })),
+          ctx.valueObjects,
+        ) ?? undefined,
       createCmdArgs: requiredFields.map((f) => {
         const wireArg = wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx);
         if (f.default !== undefined && isServerSourcedDefault(f.default)) {

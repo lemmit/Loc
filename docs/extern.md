@@ -68,8 +68,10 @@ aggregate Order {
 > extern modules used (only *used* names, since F# warns on an unused `open`): a
 > **component** renders as `OrderChart {| caption = "Q3" |}` (an anonymous-record
 > props call into the user's Feliz component function), a **function** as
-> `initials(args)`. So all six frontends — React, Vue, Svelte, Angular, HEEx,
-> and Feliz — now carry both frontend extern hatches.
+> `initials(args)`. So the frontends — React, Vue, Svelte, Angular, Feliz —
+> plus the Phoenix/HEEx server-render path now carry both frontend extern
+> hatches; Flutter carries the extern-**function** hatch (extern components are
+> deferred there).
 
 An `extern` operation's body contains **only** `precondition` statements
 — no assignment, no `emit`, no collection mutation.  The framework owns

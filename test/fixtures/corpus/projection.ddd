@@ -23,18 +23,18 @@ system ProjectionSys {
         operation place() {
           precondition status == "Draft"
           status := "Placed"
-          emit OrderPlaced { order: id, at: now() }
+          emit OrderPlaced { orderRef: id, at: now() }
         }
         operation ship() {
           precondition status == "Placed"
           status := "Shipped"
-          emit OrderShipped { order: id, at: now() }
+          emit OrderShipped { orderRef: id, at: now() }
         }
       }
       repository Orders for Order { }
 
-      event OrderPlaced  { order: Order id, at: datetime }
-      event OrderShipped { order: Order id, at: datetime }
+      event OrderPlaced  { orderRef: Order id, at: datetime }
+      event OrderShipped { orderRef: Order id, at: datetime }
 
       channel Lifecycle {
         carries: OrderPlaced, OrderShipped
@@ -43,11 +43,15 @@ system ProjectionSys {
       }
 
       // The folded read model — one row per order, updated as each event lands.
-      projection OrderBoard keyed by order {
-        order: Order id
+      // NB: the correlation column is `orderRef`, not `order` — `order` is a
+      // reserved SQL word, and identifier quoting in the projection read-model
+      // DDL/DML is not uniform across backends (Drizzle quotes; JPA/mikroorm do
+      // not), which is an orthogonal concern to the fold this fixture proves.
+      projection OrderBoard keyed by orderRef {
+        orderRef: Order id
         status: BoardStatus
         at: datetime
-        on(e: OrderPlaced)  { order := e.order  status := Placed   at := e.at }
+        on(e: OrderPlaced)  { orderRef := e.orderRef  status := Placed   at := e.at }
         on(e: OrderShipped) { status := Shipped  at := e.at }
       }
     }
@@ -61,5 +65,21 @@ system ProjectionSys {
     dataSources: [ordersState]
     serves: OrdersApi
     port: 4000
+  }
+
+  // Runtime proof (M-T4.2 folded-mode parity): drive the aggregate's lifecycle
+  // operations — each emits a domain event the in-process dispatcher fans to the
+  // `OrderBoard` fold — then read the read model back through
+  // `GET /projections/order_board`.  Asserts the fold ACTUALLY RUNS at runtime
+  // (row allocated on the first event, mutated on the second) on every backend
+  // the behavioural tier boots, not just that the emitters compile.
+  test e2e "fold the order lifecycle into the OrderBoard read model" against d {
+    let ord = api.orders.create({ customerId: "c-1", status: "Draft" })
+    api.orders.place(ord)
+    let placed = api.orderBoard.byKey(ord)
+    expect(placed.status).toBe("Placed")
+    api.orders.ship(ord)
+    let shipped = api.orderBoard.byKey(ord)
+    expect(shipped.status).toBe("Shipped")
   }
 }

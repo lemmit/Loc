@@ -10,10 +10,12 @@ import type {
   ProjectionOnIR,
   StmtIR,
   SystemIR,
+  TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { resolveContextSchema } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
@@ -204,11 +206,12 @@ export function emitWorkflowStateSchemas(
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
     if (!wf.correlationField || wf.eventSourced) continue;
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
-      renderStateSchema(contextModule, wf, schema),
+      renderStateSchema(contextModule, wf, schema, durable),
     );
   }
 }
@@ -258,10 +261,11 @@ export function emitDispatch(
       correlationWfs.set(sub.workflow.name, sub.workflow);
   }
   const dispatchSchema = sys ? resolveContextSchema(ctx, sys) : undefined;
+  const durable = durableEventTypes(ctx).size > 0;
   for (const wf of correlationWfs.values()) {
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
-      renderStateSchema(contextModule, wf, dispatchSchema),
+      renderStateSchema(contextModule, wf, dispatchSchema, durable),
     );
   }
 
@@ -349,7 +353,14 @@ function ectoStateFieldType(t: import("../../ir/types/loom-ir.js").TypeIR): stri
   return ":string";
 }
 
-function renderStateSchema(contextModule: string, wf: WorkflowIR, schema?: string): string {
+function renderStateSchema(
+  contextModule: string,
+  wf: WorkflowIR,
+  schema?: string,
+  /** Idempotent-consumer marker (dispatch-delivery-semantics.md §3): a durable
+   *  channel maps the shared `last_event_id` column the migrations add. */
+  durable = false,
+): string {
   const corr = wf.correlationField as string;
   const corrField = (wf.stateFields ?? []).find((f) => f.name === corr);
   const pkType =
@@ -358,6 +369,7 @@ function renderStateSchema(contextModule: string, wf: WorkflowIR, schema?: strin
   const fieldLines = (wf.stateFields ?? [])
     .filter((f) => f.name !== corr)
     .map((f) => `    field :${snake(f.name)}, ${ectoStateFieldType(f.type)}`);
+  if (durable) fieldLines.push(`    field :last_event_id, :string`);
   // `@schema_prefix` targets the workflow's context schema, matching the
   // migration `prefix:`.  Omitted ⇒ public, byte-identical.
   const prefixLine = schema ? `  @schema_prefix ${JSON.stringify(schema)}\n` : "";
@@ -511,9 +523,14 @@ function renderHandler(
     channels,
   );
 
+  // Idempotent-consumer marker (dispatch-delivery-semantics.md §3): under a
+  // durable channel, the ChannelConsumer parks the envelope id (= the outbox
+  // row id) in the process dictionary; the saga handler no-ops on a redelivery
+  // of the recorded id and stamps it before the state save.
+  const durable = durableEventTypes(ctx).size > 0;
   // Saga routing wrapper, indented to the `def handle` body (4 spaces).
   const inner = persisted
-    ? renderPersistedBody(appModule, contextModule, wf, sub, body, usesThis)
+    ? renderPersistedBody(appModule, contextModule, wf, sub, body, usesThis, durable)
     : indent(body, 4).join("\n");
 
   // Module names render fully-qualified throughout the body, so the only
@@ -560,6 +577,10 @@ function renderPersistedBody(
   sub: Subscription,
   bodyLines: string[],
   usesThis: boolean,
+  /** Under a durable channel the body is wrapped in the idempotent-consumer
+   *  marker (check the process-dictionary event id against the loaded row, and
+   *  stamp it after the fold) — dispatch-delivery-semantics.md §3. */
+  durable = false,
 ): string {
   const corr = wf.correlationField as string;
   const stateMod = stateModule(contextModule, wf);
@@ -572,7 +593,18 @@ function renderPersistedBody(
         paramRenames: { [sub.param]: "event" },
       })
     : `event.${snake(corr)}`;
-  const bind = usesThis ? "state" : "_state";
+  // A durable handler always reads/stamps the loaded row, so `state` must bind
+  // even when the fold body itself never touches `this`.
+  const bind = usesThis || durable ? "state" : "_state";
+  // The stamp: rewrite the (possibly body-rebound) row with the processed id,
+  // in the same Repo call window as the fold — a redelivery then no-ops above.
+  const stampLines = (base: number): string[] =>
+    durable
+      ? [
+          `${" ".repeat(base)}if event_id,`,
+          `${" ".repeat(base + 2)}do: ${appModule}.Repo.update!(Ecto.Changeset.change(state, %{last_event_id: event_id}))`,
+        ]
+      : [];
 
   if (sub.trigger === "create") {
     // Load-or-allocate: a fresh key seeds the instance row (typed defaults).
@@ -581,7 +613,7 @@ function renderPersistedBody(
       if (f.name === corr || f.optional) continue;
       allocFields.push(`${snake(f.name)}: ${stateDefault(f.type)}`);
     }
-    return [
+    const load = [
       `    key = ${keyExpr}`,
       `    ${bind} =`,
       `      case ${appModule}.Repo.get(${stateMod}, key) do`,
@@ -589,7 +621,18 @@ function renderPersistedBody(
       `        existing -> existing`,
       `      end`,
       "",
-      ...indent(bodyLines, 4),
+    ];
+    if (!durable) return [...load, ...indent(bodyLines, 4)].join("\n");
+    return [
+      ...load,
+      `    event_id = Process.get(:loom_event_id)`,
+      "",
+      `    if event_id && state.last_event_id == event_id do`,
+      `      :ok`,
+      `    else`,
+      ...indent(bodyLines, 6),
+      ...stampLines(6),
+      `    end`,
     ].join("\n");
   }
   // Reactor: route to the started instance, else drop + log `event_unrouted`.
@@ -598,6 +641,26 @@ function renderPersistedBody(
     { name: "event_type", valueExpr: JSON.stringify(sub.event) },
     { name: "key", valueExpr: "key" },
   ]);
+  if (durable) {
+    return [
+      `    key = ${keyExpr}`,
+      `    case ${appModule}.Repo.get(${stateMod}, key) do`,
+      `      nil ->`,
+      `        ${logCall}`,
+      `        :ok`,
+      "",
+      `      state ->`,
+      `        event_id = Process.get(:loom_event_id)`,
+      "",
+      `        if event_id && state.last_event_id == event_id do`,
+      `          :ok`,
+      `        else`,
+      ...indent(bodyLines, 10),
+      ...stampLines(10),
+      `        end`,
+      `    end`,
+    ].join("\n");
+  }
   return [
     `    key = ${keyExpr}`,
     `    case ${appModule}.Repo.get(${stateMod}, key) do`,
@@ -644,6 +707,15 @@ function stateDefault(t: import("../../ir/types/loom-ir.js").TypeIR): string {
  *  reactor).  The fold body is `StmtIR` (the applier statement set), so it only
  *  ever carries `:=` assigns — rendered here directly, matching the ES-applier
  *  `state = %{state | field: value}` shape. */
+/** True for a `datetime` field type (unwrapping `optional`) — its Ecto column is
+ *  `:utc_datetime` (second precision), so a folded microsecond value needs a
+ *  `DateTime.truncate(:second)` before it can be dumped. */
+function isDatetimeType(t: TypeIR): boolean {
+  return t.kind === "optional"
+    ? isDatetimeType(t.inner)
+    : t.kind === "primitive" && t.name === "datetime";
+}
+
 function renderProjectionFoldHandler(
   appModule: string,
   contextModule: string,
@@ -660,18 +732,44 @@ function renderProjectionFoldHandler(
   // Routing key: the `by <expr>` value, else the event field name-matching the
   // correlation field (the omitted-`by` rule) — an id, so `Repo.get` keys on it.
   const keyExpr = on.correlation ? renderExpr(on.correlation, renderCtx) : `event.${snake(corr)}`;
-  // Each `field := value` → an in-memory struct update.  The correlation `:=`
-  // (if the fold spells it) is skipped: it's the immutable primary key, seeded
-  // at allocation (parity with the java / hono / python folds).
-  const assignLines = on.statements
+  // A `datetime` read-model column is Ecto `:utc_datetime` (second precision),
+  // but a folded value derived from `now()` is `DateTime.utc_now()` (microsecond
+  // precision).  The fold sets the struct field directly and persists through
+  // `Ecto.Changeset.change/1`, which — unlike a `cast` changeset — does NOT
+  // truncate, so Ecto raises dumping the microsecond value into `:utc_datetime`
+  // (a 500 on the emitting operation).  Truncate datetime assignments to
+  // `:second` to match the column, the same stance `audit-emit`/`provenance-emit`
+  // take for `now()` (nil-safe + single-eval via `then/2`, since an OPTIONAL
+  // datetime field may fold a nil).
+  const datetimeFields = new Set(
+    proj.stateFields.filter((f) => isDatetimeType(f.type)).map((f) => snake(f.name)),
+  );
+  // Each `field := value` → a tracked changeset CHANGE (not an in-memory struct
+  // rebind).  `Ecto.Changeset.change(state, %{…})` is load-bearing: a bare
+  // `change(state)` after `state = %{state | f: v}` carries NO changes, so on an
+  // EXISTING row (the second event for a key) `insert_or_update` → `Repo.update`
+  // is a silent no-op and the fold never persists (e.g. `OrderShipped` would
+  // never flip the row to `Shipped`).  Passing the changes to `change/2` tracks
+  // them, so the update actually writes.  The correlation `:=` (if the fold
+  // spells it) is skipped: it's the immutable primary key, seeded at allocation
+  // (parity with the java / hono / python folds).
+  const changeEntries = on.statements
     .filter(
       (s): s is Extract<StmtIR, { kind: "assign" }> =>
         s.kind === "assign" && snake(s.target.segments[0] ?? "") !== snake(corr),
     )
-    .map(
-      (s) =>
-        `    state = %{state | ${snake(s.target.segments[0]!)}: ${renderExpr(s.value, renderCtx)}}`,
-    );
+    .map((s) => {
+      const field = snake(s.target.segments[0]!);
+      const rendered = renderExpr(s.value, renderCtx);
+      const value = datetimeFields.has(field)
+        ? `(${rendered}) |> then(&(&1 && DateTime.truncate(&1, :second)))`
+        : rendered;
+      return `${field}: ${value}`;
+    });
+  const changeset =
+    changeEntries.length > 0
+      ? `Ecto.Changeset.change(state, %{${changeEntries.join(", ")}})`
+      : `Ecto.Changeset.change(state)`;
   const body = [
     `    key = ${keyExpr}`,
     "",
@@ -680,9 +778,8 @@ function renderProjectionFoldHandler(
     `        nil -> %${rowMod}{${snake(corr)}: key}`,
     `        existing -> existing`,
     `      end`,
-    ...(assignLines.length > 0 ? ["", ...assignLines] : []),
     "",
-    `    {:ok, _} = ${appModule}.Repo.insert_or_update(Ecto.Changeset.change(state))`,
+    `    {:ok, _} = ${appModule}.Repo.insert_or_update(${changeset})`,
     `    :ok`,
   ];
   return `# Auto-generated.
