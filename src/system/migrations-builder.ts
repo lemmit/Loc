@@ -901,6 +901,7 @@ function indexRenamed(
  *  populated table).  First-run (Initial) migrations never raise this —
  *  nothing pre-exists to destroy. */
 export class MigrationDestructiveError extends Error {
+  readonly code: string = "loom.migration-destructive";
   constructor(
     readonly module: string,
     readonly offending: readonly MigrationStep[],
@@ -916,6 +917,47 @@ export class MigrationDestructiveError extends Error {
         `add-nullable / backfill-TODO / SET NOT NULL sequence instead.`,
     );
     this.name = "MigrationDestructiveError";
+  }
+}
+
+/** One table carrying a drop + add pair the rename heuristic could not collapse. */
+export interface AmbiguousRename {
+  readonly table: string;
+  readonly drops: readonly string[];
+  readonly adds: readonly string[];
+}
+
+/** Raised when a delta drops AND adds column(s) on the SAME table that the
+ *  one-drop-one-add-same-type rename heuristic could not collapse — the two
+ *  shapes it structurally can't recognise: a **rename that also changed the
+ *  column's type**, and **two (or more) renames at once** on one table.
+ *  Emitting those as drop+add silently destroys the renamed column's data, so
+ *  — absent `--allow-destructive` — this fails fast with a dedicated
+ *  `loom.migration-ambiguous-rename` code that points at the explicit
+ *  rename-intent block (M-T2.1), the non-lossy remedy.  Subclasses
+ *  {@link MigrationDestructiveError} so every existing catch (`src/cli/main.ts`)
+ *  and destructive-gate assertion keeps recognising it. */
+export class MigrationAmbiguousRenameError extends MigrationDestructiveError {
+  override readonly code = "loom.migration-ambiguous-rename";
+  constructor(
+    module: string,
+    offending: readonly MigrationStep[],
+    readonly renames: readonly AmbiguousRename[],
+  ) {
+    super(module, offending);
+    this.name = "MigrationAmbiguousRenameError";
+    this.message =
+      `migration for module "${module}" drops and adds column(s) on the same table that ` +
+      `look like an unannotated rename — emitting them as drop+add would DESTROY the ` +
+      `renamed column's data:\n` +
+      renames
+        .map((r) => `  - ${r.table}: drop [${r.drops.join(", ")}] + add [${r.adds.join(", ")}]`)
+        .join("\n") +
+      `\nIf this is a rename, declare it explicitly so the data is preserved:\n` +
+      `  migration "<name>" { <Aggregate>.<oldField> -> <newField> }\n` +
+      `(this handles both a rename that also changes type and two renames at once.)\n` +
+      `If you really mean to drop the old column and add a new empty one — losing the ` +
+      `data — re-run \`generate system\` with --allow-destructive.`;
   }
 }
 
@@ -1124,6 +1166,36 @@ export function applyDestructivePolicy(
       (s.op === "alterColumnNullable" && !s.nullable && !safeFlips.has(s)),
   );
   if (destructive.length > 0 && !opts.allowDestructive) {
+    // Prefer the honest rename-aware diagnostic when the destructive delta is
+    // rename-SHAPED: a table carrying BOTH a leftover dropColumn AND a leftover
+    // (non-backfilled) addColumn is exactly what the one-drop-one-add-same-type
+    // heuristic could not collapse — a rename+type-change or two-at-once.
+    // Reporting it as the generic destructive listing hides the safe remedy
+    // (declare the rename) and reads as an intentional drop.  A backfilled add
+    // is an explicit new column, never a rename, so it is excluded.
+    const byTable = new Map<string, { table: string; drops: string[]; adds: string[] }>();
+    const bucketFor = (schema: string | undefined, table: string) => {
+      const k = qkey(schema, table);
+      let e = byTable.get(k);
+      if (!e) {
+        e = { table, drops: [], adds: [] };
+        byTable.set(k, e);
+      }
+      return e;
+    };
+    for (const s of woven) {
+      if (s.op === "dropColumn") bucketFor(s.schema, s.table).drops.push(s.name);
+    }
+    for (const s of woven) {
+      if (s.op === "addColumn" && !backfillFor(s.schema, s.table, s.column.name)) {
+        const e = byTable.get(qkey(s.schema, s.table));
+        if (e && e.drops.length > 0) e.adds.push(s.column.name);
+      }
+    }
+    const renamePairs = [...byTable.values()].filter((e) => e.adds.length > 0);
+    if (renamePairs.length > 0) {
+      throw new MigrationAmbiguousRenameError(opts.module, destructive, renamePairs);
+    }
     throw new MigrationDestructiveError(opts.module, destructive);
   }
   if (destructive.length === 0) return woven;

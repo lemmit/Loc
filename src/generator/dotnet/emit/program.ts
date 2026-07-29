@@ -75,6 +75,11 @@ export function renderProgram(
      *  singleton, wraps the registered dispatcher in the RealtimeDomainEvent
      *  Dispatcher tee, and maps GET /api/realtime/events. */
     hasRealtime?: boolean;
+    /** Rooms + policy-derived routing v1 (channels.md): the realtime context is
+     *  tenant-owned, so the SSE endpoint derives the connecting principal's
+     *  tenant (off the ambient RequestContext, never a client value) and joins
+     *  its room via `hub.Subscribe(tenant)`.  Off ⇒ the broadcast `Subscribe()`. */
+    realtimeRoomScoped?: boolean;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -156,12 +161,22 @@ export function renderProgram(
   // outbox-durable broadcast event streams at dispatch time; the relay
   // redelivers only to handlers).
   const hasRealtime = !!options?.hasRealtime;
+  const realtimeRoomScoped = !!options?.realtimeRoomScoped;
   const realtimeHubRegistration = hasRealtime
     ? `\nbuilder.Services.AddSingleton<${ns}.Infrastructure.Realtime.RealtimeHub>();`
     : "";
+  // Rooms + policy-derived routing v1 (channels.md): a tenant-owned realtime
+  // context scopes delivery per tenant, so the connection joins the verified
+  // principal's tenant room (off the ambient RequestContext — never a
+  // client-supplied value; an unauthenticated connection joins no room).  The
+  // untenanted wire keeps the broadcast `Subscribe()`.
+  const realtimeSubscribe = realtimeRoomScoped
+    ? `var tenant = ${ns}.Domain.Common.RequestContext.Current?.CurrentUser is { } __rtUser ? __rtUser.TenantId.ToString() : null;
+    var (id, reader) = hub.Subscribe(tenant);`
+    : "var (id, reader) = hub.Subscribe();";
   // The SSE endpoint — one long-lived text/event-stream per browser connection,
   // with a 15s keep-alive ping.  Reads frames off the hub's per-client channel;
-  // `WhenAny` a 15s timer so an idle stream still pings.  v1 broadcast-to-all.
+  // `WhenAny` a 15s timer so an idle stream still pings.
   const realtimeEndpoint = hasRealtime
     ? `// Realtime SSE wire (channels.md Part I): GET /api/realtime/events streams
 // broadcast-channel events to connected browsers (\${API_BASE_URL}/realtime/events).
@@ -169,7 +184,7 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
 {
     http.Response.Headers.ContentType = "text/event-stream";
     http.Response.Headers.CacheControl = "no-cache";
-    var (id, reader) = hub.Subscribe();
+    ${realtimeSubscribe}
     try
     {
         while (!cancellationToken.IsCancellationRequested)

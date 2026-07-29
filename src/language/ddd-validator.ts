@@ -89,6 +89,7 @@ import {
   checkUnions,
   checkUnknownMemberAccess,
   checkUnknownNameRefs,
+  checkUserVisibleConcat,
 } from "./validators/index.js";
 
 /** Collapse whitespace/newlines so an error message stays one line
@@ -221,6 +222,10 @@ export class DddValidator {
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
     guard("file-upload-binding", model, () => checkFileUploadBinding(model, accept));
+    // i18n: string `+` in a user-visible page slot won't translate — warn and
+    // nudge toward template interpolation (i18n-strings.md). Warning, not error,
+    // until the template→ICU runtime makes interpolation first-class everywhere.
+    guard("user-visible-concat", model, () => checkUserVisibleConcat(model, accept));
     // Accessibility: an `Image`/`Avatar` rendering an image needs a text
     // alternative (`alt:` or `decorative: true`).  Alt text is human content
     // Loom can't derive — a missing alt fails WCAG 1.1.1 (accessibility.md).

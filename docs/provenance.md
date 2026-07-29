@@ -216,7 +216,7 @@ _ = MyApp.Provenance.record(loom_lineage_1)
 # …then save + MyApp.Provenance.flush(MyApp.Repo) inside Repo.transaction.
 ```
 
-## Scaffolded UI — the "?" provenance disclosure (all six frontends)
+## Scaffolded UI — the "?" provenance disclosure (five frontends + the HEEx server render)
 
 The lineage is already on the wire (the co-located `<field>_provenance`
 key above), so a **scaffolded detail page** now surfaces it: every
@@ -224,12 +224,13 @@ key above), so a **scaffolded detail page** now surfaces it: every
 expands to show where the value came from — the rule it was computed by,
 the computed value, and the input list (`path = value`).
 
-Rendered on **all six frontends**: **React** (`<details>` + JSX), **Vue**
+Rendered on **five of the six frontends** (all but Flutter) plus the
+Phoenix/HEEx server render: **React** (`<details>` + JSX), **Vue**
 (`<details v-if>` + `v-for`), **Svelte** (`{#if}` + keyed `{#each}`),
 **Angular** (`@if (…; as prov)` + `@for`), **Feliz** (F# `Html.details`, a
-`Some`/`None` match over the `ProvLineage option`), and **HEEx** (Phoenix
-LiveView: a null-guarded `<%= if … %>` `<details>` + a `<%= for … %>`
-comprehension). Two things make it work:
+`Some`/`None` match over the `ProvLineage option`), and — server-side —
+**HEEx** (Phoenix LiveView: a null-guarded `<%= if … %>` `<details>` + a
+`<%= for … %>` comprehension). Two things make it work:
 
 1. The React frontend response schema carries the lineage as a nullable
    `provLineageSchema` field (`src/lib/schemas.ts`), so the client type

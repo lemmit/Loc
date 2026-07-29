@@ -39,7 +39,6 @@ import type {
   EnrichedEntityPartIR,
   EnumIR,
   ExprIR,
-  FieldIR,
   FindIR,
   InvariantIR,
   OperationIR,
@@ -584,21 +583,10 @@ export function buildRoutesFile(
     lines.push(
       `        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
-    // A write-gated create-input field denies with 403 (ForbiddenError →
-    // onError) when the caller can't set it — declare it in the contract.
-    if (writeGatedParams(agg, requiredFields).length > 0) {
-      lines.push(
-        `        403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-      );
-    }
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const body = c.req.valid("json");`);
-    // Write-side field gate — reject the request (403) before constructing the
-    // aggregate when a client-supplied create-input field is write-gated and
-    // the ambient principal fails its predicate (authorization.md §5).
-    lines.push(...writeGateGuards(agg, requiredFields, "      "));
     // A server-sourced default (`now()` / `currentUser.*`) is applied
     // per-request HERE, not as a frozen wire `.default(...)`: the field is
     // wire-optional, so the factory arg coalesces the client's value with the
@@ -1088,53 +1076,6 @@ export function buildRoutesFile(
   return assembled + "\n";
 }
 
-/** Write-side field-authorization gate (`write(<expr>)` / `readonly when`,
- *  authorization.md §5, M-T3.2 item 6 — the write-side twin of `mask unless`).
- *  A field's `writeGate` is a `currentUser`-only ALLOWED-WHEN predicate that
- *  must hold whenever a CLIENT-SUPPLIED op param of the SAME NAME is present
- *  (op-param granularity — Loom has no PATCH partial update).  Returns the
- *  write-gated fields covered by `params`, in param order, deduped. */
-function writeGatedParams(agg: AggregateIR, params: readonly { name: string }[]): FieldIR[] {
-  const gated = new Map(agg.fields.filter((f) => f.writeGate).map((f) => [f.name, f] as const));
-  const seen = new Set<string>();
-  const out: FieldIR[] = [];
-  for (const p of params) {
-    const f = gated.get(p.name);
-    if (f && !seen.has(f.name)) {
-      seen.add(f.name);
-      out.push(f);
-    }
-  }
-  return out;
-}
-
-/** The handler-body guard lines for {@link writeGatedParams}: a fail-closed 403
- *  (ForbiddenError → the file's onError → RFC-7807) emitted BEFORE the domain
- *  call — the gate is principal-only, so it fails fast (no aggregate load
- *  needed).  Fail-closed: an unauthenticated caller (null principal) is
- *  rejected.  Binds `__writeUser` ONCE per handler even when several params are
- *  gated.  Byte-identical (no lines) when no supplied param is write-gated. */
-function writeGateGuards(
-  agg: AggregateIR,
-  params: readonly { name: string }[],
-  pad: string,
-): string[] {
-  const gated = writeGatedParams(agg, params);
-  if (gated.length === 0) return [];
-  const out: string[] = [
-    `${pad}const __writeUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User | undefined }).get("currentUser") ?? null;`,
-  ];
-  for (const f of gated) {
-    const pred = renderTsExpr(f.writeGate!, { thisName: "this", principalExpr: "__writeUser" });
-    out.push(
-      `${pad}if (!(__writeUser !== null && (${pred}))) throw new ForbiddenError(${JSON.stringify(
-        `Forbidden: write ${f.name}`,
-      )});`,
-    );
-  }
-  return out;
-}
-
 /** The `when` canCommand gate (criterion.md use site 2): evaluate the
  *  predicate against the loaded aggregate; false → DisallowedError,
  *  which the shared onError maps to a 409 ProblemDetails.  Throwing
@@ -1261,10 +1202,9 @@ function emitOperationRoute(
       `      ${status}: { description: ${JSON.stringify(httpStatusText(status))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
-  // A `requires` guard — or a write-gated op param (authorization.md §5) —
-  // denies with 403 (ForbiddenError → onError); declare it so the published
-  // contract documents the authorization outcome.
-  if (operationIsGuarded(op) || writeGatedParams(agg, op.params).length > 0) {
+  // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
+  // it so the published contract documents the authorization outcome.
+  if (operationIsGuarded(op)) {
     out.push(
       `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
@@ -1310,11 +1250,6 @@ function emitOperationRoute(
   }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
-
-  // Write-side field gate — reject the request (403) before loading/mutating
-  // the aggregate when a client-supplied op param is write-gated and the
-  // ambient principal fails its predicate (authorization.md §5).
-  out.push(...writeGateGuards(agg, op.params, "    "));
 
   // The mutation block — extern dispatch or the direct method call —
   // operates on `aggregate` and is independent of which repo loaded it,
@@ -1498,8 +1433,7 @@ function emitReturningOperationRoute(
   // (400 domain, 422 validation, 404 aggregate-not-found from getById), 403 if
   // guarded, plus each error variant's mapped status.
   const problemStatuses = new Set<number>([400, 422, 404]);
-  if (operationIsGuarded(op) || writeGatedParams(agg, op.params).length > 0)
-    problemStatuses.add(403);
+  if (operationIsGuarded(op)) problemStatuses.add(403);
   if (op.when) problemStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
   for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];
@@ -1549,9 +1483,6 @@ function emitReturningOperationRoute(
   }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
-  // Write-side field gate — fail-closed 403 before loading the aggregate when a
-  // client-supplied op param is write-gated (authorization.md §5).
-  out.push(...writeGateGuards(agg, op.params, "    "));
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
   out.push(...whenGateLine(agg, op, "    "));
   // Lifecycle stamps are applied persist-time in the drizzle save()

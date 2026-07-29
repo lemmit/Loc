@@ -15,6 +15,7 @@ consumption.
 ├── ...
 └── .loom/
     ├── wire-spec.json
+    ├── messages.en.json
     ├── domain.mmd
     ├── workflows.mmd
     ├── er.mmd
@@ -47,6 +48,12 @@ traceability coverage, or migration baselines.
 | File | Producer | What it is |
 |---|---|---|
 | `wire-spec.json` | `src/system/wire-spec.ts` (phase ⑨) | JSON-Schema-shaped derivation from every aggregate / part / value object's `wireShape`.  Language-agnostic; the canonical source of truth for what the JSON over the wire looks like.  Diffable — wire-contract drift between regens shows up as a clean JSON diff. |
+
+## i18n catalog
+
+| File | Producer | What it is |
+|---|---|---|
+| `messages.en.json` | `src/system/i18n-catalog.ts` (phase ⑨) | Source-language (English) message catalog — every user-visible string extracted from the system's UIs, as a flat, key-sorted `{ key: message }` object.  Keys are content-hashed (`page.<Page>.<role>.<hash>` / `component.<Comp>.<role>.<hash>` / `menu.<role>.<hash>`, D-I18N-KEY) so the catalog is reorder-invariant and a rephrase re-keys cleanly (delete-old + add-new).  The diff surface a future `ddd i18n sync` merges each locale against (M-T1.11, [`docs/old/proposals/i18n.md`](old/proposals/i18n.md)). **This slice extracts plain string literals only** — interpolated strings (`"Order ${o.id}"`) await the template→ICU lowering slice. Extraction: `src/generator/_walker/i18n-extract.ts`. |
 
 ## Storage routing
 

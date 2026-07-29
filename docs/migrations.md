@@ -147,8 +147,15 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
 - **Rename detection (heuristic fallback).** With no explicit block, a table with
   *exactly one* `dropColumn` and *one* `addColumn` **of identical type** is an
   unambiguous rename → the pair collapses into a single non-destructive
-  `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO b`). Any other drop/add mix
-  stays drop+add and falls under the gate.
+  `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO b`). Any other drop/add mix on
+  one table — the two shapes the heuristic **cannot** collapse (a rename that also
+  changes type, or two renames at once) — is *rename-shaped* but ambiguous. Rather
+  than silently degrade to a data-losing drop+add, it **aborts** with the dedicated
+  **`loom.migration-ambiguous-rename`** error, which names the drop/add columns and
+  points at the explicit `migration "…" { Agg.old -> new }` block (the non-lossy
+  remedy). A backfilled add is an explicit new column, never treated as a rename.
+  As with every destructive step, `--allow-destructive` is the deliberate opt-in
+  that accepts the drop+add (and its data loss).
 - **Drops.** A `dropColumn` or `dropTable` that survives rename-collapse is
   destructive → blocked unless `--allow-destructive`.
 - **Required-column adds.** A NOT-NULL `addColumn` with no default on a
@@ -454,6 +461,53 @@ Some feature DDL is **not** part of the platform-neutral `MigrationsIR` — prov
 (`audit_records`) are feature-local and hand-emitted by each backend as a *late*
 migration (a far-future version like `29991231235959`) that sorts after every
 module's initial migration so the tables already exist when the `ALTER`s run.
+
+## Migration-evolution gate — proving migrations evolve *on data* (M-T2.13)
+
+The tiers above prove a migration **emits** (`test:k8s`, corpus compile) and
+**applies to a fresh database** (the obs / tenancy e2e migrate an empty DB at
+first boot). Neither proves a migration **evolves** correctly on data that
+already exists — the silent-data-loss class. The `migration-evolution-e2e.yml`
+gate closes that, with two runtime checks per SQL backend against a real
+Postgres:
+
+1. **migrate-vs-create equivalence.** The domain schema after applying the full
+   chain (`Initial` v1 → delta v2) must be byte-for-byte equal to a *fresh*
+   `create` of the head (v2) model. A drift means an `ALTER` diverged from what a
+   `CREATE` of the same shape produces. The comparison is an **order-independent**
+   per-column/PK fingerprint (via host `psql` on `information_schema`): physical
+   column order legitimately differs — a rename leaves a column in place while an
+   add appends — so columns are sorted by name, and each backend's
+   migration-runner bookkeeping table (`__drizzle_migrations`,
+   `__loom_migrations`, `__EFMigrationsHistory`, `flyway_schema_history`,
+   `schema_migrations`) is excluded so only the domain schema is compared.
+2. **Populated forward-migrate.** Seed a v1 row through the REST surface,
+   regenerate the `.ddd` to v2 over the same tree (so the snapshot diff derives
+   the forward migration), apply it (at boot for node/python/dotnet/java; an
+   explicit `mix ecto.migrate` for vanilla Phoenix), and assert the row
+   **survives** with correct values — the renamed column keeps its value, the
+   back-filled NOT-NULL column is populated, the nullable add is NULL. A
+   destructive/lossy change the derive should have gated shows up here as a lost
+   or wrong row.
+
+The v1→v2 delta ([`test/e2e/fixtures/migration-evolution/{base,evolved}.ddd`](../test/e2e/fixtures/migration-evolution))
+is deliberately gate-clean (explicit rename intent + a backfill make it
+non-destructive, so no `--allow-destructive`), exercising the three
+data-preserving move classes together: a value-preserving `renameColumn`, a
+back-filled NOT-NULL add (add-nullable → `UPDATE` → `SET NOT NULL`), and a plain
+nullable add.
+
+The shared harness ([`test/e2e/support/migration-evolution-harness.ts`](../test/e2e/support/migration-evolution-harness.ts))
+owns the Postgres lifecycle (one server, `chain` + `fresh` databases), the
+fingerprint, and both assertion sequences; a thin per-backend `BackendDriver`
+supplies only the boot mechanics (mirroring the `tenancy-isolation` recipes).
+Opt-in, per backend: `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}`
+(each gated on `LOOM_MIGRATION_E2E[_…]=1`; needs docker or `LOOM_MIGRATION_PG_URL`
+plus host `psql`). The gate is main-push + dispatch, not per-PR by default — a
+docker-heavy multi-boot on every migration-touching PR is a runner burst for a
+regression acceptable to catch one merge later — but applying the
+`run-migration-e2e` label to a PR runs all five legs against that branch before
+merge.
 
 ## Relationship to `.loom/` and `wire-spec.json`
 

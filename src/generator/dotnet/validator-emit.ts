@@ -5,6 +5,8 @@ import type {
   FieldIR,
   InvariantIR,
   OperationIR,
+  TypeIR,
+  ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import {
   type ClassifyContext,
@@ -100,17 +102,18 @@ export function renderOperationValidator(
   });
 }
 
-function renderValidatorFile(args: {
-  ns: string;
-  aggName: string;
-  commandName: string;
-  invariants: InvariantIR[];
-  available: ReadonlySet<string>;
-}): ValidatorEmission {
-  const { ns, aggName, commandName, invariants, available } = args;
+/** Build the FluentValidation `RuleFor(...)` lines (single-field chains +
+ *  cross-field `.Must` carriers) for a set of invariants over `available`.
+ *  Shared by the command validators (root `x` = the command) AND the
+ *  value-object request validators (root `x` = the `<VO>Request`), since a VO
+ *  invariant reads its own fields exactly the way an aggregate invariant reads
+ *  the command's — `RuleFor(x => x.<Field>)`. */
+function buildFluentRules(
+  invariants: InvariantIR[],
+  available: ReadonlySet<string>,
+): { ruleLines: string[]; usings: Set<string> } {
   const ctx: ClassifyContext = { available };
   const ruleLines: string[] = [];
-
   // Group recognised single-field patterns per field so multiple
   // invariants on the same field share one `RuleFor(x => x.F)` chain.
   const chainsByField = new Map<string, SingleFieldPattern[]>();
@@ -164,6 +167,18 @@ function renderValidatorFile(args: {
       `        RuleFor(x => x).Must(x => ${guarded})${nameClause}\n            .WithMessage(${message})${codeClause};`,
     );
   }
+  return { ruleLines, usings };
+}
+
+function renderValidatorFile(args: {
+  ns: string;
+  aggName: string;
+  commandName: string;
+  invariants: InvariantIR[];
+  available: ReadonlySet<string>;
+}): ValidatorEmission {
+  const { ns, aggName, commandName, invariants, available } = args;
+  const { ruleLines, usings } = buildFluentRules(invariants, available);
 
   if (ruleLines.length === 0) {
     return { content: null, nonEmpty: false };
@@ -190,6 +205,147 @@ ${ruleLines.join("\n")}
 }
 `;
   return { content, nonEmpty: true };
+}
+
+// ---------------------------------------------------------------------------
+// Value-object request validators (VO invariant → 422 at the wire).
+//
+// A command carries DOMAIN value objects (`new Quantity(request.Qty.Value)`),
+// constructed in the controller BEFORE the Mediator validation pipeline runs —
+// so a command validator can't catch a bad VO field (the domain ctor throws
+// first → 400).  Instead we validate the WIRE request DTO (`QuantityRequest`,
+// no throwing ctor) up front: each VO-typed request field SetValidator-refs a
+// `<VO>RequestValidator`, and the controller runs the request validator before
+// mapping, so a malformed VO field is a FluentValidation 422 (errors[]) —
+// matching node/python/elixir instead of the domain-floor 400.
+// ---------------------------------------------------------------------------
+
+/** Resolve a (possibly array/optional-wrapped) type to the value object it
+ *  bears, plus whether the field is a collection (RuleFor vs RuleForEach). */
+function voBorne(type: TypeIR): { name: string; each: boolean } | null {
+  switch (type.kind) {
+    case "valueobject":
+      return { name: type.name, each: false };
+    case "array": {
+      const e = voBorne(type.element);
+      return e ? { name: e.name, each: true } : null;
+    }
+    case "optional":
+      return voBorne(type.inner);
+    default:
+      return null;
+  }
+}
+
+/** True when a value object carries at least one wire-boundary rule (so its
+ *  `<VO>RequestValidator` is emitted and SetValidator-referenced). */
+export function voHasWireRules(vo: ValueObjectIR): boolean {
+  return (
+    buildFluentRules(vo.invariants, new Set(vo.fields.map((f) => f.name))).ruleLines.length > 0
+  );
+}
+
+/** The SetValidator directives for a request's VO-typed fields whose VO carries
+ *  wire rules — empty when none, which is the signal to emit no request
+ *  validator (and inject no controller call). */
+function voRequestFields(
+  params: { name: string; type: TypeIR }[],
+  voByName: ReadonlyMap<string, ValueObjectIR>,
+): { field: string; voClass: string; each: boolean }[] {
+  const out: { field: string; voClass: string; each: boolean }[] = [];
+  for (const p of params) {
+    const borne = voBorne(p.type);
+    if (!borne) continue;
+    const vo = voByName.get(borne.name);
+    if (!vo || !voHasWireRules(vo)) continue;
+    out.push({ field: p.name, voClass: `${borne.name}RequestValidator`, each: borne.each });
+  }
+  return out;
+}
+
+/** The create-input + operation params of an aggregate, as `{name, type}`
+ *  probes for VO detection.  Mirrors the command/validator param derivation. */
+function requestParamSets(
+  agg: AggregateIR,
+): { name: string; params: { name: string; type: TypeIR }[] }[] {
+  const sets: { name: string; params: { name: string; type: TypeIR }[] }[] = [];
+  if (agg.persistedAs !== "eventLog") {
+    sets.push({
+      name: `Create${agg.name}Request`,
+      params: forCreateInput(agg.fields).map((f) => ({ name: f.name, type: f.type })),
+    });
+  }
+  for (const op of agg.operations) {
+    if (op.visibility !== "public" || op.params.length === 0) continue;
+    sets.push({
+      name: `${upperFirst(op.name)}${agg.name}Request`,
+      params: op.params.map((p) => ({ name: p.name, type: p.type })),
+    });
+  }
+  return sets;
+}
+
+/** The name of the request validator to run in the controller for a given
+ *  request, or null when the request has no VO field carrying wire rules. */
+export function requestVoValidatorName(
+  requestName: string,
+  params: { name: string; type: TypeIR }[],
+  vos: readonly ValueObjectIR[],
+): string | null {
+  const voByName = new Map(vos.map((v) => [v.name, v]));
+  return voRequestFields(params, voByName).length > 0 ? `${requestName}Validator` : null;
+}
+
+/** Every value-object + request validator class for an aggregate, as one
+ *  `<Agg>RequestValidators.cs` file — or null when nothing needs validating. */
+export function renderRequestValidators(
+  agg: AggregateIR,
+  vos: readonly ValueObjectIR[],
+  ns: string,
+): string | null {
+  const voByName = new Map(vos.map((v) => [v.name, v]));
+  const classes: string[] = [];
+
+  // 1) A `<VO>RequestValidator` for every VO (used by this agg) carrying rules.
+  const emittedVo = new Set<string>();
+  for (const set of requestParamSets(agg)) {
+    for (const f of voRequestFields(set.params, voByName)) {
+      const voName = f.voClass.slice(0, -"RequestValidator".length);
+      if (emittedVo.has(voName)) continue;
+      emittedVo.add(voName);
+      const vo = voByName.get(voName);
+      if (!vo) continue;
+      const { ruleLines } = buildFluentRules(vo.invariants, new Set(vo.fields.map((x) => x.name)));
+      classes.push(
+        `public sealed class ${voName}RequestValidator : AbstractValidator<${voName}Request>\n` +
+          `{\n    public ${voName}RequestValidator()\n    {\n${ruleLines.join("\n")}\n    }\n}`,
+      );
+    }
+  }
+
+  // 2) A `<Request>Validator` per request that SetValidator-refs its VO fields.
+  for (const set of requestParamSets(agg)) {
+    const fields = voRequestFields(set.params, voByName);
+    if (fields.length === 0) continue;
+    const rules = fields.map((f) =>
+      f.each
+        ? `        RuleForEach(x => x.${upperFirst(f.field)}).SetValidator(new ${f.voClass}());`
+        : `        RuleFor(x => x.${upperFirst(f.field)}).SetValidator(new ${f.voClass}());`,
+    );
+    classes.push(
+      `public sealed class ${set.name}Validator : AbstractValidator<${set.name}>\n` +
+        `{\n    public ${set.name}Validator()\n    {\n${rules.join("\n")}\n    }\n}`,
+    );
+  }
+
+  if (classes.length === 0) return null;
+  return `// Auto-generated.
+using FluentValidation;
+
+namespace ${ns}.Application.${plural(agg.name)}.Requests;
+
+${classes.join("\n\n")}
+`;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +534,15 @@ function csStringLiteral(s: string): string {
  *  invariant or precondition — drives the FluentValidation +
  *  pipeline-behavior + csproj-package gate in `index.ts` so projects
  *  with no rules don't carry an unused dependency. */
-export function hasAnyWireValidator(agg: AggregateIR): boolean {
+export function hasAnyWireValidator(
+  agg: AggregateIR,
+  /** The context's value objects — a VO-typed request field carrying its own
+   *  invariant now emits a wire request validator (VO→422), which also needs
+   *  the FluentValidation package + the DomainExceptionFilter's 422 arm.  So a
+   *  VO-only aggregate must count as "has a wire validator" too.  Defaults to
+   *  none for callers that predate the VO path (behaviour-preserving). */
+  vos: readonly ValueObjectIR[] = [],
+): boolean {
   // Cheap re-render under a sentinel namespace — `nonEmpty` is a
   // pure function of the IR, so the work is bounded by the actual
   // rule set.
@@ -388,7 +552,7 @@ export function hasAnyWireValidator(agg: AggregateIR): boolean {
     if (op.visibility !== "public") continue;
     if (renderOperationValidator(agg, op, fakeNs).nonEmpty) return true;
   }
-  return false;
+  return renderRequestValidators(agg, vos, fakeNs) != null;
 }
 
 /** Renders the generic Mediator pipeline behavior class.  One copy

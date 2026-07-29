@@ -119,7 +119,7 @@ system Storybook {
 
         Card {"Field — text bound to state", Stack {
           Field { "Your name", bind: userName },
-          Text { "Hello, " + userName }
+          Text { "Hello, ${userName}" }
         }},
 
         Card {"Toggle — bool bound to state",
@@ -133,7 +133,7 @@ system Storybook {
 
         Card {"Button — event handler", Stack {
           Button { "Increment", onClick: increment },
-          Text { "Clicks: " + clickCount }
+          Text { "Clicks: ${clickCount}" }
         }}
       }
     }

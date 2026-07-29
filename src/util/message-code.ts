@@ -9,20 +9,15 @@
 // D-I18N-KEY's content-hash posture for inline literals: a reword is a
 // delete-old + add-new in the i18n sync diff, not a silent re-translation).
 //
-// Browser-safe by construction: the generators run in the playground, so this
-// uses a pure-JS FNV-1a hash (no `node:crypto`). It is NOT cryptographic —
-// message strings need collision-avoidance, not strength. The i18n mission may
-// later formalise the algorithm (sha512-6 in the Node CLI); the `msg.<hash>`
-// shape stays stable.
+// Browser-safe by construction (see `content-hash.ts`, the shared primitive
+// this delegates to). It is NOT cryptographic — message strings need
+// collision-avoidance, not strength. The i18n mission may later formalise the
+// algorithm (sha512-6 in the Node CLI); the `msg.<hash>` shape stays stable.
 // ---------------------------------------------------------------------------
+
+import { contentHash } from "./content-hash.js";
 
 /** The stable wire `code` for a user-facing validation message string. */
 export function messageCode(text: string): string {
-  let h = 0x811c9dc5; // FNV-1a offset basis
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193); // FNV prime
-  }
-  const hash = (h >>> 0).toString(36).padStart(6, "0").slice(-6);
-  return `msg.${hash}`;
+  return `msg.${contentHash(text)}`;
 }

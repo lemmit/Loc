@@ -113,3 +113,70 @@ describe("realtime SSE wire — Java (delivery: broadcast)", () => {
     expect([...files.keys()].some((k) => k.endsWith("api/RealtimeController.java"))).toBe(false);
   });
 });
+
+// ─── Rooms + policy-derived routing v1 (tenant-scoped delivery) ─────────────
+
+const TENANT_SYSTEM = `
+system TenantShop {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Organization
+  subdomain Core {
+    context Fulfillment {
+      aggregate Order with tenantOwned, crudish { status: string }
+      repository Orders for Order { }
+      crossTenant aggregate Plan with crudish { title: string }
+      repository Plans for Plan { }
+      event OrderPlaced { order: Order id, at: datetime }
+      event PlanPublished { plan: Plan id, at: datetime }
+      channel Lifecycle { carries: OrderPlaced, PlanPublished  delivery: broadcast  retention: ephemeral }
+    }
+    context Accounts {
+      aggregate Organization with crudish { name: string }
+    }
+  }
+  api FulfillmentApi from Core
+  storage primary { type: postgres }
+  resource coreSt { for: Fulfillment, kind: state, use: primary }
+  resource acctSt { for: Accounts, kind: state, use: primary }
+  deployable backend {
+    platform: java
+    contexts: [Fulfillment, Accounts]
+    dataSources: [coreSt, acctSt]
+    serves: FulfillmentApi
+    port: 8080
+    auth: required
+  }
+}
+`;
+
+describe("realtime rooms — Java (tenant-scoped delivery)", () => {
+  it("keys the SseEmitter registry by tenant and scopes only tenantOwned events", async () => {
+    const rc = get(await generate(TENANT_SYSTEM), "api/RealtimeController.java");
+    expect(rc).toContain(
+      'private static final Set<String> REALTIME_EVENT_TYPES = Set.of("OrderPlaced", "PlanPublished");',
+    );
+    expect(rc).toContain(
+      'private static final Set<String> TENANT_SCOPED_EVENT_TYPES = Set.of("OrderPlaced");',
+    );
+    expect(rc).toContain('Map.entry("OrderPlaced", List.of("order"))');
+    // Per-tenant rooms keyed by the principal's tenant claim.
+    expect(rc).toContain(
+      "private final ConcurrentHashMap<String, CopyOnWriteArrayList<SseEmitter>> rooms = new ConcurrentHashMap<>();",
+    );
+    expect(rc).toContain("var tenant = tenantOf(CurrentUserAccessor.currentOrNull());");
+    expect(rc).toContain("import com.loom.backend.auth.CurrentUserAccessor;");
+    // Publish routes tenant-scoped events to the emitter's room; global stays fan-out.
+    expect(rc).toContain("if (!TENANT_SCOPED_EVENT_TYPES.contains(type)) {");
+    expect(rc).toContain("if (room != null) fanOut(room, type, wire(event));");
+    expect(rc).toContain("fanOut(emitters, type, ticket(event));");
+    expect(rc).toContain(
+      "return user == null || user.tenantId() == null ? null : String.valueOf(user.tenantId());",
+    );
+  });
+
+  it("an untenanted broadcast context keeps the broadcast-to-all controller (no rooms)", async () => {
+    const rc = get(await generate(system("java", BROADCAST)), "api/RealtimeController.java");
+    expect(rc).not.toContain("TENANT_SCOPED_EVENT_TYPES");
+    expect(rc).not.toContain("private final ConcurrentHashMap");
+  });
+});

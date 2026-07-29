@@ -272,17 +272,11 @@ async function runCase(c) {
 // cases.mjs's shared BEHAVIOURAL_SKIP (keyed by platform clause). A new entry is
 // a newly-found, tracked dapper-adapter gap — never a silent drop.
 const DAPPER_SKIP = {
-  // The folded-projection READ controller is EF-Core-coupled: it references
-  // `Microsoft.EntityFrameworkCore` + `AppDbContext` (the EF DbContext), which
-  // the Dapper adapter (raw Npgsql, no EF) does not emit, so
-  // `<Ctx>ProjectionsController.cs` fails to compile (CS0234/CS0246) and the boot
-  // errors. The default .NET/EF-Core adapter folds + reads the projection — that
-  // is the M-T4.2 parity claim; a Dapper projection read emitter is a distinct
-  // follow-up slice (the same adapter-scoped gap as projections on mikroorm).
-  projection:
-    "folded-projection reads are EF-Core-coupled on .NET (the projections controller " +
-    "references Microsoft.EntityFrameworkCore + AppDbContext); the Dapper adapter emits " +
-    "neither, so it does not compile",
+  // (Folded projections now emit on the Dapper adapter too — the read controller
+  // is persistence-gated: `persistence: dapper` emits a raw-Npgsql `<Ctx>Projections
+  // Controller.cs` over `NpgsqlDataSource` (no `Microsoft.EntityFrameworkCore` /
+  // `AppDbContext`), and the fold store + read-model table were already Dapper
+  // adapters, so the `projection` case runs here on real Postgres just like EF.)
 };
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));

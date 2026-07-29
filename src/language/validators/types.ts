@@ -610,25 +610,6 @@ export function checkPropertyMask(p: Property, env: Env, accept: ValidationAccep
   }
 }
 
-/** `write(<expr>)` / `readonly when <expr>` (authorization.md §5): the write-side
- *  gate predicate must type to bool, exactly like `mask unless` / a `requires`
- *  gate.  Only one of the two spellings may be present (the grammar's `|`
- *  alternation already enforces that at parse time).  The currentUser-only
- *  restriction is an IR-level check (`loom.field-write-gate-not-current-user`). */
-export function checkPropertyWriteGate(p: Property, env: Env, accept: ValidationAcceptor): void {
-  const gate = p.write ?? p.readonlyWhen;
-  if (!gate) return;
-  const t = typeOf(gate, env);
-  if (t.kind !== "primitive" || t.name !== "bool") {
-    const clause = p.write ? "write(...)" : "readonly when";
-    accept(
-      "error",
-      `'${clause}' on '${p.name}' must be of type 'bool', got '${typeToString(t)}'.`,
-      { node: p, property: p.write ? "write" : "readonlyWhen" },
-    );
-  }
-}
-
 /** Type-check a field default (`field: T = <expr>`) against the field's
  * declared type.  Mirrors `checkDerived` — literal promotion (e.g. an int
  * literal defaulting a `money` / `decimal` field) is allowed. */

@@ -10,7 +10,8 @@ HEEx.  When a user writes `design: <name>` in a `.ddd` source's
 pack and renders every UI surface (pages, forms, tables, cells) through
 it.  Built-in packs are `mantine`, `shadcn`, `mui`, `chakra` (React),
 `vuetify`, `shadcnVue` (Vue), `shadcnSvelte`, `flowbite` (Svelte),
-`angularMaterial` (Angular), and `ashPhoenix` (HEEx); custom packs are
+`angularMaterial`, `primeng`, `spartanNg` (Angular), and
+`coreComponents`, `daisyui` (HEEx); custom packs are
 any directory the user points the slot at.
 
 This document is the contract.  If you're writing a third design pack
@@ -64,12 +65,12 @@ Optional, defaults to `"tsx"`.  Discriminates the output language the
 pack's templates produce — `"tsx"` for React/Mantine/shadcn-style packs
 (Handlebars over `.hbs` files yielding TSX); `"heex"` for Phoenix
 LiveView packs (Handlebars over `.heex.hbs` files yielding HEEx, e.g.
-the built-in `ashPhoenix` pack); `"svelte"` for Svelte 5 / SvelteKit
+the built-in `coreComponents` and `daisyui` packs); `"svelte"` for Svelte 5 / SvelteKit
 packs (Handlebars over `.hbs` files yielding Svelte markup, e.g. the
 built-in `shadcnSvelte` and `flowbite` packs — these declare the
 `sv1` stack and own the full TSX-style required surface incl. forms
 and field inputs, plus a `svelte-config` shell template).
-the built-in `ashPhoenix` pack); `"vue"` for Vue 3 packs (Handlebars
+`"vue"` for Vue 3 packs (Handlebars
 yielding Vue SFC template markup, e.g. the built-in `vuetify` and
 `shadcnVue` packs).
 
@@ -102,7 +103,7 @@ template directories the loader pulls in:
 | Format | Shared dirs read |
 |---|---|
 | `tsx` (default) | `vite/`, `api/`, `docker/` |
-| `heex` | `phoenix/` (future; empty in v0 — `ashPhoenix` ships its shell files directly) |
+| `heex` | `phoenix/` (future; empty in v0 — `coreComponents`/`daisyui` ship their shell files directly) |
 | `svelte` | `sveltekit/` (api client + logger + root layout + the SvelteKit dockerfile) |
 | `vue` | `vue/`, `api/`, `docker/` (the `api/` fetch-client layer is framework-neutral TS) |
 
@@ -577,11 +578,11 @@ design: "mantine@v7"             // pinned to v7
 design: shadcn                   // → shadcn@v4
 design: "mui@v5"
 design: chakra                   // → chakra@v3
-design: ashPhoenix               // forced for phoenixLiveView platform
+design: coreComponents           // default for phoenixLiveView platform (daisyui also available)
 ```
 
 The shipped families: `mantine` (v7, v9), `shadcn` (v3, v4),
-`mui` (v5, v7), `chakra` (v2, v3), `ashPhoenix` (v3), the vue
+`mui` (v5, v7), `chakra` (v2, v3), the HEEx packs `coreComponents` (v3) and `daisyui` (v1), the vue
 packs `vuetify` (v3 — tracks Vuetify 3) and `shadcnVue` (v1 — the
 shadcn-vue flavour: reka-ui + Tailwind 4, source-copy distribution),
 the svelte packs `shadcnSvelte` and `flowbite`, and the angular pack
@@ -606,8 +607,8 @@ built-in ones — see [§ 2](#2-the-packjson-manifest).  Stack
 selection (`"stack": "vN"`) is required for `tsx` custom packs;
 the loader still resolves the named stack from the repo's
 `stacks/` directory.  Custom packs whose `format` is `heex` go
-through the same path but bind against `designs/ashPhoenix/`'s
-emit set.
+through the same path but bind against `designs/coreComponents/`'s
+emit set (the baseline HEEx pack).
 
 ## 11. Worked example — minimal pack skeleton
 

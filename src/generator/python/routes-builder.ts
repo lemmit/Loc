@@ -17,7 +17,6 @@ import {
   type EnrichedEntityPartIR,
   type ExprIR,
   exprUsesCurrentUser,
-  type FieldIR,
   findUsesCurrentUser,
   type InvariantIR,
   type OperationIR,
@@ -38,11 +37,6 @@ import {
   opOperation,
 } from "../../ir/util/openapi-ids.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
-import {
-  classifyForWire,
-  type SingleFieldPattern,
-  singleFieldConstraints,
-} from "../../ir/validate/invariant-classify.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import {
   defaultErrorStatus,
@@ -50,12 +44,16 @@ import {
   errorTypeUri,
   resolveErrorStatus,
 } from "../../util/error-defaults.js";
-import { messageCode } from "../../util/message-code.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
+import {
+  createFieldConstraints,
+  createModelValidator,
+  withFieldConstraint,
+} from "./emit/wire-constraints.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 import { aggHasFieldMask, emittableFinds } from "./repository-builder.js";
 
@@ -249,25 +247,23 @@ export function buildPyRoutesFile(
     // route and the update stamp rides the operation routes — so a read-only
     // aggregate (no create surface, no operations) references neither and must
     // not import `User` (ruff F401 under `--warnings-as-errors`).
-    authUserImportLine(
-      publicOps.some(operationUsesCurrentUser) ||
-        emittableFinds(repo).some(findUsesCurrentUser) ||
-        // A find `requires` gate that reads currentUser binds `current_user: User`.
-        emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
-        (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
-        (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
-        // A `currentUser.*` create-field default binds `current_user: User` in
-        // the create handler for its per-request coalesce.
-        (hasCreateFactory(agg) &&
-          forCreateInput(agg.fields).some(
-            (f) =>
-              f.default !== undefined &&
-              isServerSourcedDefault(f.default) &&
-              exprUsesCurrentUser(f.default),
-          )),
-      // The write-side field gate binds the non-raising `current_user()` getter.
-      emitsWriteGuard(agg),
-    ),
+    publicOps.some(operationUsesCurrentUser) ||
+      emittableFinds(repo).some(findUsesCurrentUser) ||
+      // A find `requires` gate that reads currentUser binds `current_user: User`.
+      emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
+      (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
+      (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
+      // A `currentUser.*` create-field default binds `current_user: User` in
+      // the create handler for its per-request coalesce.
+      (hasCreateFactory(agg) &&
+        forCreateInput(agg.fields).some(
+          (f) =>
+            f.default !== undefined &&
+            isServerSourcedDefault(f.default) &&
+            exprUsesCurrentUser(f.default),
+        ))
+      ? "from app.auth.user import User"
+      : null,
     "from app.db.engine import get_session",
     // Wire-format helpers for a scalar operation-return value (money → its
     // canonical decimal string, datetime → ISO-8601) — the same projection
@@ -492,128 +488,6 @@ function payloadFieldPyType(t: TypeIR, ctx: EnrichedBoundedContextIR): string {
  *  + classifier filtering Hono uses (`takeSingleFieldChain`); `&&` conjuncts
  *  on one field (e.g. `email.matches(r) && email.length <= 120`) become a
  *  single `Field(pattern=, max_length=)`. */
-function createFieldConstraints(
-  invariants: InvariantIR[],
-  available: ReadonlySet<string>,
-): Map<string, string> {
-  const byField = new Map<string, SingleFieldPattern[]>();
-  for (const inv of invariants) {
-    if (!classifyForWire(inv, { available })) continue;
-    // A messaged rule carries author text, so it routes through the
-    // `@model_validator` refine carrier (which has a message slot) rather
-    // than a native `Field(...)` constraint (whose message is Pydantic's
-    // default) — mirroring the .NET/Hono carriers.
-    if (inv.message) continue;
-    const cons = singleFieldConstraints(inv);
-    if (!cons) continue;
-    for (const { field, pattern } of cons) {
-      if (!available.has(field)) continue;
-      byField.set(field, [...(byField.get(field) ?? []), pattern]);
-    }
-  }
-  const out = new Map<string, string>();
-  for (const [field, patterns] of byField) {
-    const kwargs: string[] = [];
-    const seen = new Set<string>();
-    for (const p of patterns) {
-      for (const kw of pydanticKwargs(p)) {
-        const key = kw.slice(0, kw.indexOf("="));
-        if (seen.has(key)) continue; // first constraint wins on a duplicate key
-        seen.add(key);
-        kwargs.push(kw);
-      }
-    }
-    if (kwargs.length > 0) out.set(field, `Field(${kwargs.join(", ")})`);
-  }
-  return out;
-}
-
-function pydanticKwargs(p: SingleFieldPattern): string[] {
-  switch (p.kind) {
-    case "min":
-      // Exclusive (`weight > 0.5` on a decimal/money field) → pydantic's `gt=`;
-      // inclusive keeps `ge=`.
-      return [p.exclusive ? `gt=${p.n}` : `ge=${p.n}`];
-    case "max":
-      return [p.exclusive ? `lt=${p.n}` : `le=${p.n}`];
-    case "between":
-      return [`ge=${p.lo}`, `le=${p.hi}`];
-    case "len-min":
-      return [`min_length=${p.n}`];
-    case "len-max":
-      return [`max_length=${p.n}`];
-    case "len-eq":
-      return [`min_length=${p.n}`, `max_length=${p.n}`];
-    case "len-range":
-      return [`min_length=${p.lo}`, `max_length=${p.hi}`];
-    case "regex":
-      return [`pattern=${pyRawRegex(p.pattern)}`];
-  }
-}
-
-/** Render a regex source as a Python raw-string literal (backslashes are
- *  regex escapes, not string escapes).  Falls back to a JSON string only if
- *  the source contains both quote kinds (regexes effectively never do). */
-function pyRawRegex(src: string): string {
-  if (!src.includes('"')) return `r"${src}"`;
-  if (!src.includes("'")) return `r'${src}'`;
-  return JSON.stringify(src);
-}
-
-/** Splice a derived `Field(...)` onto a request-field declaration, folding any
- *  existing default (`= None` / `= False`) into `Field(default=…, …)` so the
- *  field's optionality is preserved. */
-function withFieldConstraint(name: string, decl: string, fieldExpr: string | undefined): string {
-  if (!fieldExpr) return `    ${name}: ${decl}`;
-  const eq = decl.indexOf(" = ");
-  if (eq === -1) return `    ${name}: ${decl} = ${fieldExpr}`;
-  const type = decl.slice(0, eq);
-  const dflt = decl.slice(eq + 3);
-  const inner = fieldExpr.slice("Field(".length, -1);
-  return `    ${name}: ${type} = Field(default=${dflt}, ${inner})`;
-}
-
-/** A Pydantic `@model_validator(mode="after")` enforcing the wire-scoped
- *  invariants that are NOT single-field shapes (cross-field comparisons like
- *  `handle != email`, or guarded predicates) — the refine fallback the other
- *  backends emit (Hono's `.refine`, Phoenix's `validate fn`).  Single-field
- *  invariants are handled by `Field(...)` constraints; this raises ValueError
- *  → FastAPI 422 for the rest, so a violation surfaces as 422 (not the
- *  domain's DomainError → 400).  Predicates render against the request DTO's
- *  verbatim camelCase fields (`self.handle`). */
-function createModelValidator(
-  invariants: InvariantIR[],
-  available: ReadonlySet<string>,
-  cls: string,
-): string | null {
-  const refines = invariants.filter(
-    (inv) =>
-      classifyForWire(inv, { available }) && (inv.message != null || !singleFieldConstraints(inv)),
-  );
-  if (refines.length === 0) return null;
-  const checks = refines.map((inv) => {
-    const pred = renderPyExpr(inv.expr, { thisName: "self", wireField: true });
-    const ok = inv.guard
-      ? `not (${renderPyExpr(inv.guard, { thisName: "self", wireField: true })}) or (${pred})`
-      : pred;
-    // A messaged rule raises PydanticCustomError so the wire error carries a
-    // stable content-hash `type` (surfaced as `errors[].code`, the i18n key) —
-    // and cleanly drops the "Value error, " prefix a bare ValueError adds. A
-    // message-less rule keeps `raise ValueError(...)`, byte-identical.
-    const raise = inv.message
-      ? `raise PydanticCustomError(${JSON.stringify(messageCode(inv.message.text))}, ${JSON.stringify(inv.message.text)})`
-      : `raise ValueError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
-    return lines(`        if not (${ok}):`, `            ${raise}`);
-  });
-  return lines(
-    "",
-    '    @model_validator(mode="after")',
-    `    def _check_invariants(self) -> "${cls}":`,
-    ...checks,
-    "        return self",
-  );
-}
-
 function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   // Event-sourced create: the request shape is the create ACTION's
   // params (the command), not the field set (appliers A2.2).
@@ -790,78 +664,6 @@ function stampCall(agg: EnrichedAggregateIR, event: "create" | "update", varName
   return `    ${varName}._stamp_on_${event}(${stampUsesUser(agg, event) ? "current_user" : ""})`;
 }
 
-// --- write-side field gate ------------------------------------------------------
-
-/** Write-side field-authorization gate (`write(<expr>)` / `readonly when`,
- *  authorization.md §5, M-T3.2 item 6 — the write-side twin of `mask unless`).
- *  A field's `writeGate` is a `currentUser`-only ALLOWED-WHEN predicate that
- *  must hold whenever a CLIENT-SUPPLIED param of the SAME NAME is present
- *  (op-param granularity — Loom has no PATCH partial update).  Returns the
- *  write-gated fields covered by `params`, in param order, deduped. */
-function writeGatedParams(
-  agg: EnrichedAggregateIR,
-  params: readonly { name: string }[],
-): FieldIR[] {
-  const gated = new Map(agg.fields.filter((f) => f.writeGate).map((f) => [f.name, f] as const));
-  const seen = new Set<string>();
-  const out: FieldIR[] = [];
-  for (const p of params) {
-    const f = gated.get(p.name);
-    if (f && !seen.has(f.name)) {
-      seen.add(f.name);
-      out.push(f);
-    }
-  }
-  return out;
-}
-
-/** The handler-body guard lines for {@link writeGatedParams}: a fail-closed 403
- *  (`ForbiddenError` → the routes onError → RFC-7807) emitted BEFORE the domain
- *  call.  The gate is principal-only, so it fails fast (no aggregate load
- *  needed).  Fail-closed: an unauthenticated caller (`current_user() is None`)
- *  is rejected.  Binds `__write_user` ONCE per handler even when several params
- *  are gated (via the non-raising `current_user()` getter — the same one the
- *  read-mask projection reads).  Byte-identical (no lines) when no supplied
- *  param is write-gated. */
-function writeGateGuards(agg: EnrichedAggregateIR, params: readonly { name: string }[]): string[] {
-  const gated = writeGatedParams(agg, params);
-  if (gated.length === 0) return [];
-  const out: string[] = ["    __write_user = current_user()"];
-  for (const f of gated) {
-    const pred = renderPyExpr(f.writeGate!, { thisName: "self", currentUserExpr: "__write_user" });
-    out.push(
-      `    if not (__write_user is not None and (${pred})):`,
-      `        raise ForbiddenError(${JSON.stringify(`Forbidden: write ${f.name}`)})`,
-    );
-  }
-  return out;
-}
-
-/** The single `from app.auth.user import …` line for the routes module — `User`
- *  (threaded principal / stamp actor) and/or `current_user` (the non-raising
- *  getter the write-side field gate reads).  Null when neither is referenced, so
- *  a principal-free routes file stays byte-identical (and never trips ruff F401).
- *  Names are sorted (isort-stable), matching the repository module's helper. */
-function authUserImportLine(needsUser: boolean, needsGetter: boolean): string | null {
-  const names = [needsUser ? "User" : null, needsGetter ? "current_user" : null]
-    .filter((n): n is string => n != null)
-    .sort();
-  return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
-}
-
-/** Whether ANY route in this aggregate's routes file emits a write-side gate —
- *  the create route (over its create-input fields / ES create params) or any
- *  public operation (over its params).  Gates the `current_user` getter import
- *  so a gate-free routes file stays byte-identical. */
-function emitsWriteGuard(agg: EnrichedAggregateIR): boolean {
-  const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
-  const createParams = esCreate ? esCreate.params : forCreateInput(agg.fields);
-  if (hasCreateFactory(agg) && writeGatedParams(agg, createParams).length > 0) return true;
-  return agg.operations
-    .filter((o) => o.visibility === "public")
-    .some((op) => writeGatedParams(agg, op.params).length > 0);
-}
-
 // --- routes ---------------------------------------------------------------------
 
 // The lifecycle audit row for a `create(...) audited` — staged through the repo
@@ -889,14 +691,9 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     const args = esCreate.params
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
-    const gated = writeGatedParams(agg, esCreate.params).length > 0;
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", false, gated ? [403] : [])})`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
-      // Write-side field gate — reject (403) before constructing the aggregate
-      // when a client-supplied create param is write-gated and the ambient
-      // principal fails its predicate (authorization.md §5).
-      ...writeGateGuards(agg, esCreate.params),
       `    created = ${agg.name}.create(${args})`,
       auditCreate ? "    repo = _repo(session)" : null,
       auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
@@ -937,15 +734,9 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     ...(stampUsesPrincipal ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
-  const gated = writeGatedParams(agg, inputs).length > 0;
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", false, gated ? [403] : [])})`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
-    // Write-side field gate — reject (403) before constructing the aggregate
-    // when a client-supplied create-input field is write-gated and the ambient
-    // principal fails its predicate (authorization.md §5).  Fail-fast, principal-
-    // only (no aggregate exists yet).
-    ...writeGateGuards(agg, inputs),
     stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
@@ -1149,10 +940,6 @@ function operationRoute(
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
   const resolve = conflictResolver(ctx);
-  // Write-side field gate: a client-supplied op param whose name matches a
-  // write-gated field denies with 403 before the domain method runs.
-  const writeGated = writeGatedParams(agg, op.params).length > 0;
-  const writeGateStatuses = writeGated ? [403] : [];
   // Exception-less operation (`operation foo(): X or NotFound`): the
   // route intercepts each error variant and translates it to an
   // RFC-7807 ProblemDetails at its mapped status; success rides as the
@@ -1180,10 +967,8 @@ function operationRoute(
     if (usesUser) callArgs.push("current_user");
     const vsave = versionedSave(agg);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), [...versionedConflictStatuses(agg, op, resolve), ...writeGateStatuses], resolve)})`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
-      // Write-side field gate — fail-closed 403 before the aggregate loads.
-      ...writeGateGuards(agg, op.params),
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
         : null,
@@ -1250,10 +1035,8 @@ function operationRoute(
     );
   }
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), [...versionedConflictStatuses(agg, op, resolve), ...writeGateStatuses], resolve)})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
-    // Write-side field gate — fail-closed 403 before the aggregate loads.
-    ...writeGateGuards(agg, op.params),
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,

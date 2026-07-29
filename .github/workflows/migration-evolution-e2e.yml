@@ -1,0 +1,164 @@
+name: Migration evolution (runtime e2e)
+
+# The runtime companion to the rename/baseline/data-migration language work
+# (M-T2.1/M-T2.2/M-T2.3).  The per-PR compile/first-boot tiers prove a migration
+# EMITS and applies to a FRESH database; nothing proved it EVOLVES correctly on
+# data that already exists — the silent-data-loss class.  This gate runs two
+# runtime checks per SQL backend against a real Postgres:
+#
+#   (1) migrate-vs-create equivalence — the schema after applying the full
+#       migration chain (Initial v1 -> delta v2) must equal a FRESH create of
+#       the head (v2) model (catches an ALTER that drifts from the CREATE).
+#   (2) populated forward-migrate — seed a v1 row through REST, evolve the .ddd
+#       to v2, apply the derived forward migration, assert the row SURVIVES with
+#       correct values (renamed column value preserved, back-filled NOT-NULL
+#       populated, nullable add NULL).
+#
+# The shared assertion + schema-fingerprint harness lives in
+# test/e2e/support/migration-evolution-harness.ts and is backend-agnostic; the
+# per-backend files differ only in boot mechanics (mirroring tenancy-isolation).
+# Fixtures: test/e2e/fixtures/migration-evolution/{base,evolved}.ddd.
+#
+# Uses one `services: postgres` container.  The harness creates two databases in
+# it (`chain`, `fresh`) — CHECK 1 needs the chain schema and the fresh-create
+# schema side by side — so it needs the MAINTENANCE db, which is why the URL
+# handed via LOOM_MIGRATION_PG_URL is only used for host/port/credentials (the
+# harness drops+creates `chain`/`fresh` itself).  Schema introspection uses host
+# `psql` (preinstalled on the runner, as the tenancy-hierarchy gate relies on).
+#
+# Triggers `push: main` + manual dispatch + a per-PR `run-migration-e2e` label
+# (apply it to a PR to run all five legs against that branch before merge).  NOT
+# on every PR by default — sibling to the tenancy / obs e2e gates; same
+# rationale: a docker-heavy multi-boot on every migration-touching PR is a runner
+# burst for a regression acceptable to catch one merge later, and the labelled
+# pre-merge run is the honest opt-in.  Heavier than tenancy (three boots + two
+# build trees per cell), so a 35-min cap.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/system/migrations-builder.ts'
+      - 'src/system/migration-artifacts.ts'
+      - 'src/ir/types/migrations-ir.ts'
+      - 'src/generator/sql-pg.ts'
+      - 'src/generator/_persistence/**'
+      - 'src/generator/elixir/migrations-emit.ts'
+      - 'test/e2e/migration-evolution.test.ts'
+      - 'test/e2e/migration-evolution-python.test.ts'
+      - 'test/e2e/migration-evolution-java.test.ts'
+      - 'test/e2e/migration-evolution-dotnet.test.ts'
+      - 'test/e2e/migration-evolution-elixir.test.ts'
+      - 'test/e2e/support/migration-evolution-harness.ts'
+      - 'test/e2e/fixtures/migration-evolution/**'
+      - 'package.json'
+      - '.github/workflows/migration-evolution-e2e.yml'
+  # On-demand per-PR run: apply the `run-migration-e2e` label to a PR to run this
+  # otherwise push:main-only gate against that branch BEFORE merge (a
+  # `synchronize` push to an already-labelled PR re-runs it).  The job-level `if`
+  # below restricts the labeled trigger to that one label so other labels don't
+  # kick off a docker-heavy multi-boot.
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+  merge_group:
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migration-evolution-e2e:
+    # push:main / merge_group / manual always run; on a PR only when the
+    # `run-migration-e2e` label is set (a `synchronize` push to an already-
+    # labelled PR re-runs it).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'run-migration-e2e')
+    runs-on: ubuntu-latest
+    # Cold path is dominated by the generated project's build/dep install run
+    # TWICE (evolution tree + fresh tree) plus three boots. 35min cap.
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: node
+            script: test:migration-evolution
+          - backend: python
+            script: test:migration-evolution-python
+          - backend: java
+            script: test:migration-evolution-java
+          - backend: dotnet
+            script: test:migration-evolution-dotnet
+          - backend: elixir
+            script: test:migration-evolution-elixir
+    name: migration-evolution-e2e (${{ matrix.backend }})
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up uv (python)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up JDK (java)
+        if: matrix.backend == 'java'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      # Java 25 toolchain needs Gradle 9.1+ (no wrapper is emitted).
+      - name: Set up Gradle (java)
+        if: matrix.backend == 'java'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.1'
+
+      - name: Set up .NET (dotnet)
+        if: matrix.backend == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Elixir/OTP (elixir)
+        if: matrix.backend == 'elixir'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run migration-evolution runtime e2e (${{ matrix.backend }})
+        env:
+          LOOM_MIGRATION_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/app
+        run: npm run ${{ matrix.script }} -- --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo "## Migration-evolution runtime e2e failed (${{ matrix.backend }})" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the run step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test seeds a v1 row, evolves the .ddd to v2, applies the derived forward migration, and asserts (1) the migrate-chain schema equals a fresh create of the head model, and (2) the seeded row survives with correct values (renamed column preserved, back-filled NOT-NULL populated, nullable add NULL).' >> $GITHUB_STEP_SUMMARY

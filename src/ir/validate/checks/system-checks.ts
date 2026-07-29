@@ -38,11 +38,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
-import {
-  exprUsesCurrentUser,
-  isMaterializedProjection,
-  isQueryTimeProjection,
-} from "../../types/loom-ir.js";
+import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
 import { backendServesRealtime } from "../../util/channels.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
@@ -50,7 +46,6 @@ import {
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
 import { opHasProvSite } from "../../util/prov-id.js";
-import { realtimeRoomPlan } from "../../util/realtime-rooms.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -147,46 +142,6 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
           severity: "error",
           code: "loom.projection-query-time-unsupported",
           message: `projection '${p.name}' uses the query-time comprehension ('from'/'where'/'join'/'select'), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Express the read as a folded 'projection', or host it on a supported deployable.`,
-          source: `${c.name}/${p.name}`,
-        });
-      }
-    }
-  }
-}
-
-// A FOLDED (materialized) projection emits its `<Proj>Row` read-model table, the
-// fold upsert, and the `GET /projections/<name>` read routes only through each
-// backend's DEFAULT persistence adapter (drizzle on node, EF Core on dotnet).
-// The MikroORM adapter (`persistence: mikroorm`) emits NO projection wiring at
-// all — no read-model entity, no fold, no route — so a read 404s; the .NET Dapper
-// adapter (`persistence: dapper`) emits a projection read controller that is
-// EF-Core-coupled (it imports `Microsoft.EntityFrameworkCore` + takes the
-// `AppDbContext`), so it won't compile under raw-Npgsql Dapper. Gate the
-// combination HONESTLY (a clear compile-time error) rather than emit code that
-// 404s or fails to build. These adapter names are platform-unique, so a bare
-// `d.persistence` membership test suffices. The behavioural `MIKRO_SKIP` /
-// `DAPPER_SKIP` entries are the runtime backstop; both this gate and those skips
-// re-arm the moment the adapter's projection emitter lands.
-const FOLDED_PROJECTION_UNSUPPORTED_PERSISTENCE = new Set(["mikroorm", "dapper"]);
-
-export function validateFoldedProjectionPersistence(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
-  for (const d of sys.deployables) {
-    if (!d.persistence || !FOLDED_PROJECTION_UNSUPPORTED_PERSISTENCE.has(d.persistence)) continue;
-    for (const cn of d.contextNames) {
-      const c = ctxByName.get(cn);
-      if (!c) continue;
-      for (const p of c.projections ?? []) {
-        if (!isMaterializedProjection(p)) continue;
-        diags.push({
-          severity: "error",
-          code: "loom.projection-persistence-unsupported",
-          message:
-            `folded projection '${p.name}' isn't emitted on the '${d.persistence}' persistence ` +
-            `adapter yet — only each backend's default adapter (drizzle on node, EF Core on ` +
-            `dotnet) wires the read-model table, fold, and read route. Deployable '${d.name}' ` +
-            `would ${d.persistence === "dapper" ? "fail to compile the read controller" : "404 the projection read"}. ` +
-            `Host this deployable on its default persistence adapter, or drop the folded projection from its contexts.`,
           source: `${c.name}/${p.name}`,
         });
       }
@@ -849,44 +804,6 @@ export function validateRelayTargetNotSubscribed(sys: SystemIR, diags: LoomDiagn
           source: d.name,
         });
       }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Realtime tenant-broadcast honesty (channels.md — "rooms + policy-derived
-// routing v1").  The Hono/node backend scopes realtime delivery by the tenant
-// DataKey (per-tenant rooms); the other SSE backends (.NET / Java / Python)
-// still broadcast every carried event to every connected browser.  In a
-// tenant-owned context that means a tenant-scoped event's payload crosses the
-// tenant boundary on the wire — the authorized refetch remains the gate, but
-// the payload itself is over-delivered.  Warn so the per-backend rollout gap
-// is a reviewed decision, not a silent cross-tenant leak.  (Phoenix/LiveView
-// re-renders server-side through the authorized read, so it is not in this
-// set — `backendServesRealtime` already excludes it.)
-export function validateRealtimeTenantBroadcast(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map<string, BoundedContextIR>();
-  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-  for (const d of sys.deployables) {
-    if (!backendServesRealtime(d.platform) || d.platform === "node") continue;
-    for (const ctxName of d.contextNames) {
-      const ctx = ctxByName.get(ctxName);
-      if (!ctx) continue;
-      const plan = realtimeRoomPlan(ctx);
-      if (!plan.tenantScoped) continue;
-      diags.push({
-        severity: "warning",
-        code: "loom.realtime-tenant-broadcast",
-        message:
-          `Deployable '${d.name}' (platform '${d.platform}') serves realtime for tenant-owned ` +
-          `context '${ctxName}', but its SSE wire broadcasts every carried event to every ` +
-          `connected browser — tenant-scoped event payloads (${[...plan.tenantEventTypes]
-            .sort()
-            .join(", ")}) cross the tenant boundary on the wire. Per-tenant rooms ship on the ` +
-          `node/Hono backend; on '${d.platform}' the authorized refetch remains the gate, but ` +
-          `the payload is over-delivered until rooms land there.`,
-        source: d.name,
-      });
     }
   }
 }
@@ -2975,67 +2892,6 @@ export function validateFieldMask(
         });
       }
     }
-  }
-}
-
-// `write(<expr>)` / `readonly when <expr>` write-side authorization (authorization.md
-// §5) — the write-side twin of `mask unless`, normalised to a single ALLOWED-WHEN
-// `field.writeGate` at lowering (`write(X)` → `X`; `readonly when X` → `!(X)`).
-// Two gates, mirroring the mask ones:
-//   - loom.field-write-gate-not-current-user — the predicate references something
-//     other than `currentUser` (+ constants).  The slice-1 gate is a param-free
-//     caller check (mirroring the mask gate); a row/param reference is illegal
-//     until the row-aware follow-up.
-//   - loom.field-write-gate-unsupported — the field is hosted by a backend whose
-//     create/op handlers don't yet enforce the gate.  A parsed-but-unenforced
-//     write gate is a SECURITY footgun (the client can set a field it shouldn't),
-//     so it fails fast rather than silently no-op'ing.  All five backends now
-//     enforce it: `node` (Hono) in its create/op handlers (fail-closed 403 before
-//     the domain call); `dotnet` in its create/operation Mediator command
-//     handlers (fail-closed 403 before the domain method); `python` in its
-//     create/operation FastAPI route handlers (fail-closed 403 via ForbiddenError
-//     before the domain call); `java` in its create/operation @Service methods
-//     (fail-closed 403 via ForbiddenException before the domain call); `elixir`
-//     (plain Ecto/Phoenix) in its create/update/operation controller actions
-//     (fail-closed 403 `cond` reading `current_user` off `conn.assigns` before
-//     the domain call).  This diagnostic can no longer fire for a backend
-//     deployable, but the set is retained for out-of-tree / future backends.
-const FIELD_WRITE_GATE_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
-export function validateFieldWriteGate(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-  backendPlatforms: Set<string>,
-): void {
-  const unsupported = [...backendPlatforms].filter((p) => !FIELD_WRITE_GATE_BACKENDS.has(p));
-  const anyBackend = backendPlatforms.size > 0;
-  for (const agg of ctx.aggregates) {
-    const gated = agg.fields.filter((f) => f.writeGate);
-    if (gated.length === 0) continue;
-    for (const f of gated) {
-      const offending = firstNonGateRef(f.writeGate!, GATE_ALLOWED_REFS);
-      if (offending !== null) {
-        diags.push({
-          severity: "error",
-          code: "loom.field-write-gate-not-current-user",
-          message:
-            `aggregate '${agg.name}' field '${f.name}': a \`write(...)\` / \`readonly when\` predicate ` +
-            `is a param-free caller check (slice 1), so it may only reference \`currentUser\` (and ` +
-            `constants) — \`${offending}\` is not available here.`,
-          source: `${ctx.name}/${agg.name}.${f.name}`,
-        });
-      }
-    }
-    if (anyBackend && unsupported.length === 0) continue;
-    const names = gated.map((f) => f.name).join(", ");
-    diags.push({
-      severity: "error",
-      code: "loom.field-write-gate-unsupported",
-      message:
-        `aggregate '${agg.name}' has write-gated field(s) ${names}, but write-side authorization is ` +
-        `not enforced by the ${unsupported.join("/")} backend(s) yet. Drop the \`write(...)\` / ` +
-        `\`readonly when\` clause for those targets, or track authorization.md §5 (M-T3.2 item 6).`,
-      source: `${ctx.name}/${agg.name}`,
-    });
   }
 }
 

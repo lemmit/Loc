@@ -109,7 +109,12 @@ import {
   renderProvenanceRecordConfiguration,
   renderProvLineage,
 } from "./emit/provenance.js";
-import { realtimeTypesOf, renderRealtimeDispatcher, renderRealtimeHub } from "./emit/realtime.js";
+import {
+  realtimeRoomPlanOf,
+  realtimeTypesOf,
+  renderRealtimeDispatcher,
+  renderRealtimeHub,
+} from "./emit/realtime.js";
 import { renderRequestContext } from "./emit/request-context.js";
 import { renderRequestContextMiddleware } from "./emit/request-context-middleware.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
@@ -456,8 +461,12 @@ function emitProjectFromContexts(
       usingDapper: system?.deployable.persistence === "dapper",
     });
     // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
-    // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
-    emitProjectionReads(ctx, ns, out, { routePrefix });
+    // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet (EF) or
+    // raw Npgsql (dapper — decoupled from AppDbContext).
+    emitProjectionReads(ctx, ns, out, {
+      routePrefix,
+      usingDapper: system?.deployable.persistence === "dapper",
+    });
     // Query-time projections (read-path-architecture.md rev.13) — a live read
     // (source find + join bulk-loads + select) with no folded read-model table.
     emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
@@ -548,6 +557,11 @@ function emitProjectFromContexts(
   // dispatcher when both are wired (chain: ChannelTee → Realtime → core).
   const realtimeTypes = realtimeTypesOf(merged);
   const hasRealtime = realtimeTypes.length > 0;
+  // Rooms + policy-derived routing v1 (channels.md): a tenant-owned context's
+  // SSE wire scopes delivery per tenant (never cross-tenant); an untenanted
+  // one keeps the broadcast-to-all hub (byte-identical).
+  const realtimeRoomPlan = realtimeRoomPlanOf(merged);
+  const realtimeRoomScoped = hasRealtime && realtimeRoomPlan.tenantScoped;
   if (hasChannels && system) {
     out.set(
       "Infrastructure/Channels/ChannelTransport.cs",
@@ -625,7 +639,10 @@ function emitProjectFromContexts(
   // the dispatcher in the tee, and maps the SSE endpoint.  A broadcast-free
   // deployable emits nothing (byte-identical).
   if (hasRealtime) {
-    out.set("Infrastructure/Realtime/RealtimeHub.cs", renderRealtimeHub(ns, realtimeTypes));
+    out.set(
+      "Infrastructure/Realtime/RealtimeHub.cs",
+      renderRealtimeHub(ns, realtimeTypes, realtimeRoomPlan),
+    );
     out.set("Infrastructure/Events/RealtimeDomainEventDispatcher.cs", renderRealtimeDispatcher(ns));
   }
   // Auth files — emitted only when the deployable opts in
@@ -860,7 +877,7 @@ function emitProjectFromContexts(
   // has wire-translatable invariants / preconditions.  Computed
   // before the exception filter render so its FluentValidation
   // arm is gated on the same flag.
-  const usesValidators = merged.aggregates.some(hasAnyWireValidator);
+  const usesValidators = merged.aggregates.some((a) => hasAnyWireValidator(a, merged.valueObjects));
   // Only emit the 23505 → 409 arm when some aggregate declares a `unique (...)`
   // key — a unique-free project stays byte-identical (strict additivity).
   const hasUniqueKeys = aggregatesHaveUniqueKeys(merged.aggregates);
@@ -983,6 +1000,7 @@ function emitProjectFromContexts(
     hasSubscriptions,
     hasOutbox,
     hasRealtime,
+    realtimeRoomScoped,
     hasAudit,
     hasProvenance,
     // Dapper persistence-port DI (M-T6.9): closed bindings keyed off the
@@ -1135,7 +1153,7 @@ function emitContext(
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
-  const usesValidators = ctx.aggregates.some(hasAnyWireValidator);
+  const usesValidators = ctx.aggregates.some((a) => hasAnyWireValidator(a, ctx.valueObjects));
   emitInfrastructure(ctx, ns, out, usesValidators);
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
@@ -1710,6 +1728,10 @@ function emitProject(
      *  singleton, wraps the dispatcher in the tee, and maps GET
      *  /api/realtime/events. */
     hasRealtime?: boolean;
+    /** Rooms + policy-derived routing v1 (channels.md): the realtime context is
+     *  tenant-owned, so the SSE endpoint derives the connecting principal's
+     *  tenant room (never a client value) and passes it to `hub.Subscribe`. */
+    realtimeRoomScoped?: boolean;
     /** Per-operation audit (audit-and-logging.md): registers the scoped
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
     hasAudit?: boolean;
@@ -1779,6 +1801,7 @@ function emitProject(
       hasOutbox: !!options?.hasOutbox,
       outboxNoopInner: !!options?.outboxNoopInner,
       hasRealtime: !!options?.hasRealtime,
+      realtimeRoomScoped: !!options?.realtimeRoomScoped,
       hasAudit: !!options?.hasAudit,
       fileUpload: options?.fileUpload,
       oidc: !!options?.oidc,

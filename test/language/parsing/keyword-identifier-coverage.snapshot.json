@@ -621,7 +621,14 @@
   "react": [],
   "readCommitted": [],
   "readUncommitted": [],
-  "readonly": [],
+  "readonly": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "redis": [],
   "relational": [],
   "repeatableRead": [],
@@ -891,5 +898,12 @@
     "nameRef",
     "paramName"
   ],
-  "write": []
+  "write": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ]
 }

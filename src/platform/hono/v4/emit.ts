@@ -585,8 +585,8 @@ export function generateTypeScriptForContexts(
       }
     }
   }
-  if (merged.projections.some(isMaterializedProjection) && !usingMikro) {
-    out.set("http/projections.ts", buildProjectionsFile(merged));
+  if (merged.projections.some(isMaterializedProjection)) {
+    out.set("http/projections.ts", buildProjectionsFile(merged, usingMikro));
   }
   // Query-time projections (read-path-architecture.md rev.13) — the always-
   // current read model of the query-time projection read.  Emitted to a distinct

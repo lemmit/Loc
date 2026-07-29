@@ -32,24 +32,6 @@ export interface WireSpecDoc {
   aggregates: Record<string, JsonSchemaObject>;
   parts: Record<string, JsonSchemaObject>;
   valueObjects: Record<string, JsonSchemaObject>;
-  /** Per-field authorization capabilities (authorization.md §5) — the review/diff
-   *  surface for `mask unless` (read redaction) and `write(...)`/`readonly when`
-   *  (write gating).  Flat map keyed `<objectKey>.<field>` (same object keys as the
-   *  three buckets above), one entry per field that carries a capability.  Read
-   *  from the field IR (not the read wire shape) so a write-only (`secret`) gated
-   *  field still appears.  OMITTED entirely when no field in the system carries a
-   *  capability — a capability-free model stays byte-identical. */
-  fieldCapabilities?: Record<string, FieldCapabilities>;
-}
-
-/** The authorization capabilities a single field carries.  Boolean presence
- *  flags (not the predicate expressions) — enough to diff "this field became
- *  masked / write-gated" without leaking the gate logic into the artifact. */
-interface FieldCapabilities {
-  /** The field is read-redacted (`mask unless <expr>`). */
-  mask?: true;
-  /** The field is write-gated (`write(<expr>)` / `readonly when <expr>`). */
-  write?: true;
 }
 
 interface JsonSchemaObject {
@@ -176,28 +158,6 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
       refIn(e.ctx),
     );
   }
-
-  // Per-field authorization capabilities (authorization.md §5).  Read from the
-  // field IR (not the read wire shape) so a write-only (`secret`) gated field
-  // still surfaces.  Keyed by the same object key each bucket used above.
-  const caps: Record<string, FieldCapabilities> = {};
-  const collectCaps = (
-    objectKey: string,
-    node: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR,
-  ) => {
-    for (const f of node.fields) {
-      if (!f.maskUnless && !f.writeGate) continue;
-      caps[`${objectKey}.${f.name}`] = {
-        ...(f.maskUnless ? { mask: true as const } : {}),
-        ...(f.writeGate ? { write: true as const } : {}),
-      };
-    }
-  };
-  for (const e of aggs) collectCaps(keyOf(collidedAgg, e.ctx, e.name), e.node);
-  for (const e of parts) collectCaps(keyOf(collidedPart, e.ctx, e.name), e.node);
-  for (const e of vos) collectCaps(keyOf(collidedVo, e.ctx, e.name), e.node);
-  if (Object.keys(caps).length > 0) doc.fieldCapabilities = caps;
-
   return doc;
 }
 

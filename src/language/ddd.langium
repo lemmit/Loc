@@ -1725,19 +1725,7 @@ Property:
     // the same greedy-expression reason those do.  `mask`/`unless` are keywords
     // (like the sibling `requires` / `implies` gate words, they are not
     // re-admitted as identifiers — pinned by keyword-identifier-completeness).
-    ('mask' 'unless' maskUnless=Expression)?
-    // Write-side field authorization (authorization.md §5) — the write-side twin
-    // of `mask unless`.  A field carrying a write gate is REJECTED (403) when a
-    // client-supplied operation param of the same name is present AND the
-    // `currentUser`-only bool predicate fails.  Two equivalent spellings, one
-    // normalised `writeGate` in the IR:
-    //   `write(<expr>)`      — writable ONLY when <expr> holds  → gate = <expr>
-    //   `readonly when <expr>` — readonly (reject) when <expr> holds → gate = !<expr>
-    // `write`/`readonly`/`when` are already soft keywords elsewhere; the clause
-    // disambiguates by position (`write` + `(`, `readonly` + `when`) after the
-    // type/flags, so a field NAMED `write`/`readonly` still parses.
-    ( 'write' '(' write=Expression ')'
-      | 'readonly' 'when' readonlyWhen=Expression )?;
+    ('mask' 'unless' maskUnless=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
@@ -1858,16 +1846,9 @@ CommonSoftKeywords returns string:
       | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
       | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
-      | 'queue' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
+      | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
       | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix'
-      | 'tenancy' | 'title' | 'token' | 'ttl' | 'use';
-// NOTE: `readonly` and `write` were removed from the soft-keyword identifier set
-// when the write-side field gate (`field: T write(<expr>)` / `readonly when
-// <expr>`, authorization.md §5) took them as trailing Property clause keywords —
-// a soft keyword that can start a following member collides with the greedy
-// optional clause, so both had to become reserved.  Neither is a DOMAIN_WORD_FLOOR
-// term and no example/corpus named a field with them; the coverage-snapshot update
-// is the reviewed checkpoint for that trade.
+      | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 // LooseName — admissible identifiers in name positions that need to
 // accept Loom keywords as ordinary names.  Used by `Parameter.name`
