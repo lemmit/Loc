@@ -39,6 +39,12 @@ function indent(s: string): string {
     .join("\n");
 }
 
+/** Indent EVERY line of a nested block by one level.  Exported so
+ *  `print-stmt.ts` shares the one implementation — a first-line-only `"  " + …`
+ *  prefix leaves a multi-line child's continuation lines and closing brace at
+ *  the parent's depth, which is the bug this replaces. */
+export const indentBlock = indent;
+
 /** `<prefix><open><items, comma-joined><close>`, wrapped onto indented lines
  *  once the one-line form would exceed `LINE_WIDTH` or an item already spans
  *  multiple lines (an inner call already wrapped). `<prefix><open><close>`
@@ -226,8 +232,9 @@ function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
   if (!printStatement) {
     throw new Error("printExpr: statement printer not registered for lambda block body");
   }
-  const body = node.stmts.map((s) => printStatement!(s)).join("\n");
-  return node.stmts.length === 0 ? `${node.param} => {}` : `${node.param} => {\n${body}\n}`;
+  if (node.stmts.length === 0) return `${node.param} => {}`;
+  const body = indent(node.stmts.map((s) => printStatement!(s)).join("\n"));
+  return `${node.param} => {\n${body}\n}`;
 }
 
 function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
@@ -239,7 +246,7 @@ function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
       return `${printTypeAtomLite(arm.varType)}${bind} => ${printExpr(arm.value)}`;
     });
     if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
-    return `match ${printExpr(node.subject)} {\n${arms.join(",\n")}\n}`;
+    return `match ${printExpr(node.subject)} {\n${indent(arms.join(",\n"))}\n}`;
   }
   const arms = node.arms.map((arm) => `${printExpr(arm.cond)} => ${printExpr(arm.value)}`);
   if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
@@ -247,7 +254,7 @@ function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
   // greedily consumes the next arm's condition (e.g. `... + name` followed
   // by `(visibility == ...)` parses as a call), so the printed form would
   // not round-trip.  The grammar accepts an optional comma between arms.
-  return `match {\n${arms.join(",\n")}\n}`;
+  return `match {\n${indent(arms.join(",\n"))}\n}`;
 }
 
 /** Minimal `TypeAtom` printer for a variant-match arm's type — inlined here
