@@ -9,6 +9,7 @@
 //   Pattern E: `method-call(ref:<Aggregate>, op, args)`           — `Customer.byId(id)` (no api-param prefix)
 //   Pattern F: `member(member(ref:<Workflow>, "instances"), "all")`        — `Fulfillment.instances.all`
 //   Pattern G: `method-call(member(ref:<Workflow>, "instances"), "byId", args)` — `Fulfillment.instances.byId(id)`
+//   Pattern H: `member(ref:apiParam, <Projection>)`                        — `Sales.SalesTotals`
 //
 // Detection is PURE IR analysis — no framework assumptions, no
 // emission.  Splitting it out of `react/walker/api-hooks.ts` (where it
@@ -45,8 +46,12 @@ export interface DetectedApiCall {
    *    `"aggregate"`         — Patterns A/B/D/E (aggregate-rooted hook)
    *    `"workflow-instance"` — Patterns F/G (`<Workflow>.instances.all` /
    *                            `.byId(id)`); `aggregateName` carries the
-   *                            workflow name, `operation` is `all`/`byId`. */
-  kind: "aggregate" | "workflow-instance";
+   *                            workflow name, `operation` is `all`/`byId`.
+   *    `"projection"`        — Pattern H (`<apiHandle>.<Projection>`);
+   *                            `aggregateName` carries the projection name and
+   *                            `operation` is `read` — a projection read takes
+   *                            no operation, since the projection IS the row. */
+  kind: "aggregate" | "workflow-instance" | "projection";
 }
 
 /** Detector context — the minimum subset of `WalkContext` the
@@ -69,6 +74,12 @@ export interface ApiHookDetectorContext {
    *  Optional so callers that never reference workflow instances need
    *  not supply it. */
   workflowsByName?: { has(name: string): boolean };
+  /** Container of READABLE projection names — the query-time projections the
+   *  served backend exposes a route for.  Pattern H matches against this set.
+   *  Optional, so a caller that never reads a projection (and every target
+   *  whose frontend client isn't ported) leaves the pattern inert and keeps
+   *  its previous output byte-for-byte. */
+  projectionsByName?: { has(name: string): boolean };
 }
 
 /** Returns a `DetectedApiCall` when `expr` matches one of the five
@@ -129,6 +140,25 @@ export function tryDetectApiHook(
       operation: "byId",
       args: expr.args,
       kind: "workflow-instance",
+    };
+  }
+  // Pattern H: member(ref:apiParam, <Projection>) — a projection read.
+  // Shaped like Pattern A minus the operation, because a projection read HAS
+  // no operation: the projection is the row.  Must be tested before Pattern D,
+  // whose `ref` arm would otherwise never see it (the receiver is an api
+  // handle, not an aggregate) and let it fall through to the unresolved
+  // `undefined.<Projection>` emit.
+  if (
+    expr.kind === "member" &&
+    expr.receiver.kind === "ref" &&
+    ctx.apiParamNames.has(expr.receiver.name) &&
+    ctx.projectionsByName?.has(expr.member)
+  ) {
+    return {
+      aggregateName: expr.member,
+      operation: "read",
+      args: [],
+      kind: "projection",
     };
   }
   // Pattern D: member(ref:<Aggregate>, op) without api-param prefix.

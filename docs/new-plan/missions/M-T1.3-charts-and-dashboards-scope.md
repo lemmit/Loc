@@ -279,22 +279,64 @@ What it took, beyond the obvious:
 Independently valuable: closes a silent mis-emit *and* an unbounded table scan.
 **Remaining:** the four non-node backends (each lifts its own gate).
 
-### 3.2 Phase 1 — the ui→projection read path (Defect D) · `M` · **P1**
+### 3.2 Phase 1 — the ui→projection read path (Defect D) · **LANDED on react**
 
-The plumbing everything else needs:
+A page can now read a projection. Singleton-only, react-only, both gated:
 
-- Lower a projection reference in a ui read (`lower-ui.ts` has no projection arm).
-- Emit a frontend client for the projection route in
-  `_frontend/api-module.ts` — a `useSalesTotals()`-shaped hook, the same
-  treatment `useAllOrders()` gets.
-- Teach `QueryView` / `Stat` to bind a **singleton** projection (one object, so
-  the `.length === 0` empty-arm is wrong for it).
-- The honest gate `loom.ui-projection-read-unsupported` **is already in**
-  (§3.7) — this phase lifts it rather than adding it.
+```ddd
+QueryView {
+  of: Sales.SalesTotals,
+  data: t => Group { Stat { "Orders", t.orders }, Stat { "Revenue", Money { t.revenue } } }
+}
+```
+```tsx
+import { useSalesTotals } from "../api/projections";
+const salesTotals = useSalesTotals();
+…
+{ salesTotals.data && (
+  <Group>
+    <Stack gap={2}><Text …>Orders</Text><Text …>{salesTotals.data.orders}</Text></Stack>
+    <Stack gap={2}><Text …>Revenue</Text><Text …><MoneyValue value={ salesTotals.data.revenue } /></Text></Stack>
+  </Group>
+) }
+```
 
-Scope decision to make: singleton-only in v1, or keyed/collection projections
-too (which then also want `Table`). Recommend **singleton-only** — it is what the
-dashboard needs and it keeps the empty/loading arms simple.
+Four pieces:
+
+- **Detector Pattern H** (`api-hook-detector.ts`) — `<apiHandle>.<Projection>`,
+  shaped like Pattern A minus the operation, because a projection read *has* no
+  operation: the projection is the row. Ordered before Pattern D, whose `ref`
+  arm would otherwise never see it.
+- **`src/api/projections.ts`** (`_frontend/projections-module.ts`) — a
+  `use<Proj>()` react-query hook per readable projection, its row schema built
+  from the same `wireShape` the backend serves, so the two can't drift. Emitted
+  only when one exists.
+- **Single-record binding, derived not declared.** A singleton returns one
+  object, so the collection semantics (`data.length === 0` / `> 0`) would read
+  `.length` on an object and render nothing. `QueryView` derives `single` from
+  the query the same way it already derives `paged` — the shape is a property of
+  the query, not a decision the page should repeat.
+- **One shared predicate** (`src/ir/util/projection-read.ts`) for *which*
+  projections are readable, imported by the emitter, the walker's detector set,
+  and the validator. A three-way disagreement here is exactly how
+  `undefined.<Projection>` got emitted in the first place.
+
+**The gate split in two**, because it asks two different questions:
+`ui-checks.ts` F3 keeps the **flavour** half (a keyed or folded projection is
+unreadable on *every* target), and `validateUiProjectionReadFramework`
+(`system-checks.ts`) owns the **framework** half (react has the client; vue /
+svelte / angular / feliz / flutter gate) — which needs a deployable in scope.
+
+**A silent drop found on the way, and fixed:** a `money` KPI could not be
+displayed at all. A bare value is `TS2322: Type 'Decimal' is not assignable to
+type 'ReactNode'` (money deserialises client-side to a decimal.js `Decimal`),
+and wrapping it — `Stat { "Revenue", Money { t.revenue } }` — rendered **empty**,
+because `Stat`'s value slot coerced the nested primitive away. `emitStat` now
+walks a nested walker-primitive in the value slot. Currency on a KPI card is the
+canonical dashboard tile, so this was a hard blocker hiding behind the feature.
+
+**Remaining:** keyed/collection projection reads (they want `Table`-shaped
+binding); the five other frontends.
 
 ### 3.3 Phase 2 — `scaffoldDashboard` + the scaffolded projection · `M` · **P1**
 
@@ -407,7 +449,7 @@ broken. `src/ir/validate/checks/`:
 | `loom.projection-whole-table-aggregation-unsupported` | an aggregating `select` hosted on a backend that hasn't ported the SQL push-down. **Now per-deployable** (`system-checks.ts`), lifted on node by Phase 0 | the remaining four backends |
 | `loom.projection-select-unresolved` | any *other* unresolved name in a `select` — the general form of the same defect (a typo emitted as a free identifier) | — (permanent) |
 | `loom.projection-groupby-unsupported` | an aggregate `select` mixed with a per-row one — a GROUP BY, reserved rather than guessed at | Phase 3 |
-| `loom.ui-projection-read-unsupported` | a page/component reading a projection through its api handle (Defect D) | Phase 1 |
+| `loom.ui-projection-read-unsupported` | **split in Phase 1** into a FLAVOUR half (`ui-checks.ts` — a keyed/folded projection, unreadable on every target) and a FRAMEWORK half (`system-checks.ts` — react has the client, the other five gate) | keyed reads; the five other frontends |
 
 Two IR shapes had to be covered for the aggregation gate, which is why half a
 fix would have leaked: a bare `count` lowers to `refKind: "unknown"`, while
@@ -428,7 +470,8 @@ stay quiet about IR-tier gates by design.
 0. **Slice 1 — the honest gates (§3.7).** ✅ landed.
 1. **Phase 0** — singleton aggregation actually computes (Defect C). ✅ landed on
    node; the four other backends each lift their own gate.
-2. **Phase 1** — ui can read a projection (Defect D).
+2. **Phase 1** — ui can read a projection (Defect D). ✅ landed on react
+   (singleton only); keyed reads + the five other frontends remain.
 3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. **Dashboard ships
    here, with no chart dependency anywhere.**
 4. **Phase 3** — `group by` (with M-T4.2).

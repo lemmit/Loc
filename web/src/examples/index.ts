@@ -22,6 +22,7 @@ import storybookComponentsSource from "./storybook-components.ddd?raw";
 import loomLandingSource from "./loom-landing.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
+import dashboardSystemSource from "./dashboard-system.ddd?raw";
 import storeShowcaseSource from "./store-showcase.ddd?raw";
 import subformShowcaseSource from "./subform-showcase.ddd?raw";
 import svelteStoreShowcaseSource from "./svelte-store-showcase.ddd?raw";
@@ -166,6 +167,13 @@ export const examples: LoomExample[] = [
     source: actionShowcaseSource,
     blurb:
       "Hand-authored Action { order.confirm } buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
+  },
+  {
+    id: "dashboard-system",
+    label: "Dashboard (KPIs aggregated in SQL)",
+    source: dashboardSystemSource,
+    blurb:
+      "A KPI page whose numbers come from the DATABASE, not from a client-side fold: a singleton query-time `projection` aggregates with `count`/`sum`/`avg`/`min`/`max` in one SQL query, the page reads it through its api handle (single-record — one object out, no `.length` checks), and `Stat` renders each field with the money figures wrapped in `Money`.",
   },
   {
     id: "store-showcase",

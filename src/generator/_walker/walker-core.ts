@@ -64,6 +64,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { readableProjectionNames } from "../../ir/util/projection-read.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
@@ -462,6 +463,7 @@ export function walkBody(
     aggregatesByName,
     bcByAggregate,
     workflowsByName,
+    projectionsByName: readableProjectionNames(new Set(bcByAggregate.values())),
     bcByWorkflow,
     formOfs: [],
     // Shared opaque per-target sink.  Created ONCE on the root context (an
@@ -602,6 +604,16 @@ export interface WalkEnv {
   /** Workflows reachable from this UI's deployable.
    *  Powers `WorkflowForm(runs: <wf>)` field dispatch. */
   workflowsByName: ReadonlyMap<string, WorkflowIR>;
+  /** Frontend-readable projection names — the detector's Pattern H set
+   *  (`<apiHandle>.<Projection>`).  DERIVED from the served contexts rather
+   *  than threaded through `walkBody`'s parameter list, since it is a pure
+   *  function of facts the context already carries.
+   *
+   *  OPTIONAL because the several hand-built sub-walk contexts (a page's
+   *  `derived` expressions, a store body, a component prop) cannot contain a
+   *  `QueryView`, so they have no projection read to resolve.  Absent ⇒ the
+   *  detector's Pattern H is inert and the walk is byte-identical. */
+  projectionsByName?: ReadonlySet<string>;
   /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
   /** Extern frontend functions declared on this ui

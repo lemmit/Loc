@@ -78,6 +78,7 @@ import {
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
+  validateUiProjectionReadFramework,
   validateUiRealtimeSupport,
   validateVanillaDocumentScope,
   validateWholeTableAggregationBackend,
@@ -174,6 +175,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuthUiFramework(sys, diags);
     validateDataGridFramework(sys, diags);
     validateUiRealtimeSupport(sys, diags);
+    validateUiProjectionReadFramework(sys, diags);
     // Flutter defers the interactive input / form primitive family; a page
     // using one on a `platform: flutter` target compiles to a silent
     // `// flutter pack: no renderer` comment.  Fail fast instead.

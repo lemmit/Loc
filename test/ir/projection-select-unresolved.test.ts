@@ -202,12 +202,12 @@ describe("loom.projection-select-unresolved", () => {
   });
 });
 
-describe("loom.ui-projection-read-unsupported", () => {
-  const withUi = (readExpr: string) => `system S {
+describe("loom.ui-projection-read-unsupported — the FLAVOUR half (every target)", () => {
+  const withProjection = (decl: string, readExpr: string) => `system S {
   subdomain Sales { context Orders {
-    aggregate Order { code: string  derived display: string = code }
+    aggregate Order { code: string  total: money  derived display: string = code }
     repository Orders for Order { }
-    projection SalesTotals keyed by order { order: Order id }
+    ${decl}
   } }
 
   api SalesApi from Sales
@@ -227,18 +227,84 @@ describe("loom.ui-projection-read-unsupported", () => {
   deployable web { platform: react targets: api ui: WebApp { Sales: api } port: 3002 }
 }`;
 
-  it("rejects a page reading a projection through its api handle", async () => {
-    // Emitted `/* unresolved: Sales */ undefined.SalesTotals.isLoading`.
-    expect(await codes(withUi("Sales.SalesTotals"))).toContain(
+  const SINGLETON = `projection SalesTotals { orders: int
+    from Order as o
+    select orders = count }`;
+
+  it("ACCEPTS a singleton query-time projection — the shape Phase 1 ships", async () => {
+    // Was: `/* unresolved: Sales */ undefined.SalesTotals.isLoading`.
+    expect(await codes(withProjection(SINGLETON, "Sales.SalesTotals"))).not.toContain(
       "loom.ui-projection-read-unsupported",
     );
+  });
+
+  it("rejects a KEYED projection — it returns a list, not a row", async () => {
+    expect(
+      await codes(
+        withProjection(
+          `projection OrderBoard keyed by order { order: Order id
+            from Order as o
+            select order = o.id }`,
+          "Sales.OrderBoard",
+        ),
+      ),
+    ).toContain("loom.ui-projection-read-unsupported");
+  });
+
+  it("rejects a FOLDED projection — it is read by key off its row table", async () => {
+    expect(
+      await codes(
+        withProjection(
+          `event OrderPlaced { order: Order id }
+           projection OrderBook keyed by order { order: Order id
+             on(e: OrderPlaced) { order := e.order } }`,
+          "Sales.OrderBook",
+        ),
+      ),
+    ).toContain("loom.ui-projection-read-unsupported");
   });
 
   it("leaves an aggregate read alone — the same receiver shape, a supported member", async () => {
     // F2 exempts an api-handle root, which is why the projection member slipped
     // through; this pins that the exemption still holds for aggregates.
-    const reported = await codes(withUi("Sales.Order.all"));
+    const reported = await codes(withProjection(SINGLETON, "Sales.Order.all"));
     expect(reported).not.toContain("loom.ui-projection-read-unsupported");
     expect(reported).not.toContain("loom.method-call-unresolved-receiver");
   });
+});
+
+describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
+  const onFrontend = (framework: string) => `system S {
+  subdomain Sales { context Orders {
+    aggregate Order { code: string  derived display: string = code }
+    repository Orders for Order { }
+    projection SalesTotals { orders: int  from Order as o  select orders = count }
+  } }
+
+  api SalesApi from Sales
+  storage primarySql { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primarySql }
+
+  ui WebApp with scaffold(subdomains: [Sales]) {
+    api Sales: SalesApi
+    page Dash {
+      route: "/dash"
+      title: "Dash"
+      body: Stack { QueryView { of: Sales.SalesTotals, data: r => Text { "x" } } }
+    }
+  }
+
+  deployable api { platform: node contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 }
+  deployable web { platform: ${framework} targets: api ui: WebApp { Sales: api } port: 3002 }
+}`;
+
+  it("is silent on react — the projection client ships there", async () => {
+    expect(await codes(onFrontend("react"))).not.toContain("loom.ui-projection-read-unsupported");
+  });
+
+  for (const framework of ["vue", "svelte", "angular", "flutter"]) {
+    it(`gates ${framework} honestly until its client ports`, async () => {
+      expect(await codes(onFrontend(framework))).toContain("loom.ui-projection-read-unsupported");
+    });
+  }
 });

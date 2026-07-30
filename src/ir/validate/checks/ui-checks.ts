@@ -28,6 +28,7 @@ import type {
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
+import { readableProjectionNames } from "../../util/projection-read.js";
 import { typeLabel } from "../../util/type-label.js";
 import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -68,6 +69,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
     for (const w of c.workflows) workflowNames.add(w.name);
     for (const p of c.projections) projectionNames.add(p.name);
   }
+  const readableProjections = readableProjectionNames(allContexts(loom));
 
   for (const sys of loom.systems) {
     for (const ui of sys.uis) {
@@ -98,6 +100,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const ctx: BodyCheckCtx = {
           aggByName,
           projectionNames,
+          readableProjections,
           handles,
           functionNames,
           componentActionParams,
@@ -126,6 +129,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const ctx: BodyCheckCtx = {
           aggByName,
           projectionNames,
+          readableProjections,
           handles,
           functionNames,
           componentActionParams,
@@ -342,9 +346,13 @@ function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
 /** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
 interface BodyCheckCtx {
   aggByName: Map<string, AggregateIR>;
-  /** Every declared `projection` name in the model — F3's lookup set.  A ui
-   *  read of one of these has no frontend path yet (see `checkProjectionRead`). */
+  /** Every declared `projection` name in the model — F3's lookup set. */
   projectionNames: ReadonlySet<string>;
+  /** The subset a frontend can actually read (`isFrontendReadableProjection`).
+   *  F3 rejects a read of a projection OUTSIDE this set on every target; a read
+   *  INSIDE it is a per-framework question (only some frontends have the
+   *  client), decided by `validateUiProjectionReadFramework` in system-checks. */
+  readableProjections: ReadonlySet<string>;
   /** Receiver-root names the walker resolves to an api / workflow-
    *  instance hook (`tryDetectApiHook`) or a declared handle — a valid
    *  method-call receiver root even though it lowers to an `unknown` ref. */
@@ -887,26 +895,31 @@ function checkMethodCallReceiver(
   });
 }
 
-/** F3 — `loom.ui-projection-read-unsupported`.  A page/component that reads a
- *  `projection` (`QueryView { of: <ApiHandle>.<Projection> }`) validates clean
- *  today and emits `/* unresolved: <Handle> *␣/ undefined.<Projection>` — a
- *  runtime `TypeError` AND a build break, from a model with no diagnostic.
+/** F3 — `loom.ui-projection-read-unsupported`, the FLAVOUR half.
  *
- *  The hole is structural, not a typo: F2 above exempts an api-handle receiver
- *  root, which is correct for an aggregate (`Sales.Customer`) but lets a
- *  PROJECTION member through unchecked, and nothing downstream resolves it —
- *  `lower-ui.ts` has no projection arm and `_frontend/api-module.ts` emits no
- *  client for a projection route.  So a projection is a backend-only read model
- *  owning an HTTP route no generated frontend ever calls.
+ *  A page/component reading a `projection` (`QueryView { of:
+ *  <ApiHandle>.<Projection> }`) used to validate clean and emit
+ *  `/* unresolved: <Handle> *␣/ undefined.<Projection>` — a runtime `TypeError`
+ *  AND a build break, from a model with no diagnostic.  The hole was
+ *  structural: F2 above exempts an api-handle receiver root, correct for an
+ *  aggregate (`Sales.Customer`) but it let a PROJECTION member through, and
+ *  nothing downstream resolved it.
  *
- *  Gate it until the ui→projection read path lands (M-T1.3 Phase 1), so the
- *  gap is an error at the model tier rather than `undefined.X` in a page. */
+ *  M-T1.3 Phase 1 shipped the read path for the SINGLETON QUERY-TIME flavour
+ *  (one object out — the dashboard KPI shape).  What stays rejected here is
+ *  every other flavour, on every target: a KEYED projection returns an array
+ *  and wants `Table`-shaped binding, and a FOLDED one is read by key off its
+ *  materialized row table.  Whether a *readable* projection's frontend has the
+ *  client is a per-framework question with no platform in scope here — that is
+ *  `validateUiProjectionReadFramework` (system-checks.ts). */
 function checkProjectionRead(
   e: Extract<ExprIR, { kind: "member" }>,
   ctx: BodyCheckCtx,
   diags: LoomDiagnostic[],
 ): void {
   if (!ctx.projectionNames.has(e.member)) return;
+  // A readable projection is handled by the per-framework gate, not here.
+  if (ctx.readableProjections.has(e.member)) return;
   // Only flag the read shape: the member names a projection AND the receiver is
   // a handle-rooted chain the walker will fail to resolve.  A same-named field
   // on a resolved receiver (`row.SalesTotals`) is not a projection read.
@@ -917,10 +930,11 @@ function checkProjectionRead(
     severity: "error",
     code: "loom.ui-projection-read-unsupported",
     message:
-      `${ctx.where}: reads projection '${e.member}' (\`${root.name}.${e.member}\`), but a ui ` +
-      `cannot consume a projection yet — projections are served on the backend only, and no ` +
-      `frontend client is generated for their route, so this would emit an unresolved receiver. ` +
-      `Read the source aggregate directly (\`${root.name}.<Aggregate>.all\`) for now.`,
+      `${ctx.where}: reads projection '${e.member}' (\`${root.name}.${e.member}\`), which a ui ` +
+      `cannot consume. Only a SINGLETON QUERY-TIME projection (no 'keyed by', a 'from … select' ` +
+      `comprehension) is readable from a page today — it returns one row, which is what a page ` +
+      `binds. A keyed projection returns a list and a folded one is read by key; neither has a ` +
+      `frontend client yet, so this would emit an unresolved receiver.`,
     source: ctx.where,
   });
 }

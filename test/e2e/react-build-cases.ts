@@ -43,6 +43,12 @@ export const reactBuildExamples = [
   { ddd: "web/src/examples/loom-landing.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/action-showcase.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/store-showcase.ddd", reactDir: "web_app" },
+  // Dashboard KPIs read from a SINGLETON query-time `projection` (M-T1.3):
+  // aggregation happens in SQL, the page binds one object (not a list), and a
+  // money tile goes through `Money` inside `Stat` — a `money` is a decimal.js
+  // `Decimal` client-side, so a bare React child is a TS2322.  All three are
+  // emit paths nothing else in this matrix exercises.
+  { ddd: "web/src/examples/dashboard-system.ddd", reactDir: "web_app" },
   // Dynamic array-of-value-object form rows (RHF useFieldArray) on both the
   // scaffolded New (`CreateForm`) and Detail (update `OperationForm`) pages —
   // guards the row templates + the op-form `fieldArrays` hoist across every

@@ -54,6 +54,7 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
 import {
   dataSourceKindForAggregate,
@@ -295,6 +296,71 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
       });
     }
   }
+}
+
+// Frontends whose generated client can READ a query-time projection
+// (M-T1.3 Phase 1).  React ships `src/api/projections.ts` + the walker's
+// Pattern H; the other five have no client, so a page reading a projection
+// there would emit an unresolved receiver — `undefined.<Projection>`, a runtime
+// TypeError and a build break.  Gate honestly until each ports, the same
+// reviewed-gap discipline as the backend-side projection gates.
+const PROJECTION_READ_FRAMEWORKS = new Set(["react"]);
+
+/** `loom.ui-projection-read-unsupported`, the FRAMEWORK half.  The FLAVOUR half
+ *  (a keyed / folded projection, unreadable on every target) is F3 in
+ *  ui-checks.ts; this one decides whether the page's own frontend has the
+ *  client, which needs the deployable in scope. */
+export function validateUiProjectionReadFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const readable = readableProjectionNames(sys.subdomains.flatMap((sd) => sd.contexts));
+  if (readable.size === 0) return;
+  for (const d of sys.deployables) {
+    if (!d.uiName) continue;
+    const fw = d.uiFramework ?? "";
+    if (PROJECTION_READ_FRAMEWORKS.has(fw)) continue;
+    const ui = sys.uis.find((u) => u.name === d.uiName);
+    if (!ui) continue;
+    const handles = new Set(ui.apiParams.map((p) => p.name));
+    // Components read projections too — F3 walks their bodies, so this half
+    // must as well or a read simply moved into a component slips the gate.
+    const bodies: Array<{ what: string; body: ExprIR | undefined }> = [
+      ...ui.pages.map((p) => ({ what: `page '${p.name}'`, body: p.body })),
+      ...ui.components.map((c) => ({ what: `component '${c.name}'`, body: c.body })),
+    ];
+    for (const { what, body } of bodies) {
+      for (const name of projectionReads(body, handles, readable)) {
+        diags.push({
+          severity: "error",
+          code: "loom.ui-projection-read-unsupported",
+          message:
+            `${what} reads projection '${name}', which deployable '${d.name}' can't render ` +
+            `(frontend '${fw || "unknown"}' generates no projection client). Projection reads ` +
+            `ship on react today; host this ui there, or read the source aggregate directly.`,
+          source: `${ui.name}/${what}`,
+        });
+      }
+    }
+  }
+}
+
+/** Readable-projection names a page body reads through an api handle — the
+ *  validator's mirror of the walker's Pattern H (`<apiHandle>.<Projection>`). */
+function projectionReads(
+  body: ExprIR | undefined,
+  handles: ReadonlySet<string>,
+  readable: ReadonlySet<string>,
+): string[] {
+  const found: string[] = [];
+  walkExprDeep(body, (e) => {
+    if (
+      e.kind === "member" &&
+      e.receiver.kind === "ref" &&
+      handles.has(e.receiver.name) &&
+      readable.has(e.member)
+    ) {
+      found.push(e.member);
+    }
+  });
+  return found;
 }
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
