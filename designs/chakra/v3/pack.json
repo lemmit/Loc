@@ -50,6 +50,7 @@
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",
@@ -277,6 +278,20 @@
         "from": "@chakra-ui/react",
         "named": [
           "Table"
+        ]
+      }
+    ],
+    "primitive-data-grid": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Button",
+          "Checkbox",
+          "HStack",
+          "Input",
+          "Stack",
+          "Table",
+          "Text"
         ]
       }
     ],
