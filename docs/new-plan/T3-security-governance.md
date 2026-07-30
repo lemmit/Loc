@@ -32,8 +32,24 @@ Sources: [completeness-audit](../audits/completeness-audit-2026-07.md) §tenancy
 Phase 2 `authorized(<category>)` declassification (2-lite warnings → errors); Phase 3 wire masking (`mask:` strategies in DTO emitters — today `sensitive()` only redacts logs, not the wire); Phase 4 sink-call classification (logs/errors/traces/metrics never receive plaintext).
 Sources: [sensitivity-and-compliance](../old/proposals/sensitivity-and-compliance.md).
 
-## M-T3.9 — Audit promotion: `audited(...)` + `logged` — `partial` · **M** · P2
-Boolean `audited` ships on all five, ops AND lifecycle (verified 2026-07-13: `AUDIT_OP_BACKENDS` = `AUDIT_LIFECYCLE_BACKENDS` = all 5, `system-checks.ts:2464-2465`; the old plan's "gate claims node support that ships nowhere" note was stale). Remaining: the argument form `audited(actions|access|events|off)` (grammar change on three productions; prerequisite for access-audit mode), the `logged` marker, and the AuditRecord snapshot enrichment.
+## M-T3.9 — Audit promotion: `audited` aggregate-wide + `logged` — `partial` · **M** · P2
+Boolean `audited` ships on all five, ops AND lifecycle (verified 2026-07-13: `AUDIT_OP_BACKENDS` = `AUDIT_LIFECYCLE_BACKENDS` = all 5, `system-checks.ts:2464-2465`; the old plan's "gate claims node support that ships nowhere" note was stale).
+
+**Landed — the aggregate-wide form `aggregate X audited { … }`.** Sits in the header region beside `crossTenant` (same category: per-aggregate participation in a compiler-owned facility — see the M-T5.17 sort-by-meaning amendment). Covers every **public** command action; `private` operations are never audited, which is the opt-out for an internal/high-churn command. **Resolved during lowering** into the per-command flags rather than threaded through emitters — `op.audited` is read at ~30 sites across the five backends with no chokepoint, so resolving early means every existing gate keeps working and a site that forgot to consult an aggregate-level flag cannot silently drop coverage. No new `AggregateIR` field. Verified generate-and-inspect on all five backends with zero emitter edits; corpus fixture `audited.ddd` puts it through the per-backend COMPILE tier. Validator warns when `audited` is declared on an aggregate with no public command action (an empty trail reads as authoritative while lying by omission). Also removed dead code: `auditedOpsOf`/`aggHasAuditedOp` were exported from the .NET/Java/Python audit emitters, called by nothing, and had drifted apart.
+
+**The argument form `audited(actions|access|events|off)` is DROPPED — do not build it.** Each of its five options dissolves on inspection:
+- `off` → unnecessary; `private` is the opt-out, and the aggregate-wide/per-command forms are alternatives rather than layered, so there is no default to negate.
+- `actions` → it *is* the shipped default; `audited(actions)` ≡ `audited`.
+- `access` (read-auditing) → **a different feature**: different table, different trigger point (query pipeline, not command boundary), different volume profile (writes on every read), different consumer. Needs its own mission and its own modifier on views/finds — `access` on an *operation* is meaningless, yet the paren form would admit it.
+- `events` → **subsumed by `persistedAs: eventLog`**, which already gives a richer, replayable history. A second, weaker event-emission mechanism competing with real event sourcing.
+- `containsPii` → **derivable** from the existing `sensitive(pii, …)` field tags; don't restate at the audit site what the field already declares.
+
+Dropping it also resolves a head-on collision with **M-T5.17**, which removed the paren modifier form and codemodded the corpus for it — `audited(actions)` would have reintroduced exactly that syntax. `audited` therefore stays a boolean permanently.
+
+**Remaining:** the `logged` marker (unrelated to audit; keep), and the AuditRecord snapshot enrichment. The read side — exposing `audit_records` as an entity-history view — is deliberately **not** this mission; see the note below.
+
+> **Not in this mission — the read path.** `audit_records` has no read endpoint on any backend (the emitters state the row is "never exposed"), so the write substrate exists with nothing consuming it. A history *view* needs: `auditTableShape` into `MigrationsIR` (it is currently hand-written DDL in 6 places, outside the platform-neutral migrations layer); an `AuditEntry` wireShape + a derived `find history(id)`; `GET /<agg>/{id}/history` ×5; a `Timeline` walker primitive + scaffolded History tab. **The load-bearing slice is authorization**: `before`/`after` store raw field values *unmasked* (the write happens server-side inside the transaction, while `mask unless` is per-caller), so an endpoint that skips the masking pass publishes every masked field's full change history. Field-level diffs are derivable from the two snapshots (don't store them), but must exclude managed/stamp fields or every entry shows `updatedAt` churn. Note also that only *successful* commands are recorded (`status` is hardcoded `"ok"`), so this answers "what changed", not "who tried".
+
 Sources: [audit-and-logging](../old/proposals/audit-and-logging.md), [lifecycle-audit-todo](../old/plans/lifecycle-audit-todo.md).
 
 ## M-T3.10 — Offerability: authz-aware `can_<op>` — `open` · **M** · P3
