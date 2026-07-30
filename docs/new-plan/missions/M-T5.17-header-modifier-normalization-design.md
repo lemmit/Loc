@@ -113,9 +113,15 @@ Before → after:
 abstract aggregate Invoice extends Party crossTenant
   persistedAs(eventLog) shape(document) inheritanceUsing(ownTable) with auditable { }
 
-// after
+// after (as Phase 2 shipped it)
 abstract crossTenant aggregate Invoice extends Party
   persistedAs: eventLog, shape: document, inheritanceUsing: ownTable
+  with auditable { }
+
+// current — the sort-by-meaning amendment put `crossTenant` back after the
+// name, now inside the order-independent group (see the status note above)
+abstract aggregate Invoice extends Party
+  persistedAs: eventLog, shape: document, inheritanceUsing: ownTable, crossTenant
   with auditable { }
 ```
 
@@ -216,6 +222,8 @@ timing:
   `persistedAs: X`, `shape`/`inheritanceUsing` likewise, `aggregate N crossTenant` →
   `crossTenant aggregate N`) across all `.ddd` + embedded-`.ddd` test strings — then
   the grammar dropped the paren alternatives + the post-name `crossTenant` position
+  *(the `crossTenant` half of this was later reversed — see the amendment note at
+  the top; the post-name position is canonical again, now order-independent)*
   and made the three colon modifiers **order-independent** (interleaving `(…)*`, each
   led by a distinct keyword — no ambiguity, and the old silent reorder-parse-error is
   gone). **No fixture re-baseline** — colon and paren lower to the same field, so
