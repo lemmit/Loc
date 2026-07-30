@@ -101,6 +101,7 @@ import { stdFunctions } from "../../language/stdlib.js";
 import { descriptorFor } from "../../platform/metadata.js";
 import { plural, snake } from "../../util/naming.js";
 import { parseDurationMs } from "../../util/timer.js";
+import { enrichContext } from "../enrich/enrichments.js";
 import { emitsRestCreate } from "../enrich/wire-projection.js";
 import type {
   AggregateIR,
@@ -1127,10 +1128,26 @@ function preLowerBoundApiOperations(
     if (!subdomain) continue;
     const ops: ApiOperationIR[] = [];
     for (const ctx of subdomain.contexts) {
-      // Structural lower only — no user shape, no module permissions.  The
-      // derivation reads aggregates, their operations and finds; it does not
-      // read enrichment output, so an un-enriched context is enough.
-      ops.push(...deriveContextOperations(lowerContext(ctx)));
+      // ENRICHED, not merely lowered.  This index is what the `remote-api-op`
+      // resolver consults, and the client emitters derive their method set from
+      // the enriched IR — so deriving here from an un-enriched context makes the
+      // two halves disagree by exactly the enrichment-derived operations.
+      //
+      // Concretely: auto-`findAll` is an ENRICHMENT, so the un-enriched set had
+      // 5 operations where the emitters saw 6.  Every backend shipped an
+      // `allOrder` client method that no `.ddd` could call — `orders.allOrder()`
+      // was rejected as "not a valid verb for a api resource", because it fell
+      // past the typed path into the untyped verb registry.
+      //
+      // The previous comment here asserted that the derivation "does not read
+      // enrichment output, so an un-enriched context is enough".  It does read
+      // it (`deriveContextOperations` looks for the `all` find), and that
+      // sentence is why the gap went unnoticed.
+      //
+      // Structural only in the sense that matters: no user shape and no module
+      // permissions are threaded in, and `lowerContext`/`enrichContext` are both
+      // pure, so the IR built here is discarded safely.
+      ops.push(...deriveContextOperations(enrichContext(lowerContext(ctx))));
     }
     out.set(name, ops);
   }

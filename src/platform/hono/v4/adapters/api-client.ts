@@ -32,6 +32,7 @@ import {
 import {
   type ApiOperationIR,
   absenceUnionSuccess,
+  collectionSuccess,
   deriveContextOperations,
 } from "../../../../ir/util/api-surface.js";
 import { resourceEnvUrlVar } from "../../../../util/resource-env.js";
@@ -153,13 +154,30 @@ export function emitApiClientModule(
       // throw.  Without this arm a union responseType fell through to `void`,
       // and the call site read fields off nothing.
       const absentAgg = absenceUnionSuccess(op.responseType);
-      const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
+      // A COLLECTION response carries the same per-row schema, wrapped: the
+      // auto-`findAll` answers with the paged envelope, a declared `T[]` find
+      // with a bare array.  Without this arm both fell through to `void` — the
+      // client issued the request and discarded every row.
+      const coll = collectionSuccess(op.responseType);
+      const respAgg =
+        op.responseType?.kind === "entity" ? op.responseType.name : (absentAgg ?? coll?.agg);
       const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
       const schemaName = agg ? `${agg.name}Response` : undefined;
       if (agg && schemaName && !emittedSchemas.has(schemaName)) {
         emittedSchemas.add(schemaName);
         out.push(...responseSchema(agg, schemaName));
         out.push(``);
+      }
+      // The paged envelope is emitted once per aggregate, beside its row
+      // schema.  Its field list mirrors the callee's `<Agg>Paged` exactly —
+      // `{ items, page, pageSize, total, totalPages }`.
+      const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
+      if (pagedName && schemaName && !emittedSchemas.has(pagedName)) {
+        emittedSchemas.add(pagedName);
+        out.push(
+          `export const ${pagedName} = z.object({ items: z.array(${schemaName}), page: z.number().int(), pageSize: z.number().int(), total: z.number().int(), totalPages: z.number().int() });`,
+          ``,
+        );
       }
 
       const bodyParams = op.params.filter((p) => p.location === "body");
@@ -171,9 +189,14 @@ export function emitApiClientModule(
       // every argument after the first.
       const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
       const params = op.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
-      const returns = schemaName
-        ? `z.infer<typeof ${schemaName}>${absentAgg ? " | null" : ""}`
-        : "void";
+      // The parsed shape and the declared return move together: whichever
+      // schema the body is parsed against is the one the signature names.
+      const parseSchema = pagedName ?? schemaName;
+      const returns = pagedName
+        ? `z.infer<typeof ${pagedName}>`
+        : schemaName
+          ? `z.infer<typeof ${schemaName}>${absentAgg ? " | null" : ""}${coll ? "[]" : ""}`
+          : "void";
       const query = op.params.filter((p) => p.location === "query");
 
       out.push(
@@ -204,10 +227,14 @@ export function emitApiClientModule(
       out.push(
         `  if (!res.ok) throw new RemoteCallError(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.status);`,
       );
-      if (schemaName) {
+      if (parseSchema) {
         // Parse at the boundary: the callee's wire shape is a contract, and a
         // violation should fail here, not three frames deeper on a field read.
-        out.push(`  return ${schemaName}.parse(await res.json());`);
+        // A bare-array find is wrapped at the parse site rather than given its
+        // own named schema — there is no envelope to name.
+        const expr =
+          coll?.carrier === "array" ? `z.array(${parseSchema})` : (parseSchema as string);
+        out.push(`  return ${expr}.parse(await res.json());`);
       }
       out.push(`}`);
       out.push(``);

@@ -155,6 +155,31 @@ export function absenceUnionSuccess(t: TypeIR | undefined): string | undefined {
   return entity?.kind === "entity" && absent ? entity.name : undefined;
 }
 
+/** The aggregate a COLLECTION-returning operation answers with, plus the
+ *  carrier it rides in.
+ *
+ *  Two carriers reach the wire.  The auto-`findAll` returns `paged`, whose body
+ *  is the envelope `{ items, page, pageSize, total, totalPages }`; a declared
+ *  find returning `T[]` answers with a bare JSON array.  A client that ignores
+ *  the distinction either loses the pagination fields or tries to read `.items`
+ *  off an array.
+ *
+ *  Shared for the same reason as `absenceUnionSuccess` above: five emitters
+ *  need one answer, and this feature has already shipped the same defect five
+ *  times over from five copies of a rule. */
+export function collectionSuccess(
+  t: TypeIR | undefined,
+): { readonly agg: string; readonly carrier: "paged" | "array" } | undefined {
+  if (!t) return undefined;
+  if (t.kind === "genericInstance" && t.ctor === "paged" && t.arg.kind === "entity") {
+    return { agg: t.arg.name, carrier: "paged" };
+  }
+  if (t.kind === "array" && t.element.kind === "entity") {
+    return { agg: t.element.name, carrier: "array" };
+  }
+  return undefined;
+}
+
 function entityType(aggName: string): TypeIR {
   return { kind: "entity", name: aggName };
 }
