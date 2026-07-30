@@ -732,7 +732,7 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
  *  FormState/Payload aliases (frontend-acl.md Phase 3 — emitted only
  *  where `z.input` and `z.output` genuinely diverge; structurally
  *  identical aliases would be noise). */
-function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
+export function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
   if (t.kind === "primitive") return t.name === "money";
   if (t.kind === "array") return typeReachesMoney(t.element, ctx);
   if (t.kind === "optional") return typeReachesMoney(t.inner, ctx);

@@ -753,6 +753,19 @@ interface FormStateBase {
   /** Optional user-supplied `onSubmit:` lambda body.  When null,
    *  the shell uses the scaffold-equivalent default. */
   onSubmitJs: string | null;
+  /** The form's `z.input` type name (`Create<Agg>FormState` etc.) when the
+   *  action schema carries a real TRANSFORM, i.e. it reaches a `money` field —
+   *  the one wire type whose `z.input` ≠ `z.output` (decimal string in,
+   *  `Decimal` out).  `undefined` otherwise.
+   *
+   *  Present ⇒ the shell must give `useForm` its THREE-generic form
+   *  (`useForm<FormState, unknown, Request>`): `zodResolver` types the
+   *  resolver's input as `z.input`, so the single-generic spelling asks for a
+   *  `Resolver<Request, …>` and gets a `Resolver<FormState, …>` — TS2322 in
+   *  the emitted page.  Absent ⇒ input and output are structurally identical
+   *  and the single generic stays (no churn, and the `FormState` alias is only
+   *  emitted where it diverges). */
+  formStateType?: string;
 }
 
 export interface AggregateFormState extends FormStateBase {
@@ -1386,6 +1399,38 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         emitExpr(expr.then, ctx),
         emitExpr(expr.otherwise, ctx),
       );
+    case "match": {
+      // `match` in EXPRESSION position — a VALUE, not markup: a Text /
+      // Heading / Button label, a `Field error:`, the RHS of `state := …`, an
+      // operand of a string concat.  The markup-child arm in `walk` renders
+      // element branches through `renderMatchChild`; there is no such seam
+      // here because there needs to be none — folding right into nested
+      // `exprTernary`s reuses the seam every target already implements in its
+      // own language (JSX ternary, F# if/then/else, Dart conditional), so this
+      // lands on all six frontends at once.  Without the arm the whole
+      // expression came out as `/* unsupported expr: match */ undefined`.
+      //
+      // With no `else`, the LAST arm becomes the tail instead of inventing a
+      // null literal the target may not spell — a `match` used as a value is
+      // expected to cover its domain, and the same right-fold is what the
+      // backend renderers do for an exhaustive variant match.
+      const arms = expr.arms;
+      const otherwise = expr.otherwise ? emitExpr(expr.otherwise, ctx) : undefined;
+      // A match with neither arms nor an `else` is not reachable from the
+      // grammar; keep the switch total by falling back to the same marker the
+      // default arm uses rather than minting a per-language null seam for it.
+      if (arms.length === 0) return otherwise ?? `/* empty match */ undefined`;
+      const rest = otherwise === undefined ? arms.slice(0, -1) : arms;
+      let out = otherwise ?? emitExpr(arms[arms.length - 1]!.value, ctx);
+      for (let i = rest.length - 1; i >= 0; i--) {
+        out = ctx.target.exprTernary(
+          emitExpr(rest[i]!.cond, ctx),
+          emitExpr(rest[i]!.value, ctx),
+          out,
+        );
+      }
+      return out;
+    }
     case "list":
       // List literal (`["EU", "US"]`) — e.g. a SelectField's `options:`.
       return ctx.target.exprList(expr.elements.map((it) => emitExpr(it, ctx)));
