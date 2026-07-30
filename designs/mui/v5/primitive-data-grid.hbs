@@ -1,0 +1,73 @@
+{{!-- primitive-data-grid — MUI chrome around a TanStack table instance.
+
+  Deliberately MUI's presentational `<Table>`, not `<DataGrid>`: the row model
+  (sorting, filtering, pagination) is owned by TanStack in the walker-emitted
+  child component that wraps this markup, so every React pack renders the same
+  behaviour with its own chrome.  Using MUI's own grid engine here would fork
+  that behaviour per pack. --}}
+    <Stack spacing={1}{{{testidAttr}}}>
+{{#if hasColumnVisibility}}      <FormGroup row>
+        {table.getAllLeafColumns().map((col) => (
+          <FormControlLabel
+            key={col.id}
+            control={<Checkbox size="small" checked={col.getIsVisible()} onChange={col.getToggleVisibilityHandler()} />}
+            label={String(col.columnDef.header ?? col.id)}
+          />
+        ))}
+      </FormGroup>
+{{/if}}      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            {table.getHeaderGroups().map((hg) => (
+              <TableRow key={hg.id}>
+                {hg.headers.map((h) => (
+                  <TableCell key={h.id} sortDirection={h.column.getIsSorted() || false}>
+                    {h.column.getCanSort() ? (
+                      <TableSortLabel
+                        active={h.column.getIsSorted() !== false}
+                        direction={h.column.getIsSorted() === "desc" ? "desc" : "asc"}
+                        onClick={h.column.getToggleSortingHandler()}
+                      >
+                        {flexRender(h.column.columnDef.header, h.getContext())}
+                      </TableSortLabel>
+                    ) : (
+                      flexRender(h.column.columnDef.header, h.getContext())
+                    )}
+{{#if hasFilters}}                    {h.column.getCanFilter() ? (
+                      <TextField
+                        size="small"
+                        variant="standard"
+                        placeholder="Filter"
+                        aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
+                        value={String(h.column.getFilterValue() ?? "")}
+                        onChange={(e) => h.column.setFilterValue(e.target.value)}
+                      />
+                    ) : null}
+{{/if}}                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableHead>
+          <TableBody>
+            {table.getRowModel().rows.map((r) => (
+              <TableRow key={r.id}>
+                {r.getVisibleCells().map((c) => (
+                  <TableCell key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+        <Button size="small" variant="outlined" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+          Previous
+        </Button>
+        <Typography variant="body2" aria-live="polite">
+          Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
+        </Typography>
+        <Button size="small" variant="outlined" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+          Next
+        </Button>
+      </Stack>
+    </Stack>

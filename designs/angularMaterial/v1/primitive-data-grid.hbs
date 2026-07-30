@@ -1,0 +1,63 @@
+{{!-- primitive-data-grid — Angular chrome around a TanStack table instance.
+
+  The `table` member, the column defs and the reactive signals all come from the
+  walker-emitted sibling component that wraps this markup
+  (src/generator/angular/walker/data-grid-child.ts); a pack only decides how the
+  grid LOOKS, never how the row model works.
+
+  `headerBody` / `cellBody` are the walker's header + cell CONTENT.  An Angular
+  pack cannot get these from the column defs: a TanStack `cell` function returns
+  framework-specific render output, and the walker produces markup.  Same split
+  `Table` already uses on Angular, whose sortable header is walker-emitted.
+
+  Like `primitive-table.hbs`, the three Angular packs differentiate through the
+  `loom-*` classes rather than component libraries, so this markup is shared. --}}
+    <div class="loom-grid"{{{testidAttr}}}>
+{{#if hasColumnVisibility}}      <div class="loom-grid-visibility">
+        @for (col of table.getAllLeafColumns(); track col.id) {
+          <label class="loom-grid-visibility-item">
+            <input type="checkbox" [checked]="col.getIsVisible()" (change)="col.toggleVisibility()" />
+            \{{ String(col.columnDef.header ?? col.id) }}
+          </label>
+        }
+      </div>
+{{/if}}      <table class="loom-table loom-table-striped loom-table-highlight">
+        <thead>
+          @for (hg of table.getHeaderGroups(); track hg.id) {
+            <tr>
+              @for (h of hg.headers; track h.id) {
+                <th [attr.aria-sort]="h.column.getIsSorted() === 'asc' ? 'ascending' : h.column.getIsSorted() === 'desc' ? 'descending' : 'none'">
+{{{headerBody}}}
+{{#if hasFilters}}                  @if (h.column.getCanFilter()) {
+                    <input
+                      class="loom-grid-filter"
+                      type="search"
+                      placeholder="Filter"
+                      [attr.aria-label]="'Filter by ' + String(h.column.columnDef.header ?? h.id)"
+                      [value]="String(h.column.getFilterValue() ?? '')"
+                      (input)="h.column.setFilterValue($any($event.target).value)"
+                    />
+                  }
+{{/if}}                </th>
+              }
+            </tr>
+          }
+        </thead>
+        <tbody>
+          @for (r of table.getRowModel().rows; track r.id) {
+            <tr>
+              @for (c of r.getVisibleCells(); track c.id) {
+                <td>
+{{{cellBody}}}
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+      <div class="loom-grid-pager">
+        <button type="button" [disabled]="!table.getCanPreviousPage()" (click)="table.previousPage()">Previous</button>
+        <span aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
+        <button type="button" [disabled]="!table.getCanNextPage()" (click)="table.nextPage()">Next</button>
+      </div>
+    </div>

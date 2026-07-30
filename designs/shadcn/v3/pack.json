@@ -65,6 +65,7 @@
     "primitive-tabs": "primitive-tabs.hbs",
     "components-ui-tabs": "components-ui-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",
@@ -95,6 +96,7 @@
     "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
+    "primitive-data-grid": [{"from": "@/components/ui/table", "named": ["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"]}, {"from": "@/components/ui/button", "named": ["Button"]}],
     "primitive-button": [
       {
         "from": "@/components/ui/button",

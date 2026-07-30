@@ -248,6 +248,11 @@ export function generateAngularForContexts(
   for (const page of pages) {
     const slug = pageSlug(page, pageCtx);
     let content: string;
+    // Sibling component files a primitive hoisted out of the page — `DataGrid`
+    // emits its child as its own `src/app/components/<kebab>.component.ts` (the
+    // page's import + `imports: []` entry come from the Angular sink).  Declared
+    // out here because the walk is scoped to the has-a-body branch.
+    let hoistedComponentFiles: readonly { path: string; content: string }[] = [];
     if (!page.body) {
       content = renderAngularPageStub(page, pageCtx, authUi);
     } else {
@@ -272,6 +277,10 @@ export function generateAngularForContexts(
         // the ui has no extractable strings (byte-identical to pre-i18n).
         i18nEnabled ? `page.${page.name}` : undefined,
       );
+      // A stub page discards the walk, so its hoisted files go with it.
+      hoistedComponentFiles = pageNeedsDeferredFeatures(result)
+        ? []
+        : (result.hoistedComponentFiles ?? []);
       content = pageNeedsDeferredFeatures(result)
         ? renderAngularPageStub(page, pageCtx, authUi)
         : renderAngularPage({
@@ -291,6 +300,7 @@ export function generateAngularForContexts(
     }
     const pagePath = `src/app/pages/${slug}.component.ts`;
     out.set(pagePath, content);
+    for (const f of hoistedComponentFiles) out.set(f.path, f.content);
     // `ui` is guaranteed defined here: `pages` (the loop source) is derived
     // from `ui?.pages ?? []`, so a non-empty iteration implies `ui` exists.
     options.sourcemap?.file(pagePath, content, page.origin, pageConstructId(ui!.name, page));

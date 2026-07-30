@@ -41,6 +41,7 @@ import type {
   VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
+import { renderSvelteDataGridChild } from "./data-grid-child.js";
 
 export const svelteTarget: WalkerTarget = {
   framework: "svelte",
@@ -130,6 +131,21 @@ export const svelteTarget: WalkerTarget = {
    *  lives in the helper module. */
   renderFilteredRows(rowsExpr, filter) {
     return `filterRows(${rowsExpr}, ${filter.name})`;
+  },
+
+  // --- DataGrid seam ------------------------------------------------------
+
+  /** A computed cell reads the row through a script-declared cast helper — the
+   *  component is generic over the row type, so raw property access on
+   *  `c.row.original` would not typecheck under `svelte-check`. */
+  dataGridRowVar: "asRow(c.row.original)",
+
+  /** A `.svelte` file holds exactly ONE component, so the grid's child becomes
+   *  a sibling `src/lib/components/<Name>.svelte`.  See
+   *  `svelte/walker/data-grid-child.ts` — including why it drives
+   *  `@tanstack/table-core` directly rather than the Svelte 3/4 adapter. */
+  renderDataGridChild(spec, ctx) {
+    return renderSvelteDataGridChild(spec, ctx);
   },
 
   // --- API binding seam ---------------------------------------------------

@@ -47,6 +47,7 @@
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",
@@ -76,6 +77,7 @@
     "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
+    "primitive-data-grid": [{"from": "@mantine/core", "named": ["Button", "Checkbox", "Group", "Stack", "Table", "Text", "TextInput", "UnstyledButton"]}],
     "primitive-heading": [
       {
         "from": "@mantine/core",

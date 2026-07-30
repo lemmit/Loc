@@ -6,6 +6,7 @@ import type {
   ExprIR,
   PageIR,
   StateFieldIR,
+  TypeIR,
   UiApiParamIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -172,6 +173,22 @@ export function pageNeedsDeferredFeatures(result: WalkResult): boolean {
   // Shared mutation sink — likewise empty (Action/Modal/DestroyForm are forked).
   if (result.actionMutations.length > 0) return true;
   return false;
+}
+
+/** The TS element type of an array-typed state field, or undefined when the
+ *  field isn't an array.  Only the shapes reachable from an explicit annotation
+ *  are spelled out; ids / enums / value objects are carried as their wire
+ *  string form in page state. */
+function arrayElementTs(t: TypeIR): string | undefined {
+  const base = t.kind === "optional" ? t.inner : t;
+  if (base.kind !== "array") return undefined;
+  const el = base.element;
+  if (el.kind === "primitive") {
+    if (el.name === "bool") return "boolean";
+    if (el.name === "int" || el.name === "long" || el.name === "decimal") return "number";
+    return "string";
+  }
+  return "string";
 }
 
 /** Render a `state {}` field's `signal(...)` initial value.  Uses the field's
@@ -376,6 +393,14 @@ export function renderAngularPage(input: AngularPageShellInput): string {
       if (isFileStateField(f)) {
         addResultImport(result, "../../api/client", "FileRef");
         members.push(`  readonly ${f.name} = signal<FileRef | null>(null);`);
+      } else if (arrayElementTs(f.type) !== undefined) {
+        // `signal([])` infers `WritableSignal<never[]>`, so any later `.set(…)`
+        // is a type error — an array field must carry its element type.  Same
+        // gap the React/Svelte shells had before #2294 and Vue's before the
+        // DataGrid Vue port.
+        members.push(
+          `  readonly ${f.name} = signal<${arrayElementTs(f.type)}[]>(${renderStateInit(f)});`,
+        );
       } else {
         members.push(`  readonly ${f.name} = signal(${renderStateInit(f)});`);
       }
@@ -525,6 +550,15 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // `src/app/pages/`), re-expose it as a member (the outlet reads it against the
   // instance), and register Angular's `NgComponentOutlet` directive in the
   // standalone `imports: []` (from `@angular/common`).
+  // `DataGrid` children hoisted into their own component files — a plain
+  // standalone component used by TAG, so it takes one import line and one
+  // `imports: []` entry (unlike the extern components below, which route
+  // through `NgComponentOutlet`).
+  for (const g of sink.dataGrids) {
+    imports.push(`import { ${g.className} } from "${g.importPath}";`);
+    componentImports.add(g.className);
+  }
+
   const usedComponents = [...result.usedUserComponents].sort();
   if (usedComponents.length > 0) {
     imports.push('import { NgComponentOutlet } from "@angular/common";');

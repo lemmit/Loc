@@ -222,7 +222,7 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       );
     }
     seenPaths.set(emitPath, page.name);
-    const pageContent = renderSveltePage(
+    const rendered = renderSveltePage(
       page.name,
       page.body!,
       ctx.pack,
@@ -253,7 +253,13 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       // undefined when the UI has no extractable strings (byte-identical).
       ctx.i18nEnabled ? `page.${page.name}` : undefined,
     );
+    const pageContent = rendered.content;
     out.set(emitPath, pageContent);
+    // Sibling component files a primitive hoisted out of the page — a `.svelte`
+    // file holds exactly one component, so `DataGrid` emits its child as its own
+    // `src/lib/components/<Name>.svelte` (the page's import comes from the same
+    // `usedUserComponents` channel a hand-written component uses).
+    for (const f of rendered.componentFiles) out.set(f.path, f.content);
     ctx.sourcemap?.file(emitPath, pageContent, page.origin, pageConstructId(ui.name, page));
   }
   return out;
