@@ -434,6 +434,9 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       const amt = renderE2EExpr(e.amount, ctx);
       return `((${amt}) * ${DURATION_UNIT_MS[e.unit]})`;
     }
+    case "i18nFormat":
+      // Transparent i18n wrapper (M-T1.11) — render the wrapped operand.
+      return renderE2EExpr(e.inner, ctx);
     case "match": {
       // Lower a match expression to a chained ternary.  E2E
       // test bodies are unlikely to use match in v0, but the IR can

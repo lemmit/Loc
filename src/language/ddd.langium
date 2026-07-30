@@ -2296,10 +2296,21 @@ PrimaryExpr infers Expression:
 TemplateString infers Expression:
     {infer TemplateStr} (
         strings+=TEMPLATE_FULL
-      | strings+=TEMPLATE_START holes+=Expression
-        (strings+=TEMPLATE_MIDDLE holes+=Expression)*
+      | strings+=TEMPLATE_START holes+=TemplateHole
+        (strings+=TEMPLATE_MIDDLE holes+=TemplateHole)*
         strings+=TEMPLATE_END
     );
+
+// One interpolation hole — the expression plus an OPTIONAL ICU format suffix
+// (i18n, M-T1.11).  `{order.total, number, ::currency/USD}` carries
+// `value=order.total` and `format=", number, ::currency/USD"` (the raw suffix,
+// leading comma + spaces preserved for round-trip).  The `TEMPLATE_FORMAT`
+// terminal is matched by a paren/brace-aware custom pattern (see
+// `DddTokenBuilder`) so a call-argument comma inside the hole
+// (`{max(a, b)}`) is NOT mistaken for the format start — only a comma at
+// hole-paren-depth 0 begins the suffix.
+TemplateHole:
+    value=Expression (format=TEMPLATE_FORMAT)?;
 
 // Bracketed list literal — `[3, 2, 1]`.  Used as the value of named
 // args that admit a list shape (e.g. `Grid { cols: [3, 2, 1] }` for
@@ -2425,6 +2436,15 @@ terminal TEMPLATE_FULL:   /`(\\.|[^`\\{])*`/;
 terminal TEMPLATE_START:  /`(\\.|[^`\\{])*\{/;
 terminal TEMPLATE_MIDDLE: /\}(\\.|[^`\\{])*\{/;
 terminal TEMPLATE_END:    /\}(\\.|[^`\\{])*`/;
+// ICU format suffix on an interpolation hole (i18n, M-T1.11) — the `, number,
+// ::currency/USD` tail of `{order.total, number, ::currency/USD}`.  This regex
+// is only a PLACEHOLDER: `DddTokenBuilder` replaces the pattern at lexer-build
+// time with a paren/brace-aware custom matcher that (a) only starts at a comma
+// sitting at hole-paren-depth 0 (so a call-arg comma `{max(a, b)}` is not the
+// format start) and (b) captures the raw suffix up to the brace that closes the
+// hole (brace-balanced, so slice-2 plural/select bodies reuse the same
+// terminal).  It lives ONLY in the `interpolation` lexer mode.
+terminal TEMPLATE_FORMAT: /,[^`}]*/;
 // Duration literal — `<int><unit>`, unit ∈ {ms,s,m,h,d}.  Used by `timerSource`'s
 // `every:` cadence (scheduling.md).  Declared before INT so `15s` lexes as one
 // DURATION token, not INT `15` + ID `s`; a suffix-less number still falls through

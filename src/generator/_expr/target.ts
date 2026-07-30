@@ -156,6 +156,12 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
    *  arithmetic.  Calendar-relative offsets (`months`/`years`) are not part
    *  of `duration`. */
   duration(unit: DurationExpr["unit"], amount: string, e: DurationExpr, ctx: Ctx): string;
+  /** i18n ICU format wrapper (M-T1.11) — INERT on every domain-logic backend.
+   *  The wrapped `inner` arrives already rendered; each backend returns it
+   *  verbatim, so a formatted template hole (`{total, number, ::currency/USD}`)
+   *  emits byte-identical to a format-less one (the format is dropped). The
+   *  suffix only comes alive on the JS/TS frontends' translation runtime. */
+  i18nFormat(inner: string): string;
   /** Boolean predicate-arms `match { cond => value }` — the original form,
    *  unchanged.  Lowered to the backend's chained-conditional idiom. */
   match(arms: RenderedArm[], otherwise: string | undefined): string;
@@ -240,6 +246,10 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       return t.convert(r(e.value), e);
     case "duration":
       return t.duration(e.unit, r(e.amount), e, ctx);
+    case "i18nFormat":
+      // Transparent i18n wrapper — render the wrapped operand and drop the
+      // format (inert on every backend; only the frontends' i18n runtime uses it).
+      return t.i18nFormat(r(e.inner));
     case "match": {
       // Variant form (variant-match.md) when a subject is present.
       if (e.subject) {
@@ -498,6 +508,11 @@ export function renderExprWithMarks<Ctx extends ExprCtxBase>(
     case "duration": {
       const amount = rm(e.amount);
       return compose(t.duration(e.unit, amount.text, e, ctx), [amount]);
+    }
+    case "i18nFormat": {
+      // Transparent — render the wrapped operand, drop the format.
+      const inner = rm(e.inner);
+      return compose(t.i18nFormat(inner.text), [inner]);
     }
     case "match": {
       if (e.subject) {

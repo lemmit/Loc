@@ -100,6 +100,8 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `(${then} if ${cond} else ${otherwise})`,
   convert: (value, e) => renderPyConvert(e.target, e.from, value),
+  // Transparent i18n wrapper (M-T1.11) — drop the format, emit the operand.
+  i18nFormat: (inner) => inner,
   // A5 temporal: a Loom ABSOLUTE duration value is a stdlib
   // `datetime.timedelta` on this backend, so `duration ± duration` /
   // `duration * int` and `datetime ± duration` all fall through to the

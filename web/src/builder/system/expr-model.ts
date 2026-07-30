@@ -125,10 +125,17 @@ export function seedExpr(node: Expression): EExpr {
       return { kind: "list", elements: node.elements.map(seedExpr) };
     case "TemplateStr":
       // `strings` carries N+1 delimiter-stripped, unescaped segments for N
-      // holes.  A mismatched pair can only come from a mid-edit parse error —
-      // keep it verbatim rather than structuring a template we can't reassemble.
-      return node.strings.length === node.holes.length + 1
-        ? { kind: "template", segments: [...node.strings], holes: node.holes.map(seedExpr) }
+      // holes.  A hole is now a `TemplateHole` (an expression `value` plus an
+      // optional raw ICU `format` suffix, M-T1.11).  Structure a plain template
+      // over the hole `value`s; a mismatched segment/hole pair (mid-edit parse
+      // error) OR a formatted hole (no structured format editor yet) falls back
+      // to a lossless `raw` leaf — printExpr re-emits `{value, format}` verbatim.
+      return node.strings.length === node.holes.length + 1 && node.holes.every((h) => !h.format)
+        ? {
+            kind: "template",
+            segments: [...node.strings],
+            holes: node.holes.map((h) => seedExpr(h.value)),
+          }
         : { kind: "raw", text: printExpr(node) };
     case "MoneyLit":
       // Mirrors printMoney's `?? "0"` fallback for a half-typed literal.

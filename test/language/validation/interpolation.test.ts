@@ -75,3 +75,54 @@ describe("validation — A6 string interpolation", () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 });
+
+// ICU `,format` suffix (i18n, M-T1.11 slice 1) — a hole may carry `, <format>`
+// after its expression.  NUMBER/CURRENCY/PERCENT require a numeric value;
+// DATE/TIME lift the datetime rejection above (a datetime hole is exactly what
+// they format); PLURAL/SELECT/unknown are deferred → loom.interp-format-unsupported.
+describe("validation — A6 interpolation format suffix", () => {
+  it("accepts a `, number` suffix on a numeric hole (int, money)", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        derived a: string = \`n {quantity, number}\`
+        derived b: string = \`m {total, number, ::currency/USD}\`
+        derived c: string = \`p {quantity, number, ::percent}\`
+      `),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("accepts a `, date` / `, time` suffix on a datetime hole (lifts the datetime rejection)", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        derived d: string = \`due {dueAt, date, ::yMMMd}\`
+        derived e: string = \`at {dueAt, time, short}\`
+      `),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects a `, number` suffix on a datetime hole — loom.interp-hole-type", async () => {
+    const { diagnostics } = await parseString(wrap(`derived x: string = \`d {dueAt, number}\``));
+    expect(diagnostics.some((d) => d.code === "loom.interp-hole-type")).toBe(true);
+  });
+
+  it("rejects a `, date` suffix on a numeric hole — loom.interp-hole-type", async () => {
+    const { diagnostics } = await parseString(wrap(`derived x: string = \`x {quantity, date}\``));
+    expect(diagnostics.some((d) => d.code === "loom.interp-hole-type")).toBe(true);
+  });
+
+  it("defers plural to slice 2 — loom.interp-format-unsupported", async () => {
+    const { diagnostics } = await parseString(
+      wrap(`derived x: string = \`p {quantity, plural, one {# item} other {# items}}\``),
+    );
+    expect(diagnostics.some((d) => d.code === "loom.interp-format-unsupported")).toBe(true);
+  });
+
+  it("defers select to slice 2 — loom.interp-format-unsupported", async () => {
+    const { diagnostics } = await parseString(
+      wrap(`derived x: string = \`s {customerName, select, other {someone}}\``),
+    );
+    expect(diagnostics.some((d) => d.code === "loom.interp-format-unsupported")).toBe(true);
+  });
+});

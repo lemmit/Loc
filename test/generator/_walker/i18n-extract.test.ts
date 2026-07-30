@@ -35,6 +35,11 @@ const plus = (left: ExprIR, right: ExprIR): ExprIR => ({
   leftType: str,
   resultType: str,
 });
+// The transparent i18n wrapper a formatted hole (`{total, number}`) lowers to —
+// `icuFromConcat` peels it, splices `format` into the display + positional ICU
+// text, and stores the peeled RAW value as the hole expr.
+const i18n = (inner: ExprIR, format: string): ExprIR =>
+  ({ kind: "i18nFormat", inner, format }) as ExprIR;
 
 async function catalogOf(source: string): Promise<Record<string, string>> {
   const { model } = await parseString(source, { validate: false });
@@ -177,6 +182,42 @@ describe("icuFromConcat — interpolated-string detection (i18n-strings.md Optio
   it("is rename-stable — the positional hash ignores which field fills the hole", () => {
     const a = icuFromConcat(plus(lit("Order "), member(ref("order"), "id")));
     const b = icuFromConcat(plus(lit("Order "), member(ref("order"), "number")));
+    // Different display (translator-readable), identical hash input (stable key).
+    expect(a?.display).not.toBe(b?.display);
+    expect(a?.positional).toBe(b?.positional);
+  });
+
+  it("splices a `, number, ::currency/USD` format into both display + positional", () => {
+    // `Total: {order.total, number, ::currency/USD}`
+    const icu = icuFromConcat(
+      plus(lit("Total: "), i18n(member(ref("order"), "total"), ", number, ::currency/USD")),
+    );
+    expect(icu).toEqual({
+      display: "Total: {total, number, ::currency/USD}", // named + skeleton
+      positional: "Total: {0, number, ::currency/USD}", // hash input carries the format
+      // the stored expr is the PEELED raw value (a number), not the wrapper
+      holes: [{ name: "total", expr: member(ref("order"), "total") }],
+    });
+  });
+
+  it("D-I18N-KEY: a FORMAT change re-keys (positional differs)", () => {
+    const currency = icuFromConcat(
+      plus(lit("Total: "), i18n(member(ref("order"), "total"), ", number, ::currency/USD")),
+    );
+    const percent = icuFromConcat(
+      plus(lit("Total: "), i18n(member(ref("order"), "total"), ", number, ::percent")),
+    );
+    // A different rendering IS a different message → different hash input.
+    expect(currency?.positional).not.toBe(percent?.positional);
+  });
+
+  it("D-I18N-KEY: a field RENAME keeps the key (positional ignores the field)", () => {
+    const a = icuFromConcat(
+      plus(lit("Total: "), i18n(member(ref("order"), "total"), ", number, ::currency/USD")),
+    );
+    const b = icuFromConcat(
+      plus(lit("Total: "), i18n(member(ref("order"), "amount"), ", number, ::currency/USD")),
+    );
     // Different display (translator-readable), identical hash input (stable key).
     expect(a?.display).not.toBe(b?.display);
     expect(a?.positional).toBe(b?.positional);

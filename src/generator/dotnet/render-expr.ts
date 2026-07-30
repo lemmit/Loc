@@ -231,6 +231,8 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   binary: (left, right, e) => renderCsBinary(left, right, e, false),
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderCsConvert(e.target, e.from, value),
+  // Transparent i18n wrapper (M-T1.11) — drop the format, emit the operand.
+  i18nFormat: (inner) => inner,
   // A5 temporal: a Loom ABSOLUTE duration value is a `TimeSpan` on this
   // backend, so `duration ± duration` / `duration * int` fall through to
   // native TimeSpan operators and `datetime ± duration` to the native

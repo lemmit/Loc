@@ -47,4 +47,19 @@ describe("print — A6 string interpolation", () => {
     expect(reparsed.strings).toEqual(node.strings);
     expect(reparsed.holes).toHaveLength(node.holes.length);
   });
+
+  // ICU `,format` suffix (i18n, M-T1.11) — `hole.format` re-emits verbatim
+  // (leading comma + spacing + the `::currency/USD` skeleton preserved).
+  it("reconstructs a formatted hole verbatim incl. the currency skeleton", async () => {
+    const node = await firstTemplate("`Total: {quantity, number, ::currency/USD}`");
+    expect(printExpr(node as Expression)).toBe("`Total: {quantity, number, ::currency/USD}`");
+  });
+
+  it("round-trips a formatted hole — printed source re-parses to the same format text", async () => {
+    const node = await firstTemplate("`Due {quantity, date, ::yMMMd}`");
+    const printed = printExpr(node as Expression);
+    expect(printed).toBe("`Due {quantity, date, ::yMMMd}`");
+    const reparsed = await firstTemplate(printed);
+    expect(reparsed.holes[0]!.format).toBe(node.holes[0]!.format);
+  });
 });

@@ -11,13 +11,17 @@
 //     deployable's UI. Translators add `<locale>.json` siblings and PR them.
 //   i18n.ts — the `t(key, default, values?)` lookup shim: returns the active
 //     locale's string for `key` (falling back to the source-language default)
-//     and substitutes `{name}` ICU placeholders from `values`.
+//     and locale-formats its ICU placeholders (`{name}`, `{total, number,
+//     ::currency/USD}`, `{d, date, ::yMMMd}`) from `values` via
+//     `intl-messageformat`.
 //
-// Deliberately NOT react-intl: `messages[key] ?? default` + a `{name}` regex
-// covers plain literals and simple interpolation with no runtime dependency and
-// no design-pack template change. ICU format suffixes (plural/select/number)
-// arrive with a later react-intl slice that upgrades this shim in place — the
-// `t(...)` call sites the walker emits stay the same.
+// The lookup half stays a tiny `messages[key] ?? default` map — no react-intl
+// provider, no design-pack template change. The formatting half is
+// `intl-messageformat` (the standalone ICU engine react-intl itself
+// builds on) so a `, number` / `, date` format suffix (M-T1.11) locale-formats
+// at runtime. The `t(key, default, values?)` call sites the walker emits are
+// unchanged. (Plural/select — brace-bodied ICU — are a later slice; the same
+// engine already supports them, only the grammar/extractor gate them out.)
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
@@ -38,14 +42,16 @@ export function renderLocaleCatalog(ui: UiIR): string {
   return `${JSON.stringify(buildUiCatalog(ui), null, 2)}\n`;
 }
 
-/** `src/i18n.ts` — the `t(key, default, values?)` lookup + interpolation shim. */
+/** `src/i18n.ts` — the `t(key, default, values?)` lookup + ICU-format shim. */
 export function renderI18nModule(): string {
   return `// Generated translation runtime (Loom i18n, M-T1.11).
-// Source-language lookup with a per-key fallback and \`{name}\` interpolation. To
-// add a locale, drop a \`src/locales/<locale>.json\` file, import it below, and
-// register it in \`catalogs\`. (ICU format suffixes — plural/select/number — arrive
-// with a later Loom release that swaps this shim for react-intl; the
-// \`t(key, default, values)\` call sites stay the same.)
+// Source-language lookup with a per-key fallback and ICU message formatting via
+// \`intl-messageformat\`. To add a locale, drop a
+// \`src/locales/<locale>.json\` file, import it below, and register it in
+// \`catalogs\`. The \`t(key, default, values)\` call sites are stable — a message
+// may carry plain \`{name}\` holes or locale-formatted ones
+// (\`{total, number, ::currency/USD}\`, \`{d, date, ::yMMMd}\`).
+import { IntlMessageFormat } from "intl-messageformat";
 import en from "./locales/en.json";
 
 type Catalog = Record<string, string>;
@@ -58,21 +64,20 @@ function activeLocale(): string {
   return catalogs[lang] ? lang : "en";
 }
 
-const messages: Catalog = catalogs[activeLocale()] ?? catalogs.en ?? {};
+const locale = activeLocale();
+const messages: Catalog = catalogs[locale] ?? catalogs.en ?? {};
 
-/** Translate a message key, falling back to the source-language default, and
- *  substitute \`{name}\` placeholders from \`values\`. An unknown placeholder is
- *  left verbatim so a missing arg is visible rather than blank. */
+/** Translate a message key, falling back to the source-language default, then
+ *  ICU-format its placeholders from \`values\` in the active locale. A
+ *  value-less message returns verbatim (no parse cost). */
 export function t(
   key: string,
   defaultMessage: string,
-  values?: Record<string, string | number>,
+  values?: Record<string, string | number | boolean | Date>,
 ): string {
   const message = messages[key] ?? defaultMessage;
   if (values === undefined) return message;
-  return message.replace(/\\{(\\w+)\\}/g, (whole, name: string) =>
-    values[name] === undefined ? whole : String(values[name]),
-  );
+  return new IntlMessageFormat(message, locale).format(values) as string;
 }
 `;
 }

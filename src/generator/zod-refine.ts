@@ -137,6 +137,9 @@ function renderRefineExpr(e: ExprIR): string {
       return `(/*UNRENDERABLE:lambda-block*/ false)`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderRefineExpr(f.value)}`).join(", ")} })`;
+    case "i18nFormat":
+      // Transparent i18n wrapper — render the wrapped operand (format dropped).
+      return renderRefineExpr(e.inner);
     case "this":
     case "id":
     case "call":

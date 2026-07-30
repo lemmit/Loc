@@ -23,11 +23,12 @@
 //      the existing `renderTextContent` interpolation. Never translated (no
 //      stable source string), unchanged on every target.
 //
-// The translation runtime is a tiny generated `src/i18n.ts` lookup shim (see
-// `src/generator/react/i18n-runtime.ts`), NOT react-intl: a `messages[key] ??
-// default` lookup plus a `{name}` substitution covers plain literals and simple
-// interpolation. ICU format suffixes (plural/select/number) arrive with a later
-// react-intl slice once the template grammar grows a `,format` hole.
+// The translation runtime is a tiny generated `src/i18n.ts` shim (see
+// `src/generator/_frontend/i18n-runtime.ts`): a `messages[key] ?? default`
+// lookup plus `intl-messageformat` for the ICU placeholders. A hole
+// may carry a `, format` suffix (M-T1.11) — the format text is spliced into the
+// message here (`icuFromConcat`), and the runtime locale-formats the raw value.
+// Plural/select (brace-bodied ICU) are a later slice; the extractor gates them.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";

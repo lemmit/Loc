@@ -114,4 +114,27 @@ describe("Angular i18n runtime", () => {
       "Status: {code}",
     );
   });
+
+  it("emits a formatted hole with ICU skeleton, IntlMessageFormat shim, + the dep", async () => {
+    // `{total, number, ::currency/USD}` (i18n slice 1) — the skeleton rides into
+    // the catalog + the t() default, `values` carries the RAW money value.
+    const withParam = SYSTEM("Heading { `Total: {total, number, ::currency/USD}` }").replace(
+      'page Home { route: "/"',
+      'page Home(total: money) { route: "/:total"',
+    );
+    const files = await generateSystemFiles(withParam);
+    const home = homeOf(files);
+    expect(home).toMatch(
+      /\{\{ t\("[^"]*", "Total: \{total, number, ::currency\/USD\}", \{ total: total \}\) \}\}/,
+    );
+    const locale = [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1];
+    expect(Object.values(JSON.parse(locale) as Record<string, string>)).toContain(
+      "Total: {total, number, ::currency/USD}",
+    );
+    const i18n = [...files].find(([p]) => p.endsWith("src/lib/i18n.ts"))![1];
+    expect(i18n).toContain('import { IntlMessageFormat } from "intl-messageformat"');
+    expect(i18n).toContain("new IntlMessageFormat(message, locale).format(values)");
+    const pkg = [...files].find(([p]) => p.endsWith("web/package.json"))![1];
+    expect(pkg).toContain("intl-messageformat");
+  });
 });

@@ -1,9 +1,11 @@
 // Generated translation runtime (Loom i18n, M-T1.11).
-// Source-language lookup with a per-key fallback and `{name}` interpolation. To
-// add a locale, drop a `src/locales/<locale>.json` file, import it below, and
-// register it in `catalogs`. (ICU format suffixes — plural/select/number — arrive
-// with a later Loom release that swaps this shim for react-intl; the
-// `t(key, default, values)` call sites stay the same.)
+// Source-language lookup with a per-key fallback and ICU message formatting via
+// `intl-messageformat`. To add a locale, drop a
+// `src/locales/<locale>.json` file, import it below, and register it in
+// `catalogs`. The `t(key, default, values)` call sites are stable — a message
+// may carry plain `{name}` holes or locale-formatted ones
+// (`{total, number, ::currency/USD}`, `{d, date, ::yMMMd}`).
+import { IntlMessageFormat } from "intl-messageformat";
 import en from "./locales/en.json";
 
 type Catalog = Record<string, string>;
@@ -16,19 +18,18 @@ function activeLocale(): string {
   return catalogs[lang] ? lang : "en";
 }
 
-const messages: Catalog = catalogs[activeLocale()] ?? catalogs.en ?? {};
+const locale = activeLocale();
+const messages: Catalog = catalogs[locale] ?? catalogs.en ?? {};
 
-/** Translate a message key, falling back to the source-language default, and
- *  substitute `{name}` placeholders from `values`. An unknown placeholder is
- *  left verbatim so a missing arg is visible rather than blank. */
+/** Translate a message key, falling back to the source-language default, then
+ *  ICU-format its placeholders from `values` in the active locale. A
+ *  value-less message returns verbatim (no parse cost). */
 export function t(
   key: string,
   defaultMessage: string,
-  values?: Record<string, string | number>,
+  values?: Record<string, string | number | boolean | Date>,
 ): string {
   const message = messages[key] ?? defaultMessage;
   if (values === undefined) return message;
-  return message.replace(/\{(\w+)\}/g, (whole, name: string) =>
-    values[name] === undefined ? whole : String(values[name]),
-  );
+  return new IntlMessageFormat(message, locale).format(values) as string;
 }

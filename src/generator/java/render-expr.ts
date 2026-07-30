@@ -377,6 +377,8 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderJavaConvert(e.target, e.from, value),
+  // Transparent i18n wrapper (M-T1.11) — drop the format, emit the operand.
+  i18nFormat: (inner) => inner,
   // A5 temporal: a Loom ABSOLUTE duration value is a `java.time.Duration`
   // on this backend, so `duration ± duration` / `duration * int` go through
   // the Duration method API and `datetime ± duration` through

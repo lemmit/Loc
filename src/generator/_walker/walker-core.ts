@@ -1520,6 +1520,14 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       ctx.usesRouteId = true;
       return ctx.target.renderRouteId?.() ?? `/* unsupported expr: ${expr.kind} */ undefined`;
     }
+    case "i18nFormat":
+      // Transparent i18n wrapper (M-T1.11).  When a body opts into i18n the
+      // format is spliced into the ICU message by `icuFromConcat`/`localizedRaw`
+      // and this node never reaches here (the extractor peels it); on the raw
+      // path (no i18n, or a non-user-visible slot) it is inert — emit the
+      // wrapped operand so a formatted hole is byte-identical to a format-less
+      // one, the format dropped.
+      return emitExpr(expr.inner, ctx);
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;
   }

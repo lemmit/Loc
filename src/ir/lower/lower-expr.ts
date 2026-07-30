@@ -2042,16 +2042,24 @@ function lowerTemplateString(expr: TemplateStr, env: Env): ExprIR {
   for (let i = 0; i < expr.strings.length; i++) {
     const seg = expr.strings[i]!;
     if (seg.length > 0) pieces.push(lit("string", seg));
-    const holeExpr = expr.holes[i];
-    if (holeExpr) {
+    const hole = expr.holes[i];
+    if (hole) {
+      const holeExpr = hole.value;
       const holeIR = lowerExpr(holeExpr, env);
       const holeType = inferExprType(holeExpr, env);
       const isStr = holeType.kind === "primitive" && holeType.name === "string";
-      pieces.push(
+      // Same string-concat operand as a format-less hole — this is what the
+      // raw path (every backend + Feliz/Flutter/HEEx) renders, so the byte
+      // output is identical whether or not a format was spelled.
+      const piece =
         isStr || !isImplicitlyStringifiableIR(holeType, env)
           ? holeIR
-          : wrapForStringConcat(holeIR, holeType),
-      );
+          : wrapForStringConcat(holeIR, holeType);
+      // A `, format` suffix wraps that operand in the transparent i18n node
+      // (LOCKED decision 1).  The wrapper renders as `inner` everywhere except
+      // the JS/TS frontends' i18n runtime; the extractor peels it (and its
+      // inner coercion) back to the raw value for the ICU `values` object.
+      pieces.push(hole.format ? { kind: "i18nFormat", inner: piece, format: hole.format } : piece);
     }
   }
   if (pieces.length === 0) return lit("string", "");

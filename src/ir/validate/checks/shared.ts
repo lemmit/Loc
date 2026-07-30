@@ -324,6 +324,11 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // column side).  Every duration unit is absolute (fixed width), so
       // there is no calendar-relative carve-out here.
       return firstNonQueryableNode(e.amount);
+    case "i18nFormat":
+      // Transparent i18n wrapper (M-T1.11) — a display-formatting node that
+      // only rides user-visible templates, never a find `where`; queryability
+      // follows the wrapped value.
+      return firstNonQueryableNode(e.inner);
     case "match":
       // `match { ... }` is a value-producing expression but contains
       // arbitrary arm conditions / values; it doesn't translate to a
