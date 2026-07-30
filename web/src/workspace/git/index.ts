@@ -6,6 +6,7 @@
 export {
   openGitFs,
   closeGitFs,
+  invalidateGitFsCache,
   deleteGitDb,
   DEFAULT_GIT_DB,
   REPO_DIR,
@@ -17,6 +18,8 @@ export {
   GitStore,
   normalizePath,
   LOOM_AUTHOR,
+  WorkspaceReadOnlyError,
+  type TabPublisher,
   type GitAuthor,
   type ListOpts,
   type CommitInfo,

@@ -40,6 +40,23 @@ export const EPHEMERAL_MESSAGE =
   "Persistent storage isn't accessible in this browser, so the playground is " +
   "running in ephemeral mode — file changes can't be saved.";
 
+/** Why this tab can't write even though storage works: another tab holds the
+ *  workspace's writer lock (M-T8.12).  Shown by the same disabled affordances
+ *  the ephemeral case already drives — the read-only CONCEPT is shared, only
+ *  the reason differs. */
+export const OTHER_TAB_MESSAGE =
+  "This workspace is open in another tab, which is the one making changes — " +
+  "so this tab is read-only. Use \u201cTake over\u201d to make this tab the writer.";
+
+/** Why the workspace is read-only, or `null` when it isn't.  Generalises the
+ *  old boolean `persistent`: the UI needs to say WHICH read-only it is. */
+export type WorkspaceReadOnlyReason = "ephemeral" | "other-tab";
+
+/** The sentence the UI shows for a read-only reason. */
+export function readOnlyMessage(reason: WorkspaceReadOnlyReason): string {
+  return reason === "ephemeral" ? EPHEMERAL_MESSAGE : OTHER_TAB_MESSAGE;
+}
+
 /** The operation a failed mutation was attempting.  Kept coarse (one
  *  value per user-visible affordance) — the UI titles the error with it. */
 export type WorkspaceSourcesOp = "write" | "create" | "create-folder" | "delete" | "delete-folder";
@@ -82,11 +99,15 @@ export interface WorkspaceSourcesSnapshot {
    *  snapshot is authoritative, and an absent file there means deleted,
    *  not "not loaded yet".  Always false without a store. */
   hydrated: boolean;
-  /** Whether mutations actually persist.  False in ephemeral mode (no
-   *  store: hostile storage policies, Safari private mode) — the file
-   *  UI disables its create/rename/delete affordances and says why
-   *  instead of painting rows that evaporate on the next refresh. */
-  persistent: boolean;
+  /** Whether mutations actually land.  False in ephemeral mode (no store:
+   *  hostile storage policies, Safari private mode) AND while another tab
+   *  owns the workspace's writer lock — the file UI disables its
+   *  create/rename/delete affordances and says why instead of painting rows
+   *  that evaporate on the next refresh. */
+  writable: boolean;
+  /** Which read-only condition applies, or `null` when writable.  The UI
+   *  keys its explanatory sentence off this. */
+  readOnlyReason: WorkspaceReadOnlyReason | null;
   /** Last failed mutation, or null.  Cleared by `clearError` and by the
    *  next explicit (non-autosave) mutation. */
   lastError: WorkspaceSourcesError | null;
@@ -182,6 +203,7 @@ export class WorkspaceSourcesController {
   private activePath: string = DEFAULT_PATH;
   private readonly listeners = new Set<WorkspaceSourcesListener>();
   private unsubscribeStore: (() => void) | null = null;
+  private unsubscribeWritable: (() => void) | null = null;
   private disposed = false;
   /** Monotonic refresh ticket.  A mutation kicks an explicit refresh and
    *  the store subscription kicks another; the highest ticket wins, so a
@@ -208,6 +230,12 @@ export class WorkspaceSourcesController {
       // their post-state is current before they resolve.
       this.unsubscribeStore = store.subscribe(WORKSPACE_PREFIX, () => {
         void this.refresh();
+      });
+      // A take-over (either direction) changes nothing about the CONTENT but
+      // everything about whether the UI may offer to change it — re-emit so
+      // the disabled affordances and their explanation flip with the role.
+      this.unsubscribeWritable = store.subscribeWritable(() => {
+        this.emit();
       });
       this.readyPromise = this.refresh();
     } else {
@@ -259,6 +287,10 @@ export class WorkspaceSourcesController {
       this.unsubscribeStore();
       this.unsubscribeStore = null;
     }
+    if (this.unsubscribeWritable) {
+      this.unsubscribeWritable();
+      this.unsubscribeWritable = null;
+    }
     this.listeners.clear();
   }
 
@@ -280,9 +312,24 @@ export class WorkspaceSourcesController {
       activePath: this.activePath,
       epoch: this.epoch,
       hydrated: this.hydrated,
-      persistent: this.store !== null,
+      writable: this.readOnlyReason === null,
+      readOnlyReason: this.readOnlyReason,
       lastError: this.lastError,
     };
+  }
+
+  /** Why mutations can't land right now, or `null` when they can.  Derived
+   *  on demand from the store (never stamped) — the store's writable flag is
+   *  flipped by the writer lock and this must not go stale behind it. */
+  private get readOnlyReason(): WorkspaceReadOnlyReason | null {
+    if (!this.store) return "ephemeral";
+    return this.store.writable ? null : "other-tab";
+  }
+
+  /** Throw the right explanatory error when a mutation can't land. */
+  private assertWritable(): void {
+    const reason = this.readOnlyReason;
+    if (reason !== null) throw new Error(readOnlyMessage(reason));
   }
 
   /** Dismiss the last mutation error (the Alert's close button). */
@@ -330,6 +377,12 @@ export class WorkspaceSourcesController {
    *  non-`.ddd` paths so design-pack writes don't accidentally route
    *  here. */
   async write(path: string, content: string): Promise<void> {
+    // Read-only (ephemeral OR another tab owns the writer lock) → drop it
+    // silently.  This is the autosave hot path: throwing here would spray a
+    // rejection per keystroke, and the banner already says why nothing sticks.
+    // The store's own `assertWritable` is the hard backstop for anything that
+    // reaches it by another route.
+    if (this.readOnlyReason !== null) return;
     return this.guard("write", path, async () => {
       if (!isDddSource(path)) {
         throw new Error(
@@ -382,8 +435,9 @@ export class WorkspaceSourcesController {
       this.recordError("create", new Error(`"${path}" already exists`), path);
       return false;
     }
-    if (!this.store) {
-      this.recordError("create", new Error(EPHEMERAL_MESSAGE), path);
+    const reason = this.readOnlyReason;
+    if (reason !== null) {
+      this.recordError("create", new Error(readOnlyMessage(reason)), path);
       return false;
     }
     try {
@@ -406,7 +460,8 @@ export class WorkspaceSourcesController {
           `WorkspaceSourcesController.createEmptyFolder: folder name is required`,
         );
       }
-      if (!this.store) throw new Error(EPHEMERAL_MESSAGE);
+      this.assertWritable();
+      if (!this.store) return;
       await this.store.mkdir(`${WORKSPACE_PREFIX}${cleaned}`);
       await this.refresh();
     });
@@ -417,7 +472,8 @@ export class WorkspaceSourcesController {
    *  consumers see a consistent snapshot. */
   async delete(path: string): Promise<void> {
     return this.guard("delete", path, async () => {
-      if (!this.store) throw new Error(EPHEMERAL_MESSAGE);
+      this.assertWritable();
+      if (!this.store) return;
       const wasActive = this.activePath === path;
       await this.store.deleteFile(path);
       await this.refresh();
@@ -440,7 +496,8 @@ export class WorkspaceSourcesController {
     return this.guard("delete-folder", folder, async () => {
       const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
       if (cleaned === "") return;
-      if (!this.store) throw new Error(EPHEMERAL_MESSAGE);
+      this.assertWritable();
+      if (!this.store) return;
       await this.store.rmdir(`${WORKSPACE_PREFIX}${cleaned}`);
       await this.refresh();
     });

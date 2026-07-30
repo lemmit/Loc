@@ -1,6 +1,18 @@
 # M-T8.12 — Playground multi-tab write coordination (design)
 
-> **Status: design brief (no claim PR yet).**
+> **Status: phases 1–2 SHIPPED (mission `done`); phase 3 rejected.**
+> Implemented as `web/src/workspace/tab-lock.ts` + `tab-channel.ts`, the
+> `GitStore` writable choke point, `writable`/`readOnlyReason` on the sources
+> snapshot, the header `WorkspaceLockBanner`, and `web/e2e/multi-tab.spec.ts`
+> in the per-PR no-network lane.  Deviations from the brief below: ownership
+> is reported through a symmetric `onOwnerChange(owner)` rather than a one-way
+> `onLost()` (a tab also GAINS the lock when the holder dies, and both
+> directions drive the same UI swap), and read-only is a MODE on `GitStore`
+> (`setWritable`) rather than a `ReadOnlyGitStore` wrapper — a wrapper changes
+> the store's identity, which would remount the editor and respawn the build
+> client on every take-over, defeating this design's own "roles swap, no
+> reload" requirement.  Slice 5's bonus (the localStorage registry `storage`
+> sync) landed too, list-only: `activeId` is deliberately NOT synced.
 > Source: `docs/audits/playground-file-mgmt-review-2026-07.md` defect **#8**
 > (P1, `workspace/git/git-fs.ts`) and its wave-3 line ("multi-tab guard").
 > Verified against `main` @ `7938c9b` (the remediation merge) and the

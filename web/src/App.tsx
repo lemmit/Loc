@@ -482,9 +482,12 @@ export default function App(): JSX.Element {
   // store so it can't race an intentional regenerate commit.
   useEffect(() => {
     const store = workspace.store;
-    if (!store) return;
+    // A read-only tab (another tab owns the writer lock) must not autosave:
+    // its LightningFS view can be a whole git sequence behind the owner's, so
+    // a commit from here would stage a stale tree over live work.
+    if (!store || !workspace.writable) return;
     return startAutoCommit(store);
-  }, [workspace.store]);
+  }, [workspace.store, workspace.writable]);
 
   // Push every workspace `.ddd` source into the LSP worker as a Monaco
   // model. Without this, only the currently-edited file reaches the LSP via
@@ -1165,6 +1168,10 @@ export default function App(): JSX.Element {
   ): Promise<VirtualFile[] | null> {
     const store = workspace.store;
     if (!store || !result?.ok || result.files.length === 0) return null;
+    // Read-only tab: regenerate still runs, its output just stays in memory
+    // (the preview is a pure client-side derive).  Nothing reaches the shared
+    // IndexedDB tree — that is the other tab's to own.
+    if (!store.writable) return null;
     try {
       // `result` is always the flag-OFF generate (see `runGenerateStep`) —
       // the git-backed workspace only ever sees exactly what it would
@@ -1759,7 +1766,8 @@ export default function App(): JSX.Element {
   const sourceFiles = sources.files;
   const sourceEpoch = sources.epoch;
   const emptySourceFolders = sources.emptyFolders;
-  const sourcesPersistent = sources.persistent;
+  const sourcesWritable = sources.writable;
+  const sourcesReadOnlyReason = sources.readOnlyReason;
   const sourceError = sources.lastError;
 
   const ctx: LayoutCtx = useMemo(
@@ -1773,7 +1781,8 @@ export default function App(): JSX.Element {
       sourceFiles,
       sourceEpoch,
       emptySourceFolders,
-      sourcesPersistent,
+      sourcesWritable,
+      sourcesReadOnlyReason,
       sourceError,
       lspClient,
       buildClient,
@@ -1847,7 +1856,8 @@ export default function App(): JSX.Element {
       sourceFiles,
       sourceEpoch,
       emptySourceFolders,
-      sourcesPersistent,
+      sourcesWritable,
+      sourcesReadOnlyReason,
       sourceError,
       lspClient,
       buildClient,

@@ -41,7 +41,8 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     deleteSourceFolder,
     emptySourceFolders,
     createEmptySourceFolder,
-    sourcesPersistent,
+    sourcesWritable,
+    sourcesReadOnlyReason,
     sourceError,
     clearSourceError,
     workspace,
@@ -64,7 +65,8 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
       emptyFolders={emptySourceFolders}
       onCreateFolder={createEmptySourceFolder}
       onDeleteFolder={deleteSourceFolder}
-      persistent={sourcesPersistent}
+      writable={sourcesWritable}
+      readOnlyReason={sourcesReadOnlyReason}
       error={sourceError}
       onDismissError={clearSourceError}
     />

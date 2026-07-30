@@ -15,6 +15,7 @@ import { WorkspaceDrawer } from "../workspace/WorkspaceDrawer";
 import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher";
 import { WorkspaceTree } from "../workspace/WorkspaceTree";
 import type { LayoutCtx } from "./ctx";
+import { WorkspaceLockBanner } from "./WorkspaceLockBanner";
 
 interface Props {
   ctx: LayoutCtx;
@@ -53,6 +54,11 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           examples={augmentedExamplesList}
           onCreateFromExample={createWorkspaceFromExample}
           size="xs"
+        />
+        {/* Only rendered while another tab owns the writer lock. */}
+        <WorkspaceLockBanner
+          reason={workspace.readOnlyReason}
+          onTakeOver={workspace.takeOver}
         />
         <Button
           size="xs"
@@ -166,6 +172,11 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
             {workspace.activeName}
           </Text>
         </Button>
+        <WorkspaceLockBanner
+          reason={workspace.readOnlyReason}
+          onTakeOver={workspace.takeOver}
+          size="sm"
+        />
       </Group>
       <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
         <Button

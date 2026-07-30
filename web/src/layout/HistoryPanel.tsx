@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
 import { type CommitFileChange, type CommitInfo, commitOnSave } from "../workspace/git";
+import { readOnlyMessage } from "../workspace/workspace-sources";
 import type { LayoutCtx } from "./ctx";
 import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
 
@@ -48,6 +49,10 @@ export function HistoryBody({
   active?: boolean;
 }): JSX.Element {
   const store = ctx.workspace.store;
+  // "Restore this version" is a WRITE (it rewrites the working tree and
+  // re-baselines the generated-merge ref), so it is suppressed — and says
+  // why — while another tab owns the writer lock.
+  const writable = ctx.workspace.writable;
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [hideAutosaves, setHideAutosaves] = useState(false);
@@ -120,7 +125,7 @@ export function HistoryBody({
   };
 
   const restore = (oid: string): void => {
-    if (!store) return;
+    if (!store || !writable) return;
     setRestoringOid(oid);
     setRestoreError(null);
     void (async () => {
@@ -154,6 +159,19 @@ export function HistoryBody({
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      {!writable && (
+        <Group px="sm" py={6} gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
+          <Text size="xs" c="dimmed" style={{ flex: 1 }} data-testid="history-readonly">
+            {readOnlyMessage("other-tab")}
+          </Text>
+          {/* No "Take over" here on purpose — the header banner owns that one
+              action, so there is exactly one place to click and exactly one
+              `workspace-readonly-banner` in the DOM. */}
+          <Button size="compact-xs" variant="light" color="orange" onClick={ctx.workspace.takeOver}>
+            Take over
+          </Button>
+        </Group>
+      )}
       <Group px="sm" py={4} justify="space-between" wrap="nowrap" style={{ flexShrink: 0 }}>
         <Text size="xs" c="dimmed">
           {shown.length} commit{shown.length === 1 ? "" : "s"}
@@ -269,7 +287,7 @@ export function HistoryBody({
                         </Button>
                       </Box>
                     )}
-                    {c.oid !== headOid && (
+                    {c.oid !== headOid && writable && (
                       <Box mt={6}>
                         {confirmOid === c.oid ? (
                           <Group gap={6} wrap="nowrap" data-testid="history-restore-confirm">

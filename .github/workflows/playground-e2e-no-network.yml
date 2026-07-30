@@ -66,6 +66,7 @@ jobs:
         e2e/source-files.spec.ts
         e2e/workspace-history.spec.ts
         e2e/workspace-persistence.spec.ts
+        e2e/multi-tab.spec.ts
         e2e/requirements-pane.spec.ts
         e2e/builder-page.spec.ts
         e2e/system-builder.spec.ts

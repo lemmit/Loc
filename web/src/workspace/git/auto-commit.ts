@@ -36,6 +36,12 @@ export function startAutoCommit(store: GitStore, opts: AutoCommitOptions = {}): 
   const flush = (): void => {
     timer = null;
     if (disposed) return;
+    // A passive (read-only) tab must not commit: its LightningFS view can be
+    // a whole git sequence behind the owner's, so an autosave from here would
+    // stage yesterday's tree over the owner's work.  `commitWorkingTree`
+    // would reject anyway (`WorkspaceReadOnlyError`) — checking first keeps
+    // the console clean, since this fires on every remote invalidation.
+    if (!store.writable) return;
     void store.commitWorkingTree(message).catch((err) => {
       // eslint-disable-next-line no-console
       console.warn("auto-commit failed:", err);
@@ -43,7 +49,7 @@ export function startAutoCommit(store: GitStore, opts: AutoCommitOptions = {}): 
   };
 
   const unsubscribe = store.subscribe(WORKSPACE_PREFIX, () => {
-    if (disposed) return;
+    if (disposed || !store.writable) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, debounceMs);
   });

@@ -233,7 +233,8 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       emptyFolders={ctx.emptySourceFolders}
                       onCreateFolder={ctx.createEmptySourceFolder}
                       onDeleteFolder={ctx.deleteSourceFolder}
-                      persistent={ctx.sourcesPersistent}
+                      writable={ctx.sourcesWritable}
+                      readOnlyReason={ctx.sourcesReadOnlyReason}
                       error={ctx.sourceError}
                       onDismissError={ctx.clearSourceError}
                     />
