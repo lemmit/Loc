@@ -1000,26 +1000,48 @@ ValueObjectMember:
 // header colon modifier — all aggregate config lives on the header, alongside
 // `persistedAs:` / `shape:`.
 Aggregate:
-    // `crossTenant` is a header flag mirroring `isAbstract` — declares
-    // shared-reference data that opts out of the tenant filter under a
-    // `tenancy by` system.  Leads beside `abstract`, before the `aggregate`
-    // keyword: `crossTenant aggregate Plan { … }`,
-    // `crossTenant aggregate Invoice with x { … }`.  (The legacy post-name
-    // position no longer parses — M-T5.17 phase 2.)
-    //
     // The aggregate id is always a `guid` — Loom mints it.
+    //
     // M-T5.17 (finding #1) — Phase 2 cutover: the enum-axis modifiers are COLON
     // clauses (`persistedAs: eventLog`), matching every other enum-value pick in
     // Loom (`type:`, `kind:`, `platform:`).  The legacy paren form was removed
-    // (corpus codemodded).  The three are ORDER-INDEPENDENT (a distinct keyword
-    // leads each, so the interleaving `(…)*` group is unambiguous), which also
-    // kills the old silent reorder-is-a-parse-error papercut.  `crossTenant`
-    // leads beside `abstract` (both boolean adjectives before `aggregate`).
-    (isAbstract?='abstract')? (crossTenant?='crossTenant')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])?
+    // (corpus codemodded).  They are ORDER-INDEPENDENT (a distinct keyword leads
+    // each, so the interleaving `(…)*` group is unambiguous), which also kills
+    // the old silent reorder-is-a-parse-error papercut.
+    //
+    // M-T5.17 AMENDMENT — header modifiers sort by MEANING, not by value type.
+    // The original cutover split them on whether the value was a boolean or an
+    // enum, which put `crossTenant` in the prefix slot.  That slot reads as
+    // access/nature territory (`private operation`, `abstract`), and
+    // `crossTenant` is neither: it is per-aggregate participation in a
+    // compiler-owned facility (the `tenancy by` policy) — the same category as
+    // `persistedAs:`.  The three regions are now:
+    //
+    //   prefix          what the declaration IS, at the type level  → `abstract`
+    //   header region   how it PARTICIPATES / is realized           → `crossTenant`,
+    //                   (after the name, order-independent)           `persistedAs:`,
+    //                                                                 `shape:`,
+    //                                                                 `inheritanceUsing:`
+    //   `with`          what is MIXED IN                            → capabilities, macros
+    //
+    // `abstract` stays prefix — it is what the aggregate is, and `abstract
+    // aggregate` reads the way every OO language spells it.  `crossTenant` is a
+    // bare boolean inside the interleaved group, so it inherits that group's
+    // order-independence:
+    //
+    //   aggregate Plan crossTenant { … }
+    //   aggregate Invoice crossTenant with stamped { … }
+    //   abstract aggregate Document persistedAs: eventLog inheritanceUsing: ownTable { … }
+    //
+    // `crossTenant` itself declares shared-reference data that opts out of the
+    // tenant filter under a `tenancy by` system (multi-tenancy Phase 1a); it is
+    // a stance MARKER — it attaches no field, filter, or stamp.
+    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])?
         (
             ('persistedAs' ':' persistedAs=TruthKind ','?)
           | ('shape' ':' shape=SavingShape ','?)
           | ('inheritanceUsing' ':' inheritanceUsing=InheritanceLayout ','?)
+          | (crossTenant?='crossTenant' ','?)
         )*
         withClause=WithClause? '{'
         members+=AggregateMember*

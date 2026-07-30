@@ -1,9 +1,33 @@
 # M-T5.17 — Surface normalization: aggregate-header modifiers + `httpStatus` clause (design)
 
-> **Status: DONE.** Phase 1 (accept-both colon, #1934) + Phase 2 cutover (paren
-> removed, `crossTenant` hoisted, order-independent, corpus codemodded) both
-> landed; `httpStatus` was hard-cut in #1918. The whole finding #1 is resolved.
-> See §"Rollout".
+> **Status: DONE, with move #1 later reversed.** Phase 1 (accept-both colon,
+> #1934) + Phase 2 cutover (paren removed, `crossTenant` hoisted,
+> order-independent, corpus codemodded) both landed; `httpStatus` was hard-cut in
+> #1918. The whole finding #1 is resolved. See §"Rollout".
+>
+> **[Amendment — sort by meaning, not by value type] Move #1 ("hoist
+> `crossTenant` to lead") was reversed.** It optimized for *adjective-position
+> uniformity* — a syntactic property — and in doing so put `crossTenant` in the
+> prefix slot, which reads as access/nature territory (`private operation`,
+> `abstract`). But `crossTenant` is not a statement about what the aggregate
+> **is**; it is per-aggregate participation in a compiler-owned facility (the
+> `tenancy by` policy) — the same category as `persistedAs:`. Grouping the header
+> by **meaning** instead gives three regions:
+>
+> | region | means | holds |
+> |---|---|---|
+> | prefix | what the declaration **is**, at the type level | `abstract` |
+> | header region (after the name, order-independent) | how it **participates / is realized** | `crossTenant`, `persistedAs:`, `shape:`, `inheritanceUsing:` |
+> | `with` | what is **mixed in** | capabilities, macros |
+>
+> `crossTenant` therefore returns to its original post-name position — now folded
+> into the interleaved `(…)*` group, so unlike the pre-M-T5.17 form it is
+> *order-independent* against the enum axes, which is the part of Phase 2 worth
+> keeping. Move #2 (paren → colon, order-independence) stands unchanged.
+>
+> Note this restores the form `docs/tenancy.md` never stopped documenting — that
+> example (`aggregate Plan crossTenant { … }`) had been un-parseable against
+> `main` since the hoist, and parses again now.
 > Sources: language-surface review 2026-07-14 (finding #1 "aggregate-header modifier
 > zoo" + finding #3 "`httpStatus X N` space-triple"); `src/language/ddd.langium`
 > (`Aggregate` header, `ApiStatus`); [`docs/decisions.md`](../../decisions.md)

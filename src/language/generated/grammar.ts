@@ -8083,16 +8083,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "cardinality": "?"
           },
           {
-            "$type": "Assignment",
-            "feature": "crossTenant",
-            "operator": "?=",
-            "terminal": {
-              "$type": "Keyword",
-              "value": "crossTenant"
-            },
-            "cardinality": "?"
-          },
-          {
             "$type": "Keyword",
             "value": "aggregate"
           },
@@ -8222,6 +8212,25 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "$ref": "#/rules@102"
                       },
                       "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
+                  }
+                ]
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Assignment",
+                    "feature": "crossTenant",
+                    "operator": "?=",
+                    "terminal": {
+                      "$type": "Keyword",
+                      "value": "crossTenant"
                     }
                   },
                   {

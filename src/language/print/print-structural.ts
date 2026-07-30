@@ -762,14 +762,12 @@ function printValueObject(node: ValueObject): string {
 }
 
 function printAggregate(node: Aggregate): string {
-  // Header modifiers in grammar order (ddd.langium `Aggregate`, M-T5.17 Phase 2):
-  //   [abstract] [crossTenant] aggregate <name> [extends <Base>]
-  //   [persistedAs: …] [shape: …] [inheritanceUsing: …] [with …]
+  // Header modifiers in grammar order (ddd.langium `Aggregate`, M-T5.17 Phase 2
+  // + the sort-by-meaning amendment):
+  //   [abstract] aggregate <name> [extends <Base>]
+  //   [persistedAs: …] [shape: …] [inheritanceUsing: …] [crossTenant] [with …]
   const abstract = node.isAbstract ? "abstract " : "";
   const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
-  // `crossTenant` (multi-tenancy Phase 1a) leads beside `abstract` — both
-  // boolean adjectives before `aggregate`.
-  const crossTenant = node.crossTenant ? "crossTenant " : "";
   // Enum-axis modifiers emit the canonical colon form (M-T5.17 finding #1),
   // matching every other enum-value pick in Loom (`type:`, `kind:`, `platform:`).
   const persistedAs = node.persistedAs ? ` persistedAs: ${node.persistedAs}` : "";
@@ -777,8 +775,13 @@ function printAggregate(node: Aggregate): string {
   const inheritanceUsing = node.inheritanceUsing
     ? ` inheritanceUsing: ${node.inheritanceUsing}`
     : "";
+  // `crossTenant` (multi-tenancy Phase 1a) is a realization modifier, so it
+  // prints in the header region beside the enum axes rather than in the prefix
+  // slot.  The group is order-independent; we emit it last for a stable,
+  // diff-friendly canonical form.
+  const crossTenant = node.crossTenant ? " crossTenant" : "";
   return declBlock(
-    `${abstract}${crossTenant}aggregate ${node.name}${ext}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
+    `${abstract}aggregate ${node.name}${ext}${persistedAs}${shape}${inheritanceUsing}${crossTenant}${printWithClause(node.withClause)}`,
     () => node.members.map(printStructural),
   );
 }
