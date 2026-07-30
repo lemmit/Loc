@@ -291,7 +291,10 @@ system Acme {
         code: string
         status: string
       }
-      repository Orders for Order {}
+      repository Orders for Order {
+        // An ABSENCE union — the caller gets a miss as a VALUE, not a raise.
+        find byCode(code: string): Order option
+      }
     }
     context Shipping {
       aggregate Shipment with crudish {
@@ -303,6 +306,13 @@ system Acme {
         create(orderId: Order id) {
           let o = orders.getOrderById(orderId)
           let s = Shipment.create({ orderCode: o.code, status: "Pending" })
+        }
+      }
+      workflow lookup {
+        create(code: string) {
+          let maybe = orders.byCodeOrder(code)
+          let note = match maybe { Order x => x.code, else => "MISSING" }
+          let s = Shipment.create({ orderCode: note, status: "Looked" })
         }
       }
     }
@@ -528,6 +538,32 @@ describe.skipIf(!ENABLED)(`typed in-system api call (api-call-e2e, caller=${CALL
       `no shipment carried the callee's code ${code}:\n${JSON.stringify(rows)}\n${tail("shipping_svc")}`,
     ).toBeDefined();
     expect(match?.status).toBe("Pending");
+  }, 120_000);
+
+  it("binds a callee 404 as a VALUE when the callee declares an absence union", async () => {
+    // The counterpart to the test below.  `getOrderById` declares `Order` with
+    // 404 among its error statuses, so a miss RAISES.  `byCode` declares
+    // `Order option`, so a miss is a value the caller matches on — and the two
+    // live in the same generated client, against the same callee.
+    //
+    // This is the half no compile gate can see: a client that types the union
+    // correctly but still throws on 404 passes tsc / mypy / dotnet / gradle /
+    // mix, and only a booted 404 tells them apart.
+    const missing = `NOPE-${Date.now()}`;
+    const ran = await fetch(`http://localhost:${SHIPPING_PORT}/api/workflows/lookup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: missing }),
+    });
+    expect(ran.ok, `absence must not fail the workflow:\n${tail("shipping_svc")}`).toBe(true);
+
+    // The `else` arm ran: the row exists and carries the arm's literal, which
+    // proves the call RETURNED rather than threw.
+    const rows = await shipments();
+    expect(
+      rows.some((s) => s.orderCode === "MISSING" && s.status === "Looked"),
+      `no shipment carried the absence arm:\n${JSON.stringify(rows)}\n${tail("shipping_svc")}`,
+    ).toBe(true);
   }, 120_000);
 
   it("surfaces a callee 404 as a failed call rather than a silent success", async () => {

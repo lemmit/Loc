@@ -33,8 +33,8 @@ import {
   servedContextsFor,
 } from "../../../ir/util/api-resource-binding.js";
 import {
-  absenceUnionSuccess,
   type ApiOperationIR,
+  absenceUnionSuccess,
   deriveContextOperations,
 } from "../../../ir/util/api-surface.js";
 import { escapeJavaIdent, lowerFirst, upperFirst } from "../../../util/naming.js";
@@ -138,8 +138,7 @@ export function emitJavaApiClients(
         // only the absent status differs (null, not a throw).  See
         // payloads.md §Union finds — there is no `type` discriminator.
         const absentAgg = absenceUnionSuccess(op.responseType);
-        const respAgg =
-          op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
+        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const recordName = agg ? `${agg.name}Response` : undefined;
         if (agg && recordName && !emittedRecords.has(recordName)) {

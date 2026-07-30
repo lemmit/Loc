@@ -18,7 +18,11 @@ system AC {
         code: string
         status: string
       }
-      repository Orders for Order { }
+      repository Orders for Order {
+        // An ABSENCE union: the caller gets a 404 as a VALUE to match on
+        // rather than a raise (payloads.md §Union finds).
+        find byCode(code: string): Order option
+      }
     }
     context Shipping {
       aggregate Shipment with crudish {
@@ -33,6 +37,15 @@ system AC {
         create(orderId: Order id) {
           let o = orders.getOrderById(orderId)
           let s = Shipment.create({ orderCode: o.code, status: "Pending" })
+        }
+      }
+      // The absence-union half: `byCode` may legitimately find nothing, so the
+      // caller MUST handle it — the union does not type-check as bare `Order`.
+      workflow lookup {
+        create(code: string) {
+          let maybe = orders.byCodeOrder(code)
+          let note = match maybe { Order x => x.code, else => "missing" }
+          let s = Shipment.create({ orderCode: note, status: "Pending" })
         }
       }
     }

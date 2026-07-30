@@ -332,9 +332,49 @@ asserts the caller persists a value only the callee could have supplied
 - `use: <Api>` is only meaningful on `kind: api`
   (`loom.resource-api-target-kind`).
 - Failures raise, they do not return a sentinel. Each backend's client throws a
-  status-carrying `RemoteCallError` / `RemoteCallException`. A `T or NotFound`
-  union return — where a 404 is a *value* the caller must match on rather than
-  an exception — is **not** implemented; only the success body is typed today.
+  status-carrying `RemoteCallError` / `RemoteCallException`.
+
+### Absence as a value — `T or NotFound`
+
+When the callee's find declares an **absence union** (`Order option`, `Order or
+NotFound`), the caller gets the absent case as a *value* to match on rather than
+an exception:
+
+```ddd
+// callee
+repository Orders for Order {
+  find byCode(code: string): Order option
+}
+
+// caller
+workflow fulfil {
+  create(code: string) {
+    let o = orders.byCodeOrder(code)
+    let note = match o { Order x => x.code, else => "missing" }
+    let s = Shipment.create({ orderCode: note, status: "Pending" })
+  }
+}
+```
+
+```ts
+export async function orders$byCodeOrder(code: string): Promise<z.infer<typeof OrderResponse> | null> {
+  if (res.status === 404) return null;          // absence is a VALUE
+  if (!res.ok) throw new RemoteCallError(…);    // everything else still fails
+  return OrderResponse.parse(await res.json());
+}
+```
+
+This is derivation, not a new knob. A union find already answers the success
+body **directly** at 200 and rides absence on its own status, with no `type`
+discriminator ([Union finds](payloads.md#union-finds--the-untagged-exception)) —
+so the client returns `T | null` and the `match` narrows on presence, exactly as
+it does for a *local* union find. Per backend: `| None` (python), `T?` (.NET), a
+nullable record (java), `nil` (phoenix).
+
+`getOrderById` is deliberately **unchanged**: its declared response is `Order`
+with 404 among its error statuses, so absence there *is* an error. You opt in by
+declaring a union find on the callee — and then the caller cannot ignore it,
+because the union does not type-check as the bare aggregate.
 
 ## Custom source types (out-of-tree)
 
