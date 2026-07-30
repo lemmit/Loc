@@ -142,6 +142,46 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // M-T1.3 Phase 0: a query-time projection whose `select` is a WHOLE-TABLE
+    // AGGREGATION (`count` / `sum` / `avg` / `min` / `max`) pushes down to SQL
+    // instead of loading rows.  System-mode only (query-time projection routes
+    // emit under `generate system`).  This is the FIRST compile coverage of the
+    // `select` clause anywhere in the repo — no `.ddd` used one before, which is
+    // how the surface came to emit a free identifier for the operator name.
+    it("system whole-table aggregation (node) — SQL push-down type-checks + bundles", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-agg-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/projection-aggregation.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const routes = fs.readFileSync(path.join(proj, "http", "query-projections.ts"), "utf8");
+        // The aggregation is a SQL query, not a fold over materialised rows —
+        // the whole point of the shape.  Pin both halves: the push-down itself,
+        // and the absence of the `SELECT *` + rehydrate path it replaced.
+        expect(routes).toContain("db.select({ orders: count()");
+        expect(routes).toContain("sum(schema.orders.total)");
+        expect(routes).not.toContain("OrderRepository(db, events);\n      const rows");
+        // One row out, so the response is the row — not an array of one.
+        expect(routes).toContain("const SalesTotalsResponse = SalesTotalsRow.openapi(");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     // Explicit-handler 200 typing (M-T5.10): a `commandHandler`/`queryHandler`
     // returning a domain aggregate types its 200 as `<Agg>Response`, IMPORTED
     // from the aggregate's own routes file (the `http/views.ts` cross-file

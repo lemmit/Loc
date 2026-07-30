@@ -3,6 +3,7 @@ import { lowerToDrizzle } from "../../../generator/typescript/repository-find-pr
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionAggregateIR,
   ProjectionIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -73,6 +74,35 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
     }
     rawReads.set(p.name, { table: `schema.${tableBare}`, where });
   }
+  // Whole-table aggregation reads: the table is queried DIRECTLY (not through
+  // the repository — the point of the shape is to never materialise rows), so
+  // the projection's `where` lowers to SQL here exactly as a raw-table source's
+  // does.  Also collects the drizzle aggregate functions the routes will call,
+  // so the `drizzle-orm` import below lists them.
+  //
+  // Deliberately covers EVERY source kind, including the raw-table ones.  The
+  // route emitter takes the aggregate branch before the raw-table branch, so
+  // skipping workflow/projection sources here would emit their aggregation with
+  // the `where` silently dropped — a wrong answer rather than a broken build.
+  // Both paths name the table identically (`lowerFirst(plural(source))`), so one
+  // lowering serves both.
+  const aggWheres = new Map<string, string | undefined>();
+  for (const p of projections) {
+    const aggregates = wholeTableAggregates(p);
+    if (!aggregates || !p.query?.source) continue;
+    for (const s of aggregates) rawDrizzleOps.add(s.aggregate.op);
+    if (!p.query.filter) {
+      aggWheres.set(p.name, undefined);
+      continue;
+    }
+    const lowered = lowerToDrizzle(p.query.filter, lowerFirst(plural(p.query.source)), ctx);
+    if (lowered) {
+      aggWheres.set(p.name, lowered.expr);
+      for (const op of lowered.ops) rawDrizzleOps.add(op);
+    } else {
+      aggWheres.set(p.name, undefined);
+    }
+  }
   const allAggs = new Set([...sourceAggs, ...followAggs]);
   const usesEvents =
     projections.some((p) => (p.query?.auxiliaries.length ?? 0) > 0) || sourceAggs.size > 0;
@@ -89,7 +119,19 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   );
   lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
-  lines.push(`import type * as schema from "../db/schema";`);
+  // `schema` is normally needed only for `NodePgDatabase<typeof schema>` — a
+  // TYPE position — but the two paths that query a table DIRECTLY (a raw-table
+  // source, and a whole-table aggregation) name `schema.<table>` as a VALUE.
+  // A type-only import makes that `TS1361: 'schema' cannot be used as a value`,
+  // which no test caught because no `.ddd` in the repo exercises either path.
+  // A value import satisfies the type position too, so this is a widening;
+  // projections that need neither keep the type-only import byte-for-byte.
+  const schemaAsValue = rawReads.size > 0 || aggWheres.size > 0;
+  lines.push(
+    schemaAsValue
+      ? `import * as schema from "../db/schema";`
+      : `import type * as schema from "../db/schema";`,
+  );
   if (rawDrizzleOps.size > 0) {
     lines.push(`import { ${[...rawDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   }
@@ -116,7 +158,14 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
       );
     }
     lines.push(`}).openapi("${T}Row");`);
-    lines.push(`const ${T}Response = z.array(${T}Row).openapi("${T}Response");`);
+    // A whole-table aggregation yields ONE row, so its response is the row
+    // itself — not an array of one.  (The array wrapper on a singleton was the
+    // shape that made `select orders = count` look like a list of counts.)
+    lines.push(
+      wholeTableAggregates(p)
+        ? `const ${T}Response = ${T}Row.openapi("${T}Response");`
+        : `const ${T}Response = z.array(${T}Row).openapi("${T}Response");`,
+    );
   }
   lines.push("");
 
@@ -128,7 +177,11 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push("");
 
   for (const p of projections) {
-    lines.push(...emitQueryProjectionRoute(p, rawReads.get(p.name)).map((l) => `  ${l}`));
+    lines.push(
+      ...emitQueryProjectionRoute(p, rawReads.get(p.name), aggWheres.get(p.name)).map(
+        (l) => `  ${l}`,
+      ),
+    );
     lines.push("");
   }
 
@@ -168,6 +221,7 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
 function emitQueryProjectionRoute(
   p: ProjectionIR,
   rawRead?: { table: string; where?: string },
+  aggregateWhere?: string,
 ): string[] {
   const T = upperFirst(p.name);
   const source = p.query!.source!;
@@ -187,6 +241,7 @@ function emitQueryProjectionRoute(
   out.push(`    },`);
   out.push(`  }),`);
   const gate = p.query!.requires;
+  const aggregates = wholeTableAggregates(p);
   out.push(`  async (httpCtx) => {`);
   // The `requires` gate (and any currentUser-scoped filter) needs the request
   // principal in scope; a failing gate denies with 403 (ForbiddenError → 403)
@@ -198,6 +253,33 @@ function emitQueryProjectionRoute(
   }
   if (gate) {
     out.push(`    if (!(${renderTsExpr(gate)})) throw new ForbiddenError("Forbidden");`);
+  }
+  // WHOLE-TABLE AGGREGATION (read-path-architecture.md rev. 8's singleton) —
+  // the aggregation pushes DOWN to SQL rather than loading rows and folding
+  // them.  This is the whole point of the shape: the naive read is a `SELECT *`
+  // over the source table with every row rehydrated into a domain object to
+  // produce one integer, which is the scaling failure M-T2.6 removed from
+  // `findAll`.  One row out, so the response is the row itself.
+  if (aggregates) {
+    const sourceTable = `schema.${lowerFirst(plural(source))}`;
+    const cols = aggregates
+      .map((s) => `${s.field}: ${drizzleAggregate(s.aggregate, sourceTable)}`)
+      .join(", ");
+    out.push(
+      `    const [row] = await db.select({ ${cols} }).from(${sourceTable})${
+        aggregateWhere ? `.where(${aggregateWhere})` : ""
+      };`,
+    );
+    const projectedFields = aggregates
+      .map((s) => `      ${s.field}: ${coerceAggregate(s.aggregate, s.type, `row?.${s.field}`)},`)
+      .join("\n");
+    out.push(`    const projected = {`);
+    out.push(...projectedFields.split("\n"));
+    out.push(`    };`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
   }
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
@@ -259,6 +341,67 @@ function emitQueryProjectionRoute(
   out.push(`  },`);
   out.push(`);`);
   return out;
+}
+
+/** The projection's `select`s when EVERY one is a whole-table aggregation —
+ *  the singleton read model — else `null`.
+ *
+ *  All-or-nothing on purpose: a MIX of aggregate and per-row selects is a
+ *  GROUP BY (one row per group), a different query and a different response
+ *  shape.  That combination is reserved (`loom.projection-groupby-unsupported`),
+ *  so it never reaches here; returning `null` for it would silently emit the
+ *  per-row path with an unresolved aggregation in it. */
+function wholeTableAggregates(
+  p: ProjectionIR,
+): Array<{ field: string; type: TypeIR; aggregate: ProjectionAggregateIR }> | null {
+  const selects = p.query?.selects ?? [];
+  if (selects.length === 0) return null;
+  const out: Array<{ field: string; type: TypeIR; aggregate: ProjectionAggregateIR }> = [];
+  for (const s of selects) {
+    if (!s.aggregate) return null;
+    out.push({ field: s.field, type: s.type, aggregate: s.aggregate });
+  }
+  return out;
+}
+
+/** The Drizzle aggregate call for one `select`.  `count` counts ROWS (no
+ *  column); the rest take the aggregated column, which is source-row-rooted so
+ *  it renders as the plain `schema.<table>.<field>` ref every other predicate
+ *  in this file uses. */
+function drizzleAggregate(agg: ProjectionAggregateIR, sourceTable: string): string {
+  if (agg.op === "count" || !agg.arg) return "count()";
+  return `${agg.op}(${aggregateColumn(agg.arg, sourceTable)})`;
+}
+
+/** The column an aggregation reads, as a Drizzle ref.  The argument arrives
+ *  lowered against the source candidate, so `sum(o.total)` is `this.total` —
+ *  a member access whose name IS the schema column key. */
+function aggregateColumn(arg: ExprIR, sourceTable: string): string {
+  if (arg.kind === "member") return `${sourceTable}.${arg.member}`;
+  // Anything else is a computed expression over the row, which SQL would have
+  // to evaluate per row before aggregating.  Not reachable: the validator only
+  // normalises a plain column reference into `select.aggregate`.
+  throw new Error("internal: a whole-table aggregation argument must be a source column reference");
+}
+
+/** Coerce one Drizzle aggregate result to the projection row's declared wire
+ *  type.  Postgres returns `numeric` aggregates as STRINGS through the driver
+ *  (and `NULL` over an empty table), so this is load-bearing rather than
+ *  cosmetic — an uncoerced `sum` would ship a string where the row declares a
+ *  number, or `null` where it declares a value.
+ *
+ *  `count` is the one operator with a meaningful zero: counting no rows is 0,
+ *  not absent.  `sum` over no rows is `NULL` in SQL; Loom's row type decides
+ *  whether that surfaces as a zero or as `null`, and a non-optional declared
+ *  field means zero. */
+function coerceAggregate(agg: ProjectionAggregateIR, type: TypeIR, expr: string): string {
+  const optional = type.kind === "optional";
+  const inner = optional ? type.inner : type;
+  const isMoneyString =
+    inner.kind === "primitive" && (inner.name === "money" || inner.name === "guid");
+  if (agg.op === "count") return `Number(${expr} ?? 0)`;
+  if (optional) return `${expr} == null ? null : ${isMoneyString ? "String" : "Number"}(${expr})`;
+  return isMoneyString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
 }
 
 /** Render a `select` expression against the source row `r` and the join alias

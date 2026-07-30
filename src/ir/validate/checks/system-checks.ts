@@ -113,6 +113,39 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 // java (PR-F), dotnet (PR-G).
 const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "dotnet"]);
 
+// Whole-table aggregation in a query-time projection's `select`
+// (`select orders = count`, `select revenue = sum(o.total)`) — the SINGLETON
+// read model of read-path-architecture.md rev. 8, whose motivating use is a
+// dashboard total / running count.  It pushes the aggregation down to SQL
+// (`COUNT(*)` / `SUM(col)`) instead of loading and folding rows, so it is a
+// distinct emit path from the per-row `select` every backend already renders.
+// Backends in `PROJECTION_AGG_SUPPORTED` have ported it; the rest gate HONESTLY
+// rather than emit the operator name as a free identifier.  Same reviewed-gap
+// discipline as `validateQueryTimeProjectionBackend` above; node is first.
+const PROJECTION_AGG_SUPPORTED = new Set(["node"]);
+
+export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    if (!platformOwnsBackend(d.platform) || PROJECTION_AGG_SUPPORTED.has(d.platform)) continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        for (const s of p.query?.selects ?? []) {
+          if (!s.aggregate) continue;
+          diags.push({
+            severity: "error",
+            code: "loom.projection-whole-table-aggregation-unsupported",
+            message: `projection '${p.name}': 'select ${s.field} = ${s.aggregate.op}(…)' is a whole-table aggregation, which deployable '${d.name}' (platform '${d.platform}') can't generate yet — only the node (Hono) backend has ported it. Host the projection on a supported deployable, or express the read per-row.`,
+            source: `${c.name}/${p.name}`,
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
   for (const d of sys.deployables) {

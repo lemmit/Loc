@@ -224,22 +224,60 @@ instead of by the browser over one page of rows.
 So Defect A drops from P1 to a **cheap honesty gate** (§3.6). The critical path
 becomes C → D → the macro.
 
-### 3.1 Phase 0 — make a server-computed number real (Defect C) · `M` · **P1**
+### 3.1 Phase 0 — make a server-computed number real (Defect C) · **LANDED on node**
 
-Backend-only. No UI, no macro, no chart. The singleton aggregating projection
-must actually work:
+Backend-only. No UI, no macro, no chart. Shipped following the established
+honest-gap pattern: **node/Hono emits it; python/java/dotnet/elixir gate**
+(`PROJECTION_AGG_SUPPORTED` in `system-checks.ts`, mirroring
+`validateQueryTimeProjectionBackend`).
 
-- `select orders = count` pushes down to `SELECT COUNT(*)`; `sum(o.total)` to
-  `SUM(total)` — not `SELECT *` + rehydrate + in-memory fold.
-- A singleton returns an **object**, not `z.array(...)`.
-- The free-identifier bug goes away because `count` resolves to an aggregation in
-  the `select` position.
-- All five backends (the query-time projection emitter already ships on all five
-  — T4 note in `T4-eventing-temporal.md`), or fewer with an **honest per-backend
-  gate**, which is the established pattern here.
+```ddd
+projection SalesTotals {
+  orders: int   revenue: money   avgLines: decimal   biggest: money
+  from Order as o
+  where Confirmed
+  select orders = count, revenue = sum(o.total), avgLines = avg(o.lineCount), biggest = max(o.total)
+}
+```
+```ts
+const [row] = await db.select({ orders: count(), revenue: sum(schema.orders.total),
+  avgLines: avg(schema.orders.lineCount), biggest: max(schema.orders.total) })
+  .from(schema.orders).where(eq(schema.orders.status, "Confirmed"));
+const projected = {
+  orders: Number(row?.orders ?? 0),
+  revenue: String(row?.revenue ?? "0"),
+  avgLines: Number(row?.avgLines ?? 0),
+  biggest: String(row?.biggest ?? "0"),
+};
+```
+
+What it took, beyond the obvious:
+
+- **Lowering normalises, emitters consume** (the proposal's own rule). A new
+  `select.aggregate` (`{ op, arg? }`) is resolved once in `lower-projection.ts`
+  so no backend re-detects an aggregation from a raw expression.
+- **Two IR shapes.** `count` lowers to `refKind: "unknown"`, `sum(o.total)` to
+  `callKind: "free"`. Covering one leaks the other.
+- **The type comes from the operator.** A bare `count` infers as `string`
+  through the ordinary expression path — simply wrong. `avg` widens to decimal
+  even over an int column.
+- **Coercions are load-bearing.** Postgres returns `numeric` aggregates as
+  **strings** through the driver, and `NULL` over an empty table. `count` has a
+  meaningful zero; `sum` over no rows is SQL `NULL`, and a non-optional declared
+  field means zero.
+- **A singleton returns the row, not an array of one** — the `z.array` wrapper
+  was what made `select orders = count` look like a list of counts.
+- **`loom.projection-groupby-unsupported` now exists** (it was a documented
+  reservation with no code). Mixing an aggregate with a per-row `select` is a
+  GROUP BY — one row per distinct value — so it is reserved rather than guessed
+  at. This is Phase 3's surface.
+- **A latent `TS1361` on a neighbouring path, found by the real compiler.** The
+  file imports `import type * as schema`, so `schema.orders` in value position
+  doesn't compile. The **raw-table-source path has the same break** and no
+  fixture ever compiled it. Both fixed by a needs-based value import.
 
 Independently valuable: closes a silent mis-emit *and* an unbounded table scan.
-Worth doing even if nothing else in this document is built.
+**Remaining:** the four non-node backends (each lifts its own gate).
 
 ### 3.2 Phase 1 — the ui→projection read path (Defect D) · `M` · **P1**
 
@@ -366,8 +404,9 @@ broken. `src/ir/validate/checks/`:
 
 | Code | Rejects | Lifted by |
 |---|---|---|
-| `loom.projection-whole-table-aggregation-unsupported` | a `select` using `count`/`sum`/`avg`/`min`/`max` with no collection receiver — the designed-but-unimplemented singleton aggregation (Defect C) | Phase 0 |
+| `loom.projection-whole-table-aggregation-unsupported` | an aggregating `select` hosted on a backend that hasn't ported the SQL push-down. **Now per-deployable** (`system-checks.ts`), lifted on node by Phase 0 | the remaining four backends |
 | `loom.projection-select-unresolved` | any *other* unresolved name in a `select` — the general form of the same defect (a typo emitted as a free identifier) | — (permanent) |
+| `loom.projection-groupby-unsupported` | an aggregate `select` mixed with a per-row one — a GROUP BY, reserved rather than guessed at | Phase 3 |
 | `loom.ui-projection-read-unsupported` | a page/component reading a projection through its api handle (Defect D) | Phase 1 |
 
 Two IR shapes had to be covered for the aggregation gate, which is why half a
@@ -386,8 +425,9 @@ stay quiet about IR-tier gates by design.
 
 ### 3.8 Ordering
 
-0. **Slice 1 — the two honest gates (§3.7).** ✅ landed.
-1. **Phase 0** — singleton aggregation actually computes (Defect C).
+0. **Slice 1 — the honest gates (§3.7).** ✅ landed.
+1. **Phase 0** — singleton aggregation actually computes (Defect C). ✅ landed on
+   node; the four other backends each lift their own gate.
 2. **Phase 1** — ui can read a projection (Defect D).
 3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. **Dashboard ships
    here, with no chart dependency anywhere.**
@@ -438,5 +478,9 @@ surface. The Defect D repro is the same fixture with the page body swapped to
 `QueryView { of: Sales.SalesTotals, data: r => Stat { "Total orders", r.orders } }`
 — it validates clean and emits `undefined.SalesTotals`.
 
-The three fixtures (page collection-op, singleton projection, ui-reads-projection)
-are worth promoting to `test/fixtures/corpus/` when Phase 0 starts.
+**Compile coverage now exists.** `test/e2e/fixtures/ts-build/projection-aggregation.ddd`
+is the first `.ddd` in the repo to use a `select` clause at all — the whole
+query-time projection surface, shipped on five backends, had none — and it runs
+under `LOOM_TS_BUILD=1` (real `tsc --noEmit` + `tsup` bundle). The remaining two
+repro fixtures (page collection-op, ui-reads-projection) are worth promoting when
+Phase 1 starts.

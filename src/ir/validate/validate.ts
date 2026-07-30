@@ -80,6 +80,7 @@ import {
   validateSystem,
   validateUiRealtimeSupport,
   validateVanillaDocumentScope,
+  validateWholeTableAggregationBackend,
   validateWorkflowSourceProjectionBackend,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
@@ -180,6 +181,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRelayTargetNotSubscribed(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
+    validateWholeTableAggregationBackend(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

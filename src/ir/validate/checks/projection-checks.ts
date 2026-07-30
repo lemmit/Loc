@@ -290,39 +290,50 @@ function validateQueryComprehension(
   // an unresolved name reaches the generated source as a FREE IDENTIFIER —
   // `{ orders: count }` — which is a hard compile error on the typed backends
   // and `undefined` on the untyped ones, from a model that otherwise validates
-  // clean.  The motivating shape is the whole-table aggregation
-  // `select orders = count` (read-path-architecture.md rev. 8's singleton):
-  // designed, parsed, and NOT implemented, so `count` lowers to an unknown ref
-  // and is emitted verbatim.  Gate it here until the aggregation lands (M-T1.3
-  // Phase 0) — the honest-gap rule the header above states for the query-time
-  // surface as a whole.
-  for (const s of q.selects ?? []) {
-    const unresolved = firstUnresolvedRefName(s.expr);
-    if (!unresolved) continue;
-    // Two codes over one condition: the aggregation vocabulary is a KNOWN
-    // unimplemented feature, everything else is a bad name.  Same defect
-    // (an undeclared identifier in the emitted mapper), different repair.
-    const isAggregation = WHOLE_TABLE_AGGREGATIONS.has(unresolved);
-    const diagCode = isAggregation
-      ? "loom.projection-whole-table-aggregation-unsupported"
-      : "loom.projection-select-unresolved";
-    const diagMessage = isAggregation
-      ? `projection '${proj.name}': 'select ${s.field} = …' uses '${unresolved}' as a ` +
-        `WHOLE-TABLE aggregation over the '${q.source}' source (no collection receiver binds ` +
-        `it). Whole-table aggregation is designed (read-path-architecture.md rev. 8 — the ` +
-        `singleton read model) but NOT yet emitted: '${unresolved}' would reach the generated ` +
-        `source as an undeclared identifier. Use a per-row 'select' for now.`
-      : `projection '${proj.name}': 'select ${s.field} = …' references '${unresolved}', which ` +
-        `resolves to nothing — not a field of the '${q.source}' source, not a 'join' alias, ` +
-        `not a parameter. It would be emitted as an undeclared identifier. Fix the name, or ` +
-        `add the 'join <Aggregate> as ${unresolved} on <idRef>' that binds it.`;
-    // Written long-hand (not `{ code, message }` shorthand) so the
-    // diagnostic-codes contract scan (`diagnostic-codes-completeness.test.ts`)
-    // can see the `code:` key it keys on.
+  // clean.
+  //
+  // A recognised WHOLE-TABLE AGGREGATION is exempt here: lowering normalises it
+  // into `select.aggregate` (a disciplined shape a ported emitter consumes), so
+  // it is a real feature rather than a bad name.  Whether the HOSTING backend
+  // has ported that emit is a deployable-level fact, so it is gated in
+  // `validateWholeTableAggregationBackend` (system-checks.ts) instead — this
+  // check has no platform in scope.  What is left here is the genuine typo.
+  // MIXING an aggregation with a per-row `select` is a GROUP BY — one row per
+  // distinct value of the per-row column, not one row for the table.  That is a
+  // different query, a different response shape, and a clause the surface does
+  // not have yet (`group by`), so it is reserved rather than guessed at.
+  // read-path-architecture.md rev. 8 reserves exactly this combination.
+  const selects = q.selects ?? [];
+  const aggregating = selects.filter((s) => s.aggregate);
+  if (aggregating.length > 0 && aggregating.length < selects.length) {
+    const perRow = selects.filter((s) => !s.aggregate).map((s) => s.field);
     diags.push({
       severity: "error",
-      code: diagCode,
-      message: diagMessage,
+      code: "loom.projection-groupby-unsupported",
+      message:
+        `projection '${proj.name}' mixes whole-table aggregation ` +
+        `(${aggregating.map((s) => s.field).join(", ")}) with per-row select(s) ` +
+        `(${perRow.join(", ")}). That is a GROUP BY — one row per distinct ` +
+        `${perRow.join("/")} — which has no surface yet. Aggregate ALL fields (a ` +
+        `single-row total), or select all of them per-row.`,
+      source: `${ctx.name}/${proj.name}`,
+    });
+  }
+  for (const s of selects) {
+    if (s.aggregate) continue;
+    const unresolved = firstUnresolvedRefName(s.expr);
+    if (!unresolved) continue;
+    const hint = WHOLE_TABLE_AGGREGATIONS.has(unresolved)
+      ? ` (a whole-table '${unresolved}' needs the aggregated column — write ` +
+        `'${unresolved}(<alias>.<field>)', or bare 'count' to count rows)`
+      : "";
+    diags.push({
+      severity: "error",
+      code: "loom.projection-select-unresolved",
+      message:
+        `projection '${proj.name}': 'select ${s.field} = …' references '${unresolved}', which ` +
+        `resolves to nothing — not a field of the '${q.source}' source, not a 'join' alias, ` +
+        `not a parameter${hint}. It would be emitted as an undeclared identifier.`,
       source: `${ctx.name}/${proj.name}`,
     });
   }
