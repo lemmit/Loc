@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapePythonIdent, snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import {
@@ -205,6 +206,10 @@ export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): 
         const needs = PY_INTRINSIC_IMPORTS[intrinsicKey(e.receiverType.name, e.member)];
         if (needs) into.add(needs);
       }
+      // A money `sum` renders an explicit `Decimal(0)` start (fleet-bug-hunt
+      // B4), so the module needs the `Decimal` import even when no money
+      // LITERAL appears in the expression.
+      if (e.member === "sum" && e.isCollectionOp && sumIsMoney(e)) into.add("decimal");
       collectPyExprImports(e.receiver, into);
       for (const a of e.args) collectPyExprImports(a, into);
       return into;
@@ -485,6 +490,23 @@ function renderMethodCall(
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
+/** True iff a `sum` reduction accumulates MONEY (Python `Decimal`) — the λ-body
+ *  type for `sum(λ)`, the receiver's element type for a no-arg `money[]` sum.
+ *  Loom `decimal` renders as a Python `float` and is deliberately excluded: it
+ *  needs no explicit start.  Elixir's `sumBodyIsDecimalStruct` is the same probe
+ *  with a wider net (money AND decimal are both `%Decimal{}` there). */
+export function sumIsMoney(e: MethodCallExpr | undefined): boolean {
+  if (!e) return false;
+  const lam = e.args[0];
+  if (lam?.kind === "lambda" && lam.body) {
+    const bodyT = bodyTypeOf(lam.body);
+    return bodyT?.kind === "primitive" && bodyT.name === "money";
+  }
+  const rt = e.receiverType.kind === "optional" ? e.receiverType.inner : e.receiverType;
+  const elem = rt.kind === "array" ? rt.element : undefined;
+  return elem?.kind === "primitive" && elem.name === "money";
+}
+
 /** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
  *  descending flag — the only collection op carrying a 2nd arg). */
 function isDescendingSort(e: MethodCallExpr): boolean {
@@ -501,8 +523,23 @@ export const PY_COLLECTION_RENDERERS: Record<
   (recv: string, args: string[], e?: MethodCallExpr) => string
 > = {
   count: (recv) => `len(${recv})`,
-  sum: (recv, args) =>
-    args.length === 1 ? `sum((${args[0]})(__x) for __x in ${recv})` : `sum(${recv})`,
+  // A money sum needs an explicit `Decimal(0)` start.  Bare `sum(...)` seeds
+  // the accumulator with int `0`, which typeshed reflects as
+  // `Decimal | Literal[0]` — a `mypy --strict` failure where the result feeds
+  // a `Decimal`, and at runtime an EMPTY collection yields int `0` where Java
+  // gives `BigDecimal.ZERO` and .NET `0m`.  int/long/decimal need no start:
+  // Loom `decimal` is a Python `float`, and `float | Literal[0]` collapses to
+  // `float` under mypy's numeric tower.
+  sum: (recv, args, e) => {
+    // A generator expression must be parenthesised when it isn't the sole
+    // argument, hence the two spellings.
+    if (!sumIsMoney(e)) {
+      return args.length === 1 ? `sum((${args[0]})(__x) for __x in ${recv})` : `sum(${recv})`;
+    }
+    return args.length === 1
+      ? `sum(((${args[0]})(__x) for __x in ${recv}), Decimal(0))`
+      : `sum(${recv}, Decimal(0))`;
+  },
   all: (recv, args) => (args.length === 1 ? `all((${args[0]})(__x) for __x in ${recv})` : "True"),
   any: (recv, args) =>
     args.length === 1 ? `any((${args[0]})(__x) for __x in ${recv})` : `len(${recv}) > 0`,
@@ -638,6 +675,21 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
       return `${subject} is ${e.op === "!=" ? "not " : ""}None`;
     }
   }
+  // Python's `%` is a FLOORED modulo — the result takes the sign of the
+  // DIVISOR (`-5 % 3 == 1`).  Every other Loom backend truncates towards
+  // zero, so the result takes the sign of the DIVIDEND (`-5 % 3 == -2` on
+  // JS/TS, C#, Java, and Elixir's deliberate `rem/2`).  Python is the sole
+  // outlier, so `%` routes through the emitted `trunc_mod` helper
+  // (`app/domain/numeric.py`) to keep the cross-backend answer identical.
+  //
+  // Safe to apply unconditionally: the type system rejects `%` on money
+  // and on the temporal types (`moneyArithmetic` / `temporalArithmetic` in
+  // `src/language/type-system.ts`), so both operands are always
+  // int / long / decimal — exactly `trunc_mod`'s `int | float` domain.
+  // SQL-side `%` never reaches here: `find-predicate.ts` lowers binaries
+  // itself and only calls back for value-side leaves (Postgres `%` already
+  // truncates, so the emitted query needs no adjustment).
+  if (e.op === "%") return `trunc_mod(${left}, ${right})`;
   // A5 temporal — Python's datetime/timedelta overload the native
   // operators (`datetime ± timedelta`, `datetime - datetime → timedelta`,
   // timedelta algebra/scaling) directly, so no dedicated arm is needed.

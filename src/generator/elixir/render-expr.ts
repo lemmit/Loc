@@ -751,10 +751,18 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
   first: (recv) => `List.first(${recv})`,
   firstOrNull: (recv) => `List.first(${recv})`,
   map: (recv, args) => `Enum.map(${recv}, ${args[0]})`,
-  sortBy: (recv, args, e) =>
-    e && isDescendingSort(e)
-      ? `Enum.sort_by(${recv}, ${args[0]}, :desc)`
-      : `Enum.sort_by(${recv}, ${args[0]})`,
+  // The sorter is TYPE-AWARE for the same reason min/max's is (see
+  // `reductionSorter`): `Enum.sort_by/2`'s default `&<=/2` is STRUCTURAL term
+  // comparison, so a `%DateTime{}` key sorts by map-field order (`:day` before
+  // `:month` before `:year` — day-of-month, not chronological) and a
+  // `%Decimal{}` key by `coef`/`exp` (2 before 1.5).  Passing the struct's
+  // MODULE as the sorter routes through its `compare/2` instead.
+  sortBy: (recv, args, e) => {
+    const sorter = sortSorter(e);
+    return sorter
+      ? `Enum.sort_by(${recv}, ${args[0]}, ${sorter})`
+      : `Enum.sort_by(${recv}, ${args[0]})`;
+  },
   distinct: (recv) => `Enum.uniq(${recv})`,
   take: (recv, args) => `Enum.take(${recv}, ${args[0]})`,
   skip: (recv, args) => `Enum.drop(${recv}, ${args[0]})`,
@@ -793,6 +801,24 @@ function sumBodyIsDecimalStruct(e: Extract<ExprIR, { kind: "method-call" }> | un
   const unwrapped = rt.kind === "optional" ? rt.inner : rt;
   const elem = unwrapped.kind === "array" ? unwrapped.element : undefined;
   return elem?.kind === "primitive" && isDecimalStruct(elem.name);
+}
+
+/** The `Enum.sort_by/3` sorter for a `sortBy` projection — `null` when the
+ *  default 2-arity form is already correct (int/long/string keys ascending).
+ *
+ *  `Decimal` and `DateTime` both export `compare/2` returning `:lt | :eq | :gt`,
+ *  which is exactly the "sorter module" contract `Enum.sort_by/3` accepts, so a
+ *  Decimal-/DateTime-keyed sort passes the module (or `{:desc, Module}`) rather
+ *  than falling back to structural term ordering.  Same type dispatch as
+ *  {@link reductionSorter}, which fixed min/max. */
+function sortSorter(e: Extract<ExprIR, { kind: "method-call" }> | undefined): string | null {
+  const desc = e ? isDescendingSort(e) : false;
+  const lam = e?.args[0];
+  const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
+  const name = bodyT?.kind === "primitive" ? bodyT.name : undefined;
+  const mod = isDecimalStruct(name) ? "Decimal" : name === "datetime" ? "DateTime" : null;
+  if (!mod) return desc ? ":desc" : null;
+  return desc ? `{:desc, ${mod}}` : mod;
 }
 
 function reductionSorter(

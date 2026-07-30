@@ -63,6 +63,17 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
   const usesDatetime = types.usesDatetime || exprImports.has("datetime");
   const idNames = [...types.idNames].sort();
 
+  const bodyParts = [
+    ...ctx.enums.flatMap(renderPyEnum),
+    ...ctx.valueObjects.flatMap(renderPyValueObject),
+  ];
+  // `UTC` is only reached when a body actually stamps `datetime.now(UTC)`; a
+  // plain `datetime` FIELD uses the type and never the constant, so importing
+  // it alongside `datetime` is a stale F401 that fails the emitted project's
+  // ruff gate.  Same string-stripped body probe the aggregate emitter uses.
+  const scan = bodyParts.join("\n").replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const usesUtc = /\bUTC\b/.test(scan);
+
   return lines(
     `"""Enums + value objects with constructor-enforced invariants.  Auto-generated."""`,
     "",
@@ -71,7 +82,8 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
     ctx.valueObjects.length > 0 ? "from dataclasses import dataclass" : null,
     usesDatetime || exprImports.has("timedelta")
       ? `from datetime import ${[
-          ...(usesDatetime ? ["UTC", "datetime"] : []),
+          ...(usesUtc ? ["UTC"] : []),
+          ...(usesDatetime ? ["datetime"] : []),
           ...(exprImports.has("timedelta") ? ["timedelta"] : []),
         ].join(", ")}`
       : null,
@@ -82,8 +94,7 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
     idNames.length > 0
       ? `from app.domain.ids import ${idNames.map((n) => `${n}Id`).join(", ")}`
       : null,
-    ...ctx.enums.flatMap(renderPyEnum),
-    ...ctx.valueObjects.flatMap(renderPyValueObject),
+    ...bodyParts,
     "",
   );
 }
