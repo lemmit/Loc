@@ -77,6 +77,21 @@ import type { SnapshotStore } from "./snapshot.js";
  *  scheme so existing fixtures stay byte-stable across the refactor. */
 export const BASE_TIMESTAMP = "20260101000000";
 
+/** Width of one module's slice of the version space (fleet-bug-hunt I1).  Every
+ *  backend that serves >1 module writes all their migrations into ONE
+ *  directory, and Ecto refuses a directory with a duplicated integer version
+ *  prefix, so each module needs a disjoint slice.  1e6 also happens to be one
+ *  DAY in the `YYYYMMDDHHMMSS` shape these versions imitate, so a strided
+ *  version still reads as a timestamp. */
+export const MODULE_VERSION_STRIDE = 1_000_000;
+
+/** Portion of a module's block reserved for its INITIAL migration.  One
+ *  initial `MigrationsIR` can expand into MANY files (the Elixir emitter
+ *  writes one migration per table, allocating `floor + i`, `floor + N*10 + …`,
+ *  `floor + N*100 + …`), so deltas start above the reservation rather than at
+ *  `floor + 1`, which would alias the second create-table. */
+export const INITIAL_SUBBLOCK_SPAN = 500_000;
+
 export function schemaFromModule(
   module: EnrichedSubdomainIR,
   /** Per-aggregate saving shape (D-DOCUMENT-AXIS).  Selects the table
@@ -1454,6 +1469,32 @@ export function buildMigrations(
   for (const tr of options.tableRenameIntents ?? []) pin(tr.migration, tr.context);
   for (const bi of options.backfillIntents ?? []) pin(bi.migration, bi.context);
   const ownerModules = sys.subdomains.filter((md) => md.migrationsOwner).map((md) => md.name);
+  // Per-module VERSION BLOCK (fleet-bug-hunt I1).  Resolved for every owner
+  // module up front, because allocating a block for a NEW module needs to see
+  // every block already taken.  Precedence:
+  //   1. the block recorded in the module's own snapshot — a module keeps its
+  //      block for life, so its deltas always land in the same slice;
+  //   2. for a snapshot written before this field existed, the LEGACY
+  //      position-derived index, so already-generated projects keep the block
+  //      their initial migrations were emitted with;
+  //   3. otherwise (a brand-new module) the next free block, above everything
+  //      — which is what makes a module added later safe to insert anywhere in
+  //      the source.
+  const versionBlocks = new Map<string, number>();
+  {
+    let maxBlock = -1;
+    ownerModules.forEach((name, i) => {
+      const snap = snapshots.read(name);
+      if (snap === null) return;
+      const block = snap.versionBlock ?? i;
+      versionBlocks.set(name, block);
+      maxBlock = Math.max(maxBlock, block);
+    });
+    for (const name of ownerModules) {
+      if (!versionBlocks.has(name)) versionBlocks.set(name, ++maxBlock);
+    }
+  }
+  const versionBlockOf = (name: string): number => versionBlocks.get(name) ?? 0;
   for (const m of sys.subdomains) {
     if (!m.migrationsOwner) continue;
     // Binding-aware saving-shape resolver: resolve each aggregate's
@@ -1584,10 +1625,23 @@ export function buildMigrations(
       ...newData.map((d): MigrationStep => ({ op: "sqlExec", sql: d.sql })),
     ];
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
+    // Version allocation is per-module BLOCK (fleet-bug-hunt I1).  A module's
+    // block is `BASE_TIMESTAMP + block * MODULE_VERSION_STRIDE`; its INITIAL
+    // migration sits at the block's floor, its deltas above
+    // `INITIAL_SUBBLOCK_SPAN`.  The reservation exists because one initial
+    // MigrationsIR can expand into MANY files — the Elixir emitter writes one
+    // migration per table, allocating `floor + i`, `floor + N*10 + …`,
+    // `floor + N*100 + …` — so a delta numbered `floor + 1` would alias the
+    // second create-table.  Keeping the arithmetic here (rather than re-homing
+    // versions inside the emitter) is what lets the snapshot's
+    // `migrationHistory` and the emitted FILENAMES agree, which the
+    // migration-baseline guard checks.
+    const blockFloor =
+      BigInt(BASE_TIMESTAMP) + BigInt(versionBlockOf(m.name) * MODULE_VERSION_STRIDE);
     const version =
       baseline === null
-        ? BASE_TIMESTAMP
-        : String(BigInt(baseline.lastVersion ?? BASE_TIMESTAMP) + 1n);
+        ? String(blockFloor)
+        : String(BigInt(baseline.lastVersion ?? String(blockFloor)) + 1n);
     const name = baseline === null ? "Initial" : describeMigration(steps);
     // Stamp the next snapshot with the version we're about to emit so
     // the FOLLOWING regen starts from `version + 1`.  Append to
@@ -1601,18 +1655,28 @@ export function buildMigrations(
     const appliedOut = [...(baseline?.appliedDataMigrations ?? []), ...newData.map((d) => d.key)];
     const appliedField: Partial<SchemaSnapshot> =
       appliedOut.length > 0 ? { appliedDataMigrations: appliedOut } : {};
+    // The module's block is stamped on EVERY snapshot write (including the
+    // no-op one) so a pre-`versionBlock` project records its legacy block on
+    // the first regen after this change, instead of re-deriving it forever.
+    const versionBlock = versionBlockOf(m.name);
+    // After an INITIAL, the next version starts above the reserved
+    // initial sub-block, not at `version + 1` — see the comment above.
+    const lastVersionAfter =
+      baseline === null ? String(blockFloor + BigInt(INITIAL_SUBBLOCK_SPAN)) : version;
     const stamped: SchemaSnapshot =
       steps.length === 0
         ? {
             ...next,
             lastVersion: baseline?.lastVersion ?? next.lastVersion,
             migrationHistory: prevHistory.length > 0 ? prevHistory : undefined,
+            versionBlock,
             ...appliedField,
           }
         : {
             ...next,
-            lastVersion: version,
+            lastVersion: lastVersionAfter,
             migrationHistory: [...prevHistory, { version, name }],
+            versionBlock,
             ...appliedField,
           };
     out.push({

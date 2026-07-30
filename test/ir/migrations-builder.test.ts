@@ -16,6 +16,7 @@ import {
   BASE_TIMESTAMP,
   buildMigrations,
   diffSchema,
+  INITIAL_SUBBLOCK_SPAN,
   MigrationAmbiguousRenameError,
   MigrationDestructiveError,
   MigrationShapeChangeError,
@@ -908,7 +909,13 @@ describe("buildMigrations", () => {
     expect(out[0]!.version).toBe(BASE_TIMESTAMP);
     expect(out[0]!.name).toBe("Initial");
     expect(out[0]!.steps.length).toBeGreaterThan(0);
-    expect(out[0]!.next.lastVersion).toBe(BASE_TIMESTAMP);
+    // After an INITIAL the counter jumps past the module's reserved
+    // initial sub-block, so the first DELTA can't alias one of the many files
+    // an initial expands into on Elixir (fleet-bug-hunt I1).
+    expect(out[0]!.next.lastVersion).toBe(
+      String(BigInt(BASE_TIMESTAMP) + BigInt(INITIAL_SUBBLOCK_SPAN)),
+    );
+    expect(out[0]!.next.versionBlock).toBe(0);
   });
 
   it("returns empty steps + carried-over lastVersion when snapshot already matches", async () => {

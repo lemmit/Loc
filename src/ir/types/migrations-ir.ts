@@ -160,6 +160,22 @@ export interface SchemaSnapshot {
    *  once.  Absent / empty when no raw steps have been emitted.  Optional
    *  ⇒ `schemaVersion` stays 1; old snapshots read fine. */
   appliedDataMigrations?: string[];
+  /** Per-module VERSION BLOCK index (fleet-bug-hunt I1).  Every backend that
+   *  serves >1 module writes all their migrations into ONE directory, and Ecto
+   *  refuses a directory with a duplicated integer version prefix — so each
+   *  module needs a disjoint slice of the version space.  The Elixir emitter
+   *  used to derive that slice from the module's POSITION in the migrations
+   *  array, which (a) was computed only for INITIAL migrations, so every
+   *  module's first delta collided at the same version and sorted before its
+   *  own create-table, and (b) would shift under a later module insertion.
+   *
+   *  Recording the block in the snapshot fixes both: a module keeps its block
+   *  for life, and a NEW module is allocated a block above every existing one.
+   *  Absent on snapshots written before this field existed — the builder then
+   *  falls back to the legacy position-derived index, so existing projects
+   *  keep the block they were generated with.  Optional ⇒ `schemaVersion`
+   *  stays 1. */
+  versionBlock?: number;
   tables: TableShape[];
 }
 

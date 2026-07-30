@@ -42,10 +42,7 @@ export function renderPgStep(step: MigrationStep): string {
         step.nullable ? "DROP NOT NULL" : "SET NOT NULL"
       };`;
     case "alterColumnType":
-      return (
-        `ALTER TABLE ${qualified(step.schema, step.table)} ALTER COLUMN ${ident(step.name)} ` +
-        `TYPE ${renderPgType(step.to)} USING ${ident(step.name)}::${renderPgType(step.to)};`
-      );
+      return `${renderAlterColumnTypeSql(step)};`;
     case "addIndex":
       // The index carries no schema of its own; the step's `schema` is the
       // owning table's schema (indexes live in the table's schema).
@@ -88,6 +85,24 @@ export function renderBackfillSql(step: {
  *  schema-qualified (a migration runner's `search_path` excludes context
  *  schemas); the target is bare — Postgres keeps a renamed index in its
  *  existing schema. */
+/** `ALTER TABLE … ALTER COLUMN … TYPE … USING …` — the semicolon-less form, so
+ *  the Ecto emitter can wrap it in `execute/1` and get a statement bit-identical
+ *  with the Postgres backends (fleet-bug-hunt I2).  The `USING <col>::<type>`
+ *  cast is the load-bearing part: without it Postgres refuses any change that
+ *  isn't implicitly castable ("column cannot be cast automatically"), which is
+ *  most of them — `string → int` included. */
+export function renderAlterColumnTypeSql(step: {
+  table: string;
+  name: string;
+  to: ColumnType;
+  schema?: string;
+}): string {
+  return (
+    `ALTER TABLE ${qualified(step.schema, step.table)} ALTER COLUMN ${ident(step.name)} ` +
+    `TYPE ${renderPgType(step.to)} USING ${ident(step.name)}::${renderPgType(step.to)}`
+  );
+}
+
 export function renderRenameIndexSql(step: { from: string; to: string; schema?: string }): string {
   return `ALTER INDEX ${qualified(step.schema, step.from)} RENAME TO ${ident(step.to)}`;
 }

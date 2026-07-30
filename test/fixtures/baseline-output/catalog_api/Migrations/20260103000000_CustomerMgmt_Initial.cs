@@ -15,8 +15,8 @@ namespace CatalogApi.Migrations
     // relative reference resolves against the wrong scope (CS0234);
     // global:: sidesteps the ambiguity for every namespace.
     [DbContext(typeof(global::CatalogApi.Infrastructure.Persistence.AppDbContext))]
-    [Migration("20260101000000_CustomerMgmt_Initial")]
-    public partial class M20260101000000_CustomerMgmt_Initial : Migration
+    [Migration("20260103000000_CustomerMgmt_Initial")]
+    public partial class M20260103000000_CustomerMgmt_Initial : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
