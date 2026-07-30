@@ -10,6 +10,7 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
+import { SHIPPED_COMBOS } from "../../../util/channels.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
 import { lowerFirst, snake } from "../../../util/naming.js";
 import {
@@ -26,6 +27,7 @@ import type {
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
@@ -40,7 +42,11 @@ import type {
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
-import { backendServesRealtime } from "../../util/channels.js";
+import {
+  backendServesRealtime,
+  durableEventTypes,
+  realtimeEventTypes,
+} from "../../util/channels.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -2214,12 +2220,23 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 // `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d).
 //
 // The node/hono MikroORM adapter is the SECOND node persistence backend
-// (alongside the default `drizzle`), now at FULL PARITY with drizzle (M-T6.9,
-// drained across 7 waves): every shape/inheritance/containment/association/
-// audit/provenance/managed-field/seed/ES intersection emits.  This check now
-// fires ONLY for a genuinely-impossible shape (an abstract inheritance base
-// that owns its own `contains` — the base has no repository and concretes do
-// not inherit its parts, so its tables would have no reader/writer).
+// (alongside the default `drizzle`), at full parity with drizzle on the
+// PERSISTENCE axis (M-T6.9, drained across 7 waves): every shape/inheritance/
+// containment/association/audit/provenance/managed-field/seed/ES intersection
+// emits.  Two distinct families of reject live here:
+//
+//  (a) SHAPE rejects (`reject`) — a genuinely-impossible mapping, drizzle
+//      included.  Only one survives M-T6.9: an abstract inheritance base that
+//      owns its own `contains` (the base has no repository and concretes do not
+//      inherit its parts, so its tables would have no reader/writer).
+//  (b) FEATURE rejects (`rejectFeature`, M-T6.23) — parity is persistence-only,
+//      and five NON-persistence features are gated `&& !usingMikro` in the Hono
+//      emitter: query-time projections, realtime SSE, the transactional outbox,
+//      timers (`scheduler.ts`) and broker channel drivers.  Each one used to
+//      generate a project with the feature SILENTLY absent; each is now an
+//      honest error.  Closing any of them means deleting its clause here — the
+//      gate is the interim, the emitter is the principled fix
+//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1).
 //
 // Persist-time audit stamping IS supported (node-persist-time-auditing): the
 // MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
@@ -2249,9 +2266,88 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         code: "loom.mikroorm-unsupported",
       });
     };
+    // The FEATURE-gap twin of `reject`.  The clauses below do not reject an
+    // unmappable SHAPE — they reject a feature whose Hono emitter is gated
+    // `&& !usingMikro`, so on this adapter it emits NOTHING.  Each of these was
+    // a SILENT drop (a valid model generated a project with the feature simply
+    // absent, no diagnostic) until this gate; see
+    // `docs/old/proposals/integrity-audit-2026-07-residue.md` R1, which named
+    // the query-time-projection case, and M-T6.23 for the rest.  The honest
+    // answer names the default adapter as the way out — every one of these
+    // features emits on drizzle.
+    const rejectFeature = (
+      subject: string,
+      emits: string,
+      severity: "error" | "warning" = "error",
+    ): void => {
+      diags.push({
+        severity,
+        message:
+          `Deployable '${dep.name}' selects 'persistence: mikroorm', but ${subject}, which the ` +
+          `MikroORM adapter does not emit — the generated project would silently omit ${emits}. ` +
+          `Drop the 'persistence: mikroorm' clause to use the default (drizzle) adapter, which ` +
+          `emits it, or host the feature on a different deployable.`,
+        source: `${sys.name}/${dep.name}`,
+        code: "loom.mikroorm-unsupported",
+      });
+    };
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
+      // --- Feature gates (M-T6.23) -----------------------------------------
+      // (1) Query-time projections: `emit.ts` gates `http/query-projections.ts`
+      // on `!usingMikro`, so the read model's routes vanish entirely.  FOLDED
+      // projections are supported (read-model EntitySchema + `em.upsert` fold —
+      // see `projection-persistence-gate.test.ts`); only the query-time
+      // comprehension is missing.
+      for (const p of ctx.projections ?? []) {
+        if (isQueryTimeProjection(p)) {
+          rejectFeature(
+            `context '${ctxName}' declares the query-time projection '${p.name}'`,
+            `its '/projections/${snake(p.name)}' read routes`,
+          );
+        }
+      }
+      // (2) Realtime SSE: `http/realtime.ts` and the index.ts realtime tee are
+      // both `!usingMikro`-gated, so a `delivery: broadcast` channel loses the
+      // browser-observable wire.
+      //
+      // Severity is CONSUMER-DEPENDENT, because a broadcast channel does double
+      // duty: it is also the routing declaration that makes a projection fold or
+      // a saga subscribe to the event — and that half works fine here (the
+      // in-process dispatcher is emitted on this adapter).  So:
+      //   - a FRONTEND targeting this backend emits `src/api/realtime.ts`
+      //     unconditionally for a broadcast channel (the frontend gate keys on
+      //     the target's PLATFORM, not its persistence), so its EventSource
+      //     would poll a route that 404s → error, a real broken feature.
+      //   - with no such frontend the wire is unobserved: fold/saga routing is
+      //     intact and nothing notices the missing endpoint → warning, so the
+      //     omission is on the record without failing a working model.
+      if (realtimeEventTypes(ctx).size > 0) {
+        const consumed = sys.deployables.some((f) => f.targetName === dep.name);
+        rejectFeature(
+          `context '${ctxName}' carries a 'delivery: broadcast' channel`,
+          consumed
+            ? `the realtime SSE wire ('GET /realtime/events') that the frontend targeting it subscribes to`
+            : `the realtime SSE wire ('GET /realtime/events') — the fold/saga routing half of the channel is unaffected`,
+          consumed ? "error" : "warning",
+        );
+      }
+      // (3) Transactional outbox: the relay argument to `renderProjectIndexTs`
+      // is `!usingMikro`-gated and no `__loom_outbox` table is created, so a
+      // channel that asked for durability (`retention: log | work`) silently
+      // degrades to the at-most-once in-process path — the declared
+      // at-least-once contract is not honoured (dispatch-delivery-semantics.md).
+      // Conjoined with the local-reactor test exactly as the emitter does: with
+      // no subscriber there is nothing for a relay to drain, so the model is
+      // functionally identical on both adapters and must not be rejected.
+      const subs = (ctx as EnrichedBoundedContextIR).eventSubscriptions ?? [];
+      if (subs.length > 0 && durableEventTypes(ctx).size > 0) {
+        rejectFeature(
+          `context '${ctxName}' carries a durable channel ('retention: log | work') with a local reactor`,
+          `the transactional outbox + relay that make its delivery at-least-once`,
+        );
+      }
       // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
       // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
       // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
@@ -2361,6 +2457,46 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // `keepTransactionContext`.  Persist-time audit STAMPING (`auditable` /
         // `with audit` → `stampInsert` in `em.upsert`) stays supported too.
       }
+    }
+    // (4) Timers: `hasTimers` is `&& !usingMikro`, so `scheduler.ts` is never
+    // written — the cadence never fires and the timer's event is never emitted.
+    // Mirrors the emitter's ownership filter exactly (the subdomain's
+    // `migrationsOwner`), so a mikroorm deployable that merely HOSTS a timer's
+    // context without owning it is not blamed for another deployable's emission.
+    for (const ts of sys.timerSources ?? []) {
+      const owner = sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
+      if (owner?.migrationsOwner !== dep.name) continue;
+      rejectFeature(
+        `it owns the timerSource '${ts.name}' (firing '${ts.event}')`,
+        `'scheduler.ts' — the cadence would never fire`,
+      );
+    }
+    // (5) Broker-bound channels: `channelBindings` is computed as `[]` for a
+    // mikroorm deployable (`emit.ts`), so `http/channels.ts` — the driver,
+    // producer tee and consumer loop — is never emitted, while system compose
+    // still provisions the broker sidecar and injects its URL.  The result is a
+    // stack that boots with a live broker nothing publishes to or reads from.
+    // Re-derived here at the IR level rather than calling the generator's
+    // `brokerChannelBindings` (that would be a validate → generator backward
+    // edge); `SHIPPED_COMBOS` lives in `src/util/channels.ts` precisely so a
+    // validator can reason about broker wiring without importing downward.
+    const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
+    for (const csName of dep.channelSourceNames ?? []) {
+      const cs = sys.channelSources.find((c) => c.name === csName);
+      if (!cs) continue;
+      const type = storageType.get(cs.storageName);
+      if (type !== "redis" && type !== "rabbitmq" && type !== "kafka") continue;
+      const ch = sys.subdomains
+        .flatMap((s) => s.contexts)
+        .flatMap((c) => c.channels ?? [])
+        .find((c) => c.name === cs.channelName);
+      if (!ch) continue;
+      if (!SHIPPED_COMBOS[type].has(`${ch.delivery}/${ch.retention}`)) continue;
+      rejectFeature(
+        `it wires the channelSource '${cs.name}' to the ${type} broker '${cs.storageName}'`,
+        `'http/channels.ts' (the broker driver, producer tee and consumer loop) — ` +
+          `compose would still start the broker with nothing publishing to it`,
+      );
     }
   }
 }

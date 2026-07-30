@@ -84,8 +84,27 @@ function walk(dir, pred, out = []) {
 const MIKRO_SKIP = {
   // (Folded projections now emit on the mikroorm adapter too — the `<Proj>Row`
   // EntitySchema + `em.upsert` fold + `em.find`/`em.findOne` read routes land
-  // via `buildProjectionsFile(..., usingMikro)`, so the `projection` case runs
-  // here on real Postgres just like the drizzle tier.)
+  // via `buildProjectionsFile(..., usingMikro)`, so the `projection` case's FOLD
+  // is supported here; what skips it is the sibling broadcast channel below.)
+  //
+  // --- M-T6.23: features the adapter never emitted, now honest errors ---------
+  // Both of these are `loom.mikroorm-unsupported` ERRORS as of M-T6.23, so
+  // forcing the case onto mikroorm no longer generates — it fails validation.
+  // Before the gate landed each booted and PASSED here with the feature silently
+  // absent: the api-tier assertions are satisfied by the synchronous in-process
+  // dispatch that survives on this adapter, so a missing broker driver / outbox
+  // relay was invisible to the run.  That is what made them hollow cells rather
+  // than coverage.  Removing an entry is the re-arm once the emitter lands.
+  //
+  // The `projection` / `saga` / `eventsourced-workflow` cases are deliberately
+  // NOT here: their `delivery: broadcast` channel is only missing the SSE wire
+  // (a WARNING, since no frontend consumes it in these fixtures), while the
+  // fold/saga routing they actually assert rides the in-process dispatcher and
+  // works on this adapter.  They keep booting here.
+  "channels-broker":
+    "mikroorm emits no http/channels.ts (broker driver/producer tee/consumer loop) — M-T6.23",
+  outbox:
+    "mikroorm emits no transactional outbox + relay, so `retention: work` is at-most-once — M-T6.23",
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`

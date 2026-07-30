@@ -695,12 +695,26 @@ function applySuffixToRecv(
         leftType: { kind: "primitive", name: "int" },
         resultType: { kind: "primitive", name: "bool" },
       };
+      // Operand types must describe what the SUM and COUNT actually render as,
+      // not just the declared result — the typed backends box from the operands
+      // (fleet-bug-hunt A2).  `count` is always `int`; `sum` carries the λ body's
+      // type, so an INT-bodied λ makes this an int/int division that must widen:
+      //   - stamping both operands `int` (with a `decimal` result) makes
+      //     `isIntDivWidenedToDecimal` fire, so .NET emits `(decimal)(sum) / count`
+      //     and Java `BigDecimal.valueOf(sum).divide(…)` instead of truncating
+      //     integer division — an average must never truncate;
+      //   - leaving `rightType` unset (as this did) also broke the MONEY-bodied
+      //     case on Java: `sum.divide(count, MathContext)` has no `int` overload.
+      // TS/Python are fractional either way and stay byte-identical.
+      const bodyIsIntegral =
+        bodyT?.kind === "primitive" && (bodyT.name === "int" || bodyT.name === "long");
       const div: ExprIR = {
         kind: "binary",
         op: "/",
         left: sumCall,
         right: countCall(),
-        leftType: numPrim,
+        leftType: bodyIsIntegral ? { kind: "primitive", name: "int" } : numPrim,
+        rightType: { kind: "primitive", name: "int" },
         resultType: numPrim,
       };
       const ternary: ExprIR = {

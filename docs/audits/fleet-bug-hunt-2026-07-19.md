@@ -53,6 +53,46 @@ cosmetic/content defect.
 
 ---
 
+## Scorecard — re-verified against fresh `main`, 2026-07-30
+
+*Every one of the 26 items (25 unique + F1b) re-checked against `main` @ `7938c9b`, source-grounded: each `FIXED` row names the code that closes it, each `LIVE` row the code that still carries it. Prompted by the discovery that **no mission tracked this register** — now **[M-T9.24](../new-plan/T9-toolchain-health.md)**. Eleven items had closed in the eleven days since the hunt, **four of them silently** (no inline note here, no mention in the mission that fixed them): B5, D1, E1, E3. That is the reason this pass exists — a bug register nobody re-reads decays into a list you can't act on, because you can't tell which half is real.*
+
+| # | Bug | Severity | Status (2026-07-30) |
+|---|---|---|---|
+| A1 | `int / int` undefined semantics | wrong-value | **FIXED** — widened to `decimal` + `divTrunc` intrinsic (`type-system.ts:654`, `lower-expr.ts:2180`) |
+| A2 | `avg(λ)` truncates on .NET; Java won't compile | wrong-value / build-break | **FIXED 2026-07-30** (this pass) — the desugar now stamps the operand slots with what `sum`/`count` actually render (`int`/`int` for an int-bodied λ) while `resultType` keeps the declared widening, so `isIntDivWidenedToDecimal` fires: .NET `(decimal)(Sum(...)) / Count()` = 1.5, Java `BigDecimal.valueOf(sum).divide(...)`. The `rightType: int` stamp also fixed a case NEITHER A2 nor A4 named — a **money** `avg` on Java emitted `.divide(size, MathContext)`, no `int` overload. `gradle testClasses`: BUILD SUCCESSFUL |
+| A3 | Python `%` is floored modulo | wrong-value | **LIVE** — `pyBinOp` returns `%` verbatim (`python/render-expr.ts:652-656`) |
+| A4 | Java `money * int` / `money / int`, non-literal operand | build-break | **FIXED 2026-07-30** (this pass) — `boxIntegralForBigDecimal` wraps an integral operand in the money arm, plus the MIRROR case this entry missed (`money × scalar` is commutative, so `qty * this.total` put money on the right and fell through to `int * BigDecimal`). Proven with the real toolchain on one project: pre-fix `error: no suitable method found for divide(int,MathContext)` → BUILD FAILED; post-fix BUILD SUCCESSFUL |
+| B1 | TS `sortBy` over money sorts lexicographically | wrong-value | **FIXED** (noted inline) |
+| B2 | TS `money[].contains(x)` always false | wrong-value | **FIXED** — `.eq` (`typescript/render-expr.ts:461`) |
+| B3 | Elixir `sortBy` term-orders datetime/decimal | wrong-value | **LIVE** — `Enum.sort_by(recv, mapper)` with no sorter module (`elixir/render-expr.ts:754-755`) |
+| B4 | Python `.sum(λ)` over money has no `Decimal` start | build-break + wrong-value | **LIVE** — `sum((λ)(__x) for __x in recv)` (`python/render-expr.ts:502-503`) |
+| B5 | Python `to_wire` money via `str()` | wrong-value | **FIXED silently** — `wireValue` now emits `money_str(...)` (`python/repository-builder.ts:1485-1493`) |
+| C1 | No-paren `.first` / `.firstOrNull` | build-break | **FIXED** (noted inline) |
+| C2 | .NET `firstOrNull()` over value types returns `default(T)` | wrong-value | **LIVE** — `firstOrNull: (recv) => \`${recv}.FirstOrDefault()\`` (`dotnet/render-expr.ts:818`) |
+| D1 | `shape(document)` + optional single containment | build-break + runtime crash | **FIXED silently** — all three sites now guard on `c.optional` (`repository-document-builder.ts:334/374/402`) |
+| E1 | `json` entity fields import Jackson-2 `JsonNode` | build-break | **FIXED silently** — `tools.jackson.databind.JsonNode` (`java/render-expr.ts:1033`) |
+| E2 | Jackson-2 imports across 6 java emitters | build-break | **MOSTLY FIXED — 3 refs remain**: `emit/channels.ts:1543` and `:1597` (`com.fasterxml.jackson.databind.ObjectMapper`), `openapi-customizer.ts:707` (`com.fasterxml.jackson.core.JsonProcessingException`). 21 → 3 |
+| E3 | Java service finder `decimal`/`guid` param un-imported | build-break | **FIXED silently** — finder params now collect via `collectJavaTypeImports` (`emit/service.ts:215`) |
+| F1 | Scaffolded bare `money` cell renders a `Decimal` | build-break | **FIXED** (noted inline) |
+| F1b | Scaffolded money **form** RHF resolver input≠output | build-break | **LIVE** — packs still emit single-generic `useForm<Create{{Agg}}Request>` (`designs/mantine/v9/form-of-decls.hbs:4` + the op/workflow siblings) |
+| F2 | `match` in expression position emits `undefined` | wrong-value | **LIVE** — `emitExpr` (`_walker/walker-core.ts:1252+`) still has no `case "match"`; the arm at `:930` is `walk`, the child-position path the audit already excluded |
+| F3 | Double-quote in user strings breaks JSX attributes | build-break | **FIXED** (noted inline) |
+| F4/F5 | Vue/Svelte auth gates render literal "null" | UX | **FIXED** (noted inline) |
+| G1 | `this`-referencing field default spliced into the wire schema | boot-break | **LIVE** — `wireCreateDefault` returns `f.default` unfiltered (`wire-projection.ts:169-189`); no constant-expression validator exists |
+| G2 | Auto-versioning collides with a user `version` field | boot-break | **LIVE** — no collision diagnostic anywhere in `src/ir/validate/checks/` |
+| H1 | Scaffold-local `plural()` diverges from `util/naming` | wrong-value | **FIXED** (not noted inline) — `_body-builders.ts:29` imports `{ plural, snake }` from `util/naming.js` |
+| I1 | Phoenix multi-module delta versions collide | boot-break | **LIVE** — the stride is applied only to `emitInitial` filenames (`elixir/migrations-emit.ts:137`); the snapshot stamps bare `BASE_TIMESTAMP` (`migrations-builder.ts:1589`) and `emitDelta` uses `m.version` raw (`:541`) |
+| I2 | Ecto `alterColumnType` omits the `USING` cast | migration-apply failure | **LIVE** — `modify :x, <type>, from: <old>` with no USING/fragment (`elixir/migrations-emit.ts:598-603`) |
+
+**Tally at re-verification: 12 fixed, 13 live** (E2 counted live at 3 of its 21 refs). **A2 and A4 were then fixed in the same pass** (both closed through the `rightType` / `isIntDivWidenedToDecimal` seam A1 had already built and neither was wired to), leaving **11 live**. Every live row keeps its original file:line + repro below — those were re-checked, not assumed. Drain order and grouping: **[M-T9.24](../new-plan/T9-toolchain-health.md)**.
+
+**A third lesson, from fixing A2/A4 immediately after:** A1's fix built the exact machinery both needed (`rightType` on the binary IR, `isIntDivWidenedToDecimal`) and stopped at its own repro. When a fix lands a *seam*, the next step is to sweep the siblings that could ride it — otherwise the seam sits unused next to the bugs it was built for, and A2's own note ("the real fix belongs in the `avg` desugar itself") ages for eleven days.
+
+**Two lessons for the next sweep**, both worth more than any single row here: (1) *a register with no mission is a register that rots* — 4 of 12 fixes left no trace either here or in the mission that made them, so the only way to know the state was to re-derive all 26; (2) *the inline-update convention worked where it was used* — the 7 items with `> Update (2026-07-19…)` notes were trustworthy on re-read, and cost their author one paragraph each.
+
+---
+
 ## A. Numeric semantics — cross-backend divergence
 
 ### A1. `int / int` has no defined semantics — five backends, two answers *(wrong-value; + build-break on Python)*
