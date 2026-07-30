@@ -562,6 +562,33 @@ function expandCapability(
           isAggregate,
         );
   for (const agg of targets) {
+    // The `version` collision (G2) has to be checked HERE too, not only in
+    // `applyDefaultVersioning`: that function returns early when the aggregate
+    // already carries the `versioned` tag, so an EXPLICIT `aggregate X with
+    // versioned { version: string }` — or a context-level `with versioned` over
+    // an aggregate that declares one — never reached its guard and still
+    // produced `"version" TEXT NOT NULL DEFAULT 1`, the DDL Postgres rejects at
+    // CREATE TABLE.  Same rule, same message: an `int` is structurally the
+    // field the capability would have spliced (skip the splice, keep the tag);
+    // anything else is an error naming both ways out.
+    if (cap.name === "versioned") {
+      const declared = existingVersionMember(agg);
+      if (declared) {
+        if (!isIntProperty(declared)) {
+          recordDiagnostic(doc, {
+            severity: "error",
+            message:
+              `field 'version' on aggregate '${agg.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
+              `Rename this field (e.g. '${lowerFirstSafe(agg.name)}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+            node: declared,
+            property: "name",
+          });
+          continue;
+        }
+        tagCapability(agg, "versioned");
+        continue;
+      }
+    }
     const cloned: unknown[] = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
     for (const m of cloned) {
       resolveSelfTypes(m as AstNode, agg.name, buildRef);
