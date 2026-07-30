@@ -606,6 +606,18 @@ function renderStoreWiring(
  *  `handleSubmit(...)` call directly; this helper produces only
  *  the shell-level surroundings: imports + in-function hook
  *  declarations + the `usesNavigate` signal. */
+
+/** The `useForm` type arguments for a form.  Single generic by default; the
+ *  RHF THREE-generic form (`<FormState, unknown, Request>`) when the schema
+ *  carries a transform — see `FormStateBase.formStateType`.  `zodResolver`
+ *  types the resolver's INPUT as `z.input`, so a money-bearing form under the
+ *  single generic asks for `Resolver<Request, …>` and gets
+ *  `Resolver<FormState, …>`: TS2322 in the emitted page, plus a TS2345 where
+ *  `handleSubmit`'s callback value flows into the mutation. */
+function formGenericsFor(requestType: string, formStateType: string | undefined): string {
+  return formStateType ? `${formStateType}, unknown, ${requestType}` : requestType;
+}
+
 type FormWiring = {
   /** Page-scope const declarations (the `useForm` destructure, the
    *  mutation hook, idTarget `useAll<X>` calls) emitted above the
@@ -637,6 +649,7 @@ function renderFormOfWiring(
   }
   const { agg, idTargets, useController, defaultValuesTs, fieldArrays, onSubmitJs } = state;
   const tplCtx = {
+    formGenerics: formGenericsFor(`Create${agg.name}Request`, state.formStateType),
     aggregateName: agg.name,
     aggregateNameCamel: lowerFirst(agg.name),
     pluralAggregateName: plural(agg.name),
@@ -682,6 +695,7 @@ function renderFormOpWiring(
     state;
   const opPascal = upperFirst(op.name);
   const tplCtx = {
+    formGenerics: formGenericsFor(`${opPascal}${agg.name}Request`, state.formStateType),
     // Present iff a this-relative default seeded from the loaded record: the
     // component takes a `record: <recordType>` prop and its `defaultValues`
     // reads it (`record.<field>`).  Absent → no record prop (default path).
@@ -751,6 +765,7 @@ function renderFormRunsWiring(
   const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs, fieldArrays } = state;
   const wfPascal = upperFirst(workflow.name);
   const tplCtx = {
+    formGenerics: formGenericsFor(`${wfPascal}Request`, state.formStateType),
     workflowName: workflow.name,
     workflowPascal: wfPascal,
     humanWorkflow: humanize(workflow.name),

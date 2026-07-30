@@ -9,6 +9,7 @@
 import { createInputFields } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { typeReachesMoney } from "../../_frontend/api-module.js";
 import {
   idTargetHookVar,
   idTargetsInFields,
@@ -48,6 +49,24 @@ import { emitActionThen } from "./controls.js";
 /** `CreateForm(of: <Agg>)` — the create-form primitive.  Delegates to
  *  `emitFormOfAggregate`, which builds the per-field view models and
  *  pushes a `FormOfState` on the shell sink. */
+
+/** The `<Action>FormState` alias name when the form's schema carries a real
+ *  TRANSFORM — i.e. some field reaches `money`, the one wire type whose
+ *  `z.input` (a decimal string) differs from its `z.output` (a `Decimal`).
+ *  `undefined` otherwise.
+ *
+ *  Gated identically to `dualTypeAliases` in the api-module emitter, because
+ *  the alias only EXISTS where that gate fires — importing it unconditionally
+ *  would break every non-money form.  Returning `undefined` keeps those forms
+ *  on the single-generic `useForm`, byte-identical to before. */
+function formStateTypeFor(
+  action: string,
+  fields: readonly { type: TypeIR }[],
+  bc: BoundedContextIR,
+): string | undefined {
+  return fields.some((f) => typeReachesMoney(f.type, bc)) ? `${action}FormState` : undefined;
+}
+
 export function emitCreateForm(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -218,11 +237,14 @@ function emitFormOfOperationByName(
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
+  const opFormStateType = formStateTypeFor(`${upperFirst(op.name)}${agg.name}`, fields, bc);
+  if (opFormStateType) addImport(ctx, `../api/${lowerFirst(agg.name)}`, opFormStateType);
   ctx.formOfs.push({
     kind: "operation",
     agg,
     op,
     bc,
+    formStateType: opFormStateType,
     fields,
     idExpr: `id ?? ""`,
     idTargets: prepared.idTargets,
@@ -495,10 +517,15 @@ function emitFormOfAggregate(
   }
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
+  const createFormStateType = formStateTypeFor(`Create${agg.name}`, fields, bc);
+  if (createFormStateType) {
+    addImport(ctx, `../api/${lowerFirst(agg.name)}`, createFormStateType);
+  }
   ctx.formOfs.push({
     kind: "aggregate",
     agg,
     bc,
+    formStateType: createFormStateType,
     fields,
     idTargets: prepared.idTargets,
     useController: prepared.useController,
@@ -563,10 +590,13 @@ function emitFormRuns(
   );
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "run");
+  const wfFormStateType = formStateTypeFor(wfPascalForImport, fields, bc);
+  if (wfFormStateType) addImport(ctx, "../api/workflows", wfFormStateType);
   ctx.formOfs.push({
     kind: "workflow",
     workflow,
     bc,
+    formStateType: wfFormStateType,
     fields,
     idTargets: prepared.idTargets,
     useController: prepared.useController,
@@ -676,11 +706,14 @@ function emitFormOfOperation(
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
+  const opFormStateType = formStateTypeFor(`${upperFirst(op.name)}${agg.name}`, fields, bc);
+  if (opFormStateType) addImport(ctx, `../api/${lowerFirst(agg.name)}`, opFormStateType);
   ctx.formOfs.push({
     kind: "operation",
     agg,
     op,
     bc,
+    formStateType: opFormStateType,
     fields,
     idExpr,
     idTargets: prepared.idTargets,

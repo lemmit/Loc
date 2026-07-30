@@ -1,7 +1,7 @@
 function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>{{#if recordVar}}; record: {{recordType}}{{/if}} }) {
   const [open, setOpen] = useState(false);
 {{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
-{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}{{aggregateName}}Request>({
+{{/each}}  const {{{destructured}}} = useForm<{{{formGenerics}}}>({
     resolver: zodResolver({{opPascal}}{{aggregateName}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });{{#each fieldArrays}}

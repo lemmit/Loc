@@ -5,7 +5,7 @@ import {
   type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
-import { zodForResponse } from "./api-module.js";
+import { typeReachesMoney, zodForResponse } from "./api-module.js";
 
 // ---------------------------------------------------------------------------
 // Workflow API module + Playwright page object emission.
@@ -73,7 +73,7 @@ export function buildWorkflowsApiModule(
   }
   lines.push("");
 
-  for (const { wf } of workflows) {
+  for (const { wf, ctx } of workflows) {
     lines.push(`export const ${upperFirst(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
@@ -82,6 +82,18 @@ export function buildWorkflowsApiModule(
     lines.push(
       `export type ${upperFirst(wf.name)}Request = z.infer<typeof ${upperFirst(wf.name)}Request>;`,
     );
+    // Dual FormState/Payload aliases — same gate and same reason as the
+    // aggregate create/operation schemas in `api-module.ts`: money is the one
+    // wire type whose schema TRANSFORMS on parse, so only a money-bearing
+    // request has `z.input ≠ z.output`.  A `WorkflowForm` over one needs the
+    // `FormState` name for RHF's three-generic `useForm`.
+    if (wf.params.some((p) => typeReachesMoney(p.type, ctx))) {
+      const name = upperFirst(wf.name);
+      lines.push(`/** Pre-parse form shape (z.input) — money fields are decimal strings. */`);
+      lines.push(`export type ${name}FormState = z.input<typeof ${name}Request>;`);
+      lines.push(`/** Post-parse payload shape (z.output) — money fields are Decimal. */`);
+      lines.push(`export type ${name}Payload = z.output<typeof ${name}Request>;`);
+    }
     lines.push("");
     lines.push(`export function use${upperFirst(wf.name)}Workflow() {`);
     lines.push(`  return useMutation({`);
