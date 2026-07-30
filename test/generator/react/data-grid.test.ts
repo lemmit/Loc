@@ -32,13 +32,13 @@ const GRID = `QueryView { of: Sales.Customer.all, data: rows => DataGrid(
   rows: rows, multiSort: true, columnVisibility: true, pageSize: 25,
   testid: "customers-grid") }`;
 
-async function genPage(body: string): Promise<string> {
+async function genPage(body: string, state = ""): Promise<string> {
   const files = await generateSystemFiles(`
     system S {
       ${DOMAIN}
       ui WebApp {
         api Sales: SalesApi
-        page X { route: "/x"  body: ${body} }
+        page X { route: "/x"  ${state}  body: ${body} }
       }
       deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
@@ -125,6 +125,92 @@ describe("DataGrid — feature gating", () => {
     );
     expect(page).toContain("enableSorting: false");
     expect(page).toContain("enableColumnFilter: false");
+  });
+});
+
+// -------------------------------------------------------------------------
+// Row selection — `selection: <string[] state field>`.
+//
+// Selection is the ONE piece of grid view-state the page can read (a sibling
+// "Delete selected (3)" has a real need for it; sort/filter/visibility are
+// opaque).  The wiring crosses the module boundary: TanStack's selection MAP
+// lives in the hoisted child, the id LIST lives in the page's `useState`, and
+// a `useEffect` bridges them via the setter threaded in as a prop.
+// -------------------------------------------------------------------------
+
+const SEL_STATE = "state { picked: string[] }";
+
+const SEL_GRID = `Stack(
+  Text("count: {picked.length}"),
+  QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+    Column("Name", o => o.name, sortable: true),
+    rows: rows, selection: picked, testid: "sel-grid") })`;
+
+describe("DataGrid — row selection", () => {
+  it("threads the page's state setter in as a prop", async () => {
+    const page = await genPage(SEL_GRID, SEL_STATE);
+    expect(page).toContain(
+      "function SelGrid<T extends object>({ rows, onSelectionChange }: " +
+        "{ rows: readonly T[]; onSelectionChange: (ids: string[]) => void }) {",
+    );
+    expect(page).toContain(
+      "<SelGrid rows={customerAll.data.items} onSelectionChange={setPicked} />",
+    );
+    // The page still owns the id list.
+    expect(page).toContain("const [picked, setPicked] = useState<string[]>([]);");
+  });
+
+  it("owns TanStack's selection map in the child and enables row selection", async () => {
+    const page = await genPage(SEL_GRID, SEL_STATE);
+    expect(page).toContain(
+      "const [rowSelection, setRowSelection] = useState<RowSelectionState>({});",
+    );
+    expect(page).toContain("onRowSelectionChange: setRowSelection,");
+    expect(page).toContain("enableRowSelection: true,");
+    expect(page).toContain("type RowSelectionState");
+  });
+
+  it("emits a leading checkbox column, walker-rendered so no pack template is needed", async () => {
+    const page = await genPage(SEL_GRID, SEL_STATE);
+    expect(page).toContain(`id: "loom-select",`);
+    // Plain <input>, not a pack component — this is the one cell whose
+    // BEHAVIOUR (not appearance) is load-bearing, and keeping it out of the
+    // pack means selection ports to every pack and framework unchanged.
+    expect(page).toContain('type="checkbox"');
+    expect(page).toContain("t.getToggleAllPageRowsSelectedHandler()");
+    expect(page).toContain("row.getToggleSelectedHandler()");
+    // The select column is never sortable or filterable.
+    expect(page).toContain("enableSorting: false");
+    // …and it leads the column list.
+    expect(page.indexOf(`id: "loom-select"`)).toBeLessThan(page.indexOf(`id: "name"`));
+  });
+
+  it("syncs selected row ids back to the page on every selection change", async () => {
+    const page = await genPage(SEL_GRID, SEL_STATE);
+    expect(page).toContain("onSelectionChange(");
+    expect(page).toContain(
+      ".rows.map((r) => String((r.original as { id?: unknown }).id ?? r.index)),",
+    );
+    // Keyed on the selection map only, so it fires once per selection change.
+    expect(page).toContain("}, [rowSelection]);");
+  });
+
+  it("emits ONE react import line when the page has state and the grid has hooks", async () => {
+    // The shell builds its own react import; the hoisted child registers
+    // useMemo/useState/useEffect through `addImport`.  Two lines would be a
+    // duplicate-identifier error.
+    const page = await genPage(SEL_GRID, SEL_STATE);
+    const reactImports = page.split("\n").filter((l) => l.endsWith(`from "react";`));
+    // The shell's own order comes first (it is load-bearing for existing
+    // output bytes); body specifiers append.
+    expect(reactImports).toEqual(['import { useState, useEffect, useMemo } from "react";']);
+  });
+
+  it("emits no selection wiring when `selection:` is absent", async () => {
+    const page = await genPage(GRID);
+    expect(page).not.toContain("RowSelectionState");
+    expect(page).not.toContain("loom-select");
+    expect(page).not.toContain("onSelectionChange");
   });
 });
 

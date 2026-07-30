@@ -9,6 +9,23 @@ import type { ApiHookUse, ImportMap } from "../body-walker.js";
 /** Code-unit (default `Array.prototype.sort`) string ordering. */
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Remove the `"react"` entry from a walked-body import map, returning its
+ *  specifiers.
+ *
+ *  The shell builds its OWN react import line (`Fragment`/`useState`/
+ *  `useEffect`/`useMemo`, driven by what the shell itself emits), while
+ *  primitives that need a react hook — `DataGrid`'s hoisted child calls
+ *  `useMemo`/`useState`/`useEffect` — register theirs through `addImport`.
+ *  Rendering both produces two `from "react"` lines and a duplicate-identifier
+ *  error the moment they overlap (a page with `state {}` *and* a DataGrid).
+ *  So the shell drains this one and merges it into its own line. */
+export function takeReactSpecifiers(imports: ImportMap): string[] {
+  const names = imports.get("react");
+  if (!names) return [];
+  imports.delete("react");
+  return [...names];
+}
+
 /** Render `import { … } from "<path>";` lines from a path→names map.
  *  Names are sorted within each line; sources are sorted by
  *  `comparePaths`.  When `srcImportPrefix` is non-default, paths

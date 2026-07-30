@@ -23,11 +23,13 @@ import type {
   EnrichedLoomModel,
   ExprIR,
   PageIR,
+  StateFieldIR,
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import { typeLabel } from "../../util/type-label.js";
+import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // View-effect builtins (`navigate(…)`, `toast(…)`) lower to bare
@@ -103,6 +105,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
+        checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         checkAsyncEffectArgs(
           pageWhere(page),
           page.actions,
@@ -126,6 +129,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         };
         checkBody(comp.body, ctx, diags);
         checkActionBodies(comp.actions, ctx, diags);
+        checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkAsyncEffectArgs(
           `component '${comp.name}'`,
           comp.actions,
@@ -368,6 +372,68 @@ interface BodyCheckCtx {
 
 function pageWhere(p: PageIR): string {
   return `page '${p.name}'`;
+}
+
+// -------------------------------------------------------------------------
+// `loom.datagrid-selection-not-state` / `loom.datagrid-selection-not-array` —
+// `DataGrid(selection: <field>)` is the one piece of grid view-state the page
+// can read, and the walker wires it by NAME: it emits
+// `onSelectionChange={set<Field>}` against the page shell's
+// `useState<...>` for that field.  The walker has no types, so it can only
+// check that the name is a declared state field — and silently drops the
+// selection column when it isn't.  Both halves are gated here instead, where
+// the declared `TypeIR` is resolved and the diagnostic can name the field:
+//
+//   - not a state field  → the checkbox column vanishes with no explanation
+//     (the ref might be a page param, a `let`, or a typo);
+//   - not `String[]`     → the emitted `setX(ids: string[])` is assigned a
+//     `string[]` against e.g. `useState<string>`, surfacing as a tsc error in
+//     generated code, far from its cause in the `.ddd`.
+// -------------------------------------------------------------------------
+
+function checkDataGridSelection(
+  body: ExprIR | undefined,
+  state: readonly StateFieldIR[],
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  const byName = new Map(state.map((f) => [f.name, f.type]));
+  walkExprDeep(body, (e) => {
+    if (e.kind !== "call" || e.name !== "DataGrid") return;
+    const arg = namedArg(e, "selection");
+    if (!arg) return;
+    if (arg.kind !== "ref" || !byName.has(arg.name)) {
+      const label = arg.kind === "ref" ? `'${arg.name}'` : "that expression";
+      diags.push({
+        severity: "error",
+        code: "loom.datagrid-selection-not-state",
+        message:
+          `${where}: DataGrid 'selection:' must name a \`String[]\` field declared in this ` +
+          `${where.startsWith("component") ? "component" : "page"}'s \`state { }\` block, but ${label} ` +
+          `isn't one. Declare \`state { selectedIds: String[] }\` and bind \`selection: selectedIds\`.`,
+        source: where,
+      });
+      return;
+    }
+    const t = byName.get(arg.name)!;
+    if (!isStringArray(t)) {
+      diags.push({
+        severity: "error",
+        code: "loom.datagrid-selection-not-array",
+        message:
+          `${where}: DataGrid 'selection: ${arg.name}' needs a \`String[]\` state field — ` +
+          `the grid reports the selected rows' ids — but '${arg.name}' is declared ` +
+          `\`${typeLabel(t)}\`. Change it to \`${arg.name}: String[]\`.`,
+        source: where,
+      });
+    }
+  });
+}
+
+/** True for exactly `String[]` — the selected-row-id list shape the walker
+ *  emits (`onSelectionChange: (ids: string[]) => void`). */
+function isStringArray(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "primitive" && t.element.name === "string";
 }
 
 /** Fix 4 — run the same IR body checks over every named action's body, with
