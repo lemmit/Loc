@@ -19,19 +19,25 @@ import {
   typeToString,
 } from "../type-system.js";
 
-/** ICU format kinds slice 1 supports (i18n, M-T1.11).  `currency`/`percent`
- *  are NUMBER sub-skeletons (`, number, ::currency/USD`), so the ICU *type* is
- *  always one of these three; `plural`/`select` (brace-bodied) are deferred to
- *  slice 2. */
-type FormatKind = "number" | "date" | "time" | "unsupported";
+/** ICU format kinds Loom supports (i18n, M-T1.11).  `currency`/`percent` are
+ *  NUMBER sub-skeletons (`, number, ::currency/USD`), so the number ICU *type*
+ *  covers all three; `plural`/`selectordinal` are the count-driven branch forms
+ *  (slice 2) and `select` the string-driven one — all rendered natively by the
+ *  `intl-messageformat` runtime the shim ships. */
+type FormatKind = "number" | "date" | "time" | "plural" | "select" | "unsupported";
 
 /** The ICU top-level type of a raw format suffix (`", number, ::currency/USD"`
- *  → `"number"`), or `undefined` when the hole carries no format. */
+ *  → `"number"`, `", plural, one {…} other {…}"` → `"plural"`), or `undefined`
+ *  when the hole carries no format. */
 function formatKind(format: string | undefined): FormatKind | undefined {
   if (format === undefined) return undefined;
   // Strip the leading comma, take the first token (the ICU argType).
   const argType = format.replace(/^,/, "").trim().split(/[\s,]/)[0] ?? "";
   if (argType === "number" || argType === "date" || argType === "time") return argType;
+  // `plural` and `selectordinal` are both count-driven (numeric arg); `select`
+  // is string-driven.  Normalise `selectordinal` onto `plural`'s numeric rule.
+  if (argType === "plural" || argType === "selectordinal") return "plural";
+  if (argType === "select") return "select";
   return "unsupported";
 }
 
@@ -59,11 +65,22 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
         if (kind === "unsupported") {
           accept(
             "error",
-            `Unsupported template format '${hole.format?.trim()}'. This release supports ` +
-              `number formats (\`, number\`, \`, number, ::currency/USD\`, \`, number, ::percent\`) ` +
-              `and date/time formats (\`, date, ::yMMMd\`, \`, time, short\`). ` +
-              `Plural and select are not yet available.`,
+            `Unsupported template format '${hole.format?.trim()}'. Supported ICU formats are ` +
+              `\`number\` (incl. \`::currency/USD\`, \`::percent\`), \`date\`/\`time\`, ` +
+              `\`plural\`/\`selectordinal\`, and \`select\`.`,
             { node, property: "holes", index: i, code: "loom.interp-format-unsupported" },
+          );
+          continue;
+        }
+        if (kind === "select") {
+          // `select` matches the value (coerced to a string by ICU) against its
+          // branch keys — any stringifiable hole works (string, enum, id, …).
+          if (t.kind === "primitive" && t.name === "string") continue;
+          if (isImplicitlyStringifiable(t)) continue;
+          accept(
+            "error",
+            `A 'select' format expects a string or enum value, but this hole is '${typeToString(t)}'.`,
+            { node, property: "holes", index: i, code: "loom.interp-hole-type" },
           );
           continue;
         }
@@ -78,11 +95,12 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
           );
           continue;
         }
-        // kind === "number" — a numeric value the locale formatter can render.
+        // kind === "number" | "plural" — both operate on a numeric value (the
+        // locale formatter renders it; plural selects a branch by its count).
         if (isNumericType(t)) continue;
         accept(
           "error",
-          `A 'number' format expects a numeric value (int, decimal, or money), but this hole ` +
+          `A '${kind}' format expects a numeric value (int, decimal, or money), but this hole ` +
             `is '${typeToString(t)}'.`,
           { node, property: "holes", index: i, code: "loom.interp-hole-type" },
         );

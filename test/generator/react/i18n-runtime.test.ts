@@ -141,4 +141,32 @@ describe("React i18n runtime", () => {
     const pkg = [...files].find(([p]) => p.endsWith("web/package.json"))![1];
     expect(pkg).toContain("intl-messageformat");
   });
+
+  it("emits a plural + select hole as a nested-brace ICU message (slice 2)", async () => {
+    // The brace-balanced lexer captures the whole plural/select body; the raw
+    // ICU string rides verbatim into the catalog + the t() default, and the
+    // intl-messageformat runtime renders the count-/value-selected branch.
+    const withParam = SYSTEM(
+      "Stack { " +
+        "Text { `You have {count, plural, one {# order} other {# orders}}` }, " +
+        "Text { `Status: {status, select, shipped {Shipped} other {Pending}}` } }",
+    ).replace('page Home { route: "/"', 'page Home(count: int, status: string) { route: "/:count"');
+    const files = await generateSystemFiles(withParam);
+    const home = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
+    expect(home).toContain(
+      't("page.Home.text.io7xmj", "You have {count, plural, one {# order} other {# orders}}", { count: count })',
+    );
+    expect(home).toContain(
+      't("page.Home.text.0lqlui", "Status: {status, select, shipped {Shipped} other {Pending}}", { status: status })',
+    );
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain(
+      "You have {count, plural, one {# order} other {# orders}}",
+    );
+    expect(Object.values(catalog)).toContain(
+      "Status: {status, select, shipped {Shipped} other {Pending}}",
+    );
+  });
 });

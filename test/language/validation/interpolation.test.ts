@@ -76,10 +76,11 @@ describe("validation — A6 string interpolation", () => {
   });
 });
 
-// ICU `,format` suffix (i18n, M-T1.11 slice 1) — a hole may carry `, <format>`
-// after its expression.  NUMBER/CURRENCY/PERCENT require a numeric value;
-// DATE/TIME lift the datetime rejection above (a datetime hole is exactly what
-// they format); PLURAL/SELECT/unknown are deferred → loom.interp-format-unsupported.
+// ICU `,format` suffix (i18n, M-T1.11) — a hole may carry `, <format>` after
+// its expression.  NUMBER/CURRENCY/PERCENT + PLURAL/SELECTORDINAL require a
+// numeric value; DATE/TIME lift the datetime rejection above (a datetime hole is
+// exactly what they format); SELECT wants a string/enum; a genuinely unknown ICU
+// argType → loom.interp-format-unsupported.
 describe("validation — A6 interpolation format suffix", () => {
   it("accepts a `, number` suffix on a numeric hole (int, money)", async () => {
     const { errors } = await parseString(
@@ -112,16 +113,33 @@ describe("validation — A6 interpolation format suffix", () => {
     expect(diagnostics.some((d) => d.code === "loom.interp-hole-type")).toBe(true);
   });
 
-  it("defers plural to slice 2 — loom.interp-format-unsupported", async () => {
-    const { diagnostics } = await parseString(
-      wrap(`derived x: string = \`p {quantity, plural, one {# item} other {# items}}\``),
+  it("accepts a `, plural` / `, selectordinal` suffix on a numeric hole (slice 2)", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        derived a: string = \`p {quantity, plural, one {# item} other {# items}}\`
+        derived b: string = \`o {quantity, selectordinal, one {#st} other {#th}}\`
+      `),
     );
-    expect(diagnostics.some((d) => d.code === "loom.interp-format-unsupported")).toBe(true);
+    expect(errors).toEqual([]);
   });
 
-  it("defers select to slice 2 — loom.interp-format-unsupported", async () => {
+  it("accepts a `, select` suffix on a string / enum hole (slice 2)", async () => {
+    const { errors } = await parseString(
+      wrap(`derived x: string = \`s {customerName, select, vip {VIP} other {someone}}\``),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects a `, plural` suffix on a non-numeric hole — loom.interp-hole-type", async () => {
     const { diagnostics } = await parseString(
-      wrap(`derived x: string = \`s {customerName, select, other {someone}}\``),
+      wrap(`derived x: string = \`p {customerName, plural, other {#}}\``),
+    );
+    expect(diagnostics.some((d) => d.code === "loom.interp-hole-type")).toBe(true);
+  });
+
+  it("rejects a genuinely unknown ICU format — loom.interp-format-unsupported", async () => {
+    const { diagnostics } = await parseString(
+      wrap(`derived x: string = \`x {quantity, spellout}\``),
     );
     expect(diagnostics.some((d) => d.code === "loom.interp-format-unsupported")).toBe(true);
   });
