@@ -19,9 +19,9 @@ import type { LayoutCtx } from "../../layout/ctx";
 import type { Model } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { ifParses, spliceNodeIfParses, lineDiff } from "../edit-engine";
-import { RefusalLine, useRefusal } from "../refusal";
-import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
+import { spliceNodeIfParses, lineDiff } from "../edit-engine";
+import { RefusalLine } from "../refusal";
+import { usePaneHarness } from "../pane-harness";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import type { WireField } from "../../../../src/ir/types/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
@@ -346,33 +346,38 @@ function InspectorPanel({ compact, opened, onClose, children }: { compact: boole
 }
 
 function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
-  const [rev, setRev] = useState(0);
-  // What the pane actually reads is the SOURCE TEXT, not the ctx object.
-  // Deriving on `ctx` re-ran a main-thread Langium parse + a graph build + a
-  // full React Flow reflow on every unrelated app tick (a pipeline step, a
-  // diagnostic arriving, an agent token streaming, a test result landing).
-  // The deps below are the complete set of signals that the text under
-  // `getSource()` moved:
-  //   rev          — this pane's own Apply committed an edit
-  //   liveTick     — the user typed in Monaco (debounced ~350 ms)
-  //   externalTick — the editor was reseeded onto different content by
-  //                  something else (file-tab switch, external change to the
-  //                  active file, example import, workspace switch)
-  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
-  const externalTick = useExternalSourceTick(
-    ctx.initialSource,
-    ctx.activeSourcePath,
-    ctx.sourceEpoch,
-  );
   const getSource = ctx.getSource;
-  const parsed = useMemo(
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
-    () => parseDdd(getSource()),
-    [getSource, rev, liveTick, externalTick],
-  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // In preview mode an edit is staged (showing its source diff) until confirmed
+  // instead of committing live — see the harness's `onCommit` below.
+  const [preview, setPreview] = useState(false);
+  const [pending, setPending] = useState<{ next: string; keepSelection: boolean } | null>(null);
+
+  // The shared safety rails (parse memo + `rev` + write gate + refusal line) —
+  // see `pane-harness.ts`.  Every editing handler routes through `apply` /
+  // `applyOrRefuse`; `parseOk` gates every derivation that addresses CST
+  // ranges, so nothing is built from a recovered AST.
+  //
+  // This pane's one divergence is the staged-preview commit: `onCommit`
+  // intercepts the gated candidate and parks it in `pending` (rendering a diff)
+  // rather than writing it.  The extra `keepSelection` argument rides through
+  // `apply(next, keepSelection)` into the override.
+  const harness = usePaneHarness<[keepSelection?: boolean]>(ctx, {
+    onCommit: (next, commitNow, keepSelection = false) => {
+      // A no-op edit (text unchanged) always passes through.
+      if (preview && next !== ctx.getSource()) {
+        setPending({ next, keepSelection });
+        return;
+      }
+      if (!keepSelection) setSelectedId(null);
+      commitNow(next);
+    },
+  });
+  const { parsed, rev, refusal } = harness;
+  const { apply, applyOrRefuse } = harness;
   const graph = useMemo(
-    () => (parsed.parserErrors.length === 0 ? buildSystemGraph(parsed.ast) : null),
-    [parsed],
+    () => (harness.parseOk ? buildSystemGraph(parsed.ast) : null),
+    [parsed, harness.parseOk],
   );
   // LSP diagnostics attributed to the construct that most tightly contains each,
   // so a broken aggregate / view / workflow is flagged on its own node.
@@ -386,7 +391,6 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const positionsRef = useRef<Map<string, Pos>>(loadPositions());
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode, new Map(), false, positionsRef.current) : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const compact = !ctx.isDesktop;
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -403,8 +407,6 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [kindFilter, setKindFilter] = useState<NodeKind[]>([]);
   const [overlay, setOverlay] = useState(false);
   const [coverage, setCoverage] = useState<Map<string, CoverageStatus>>(new Map());
-  const [preview, setPreview] = useState(false);
-  const [pending, setPending] = useState<{ next: string; keepSelection: boolean } | null>(null);
   const [wireShape, setWireShape] = useState<WireField[] | null>(null);
   const [grouped, setGrouped] = useState(false);
   const layout = useMemo(() => (grouped && graph ? groupedLayout(graph) : null), [grouped, graph]);
@@ -563,7 +565,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return m;
   }, [typeOptions]);
 
-  if (parsed.parserErrors.length > 0) {
+  // Confirming a staged preview commits text the harness already gated, so it
+  // goes straight to the committer (plus this pane's selection reset).
+  const commit = (next: string, keepSelection: boolean): void => {
+    if (!keepSelection) setSelectedId(null);
+    harness.commit(next);
+  };
+
+  if (!harness.parseOk) {
     return <Message>Source has syntax errors — fix them in the editor to use the model builder.</Message>;
   }
   if (!graph || graph.nodes.length === 0) {
@@ -571,36 +580,6 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   }
 
   const selected = graph.nodes.find((n) => n.id === selectedId) ?? null;
-
-  const refusal = useRefusal();
-
-  const commit = (next: string, keepSelection: boolean): void => {
-    ctx.onSourceChange(next, "builder");
-    if (!keepSelection) setSelectedId(null);
-    setRev((r) => r + 1);
-  };
-
-  // In preview mode an edit is staged (showing its source diff) until confirmed,
-  // instead of committing live. A no-op edit (text unchanged) always passes
-  // through. `apply` is the single choke point every editing handler routes to
-  // — and therefore where the write-back gate lives: an edit that would leave
-  // the source unparseable is refused (visibly) rather than committed or
-  // staged.  See `docs/audits/playground-file-mgmt-review-2026-07.md` #12.
-  const apply = (next: string, keepSelection = false): void => {
-    if (ifParses(next) == null) {
-      refusal.refuse();
-      return;
-    }
-    refusal.clear();
-    if (preview && next !== ctx.getSource()) setPending({ next, keepSelection });
-    else commit(next, keepSelection);
-  };
-
-  /** A helper returned null (nothing written) — surface it, don't no-op. */
-  const applyOrRefuse = (next: string | null, keepSelection = false): void => {
-    if (next == null) refusal.refuse();
-    else apply(next, keepSelection);
-  };
 
   // Both renames run through a throwaway linked Langium build, which can
   // reject; the call sites are `void`-ed fire-and-forget, so swallow-and-log

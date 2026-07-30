@@ -1,6 +1,6 @@
 # M-T8.13 — System-builder v1/v2 consolidation (design)
 
-> **Status: design-in-progress (brief).** The endgame decision flagged as
+> **Status: phase 1 landed; phases 2–7 design-in-progress (brief).** The endgame decision flagged as
 > wave-3 "structural" work in
 > `docs/audits/playground-file-mgmt-review-2026-07.md` §2 and left explicitly
 > out of scope by PR #2287.
@@ -96,7 +96,7 @@ graph is actually better at without keeping a second mutation surface.
 
 | # | Slice | Size | Gate |
 |---|---|:--:|---|
-| 1 | **Shared pane harness** — `web/src/builder/pane-harness.ts`: `useModelSource(ctx)` returning `{ parsed, parseOk, rev, apply, applyOrRefuse, refusal }`, composing the existing `use-live-source-tick` + `refusal` + `edit-engine.ifParses` into the one `rev`/parse-memo/choke-point shape all four panes hand-roll today. | **M** | unconditional |
+| 1 | ✅ **Shared pane harness** — `web/src/builder/pane-harness.ts`: `usePaneHarness(ctx)` returning `{ parsed, parseOk, rev, bumpRev, liveTick, externalTick, refusal, apply, applyOrRefuse, applyOrSkip, commit }`, composing the existing `use-live-source-tick` + `refusal` + `edit-engine.ifParses` into the one `rev`/parse-memo/choke-point shape all four panes hand-rolled. | **M** | unconditional |
 | 2 | Port **wire shape** + **infra props** (fixing the 5-of-12 `PLATFORMS` list) + **find params/return** to v2's node-detail panel — all three ride pure, already-tested modules. | S ×3 | decision |
 | 3 | Port **field retype + modifiers** (`fields.ts` mutators exist; this is v2 node-detail UI). | **M** | decision |
 | 4 | Port **coverage overlay** + **search** to a v2 **Overview** mode (search must cross levels → a jump-to-path result list, not dimming). | **M–L** | decision |
@@ -113,6 +113,47 @@ makes the #2287 drift class *unrepeatable*. Slices 2–5: each ported feature ke
 its v1 e2e assertion, re-pointed at v2 testids. Slice 6: the label flip lands with
 the spec rename in one PR. Slice 7: `rg 'builder/system/'` returns no hits outside
 the new home.
+
+## Phase 1 — as landed
+
+Two modules, mirroring the `live-source-tick.ts` / `use-live-source-tick.ts`
+split (the root vitest suite has no `web/node_modules`, so the react-free half
+has to be importable on its own):
+
+- **`web/src/builder/pane-write.ts`** — the pure decisions. `isParseOk(parsed)`
+  is the READ gate (false on a recovered AST); `writeDecision(next, gate,
+  nullMeans)` is the WRITE gate, folding `edit-engine.ifParses` and the
+  "helper returned null" case into `"commit" | "refuse" | "skip"`.
+- **`web/src/builder/pane-harness.ts`** — `usePaneHarness(ctx, options?)`, the
+  react composition: the `[getSource, rev, liveTick, externalTick]` parse memo,
+  `parseOk`, `useRefusal`, and the `apply` / `applyOrRefuse` / `applyOrSkip` /
+  `commit` choke-point. `ctx` is the narrow structural `PaneSourceCtx`
+  (`getSource`, `onSourceChange`, `editorSourceTick`, `initialSource`,
+  `activeSourcePath`, `sourceEpoch`) rather than the whole `LayoutCtx`.
+
+The two genuine pane divergences became **options**, not parallel copies:
+
+| Pane | Divergence | How the harness carries it |
+|---|---|---|
+| `BuilderPane` | must not re-derive on an external reseed (a new `liveNodes` reference echoes into a craft `deserialize` that clobbers in-flight settings-panel edits) | `externalReseed: false` — the tick hook still runs, fed frozen inputs, so it never bumps |
+| v1 `SystemBuilderPane` | preview mode stages an edit's diff instead of committing; the staged write carries a `keepSelection` flag | `onCommit(next, commitNow, ...args)` override + `usePaneHarness<[keepSelection?: boolean]>` |
+
+`RequirementsPane`'s `apply(node, text)` / `append(text)` and v1/v2's per-handler
+wrappers survive as 1–3-line pane-local shims over the harness — they carry
+pane semantics (which node to splice, whether to clear the selection), not
+rails. v1's coverage-overlay and wire-shape effects stay in the pane; only the
+rails moved.
+
+The pin lives in `test/playground/builder-pane-harness.test.ts`: it *discovers*
+`web/src/builder/**/*Pane.tsx` (so a new pane is covered the day it lands),
+asserts each takes `usePaneHarness`, and fails on any of the hand-rolled rails
+reappearing (`useLiveSourceTick(`, `useExternalSourceTick(`, `useRefusal(`,
+`parseDdd(getSource())`, `parseDdd(ctx.getSource())`, `parsed.parserErrors`).
+
+One latent bug fell out: v1 called `useRefusal()` *after* its
+`parserErrors` early return, so the render that first saw a syntax error
+dropped a hook — React's "rendered fewer hooks than expected". Hoisting the
+rails to the top of the component removes it.
 
 ## Test / e2e migration strategy
 

@@ -26,7 +26,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
-import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
+import { usePaneHarness } from "../pane-harness";
 import {
   aggregateBody,
   deleteStatement,
@@ -68,8 +68,7 @@ import {
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
-import { ifParses } from "../edit-engine";
-import { RefusalLine, useRefusal } from "../refusal";
+import { RefusalLine } from "../refusal";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
@@ -558,7 +557,6 @@ function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) 
 
 function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [path, setPath] = useState<ViewPath>([]);
-  const [rev, setRev] = useState(0);
   // Narrow the per-node widths on a phone-width canvas (< 768px → compact),
   // so StmtNode + the deployable's multi-select panel don't blow past the
   // edge of the small canvas.
@@ -572,29 +570,18 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // workflow's `create(...)` starter, an operation's own statements), so the
   // default view — and every expression-slot key derived from it — is unchanged.
   const [bodyMember, setBodyMember] = useState<BodyKey | undefined>(undefined);
-  // Re-parse after every commit by depending on `rev` (`apply` bumps it) —
-  // plus the debounced editor tick and the external-reseed signals.  This used
-  // to depend on `ctx`, whose identity churned on every app tick, so a
-  // pipeline step / diagnostic / agent token re-ran the parse AND the whole
-  // view-graph build.  See `SystemBuilderPane` for the dep-by-dep rationale.
-  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
-  const externalTick = useExternalSourceTick(
-    ctx.initialSource,
-    ctx.activeSourcePath,
-    ctx.sourceEpoch,
-  );
-  const getSource = ctx.getSource;
-  const parsed = useMemo(
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
-    () => parseDdd(getSource()),
-    [getSource, rev, liveTick, externalTick],
-  );
-  // Same parse gate v1 carries (`SystemBuilderPane`): a recovered AST would
+  // The shared safety rails (parse memo + `rev` + write gate + refusal line) —
+  // see `pane-harness.ts`.  The parse re-runs after every commit (`apply` bumps
+  // `rev`), on the debounced editor tick, and on the external-reseed signals.
+  //
+  // `parseOk` is the read gate v1 has always carried: a recovered AST would
   // otherwise yield a silently-partial graph whose delete/rename handlers
   // splice CST ranges that no longer describe the user's source.  The gate has
   // to live *inside* the derivations — hooks below must still run
   // unconditionally — so the message renders at the end.
-  const parseOk = parsed.parserErrors.length === 0;
+  const harness = usePaneHarness(ctx);
+  const { parsed, parseOk, rev, refusal } = harness;
+  const { apply, applyOrRefuse } = harness;
   const graph = useMemo(
     () => (parseOk ? buildViewGraph(parsed.ast, path, { workflowMember: bodyMember }) : EMPTY_GRAPH),
     [parsed, path, parseOk, bodyMember],
@@ -629,28 +616,6 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   }, [path]);
   const primaryMemberKey = primaryBodyKey(path, bodyMembers);
   const leafKind = path[path.length - 1]?.kind;
-
-  const refusal = useRefusal();
-
-  /** Single choke-point for source edits — bump `rev` so the next render
-   *  re-parses, re-builds the view-graph and re-binds the per-stmt data.
-   *  Also the last line of defence for the write-back gate: whatever path
-   *  produced `next`, it doesn't reach the editor unless it parses. */
-  const apply = (next: string): void => {
-    if (ifParses(next) == null) {
-      refusal.refuse();
-      return;
-    }
-    refusal.clear();
-    ctx.onSourceChange(next, "builder");
-    setRev((r) => r + 1);
-  };
-
-  /** A helper returned null (nothing written) — surface it, don't no-op. */
-  const applyOrRefuse = (next: string | null): void => {
-    if (next == null) refusal.refuse();
-    else apply(next);
-  };
 
   // When the path's leaf is an operation / workflow, materialise its statement
   // views + per-statement editor handlers and pass them through the stmt node's
