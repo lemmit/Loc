@@ -1,11 +1,11 @@
 // Generated translation runtime (Loom i18n, M-T1.11).
 // Source-language lookup with a per-key fallback and ICU message formatting via
-// `@formatjs/intl-messageformat`. To add a locale, drop a
+// `intl-messageformat`. To add a locale, drop a
 // `src/locales/<locale>.json` file, import it below, and register it in
 // `catalogs`. The `t(key, default, values)` call sites are stable — a message
 // may carry plain `{name}` holes or locale-formatted ones
 // (`{total, number, ::currency/USD}`, `{d, date, ::yMMMd}`).
-import { IntlMessageFormat } from "@formatjs/intl-messageformat";
+import { IntlMessageFormat } from "intl-messageformat";
 import en from "./locales/en.json";
 
 type Catalog = Record<string, string>;

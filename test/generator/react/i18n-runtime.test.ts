@@ -106,12 +106,12 @@ describe("React i18n runtime", () => {
     );
   });
 
-  it("formats the shim via @formatjs/intl-messageformat (ICU, not a {name} regex)", async () => {
+  it("formats the shim via intl-messageformat (ICU, not a {name} regex)", async () => {
     // Slice 1 swaps the old `message.replace(/{name}/)` regex shim for the ICU
     // engine so a `, number` / `, date` format suffix locale-formats at runtime.
     const files = await generateSystemFiles(SYSTEM(`Heading { "Hi" }`));
     const i18n = [...files].find(([p]) => p.endsWith("src/i18n.ts"))![1];
-    expect(i18n).toContain('import { IntlMessageFormat } from "@formatjs/intl-messageformat"');
+    expect(i18n).toContain('import { IntlMessageFormat } from "intl-messageformat"');
     expect(i18n).toContain("new IntlMessageFormat(message, locale).format(values)");
     // `values` widened to admit Date (for `, date`) + boolean alongside string/number.
     expect(i18n).toMatch(/values\?: Record<string, string \| number \| boolean \| Date>/);
@@ -139,6 +139,6 @@ describe("React i18n runtime", () => {
     );
     // The stack carries the ICU engine dependency.
     const pkg = [...files].find(([p]) => p.endsWith("web/package.json"))![1];
-    expect(pkg).toContain("@formatjs/intl-messageformat");
+    expect(pkg).toContain("intl-messageformat");
   });
 });

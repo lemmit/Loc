@@ -25,7 +25,7 @@
 //
 // The translation runtime is a tiny generated `src/i18n.ts` shim (see
 // `src/generator/_frontend/i18n-runtime.ts`): a `messages[key] ?? default`
-// lookup plus `@formatjs/intl-messageformat` for the ICU placeholders. A hole
+// lookup plus `intl-messageformat` for the ICU placeholders. A hole
 // may carry a `, format` suffix (M-T1.11) — the format text is spliced into the
 // message here (`icuFromConcat`), and the runtime locale-formats the raw value.
 // Plural/select (brace-bodied ICU) are a later slice; the extractor gates them.

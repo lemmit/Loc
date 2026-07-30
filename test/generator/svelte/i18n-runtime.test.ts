@@ -140,9 +140,9 @@ describe("Svelte i18n runtime", () => {
       "Total: {total, number, ::currency/USD}",
     );
     const i18n = [...files].find(([p]) => p.endsWith("src/lib/i18n.ts"))![1];
-    expect(i18n).toContain('import { IntlMessageFormat } from "@formatjs/intl-messageformat"');
+    expect(i18n).toContain('import { IntlMessageFormat } from "intl-messageformat"');
     expect(i18n).toContain("new IntlMessageFormat(message, locale).format(values)");
     const pkg = [...files].find(([p]) => p.endsWith("web/package.json"))![1];
-    expect(pkg).toContain("@formatjs/intl-messageformat");
+    expect(pkg).toContain("intl-messageformat");
   });
 });

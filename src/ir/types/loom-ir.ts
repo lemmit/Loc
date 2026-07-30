@@ -3710,7 +3710,7 @@ export type ExprIR =
    * DROPPED, so a formatted template emits byte-identical to a format-less one.
    * The format only comes alive on the four JS/TS frontends' i18n runtime,
    * where `icuFromConcat` (src/generator/_walker/i18n-extract.ts) splices the
-   * suffix into the emitted ICU message and `@formatjs/intl-messageformat`
+   * suffix into the emitted ICU message and `intl-messageformat`
    * locale-formats the value at runtime.  `inner` is the concat operand (the
    * `convert`/`.display` string-coercion), which the extractor peels back to
    * the raw value for the runtime `values` object.
