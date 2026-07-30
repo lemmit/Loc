@@ -37,8 +37,8 @@ export const DETAIL_STACK_FRAMES = 30;
 export const DETAIL_COMPONENT_FRAMES = 20;
 
 /** Reasons that denote an actual error (as opposed to a pressure breadcrumb
- *  like `hidden` / `pagehide`).  These set the `lastCrash` flag and are what
- *  a crash report is built around. */
+ *  like `hidden` / `pagehide`).  These are what a crash report is built
+ *  around. */
 export const CRASH_REASONS = [
   "react-error",
   "react-error-pane",
@@ -51,6 +51,18 @@ export type CrashReason = (typeof CRASH_REASONS)[number];
 /** Is this reason an error class (vs. a pressure breadcrumb)? */
 export function isCrashReason(reason: string): boolean {
   return (CRASH_REASONS as readonly string[]).includes(reason);
+}
+
+/** The subset of error classes that took visible UI down — a React boundary
+ *  actually caught a render throw.  Only these arm the next-boot "crashed
+ *  last session" notice: a stray `unhandledrejection` or a worker hiccup is
+ *  ring-worthy detail but not a crash the user experienced, and nagging on
+ *  those would train users to dismiss the notice unread. */
+export const FATAL_CRASH_REASONS = ["react-error", "react-error-pane"] as const;
+
+/** Should this reason arm the next-boot notice? */
+export function isFatalCrashReason(reason: string): boolean {
+  return (FATAL_CRASH_REASONS as readonly string[]).includes(reason);
 }
 
 export interface DiagSnapshot {
@@ -276,15 +288,15 @@ export function clearDiagnostics(): void {
  *
  *  `detail` is what turns a breadcrumb into a bug report — pass it from every
  *  error-class capture point (both React boundaries, both window handlers, the
- *  build worker).  Error-class reasons additionally set the `lastCrash` flag
- *  read on the next boot. */
+ *  build worker).  Fatal classes (a React boundary caught a render throw)
+ *  additionally set the `lastCrash` flag read on the next boot. */
 export async function logDiagnostic(reason: string, detail?: DiagDetail): Promise<void> {
   try {
     const snap = await capture(reason, detail);
     // eslint-disable-next-line no-console
     console.warn("[loom-diag]", reason, snap);
     appendRing(snap);
-    if (isCrashReason(reason)) writeLastCrash(snap);
+    if (isFatalCrashReason(reason)) writeLastCrash(snap);
   } catch {
     // diagnostics must never be the thing that crashes the app
   }

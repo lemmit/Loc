@@ -37,12 +37,15 @@ export function LastCrashNotice(): JSX.Element | null {
       title="The playground crashed in your last session"
       data-testid="last-crash-notice"
       style={{
+        // Top-right corner card, below the header strip.  Deliberately NOT
+        // bottom-anchored: both shells put their tab navigation at the bottom
+        // edge, and a notice sitting on top of it swallows the clicks (the
+        // no-network e2e lane caught exactly that).
         position: "fixed",
-        left: "50%",
-        transform: "translateX(-50%)",
-        bottom: 16,
+        right: 16,
+        top: 56,
         zIndex: 1000,
-        maxWidth: 620,
+        maxWidth: 400,
         width: "calc(100% - 32px)",
       }}
     >

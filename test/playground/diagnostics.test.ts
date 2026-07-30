@@ -188,14 +188,23 @@ describe("logDiagnostic — round-trip through storage", () => {
     expect(readDiagnostics()).toHaveLength(12);
   });
 
-  it("sets lastCrash for an error class and NOT for a pressure breadcrumb", async () => {
+  it("arms lastCrash only for fatal boundary crashes — not breadcrumbs or non-fatal error classes", async () => {
     await logDiagnostic("hidden");
     expect(readLastCrash()).toBeNull();
 
+    // Ring-worthy but NOT notice-worthy: the user saw no crash, and a notice
+    // armed by stray rejections/worker hiccups would sit over the tab bars
+    // (the no-network lane caught it doing exactly that) and train users to
+    // dismiss it unread.
     await logDiagnostic("worker-error", { message: "worker died", pane: "build-worker" });
+    await logDiagnostic("unhandledrejection", { message: "stray" });
+    await logDiagnostic("window-error", { message: "stray" });
+    expect(readLastCrash()).toBeNull();
+
+    await logDiagnostic("react-error-pane", { message: "pane down", pane: "builder" });
     const flag = readLastCrash();
-    expect(flag?.reason).toBe("worker-error");
-    expect(flag?.message).toBe("worker died");
+    expect(flag?.reason).toBe("react-error-pane");
+    expect(flag?.message).toBe("pane down");
     expect(flag?.build.sha).toBe("dev");
     expect(flag?.t).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
