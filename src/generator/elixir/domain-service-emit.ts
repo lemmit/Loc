@@ -472,6 +472,8 @@ function renderStatement(
     case "precondition":
       // Bug-shaped guard → raise (the same `ArgumentError` shape the aggregate
       // operation body emits in render-stmt.ts).
+      // Derived message, NOT the author's `message "…"` — prefix-routed by
+      // `GUARD_RESCUE` at the controller.  See M-T6.20.
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;

@@ -1,6 +1,10 @@
 # M-T6.20 — Elixir (vanilla Phoenix) `precondition` custom messages + wire `code`
 
-**Status:** `open` · **L** · P3 · ⭐ cross-backend parity gap (one backend, one construct)
+**Status:** `partial` · **M** (down from L) · P3 · ⭐ cross-backend parity gap (one backend, one construct)
+
+> **[2026-07-29] Path 1 landed early, unplanned — read this before picking the mission up.** The `ensure` → 422 path below is **DONE** (#2300). It was not scheduled: the M-T9.11 wire-golden gate needed an error-envelope assertion, the golden is byte-exact, and elixir's bare `:precondition_failed` atom made the `detail` generic — so this mission's ensure-path message half became the blocking dependency for closing that gate's last coverage hole, and was done there. The reshape is exactly the one predicted below (2-tuple reason, `ensure/2` itself unchanged); the protocol now has a single owner, `src/generator/elixir/vanilla/denial.ts`, which both producers and consumers go through. `denialMessage` honours the author `message "…"`.
+>
+> **What is left:** (1) the **`raise` path** — and the warning in §2 turned out to be the load-bearing constraint, see the note there; (2) the wire **`code`**, untouched. The producer/consumer site maps in §1 are now HISTORICAL — grep before trusting them.
 
 **Context:** the custom-validation-messages feature (`message "..."` on `invariant` / `check` / `precondition`, plus the per-error wire `code`) shipped end-to-end on all five backends **except** this one construct on this one backend: a **`precondition`** carries neither its author **message** nor a wire **`code`** on the vanilla Phoenix/Ecto backend. Everything else is done:
 
@@ -50,8 +54,9 @@ The `messageCode(text)` helper (`src/util/message-code.ts`, shared FNV-1a) is th
 
 ## Recommended sequencing
 
-1. **Message-only first** (both paths), as one PR: tuple-ise the ensure reason (`{:precondition_failed, detail}`), update all producers + consumers, introduce a typed `PreconditionError` for the raise path + update `GUARD_RESCUE`. Detail = `s.message ? s.message.text : "Precondition failed: <source>"` (keep the existing default text so message-less output stays semantically identical, though the 422 detail wording may change — pin it in a test).
-2. **Then the code** as a second PR: pick reshape option (a) or (b); (a) is truer parity.
+1. ~~**Message-only, the ensure path**~~ — **done** (#2300), see the status note at the top.
+2. **Message-only, the raise path** — the remaining message work, and the reason this mission is still open. Introduce a typed exception (a domain-layer `defexception`, NOT a `<App>Web.*` one — `function-emit` / `domain-service-emit` live under `lib/<app>/` and must not reference the Web namespace) and rescue it **by type** in `GUARD_RESCUE`, replacing the prefix `cond`. Only then can the raise sites carry `denialMessage(s)`; today they deliberately emit the derived form, each with a comment saying why. Verify with a fixture whose authored-message precondition sits on a `function` — it must answer **422**, not the 500 the prefix miss would produce.
+3. **Then the code** as a third PR: pick reshape option (a) or (b); (a) is truer parity.
 
 ## Verification (the gate)
 
@@ -63,4 +68,6 @@ The whole **vanilla-\* Phoenix matrix** exercises preconditions across ops, even
 
 ## Why it was deferred
 
-A disproportionately large/risky refactor of the vanilla backend's error control-flow core (~8 producer sites + ~3 consumers + a typed exception + ProblemDetails reshape) for a narrow benefit (precondition text/code on one backend, one construct). Workaround: authors get the derived default message; the predicate is still enforced (correct 400/422), just without the custom string/key. P3.
+A disproportionately large/risky refactor of the vanilla backend's error control-flow core (~8 producer sites + ~3 consumers + a typed exception + ProblemDetails reshape) for a narrow benefit (precondition text/code on one backend, one construct). Workaround: authors get the derived default message; the predicate is still enforced (correct 403/422), just without the custom string/key. P3.
+
+**[2026-07-29] Re-pricing after the partial landing.** The deferral reasoning held up, but the split turned out to be uneven: the ensure path (the ~6 producers + 4 consumers — the bulk of the "8 + 3") carried the risk and is now paid, gated, and green on the whole vanilla-\* matrix. What remains is 3 raise sites + one `cond` + one exception module — **M, not L**. Whoever picks this up inherits a smaller and better-understood job than the original estimate; the risk that made it L is spent.

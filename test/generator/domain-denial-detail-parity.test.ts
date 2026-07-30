@@ -46,6 +46,15 @@ system Denials {
           precondition total > 0
           status := "cancelled"
         }
+
+        // A precondition with an AUTHOR-WRITTEN message, on an OPERATION (the
+        // HTTP-boundary path).  Every backend must prefer it over the derived
+        // "Precondition failed: <source>" — a backend that ignores the clause
+        // and derives anyway sends a detail the author explicitly overrode.
+        operation reprice(to: int) {
+          precondition to > 0 message "Repricing needs a positive amount"
+          total := to
+        }
       }
       repository Orders for Order { }
     }
@@ -72,6 +81,18 @@ system Denials {
  *  the expectation about escaping rather than about the message. */
 const PRECONDITION_DETAIL = "Precondition failed: total > 0";
 const FORBIDDEN_DETAIL = "Forbidden: currentUser.level > 2";
+/** …and when the author writes `message "…"`, THAT is the detail — the derived
+ *  form must not appear for that statement.  Elixir used to drop the clause
+ *  here; its typed-denial path now shares one `denialMessage` rule with the
+ *  other four.
+ *
+ *  Scoped to an OPERATION deliberately.  Elixir has a second denial path — the
+ *  `raise(ArgumentError, …)` used by `function` / `domainService` / pure-core
+ *  bodies — whose status is routed by MESSAGE PREFIX in `GUARD_RESCUE`, so an
+ *  authored message there would miss the prefix and `reraise` into a 500.
+ *  That path still emits the derived form on purpose; closing it needs the
+ *  typed-exception reshape tracked as **M-T6.20**, not a string swap. */
+const AUTHORED_DETAIL = "Repricing needs a positive amount";
 
 async function emit(platform: string): Promise<string> {
   const files = await generateSystemFiles(SOURCE(platform));
@@ -86,6 +107,14 @@ describe("RS-15 — domain-floor denials are 422 with an occurrence-specific det
 
     it(`${platform}: the requires message names the failed predicate`, async () => {
       expect(await emit(platform)).toContain(FORBIDDEN_DETAIL);
+    });
+
+    it(`${platform}: an authored message clause wins over the derived detail`, async () => {
+      const out = await emit(platform);
+      expect(out).toContain(AUTHORED_DETAIL);
+      expect(out, "derived detail emitted despite an authored message").not.toContain(
+        "Precondition failed: to > 0",
+      );
     });
 
     it(`${platform}: the domain floor answers 422, and 400 is not its status`, async () => {

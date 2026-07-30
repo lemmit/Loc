@@ -842,10 +842,17 @@ export function renderReturningStmt(
     case "precondition":
       // Raise form — reached only by the pure-core / document / function paths
       // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 denial).
+      // NOTE the message is the DERIVED form even when the author wrote
+      // `message "…"`: `GUARD_RESCUE` below routes this raise to its status by
+      // MESSAGE PREFIX, so an authored message would miss the prefix and
+      // `reraise` into a 500.  The `ensure` path has no such coupling and does
+      // honour the clause.  Closing this needs the typed-exception reshape —
+      // M-T6.20.
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
       // Raise form — reached only by the pure-core / document / function paths
       // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 403 denial).
+      // Prefix-routed by `GUARD_RESCUE`, same coupling as the precondition arm.
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
