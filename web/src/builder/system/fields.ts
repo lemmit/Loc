@@ -176,6 +176,18 @@ export function typeText(spec: TypeSpec): string {
   return `${baseLabel(spec.base)}${spec.array ? "[]" : ""}${spec.optional ? "?" : ""}`;
 }
 
+/** A type given either structurally (the pickers' `TypeSpec`) or as raw `.ddd`
+ *  text (`"Order id[]"`).  Both spellings splice identically — the model
+ *  builder's node-level inline inputs commit text, the pickers commit specs.
+ *  (`op-surface.ts` introduced this for its header setters; it lives here now
+ *  because the field / find setters take it too.) */
+export type TypeInput = TypeSpec | string;
+
+/** The `.ddd` text for either spelling of a type. */
+export function typeInputText(type: TypeInput): string {
+  return typeof type === "string" ? type.trim() : typeText(type);
+}
+
 export function buildTypeRef(spec: TypeSpec): TypeRef {
   let base: TypeRef["base"];
   switch (spec.base.kind) {
@@ -338,7 +350,7 @@ export function retypeField(
   kind: NodeKind,
   name: string,
   index: number,
-  type: TypeSpec,
+  type: TypeInput,
 ): string | null {
   const node = locate(source, kind, name);
   if (!node) return null;
@@ -349,7 +361,7 @@ export function retypeField(
   const cst = propertyList(node).list[index]?.type.$cstNode;
   if (!cst) return null;
   return ifParses(
-    applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]),
+    applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeInputText(type) }]),
   );
 }
 

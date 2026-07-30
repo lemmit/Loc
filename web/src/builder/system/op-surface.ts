@@ -12,7 +12,13 @@ import type {
 } from "../../../../src/language/generated/ast.js";
 import { applyEdits, type TextEdit } from "../edit-engine";
 import { parseDdd } from "../parse";
-import { baseLabel, baseSpecOf, typeText, type TypeSpec } from "./fields";
+import {
+  baseLabel,
+  baseSpecOf,
+  typeInputText,
+  type TypeInput,
+  type TypeSpec,
+} from "./fields";
 import type { ParamInfo } from "./find-params";
 import { IDENTIFIER } from "./rename";
 
@@ -40,10 +46,12 @@ import { IDENTIFIER } from "./rename";
 // ---------------------------------------------------------------------------
 
 /** A type given either structurally (the pickers' `TypeSpec`) or as raw
- *  `.ddd` text (`"Order[]"`) — both spellings splice identically. */
-export type TypeInput = TypeSpec | string;
+ *  `.ddd` text (`"Order[]"`) — both spellings splice identically.  Defined in
+ *  `fields.ts` (the field / find / op setters all take it); re-exported here
+ *  because this module's own signatures are its main consumer. */
+export type { TypeInput };
 
-const asTypeText = (type: TypeInput): string => (typeof type === "string" ? type.trim() : typeText(type));
+const asTypeText = typeInputText;
 
 /** Validate by re-parsing: return `candidate` only if it still parses. */
 function ifParses(candidate: string): string | null {

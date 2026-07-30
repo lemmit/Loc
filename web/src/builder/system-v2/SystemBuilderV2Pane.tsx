@@ -1,8 +1,12 @@
-// Model builder v2 — Phase 1 (drill-down backbone, read-only).
+// The Model builder — the playground's ONE structural editing pane
+// (M-T8.13: v1's parallel flat-canvas pane was retired into this one).
 //
 // The canvas IS the navigator. Each level shows the children of the current
 // node; a breadcrumb up top tracks the path; clicking a drillable node pushes
-// a step. v1 is unchanged and still ships in the "Model" tab.
+// a step. At the ROOT the breadcrumb also offers **Overview** — v1's flat
+// whole-system graph, read-only, carrying the comprehension features a
+// drill-down cannot serve (coverage heatmap, cross-model search + kind
+// filter, wire shape); opening a node there jumps the drill-down to it.
 
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type ReactNode } from "react";
 import { Box, Button, Checkbox, Group, Stack, Text, TextInput } from "@mantine/core";
@@ -41,7 +45,38 @@ import {
 } from "../system/body";
 import type { NestedExprEditors } from "../system/BodyEditor";
 import { setEmitEvent } from "../system/emit-event";
-import { deleteField, listFields } from "../system/fields";
+import {
+  FIELD_ACCESS,
+  deleteField,
+  listFieldModifiers,
+  listFields,
+  retypeField,
+  setFieldAccess,
+  setFieldCheck,
+  setFieldDefault,
+  setFieldMask,
+  setFieldSensitivity,
+} from "../system/fields";
+import {
+  addFindParam,
+  deleteFindParam,
+  freshParamName,
+  listFindParams,
+  renameFindParam,
+  retypeFindParam,
+  setFindReturnType,
+} from "../system/find-params";
+import {
+  PLATFORMS,
+  STORAGE_TYPES,
+  deployablePlatform,
+  deployablePort,
+  setDeployablePlatform,
+  setDeployablePort,
+  setStorageType,
+  storageType,
+} from "../system/infra-props";
+import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "../system/rebind";
 import { seedExpr } from "../system/expr-model";
 import {
   editExprSlot,
@@ -72,6 +107,7 @@ import { RefusalLine } from "../refusal";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
+import OverviewCanvas from "./OverviewCanvas";
 import { deleteByAstType, deleteInvariant } from "./delete-extra";
 import { renameByAstType } from "./rename-extra";
 import {
@@ -207,6 +243,10 @@ function toRfNodes(
         data: cdata as unknown as Record<string, unknown>,
         draggable: !useDerived,
         selectable: false,
+        // An open detail block makes the node taller than its layout row, so
+        // it overlaps the next node in the column. Lift it, or the sibling
+        // painted after it swallows the clicks on the block's own controls.
+        ...(cdata.detailsOpen ? { zIndex: 10 } : {}),
       } satisfies Node;
     }
     // Fallback (shouldn't fire — every non-stmt node should get construct data
@@ -341,6 +381,21 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   channelsource: "ChannelSource",
   timer: "TimerSource",
 };
+
+/** The declaration node of `$type` named `name`, or undefined. The node-detail
+ *  readers (`storageType`, `deployablePlatform`, `currentTarget`, …) address
+ *  the AST node, while the view-graph node only carries kind + name. */
+function astByTypeName(ast: AstNode, type: string, name: string): AstNode | undefined {
+  for (const node of AstUtils.streamAst(ast)) {
+    if (node.$type === type && (node as { name?: string }).name === name) return node;
+  }
+  return undefined;
+}
+
+/** The keyword-less `editable` default, as the access select's own option —
+ *  the grammar has no token for it, so picking it means "remove the access
+ *  keyword". Same contract v1's inspector used. */
+const EDITABLE_ACCESS = "editable";
 
 /** Path-leaf kinds whose view is a statement flow over ONE body of the
  *  aggregate the step above names — an operation, or a lifecycle `body` step
@@ -518,7 +573,12 @@ function toRfEdges(g: ViewGraph): Edge[] {
   });
 }
 
-function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) => void }): JSX.Element {
+function Breadcrumb({ path, onJump, onOverview }: {
+  path: ViewPath;
+  onJump: (depth: number) => void;
+  /** Only offered at the root — Overview IS the root, seen flat. */
+  onOverview?: () => void;
+}): JSX.Element {
   return (
     <Group
       gap={4}
@@ -537,6 +597,17 @@ function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) 
       >
         Model
       </Button>
+      {onOverview && (
+        <Button
+          size="compact-xs"
+          variant="default"
+          data-testid="c4system-v2-overview-toggle"
+          title="See the whole model as one flat graph (read-only) — coverage heatmap, search, wire shape"
+          onClick={onOverview}
+        >
+          Overview
+        </Button>
+      )}
       {path.map((step, i) => (
         <Fragment key={`${step.kind}:${step.name}:${i}`}>
           <Text size="xs" c="dimmed">›</Text>
@@ -555,8 +626,14 @@ function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) 
   );
 }
 
-function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
-  const [path, setPath] = useState<ViewPath>([]);
+function Inner({ ctx, path, setPath, onOverview }: {
+  ctx: LayoutCtx;
+  // The drill path is owned by the pane shell so switching to Overview and
+  // back doesn't lose where you were.
+  path: ViewPath;
+  setPath: (next: ViewPath | ((prev: ViewPath) => ViewPath)) => void;
+  onOverview: () => void;
+}): JSX.Element {
   // Narrow the per-node widths on a phone-width canvas (< 768px → compact),
   // so StmtNode + the deployable's multi-select panel don't blow past the
   // edge of the small canvas.
@@ -570,6 +647,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // workflow's `create(...)` starter, an operation's own statements), so the
   // default view — and every expression-slot key derived from it — is unchanged.
   const [bodyMember, setBodyMember] = useState<BodyKey | undefined>(undefined);
+  // Which node's collapsed detail block (`detailsLabel`) is expanded, by node
+  // id. Pane state rather than node-local so the pane can also LIFT that node
+  // above the siblings its extra height now overlaps (the per-kind columns lay
+  // out on a fixed row pitch).
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
   // The shared safety rails (parse memo + `rev` + write gate + refusal line) —
   // see `pane-harness.ts`.  The parse re-runs after every commit (`apply` bumps
   // `rev`), on the debounced editor tick, and on the external-reseed signals.
@@ -611,8 +693,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   }, [parsed, path, parseOk]);
   // Leaving the container (or drilling into another one) drops back to its
   // primary body — a member key from the previous one means nothing here.
+  // The expanded detail block goes with it: node ids repeat across views, so a
+  // stale key would silently expand an unrelated node in the new one.
   useEffect(() => {
     setBodyMember(undefined);
+    setDetailsKey(null);
   }, [path]);
   const primaryMemberKey = primaryBodyKey(path, bodyMembers);
   const leafKind = path[path.length - 1]?.kind;
@@ -846,6 +931,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       return { expressionEditor, onToggleExpression };
     };
 
+    /** The collapsed-detail-block wiring for one node id. */
+    const detailToggle = (id: string): { detailsOpen: boolean; onToggleDetails: () => void } => ({
+      detailsOpen: detailsKey === id,
+      onToggleDetails: () => setDetailsKey((cur) => (cur === id ? null : id)),
+    });
+
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
 
@@ -925,6 +1016,90 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 const next = deleteContainment(ctx.getSource(), aggName, fieldName);
                 if (next != null) apply(next);
               };
+        // Property TYPE + the modifier clauses (`= default`, `check … message`,
+        // `mask unless`, the access keyword, `sensitive(…)`) — v1's collapsible
+        // `ƒ` section, now the field node's own collapsed detail block. Every
+        // mutator returns null when the rewrite wouldn't re-parse, which is a
+        // no-op here (the next render re-seeds the input from source).
+        let inputs: ConstructNodeData["inputs"];
+        let selects: ConstructNodeData["selects"];
+        if (n.kind === "field") {
+          const agg = findAggregate(parsed.ast, aggName);
+          const idx = agg ? listFields(agg).findIndex((f) => f.name === n.name) : -1;
+          const info = agg && idx >= 0 ? listFields(agg)[idx] : undefined;
+          const mods = agg && idx >= 0 ? listFieldModifiers(agg)[idx] : undefined;
+          if (info && mods) {
+            const edit = (next: string | null): void => {
+              if (next != null) apply(next);
+            };
+            inputs = [
+              {
+                label: "type",
+                value: `${info.baseLabel}${info.array ? "[]" : ""}${info.optional ? "?" : ""}`,
+                testid: "c4system-v2-field-type",
+                onCommit: (v) => edit(retypeField(ctx.getSource(), "aggregate", aggName, idx, v)),
+              },
+              {
+                label: "ƒ default",
+                value: mods.default ?? "",
+                placeholder: "(none)",
+                testid: "c4system-v2-field-default",
+                onCommit: (v) => edit(setFieldDefault(ctx.getSource(), "aggregate", aggName, idx, v)),
+              },
+              {
+                label: "check",
+                value: mods.check ?? "",
+                placeholder: "(none)",
+                testid: "c4system-v2-field-check",
+                onCommit: (v) => edit(setFieldCheck(ctx.getSource(), "aggregate", aggName, idx, v)),
+              },
+              {
+                label: "check message",
+                value: mods.checkMessage ?? "",
+                placeholder: "(none)",
+                testid: "c4system-v2-field-check-message",
+                onCommit: (v) =>
+                  edit(setFieldCheck(ctx.getSource(), "aggregate", aggName, idx, mods.check ?? "", v)),
+              },
+              {
+                label: "mask unless",
+                value: mods.maskUnless ?? "",
+                placeholder: "currentUser.…",
+                testid: "c4system-v2-field-mask",
+                onCommit: (v) => edit(setFieldMask(ctx.getSource(), "aggregate", aggName, idx, v)),
+              },
+              {
+                label: "sensitive",
+                value: (mods.sensitivity ?? []).join(", "),
+                placeholder: "pii, phi",
+                testid: "c4system-v2-field-sensitive",
+                onCommit: (v) =>
+                  edit(setFieldSensitivity(ctx.getSource(), "aggregate", aggName, idx, v.split(","))),
+              },
+            ];
+            selects = [
+              {
+                label: "access",
+                // The keyword-less `editable` default is its own option: the
+                // grammar has no token for it, so picking it REMOVES the access
+                // keyword.
+                data: [EDITABLE_ACCESS, ...FIELD_ACCESS],
+                value: mods.access ?? EDITABLE_ACCESS,
+                testid: "c4system-v2-field-access",
+                onChange: (v) =>
+                  edit(
+                    setFieldAccess(
+                      ctx.getSource(),
+                      "aggregate",
+                      aggName,
+                      idx,
+                      FIELD_ACCESS.find((a) => a === v) ?? null,
+                    ),
+                  ),
+              },
+            ];
+          }
+        }
         m.set(n.id, {
           kind: n.kind,
           name: n.name,
@@ -932,6 +1107,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           drillable: n.drillable,
           onRename,
           onDelete,
+          inputs,
+          selects,
+          // Six clauses would turn every field node into a form — they live
+          // behind the node's own `ƒ` toggle, as they did in v1's inspector.
+          detailsLabel: "ƒ",
+          ...detailToggle(n.id),
           compact,
           // A `mask unless` chip rides along on the field leaf.
           badges: n.badges,
@@ -963,14 +1144,89 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       // bindings (modules / serves). Single-valued targets / ui are handled by
       // drag-rebind on the edges (Phase 4d).
       let multiSelects: ConstructNodeData["multiSelects"];
+      let selects: ConstructNodeData["selects"];
+      let actions: ConstructNodeData["actions"];
+      let inputs: ConstructNodeData["inputs"];
+      const astNode = astType != null ? astByTypeName(parsed.ast, astType, n.name) : undefined;
+
+      // Infra scalar properties (v1's inspector rows): a storage's `type:`,
+      // a deployable's `platform:` / `port:`.
+      if (n.kind === "storage" && astNode) {
+        const storeName = n.name;
+        selects = [
+          {
+            label: "type",
+            data: [...STORAGE_TYPES],
+            value: storageType(astNode) ?? null,
+            searchable: true,
+            testid: "c4system-v2-storage-type",
+            onChange: (v) => {
+              const next = v && setStorageType(ctx.getSource(), storeName, v);
+              if (next) apply(next);
+            },
+          },
+        ];
+      }
+      if (n.kind === "deployable" && astNode) {
+        const depName = n.name;
+        selects = [
+          {
+            label: "platform",
+            data: [...PLATFORMS],
+            value: deployablePlatform(astNode) ?? null,
+            searchable: true,
+            testid: "c4system-v2-deployable-platform",
+            onChange: (v) => {
+              const next = v && setDeployablePlatform(ctx.getSource(), depName, v);
+              if (next) apply(next);
+            },
+          },
+        ];
+        inputs = [
+          {
+            label: "port",
+            // Emptying the field drops the (optional) `port:` clause — the
+            // same "null means remove" contract every other setter carries.
+            value: deployablePort(astNode)?.toString() ?? "",
+            placeholder: "(none)",
+            testid: "c4system-v2-deployable-port",
+            onCommit: (v) => {
+              const text = v.trim();
+              const port = text === "" ? undefined : Number(text);
+              if (port !== undefined && !Number.isInteger(port)) return;
+              const next = setDeployablePort(ctx.getSource(), depName, port);
+              if (next != null) apply(next);
+            },
+          },
+        ];
+      }
+
+      // A repository's `for <Aggregate>` / an api's `from <Subdomain>` — the
+      // single cross-reference each carries, as a closed pick.  Behind the
+      // node's own toggle: a repository IS drillable, and an always-open
+      // select would sit under the pointer where the drill click lands.
+      let detailsLabel: ConstructNodeData["detailsLabel"];
+      if (isRebindKind(n.kind) && astNode) {
+        const owner = n.name;
+        const kind = n.kind;
+        detailsLabel = "⇄";
+        selects = [
+          {
+            label: targetKindOf(kind) === "subdomain" ? "from" : "for",
+            data: rebindTargets(parsed.ast, kind),
+            value: currentTarget(astNode, kind),
+            searchable: true,
+            testid: "c4system-v2-rebind",
+            onChange: (v) => {
+              const next = v && rebindReference(ctx.getSource(), kind, owner, v);
+              if (next) apply(next);
+            },
+          },
+        ];
+      }
+
       if (n.kind === "deployable") {
-        let dep: AstNode | undefined;
-        for (const node of AstUtils.streamAst(parsed.ast)) {
-          if (node.$type === "Deployable" && (node as { name?: string }).name === n.name) {
-            dep = node;
-            break;
-          }
-        }
+        const dep = astNode;
         if (dep) {
           const depName = n.name;
           multiSelects = [
@@ -1004,7 +1260,6 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       // expression tree of their own: the `requires` gate and `ignoring`.
       let expressionEditor: ReactNode | undefined;
       let onToggleExpression: (() => void) | undefined;
-      let inputs: ConstructNodeData["inputs"];
       if (n.kind === "find" && aggOwner?.kind === "repository") {
         const repoName = aggOwner.name;
         const t = buildExprToggle(
@@ -1016,6 +1271,10 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         const surface = findSurface(parsed.ast, repoName, n.name);
         if (surface) {
           const findName = n.name;
+          // Collapsed: the header clauses plus the signature are five-plus
+          // fields, and a repository view stacks its finds — expanded by
+          // default they overlap the next find's node.
+          detailsLabel = "⋯";
           inputs = [
             {
               label: "requires",
@@ -1042,6 +1301,64 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 if (next != null) apply(next);
               },
             },
+            // The find's SIGNATURE — the surface v1's inspector owned: the
+            // return type plus one row per parameter (`name: Type`, editable
+            // and deletable) and a `+ param` action.
+            {
+              label: "returns",
+              value: surface.returnTypeText,
+              testid: "c4system-v2-find-return",
+              onCommit: (v) => {
+                const text = v.trim();
+                if (!text) return;
+                const next = setFindReturnType(ctx.getSource(), repoName, findName, text);
+                if (next != null) apply(next);
+              },
+            },
+            ...surface.params.map((p, i) => ({
+              label: `param ${i + 1}`,
+              value: `${p.name}: ${p.baseLabel}${p.array ? "[]" : ""}${p.optional ? "?" : ""}`,
+              testid: `c4system-v2-find-param-${i}`,
+              // `name: Type` in one field, committed as (at most) two narrow
+              // splices — the rename first, then the retype on its result, so
+              // a rejected half leaves the other half applied to nothing.
+              onCommit: (v: string): void => {
+                const cut = v.indexOf(":");
+                if (cut < 0) return;
+                const name = v.slice(0, cut).trim();
+                const type = v.slice(cut + 1).trim();
+                if (!name || !type) return;
+                let src = ctx.getSource();
+                if (name !== p.name) {
+                  const renamed = renameFindParam(src, repoName, findName, i, name);
+                  if (renamed == null) return;
+                  src = renamed;
+                }
+                const retyped = retypeFindParam(src, repoName, findName, i, type);
+                const next = retyped ?? (src === ctx.getSource() ? null : src);
+                if (next != null) apply(next);
+              },
+              onDelete: (): void => {
+                const next = deleteFindParam(ctx.getSource(), repoName, findName, i);
+                if (next != null) apply(next);
+              },
+            })),
+          ];
+          actions = [
+            {
+              label: "+ param",
+              testid: "c4system-v2-find-param-add",
+              onClick: () => {
+                const next = addFindParam(
+                  ctx.getSource(),
+                  repoName,
+                  findName,
+                  freshParamName(parsed.ast, repoName, findName),
+                  { base: { kind: "primitive", name: "string" }, array: false, optional: false },
+                );
+                if (next != null) apply(next);
+              },
+            },
           ];
         }
       }
@@ -1055,6 +1372,10 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onDelete,
         multiSelects,
         inputs,
+        selects,
+        actions,
+        detailsLabel,
+        ...(detailsLabel ? detailToggle(n.id) : {}),
         expressionEditor,
         onToggleExpression,
         compact,
@@ -1068,7 +1389,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     // without them the toggle flips state but this memo never rebuilds the
     // node data, so the editor never opens for invariant / find / view slots.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, parsed, path, rev, compact, structuredKey, exprMode]);
+  }, [graph, parsed, path, rev, compact, structuredKey, exprMode, detailsKey]);
 
   // Per-view persisted positions. The ref mirrors localStorage for the
   // current view and is re-read whenever `path` changes (drilling into a new
@@ -1358,7 +1679,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <Breadcrumb path={path} onJump={jumpTo} />
+      <Breadcrumb path={path} onJump={jumpTo} onOverview={path.length === 0 ? onOverview : undefined} />
       {bodyMembers.length > 0 && (
         <BodyPicker
           members={bodyMembers}
@@ -1425,9 +1746,29 @@ function Message({ children }: { children: ReactNode }): JSX.Element {
 }
 
 export default function SystemBuilderV2Pane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
+  // The drill path lives here so the Overview round-trip is lossless; `mode`
+  // picks which canvas is mounted. Each branch gets its OWN provider (keyed,
+  // so switching remounts it) — two React Flow instances must never share one
+  // store, and only one is ever mounted.
+  const [path, setPath] = useState<ViewPath>([]);
+  const [mode, setMode] = useState<"drill" | "overview">("drill");
+  if (mode === "overview") {
+    return (
+      <ReactFlowProvider key="overview">
+        <OverviewCanvas
+          ctx={ctx}
+          onClose={() => setMode("drill")}
+          onOpen={(next) => {
+            setPath(next);
+            setMode("drill");
+          }}
+        />
+      </ReactFlowProvider>
+    );
+  }
   return (
-    <ReactFlowProvider>
-      <Inner ctx={ctx} />
+    <ReactFlowProvider key="drill">
+      <Inner ctx={ctx} path={path} setPath={setPath} onOverview={() => setMode("overview")} />
     </ReactFlowProvider>
   );
 }

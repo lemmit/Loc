@@ -121,7 +121,6 @@ export type MobileCodeView =
   | "source"
   | "builder"
   | "model"
-  | "model-v2"
   | "requirements"
   | "generated";
 

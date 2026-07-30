@@ -52,31 +52,30 @@ test("mobile Builder: palette drawer adds a primitive, settings drawer edits it"
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
-test("mobile Model: Generated shows the file tree; inspector drawer adds a construct", async ({ page }) => {
+test("mobile Model: Generated shows the file tree; the per-view palette adds a construct", async ({ page }) => {
   await openExample(page, /Sales System/);
 
   await page.getByTestId("mobile-doc-tab-model").click();
-  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 15_000 });
 
   const flowNodes = page.locator(".react-flow__node");
-  await expect.poll(async () => flowNodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
+  await expect.poll(async () => flowNodes.count(), { timeout: 10_000 }).toBeGreaterThan(0);
 
   // The "Generated" chip switches to the file browser (its mobile layout) —
-  // the core "consolidated tab" behaviour.  Done before the drawer interaction
-  // so the inspector's modal overlay can't intercept the chip tap.
+  // the core "consolidated tab" behaviour.
   await page.getByTestId("mobile-doc-tab-generated").click();
   await expect(page.getByTestId("file-tree-mobile")).toBeVisible({ timeout: 10_000 });
 
-  // Back to the Model: the inspector + construct buttons live in a bottom
-  // drawer on mobile.  Adding an aggregate writes back valid source.
+  // Back to the Model: drill into the system, whose palette adds a storage.
+  // (The bottom-drawer inspector this used to drive was v1 chrome — the
+  // consolidated pane puts the palette inline above the canvas instead.)
   await page.getByTestId("mobile-doc-tab-model").click();
-  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
-  await expect.poll(async () => flowNodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
-  const before = await flowNodes.count();
-
-  await page.getByTestId("c4system-open-inspector").click();
-  await expect(page.getByTestId("c4system-add-aggregate")).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId("c4system-add-aggregate").click();
-  await expect.poll(async () => flowNodes.count()).toBeGreaterThan(before);
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 15_000 });
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  const before = await page.locator('.react-flow__node[data-id^="storage:"]').count();
+  await page.getByTestId("c4system-v2-add-storage").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="storage:"]').count(), { timeout: 10_000 })
+    .toBe(before + 1);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });

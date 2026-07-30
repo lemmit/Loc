@@ -1,9 +1,10 @@
 // The builder panes' shared safety-rail harness.
 //
-// Four panes edit the `.ddd` text through a visual surface — `BuilderPane`
-// (page canvas), `system/SystemBuilderPane` (model v1), `system-v2/
-// SystemBuilderV2Pane` (model v2) and `requirements/RequirementsPane` — and
-// every one of them needs the SAME four rails:
+// The panes edit the `.ddd` text through a visual surface — `BuilderPane`
+// (page canvas), `system-v2/SystemBuilderV2Pane` (the model builder, whose
+// read-only `OverviewCanvas` takes the same rails) and
+// `requirements/RequirementsPane` — and every one of them needs the SAME four
+// rails:
 //
 //   1. re-derive when (and only when) the source under `getSource()` moved —
 //      this pane's own commit (`rev`), the debounced editor tick (`liveTick`),
@@ -12,10 +13,13 @@
 //   3. a WRITE gate, so a candidate the parser rejects is never committed;
 //   4. a visible refusal when a write is refused, instead of a silent no-op.
 //
-// They used to carry four parallel copies of all of it, and the copies drifted:
-// v2 shipped without rail 2 entirely (`docs/audits/playground-file-mgmt-review-2026-07.md`
-// defect #6), which #2287 then had to fix twice.  One implementation, four
-// consumers — mission M-T8.13 phase 1.
+// They used to carry a parallel copy each (four, back when a second model pane
+// still shipped), and the copies drifted: v2 shipped without rail 2 entirely
+// (`docs/audits/playground-file-mgmt-review-2026-07.md` defect #6), which
+// #2287 then had to fix twice.  One implementation, every consumer — mission
+// M-T8.13 phase 1.  (Phases 2–4 then retired the v1 model pane into v2, so
+// there are three consumers and one fewer copy to drift; the completeness pin
+// DISCOVERS panes, so nothing about it had to change.)
 //
 // The pure decision half lives in `pane-write.ts` (react-free, unit-tested);
 // this module is the react composition over it.

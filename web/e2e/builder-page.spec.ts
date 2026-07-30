@@ -728,11 +728,11 @@ test("Model v2 shows the syntax-error message instead of a partial graph", async
   await waitForPlaygroundReady(page);
   await setSource(page, LIVE_SYNC_SOURCE);
 
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 15_000 });
 
   await setSource(page, BROKEN_BODY_SOURCE);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByText("Source has syntax errors")).toBeVisible({ timeout: 5_000 });
   await expect(page.getByTestId("c4system-v2-pane")).toHaveCount(0);
   await expect(page.getByTestId("app-crash-fallback")).toHaveCount(0);

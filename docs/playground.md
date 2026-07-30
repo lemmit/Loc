@@ -61,7 +61,7 @@ payload).
 
 ### Visual system builder
 
-There are actually three graphical editors (the "Code" tab's sub-views),
+There are three graphical editors (the "Code" tab's sub-views),
 all backed by craft.js / React Flow, that edit the **same `.ddd` source**
 round-trip — they parse the current source, let you manipulate it visually,
 then splice the result back in (preserving everything else) and push it
@@ -70,9 +70,18 @@ immediately:
 
 - a **page builder** (`src/builder/page/`) — drag/drop the page-body
   primitives (`List`/`Detail`/`Form`/`Stack`/…) onto a craft.js canvas;
-- a **system builder** (`src/builder/system/`, plus a `system-v2/`
-  React-Flow graph variant) — edit deployables, modules, aggregates, and
-  their wiring as a node graph;
+- a **model builder** (`src/builder/system-v2/`, over the shared edit
+  library in `src/builder/system/`) — a React-Flow **drill-down navigator**
+  where the canvas *is* the breadcrumb: each level shows the children of the
+  current construct (system → module → context → aggregate → operation →
+  statement flow), and every node carries its own rename / delete / clause
+  edits. At the root it also offers **Overview** — the whole model as one
+  flat, *read-only* graph, with the coverage heatmap, cross-model search +
+  kind filter, module/context nesting and the wire-shape (DTO) inspector;
+  opening a construct there jumps the navigator to it, ancestors and all.
+  (Until M-T8.13 this shipped as *two* panes — a flat "Model" editor and a
+  "Model v2" drill-down. They are one pane now: one mutation surface, with
+  the flat canvas surviving as the read-only Overview mode.)
 - a **requirements** pane (`src/builder/requirements/`).
 
 These are genuine source-editing surfaces, not read-only diagrams. On

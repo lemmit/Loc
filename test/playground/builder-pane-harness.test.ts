@@ -116,17 +116,16 @@ function panes(): string[] {
 }
 
 describe("builder panes — the rails come from the harness, not a local copy", () => {
-  it("finds the four panes", () => {
+  it("finds the three panes", () => {
+    // Three, not four: M-T8.13 phases 2–4 retired the v1 `SystemBuilderPane`
+    // into `SystemBuilderV2Pane` (its flat canvas survives as that pane's
+    // read-only Overview mode). The discovery walk is what keeps this honest —
+    // a new or renamed pane shows up here the day it lands.
     expect(
       panes()
         .map((p) => path.basename(p))
         .sort(),
-    ).toEqual([
-      "BuilderPane.tsx",
-      "RequirementsPane.tsx",
-      "SystemBuilderPane.tsx",
-      "SystemBuilderV2Pane.tsx",
-    ]);
+    ).toEqual(["BuilderPane.tsx", "RequirementsPane.tsx", "SystemBuilderV2Pane.tsx"]);
   });
 
   it.each(panes().map((p) => [path.basename(p), p]))("%s takes the harness", (_name, file) => {

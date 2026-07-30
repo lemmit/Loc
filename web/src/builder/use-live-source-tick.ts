@@ -13,7 +13,7 @@
 //
 // Since M-T8.13 phase 1 the panes no longer call these directly — `pane-harness.ts`
 // composes them with the parse gate, the write gate and the refusal line into
-// the one `usePaneHarness(ctx)` all four panes take.
+// the one `usePaneHarness(ctx)` every builder pane takes.
 
 import { useEffect, useRef, useState } from "react";
 import { LIVE_SYNC_DEBOUNCE_MS, reseedDecision } from "./live-source-tick";
