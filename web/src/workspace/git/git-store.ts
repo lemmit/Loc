@@ -25,6 +25,12 @@ import * as git from "isomorphic-git";
 
 import type { VfsEntry, VfsFileEntry, VfsListener, VfsPath } from "../../vfs/types.js";
 import { asFsClient, type GitFs } from "./git-fs.js";
+import {
+  encodeGeneratedBase,
+  GENERATED_BASE_REF,
+  GENERATED_PREFIX,
+  type GeneratedBaseMap,
+} from "./refs.js";
 
 /** Normalise a VFS path: enforce leading `/`, collapse `..`/`.`, reject
  *  root escape.  Mirrors `web/src/vfs/memory-vfs.ts`'s `normalize` so
@@ -65,6 +71,13 @@ interface Subscription {
   prefix: VfsPath;
   listener: VfsListener;
 }
+
+/** Notified with the new commit's oid every time a commit lands.  A
+ *  channel of its own rather than a synthetic path event on the file
+ *  notifier: the autosave debounce listens to file events, so folding
+ *  commits into that stream would make every commit schedule the next
+ *  one. */
+export type CommitListener = (oid: string) => void;
 
 /** A node:fs-style error carrying a POSIX `code`.  LightningFS throws
  *  these for ENOENT / EEXIST / ENOTEMPTY / etc. */
@@ -115,6 +128,7 @@ const ABSOLUTE = (filepath: string): VfsPath =>
 
 export class GitStore {
   private readonly subs = new Set<Subscription>();
+  private readonly commitSubs = new Set<CommitListener>();
   /** Serialises commits so concurrent callers (debounced autosave +
    *  an intentional regenerate) can't interleave git index/HEAD writes. */
   private commitChain: Promise<unknown> = Promise.resolve();
@@ -275,6 +289,20 @@ export class GitStore {
     };
   }
 
+  /** Subscribe to commits (autosave, regenerate, restore).  Returns an
+   *  unsubscribe fn.  Separate from `subscribe` so a listener can react
+   *  to history moving without also seeing every keystroke's write. */
+  subscribeCommits(listener: CommitListener): () => void {
+    this.commitSubs.add(listener);
+    return () => {
+      this.commitSubs.delete(listener);
+    };
+  }
+
+  private notifyCommit(oid: string): void {
+    for (const l of this.commitSubs) l(oid);
+  }
+
   private notify(changed: ReadonlyArray<VfsPath>): void {
     for (const sub of this.subs) {
       let matched: VfsPath[] | null = null;
@@ -299,12 +327,26 @@ export class GitStore {
     const workingFiles = nodes
       .filter((n) => n.kind === "file")
       .map((n) => REPO_RELATIVE(n.path));
+    // Tolerate a file vanishing between the walk and its `git.add`: the
+    // walk is not atomic against concurrent writes (a delete from the UI
+    // can land mid-loop), and letting that reject would fail the WHOLE
+    // commit — for the debounced autosave that means the milestone is
+    // silently skipped (`auto-commit.ts` only console.warns).  A file
+    // that is genuinely gone is simply not staged as content; dropping
+    // it from `workingSet` lets the removal pass below stage the delete
+    // instead, so the commit still lands with a consistent tree.
+    const stagedFiles: string[] = [];
     for (const filepath of workingFiles) {
-      await git.add({ fs: this.fsc, dir: this.dir, filepath });
+      try {
+        await git.add({ fs: this.fsc, dir: this.dir, filepath });
+        stagedFiles.push(filepath);
+      } catch (err) {
+        if (await this.exists(ABSOLUTE(filepath))) throw err; // a real failure
+      }
     }
     // Removals: anything currently tracked in the index but gone from
     // the working tree.
-    const workingSet = new Set(workingFiles);
+    const workingSet = new Set(stagedFiles);
     let tracked: string[] = [];
     try {
       tracked = await git.listFiles({ fs: this.fsc, dir: this.dir });
@@ -335,12 +377,14 @@ export class GitStore {
   }
 
   async commit(message: string, author: GitAuthor = LOOM_AUTHOR): Promise<string> {
-    return git.commit({
+    const oid = await git.commit({
       fs: this.fsc,
       dir: this.dir,
       message,
       author: { ...author },
     });
+    this.notifyCommit(oid);
+    return oid;
   }
 
   /** Stage the whole working tree and commit it, serialised against any
@@ -515,7 +559,13 @@ export class GitStore {
    *  write them), so it doesn't depend on git checkout's stat shortcut and
    *  never moves HEAD: the caller commits the restored state as a new
    *  commit, keeping history linear and recoverable.  Returns the absolute
-   *  paths it changed. */
+   *  paths it changed.
+   *
+   *  Also re-baselines `refs/loom/generated-base` to the restored
+   *  `generated/**` tree.  That ref is what the regenerate 3-way merge
+   *  calls "the output generated last time"; left pointing at the newer
+   *  output, every rolled-back generated file reads as a hand edit and
+   *  the next regenerate sprays conflict markers over the tree. */
   async restoreCommit(oid: string): Promise<VfsPath[]> {
     // Target = the commit's /workspace blobs.
     const target = new Map<VfsPath, string>();
@@ -555,6 +605,17 @@ export class GitStore {
         changed.push(path);
       }
     }
+
+    // The base is a JSON blob of project-relative generated paths (never
+    // a commit oid) — `generated-tree.ts` reads it back through
+    // `decodeGeneratedBase`, so point the ref at a freshly-written blob
+    // describing the tree we just restored.
+    const base: GeneratedBaseMap = {};
+    for (const [path, content] of target) {
+      if (path.startsWith(GENERATED_PREFIX)) base[path.slice(GENERATED_PREFIX.length)] = content;
+    }
+    await this.writeRef(GENERATED_BASE_REF, await this.writeBlobText(encodeGeneratedBase(base)));
+
     return changed;
   }
 

@@ -21,12 +21,28 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActionIcon, Box, Button, Group, Menu, Stack, Text, TextInput, Tooltip } from "@mantine/core";
+import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Group,
+  Menu,
+  Stack,
+  Text,
+  TextInput,
+  Tooltip,
+} from "@mantine/core";
 import { buildTree, type TreeFolder } from "../preview/file-tree";
 import { FileTree } from "../preview/FileTree";
-import { DEFAULT_PATH } from "../workspace/workspace-sources";
+import {
+  DEFAULT_PATH,
+  EPHEMERAL_MESSAGE,
+  type WorkspaceSourcesError,
+} from "../workspace/workspace-sources";
 import {
   fileInFolderPath,
+  joinRel,
   parentRelOf,
   renameTargetPath,
   validateNewFileInFolder,
@@ -56,6 +72,16 @@ export interface SourceFilesTreeProps {
   onDeleteFolder?: (folder: string) => void;
   /** Rename a file: write `newPath` with the old content, drop `oldPath`. */
   onRename?: (oldPath: string, newPath: string) => void;
+  /** Whether file changes actually persist.  False in ephemeral mode
+   *  (no git store), where every mutator is a no-op — the create /
+   *  rename / delete affordances are disabled and say why rather than
+   *  letting the user add a file that silently evaporates. */
+  persistent?: boolean;
+  /** Last failed mutation from the sources controller, rendered as a
+   *  dismissible Alert above the tree. */
+  error?: WorkspaceSourcesError | null;
+  /** Dismiss `error`. */
+  onDismissError?: () => void;
   /** Layout:
    *   - `sidebar`   — a standalone desktop column (own header + border).
    *   - `accordion` — a collapsible mobile panel.
@@ -117,9 +143,26 @@ interface MenuState {
   target: { path: string; kind: "file" | "folder" } | null;
 }
 
+/** Human-readable title for a failed mutation, by op. */
+const ERROR_TITLE: Record<WorkspaceSourcesError["op"], string> = {
+  write: "Save failed",
+  create: "Could not create the file",
+  "create-folder": "Could not create the folder",
+  delete: "Delete failed",
+  "delete-folder": "Could not delete the folder",
+};
+
+/** Shared empty-set identity for the optional `emptyFolders` prop. */
+const NO_EMPTY_FOLDERS: ReadonlySet<string> = new Set<string>();
+
 export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   const variant = props.variant ?? "accordion";
-  const emptyFolders = props.emptyFolders ?? new Set<string>();
+  const persistent = props.persistent ?? true;
+  // Module-level fallback, not `new Set()` inline: an inline literal is a fresh
+  // identity every render, which makes the `root` memo below miss every single
+  // time (a full workspace-tree rebuild per render) for every caller that
+  // doesn't pass `emptyFolders`.
+  const emptyFolders = props.emptyFolders ?? NO_EMPTY_FOLDERS;
   const root = useMemo(
     () => workspaceTree(props.files, props.activePath, emptyFolders),
     [props.files, props.activePath, emptyFolders],
@@ -129,13 +172,16 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   const [form, setForm] = useState<FormState>(null);
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
+  // The header "+" menu is CONTROLLED — see `addMenu` below for why the
+  // uncontrolled Mantine toggle can't survive this target sandwich.
+  const [addOpened, setAddOpened] = useState(false);
   const existingPaths = useMemo(() => new Set(props.files.keys()), [props.files]);
 
   const draftError =
     form?.kind === "create-file"
       ? validateNewFileInFolder(draft, existingPaths, form.parent)
       : form?.kind === "create-folder"
-        ? validateNewFolderName(draft, existingPaths)
+        ? validateNewFolderName(draft, existingPaths, form.parent, emptyFolders)
         : form?.kind === "rename"
           ? validateRename(draft, existingPaths, form.target)
           : undefined;
@@ -169,8 +215,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
       props.onCreate(fileInFolderPath(form.parent, draft));
     } else if (form.kind === "create-folder") {
       const name = draft.trim().replace(/^\/+/, "").replace(/\/+$/, "");
-      const folder = form.parent ? `${form.parent}/${name}` : name;
-      props.onCreateFolder?.(folder);
+      props.onCreateFolder?.(joinRel(form.parent, name));
     } else if (form.kind === "rename") {
       const target = renameTargetPath(form.target, draft);
       if (target !== form.target) props.onRename?.(form.target, target);
@@ -217,10 +262,18 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
       if (target === null) {
         return (
           <>
-            <Menu.Item onClick={() => openForm({ kind: "create-file", parent: "" })}>
+            <Menu.Item
+              disabled={!persistent}
+              data-testid="source-files-new-file"
+              onClick={() => openForm({ kind: "create-file", parent: "" })}
+            >
               New file…
             </Menu.Item>
-            <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: "" })}>
+            <Menu.Item
+              disabled={!persistent}
+              data-testid="source-files-new-folder"
+              onClick={() => openForm({ kind: "create-folder", parent: "" })}
+            >
               New folder…
             </Menu.Item>
           </>
@@ -230,14 +283,24 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         const folderRel = target.path;
         return (
           <>
-            <Menu.Item onClick={() => openForm({ kind: "create-file", parent: folderRel })}>
+            <Menu.Item
+              disabled={!persistent}
+              onClick={() => openForm({ kind: "create-file", parent: folderRel })}
+            >
               New file…
             </Menu.Item>
-            <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: folderRel })}>
+            <Menu.Item
+              disabled={!persistent}
+              onClick={() => openForm({ kind: "create-folder", parent: folderRel })}
+            >
               New folder…
             </Menu.Item>
             <Menu.Divider />
-            <Menu.Item color="red" onClick={() => confirmDeleteFolder(folderRel)}>
+            <Menu.Item
+              color="red"
+              disabled={!persistent}
+              onClick={() => confirmDeleteFolder(folderRel)}
+            >
               Delete folder
             </Menu.Item>
           </>
@@ -249,19 +312,23 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         <>
           <Menu.Item onClick={() => props.onSelect(fullPath)}>Open</Menu.Item>
           <Menu.Item
-            disabled={isMain}
+            disabled={isMain || !persistent}
             onClick={() => openForm({ kind: "rename", target: fullPath }, leafNoExt(fullPath))}
           >
             Rename…
           </Menu.Item>
           <Menu.Divider />
-          <Menu.Item color="red" disabled={isMain} onClick={() => confirmDeleteFile(fullPath)}>
+          <Menu.Item
+            color="red"
+            disabled={isMain || !persistent}
+            onClick={() => confirmDeleteFile(fullPath)}
+          >
             Delete file
           </Menu.Item>
         </>
       );
     },
-    [openForm, confirmDeleteFile, confirmDeleteFolder, props],
+    [openForm, confirmDeleteFile, confirmDeleteFolder, persistent, props],
   );
 
   const menuItems = menu ? actionItems(menu.target) : null;
@@ -307,19 +374,54 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     [actionItems],
   );
 
+  // Opening the "+" menu is DRIVEN BY US, not by Mantine's uncontrolled
+  // toggle.  Two forces collide on this one element:
+  //
+  //  1. In the accordion variant the button sits inside a `<summary>`, so a
+  //     plain click would toggle the `<details>` open/closed underneath the
+  //     menu.  That's what the `preventDefault()` is for.
+  //  2. `Menu.Target` injects its toggle as the CHILD's `onClick` — but the
+  //     child here is a `Tooltip`, and Tooltip re-spreads the grandchild's own
+  //     props AFTER the ones it received (`{...tooltipProps, ..._childrenProps}`).
+  //     So the `ActionIcon`'s local `onClick` silently REPLACED the toggle and
+  //     the menu never opened at all (the "+" was a dead affordance).
+  //
+  // Controlling `opened` keeps both: cancel the summary toggle, then flip the
+  // menu ourselves.  Mantine still closes it on item click / outside click via
+  // `onChange`.
+  const toggleAdd = (e: { preventDefault: () => void; stopPropagation: () => void }): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAddOpened((o) => !o);
+  };
+
   const addMenu = (
-    <Menu position="bottom-end" shadow="sm" withinPortal>
+    <Menu position="bottom-end" shadow="sm" withinPortal opened={addOpened} onChange={setAddOpened}>
       <Menu.Target>
-        <Tooltip label="Add a new .ddd file or folder" withArrow openDelay={400}>
+        <Tooltip
+          label={persistent ? "Add a new .ddd file or folder" : EPHEMERAL_MESSAGE}
+          withArrow
+          multiline
+          w={persistent ? undefined : 260}
+          openDelay={400}
+        >
           <ActionIcon
             component="span"
             size={variant === "accordion" ? "md" : "sm"}
             variant="subtle"
             color="gray"
+            data-testid="source-files-add"
+            role="button"
+            tabIndex={0}
             aria-label="Add a new .ddd file or folder"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
+            aria-disabled={!persistent}
+            data-disabled={persistent ? undefined : true}
+            onClick={toggleAdd}
+            // `component="span"` (a `<button>` isn't valid inside `<summary>`)
+            // means no built-in keyboard activation — wire it up explicitly so
+            // the menu is reachable without a pointer.
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") toggleAdd(e);
             }}
           >
             +
@@ -332,10 +434,47 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           e.stopPropagation();
         }}
       >
-        <Menu.Item onClick={() => openForm({ kind: "create-file", parent: "" })}>New file</Menu.Item>
-        <Menu.Item onClick={() => openForm({ kind: "create-folder", parent: "" })}>New folder</Menu.Item>
+        <Menu.Item
+          disabled={!persistent}
+          data-testid="source-files-new-file"
+          onClick={() => openForm({ kind: "create-file", parent: "" })}
+        >
+          New file
+        </Menu.Item>
+        <Menu.Item
+          disabled={!persistent}
+          data-testid="source-files-new-folder"
+          onClick={() => openForm({ kind: "create-folder", parent: "" })}
+        >
+          New folder
+        </Menu.Item>
       </Menu.Dropdown>
     </Menu>
+  );
+
+  // Why nothing the user does here will stick.  Same condition (and the
+  // same explanation) the History panel already shows for its own
+  // unavailability — before this the file UI just silently no-op'd.
+  const ephemeralNotice = !persistent && (
+    <Text size="xs" c="dimmed" px="sm" py={6} data-testid="source-files-ephemeral">
+      {EPHEMERAL_MESSAGE}
+    </Text>
+  );
+
+  const errorAlert = props.error && (
+    <Alert
+      color="red"
+      variant="light"
+      mx="sm"
+      my={6}
+      withCloseButton={!!props.onDismissError}
+      onClose={props.onDismissError}
+      title={ERROR_TITLE[props.error.op]}
+      data-testid="source-files-error"
+      style={{ flexShrink: 0 }}
+    >
+      <Text size="xs">{props.error.message}</Text>
+    </Alert>
   );
 
   const inlineForm = form !== null && (
@@ -347,6 +486,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         <TextInput
           size="sm"
           autoFocus
+          data-testid="source-files-name"
           placeholder={
             form.kind === "create-folder" ? "folder name" : "filename (.ddd optional)"
           }
@@ -359,7 +499,13 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           }}
         />
         <Group gap={6} wrap="nowrap">
-          <Button size="xs" variant="default" onClick={submitForm} disabled={!!draftError}>
+          <Button
+            size="xs"
+            variant="default"
+            data-testid="source-files-submit"
+            onClick={submitForm}
+            disabled={!!draftError}
+          >
             {form.kind === "rename" ? "Rename" : "Add"}
           </Button>
           <Button size="xs" variant="subtle" color="gray" onClick={cancelForm}>
@@ -406,6 +552,8 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           : { flex: 1, minHeight: 0, overflow: "auto" }
       }
     >
+      {errorAlert}
+      {ephemeralNotice}
       {inlineForm}
       <FileTree
         root={root}

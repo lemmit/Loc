@@ -94,6 +94,55 @@ test("Restore this version creates a restore commit", async ({ page }) => {
   });
 });
 
+test("Restore this version reverts the visible editor content", async ({ page }) => {
+  await wipeStorage(page);
+
+  // A marker that exists ONLY after the SECOND edit, so the oldest commit is
+  // always a valid "before" target.
+  //
+  // The base edit is load-bearing, not padding: opening a fresh workspace does
+  // not itself record a commit, so a single edit leaves history with exactly
+  // ONE row — and then `rows.count() > 1` below fails (and restoring that lone
+  // row would restore the marker itself).  Two edits give a pre-marker commit
+  // deterministically, the same shape the sibling "creates a restore commit"
+  // test already relies on.
+  const marker = `// hist-visible-${Date.now()}`;
+  await editAndCommit(page, "// hist-visible-base");
+  await editAndCommit(page, marker);
+  const editor = page.locator(".monaco-editor").first();
+  await expect(editor).toContainText(marker, { timeout: 10_000 });
+
+  await page.getByTestId("devtools-tab-history").click();
+  const rows = page.getByTestId("history-row");
+  await expect.poll(() => rows.count(), { timeout: 10_000 }).toBeGreaterThan(1);
+
+  // Restore the OLDEST commit: it predates the marker no matter which
+  // autosave / regenerate commits landed in between (the newest row is
+  // the current state and offers no Restore button).
+  await rows.last().click();
+  await page.getByTestId("history-restore").last().click();
+  await page.getByTestId("history-restore-do").last().click();
+  await expect(page.getByTestId("history-list")).toContainText("restore to", {
+    timeout: 10_000,
+  });
+
+  // The fix: the store→editor direction of the sync.  Without it the git
+  // tree rolls back but Monaco keeps showing (and owning) the old buffer.
+  await expect(editor).not.toContainText(marker, { timeout: 15_000 });
+
+  // …and the next keystroke must not write the pre-restore buffer back.
+  await editor.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\n// after-restore\n");
+  await page.waitForTimeout(2200); // past the autosave-commit debounce
+  await expect(editor).not.toContainText(marker);
+  await page.reload();
+  await waitForPlaygroundReady(page);
+  await expect(page.locator(".monaco-editor").first()).not.toContainText(marker, {
+    timeout: 15_000,
+  });
+});
+
 test("Output panel exposes a Conflicts stream", async ({ page }) => {
   await wipeStorage(page);
   await page.getByTestId("devtools-tab-output").click();

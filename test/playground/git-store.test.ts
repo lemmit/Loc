@@ -222,6 +222,38 @@ describe("GitStore: notifier", () => {
     await store.mkdir("/workspace/a/b/c");
     expect(seen).toEqual([["/workspace/a", "/workspace/a/b", "/workspace/a/b/c"]]);
   });
+
+  it("notifies commit subscribers with the new oid", async () => {
+    const seen: string[] = [];
+    const unsub = store.subscribeCommits((oid) => seen.push(oid));
+    await store.writeFile("/workspace/a.ddd", "1");
+    const oid = await store.commitWorkingTree("c1");
+    expect(seen).toEqual([oid]);
+    unsub();
+    await store.writeFile("/workspace/a.ddd", "2");
+    await store.commitWorkingTree("c2");
+    expect(seen).toHaveLength(1); // no delivery after unsubscribe
+  });
+
+  it("does not notify commit subscribers when nothing was staged", async () => {
+    const seen: string[] = [];
+    store.subscribeCommits((oid) => seen.push(oid));
+    await store.writeFile("/workspace/a.ddd", "1");
+    await store.commitWorkingTree("c1");
+    expect(await store.commitWorkingTree("no-op")).toBeUndefined();
+    expect(seen).toHaveLength(1);
+  });
+
+  it("keeps the commit channel separate from the file channel", async () => {
+    // The autosave debounce listens on the file channel; a commit
+    // arriving there would make every commit schedule the next one.
+    const files: VfsPath[][] = [];
+    store.subscribe("/workspace", (changed) => files.push([...changed]));
+    await store.writeFile("/workspace/a.ddd", "1");
+    files.length = 0;
+    await store.commitWorkingTree("c1");
+    expect(files).toEqual([]);
+  });
 });
 
 describe("GitStore: snapshot projection", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import "fake-indexeddb/auto";
+import type { VfsPath } from "../../web/src/vfs/types.js";
 import { GitStore, openGitFs, startAutoCommit } from "../../web/src/workspace/git/index.js";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,76 @@ describe("GitStore.commitWorkingTree", () => {
     expect(await store.commitWorkingTree("noop")).toBeUndefined();
     await store.writeFile("/workspace/main.ddd", "x");
     expect(await store.commitWorkingTree("real")).toBeTypeOf("string");
+  });
+});
+
+// Defect #17 of the 2026-07 review's register: `stageAll` walks the tree and
+// then `git.add`s each path, so a file deleted in between rejected the WHOLE
+// commit — and `startAutoCommit` only console.warns, so the autosave milestone
+// vanished silently.  Staging is now per-path tolerant of a vanished file.
+describe("GitStore.stageAll tolerates concurrent deletes", () => {
+  /** Delete `path` between `stageAll`'s tree walk and its per-file
+   *  `git.add` — the real race (a UI delete landing mid-commit), which
+   *  used to reject the whole commit and silently skip the autosave. */
+  function deleteDuringWalk(store: GitStore, path: VfsPath): void {
+    const walk = (store as unknown as { walkTree(): Promise<unknown> }).walkTree.bind(store);
+    (store as unknown as { walkTree(): Promise<unknown> }).walkTree = async () => {
+      const nodes = await walk();
+      await store.deleteFile(path);
+      return nodes;
+    };
+  }
+
+  it("still commits the surviving files when one vanishes mid-walk", async () => {
+    const store = await freshStore();
+    await store.writeFile("/workspace/a.ddd", "1");
+    await store.writeFile("/workspace/doomed.ddd", "2");
+    deleteDuringWalk(store, "/workspace/doomed.ddd");
+
+    const oid = await store.commitWorkingTree("save");
+    expect(oid).toBeTypeOf("string");
+    expect(await store.readFileAtRef("/workspace/a.ddd")).toBe("1");
+    expect(await store.readFileAtRef("/workspace/doomed.ddd")).toBeUndefined();
+  });
+
+  it("records the delete when the vanished file was already tracked", async () => {
+    const store = await freshStore();
+    await store.writeFile("/workspace/a.ddd", "1");
+    await store.writeFile("/workspace/doomed.ddd", "2");
+    await store.commitWorkingTree("first");
+    expect(await store.readFileAtRef("/workspace/doomed.ddd")).toBe("2");
+
+    await store.writeFile("/workspace/a.ddd", "1b");
+    deleteDuringWalk(store, "/workspace/doomed.ddd");
+    expect(await store.commitWorkingTree("second")).toBeTypeOf("string");
+    expect(await store.readFileAtRef("/workspace/a.ddd")).toBe("1b");
+    expect(await store.readFileAtRef("/workspace/doomed.ddd")).toBeUndefined();
+  });
+
+  it("still surfaces a genuine add failure", async () => {
+    const store = await freshStore();
+    await store.writeFile("/workspace/a.ddd", "1");
+    // A file the walk reports but that never existed is indistinguishable
+    // from one deleted mid-walk — it is skipped, not fatal...
+    const walk = (store as unknown as { walkTree(): Promise<{ path: string; kind: string }[]> })
+      .walkTree;
+    (store as unknown as { walkTree(): Promise<{ path: string; kind: string }[]> }).walkTree =
+      async () => [
+        ...(await walk.call(store)),
+        { path: "/workspace/ghost.ddd", kind: "file" as const },
+      ];
+    expect(await store.commitWorkingTree("save")).toBeTypeOf("string");
+    // ...while a real file whose read blows up must NOT be swallowed.
+    await store.writeFile("/workspace/b.ddd", "2");
+    const fsp = store.context.fs.promises as unknown as {
+      readFile(p: string, o?: unknown): Promise<unknown>;
+    };
+    const realRead = fsp.readFile.bind(fsp);
+    fsp.readFile = async (p, o) => {
+      if (p === "/workspace/b.ddd") throw new Error("disk on fire");
+      return realRead(p, o);
+    };
+    await expect(store.commitWorkingTree("boom")).rejects.toBeTruthy();
   });
 });
 

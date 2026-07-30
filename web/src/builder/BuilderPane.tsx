@@ -6,7 +6,10 @@ import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
 import { isAggregate, isOperation, isPage, isUi, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
-import { spliceNode } from "./edit-engine";
+import { ifParses, spliceNodeIfParses } from "./edit-engine";
+import { RefusalLine, useRefusal } from "./refusal";
+import { useLiveSourceTick } from "./use-live-source-tick";
+import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
 import {
@@ -55,32 +58,6 @@ import StatePanel from "./page/StatePanel";
 // Apply tags the edit as "builder" origin so it's pushed back into the live
 // Monaco model + LSP (source tab and Problems panel reflect it immediately),
 // then re-seeds the canvas so the change persists visibly here too.
-interface BodyEntry {
-  name: string;
-  /** The body expression (its CST range is the splice target). */
-  expr: Expression;
-  /** The owning `Page` (absent for `component` bodies) — drives the state editor. */
-  page?: Page;
-}
-
-// Every editable body: a `page`'s `body:` and a `component`'s `body:` both
-// project a single expression onto the canvas.
-function collectBodies(ast: unknown): BodyEntry[] {
-  const out: BodyEntry[] = [];
-  for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
-    if (node.$type === "Page") {
-      const body = (node as Page).props.find((p): p is BodyProp => p.$type === "BodyProp");
-      if (body) out.push({ name: (node as Page).name, expr: body.expr, page: node as Page });
-    } else if (node.$type === "Component") {
-      // Extern components have no `body:` (their rendering lives in a
-      // hand-written module), so there's nothing to project onto the canvas.
-      const comp = node as Component;
-      if (comp.body) out.push({ name: comp.name, expr: comp.body });
-    }
-  }
-  return out;
-}
-
 // Typed option sets for `ref` props (drives the binding dropdowns).  `operation`
 // is contextual (depends on a node's sibling `of:`) so it's collected separately.
 function collectOptions(ast: unknown): Record<string, string[]> {
@@ -115,7 +92,7 @@ function collectComponents(ast: unknown): Map<string, string[]> {
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "Component") {
       const c = node as Component;
-      out.set(c.name, c.params.map((p) => p.name));
+      out.set(c.name, (c.params ?? []).map((p) => p.name));
     }
   }
   return out;
@@ -128,7 +105,7 @@ function collectEnums(ast: unknown): Map<string, string[]> {
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "EnumDecl") {
       const e = node as EnumDecl;
-      out.set(e.name, e.values.map((v) => v.name));
+      out.set(e.name, (e.values ?? []).map((v) => v.name));
     }
   }
   return out;
@@ -154,43 +131,31 @@ function annotateDiagnostics(tree: BuilderNode, diagnostics: readonly { range: {
   }
 }
 
-// Debounce window for the text→canvas live re-seed.  300ms is the lower
-// bound the task gave; long enough to coalesce a typing storm in Monaco,
-// short enough that an edit feels "live" to the user watching the canvas.
-const LIVE_SYNC_DEBOUNCE_MS = 350;
+/** Stable string describing which nodes of a serialized seed carry a
+ *  `__diag` annotation (and what it says).  `""` when none do — the common
+ *  case, which keeps the canvas mount key still. */
+function diagSignature(nodes: SerializedNodes | null): string {
+  if (!nodes) return "";
+  const parts: string[] = [];
+  for (const [id, node] of Object.entries(nodes)) {
+    const diag = (node as { props?: Record<string, unknown> }).props?.__diag;
+    if (typeof diag === "string" && diag !== "") parts.push(`${id}=${diag}`);
+  }
+  return parts.sort().join("|");
+}
 
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
-  // Debounced mirror of `ctx.editorSourceTick`.  Bumped after the user
-  // has stopped typing for `LIVE_SYNC_DEBOUNCE_MS`; that drives the live
-  // canvas re-seed (separate from `rev`, which is the Apply-path counter
-  // that fully remounts the craft Editor — the live path mustn't remount,
-  // or the user's selection / open inputs would tear down).
-  //
-  // The very first editor tick observed by this BuilderPane instance is
-  // captured in `firstSeenTickRef` and ignored: the initial canvas seed
-  // already reflects whatever source the user typed before opening the
-  // builder, so re-running the seed on that pre-mount tick would clobber
-  // a selection / settings-panel edit the user started during the
-  // debounce window after switching tabs.  Only ticks that *advance*
-  // beyond that baseline schedule a re-seed.
-  const [liveTick, setLiveTick] = useState(0);
-  const firstSeenTickRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (firstSeenTickRef.current === null) {
-      firstSeenTickRef.current = ctx.editorSourceTick;
-      return;
-    }
-    if (ctx.editorSourceTick <= firstSeenTickRef.current) return;
-    const t = window.setTimeout(() => setLiveTick((n) => n + 1), LIVE_SYNC_DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [ctx.editorSourceTick]);
-  // `rev` re-reads on Apply (full remount); `liveTick` re-reads on the
-  // debounced editor change (in-place re-seed inside PageBuilder).  Don't
-  // depend on `ctx` here — ctx is a fresh object every App render, but the
-  // underlying source only changes when one of these counters bumps, and
-  // re-parsing on every render makes `liveNodes` a new reference each
+  // Debounced mirror of `ctx.editorSourceTick` — bumped after the user has
+  // stopped typing.  Separate from `rev` (the Apply-path counter that fully
+  // remounts the craft Editor); the live path must NOT remount or the user's
+  // selection / open inputs would tear down.  See `use-live-source-tick.ts`
+  // for the baseline rule (the first tick a pane sees is not a change).
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  // `rev` re-reads on Apply; `liveTick` re-reads on the debounced editor
+  // change (in-place re-seed inside PageBuilder).  Don't depend on `ctx`
+  // here — re-parsing on every render makes `liveNodes` a new reference each
   // time, which would echo into a deserialize that clobbers the user's
   // in-flight settings-panel edits.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,10 +167,20 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const componentNames = useMemo(() => [...components.keys()].sort(), [components]);
   const stateTypes = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const enumCases = useMemo(() => collectEnums(parsed.ast), [parsed]);
+  const refusal = useRefusal();
 
   // Apply a source-level state edit (splice) and re-seed, like handleApply.
+  // The State panel's helpers splice a reprinted `state { … }` block; a bad
+  // reprint would otherwise commit a source the builder itself can't reopen,
+  // so the candidate is re-parsed here before it reaches the editor.
   const applyState = (next: string | null): void => {
+    // null here means the helper found nothing to edit — not a refusal.
     if (next == null) return;
+    if (ifParses(next) == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
     ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
   };
@@ -251,7 +226,9 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // on the canvas so the builder flags problems without leaving for the
   // Problems panel.
   const bodyDiagnostics = useMemo(() => {
-    const r = current?.expr.$cstNode?.range;
+    // `expr` can be undefined on a recovered AST — the `?.` has to guard it,
+    // not just `current`.
+    const r = current?.expr?.$cstNode?.range;
     if (!r) return [];
     return ctx.diagnostics.filter((d) => d.range.start.line <= r.end.line && d.range.end.line >= r.start.line);
   }, [ctx.diagnostics, current]);
@@ -265,7 +242,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // settings-panel edits.
   const seedNodes = useMemo<SerializedNodes | null>(
     () => {
-      if (!current) return null;
+      if (!current?.expr) return null;
       return toCraft(seedFromBody(current.expr, components));
     },
     [current, components],
@@ -273,26 +250,35 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Diagnostics overlay — annotate a separate copy so it doesn't disturb
   // the canonical seed.  `initialNodes` (below) is what `<Frame>` consumes,
   // and craft only honours its initial value, so a diagnostic-only refresh
-  // doesn't reach the canvas — that's acceptable: the diagnostics bar at
-  // the top of the canvas (separate component) updates immediately, and
-  // per-node red outlines surface on the next live re-seed / Apply.
+  // can't reach the canvas through the data prop — `diagKey` below carries it
+  // into the mount key instead.
   const annotatedNodes = useMemo<SerializedNodes | null>(
     () => {
-      if (!current || !seedNodes) return null;
+      if (!current?.expr || !seedNodes) return null;
       const tree = seedFromBody(current.expr, components);
       annotateDiagnostics(tree, bodyDiagnostics);
       return toCraft(tree);
     },
     [current, components, seedNodes, bodyDiagnostics],
   );
+  // Which nodes of the annotated seed actually carry a diagnostic.  The
+  // per-node outlines are baked into the seed at MOUNT, and diagnostics arrive
+  // out-of-band of the parse (LSP round-trip) — so a warning that lands after
+  // the mount, or one whose range only lines up with the seed a re-emit later,
+  // would otherwise never reach the canvas at all: the problems bar showed it
+  // and the node stayed unmarked, permanently.  Folding the annotation set into
+  // the mount key re-bakes the seed exactly when it changes.  It is derived
+  // from the ATTACHED annotations, not from `ctx.diagnostics`, so an unmapped
+  // or unchanged diagnostic set leaves the key alone and the canvas mounted.
+  const diagKey = useMemo(() => diagSignature(annotatedNodes), [annotatedNodes]);
 
   // `initialNodes` is the **first** seed for the current Editor mount (i.e.
-  // the current page + Apply-rev pair).  It's what `<Frame data={...}>`
-  // consumes; craft ignores subsequent `data` changes, so a live re-seed
-  // can't go through here — see `liveNodes` below.  We snapshot the very
-  // first non-null annotated seed and pin it via a ref so live updates
-  // don't bleed into the Frame's data and trigger a Frame remount.
-  const mountKey = `${current?.name ?? ""}:${rev}`;
+  // the current page + Apply-rev + annotation triple).  It's what
+  // `<Frame data={...}>` consumes; craft ignores subsequent `data` changes, so
+  // a live re-seed can't go through here — see `liveNodes` below.  We snapshot
+  // the first non-null annotated seed per key and pin it via a ref so live
+  // updates don't bleed into the Frame's data and trigger a Frame remount.
+  const mountKey = `${current?.name ?? ""}:${rev}:${diagKey}`;
   const initialNodesRef = useRef<{ key: string; nodes: SerializedNodes } | null>(null);
   if (annotatedNodes && initialNodesRef.current?.key !== mountKey) {
     initialNodesRef.current = { key: mountKey, nodes: annotatedNodes };
@@ -317,13 +303,24 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return <Message>No <code>page</code> or <code>component</code> with a <code>body:</code> found. Add a <code>ui {"{ page { … } }"}</code> block.</Message>;
   }
 
+  // `source` is read ONCE and everything downstream — the parse that locates
+  // the page, the splice, and the re-parse that validates it — runs against
+  // that same snapshot.  The canvas is seeded off a 350 ms-debounced parse, so
+  // `ctx.getSource()` can have drifted from what the user sees; re-reading it
+  // between validate and commit would reopen exactly that window.
   const handleApply = (nodes: SerializedNodes): void => {
     const source = ctx.getSource();
     const fresh = parseDdd(source);
     const page = collectBodies(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    ctx.onSourceChange(spliceNode(source, page.expr, emitted), "builder");
+    const next = spliceNodeIfParses(source, page.expr, emitted);
+    if (next == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
+    ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
   };
 
@@ -351,9 +348,13 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           )}
         </Group>
       )}
+      <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <PageBuilder
-          key={`${current.name}:${rev}`}
+          // `mountKey` (page : Apply-rev : annotation-set) — remounting the
+          // craft Editor is the only way a freshly annotated seed reaches
+          // `<Frame data>`, which craft reads once.
+          key={mountKey}
           initialNodes={initialNodes}
           liveNodes={liveNodes ?? initialNodes}
           pages={pages.map((p) => p.name)}

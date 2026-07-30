@@ -3,7 +3,7 @@ import type { BodyProp, Expression, Model, Page, StateBlock, StateField } from "
 import { printStructural } from "../../../../src/language/print/index.js";
 import { mkStateBlock, mkStateField } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { applyEdits, nodeEditRange } from "../edit-engine";
+import { applyEdits, ifParses, nodeEditRange } from "../edit-engine";
 import { baseLabel, baseSpecOf, buildTypeRef, typeText, type BaseSpec, type TypeSpec } from "../system/fields";
 
 // ---------------------------------------------------------------------------
@@ -84,18 +84,17 @@ function parseExpr(text: string): Expression | null {
 export function listStateFields(page: Page): StateFieldInfo[] {
   const sb = stateBlockOf(page);
   if (!sb) return [];
-  return sb.fields.map((f) => {
+  // A field whose `type` didn't parse is skipped rather than dereferenced —
+  // the panel re-reads the live source mid-keystroke, and Langium recovery
+  // keeps the `StateField` with `type` undefined.
+  return sb.fields.flatMap((f) => {
+    if (!f.type) return [];
     const base = baseSpecOf(f.type);
-    return { name: f.name, base, baseLabel: baseLabel(base), array: f.type.array, optional: f.type.optional, init: f.init?.$cstNode?.text?.trim() };
+    return [{ name: f.name, base, baseLabel: baseLabel(base), array: f.type.array, optional: f.type.optional, init: f.init?.$cstNode?.text?.trim() }];
   });
 }
 
 // --- mutating ops (parse → locate → narrow splice → re-parse) --------------
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
-}
 
 /** Leading whitespace of the line containing `offset`. */
 function lineIndent(source: string, offset: number): string {
@@ -167,7 +166,7 @@ export function retypeStateField(source: string, pageName: string, index: number
   const sb = page && stateBlockOf(page);
   // Only the `TypeRef` span is rewritten, so a trailing `= init` on the same
   // field is untouched rather than reprinted.
-  const cst = sb?.fields[index]?.type.$cstNode;
+  const cst = sb?.fields[index]?.type?.$cstNode;
   if (!cst) return null;
   return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(spec) }]));
 }
@@ -178,7 +177,7 @@ export function setStateDefault(source: string, pageName: string, index: number,
   const page = locate(source, pageName);
   const sb = page && stateBlockOf(page);
   const field = sb?.fields[index];
-  const typeCst = field?.type.$cstNode;
+  const typeCst = field?.type?.$cstNode;
   if (!field || !typeCst) return null;
   const initCst = field.init?.$cstNode;
   if (text.trim() === "") {

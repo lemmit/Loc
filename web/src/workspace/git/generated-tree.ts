@@ -31,14 +31,16 @@
 // ---------------------------------------------------------------------------
 
 import { commitOnSave } from "./helpers.js";
-import { GENERATED_BASE_REF } from "./helpers.js";
+import {
+  decodeGeneratedBase,
+  encodeGeneratedBase,
+  GENERATED_BASE_REF,
+  GENERATED_PREFIX,
+} from "./refs.js";
 import type { GitAuthor, GitStore } from "./git-store.js";
 import type { VfsPath } from "../../vfs/types.js";
 
-/** Root under which generated output is written.  Disjoint from the
- *  `.ddd` sources (`/workspace/*.ddd`) and custom packs
- *  (`/workspace/design/`), so generated paths never collide. */
-export const GENERATED_PREFIX = "/workspace/generated/";
+export { GENERATED_PREFIX };
 
 /** A generated file as produced by the build worker — a project-
  *  relative path (`catalog_web/domain/product.ts`) and its content. */
@@ -87,7 +89,7 @@ async function readGeneratedBase(
 ): Promise<Record<string, string> | null> {
   try {
     const oid = await store.resolveRef(GENERATED_BASE_REF);
-    return JSON.parse(await store.readBlobText(oid)) as Record<string, string>;
+    return decodeGeneratedBase(await store.readBlobText(oid));
   } catch {
     return null; // no prior generate
   }
@@ -97,7 +99,7 @@ async function writeGeneratedBase(
   store: GitStore,
   map: Record<string, string>,
 ): Promise<void> {
-  const oid = await store.writeBlobText(JSON.stringify(map));
+  const oid = await store.writeBlobText(encodeGeneratedBase(map));
   await store.writeRef(GENERATED_BASE_REF, oid);
 }
 

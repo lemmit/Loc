@@ -3,6 +3,7 @@ import { Center, Loader, Stack, Text } from "@mantine/core";
 import * as monaco from "monaco-editor";
 import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic } from "../lsp/protocol";
+import { modelUriFor } from "../lsp/workspace-lsp-sync";
 
 const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
 
@@ -18,6 +19,8 @@ const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
  *  documents by URI, so two callers (LoomEditor + workspace-lsp-sync) must
  *  agree on the same URI for the same file or they'd create duplicate
  *  documents in Langium's global scope and produce phantom ambiguity errors.
+ *  The string form is therefore owned by ONE function — `modelUriFor` in
+ *  `lsp/workspace-lsp-sync.ts` — and parsed here.
  *
  *  The scheme is `inmemory:///<workspace-relative>` for every `.ddd` source,
  *  so `/workspace/main.ddd` → `inmemory:///workspace/main.ddd` and
@@ -26,8 +29,8 @@ const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
  *  back-compat shim from before multi-file workspaces existed; collapsing
  *  it means cross-file imports (`import "./shared/money.ddd"`) resolve
  *  through the same URI scheme as the build-worker's `project-loader`. */
-function modelUriFor(activePath: string): monaco.Uri {
-  return monaco.Uri.parse(`inmemory:///${activePath.replace(/^\/+/, "")}`);
+function monacoUriFor(activePath: string): monaco.Uri {
+  return monaco.Uri.parse(modelUriFor(activePath));
 }
 
 /** After a workspace edit lands in the model (e.g. applying an "Unfold
@@ -140,7 +143,7 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
 
     // Reuse the model across remounts so the LSP document stays attached;
     // refresh its content to the (possibly new) example source.
-    const modelUri = modelUriFor(activePathRef.current);
+    const modelUri = monacoUriFor(activePathRef.current);
     const model =
       monaco.editor.getModel(modelUri) ??
       monaco.editor.createModel(initialValueRef.current, "ddd", modelUri);

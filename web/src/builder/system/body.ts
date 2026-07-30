@@ -24,7 +24,7 @@ import type {
   WorkflowCreateDecl,
 } from "../../../../src/language/generated/ast.js";
 import { isWorkflowCreateDecl } from "../../../../src/language/generated/ast.js";
-import { applyEdits } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 import { parseDdd } from "../parse";
 
 // ---------------------------------------------------------------------------
@@ -263,7 +263,7 @@ export function listOperations(node: AstNode): string[] {
 export function listStatements(ast: Model, loc: BodyLocator): string[] | null {
   const body = resolveBody(ast, loc);
   if (!body) return null;
-  return body.statements.map((s) => s.$cstNode?.text ?? "");
+  return (body.statements ?? []).map((s) => s.$cstNode?.text ?? "");
 }
 
 // ---------------------------------------------------------------------------
@@ -483,21 +483,25 @@ function armView(arm: VariantStmtArm, base: number, src: string, depth: number):
 }
 
 function stmtView(s: Statement, depth = 0): StmtView {
+  // `target` (and its `tail`/`args` lists), and `EmitStmt.fields`, can be
+  // undefined on a partially-recovered AST — the builders re-parse the live
+  // source mid-keystroke, and Langium's recovery keeps the enclosing statement
+  // while leaving the sub-node it couldn't parse absent.
   if (s.$type === "AssignOrCallStmt" && s.op && s.value) {
     return {
       kind: "assign",
-      target: s.target.$cstNode?.text?.trim() ?? "",
+      target: s.target?.$cstNode?.text?.trim() ?? "",
       op: s.op,
       value: s.value.$cstNode?.text?.trim() ?? "",
     };
   }
   // Bare call: an LValue with a trailing call (`order.addLine(productId, qty)`),
   // no mutation suffix. The LValue carries the dotted head/tail + arg list.
-  if (s.$type === "AssignOrCallStmt" && !s.op && !s.value && s.target.call) {
+  if (s.$type === "AssignOrCallStmt" && !s.op && !s.value && s.target?.call) {
     return {
       kind: "call",
-      head: [s.target.head, ...s.target.tail].join("."),
-      args: s.target.args.map((a) => a.$cstNode?.text?.trim() ?? ""),
+      head: [s.target.head, ...(s.target.tail ?? [])].join("."),
+      args: (s.target.args ?? []).map((a) => a.$cstNode?.text?.trim() ?? ""),
     };
   }
   if (s.$type === "EmitStmt") {
@@ -507,7 +511,10 @@ function stmtView(s: Statement, depth = 0): StmtView {
       // `$refText` is the event name without triggering a linker deref (the
       // playground parse is unlinked).
       event: e.event?.$refText ?? "",
-      fields: e.fields.map((f) => ({ name: f.name, value: f.value.$cstNode?.text?.trim() ?? "" })),
+      fields: (e.fields ?? []).map((f) => ({
+        name: f.name,
+        value: f.value?.$cstNode?.text?.trim() ?? "",
+      })),
     };
   }
   if (s.$type === "LetStmt") {
@@ -583,7 +590,7 @@ function stmtView(s: Statement, depth = 0): StmtView {
 export function listStatementViews(ast: Model, loc: BodyLocator): StmtView[] | null {
   const body = resolveBody(ast, loc);
   if (!body) return null;
-  return body.statements.map((s) => stmtView(s));
+  return (body.statements ?? []).map((s) => stmtView(s));
 }
 
 /** The source a row reconstructs for a view — the identity/`onEdit` payload. */
@@ -710,11 +717,6 @@ export function editFunctionBody(source: string, owner: string, fn: string, text
   const cst = findFunction(parseDdd(source).ast, owner, fn)?.body?.$cstNode;
   if (!cst) return null;
   return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: text.trim() }]));
-}
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
 }
 
 // ---------------------------------------------------------------------------

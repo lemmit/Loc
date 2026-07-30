@@ -19,7 +19,9 @@ import type { LayoutCtx } from "../../layout/ctx";
 import type { Model } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode, lineDiff } from "../edit-engine";
+import { ifParses, spliceNodeIfParses, lineDiff } from "../edit-engine";
+import { RefusalLine, useRefusal } from "../refusal";
+import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import type { WireField } from "../../../../src/ir/types/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
@@ -345,7 +347,29 @@ function InspectorPanel({ compact, opened, onClose, children }: { compact: boole
 
 function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [rev, setRev] = useState(0);
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  // What the pane actually reads is the SOURCE TEXT, not the ctx object.
+  // Deriving on `ctx` re-ran a main-thread Langium parse + a graph build + a
+  // full React Flow reflow on every unrelated app tick (a pipeline step, a
+  // diagnostic arriving, an agent token streaming, a test result landing).
+  // The deps below are the complete set of signals that the text under
+  // `getSource()` moved:
+  //   rev          — this pane's own Apply committed an edit
+  //   liveTick     — the user typed in Monaco (debounced ~350 ms)
+  //   externalTick — the editor was reseeded onto different content by
+  //                  something else (file-tab switch, external change to the
+  //                  active file, example import, workspace switch)
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  const externalTick = useExternalSourceTick(
+    ctx.initialSource,
+    ctx.activeSourcePath,
+    ctx.sourceEpoch,
+  );
+  const getSource = ctx.getSource;
+  const parsed = useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
+    () => parseDdd(getSource()),
+    [getSource, rev, liveTick, externalTick],
+  );
   const graph = useMemo(
     () => (parsed.parserErrors.length === 0 ? buildSystemGraph(parsed.ast) : null),
     [parsed],
@@ -453,7 +477,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     }
     let alive = true;
     void (async () => {
-      const model = await buildLinkedModel(ctx.getSource());
+      const model = await buildLinkedModel(getSource());
       if (!alive || !model || !graph) return;
       try {
         const loom = enrichLoomModel(lowerModel(model));
@@ -465,7 +489,10 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return () => {
       alive = false;
     };
-  }, [overlay, graph, ctx, rev]);
+    // `graph` already tracks every source change (it derives from `parsed`),
+    // so this used to re-run on `ctx` identity alone — i.e. on every app tick,
+    // each one paying for a full linked Langium build + lower + enrich.
+  }, [overlay, graph, getSource]);
 
   // Wire shape (canonical DTO field list) of the selected aggregate / value
   // object — lowered + enriched from the linked model, async + off the render
@@ -480,7 +507,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     }
     let alive = true;
     void (async () => {
-      const model = await buildLinkedModel(ctx.getSource());
+      const model = await buildLinkedModel(getSource());
       if (!alive || !model) return;
       try {
         const loom = enrichLoomModel(lowerModel(model));
@@ -492,7 +519,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return () => {
       alive = false;
     };
-  }, [selectedId, ctx, rev]);
+    // `parsed` is the source-change signal (rev / debounced typing / external
+    // reseed); depending on `ctx` re-ran the whole linked build per app tick.
+  }, [selectedId, getSource, parsed]);
 
   // Dim non-matching nodes / edges in place (preserving positions) when a search
   // or kind filter is active; an edge stays lit only if both endpoints match.
@@ -543,6 +572,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   const selected = graph.nodes.find((n) => n.id === selectedId) ?? null;
 
+  const refusal = useRefusal();
+
   const commit = (next: string, keepSelection: boolean): void => {
     ctx.onSourceChange(next, "builder");
     if (!keepSelection) setSelectedId(null);
@@ -551,18 +582,40 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   // In preview mode an edit is staged (showing its source diff) until confirmed,
   // instead of committing live. A no-op edit (text unchanged) always passes
-  // through. `apply` is the single choke point every editing handler routes to.
+  // through. `apply` is the single choke point every editing handler routes to
+  // — and therefore where the write-back gate lives: an edit that would leave
+  // the source unparseable is refused (visibly) rather than committed or
+  // staged.  See `docs/audits/playground-file-mgmt-review-2026-07.md` #12.
   const apply = (next: string, keepSelection = false): void => {
+    if (ifParses(next) == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
     if (preview && next !== ctx.getSource()) setPending({ next, keepSelection });
     else commit(next, keepSelection);
   };
 
+  /** A helper returned null (nothing written) — surface it, don't no-op. */
+  const applyOrRefuse = (next: string | null, keepSelection = false): void => {
+    if (next == null) refusal.refuse();
+    else apply(next, keepSelection);
+  };
+
+  // Both renames run through a throwaway linked Langium build, which can
+  // reject; the call sites are `void`-ed fire-and-forget, so swallow-and-log
+  // here rather than emitting `unhandledrejection` noise.  A failed rename
+  // leaves the source untouched.
   const renameField = async (oldName: string, rawNext: string): Promise<void> => {
     if (!selected) return;
     const next = rawNext.trim();
     if (!IDENTIFIER.test(next) || next === oldName) return;
-    const result = await renameMember(ctx.getSource(), selected.kind, selected.name, oldName, next);
-    if (result != null) apply(result, true);
+    try {
+      applyOrRefuse(await renameMember(ctx.getSource(), selected.kind, selected.name, oldName, next), true);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("rename failed:", e);
+    }
   };
 
   const renameSelected = async (): Promise<void> => {
@@ -571,8 +624,10 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (!IDENTIFIER.test(next) || next === selected.name) return;
     setRenaming(true);
     try {
-      const result = await renameConstruct(ctx.getSource(), selected.kind, selected.name, next);
-      if (result != null) apply(result);
+      applyOrRefuse(await renameConstruct(ctx.getSource(), selected.kind, selected.name, next));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("rename failed:", e);
     } finally {
       setRenaming(false);
     }
@@ -580,10 +635,13 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   const deleteSelected = (): void => {
     if (!selected) return;
-    const fresh = parseDdd(ctx.getSource());
-    const match = findByKindName(fresh.ast, selected);
+    // One snapshot: the parse that locates the node and the text spliced are
+    // the same string, so a debounced source change can't shift the offsets
+    // between lookup and edit.
+    const source = ctx.getSource();
+    const match = findByKindName(parseDdd(source).ast, selected);
     if (!match) return;
-    apply(spliceNode(ctx.getSource(), match, ""));
+    applyOrRefuse(spliceNodeIfParses(source, match, ""));
   };
 
   const addSubdomain = (): void => {
@@ -909,6 +967,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         )}
       </Box>
       <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
+        <RefusalLine refused={refusal.refused} />
         {(contextNames.length > 1 || subdomainNameList.length > 1) && (
           <Group gap={4} mb={4} wrap="nowrap" align="center">
             <Text size="xs" c="dimmed">Add into</Text>

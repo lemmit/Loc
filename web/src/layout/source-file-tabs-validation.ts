@@ -45,33 +45,70 @@ export function validateNewFileBasename(
   return undefined;
 }
 
-/** Validate a user-typed folder name.  Folders are a single path
- *  segment — no nesting in the create UI (a user that wants
- *  `a/b/c` can create the folders one level at a time). */
+/** Every folder that already exists DIRECTLY inside `parentRel`
+ *  (`""` = workspace root).  Two sources, because a folder can exist
+ *  either way: implicitly, because a `.ddd` file lives under it, or
+ *  explicitly, as a VFS dir entry with no `.ddd` descendants (the
+ *  controller's `emptyFolders`). */
+export function siblingFolders(
+  parentRel: string,
+  existing: ReadonlySet<string>,
+  emptyFolders: ReadonlySet<string> = new Set(),
+): Set<string> {
+  const parent = parentRel.replace(/^\/+/, "").replace(/\/+$/, "");
+  const prefix = parent === "" ? "" : `${parent}/`;
+  const out = new Set<string>();
+  const add = (rel: string, isFile: boolean): void => {
+    if (!rel.startsWith(prefix)) return;
+    const rest = rel.slice(prefix.length);
+    const slash = rest.indexOf("/");
+    // A FILE only implies a folder when it sits deeper than the parent
+    // (`rest` still has a separator); an empty-folder entry IS the
+    // folder, so its own first segment counts.
+    if (slash > 0) out.add(rest.slice(0, slash));
+    else if (!isFile && rest !== "") out.add(rest);
+  };
+  for (const p of existing) {
+    if (!p.startsWith(WORKSPACE_PREFIX)) continue;
+    add(p.slice(WORKSPACE_PREFIX.length), true);
+  }
+  for (const f of emptyFolders) add(f.replace(/^\/+/, ""), false);
+  return out;
+}
+
+/** Validate a user-typed folder name created inside `parentRel`.
+ *  Folders are a single path segment — no nesting in the create UI (a
+ *  user that wants `a/b/c` creates the folders one level at a time).
+ *
+ *  The duplicate check is against the ACTUAL siblings of `parentRel`.
+ *  Scanning only root-level first segments (as this did) was wrong in
+ *  both directions: it rejected `shared` inside `audit/` because a
+ *  root-level `shared` existed, and it let a real `audit/shared`
+ *  duplicate through — where `mkdir` is idempotent, so the create
+ *  silently did nothing. */
 export function validateNewFolderName(
   name: string,
   existing: ReadonlySet<string>,
+  parentRel = "",
+  emptyFolders: ReadonlySet<string> = new Set(),
 ): string | undefined {
   const trimmed = name.trim().replace(/\/+$/, "");
   if (trimmed === "") return "Folder name is required.";
   if (!/^[A-Za-z0-9._-]+$/.test(trimmed)) {
     return "Use letters, digits, dash, underscore, dot.  No slashes.";
   }
-  // "Folder exists" check — any existing path whose first segment
-  // matches `trimmed` means the folder is already there.  We allow
-  // creating a new file inside an existing folder via the file
-  // form; the folder form is for net-new folders.
-  const existingFirstSegments = new Set<string>();
-  for (const p of existing) {
-    if (!p.startsWith(WORKSPACE_PREFIX)) continue;
-    const rest = p.slice(WORKSPACE_PREFIX.length);
-    const slash = rest.indexOf("/");
-    if (slash > 0) existingFirstSegments.add(rest.slice(0, slash));
-  }
-  if (existingFirstSegments.has(trimmed)) {
-    return `Folder "${trimmed}" already exists — add a file inside via "+ New file".`;
+  if (siblingFolders(parentRel, existing, emptyFolders).has(trimmed)) {
+    const where = joinRel(parentRel, trimmed);
+    return `Folder "${where}" already exists — add a file inside via "New file".`;
   }
   return undefined;
+}
+
+/** Join a workspace-relative parent and a leaf, without the
+ *  `/workspace/` prefix (`joinWorkspace` is the prefixed sibling). */
+export function joinRel(parentRel: string, leaf: string): string {
+  const p = parentRel.replace(/^\/+/, "").replace(/\/+$/, "");
+  return p ? `${p}/${leaf}` : leaf;
 }
 
 /** Join a workspace-relative folder (`""` = root, `shared`, `a/b`) and a

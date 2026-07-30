@@ -34,7 +34,9 @@ import {
 import { AstUtils, type AstNode } from "langium";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
-import { spliceNode } from "../edit-engine";
+import { ifParses, spliceNodeIfParses } from "../edit-engine";
+import { RefusalLine, useRefusal } from "../refusal";
+import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
 import {
   printRequirementText,
   printSolutionText,
@@ -234,7 +236,25 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   // `rev` bumps on save so we re-parse the (mutated) source and re-render
   // forms with the canonical text.  Mirrors `BuilderPane`'s `rev` pattern.
   const [rev, setRev] = useState(0);
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  const refusal = useRefusal();
+  // Deriving on `ctx` re-parsed the source AND (below) re-ran `lowerModel` +
+  // `enrichLoomModel` synchronously on the render path for every unrelated app
+  // tick — a pipeline step, a diagnostic, an agent token, a test result.  Both
+  // now hang off the same source-change signals the other builder panes use:
+  // this pane's own `rev`, the debounced editor tick, and the external-reseed
+  // signals (see `SystemBuilderPane` for the dep-by-dep rationale).
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  const externalTick = useExternalSourceTick(
+    ctx.initialSource,
+    ctx.activeSourcePath,
+    ctx.sourceEpoch,
+  );
+  const getSource = ctx.getSource;
+  const parsed = useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
+    () => parseDdd(getSource()),
+    [getSource, rev, liveTick, externalTick],
+  );
   const trace = useMemo(() => collect(parsed.ast), [parsed]);
   const [selected, setSelected] = useState<Selection | null>(null);
 
@@ -263,9 +283,16 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
     }
   }, [parsed, ctx.testResults, trace.requirements.length]);
 
+  // `originalNode` comes from the memoised parse of this same source, and the
+  // spliced candidate is re-parsed before it commits — a reprint that would
+  // leave the file unparseable is refused, not written.
   const apply = (originalNode: AstNode, newText: string): void => {
-    const source = ctx.getSource();
-    const next = spliceNode(source, originalNode, newText);
+    const next = spliceNodeIfParses(ctx.getSource(), originalNode, newText);
+    if (next == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
     ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
   };
@@ -276,7 +303,13 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const append = (newText: string): void => {
     const source = ctx.getSource();
     const sep = source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
-    ctx.onSourceChange(source + sep + newText + "\n", "builder");
+    const next = ifParses(source + sep + newText + "\n");
+    if (next == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
+    ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
   };
 
@@ -321,6 +354,8 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const showDetail = isDesktop || selected !== null;
 
   return (
+    <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+    <RefusalLine refused={refusal.refused} />
     <Box
       style={{
         flex: 1,
@@ -522,6 +557,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
           }}
         />
       )}
+    </Box>
     </Box>
   );
 }

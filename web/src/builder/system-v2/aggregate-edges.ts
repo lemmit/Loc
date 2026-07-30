@@ -98,7 +98,7 @@ function collectReads(expr: Expression | undefined, stateNames: Set<string>, int
       // `this.x` / `this.x.y` / `this.x.y.z` all read field `x` — the
       // first member-suffix on a ThisRef head. Subsequent suffixes
       // address members of the receiver's type, not aggregate state.
-      if (pc.head?.$type === "ThisRef" && pc.suffixes.length > 0) {
+      if (pc.head?.$type === "ThisRef" && (pc.suffixes?.length ?? 0) > 0) {
         const first = pc.suffixes[0];
         if (first?.$type === "MemberSuffix") into.add((first as MemberSuffix).member);
       }
@@ -116,7 +116,7 @@ function collectReads(expr: Expression | undefined, stateNames: Set<string>, int
 function writtenField(lv: LValue, stateNames: Set<string>): string | null {
   if (!lv) return null;
   if (lv.head === "this") {
-    return lv.tail[0] ?? null;
+    return lv.tail?.[0] ?? null;
   }
   return stateNames.has(lv.head) ? lv.head : null;
 }
@@ -139,12 +139,13 @@ function collectFromStatements(
       }
       // The RHS of an assign and the args of a call both contribute reads.
       collectReads(a.value, stateNames, reads);
-      for (const arg of a.target.args) collectReads(arg, stateNames, reads);
+      // `target`/`args` are undefined on a partially-recovered AST.
+      for (const arg of a.target?.args ?? []) collectReads(arg, stateNames, reads);
     } else if (s.$type === "EmitStmt") {
       const e = s as EmitStmt;
       const ev = e.event?.$refText;
       if (ev) addEdge(rel.emits, src, ev);
-      for (const f of e.fields) {
+      for (const f of e.fields ?? []) {
         // EmitField has `value` per the grammar — walk it for reads.
         collectReads(f.value, stateNames, reads);
       }

@@ -17,9 +17,9 @@
 // The `.loom` folder sorts first in the tree (leading dot), so its files are
 // reliably rendered inside react-arborist's virtualized viewport.
 
-import type { Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { selectExample, waitForPlaygroundReady } from "./_helpers";
+import { revealTreeRow as revealRow, selectExample, waitForPlaygroundReady } from "./_helpers";
 
 // Count the distinct Monaco token classes (`.mtk1`, `.mtk2`, …) in the active
 // read-only viewer.  Untokenized plaintext collapses to a single class; real
@@ -32,25 +32,6 @@ async function distinctMonacoTokenClasses(page: Page): Promise<number> {
     }
     return classes.size;
   });
-}
-
-// The generated tree is a react-arborist virtualized list, so a row far down
-// (or a deep file) isn't in the DOM until scrolled into view.  Wheel the
-// scrollable descendant until the first row matching `name` mounts, then
-// return it.
-async function revealRow(page: Page, tree: Locator, name: string | RegExp): Promise<Locator> {
-  const row = tree.getByText(name).first();
-  for (let i = 0; i < 120 && (await row.count()) === 0; i++) {
-    await tree.evaluate((el) => {
-      const scroller = [el, ...el.querySelectorAll<HTMLElement>("*")].find(
-        (n): n is HTMLElement => n instanceof HTMLElement && n.scrollHeight > n.clientHeight + 4,
-      );
-      scroller?.scrollBy(0, 300);
-    });
-    await page.waitForTimeout(50);
-  }
-  await expect(row).toBeVisible();
-  return row;
 }
 
 test("Generated explorer renders markdown and highlights code files", async ({ page }) => {

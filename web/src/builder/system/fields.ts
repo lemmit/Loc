@@ -21,7 +21,7 @@ import {
   mkTypeRef,
 } from "../../../../src/macros/api/index.js";
 import { parseDdd } from "../parse";
-import { applyEdits } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 import { IDENTIFIER } from "./rename";
 import type { NodeKind } from "./model";
 
@@ -215,9 +215,13 @@ export function buildTypeRef(spec: TypeSpec): TypeRef {
 // --- read helpers (for the inspector UI) -----------------------------------
 
 export function listFields(node: AstNode): FieldInfo[] {
-  return propertyList(node).list.map((p) => {
+  // Read path: the panes re-read the live source mid-keystroke, so a property
+  // whose `type` didn't parse is skipped rather than dereferenced (the same
+  // recovered-AST guard `listStateFields` carries).
+  return propertyList(node).list.flatMap((p) => {
+    if (!p.type) return [];
     const base = baseSpecOf(p.type);
-    return { name: p.name, base, baseLabel: baseLabel(base), array: p.type.array, optional: p.type.optional };
+    return [{ name: p.name, base, baseLabel: baseLabel(base), array: p.type.array, optional: p.type.optional }];
   });
 }
 
@@ -261,11 +265,6 @@ export function availableTypes(ast: Model): TypeOption[] {
 }
 
 // --- mutating ops (parse → locate → narrow splice → re-parse) --------------
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
-}
 
 /** Leading whitespace of the line containing `offset`. */
 function lineIndent(source: string, offset: number): string {

@@ -26,6 +26,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
+import { useExternalSourceTick, useLiveSourceTick } from "../use-live-source-tick";
 import {
   aggregateBody,
   deleteStatement,
@@ -67,10 +68,12 @@ import {
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils, type AstNode } from "langium";
 import { isEventDecl } from "../../../../src/language/generated/ast.js";
-import { spliceNode } from "../edit-engine";
+import { ifParses } from "../edit-engine";
+import { RefusalLine, useRefusal } from "../refusal";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
+import { deleteByAstType, deleteInvariant } from "./delete-extra";
 import { renameByAstType } from "./rename-extra";
 import {
   apiNames,
@@ -228,6 +231,11 @@ function toRfNodes(
 }
 
 const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
+
+/** Stand-in graph used while the source doesn't parse — keeps the React Flow
+ *  hooks below fed with a valid (empty) shape instead of one derived from a
+ *  partially-recovered AST. */
+const EMPTY_GRAPH: ViewGraph = { title: "Model", nodes: [], edges: [] };
 
 /** Total budget for a drill transition: ~200ms zoom-into the clicked node
  *  (drill-in only), then ~250ms `fitView` to settle into the new view.
@@ -564,11 +572,32 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // workflow's `create(...)` starter, an operation's own statements), so the
   // default view — and every expression-slot key derived from it — is unchanged.
   const [bodyMember, setBodyMember] = useState<BodyKey | undefined>(undefined);
-  // Re-parse after every commit by depending on `rev` (`apply` bumps it).
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  // Re-parse after every commit by depending on `rev` (`apply` bumps it) —
+  // plus the debounced editor tick and the external-reseed signals.  This used
+  // to depend on `ctx`, whose identity churned on every app tick, so a
+  // pipeline step / diagnostic / agent token re-ran the parse AND the whole
+  // view-graph build.  See `SystemBuilderPane` for the dep-by-dep rationale.
+  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
+  const externalTick = useExternalSourceTick(
+    ctx.initialSource,
+    ctx.activeSourcePath,
+    ctx.sourceEpoch,
+  );
+  const getSource = ctx.getSource;
+  const parsed = useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `getSource` reads a ref; the deps below are the change signals.
+    () => parseDdd(getSource()),
+    [getSource, rev, liveTick, externalTick],
+  );
+  // Same parse gate v1 carries (`SystemBuilderPane`): a recovered AST would
+  // otherwise yield a silently-partial graph whose delete/rename handlers
+  // splice CST ranges that no longer describe the user's source.  The gate has
+  // to live *inside* the derivations — hooks below must still run
+  // unconditionally — so the message renders at the end.
+  const parseOk = parsed.parserErrors.length === 0;
   const graph = useMemo(
-    () => buildViewGraph(parsed.ast, path, { workflowMember: bodyMember }),
-    [parsed, path, bodyMember],
+    () => (parseOk ? buildViewGraph(parsed.ast, path, { workflowMember: bodyMember }) : EMPTY_GRAPH),
+    [parsed, path, parseOk, bodyMember],
   );
 
   // The statement-bearing members of the container at the path leaf, for the
@@ -576,7 +605,10 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // — on an operation / lifecycle-`body` leaf — every body of the aggregate
   // that owns it, so the whole member list is one click away from any of them.
   // Empty at every other level.
+  // Gated on `parseOk` for the same reason the graph is: on a recovered AST
+  // `listBodies` reports members whose CST ranges the write-backs can't trust.
   const bodyMembers: BodyRef[] = useMemo(() => {
+    if (!parseOk) return [];
     const last = path[path.length - 1];
     if (last?.kind === "workflow") {
       const wf = findWorkflow(parsed.ast, last.name);
@@ -589,7 +621,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       return agg ? listBodies(agg) : [];
     }
     return [];
-  }, [parsed, path]);
+  }, [parsed, path, parseOk]);
   // Leaving the container (or drilling into another one) drops back to its
   // primary body — a member key from the previous one means nothing here.
   useEffect(() => {
@@ -598,11 +630,26 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const primaryMemberKey = primaryBodyKey(path, bodyMembers);
   const leafKind = path[path.length - 1]?.kind;
 
+  const refusal = useRefusal();
+
   /** Single choke-point for source edits — bump `rev` so the next render
-   *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
+   *  re-parses, re-builds the view-graph and re-binds the per-stmt data.
+   *  Also the last line of defence for the write-back gate: whatever path
+   *  produced `next`, it doesn't reach the editor unless it parses. */
   const apply = (next: string): void => {
+    if (ifParses(next) == null) {
+      refusal.refuse();
+      return;
+    }
+    refusal.clear();
     ctx.onSourceChange(next, "builder");
     setRev((r) => r + 1);
+  };
+
+  /** A helper returned null (nothing written) — surface it, don't no-op. */
+  const applyOrRefuse = (next: string | null): void => {
+    if (next == null) refusal.refuse();
+    else apply(next);
   };
 
   // When the path's leaf is an operation / workflow, materialise its statement
@@ -621,9 +668,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
    *  expression-slot plumbing (key + slot factories, the inline `ƒx`
    *  render/toggle closures, and the path-addressed bundle nested rows use).
    *  Shared by the flow nodes and the lifecycle list panel so both address the
-   *  SAME slots — one body, one set of keys. */
+   *  SAME slots — one body, one set of keys.  Gated on `parseOk` like the
+   *  graph: statement views over a recovered AST carry CST ranges the
+   *  write-backs can't trust. */
   const bodySurface = useMemo(() => {
-    if (!leafLoc) return null;
+    if (!leafLoc || !parseOk) return null;
     const views = listStatementViews(parsed.ast, leafLoc) ?? [];
     // Aggregate field names for the assignment-target Autocomplete; only
     // meaningful in an operation body, empty for workflows.
@@ -719,7 +768,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return { views, targets, events, slotFor, hasEditor, renderEditor, toggle, nestedFor };
     // `ctx` covers getSource changes (parent re-renders create a fresh ctx).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, leafLoc, structuredKey, exprMode, rev]);
+  }, [parsed, parseOk, leafLoc, structuredKey, exprMode, rev]);
 
   const stmtData = useMemo(() => {
     const m = new Map<string, Record<string, unknown>>();
@@ -856,18 +905,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         const aggName = aggOwner.name;
         const idx = Number(n.id.slice("invariant:".length));
         const onDelete = (): void => {
-          const agg = findAggregate(parsed.ast, aggName);
-          if (!agg) return;
-          let i = 0;
-          for (const member of agg.members) {
-            if (member.$type === "Invariant") {
-              if (i === idx) {
-                apply(spliceNode(ctx.getSource(), member, ""));
-                return;
-              }
-              i++;
-            }
-          }
+          applyOrRefuse(deleteInvariant(ctx.getSource(), aggName, idx));
         };
         const { expressionEditor, onToggleExpression } = buildExprToggle(
           { kind: "invariant", owner: aggName, index: idx },
@@ -894,9 +932,14 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         const aggName = aggOwner.name;
         const onRename = (next: string): void => {
           if (!IDENTIFIER.test(next) || next === n.name) return;
-          void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next).then((result) => {
-            if (result != null) apply(result);
-          });
+          void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next)
+            .then(applyOrRefuse)
+            // A failed rename leaves the source untouched; log it rather than
+            // letting the rejection surface as `unhandledrejection` noise.
+            .catch((e: unknown) => {
+              // eslint-disable-next-line no-console
+              console.error("rename failed:", e);
+            });
         };
         const onDelete =
           n.kind === "field"
@@ -936,20 +979,18 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         astType != null
           ? (next: string) => {
               if (!IDENTIFIER.test(next) || next === n.name) return;
-              void renameByAstType(ctx.getSource(), astType, n.name, next).then((result) => {
-                if (result != null) apply(result);
-              });
+              void renameByAstType(ctx.getSource(), astType, n.name, next)
+                .then(applyOrRefuse)
+                .catch((e: unknown) => {
+                  // eslint-disable-next-line no-console
+                  console.error("rename failed:", e);
+                });
             }
           : undefined;
       const onDelete =
         astType != null
           ? () => {
-              for (const ast of AstUtils.streamAst(parsed.ast)) {
-                if (ast.$type === astType && (ast as { name?: string }).name === n.name) {
-                  apply(spliceNode(ctx.getSource(), ast, ""));
-                  return;
-                }
-              }
+              applyOrRefuse(deleteByAstType(ctx.getSource(), astType, n.name));
             }
           : undefined;
 
@@ -1345,6 +1386,11 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (next != null) apply(next);
   };
 
+  // Below every hook, so the gate above can't change the hook order.
+  if (!parseOk) {
+    return <Message>Source has syntax errors — fix them in the editor to use the model builder.</Message>;
+  }
+
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={jumpTo} />
@@ -1359,6 +1405,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       )}
       {opInspector}
       <AddPalette path={path} source={ctx.getSource()} onChange={apply} bodyMember={bodyMember} />
+      <RefusalLine refused={refusal.refused} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
           nodes={nodes}
@@ -1400,6 +1447,14 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           </Text>
         )}
       </Box>
+    </Box>
+  );
+}
+
+function Message({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <Box p="md">
+      <Text size="sm" c="dimmed">{children}</Text>
     </Box>
   );
 }

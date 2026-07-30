@@ -157,26 +157,38 @@ export default function PageBuilder({ initialNodes, liveNodes, pages, pageName, 
 // selection state.
 function LiveSync({ nodes }: { nodes: SerializedNodes }): null {
   const { actions, query } = useEditor();
+  // `nodes` is the ONLY dependency, deliberately.  craft's `useEditor()` hands
+  // back a FRESHLY BUILT `actions` object on every render, so listing it (as
+  // the exhaustive-deps rule wants) re-ran this effect on any re-render of the
+  // pane — and each run calls `actions.deserialize`, which resets the canvas to
+  // the seed and SILENTLY DISCARDS everything the user has added since (a
+  // palette add, a drag-in, a reorder) without a source change to justify it.
+  // A new `nodes` reference is the one event that means "the source re-seeded",
+  // which is exactly when a deserialize is wanted; `actions`/`query` are read
+  // off a ref refreshed during render so the effect still uses the current pair.
+  const apiRef = useRef({ actions, query });
+  apiRef.current = { actions, query };
   const firstRef = useRef(true);
   useEffect(() => {
     if (firstRef.current) { firstRef.current = false; return; }
+    const { actions: act, query: q } = apiRef.current;
     // Snapshot the current selection path *before* deserialize.  The
     // selection event holds the craft node id; we map it to a structural
     // path so it survives the id reshuffle that deserialize triggers.
-    const selectedId = query.getEvent("selected").first();
-    const currentSerialized = selectedId ? query.getSerializedNodes() : null;
+    const selectedId = q.getEvent("selected").first();
+    const currentSerialized = selectedId ? q.getSerializedNodes() : null;
     const path = selectedId && currentSerialized
       ? pathOfNode(currentSerialized as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, selectedId)
       : null;
-    actions.deserialize(nodes);
+    act.deserialize(nodes);
     // Re-select at the same path in the freshly-deserialized tree.  An
     // unresolvable path (node moved or removed) just clears selection.
     if (path) {
-      const fresh = query.getSerializedNodes();
+      const fresh = q.getSerializedNodes();
       const next = findNodeAtPath(fresh as unknown as Record<string, { nodes?: string[]; parent?: string | null }>, path);
-      if (next && next !== "ROOT") actions.selectNode(next);
+      if (next && next !== "ROOT") act.selectNode(next);
     }
-  }, [nodes, actions, query]);
+  }, [nodes]);
   return null;
 }
 

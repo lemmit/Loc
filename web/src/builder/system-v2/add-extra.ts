@@ -12,7 +12,7 @@ import type {
   Subdomain,
   System,
 } from "../../../../src/language/generated/ast.js";
-import { applyEdits } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 import { parseDdd } from "../parse";
 
 function freshName(ast: Model, base: string): string {
@@ -32,10 +32,6 @@ function insertIntoBlock(source: string, block: AstNode, text: string): string {
   if (!cst) throw new Error("insertIntoBlock: node has no CST");
   const at = cst.end - 1; // just before the closing `}`
   return applyEdits(source, [{ offset: at, end: at, newText: text }]);
-}
-
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
 }
 
 /** Add a new (empty) bounded context to an existing subdomain, returning the new

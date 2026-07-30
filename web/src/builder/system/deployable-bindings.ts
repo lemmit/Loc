@@ -1,7 +1,7 @@
 import { AstUtils, CstUtils, GrammarUtils, type AstNode, type CstNode } from "langium";
 import type { Deployable, Model } from "../../../../src/language/generated/ast.js";
 import { parseDdd } from "../parse";
-import { applyEdits } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 
 // ---------------------------------------------------------------------------
 // Deployable composition bindings — the multi-valued / single references a
@@ -66,17 +66,14 @@ export function uiKind(node: AstNode): "sugar" | "compose" | "none" {
   return d.uiSugar ? "sugar" : "none";
 }
 export function deployableUi(node: AstNode): string | null {
-  return asDeployable(node)?.uiSugar?.ref.$refText ?? null;
+  // `ref` is absent on a partially-recovered AST (`ui ` with nothing after it),
+  // so the whole chain stays optional.
+  return asDeployable(node)?.uiSugar?.ref?.$refText ?? null;
 }
 
 // --- mutating ops (parse → locate → narrow splice → re-parse) --------------
 
 const COMMENT_RULES = ["ML_COMMENT", "SL_COMMENT"];
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
-}
 
 /** Leading whitespace of the line containing `offset`. */
 function lineIndent(source: string, offset: number): string {

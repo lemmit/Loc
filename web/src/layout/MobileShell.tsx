@@ -10,6 +10,7 @@ import { HistoryBody } from "./HistoryPanel";
 import { MigrationsBody, migrationsDot } from "./MigrationsPanel";
 import { agentDot, ChatBody } from "./ChatPanel";
 import { OutputPanel, outputAggregateDot } from "./OutputPanel";
+import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 
 // The visual Builder (craft.js + a main-thread Langium parse) and the
@@ -111,30 +112,38 @@ export function MobileShell({ ctx }: Props): JSX.Element {
         </Box>
         {codeView === "builder" && (
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading builder…</Text></Box>}>
-              <BuilderPane ctx={ctx} />
-            </Suspense>
+            <PaneErrorBoundary name="Builder">
+              <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading builder…</Text></Box>}>
+                <BuilderPane ctx={ctx} />
+              </Suspense>
+            </PaneErrorBoundary>
           </Box>
         )}
         {codeView === "model" && (
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
-              <SystemBuilderPane ctx={ctx} />
-            </Suspense>
+            <PaneErrorBoundary name="Model">
+              <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
+                <SystemBuilderPane ctx={ctx} />
+              </Suspense>
+            </PaneErrorBoundary>
           </Box>
         )}
         {codeView === "model-v2" && (
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
-              <SystemBuilderV2Pane ctx={ctx} />
-            </Suspense>
+            <PaneErrorBoundary name="Model v2">
+              <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
+                <SystemBuilderV2Pane ctx={ctx} />
+              </Suspense>
+            </PaneErrorBoundary>
           </Box>
         )}
         {codeView === "requirements" && (
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading requirements…</Text></Box>}>
-              <RequirementsPane ctx={ctx} />
-            </Suspense>
+            <PaneErrorBoundary name="Requirements">
+              <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading requirements…</Text></Box>}>
+                <RequirementsPane ctx={ctx} />
+              </Suspense>
+            </PaneErrorBoundary>
           </Box>
         )}
         {codeView === "generated" && (

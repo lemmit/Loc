@@ -4,6 +4,7 @@ import { useMediaQuery } from "@mantine/hooks";
 import type { EditorHandle } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
+import { monacoModelHost } from "./lsp/model-host";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { type AgentMessage, runAgentDemo as playAgentDemo } from "./agent/demo";
 import { runLiveAgent } from "./agent/live";
@@ -49,6 +50,8 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import { filesDroppedByExample } from "./workspace/example-import";
+import { NEW_FILE_SEED, pickInitialSource } from "./workspace/initial-source";
 import type { WorkspaceSourcesController } from "./workspace/workspace-sources";
 import { applyGeneratedTree, readGeneratedTree, startAutoCommit } from "./workspace/git";
 import {
@@ -61,6 +64,7 @@ import {
 import { fnv1a32 } from "./util/hash";
 import { downloadBytes, makeZip } from "./util/zip";
 import { usePersistedState } from "./util/usePersistedState";
+import { useStableFns } from "./util/useStableFns";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
 import {
   bootError as selBootError,
@@ -99,6 +103,9 @@ import type { LogLine } from "./util/log-line";
 const LOG_CAP = 1000;
 const capLog = (lines: LogLine[]): LogLine[] =>
   lines.length > LOG_CAP ? lines.slice(-LOG_CAP) : lines;
+
+/** Shared "no generated files yet" identity — see the `files` derivation. */
+const EMPTY_FILES: VirtualFile[] = [];
 
 /** Per-deployable summary derived from the generated file tree.
  *  The playground only knows how to bundle + boot Hono backends and
@@ -245,27 +252,28 @@ export default function App(): JSX.Element {
     [exampleId, augmentedExamplesList],
   );
 
-  // Editor's seed value for the active file.  Precedence:
-  //   1. Persisted VFS content for this path (multi-file files
-  //      survive tab switches and reloads via IDB).
-  //   2. Chosen example (main.ddd only — examples are single-file).
-  //   3. Empty body with a stub comment (newly-created non-main
-  //      file before the user types anything).
-  // The editor remounts via `key={…activePath}` when the active
-  // path changes, picking up this freshly-computed value each time.
-  const initialSource = useMemo(() => {
-    const persisted = sources.files.get(sources.activePath);
-    if (persisted !== undefined) return persisted;
-    // For main.ddd the active workspace's persisted content is the
-    // authoritative seed (sync-read at store-open); it covers the gap
-    // before the sources controller finishes its async load on a
-    // workspace switch.  Falls back to the last-imported example for a
-    // brand-new / hostile-storage workspace.
-    if (sources.activePath === "/workspace/main.ddd") {
-      return workspace.persistedSource ?? exampleSource;
-    }
-    return "// New file — declare a context, valueobject, or enum here.\n";
-  }, [sources.files, sources.activePath, exampleSource, workspace.persistedSource]);
+  // Editor's seed value for the active file — the precedence rule (and
+  // why `persistedSource` may only be consulted pre-hydration) lives in
+  // `workspace/initial-source.ts`.  The editor remounts via
+  // `key={…activePath}:{sourceEpoch}` when either changes, picking up
+  // this freshly-computed value each time.
+  const initialSource = useMemo(
+    () =>
+      pickInitialSource({
+        files: sources.files,
+        activePath: sources.activePath,
+        hydrated: sources.hydrated,
+        persistedSource: workspace.persistedSource,
+        exampleSource,
+      }),
+    [
+      sources.files,
+      sources.activePath,
+      sources.hydrated,
+      exampleSource,
+      workspace.persistedSource,
+    ],
+  );
 
   const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
 
@@ -487,6 +495,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const dispose = syncWorkspaceToLsp(sources.controller, {
       getActivePath: () => activePathRef.current,
+      host: monacoModelHost,
     });
     return dispose;
   }, [sources.controller]);
@@ -662,19 +671,25 @@ export default function App(): JSX.Element {
   // companion files the example doesn't include, reset downstream state,
   // and regenerate promptly.
   async function importExample(id: string): Promise<void> {
-    userPickedExampleRef.current = true;
     const ex = examples.find((e) => e.id === id) ?? defaultExample;
     const ctrl = sourcesRef.current.controller;
-    const keep = new Set<string>(["/workspace/main.ddd"]);
-    if (ex.files) {
-      for (const rel of Object.keys(ex.files)) {
-        const clean = rel.replace(/^\/+/, "");
-        if (clean.endsWith(".ddd")) keep.add(`/workspace/${clean}`);
-      }
+    // Importing overwrites the workspace with the example's file set, so any
+    // other source file is deleted.  Confirm ONLY when that would actually
+    // lose something — a switch between two single-file examples drops
+    // nothing and must not prompt.  Same idiom as the other destructive file
+    // actions (SourceFilesTree deletes, workspace delete): `window.confirm`.
+    const dropped = filesDroppedByExample(sourcesRef.current.files.keys(), ex.files);
+    if (dropped.length > 0 && typeof window !== "undefined") {
+      const list = dropped.map((p) => `  ${p.replace("/workspace/", "")}`).join("\n");
+      const ok = window.confirm(
+        `Loading "${ex.label}" replaces this workspace's files.\n\n` +
+          `${dropped.length} file${dropped.length === 1 ? "" : "s"} will be deleted:\n${list}\n\n` +
+          `Continue?`,
+      );
+      if (!ok) return;
     }
-    for (const path of [...sourcesRef.current.files.keys()]) {
-      if (!keep.has(path)) await ctrl.delete(path);
-    }
+    userPickedExampleRef.current = true;
+    for (const path of dropped) await ctrl.delete(path);
     await seedProject(ctrl, ex.source, ex.files);
     sourceRef.current = ex.source;
     writeHashSource(ex.source);
@@ -871,12 +886,14 @@ export default function App(): JSX.Element {
   const bootErrorMessage = selBootError(pipeline);
   const dispatchSlot = pipeline.dispatch.kind === "result" ? pipeline.dispatch.result : null;
 
-  const reactBundleStatus: ReactBundleStatus = (() => {
+  // Memoised: this is a fresh object per render otherwise, which would make
+  // the `ctx` memo below miss on every single render.
+  const reactBundleStatus = useMemo<ReactBundleStatus>(() => {
     if (pipeline.bundle.kind !== "result") return { kind: "pending" };
     const r = pipeline.bundle.react;
     if (r === null) return { kind: "absent" };
     return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
-  })();
+  }, [pipeline.bundle]);
 
   // Last-good preview retention.  The preview now refreshes in place,
   // so it must stay mounted across the live-mode regenerate cascade —
@@ -1329,8 +1346,15 @@ export default function App(): JSX.Element {
     const ctrl = s.controller;
     const content = s.files.get(oldPath) ?? "";
     const wasActive = s.activePath === oldPath;
-    await ctrl.write(newPath, content);
-    await ctrl.delete(oldPath);
+    // Callers invoke this without awaiting, so a rejection here would be an
+    // unhandled one.  The controller has already put it on its error channel
+    // (the tree renders it); swallow and leave the workspace as-is.
+    try {
+      await ctrl.write(newPath, content);
+      await ctrl.delete(oldPath);
+    } catch {
+      return;
+    }
     if (wasActive) ctrl.setActivePath(newPath);
     scheduleAutoGenerate();
   }
@@ -1343,19 +1367,31 @@ export default function App(): JSX.Element {
     const prefix = `/workspace/${clean}/`;
     const ctrl = sourcesRef.current.controller;
     void (async () => {
-      for (const path of [...sourcesRef.current.files.keys()]) {
-        if (path.startsWith(prefix)) await ctrl.delete(path);
+      try {
+        for (const path of [...sourcesRef.current.files.keys()]) {
+          if (path.startsWith(prefix)) await ctrl.delete(path);
+        }
+      } catch {
+        // On the controller's error channel already; stop rather than
+        // carry on rmdir-ing a folder whose files are still there.
+        return;
       }
       try {
         await ctrl.deleteEmptyFolder(clean);
       } catch {
-        /* implicit folders vanish with their last file; rmdir is a no-op */
+        // An implicit folder vanishes with its last file, so rmdir on it
+        // legitimately fails here — clear the error the controller just
+        // recorded rather than showing the user a failure that isn't one.
+        ctrl.clearError();
       }
       scheduleAutoGenerate();
     })();
   }
 
-  const files: VirtualFile[] = generateSuccess?.files ?? [];
+  // `?? EMPTY_FILES` (module-level), not `?? []`: a fresh array literal per
+  // render made the three memos below — and the `ctx` memo — miss every render
+  // for the entire pre-generate lifetime of the app.
+  const files: VirtualFile[] = generateSuccess?.files ?? EMPTY_FILES;
   // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
   // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
   const tree = useMemo(
@@ -1576,44 +1612,56 @@ export default function App(): JSX.Element {
     setAgentMessages([]);
   }
 
-  // Bundle every piece of state + every action into a single ctx
-  // object that the shell + its panes consume.  Children destructure
-  // what they need; no React context, no prop drilling.
-  const ctx: LayoutCtx = {
-    isDesktop,
-    exampleId,
+  // ---------------------------------------------------------------------
+  // ctx — the state + actions bundle the shell and its panes consume.
+  //
+  // Identity matters here.  `ctx` used to be a fresh object literal on every
+  // App render, and three heavy panes (the v1 / v2 system builders and the
+  // requirements pane) keyed their derivations off that identity — so ANY app
+  // state tick (a pipeline step, a diagnostic arriving, an agent token
+  // streaming, a test result landing) re-ran a main-thread Langium parse, a
+  // graph rebuild and a React Flow reflow.  On a memory-constrained phone that
+  // churn is the OOM feeder.
+  //
+  // Two halves make the memo below actually hit:
+  //   * every CALLBACK goes through `useStableFns`, which hands back wrappers
+  //     with a fixed identity that forward to the newest render's closure (so
+  //     nothing is frozen on a stale snapshot — the failure mode a hand-written
+  //     `useCallback` dep list invites), and
+  //   * every VALUE is listed in the dep array below, in field order.
+  //
+  // The three `*Ref.current` reads are deliberate deps: they mutate without a
+  // render, and listing them reproduces exactly the old behaviour (ctx picks
+  // the latest ref value up on whatever render happens next).
+  // ---------------------------------------------------------------------
+  const ctxFns = useStableFns({
     setExampleId,
     createWorkspaceFromExample,
-    augmentedExamplesList,
-    initialSource,
-    getSource: () => sourceRef.current,
-    workspace,
-    activeSourcePath: sources.activePath,
-    sourceFiles: sources.files,
+    getSource: (): string => sourceRef.current,
     setActiveSourcePath: sources.setActivePath,
-    // New-file: seed VFS with a stub body so the editor has
-    // something non-empty to mount against, then flip the active
-    // path.  The Files tab strip validates the basename before
-    // calling, so we trust `path` here.
-    createSourceFile: (path: string) => {
-      const s = sourcesRef.current;
-      const seed = "// New file — declare a context, valueobject, or enum here.\n";
-      s.write(path, seed);
-      s.setActivePath(path);
+    // New-file: seed the VFS with a stub body, and only once that write
+    // has LANDED flip the active path + schedule a regenerate (matching
+    // rename / delete-folder).  This used to be fire-and-forget — an
+    // unawaited `write` plus an immediate `setActivePath` and no
+    // regenerate — so a failed or ephemeral-mode create left a phantom
+    // tree row that evaporated on the next refresh, and a successful one
+    // never reached the generator.  `createFile` reports both failure
+    // modes on the controller's error channel, which the tree renders.
+    createSourceFile: (path: string): void => {
+      void (async () => {
+        if (await sourcesRef.current.controller.createFile(path, NEW_FILE_SEED)) {
+          scheduleAutoGenerate();
+        }
+      })();
     },
     deleteSourceFile: sources.delete,
     renameSourceFile,
     deleteSourceFolder,
-    emptySourceFolders: sources.emptyFolders,
     createEmptySourceFolder: sources.createEmptyFolder,
     deleteEmptySourceFolder: sources.deleteEmptyFolder,
-    lspClient: lspClientRef.current,
-    buildClient: buildClientRef.current,
-    engine: engineRef.current,
-    authedRuntime,
-    authStub,
+    clearSourceError: sources.clearError,
     setAuthStub,
-    onSourceChange: (text, origin) => {
+    onSourceChange: (text: string, origin?: "editor" | "builder"): void => {
       sourceRef.current = text;
       // A real source change (typing in Monaco or a Builder Apply) — from
       // here on, mobile auto-generate is allowed (see hasUserEditedRef).
@@ -1642,96 +1690,201 @@ export default function App(): JSX.Element {
       // LSP — keeping the source tab and Problems panel in sync.
       if (origin !== "editor") editorHandleRef.current?.setSource(text);
     },
-    editorSourceTick,
     onDiagnosticsChange: setDiagnostics,
     scheduleAutoGenerate,
-    editorHandleRef,
-    diagnostics,
-    errorCount,
-    generatedConflicts,
-    warningCount,
-    pipeline,
-    generateResult,
-    generateSuccess,
-    honoBundleResult,
-    reactBundleResult,
-    reactBundleStatus,
-    honoBundle,
-    reactBundle,
-    previewBundle,
-    previewBooted,
-    previewProblem,
-    ddl,
-    persistent,
-    migrated,
-    bootErrorMessage,
-    dispatchSlot,
-    files,
-    tree,
-    selectedFile,
-    selectedPath,
     setSelectedPath,
-    unsupportedDeployables: deployableAnalysis.unsupported,
-    reqMethod,
     setReqMethod,
-    reqPath,
     setReqPath,
-    reqBody,
     setReqBody,
-    apiEndpoints,
-    selectedOpId,
-    selectedEndpoint,
     runSelectEndpoint,
-    pathParamValues,
     setPathParam,
-    queryParamValues,
     setQueryParam,
     runGenerateExample,
     runQuery,
-    liveMode,
     setLiveMode,
-    activeTab,
     setActiveTab,
-    dockTab,
     setDockTab,
-    codeView,
     setCodeView,
-    testResults,
     setTestResults,
-    outputStream,
     setOutputStream,
-    backendLog,
-    appLog,
     appendAppLog,
     getAppLog,
     clearBackendLog,
     clearAppLog,
-    copied,
     copyShareLink,
-    agentMessages,
-    agentRunning,
-    runAgentDemo: () => void runAgentDemo(),
-    agentSettings,
+    runAgentDemo: (): void => void runAgentDemo(),
     setAgentSettings,
-    sendAgentMessage: (text: string) => void sendAgentMessage(text),
+    sendAgentMessage: (text: string): void => void sendAgentMessage(text),
     clearAgentChat,
-    runGenerate: () => void runGenerate(true),
-    runBundle: () => void runBundle(),
-    runBoot: () => void runBoot(),
-    runResetData: () => void runResetData(),
-    runWipe: () => void runWipe(),
-    runDispatch: () => void runDispatch(),
-    runFull: () => void runFull(),
-    evolution,
-    evolutionRunning,
-    runEvolutionDiff: (ref?: string) => void runEvolutionDiff(ref),
-    evolutionBaselineRef,
+    runGenerate: (): void => void runGenerate(true),
+    runBundle: (): void => void runBundle(),
+    runBoot: (): void => void runBoot(),
+    runResetData: (): void => void runResetData(),
+    runWipe: (): void => void runWipe(),
+    runDispatch: (): void => void runDispatch(),
+    runFull: (): void => void runFull(),
+    runEvolutionDiff: (ref?: string): void => void runEvolutionDiff(ref),
     pinEvolutionBaseline,
-    snapshotResult,
-    snapshotRunning,
-    runCaptureSnapshot: () => void runCaptureSnapshot(),
+    runCaptureSnapshot: (): void => void runCaptureSnapshot(),
     runDownloadZip,
-  };
+  });
+
+  const lspClient = lspClientRef.current;
+  const buildClient = buildClientRef.current;
+  const engine = engineRef.current;
+  const unsupportedDeployables = deployableAnalysis.unsupported;
+  const activeSourcePath = sources.activePath;
+  const sourceFiles = sources.files;
+  const sourceEpoch = sources.epoch;
+  const emptySourceFolders = sources.emptyFolders;
+  const sourcesPersistent = sources.persistent;
+  const sourceError = sources.lastError;
+
+  const ctx: LayoutCtx = useMemo(
+    () => ({
+      isDesktop,
+      exampleId,
+      augmentedExamplesList,
+      initialSource,
+      workspace,
+      activeSourcePath,
+      sourceFiles,
+      sourceEpoch,
+      emptySourceFolders,
+      sourcesPersistent,
+      sourceError,
+      lspClient,
+      buildClient,
+      engine,
+      authedRuntime,
+      authStub,
+      editorSourceTick,
+      editorHandleRef,
+      diagnostics,
+      errorCount,
+      generatedConflicts,
+      warningCount,
+      pipeline,
+      generateResult,
+      generateSuccess,
+      honoBundleResult,
+      reactBundleResult,
+      reactBundleStatus,
+      honoBundle,
+      reactBundle,
+      previewBundle,
+      previewBooted,
+      previewProblem,
+      ddl,
+      persistent,
+      migrated,
+      bootErrorMessage,
+      dispatchSlot,
+      files,
+      tree,
+      selectedFile,
+      selectedPath,
+      unsupportedDeployables,
+      reqMethod,
+      reqPath,
+      reqBody,
+      apiEndpoints,
+      selectedOpId,
+      selectedEndpoint,
+      pathParamValues,
+      queryParamValues,
+      liveMode,
+      activeTab,
+      dockTab,
+      codeView,
+      testResults,
+      outputStream,
+      backendLog,
+      appLog,
+      copied,
+      agentMessages,
+      agentRunning,
+      agentSettings,
+      evolution,
+      evolutionRunning,
+      evolutionBaselineRef,
+      snapshotResult,
+      snapshotRunning,
+      ...ctxFns,
+    }),
+    // Exhaustive over every VALUE field above, in the same order.  `ctxFns`
+    // and `editorHandleRef` are identity-stable by construction.
+    [
+      ctxFns,
+      isDesktop,
+      exampleId,
+      augmentedExamplesList,
+      initialSource,
+      workspace,
+      activeSourcePath,
+      sourceFiles,
+      sourceEpoch,
+      emptySourceFolders,
+      sourcesPersistent,
+      sourceError,
+      lspClient,
+      buildClient,
+      engine,
+      authedRuntime,
+      authStub,
+      editorSourceTick,
+      diagnostics,
+      errorCount,
+      generatedConflicts,
+      warningCount,
+      pipeline,
+      generateResult,
+      generateSuccess,
+      honoBundleResult,
+      reactBundleResult,
+      reactBundleStatus,
+      honoBundle,
+      reactBundle,
+      previewBundle,
+      previewBooted,
+      previewProblem,
+      ddl,
+      persistent,
+      migrated,
+      bootErrorMessage,
+      dispatchSlot,
+      files,
+      tree,
+      selectedFile,
+      selectedPath,
+      unsupportedDeployables,
+      reqMethod,
+      reqPath,
+      reqBody,
+      apiEndpoints,
+      selectedOpId,
+      selectedEndpoint,
+      pathParamValues,
+      queryParamValues,
+      liveMode,
+      activeTab,
+      dockTab,
+      codeView,
+      testResults,
+      outputStream,
+      backendLog,
+      appLog,
+      copied,
+      agentMessages,
+      agentRunning,
+      agentSettings,
+      evolution,
+      evolutionRunning,
+      evolutionBaselineRef,
+      snapshotResult,
+      snapshotRunning,
+    ],
+  );
 
   return (
     <AppShell

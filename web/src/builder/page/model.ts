@@ -280,18 +280,44 @@ export function defaultNode(name: keyof typeof SPECS): BuilderNode {
   return { name, props, children: [] };
 }
 
-function opaque(expr: Expression): BuilderNode {
-  return { name: "Opaque", props: { raw: printExpr(expr) }, children: [] };
+// ---------------------------------------------------------------------------
+// Recovered-AST safety.  The builders re-parse on every keystroke, so they
+// routinely see a *partially recovered* AST: Langium's error recovery keeps the
+// enclosing node but leaves the sub-node it couldn't parse `undefined`
+// (`body:` with no expression, `state { x: }` with no type, a match arm with no
+// value, …).  Every deref below therefore treats any child as possibly absent
+// and degrades to an empty/Opaque node instead of throwing in render.
+// ---------------------------------------------------------------------------
+
+/** Stand-in for a sub-expression error recovery left undefined. */
+function missing(): BuilderNode {
+  return { name: "Opaque", props: { raw: "" }, children: [] };
 }
 
-function asString(e: Expression): string | null {
-  return e.$type === "StringLit" ? e.value : null;
+/** `printExpr` dereferences sub-nodes unconditionally, so it throws on a
+ *  half-parsed expression — fall back to the verbatim CST text. */
+function safePrint(e: Expression | undefined): string {
+  if (!e) return "";
+  try {
+    return printExpr(e);
+  } catch {
+    return e.$cstNode?.text ?? "";
+  }
+}
+
+function opaque(expr: Expression | undefined): BuilderNode {
+  return { name: "Opaque", props: { raw: safePrint(expr) }, children: [] };
+}
+
+function asString(e: Expression | undefined): string | null {
+  return e?.$type === "StringLit" ? e.value : null;
 }
 
 /** Read one arg into a typed prop value by kind; null if the arg doesn't match
  *  (caller falls back to opaque).  `expr` accepts any expression except the
  *  structured slots (`Lambda`/`MatchExpr`) and stores its printed text. */
-function readProp(kind: PropKind, e: Expression): string | number | null {
+function readProp(kind: PropKind, e: Expression | undefined): string | number | null {
+  if (!e) return null;
   if (kind === "string" || kind === "color") return asString(e);
   if (kind === "int") return e.$type === "IntLit" ? e.value : null;
   // A bare identifier (`Order`) or a qualified ref (`Sales.Order`); both emit
@@ -300,11 +326,11 @@ function readProp(kind: PropKind, e: Expression): string | number | null {
   // suffix is a MemberSuffix; we accept that shape for the ref kind.
   if (kind === "ref") {
     if (e.$type === "NameRef") return e.name;
-    if (e.$type === "PostfixChain") return printExpr(e);
+    if (e.$type === "PostfixChain") return safePrint(e);
     return null;
   }
   if (e.$type === "Lambda" || e.$type === "MatchExpr") return null;
-  return printExpr(e);
+  return safePrint(e);
 }
 
 /** An `order` token is either a prop key (positional or named scalar) or this
@@ -316,7 +342,7 @@ const CHILD_TOKEN = "";
 // non-canonical orderings — a positional after a named arg — round-trip instead
 // of falling back to Opaque).  Returns null if the call doesn't match the spec
 // (caller falls back to Opaque).
-function seedCall(name: string, spec: PrimitiveSpec, args: ReadonlyArray<CallArg | BuilderEntry>, components: ReadonlyMap<string, readonly string[]>): BuilderNode | null {
+function seedCall(name: string, spec: PrimitiveSpec, args: ReadonlyArray<CallArg | BuilderEntry> | undefined, components: ReadonlyMap<string, readonly string[]>): BuilderNode | null {
   const posKeys = posSpecs(spec);
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
   const namedChildren = new Set(spec.namedChildren ?? []);
@@ -330,7 +356,8 @@ function seedCall(name: string, spec: PrimitiveSpec, args: ReadonlyArray<CallArg
   // the first non-literal (or one past the declared props) begins the children.
   let peeling = isContainerKind && posKeys.length > 0;
 
-  for (const a of args) {
+  for (const a of args ?? []) {
+    if (!a) continue;
     if (a.name) {
       const ns = namedSpec.get(a.name);
       if (ns) {
@@ -343,7 +370,7 @@ function seedCall(name: string, spec: PrimitiveSpec, args: ReadonlyArray<CallArg
         child.slot = a.name;
         children.push(child);
         order.push(CHILD_TOKEN);
-      } else if (a.value.$type === "Lambda" || a.value.$type === "MatchExpr") {
+      } else if (a.value?.$type === "Lambda" || a.value?.$type === "MatchExpr") {
         // An unknown named arg whose value is a lambda/match (e.g. an event
         // handler `onClick: e => { … }`) becomes a slot child — an editable
         // Lambda/Match node (with the statement-row editor for block bodies) —
@@ -357,7 +384,7 @@ function seedCall(name: string, spec: PrimitiveSpec, args: ReadonlyArray<CallArg
         // verbatim, editable as a generic expr field) rather than collapsing the
         // whole node to Opaque.  Lets the many optional modifiers a primitive
         // accepts (`testid:`, `striped:`, `gap:`, …) round-trip.
-        props[a.name] = printExpr(a.value);
+        props[a.name] = safePrint(a.value);
         order.push(a.name);
       }
       continue;
@@ -401,7 +428,10 @@ function rangeStr(node: { $cstNode?: { range: { start: { line: number; character
  *  user-defined `component` names in scope; a call to one is recognised as a
  *  node (its positional args become children) rather than falling to Opaque.
  *  Records each node's source range (`__range`) for diagnostic mapping. */
-export function seedFromBody(expr: Expression, components: ReadonlyMap<string, readonly string[]> = EMPTY_COMPONENTS): BuilderNode {
+export function seedFromBody(expr: Expression | undefined, components: ReadonlyMap<string, readonly string[]> = EMPTY_COMPONENTS): BuilderNode {
+  // Error recovery can hand us `undefined` for any body / sub-expression while
+  // the user is mid-keystroke (`body:` with nothing after it).
+  if (!expr) return missing();
   const node = seedNode(expr, components);
   const range = rangeStr(expr);
   if (range) node.props.__range = range;
@@ -411,14 +441,15 @@ export function seedFromBody(expr: Expression, components: ReadonlyMap<string, r
 // Seed one statement of a block-bodied lambda.  An assignment (`target op
 // value`) is modelled with structured target/op/value fields so it edits as
 // three controls; every other statement keeps its source verbatim in `src`.
-function seedStmt(s: Statement): BuilderNode {
+function seedStmt(s: Statement | undefined): BuilderNode {
+  if (!s) return { name: "Stmt", props: { src: "" }, children: [] };
   const range = rangeStr(s);
   const ext = range ? { __range: range } : {};
   if (s.$type === "AssignOrCallStmt" && s.op && s.value) {
-    return { name: "Stmt", props: { kind: "assign", target: s.target.$cstNode?.text?.trim() ?? "", op: s.op, value: s.value.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
+    return { name: "Stmt", props: { kind: "assign", target: s.target?.$cstNode?.text?.trim() ?? "", op: s.op, value: s.value.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
   }
   if (s.$type === "LetStmt") {
-    return { name: "Stmt", props: { kind: "let", name: s.name, value: s.expr.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
+    return { name: "Stmt", props: { kind: "let", name: s.name, value: s.expr?.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
   }
   // `navigate(<page>, <params?>)` — a bare call to the UI navigation
   // primitive: structure it into a target-page picker + an optional positional
@@ -429,15 +460,15 @@ function seedStmt(s: Statement): BuilderNode {
   // (`{ id: order.id }`) don't parse in page-expression position — only domain
   // bodies admit object literals — so params is one positional expression; users
   // who want object-literal params hand-write the bare statement.
-  if (s.$type === "AssignOrCallStmt" && !s.op && s.target.call && s.target.head === "navigate" && s.target.tail.length === 0) {
-    const to = s.target.args[0];
+  if (s.$type === "AssignOrCallStmt" && !s.op && s.target?.call && s.target.head === "navigate" && s.target.tail?.length === 0) {
+    const to = s.target.args?.[0];
     if (to && to.$type === "NameRef") {
       return {
         name: "Stmt",
         props: {
           kind: "navigate",
           to: to.name,
-          params: s.target.args[1] ? printExpr(s.target.args[1]) : "",
+          params: s.target.args?.[1] ? safePrint(s.target.args[1]) : "",
           ...ext,
         },
         children: [],
@@ -456,15 +487,15 @@ function seedNode(expr: Expression, components: ReadonlyMap<string, readonly str
     return {
       name: "Lambda",
       props: { param: expr.param, __block: "1" },
-      children: expr.stmts.map(seedStmt),
+      children: (expr.stmts ?? []).map(seedStmt),
     };
   }
   // match — predicate arms (cond + value child) plus an optional else child.
   if (expr.$type === "MatchExpr") {
-    const children: BuilderNode[] = expr.arms.map((arm) => ({
+    const children: BuilderNode[] = (expr.arms ?? []).map((arm) => ({
       name: "MatchArm" as const,
-      props: { cond: printExpr(arm.cond) },
-      children: [seedFromBody(arm.value, components)],
+      props: { cond: safePrint(arm?.cond) },
+      children: [seedFromBody(arm?.value, components)],
     }));
     if (expr.elseExpr) children.push({ name: "MatchElse", props: {}, children: [seedFromBody(expr.elseExpr, components)] });
     return { name: "Match", props: {}, children };
@@ -474,18 +505,18 @@ function seedNode(expr: Expression, components: ReadonlyMap<string, readonly str
   // flatten: a PostfixChain with NameRef head + single CallSuffix) is still
   // accepted so older fragments keep parsing.
   let name: string;
-  let args: ReadonlyArray<CallArg | BuilderEntry>;
+  let args: ReadonlyArray<CallArg | BuilderEntry> | undefined;
   if (expr.$type === "BuilderCall") {
     name = expr.type;
     args = expr.entries;
   } else if (
     expr.$type === "PostfixChain" &&
-    expr.suffixes.length === 1 &&
-    expr.suffixes[0]!.$type === "CallSuffix" &&
-    expr.head.$type === "NameRef"
+    expr.suffixes?.length === 1 &&
+    expr.suffixes[0]?.$type === "CallSuffix" &&
+    expr.head?.$type === "NameRef"
   ) {
     name = expr.head.name;
-    args = (expr.suffixes[0] as { args: CallArg[] }).args;
+    args = (expr.suffixes[0] as { args?: CallArg[] }).args;
   } else {
     return opaque(expr);
   }
@@ -636,14 +667,16 @@ export function emitBody(node: BuilderNode): string {
  *  fields whose named base isn't present in the supplied `enums` map. */
 export function enumStateFields(page: Page, enums: ReadonlyMap<string, readonly string[]>): Map<string, string> {
   const out = new Map<string, string>();
-  const sb = page.props.find((p): p is StateBlock => p.$type === "StateBlock");
+  const sb = page.props?.find((p): p is StateBlock => p.$type === "StateBlock");
   if (!sb) return out;
-  for (const f of sb.fields) {
+  for (const f of sb.fields ?? []) {
     // A `NamedType` base carries a cross-reference (`target.$refText` is the
     // declared identifier); consult its name without needing the linker, then
     // intersect with the supplied enums map. PrimitiveType/IdType are ignored.
-    const base = f.type.base;
-    if (base.$type !== "NamedType") continue;
+    // `type` (and its `base`) is undefined on a half-typed `state { x: }` —
+    // Langium error recovery keeps the field but drops the unparsed type.
+    const base = f?.type?.base;
+    if (base?.$type !== "NamedType") continue;
     const name = base.target?.$refText;
     if (typeof name === "string" && enums.has(name)) out.set(f.name, name);
   }

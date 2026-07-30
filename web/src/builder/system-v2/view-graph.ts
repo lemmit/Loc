@@ -58,7 +58,7 @@ import type {
   UserBlock,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
-import { spliceNode } from "../edit-engine";
+import { spliceNodeIfParses } from "../edit-engine";
 import { parseDdd } from "../parse";
 import {
   aggregateBodyStatements,
@@ -1806,7 +1806,10 @@ export function deleteContainment(source: string, aggName: string, fieldName: st
     (m): m is Containment => m.$type === "Containment" && m.name === fieldName,
   );
   if (!target) return null;
-  return spliceNode(source, target, "");
+  // Gated like every other builder write-back: the splice is re-parsed and
+  // refused rather than committed if removing the member leaves text the
+  // parser rejects (see `edit-engine.ts`).
+  return spliceNodeIfParses(source, target, "");
 }
 
 export function findWorkflow(ast: Model, name: string): Workflow | undefined {

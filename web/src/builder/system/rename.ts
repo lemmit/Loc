@@ -2,9 +2,8 @@ import { AstUtils, type AstNode } from "langium";
 import { collectMemberUsages, isRenameableMember } from "../../../../src/language/lsp/member-refs.js";
 import { iterateEntityMembers } from "../../../../src/language/type-system.js";
 import type { Aggregate, EntityPart, ValueObject } from "../../../../src/language/generated/ast.js";
-import { applyEdits, type TextEdit } from "../edit-engine";
+import { applyEdits, ifParses, type TextEdit } from "../edit-engine";
 import { buildLinkedDocument } from "./linked-doc";
-import { parseDdd } from "../parse";
 import type { NodeKind } from "./model";
 
 // Rename a structural construct *and every reference to it*.
@@ -79,7 +78,10 @@ export async function renameConstruct(
     return true;
   });
 
-  return applyEdits(source, unique);
+  // Same write-back gate `renameMember` carries: a `newName` that isn't a bare
+  // identifier (callers guard, but this is the exported surface) rewrites every
+  // declaration + reference span into text the parser rejects. Refuse instead.
+  return ifParses(applyEdits(source, unique));
 }
 
 // Rename a *field* (property / containment / derived / function) on an
@@ -129,6 +131,5 @@ export async function renameMember(
     seen.add(key);
     return true;
   });
-  const next = applyEdits(source, unique);
-  return parseDdd(next).parserErrors.length === 0 ? next : null;
+  return ifParses(applyEdits(source, unique));
 }

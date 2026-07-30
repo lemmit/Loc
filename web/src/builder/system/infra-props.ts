@@ -1,7 +1,7 @@
 import { AstUtils, CstUtils, GrammarUtils, type AstNode, type CstNode } from "langium";
 import type { Deployable, Model, Storage } from "../../../../src/language/generated/ast.js";
 import { parseDdd } from "../parse";
-import { applyEdits } from "../edit-engine";
+import { applyEdits, ifParses } from "../edit-engine";
 
 // ---------------------------------------------------------------------------
 // Scalar property editing for the infra constructs (storage / deployable):
@@ -29,11 +29,6 @@ function findByName(ast: Model, type: string, name: string): AstNode | null {
     if (n.$type === type && (n as { name?: unknown }).name === name) return n;
   }
   return null;
-}
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
 }
 
 /** Leading whitespace of the line containing `offset`. */

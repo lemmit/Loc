@@ -7,7 +7,7 @@ import type {
   Repository,
 } from "../../../../src/language/generated/ast.js";
 import { parseDdd } from "../parse";
-import { applyEdits, type TextEdit } from "../edit-engine";
+import { applyEdits, ifParses, type TextEdit } from "../edit-engine";
 import { IDENTIFIER } from "./rename";
 import { baseLabel, baseSpecOf, typeText, type BaseSpec, type TypeSpec } from "./fields";
 
@@ -70,11 +70,6 @@ export function findReturnSpec(ast: Model, repoName: string, findName: string): 
 }
 
 // --- mutating ops (parse → locate → narrow splice → re-parse) --------------
-
-/** Validate by re-parsing: return `candidate` only if it still parses. */
-function ifParses(candidate: string): string | null {
-  return parseDdd(candidate).parserErrors.length === 0 ? candidate : null;
-}
 
 /** The shared prologue: re-parse and resolve the find.  Null on a
  *  syntactically invalid source or an unknown repository / find. */

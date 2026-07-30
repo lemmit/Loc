@@ -22,6 +22,9 @@ import {
   type WorkspaceSourcesSnapshot,
 } from "./workspace-sources.js";
 
+// The controller has already recorded the failure on its error channel
+// (`snapshot().lastError`, rendered by the files UI) by the time these
+// wrappers see the rejection; the console line is only for debugging.
 function reportWorkspaceError(err: unknown): void {
   // eslint-disable-next-line no-console
   console.error("workspace operation failed:", err);
@@ -48,6 +51,8 @@ export interface WorkspaceSourcesApi extends WorkspaceSourcesState {
    *  folder still has `.ddd` content inside (VFS enforces non-empty
    *  protection); no-op when the folder doesn't exist. */
   deleteEmptyFolder(folder: string): void;
+  /** Dismiss `lastError` (the files UI's Alert close button). */
+  clearError(): void;
   /** The underlying controller — exposed for non-React consumers that
    *  need to subscribe outside the React render cycle (e.g. the LSP
    *  workspace sync, which pushes every workspace `.ddd` into Monaco
@@ -103,19 +108,34 @@ export function useWorkspaceSources(store: GitStore | null): WorkspaceSourcesApi
     },
     [controller],
   );
+  const clearError = useCallback(() => controller.clearError(), [controller]);
 
   return useMemo(
     () => ({
       files: snapshot.files,
       emptyFolders: snapshot.emptyFolders,
       activePath: snapshot.activePath,
+      epoch: snapshot.epoch,
+      hydrated: snapshot.hydrated,
+      persistent: snapshot.persistent,
+      lastError: snapshot.lastError,
       setActivePath,
       write,
       delete: del,
       createEmptyFolder,
       deleteEmptyFolder,
+      clearError,
       controller,
     }),
-    [snapshot, setActivePath, write, del, createEmptyFolder, deleteEmptyFolder, controller],
+    [
+      snapshot,
+      setActivePath,
+      write,
+      del,
+      createEmptyFolder,
+      deleteEmptyFolder,
+      clearError,
+      controller,
+    ],
   );
 }
