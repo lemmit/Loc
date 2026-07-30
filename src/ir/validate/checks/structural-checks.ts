@@ -16,6 +16,7 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  FieldIR,
   FindIR,
   FunctionIR,
   StmtIR,
@@ -1351,6 +1352,73 @@ export function validateFunctionBlockBodies(ctx: BoundedContextIR, diags: LoomDi
   for (const wf of ctx.workflows) {
     for (const fn of wf.functions ?? []) check(wf.name, fn);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Field defaults must be instance-INDEPENDENT (fleet-bug-hunt G1).
+//
+// A `= default` on a plain field is not a body — it is spliced into contexts
+// where no instance exists yet, most visibly the CREATE-REQUEST wire schema
+// (`wireCreateDefault` forwards it to every backend's default slot).  A
+// default that reads `this` therefore emits, at MODULE scope:
+//
+//   Hono     z.coerce.number().default(this.total / this.count)   // TS2683 +
+//                                                                 // TypeError
+//                                                                 // on import
+//   Python   avg_price: Decimal = self.total / self.count         // NameError
+//   .NET     — the default is silently DROPPED, so the field becomes a
+//   Java       REQUIRED create input: a boot-break on two backends and a
+//              silent contract change on the other two.
+//
+// A value computed from other fields is a `derived`, which is exactly what the
+// message says.  Rejecting is the honest answer: every alternative (drop the
+// default, or emit it only where an instance exists) silently changes the
+// declared wire contract, and the two behaviours already disagree per backend.
+//
+// `now` / `currentUser` / enum-value / literal defaults are all fine — they
+// resolve without an instance, and every backend renders them.
+// ---------------------------------------------------------------------------
+
+/** The expression shapes that need a constructed instance to evaluate. */
+function instanceDependence(e: ExprIR): string | undefined {
+  if (e.kind === "this") return "this";
+  if (e.kind === "id") return "this.id";
+  if (e.kind === "ref") {
+    if (e.refKind === "this-prop" || e.refKind === "this-vo-prop") return `this.${e.name}`;
+    if (e.refKind === "this-derived") return `this.${e.name} (a derived)`;
+  }
+  if (e.kind === "member" && e.receiver.kind === "this") return `this.${e.member}`;
+  if (e.kind === "call" && (e.callKind === "function" || e.callKind === "private-operation")) {
+    return `this.${e.name}(…)`;
+  }
+  return undefined;
+}
+
+export function validateFieldDefaults(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  const check = (owner: string, fields: readonly FieldIR[]): void => {
+    for (const f of fields) {
+      if (f.default === undefined) continue;
+      let found: string | undefined;
+      walkExpr(f.default, (e) => {
+        found ??= instanceDependence(e);
+      });
+      if (found === undefined) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.field-default-not-constant",
+        message:
+          `default for '${owner}.${f.name}' reads ${found}, but a field default is evaluated where no instance exists yet — ` +
+          `notably the create-request wire schema, which every client sees. ` +
+          `Write it as 'derived ${f.name}: … = …' if it is computed from other fields, or give the field an instance-independent default.`,
+        source: `${ctx.name}/${owner}.${f.name}`,
+      });
+    }
+  };
+  for (const agg of ctx.aggregates) {
+    check(agg.name, agg.fields);
+    for (const part of agg.parts) check(part.name, part.fields);
+  }
+  for (const vo of ctx.valueObjects) check(vo.name, vo.fields);
 }
 
 /** Walk every expression inside an entity's invariants, derived

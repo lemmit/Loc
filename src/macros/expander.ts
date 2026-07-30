@@ -47,6 +47,8 @@ import {
   type MacroArg,
   type MacroCall,
   type Model,
+  type PrimitiveType,
+  type Property,
   type Ui,
 } from "../language/generated/ast.js";
 import { CAPABILITIES_TAG, FILTER_ORIGIN_TAG } from "../util/capability-tag.js";
@@ -296,9 +298,71 @@ function applyDefaultVersioning(
   if ((agg as { persistedAs?: string }).persistedAs === "eventLog") return;
   const already = (agg as { [CAPABILITIES_TAG]?: string[] })[CAPABILITIES_TAG] ?? [];
   if (already.includes("versioned")) return;
+  // A user-declared `version` member wins by name in `mergeScopedMembers`, so
+  // the injected `version: int = 1` is silently dropped — but the aggregate
+  // still gets TAGGED `versioned`, and every downstream consumer then treats
+  // the user's column as the optimistic-concurrency counter.  For
+  // `version: string` that is a boot-break: the migration builder stamps the
+  // int default onto the text column by name (`"version" TEXT NOT NULL
+  // DEFAULT 1`, which Postgres rejects at CREATE TABLE) and the repository
+  // inserts a number and computes `expected + 1` on a string.
+  //
+  // An `int` member is structurally the field the capability would have
+  // spliced, so that spelling keeps working — the splice is skipped (it would
+  // be dropped anyway) and the tag still applies.  Anything else is rejected:
+  // there is no reading of `version: string` under which the concurrency
+  // column is also correct.
+  const declared = existingVersionMember(agg);
+  if (declared) {
+    if (!isIntProperty(declared)) {
+      recordDiagnostic(doc, {
+        severity: "error",
+        message:
+          `field 'version' on aggregate '${agg.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
+          `Rename this field (e.g. '${lowerFirstSafe(agg.name)}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+        node: declared,
+        property: "name",
+      });
+      return;
+    }
+    tagCapability(agg, "versioned");
+    return;
+  }
   const cap = inv.Capability.get("versioned");
   if (!cap) return; // the prelude always provides it; stay defensive
   expandCapability(cap, agg, "aggregate", agg, doc, buildRef);
+}
+
+/** The aggregate's own `version` PROPERTY, or undefined.  Only a property can
+ *  collide with the spliced field — a derived / function / operation of that
+ *  name lives in a different member namespace downstream. */
+function existingVersionMember(agg: Aggregate): Property | undefined {
+  return agg.members.find(
+    (m): m is Property => m.$type === "Property" && (m as Property).name === "version",
+  );
+}
+
+/** True iff the property is a plain (non-optional, non-array) `int` — the exact
+ *  shape the `versioned` capability would have spliced. */
+function isIntProperty(p: Property): boolean {
+  const t = p.type;
+  if (!t || t.optional || t.array || t.alternatives.length > 0) return false;
+  return t.base?.$type === "PrimitiveType" && (t.base as PrimitiveType).name === "int";
+}
+
+/** Record capability membership without splicing any member — the annotation
+ *  lowering's `collectCapabilities` reads.  Mirrors the tail of
+ *  `expandCapability`; used when the host already declares the capability's
+ *  field itself. */
+function tagCapability(agg: Aggregate, name: string): void {
+  const slot = agg as { [CAPABILITIES_TAG]?: string[] };
+  if (!slot[CAPABILITIES_TAG]) slot[CAPABILITIES_TAG] = [];
+  if (!slot[CAPABILITIES_TAG].includes(name)) slot[CAPABILITIES_TAG].push(name);
+}
+
+/** `Release` → `release`, for the rename suggestion in the collision message. */
+function lowerFirstSafe(name: string): string {
+  return name.length > 0 ? name[0]!.toLowerCase() + name.slice(1) : name;
 }
 
 function expandOneCall(
