@@ -61,6 +61,19 @@ const elixirFeatures = CORPUS.filter((f) => f.backends.includes("vanilla"))
   .filter((f) => !CASE || f.id === CASE)
   .map((f) => f.id);
 
+// A hex PACKAGE cache shared by every container this file starts.
+//
+// `docker run --rm` throws away the container's `~/.hex`, so each project
+// re-downloads the entire dependency closure from scratch.  That was invisible
+// while a feature meant exactly one project; a multi-deployable feature doubles
+// it, and behind the loopback hex mirror the second `deps.get` reliably dies
+// with `Request failed (:timeout)` fetching a tarball the first run had already
+// pulled.  Mounting one host dir at `/root/.hex` makes the second project a
+// cache hit — correctness behind the mirror, and a straight speed-up on CI's
+// direct hex.pm access.  Same shape as the NuGet cache mount in
+// `api-call-e2e.test.ts`.
+const HEX_CACHE = path.join(os.tmpdir(), "loom-corpus-elixir-hex");
+
 // `mix deps.get --only prod && mix compile --warnings-as-errors` inside the
 // elixir image.  When `mirror` is set (LOOM_HEX_MIRROR=1) hex.pm traffic is
 // routed through the loopback mirror so this gate also runs behind a
@@ -68,8 +81,10 @@ const elixirFeatures = CORPUS.filter((f) => f.backends.includes("vanilla"))
 function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
   const shellPrefix = mirror?.shellPrefix ?? "";
+  fs.mkdirSync(HEX_CACHE, { recursive: true });
   execSync(
-    `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app -e MIX_ENV=prod ${IMAGE} ` +
+    `docker run --rm ${dockerArgs}-v ${projDir}:/app -v ${HEX_CACHE}:/root/.hex ` +
+      `-w /app -e MIX_ENV=prod ${IMAGE} ` +
       `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
       `mix deps.get --only prod && mix compile --warnings-as-errors'`,
     { stdio: "inherit", timeout: 600_000 },
