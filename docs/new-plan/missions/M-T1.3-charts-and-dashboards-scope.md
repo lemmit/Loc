@@ -251,10 +251,8 @@ The plumbing everything else needs:
   treatment `useAllOrders()` gets.
 - Teach `QueryView` / `Stat` to bind a **singleton** projection (one object, so
   the `.length === 0` empty-arm is wrong for it).
-- **Ship the honest gate first**, in the same PR or ahead of it:
-  `loom.ui-projection-read-unsupported`, so `undefined.X` can never be emitted
-  again on an un-ported frontend. Defect D is currently a silent hole in
-  `ui-checks.ts`.
+- The honest gate `loom.ui-projection-read-unsupported` **is already in**
+  (§3.7) — this phase lifts it rather than adding it.
 
 Scope decision to make: singleton-only in v1, or keyed/collection projections
 too (which then also want `Table`). Recommend **singleton-only** — it is what the
@@ -360,10 +358,37 @@ Gates tripped, each to be *addressed* rather than loosened: `heex-parity`,
   nice small win; note the `pagedDataIsList` wrinkle at `walker-core.ts:1411`
   (Feliz has no envelope).
 
-### 3.7 Ordering
+### 3.7 Landed already — the two honest gates (slice 1)
 
+Before any of the phases above, the two **silent** holes are now closed, so
+every later slice is a *lift* of a named gate rather than a hunt for what is
+broken. `src/ir/validate/checks/`:
+
+| Code | Rejects | Lifted by |
+|---|---|---|
+| `loom.projection-whole-table-aggregation-unsupported` | a `select` using `count`/`sum`/`avg`/`min`/`max` with no collection receiver — the designed-but-unimplemented singleton aggregation (Defect C) | Phase 0 |
+| `loom.projection-select-unresolved` | any *other* unresolved name in a `select` — the general form of the same defect (a typo emitted as a free identifier) | — (permanent) |
+| `loom.ui-projection-read-unsupported` | a page/component reading a projection through its api handle (Defect D) | Phase 1 |
+
+Two IR shapes had to be covered for the aggregation gate, which is why half a
+fix would have leaked: a bare `count` lowers to `refKind: "unknown"`, while
+`sum(o.total)` lowers to `callKind: "free"` — documented in the `CallKind` union
+as *"unresolved free call"*. Either one reaches the emitter verbatim, because
+every backend's query-time projection emitter renders the `select` expr straight
+into its row mapper with no further name resolution.
+
+**A note on how these survived: `ddd parse` does not run phase ⑦.** The IR
+validator runs on `generate` (and in the test harness), not on `parse` — so the
+cheap check an author reaches for reports `0 errors` on a model whose IR tier was
+never consulted. Worth remembering when reading the "validates clean" claims
+above: they were true at both tiers *before* this slice, but `parse` alone will
+stay quiet about IR-tier gates by design.
+
+### 3.8 Ordering
+
+0. **Slice 1 — the two honest gates (§3.7).** ✅ landed.
 1. **Phase 0** — singleton aggregation actually computes (Defect C).
-2. **Phase 1** — ui can read a projection, gate first (Defect D).
+2. **Phase 1** — ui can read a projection (Defect D).
 3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. **Dashboard ships
    here, with no chart dependency anywhere.**
 4. **Phase 3** — `group by` (with M-T4.2).

@@ -18,13 +18,46 @@
 // check here.
 // -------------------------------------------------------------------------
 
-import type { BoundedContextIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
+import type { BoundedContextIR, ExprIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
 import {
   isMaterializedProjection,
   isQueryTimeProjection,
   isShorthandProjection,
 } from "../../types/loom-ir.js";
+import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+
+/** The whole-table (keyless) aggregation vocabulary a singleton projection's
+ *  `select` reaches for (read-path-architecture.md rev. 8).  Spelled bare
+ *  (`select orders = count`) it lowers to an unknown ref, since there is no
+ *  collection receiver to bind it to — which is exactly how it slips into the
+ *  generated source as a free identifier.  Kept as a set so the diagnostic can
+ *  say "this is the unimplemented aggregation" rather than "typo". */
+const WHOLE_TABLE_AGGREGATIONS: ReadonlySet<string> = new Set([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+]);
+
+/** First unresolved NAME anywhere in a `select` expression, or `null` when
+ *  every name resolves.  Two shapes, because the aggregation vocabulary lowers
+ *  to both: a bare `count` becomes `refKind: "unknown"`, while `sum(o.total)`
+ *  becomes `callKind: "free"` — which the CallKind union documents as
+ *  *"unresolved free call"*.  Either one is the precise condition that makes an
+ *  emitter write an undeclared identifier, since every backend's query-time
+ *  projection emitter renders the `select` expr verbatim into its row mapper
+ *  with no further name resolution. */
+function firstUnresolvedRefName(e: ExprIR): string | null {
+  let found: string | null = null;
+  walkExprDeep(e, (node) => {
+    if (found) return;
+    if (node.kind === "ref" && node.refKind === "unknown") found = node.name;
+    else if (node.kind === "call" && node.callKind === "free") found = node.name;
+  });
+  return found;
+}
 
 export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const proj of ctx.projections) {
@@ -251,6 +284,47 @@ function validateQueryComprehension(
         source: `${ctx.name}/${proj.name}`,
       });
     }
+  }
+  // A `select` expression must RESOLVE.  Every backend's query-time emitter
+  // renders each `select` expr straight into the per-row projection mapper, so
+  // an unresolved name reaches the generated source as a FREE IDENTIFIER —
+  // `{ orders: count }` — which is a hard compile error on the typed backends
+  // and `undefined` on the untyped ones, from a model that otherwise validates
+  // clean.  The motivating shape is the whole-table aggregation
+  // `select orders = count` (read-path-architecture.md rev. 8's singleton):
+  // designed, parsed, and NOT implemented, so `count` lowers to an unknown ref
+  // and is emitted verbatim.  Gate it here until the aggregation lands (M-T1.3
+  // Phase 0) — the honest-gap rule the header above states for the query-time
+  // surface as a whole.
+  for (const s of q.selects ?? []) {
+    const unresolved = firstUnresolvedRefName(s.expr);
+    if (!unresolved) continue;
+    // Two codes over one condition: the aggregation vocabulary is a KNOWN
+    // unimplemented feature, everything else is a bad name.  Same defect
+    // (an undeclared identifier in the emitted mapper), different repair.
+    const isAggregation = WHOLE_TABLE_AGGREGATIONS.has(unresolved);
+    const diagCode = isAggregation
+      ? "loom.projection-whole-table-aggregation-unsupported"
+      : "loom.projection-select-unresolved";
+    const diagMessage = isAggregation
+      ? `projection '${proj.name}': 'select ${s.field} = …' uses '${unresolved}' as a ` +
+        `WHOLE-TABLE aggregation over the '${q.source}' source (no collection receiver binds ` +
+        `it). Whole-table aggregation is designed (read-path-architecture.md rev. 8 — the ` +
+        `singleton read model) but NOT yet emitted: '${unresolved}' would reach the generated ` +
+        `source as an undeclared identifier. Use a per-row 'select' for now.`
+      : `projection '${proj.name}': 'select ${s.field} = …' references '${unresolved}', which ` +
+        `resolves to nothing — not a field of the '${q.source}' source, not a 'join' alias, ` +
+        `not a parameter. It would be emitted as an undeclared identifier. Fix the name, or ` +
+        `add the 'join <Aggregate> as ${unresolved} on <idRef>' that binds it.`;
+    // Written long-hand (not `{ code, message }` shorthand) so the
+    // diagnostic-codes contract scan (`diagnostic-codes-completeness.test.ts`)
+    // can see the `code:` key it keys on.
+    diags.push({
+      severity: "error",
+      code: diagCode,
+      message: diagMessage,
+      source: `${ctx.name}/${proj.name}`,
+    });
   }
   // The HONEST "not yet emitted on this backend" gate
   // (`loom.projection-query-time-unsupported`) is a SYSTEM-level check

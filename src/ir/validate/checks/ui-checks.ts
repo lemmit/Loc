@@ -59,9 +59,14 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
   // acceptance so F2 only flags receivers the walker truly can't resolve.
   const aggNames = new Set<string>();
   const workflowNames = new Set<string>();
+  // Projection names drive F3 (`loom.ui-projection-read-unsupported`).  BOTH
+  // flavours are unreadable from a ui — query-time and folded alike — since the
+  // missing piece is the frontend client, not the backend read.
+  const projectionNames = new Set<string>();
   for (const c of allContexts(loom)) {
     for (const a of c.aggregates) aggNames.add(a.name);
     for (const w of c.workflows) workflowNames.add(w.name);
+    for (const p of c.projections) projectionNames.add(p.name);
   }
 
   for (const sys of loom.systems) {
@@ -92,6 +97,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
+          projectionNames,
           handles,
           functionNames,
           componentActionParams,
@@ -119,6 +125,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
+          projectionNames,
           handles,
           functionNames,
           componentActionParams,
@@ -335,6 +342,9 @@ function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
 /** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
 interface BodyCheckCtx {
   aggByName: Map<string, AggregateIR>;
+  /** Every declared `projection` name in the model — F3's lookup set.  A ui
+   *  read of one of these has no frontend path yet (see `checkProjectionRead`). */
+  projectionNames: ReadonlySet<string>;
   /** Receiver-root names the walker resolves to an api / workflow-
    *  instance hook (`tryDetectApiHook`) or a declared handle — a valid
    *  method-call receiver root even though it lowers to an `unknown` ref. */
@@ -512,6 +522,8 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
       return;
     }
     case "member":
+      // F3 — a ui read of a `projection` has no frontend path yet.
+      checkProjectionRead(e, ctx, diags);
       checkBody(e.receiver, ctx, diags);
       return;
     case "binary":
@@ -871,6 +883,44 @@ function checkMethodCallReceiver(
       `unresolved receiver '${root.name}'. A method-call receiver must resolve to a page/component ` +
       `parameter, state / derived value, lambda binding, or a declared api handle ` +
       `(\`api <Handle>: <Api>\`). Declare the handle, or fix the reference.`,
+    source: ctx.where,
+  });
+}
+
+/** F3 — `loom.ui-projection-read-unsupported`.  A page/component that reads a
+ *  `projection` (`QueryView { of: <ApiHandle>.<Projection> }`) validates clean
+ *  today and emits `/* unresolved: <Handle> *␣/ undefined.<Projection>` — a
+ *  runtime `TypeError` AND a build break, from a model with no diagnostic.
+ *
+ *  The hole is structural, not a typo: F2 above exempts an api-handle receiver
+ *  root, which is correct for an aggregate (`Sales.Customer`) but lets a
+ *  PROJECTION member through unchecked, and nothing downstream resolves it —
+ *  `lower-ui.ts` has no projection arm and `_frontend/api-module.ts` emits no
+ *  client for a projection route.  So a projection is a backend-only read model
+ *  owning an HTTP route no generated frontend ever calls.
+ *
+ *  Gate it until the ui→projection read path lands (M-T1.3 Phase 1), so the
+ *  gap is an error at the model tier rather than `undefined.X` in a page. */
+function checkProjectionRead(
+  e: Extract<ExprIR, { kind: "member" }>,
+  ctx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  if (!ctx.projectionNames.has(e.member)) return;
+  // Only flag the read shape: the member names a projection AND the receiver is
+  // a handle-rooted chain the walker will fail to resolve.  A same-named field
+  // on a resolved receiver (`row.SalesTotals`) is not a projection read.
+  const root = rootRef(e.receiver);
+  if (root?.refKind !== "unknown") return;
+  if (!ctx.handles.has(root.name)) return;
+  diags.push({
+    severity: "error",
+    code: "loom.ui-projection-read-unsupported",
+    message:
+      `${ctx.where}: reads projection '${e.member}' (\`${root.name}.${e.member}\`), but a ui ` +
+      `cannot consume a projection yet — projections are served on the backend only, and no ` +
+      `frontend client is generated for their route, so this would emit an unresolved receiver. ` +
+      `Read the source aggregate directly (\`${root.name}.<Aggregate>.all\`) for now.`,
     source: ctx.where,
   });
 }
