@@ -108,7 +108,15 @@ export function emitTable(
       // targets that call the helper (Vue/Svelte/Angular — their strict
       // templates reject the inline `as`-cast comparator) read it to import.
       ctx.usesTableSort = true;
-      rowsExpr = ctx.target.renderSortedRows(rowsExpr, sortKeyRef, sortDirRef);
+      rowsExpr = ctx.target.renderSortedRows({
+        rowsExpr,
+        sortKey: sortKeyRef,
+        sortDir: sortDirRef,
+        // Pre-scanned rather than collected during the column walk below,
+        // which runs AFTER this: a statically-typed target needs the whole set
+        // up front to emit its `match` over the sort key.
+        columns: sortableColumnFields(call),
+      });
     }
   }
 
@@ -336,6 +344,19 @@ function emitColumn(
     cellJsx,
     key,
   };
+}
+
+/** The `field:` of every `sortable:` Column under a `Table`, in declaration
+ *  order — the exact set of values its `sortKey` state can hold.  Resolved the
+ *  same way `emitColumn` resolves a single column's sort field (explicit
+ *  `field:`, else the accessor's member), so the two cannot disagree about
+ *  which columns are sortable. */
+function sortableColumnFields(call: Extract<ExprIR, { kind: "call" }>): string[] {
+  return call.args
+    .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
+    .filter((c) => boolNamed(c, "sortable") === true)
+    .map((c) => stringNamed(c, "field") ?? sortFieldFromAccessor(c.args[1]))
+    .filter((f): f is string => f !== undefined);
 }
 
 /** Infer a column's sort field from a simple accessor lambda `o => o.<field>`.

@@ -100,6 +100,29 @@ export interface SortableHeaderSpec {
   sortDir: StateRef;
 }
 
+/** What a target needs to sort a `Table`'s rows client-side (M-T1.1 — the
+ *  `renderSortedRows` seam).
+ *
+ *  `columns` is the load-bearing field for a STATICALLY-TYPED target.  The sort
+ *  key is a RUNTIME string, so JS just indexes (`row[sortKey]`) — but F# and
+ *  Dart records cannot be indexed by a runtime string, so those targets have to
+ *  emit a `match` over the key with one arm per sortable column.  That needs
+ *  the column list, which the original positional signature did not carry: the
+ *  seam was unimplementable off the JSX family however the rest of the Table
+ *  behaved. */
+export interface SortedRowsSpec {
+  /** The rows expression to sort, AFTER any filter. */
+  rowsExpr: string;
+  /** Page-state field holding the active sort column. */
+  sortKey: StateRef;
+  /** Page-state field holding the active direction (`"asc"` / `"desc"`). */
+  sortDir: StateRef;
+  /** The `field:` of every `sortable:` column, in declaration order — the exact
+   *  set of values `sortKey` can hold.  A target that indexes at runtime (all
+   *  four JSX targets) ignores it. */
+  columns: readonly string[];
+}
+
 /** The data a target needs to render a pager control below a paged `Table`
  *  (M-T1.1 / M-T2.6 — the `renderPager` seam). */
 export interface PagerSpec {
@@ -892,7 +915,7 @@ export interface WalkerTarget {
   /** Wrap a `Table`'s already-rendered `rows` expression in a client-side
    *  sort by the active `sortKey` / `sortDir` state fields.  React returns a
    *  `[...(rows)].sort((a, b) => …)` chain; omitted → rows render unsorted. */
-  renderSortedRows?(rowsExpr: string, sortKey: StateRef, sortDir: StateRef): string;
+  renderSortedRows?(spec: SortedRowsSpec): string;
 
   /** Render the client-side pager control emitted below a paged `Table` — a
    *  "Prev" / "Next" pair around a "Page N" label, wired to the `page` state

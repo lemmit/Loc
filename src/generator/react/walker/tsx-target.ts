@@ -118,7 +118,10 @@ export const tsxTarget: WalkerTarget = {
    *  order.  Copies first (`[...]`) so the source array isn't mutated;
    *  the `as number` casts satisfy the type-checker while relational
    *  `<` compares strings and numbers correctly at runtime. */
-  renderSortedRows(rowsExpr, sortKey, sortDir) {
+  renderSortedRows({ rowsExpr, sortKey, sortDir }) {
+    // `columns` is unused here: JS indexes the row by the runtime sort key
+    // directly, so the sortable-column list a statically-typed target needs is
+    // information this target already has at runtime.
     const k = sortKey.name;
     const d = sortDir.name;
     return (

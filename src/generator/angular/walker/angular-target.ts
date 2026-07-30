@@ -108,7 +108,10 @@ export const angularTarget: WalkerTarget = {
   /** Sort via the shared `sortRows` helper, which the Angular page-shell
    *  re-exposes as a component member (Angular templates can only call members,
    *  not free imports).  Signals read with `()`. */
-  renderSortedRows(rowsExpr, sortKey, sortDir) {
+  renderSortedRows({ rowsExpr, sortKey, sortDir }) {
+    // `columns` is unused here: JS indexes the row by the runtime sort key
+    // directly, so the sortable-column list a statically-typed target needs is
+    // information this target already has at runtime.
     return `sortRows(${rowsExpr}, ${sortKey.name}(), ${sortDir.name}())`;
   },
 
