@@ -39,6 +39,7 @@ import { mutationsFor } from "../fixtures/corpus/mutations.js";
  *  apply a capability, which is what M1 collides with. */
 const FAST_SLICE = [
   "core-domain",
+  "field-defaults",
   "stamps",
   "tenancy-owned",
   "tenancy-hierarchy",
