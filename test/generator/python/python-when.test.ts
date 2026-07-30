@@ -58,12 +58,16 @@ describe("python when gate + can-query", () => {
     expect(canBlock.slice(0, canBlock.indexOf("@router")).includes("repo.save")).toBe(false);
   });
 
-  it("maps DisallowedError to a 409 Conflict problem response in the app", async () => {
+  it("maps DisallowedError to a 409 Disallowed problem response in the app", async () => {
     const files = await build();
     const problem = files.get("api/app/http/problem.py")!;
     expect(problem).toContain("DisallowedError");
     expect(problem).toContain("@app.exception_handler(DisallowedError)");
-    expect(problem).toContain('return problem(request, 409, "Conflict", str(err))');
+    // RS-17 — the 7807 title is the ERROR NAME (`errorTitle` humanises
+    // `Disallowed`), not the 409 reason phrase; python titled it "Conflict"
+    // until #2300's follow-up, diverging from node/.NET/Java.  The sibling 409
+    // rungs (UniquenessConflict / ConcurrencyConflict) keep "Conflict".
+    expect(problem).toContain('return problem(request, 409, "Disallowed", str(err))');
     const errors = files.get("api/app/domain/errors.py")!;
     expect(errors).toContain("class DisallowedError(Exception):");
   });

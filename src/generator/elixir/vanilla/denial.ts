@@ -81,3 +81,26 @@ export function denialResponders(fnName = "respond", indent = ""): string {
     })
     .join("\n\n");
 }
+
+/** The `when` STATE-GATE rung of the same ladder (RS-17).  A `when`-gated
+ *  operation invoked in a state its predicate refuses answers 409 with title
+ *  "Disallowed" and a detail naming the operation and aggregate — byte-identical
+ *  to node/.NET/Java/Python's `DisallowedException(...)` message.
+ *
+ *  Same shape and same reason as the guard rungs above: the bare `:disallowed`
+ *  atom carried the status but not the message, so the controller answered a
+ *  fixed sentence ("Operation not allowed in the current state") where the other
+ *  four name the occurrence.  Carrying the message in the tuple also dissolves
+ *  what looked like the hard part — the event-sourced `command_error/2` clause is
+ *  SHARED across every command of an aggregate and so has no `op` in scope, but
+ *  it never needs one: the PRODUCER has `op`, and the consumer just binds the
+ *  detail. */
+export function disallowedMessage(aggName: string, opName: string): string {
+  return `operation '${opName}' is not allowed in the current state of ${aggName}.`;
+}
+
+/** `{:disallowed, "operation '…' is not allowed …"}` — the reason term a failed
+ *  `when` gate short-circuits to. */
+export function disallowedTerm(aggName: string, opName: string): string {
+  return `{:disallowed, ${JSON.stringify(disallowedMessage(aggName, opName))}}`;
+}

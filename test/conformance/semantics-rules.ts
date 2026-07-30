@@ -332,34 +332,37 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   },
   {
     id: "RS-17",
-    title: "A `when` state-gate rejection names the operation it refused — OPEN",
+    title: "A `when` state-gate rejection names the operation it refused",
     trigger:
       "an `operation … when <pred>` invoked in a state the predicate rejects — the 409 rung of the denial ladder",
     observable:
-      'every backend answers 409, but the ENVELOPE splits four-vs-one. node/dotnet/java/python send title "Disallowed" with the occurrence-specific detail "operation \'<op>\' is not allowed in the current state of <Agg>."; elixir sends title "Conflict" with the fixed sentence "Operation not allowed in the current state".',
-    // OPEN — found, not yet fixed.  Sized and left out of #2300 deliberately:
-    // the fix is a third pass over the elixir denial protocol (the `:disallowed`
-    // atom has to become a `{:disallowed, msg}` tuple the same way
-    // `:precondition_failed` did in RS-15), and one of its three sites — the
-    // event-sourced `command_error/2` clause — is SHARED across every command of
-    // an aggregate, so it has no single `op` in scope to name.  That is a
-    // mechanism change, not a string swap.
+      'every backend answers 409 with title "Disallowed" and the occurrence-specific detail "operation \'<op>\' is not allowed in the current state of <Agg>.". The TITLE is the error NAME, not the status reason phrase — the sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) are the ones titled "Conflict".',
+    // Two independent divergences, and the split was NOT the one first recorded.
+    //   * `detail` — elixir alone sent a fixed sentence ("Operation not allowed
+    //     in the current state") because `:disallowed` was a bare atom carrying
+    //     no message.  Same shape and same fix as RS-15: the reason is now a
+    //     `{:disallowed, msg}` tuple built at the PRODUCER, which is why the
+    //     event-sourced `command_error/2` clause being SHARED across an
+    //     aggregate's commands never mattered — the consumer only binds it.
+    //   * `title` — elixir AND **python** sent "Conflict".  The first draft of
+    //     this rule recorded a 4-vs-1 split with python on the conforming side;
+    //     that was inferred from python's (correct) DETAIL and never checked
+    //     against its title.  It is 3-vs-2.  Recorded because it is the second
+    //     time on this rule that the cheap inference was wrong.
+    // Direction decided by Loom's own rule, not a vote: `errorTitle`
+    // (src/util/error-defaults.ts) derives a title by humanising the ERROR NAME,
+    // falling back to the status reason phrase only when there is no named
+    // error — and `Disallowed` is a blessed stdlib name in STDLIB_ERROR_STATUS.
     //
-    // WHICH SIDE IS RIGHT is not a vote here either — Loom's own rule decides
-    // it, twice over:
-    //   * `title` — `errorTitle` (src/util/error-defaults.ts) derives a title by
-    //     humanising the ERROR NAME, falling back to the status reason phrase
-    //     only when there is no named error.  `Disallowed` IS a blessed stdlib
-    //     error name, so "Disallowed" is correct and "Conflict" is the miss.
-    //   * `detail` — RFC 7807 wants it specific to the OCCURRENCE (the same
-    //     reasoning that settled RS-15), so naming the op + aggregate wins.
-    // Elixir moves on both.  Listing only the measured-conforming backends
-    // follows RS-12's precedent for a rule whose direction is decided but whose
-    // fix has not landed.
-    conforms: ["node", "dotnet", "java", "python"],
+    // NOT fixed here: elixir hardcodes the 409 literal where the other four
+    // resolve it through `resolveErrorStatus("Disallowed", …)`, so an
+    // `httpStatus Disallowed -> N` override moves four backends and not the
+    // fifth.  That is the ladder-routing gap — mission M-T5.20.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
-      "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — reading the freshly-minted `state-gate` golden, before booting a second backend",
-      "predicted from the emitters and confirmed by grep, not by a failing run: the gate's coverage had not reached this case yet",
+      "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — by READING the freshly-minted `state-gate` golden, before booting a second backend",
+      "fixed (elixir): `{:disallowed, msg}` denial tuple + title Disallowed, via src/generator/elixir/vanilla/denial.ts",
+      "fixed (python): the DisallowedError handler titled the response Conflict",
     ],
     tier: "behavioral",
   },

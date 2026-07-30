@@ -37,7 +37,7 @@ import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
-import { denialTerm } from "./denial.js";
+import { denialTerm, disallowedTerm } from "./denial.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
@@ -196,11 +196,12 @@ export function opHasWhenGate(op: OperationIR): boolean {
 /** The `when` state gate → a leading `:ok <- ensure(<pred>, :disallowed)`
  *  with-clause.  The predicate reads the loaded `record`'s own state (op params
  *  are out of scope by design); a false predicate short-circuits the `with` to
- *  `{:error, :disallowed}`, which the controller maps to 409 Conflict — parity
- *  with Hono/​.NET/​Java/​Python's `DisallowedError` → 409.  Rendered FIRST in the
- *  guard chain so the state gate precedes any `precondition`. */
-function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
-  return `:ok <- ensure(${renderExpr(op.when as ExprIR, rc)}, :disallowed)`;
+ *  `{:error, {:disallowed, msg}}`, which the controller maps to 409 Conflict —
+ *  parity with Hono/​.NET/​Java/​Python's `DisallowedError` → 409, message included
+ *  (RS-17).  Rendered FIRST in the guard chain so the state gate precedes any
+ *  `precondition`. */
+function renderWhenGateClause(aggName: string, op: OperationIR, rc: RenderCtx): string {
+  return `:ok <- ensure(${renderExpr(op.when as ExprIR, rc)}, ${disallowedTerm(aggName, op.name)})`;
 }
 
 /** All hoisted guard with-clauses for an op, in evaluation order: the `when`
@@ -208,9 +209,9 @@ function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
  *  / 403) and `precondition` (→ `:precondition_failed` / 422) in body order.
  *  Byte-identical to the old requires/precondition-only list when the op has no
  *  `when`, so a guard-free / `when`-free op is unchanged. */
-export function collectOpGuardClauses(op: OperationIR, rc: RenderCtx): string[] {
+export function collectOpGuardClauses(aggName: string, op: OperationIR, rc: RenderCtx): string[] {
   const clauses: string[] = [];
-  if (op.when) clauses.push(renderWhenGateClause(op, rc));
+  if (op.when) clauses.push(renderWhenGateClause(aggName, op, rc));
   for (const s of op.statements) {
     if (s.kind === "requires" || s.kind === "precondition") {
       clauses.push(renderOpGuardClause(s, rc));
@@ -525,7 +526,7 @@ export function renderReturningOpFunction(
   // guard STATEMENTS from the in-body statements (they no longer render inline;
   // the `when` gate is a predicate field, not a statement, so it needs no
   // exclusion).
-  const guardClauses = collectOpGuardClauses(op, renderCtx);
+  const guardClauses = collectOpGuardClauses(agg.name, op, renderCtx);
   const bodyStmts = op.statements.filter((s, idx) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
     if (hoistEmits && s.kind === "emit") return false;
@@ -1093,8 +1094,8 @@ export function renderReturningOpControllerAction(
     // never emits an unreachable clause).
     ...(opHasWhenGate(op)
       ? [
-          `  def ${resultFn}(conn, {:error, :disallowed}),
-    do: ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")`,
+          `  def ${resultFn}(conn, {:error, {:disallowed, detail}}),
+    do: ProblemDetails.problem_response(conn, 409, "Disallowed", detail)`,
         ]
       : []),
     ...(opHasGuards(op)

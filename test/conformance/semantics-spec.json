@@ -301,18 +301,20 @@
     },
     {
       "id": "RS-17",
-      "title": "A `when` state-gate rejection names the operation it refused — OPEN",
+      "title": "A `when` state-gate rejection names the operation it refused",
       "trigger": "an `operation … when <pred>` invoked in a state the predicate rejects — the 409 rung of the denial ladder",
-      "observable": "every backend answers 409, but the ENVELOPE splits four-vs-one. node/dotnet/java/python send title \"Disallowed\" with the occurrence-specific detail \"operation '<op>' is not allowed in the current state of <Agg>.\"; elixir sends title \"Conflict\" with the fixed sentence \"Operation not allowed in the current state\".",
+      "observable": "every backend answers 409 with title \"Disallowed\" and the occurrence-specific detail \"operation '<op>' is not allowed in the current state of <Agg>.\". The TITLE is the error NAME, not the status reason phrase — the sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) are the ones titled \"Conflict\".",
       "conforms": [
         "node",
         "dotnet",
         "java",
-        "python"
+        "python",
+        "elixir"
       ],
       "provenance": [
-        "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — reading the freshly-minted `state-gate` golden, before booting a second backend",
-        "predicted from the emitters and confirmed by grep, not by a failing run: the gate's coverage had not reached this case yet"
+        "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — by READING the freshly-minted `state-gate` golden, before booting a second backend",
+        "fixed (elixir): `{:disallowed, msg}` denial tuple + title Disallowed, via src/generator/elixir/vanilla/denial.ts",
+        "fixed (python): the DisallowedError handler titled the response Conflict"
       ],
       "tier": "behavioral"
     }

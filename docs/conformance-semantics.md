@@ -400,47 +400,44 @@ the conforming backends, and the fix that established it.
   it. Verified on a real booted Spring app, not an emitted-string assertion.
   Tier: **behavioral**.
 
-### RS-17 · A `when` state-gate rejection names the operation it refused — **OPEN**
-- **Guarantee (pending fix).** An `operation … when <pred>` invoked in a state
-  the predicate rejects answers **409** with title `"Disallowed"` and the
-  occurrence-specific detail
-  `operation '<op>' is not allowed in the current state of <Agg>.` on every
-  backend.
-- **Trigger.** The 409 rung of the denial ladder — a `when`-gated operation
-  called in a state its predicate refuses.
-- **Observable — four-vs-one.** Every backend gets the *status* right; the
-  envelope splits.
-
-  | backends | `title` | `detail` |
-  |---|---|---|
-  | node, dotnet, java, python | `"Disallowed"` | `operation 'cancel' is not allowed in the current state of Order.` |
-  | elixir | `"Conflict"` | `Operation not allowed in the current state` |
-
-- **Which side is right — Loom's own rules decide, twice.** This is not a vote
-  (RS-11's lesson), and it does not need one:
-  - **`title`** — `errorTitle` (`src/util/error-defaults.ts`) derives a title by
-    humanising the **error name**, falling back to the status reason phrase only
-    when there is no named error. `Disallowed` **is** a blessed stdlib error
-    name (it sits in `STDLIB_ERROR_STATUS` at 409), so `"Disallowed"` is
-    correct and `"Conflict"` is the miss.
-  - **`detail`** — RFC 7807 wants it specific to the *occurrence*, the same
-    reasoning that settled RS-15.
-
-  Elixir moves on both.
-- **Why it is still open.** The fix is a third pass over the elixir denial
-  protocol: `:disallowed` has to become a `{:disallowed, msg}` tuple exactly as
-  `:precondition_failed` did, and one of its three sites — the event-sourced
-  `command_error/2` clause — is **shared across every command of an aggregate**,
-  so it has no single `op` in scope to name. That is a mechanism change, not a
-  string swap, and it was left out of #2300 rather than bolted on.
-- **Conforms (provisional).** node, dotnet, java, python. **Targets:** elixir.
+### RS-17 · A `when` state-gate rejection names the operation it refused
+- **Guarantee.** An `operation … when <pred>` invoked in a state the predicate
+  refuses answers **409** with title `"Disallowed"` and the occurrence-specific
+  detail `operation '<op>' is not allowed in the current state of <Agg>.` on
+  every backend.
+- **Trigger.** The 409 rung of the denial ladder.
+- **Why the title is the error NAME, not `"Conflict"`.** `errorTitle`
+  (`src/util/error-defaults.ts`) derives a 7807 title by humanising the **error
+  name**, falling back to the status reason phrase only when there is no named
+  error — and `Disallowed` is a blessed stdlib name in `STDLIB_ERROR_STATUS`.
+  The *sibling* 409 rungs, `UniquenessConflict` and `ConcurrencyConflict`, are
+  the ones correctly titled `"Conflict"`; conflating them is exactly the mistake
+  to avoid here (and the one an over-broad `not.toContain('409, "Conflict"')`
+  assertion made on the first attempt — it failed four correct backends).
+- **Two independent divergences, and the split was not the one first recorded.**
+  - **`detail`** — elixir alone sent the fixed sentence
+    `Operation not allowed in the current state`, because `:disallowed` was a
+    bare atom carrying no message. Same shape and same fix as RS-15: the reason
+    is now a `{:disallowed, msg}` tuple built at the **producer**. That is also
+    why the event-sourced `command_error/2` clause being *shared* across an
+    aggregate's commands never mattered — it only binds the detail. The first
+    draft of this rule called that the hard part; it wasn't.
+  - **`title`** — elixir **and python** sent `"Conflict"`. The first draft
+    recorded a 4-vs-1 split with python on the conforming side; that was
+    inferred from python's (correct) *detail* and never checked against its
+    title. It is **3-vs-2**. Worth recording: on one small rule, the cheap
+    inference was wrong twice.
+- **Not fixed here.** Elixir hardcodes the `409` literal where the other four
+  resolve it through `resolveErrorStatus("Disallowed", …)`, so an
+  `httpStatus Disallowed -> N` override moves four backends and not the fifth.
+  That is the ladder-routing gap — mission **M-T5.20**.
+- **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found 2026-07-30 while extending the M-T9.11 golden set to the
-  corpus feature cases — by **reading a freshly-minted golden**
-  (`state-gate`), before booting a second backend, then confirming against the
-  emitters. Worth noting how it was found: the gate's *coverage* had not reached
-  this case, so no run would have failed; the finding came from treating the
-  golden as an answer key to be reviewed rather than a file to be committed.
-  Tier: **behavioral**.
+  corpus feature cases — by **reading a freshly-minted golden** (`state-gate`),
+  before booting a second backend. No run would have failed: the gate's coverage
+  had not reached this case. The finding came from treating a golden as an
+  answer key to be reviewed rather than a file to be committed. Tier:
+  **behavioral**.
 
 ---
 
