@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
+import { corpusProjectDirs, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -54,17 +54,20 @@ describe.skipIf(!ENABLED)("corpus features compile under dotnet build (.NET)", (
         stdio: "inherit",
         cwd: repoRoot,
       });
-      // The deployable is named `d` → its project lands under `d/`.
-      const proj = path.join(outDir, CORPUS_DEPLOYABLE);
-      expect(fs.existsSync(proj), `${featureId}: .NET project emitted`).toBe(true);
-      execSync("dotnet restore --nologo", { cwd: proj, stdio: "inherit", timeout: 300_000 });
-      // `/warnaserror` keeps the gate honest about both real errors and warnings
-      // (an unused-using or nullable-mismatch the emitter shouldn't produce).
-      execSync("dotnet build --no-restore --nologo /warnaserror", {
-        cwd: proj,
-        stdio: "inherit",
-        timeout: 300_000,
-      });
+      // One project per declared deployable (`d` for every single-service
+      // fixture; a multi-service feature names both, and BOTH must compile).
+      for (const dir of corpusProjectDirs(featureId)) {
+        const proj = path.join(outDir, dir);
+        expect(fs.existsSync(proj), `${featureId}: .NET project '${dir}' emitted`).toBe(true);
+        execSync("dotnet restore --nologo", { cwd: proj, stdio: "inherit", timeout: 300_000 });
+        // `/warnaserror` keeps the gate honest about both real errors and warnings
+        // (an unused-using or nullable-mismatch the emitter shouldn't produce).
+        execSync("dotnet build --no-restore --nologo /warnaserror", {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 300_000,
+        });
+      }
     } finally {
       fs.rmSync(outDir, { recursive: true, force: true });
     }

@@ -2,8 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BACKEND_LABEL } from "../fixtures/corpus/backends.js";
-import { generateCorpusCase } from "../fixtures/corpus/harness.js";
+import { BACKEND_LABEL, type Backend } from "../fixtures/corpus/backends.js";
+import { corpusProjectDirs, generateCorpusCase } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +60,35 @@ describe("corpus coverage — completeness", () => {
   });
 });
 
+// The file each backend drops at the ROOT of a generated project — how a
+// top-level dir in the emitted map is recognised as something a compile tier
+// would build.
+const PROJECT_MARKER: Record<Backend, (basename: string) => boolean> = {
+  node: (f) => f === "package.json",
+  dotnet: (f) => f.endsWith(".csproj"),
+  java: (f) => f === "build.gradle" || f === "build.gradle.kts",
+  python: (f) => f === "pyproject.toml",
+  vanilla: (f) => f === "mix.exs",
+};
+
+/** Top-level dirs in an emitted file map that hold a DEPLOYABLE's project.
+ *
+ *  The backend marker alone is not enough: the emitted `e2e/` harness is also a
+ *  node package.  A deployable is what compose BUILDS, so it is the pairing of
+ *  the marker with a root `Dockerfile` that identifies one. */
+function emittedProjectDirs(files: Map<string, string>, backend: Backend): string[] {
+  const marked = new Set<string>();
+  const dockerised = new Set<string>();
+  for (const rel of files.keys()) {
+    const [dir, ...rest] = rel.split("/");
+    if (!dir || rest.length !== 1) continue; // only the project ROOT
+    const base = rest[0] ?? "";
+    if (PROJECT_MARKER[backend](base)) marked.add(dir);
+    if (base === "Dockerfile") dockerised.add(dir);
+  }
+  return [...marked].filter((d) => dockerised.has(d)).sort();
+}
+
 describe("corpus coverage — generation matrix", () => {
   for (const feature of CORPUS) {
     for (const backend of feature.backends) {
@@ -69,6 +98,17 @@ describe("corpus coverage — generation matrix", () => {
           files.size,
           `${feature.id} on ${BACKEND_LABEL[backend]} emitted no files`,
         ).toBeGreaterThan(0);
+
+        // The compile tiers can't discover what to build — they read the
+        // manifest's `deployables` (defaulting to the single `d`) BEFORE
+        // generating.  A fixture that renames or adds a deployable without
+        // saying so turns those docker gates into silent no-ops, or fails them
+        // hours later with a bare "project emitted: expected false to be true".
+        // Catch the drift here, per-PR, in milliseconds.
+        expect(
+          emittedProjectDirs(files, backend),
+          `${feature.id} on ${BACKEND_LABEL[backend]}: emitted project dirs disagree with the manifest's \`deployables\` — update test/fixtures/corpus/manifest.ts`,
+        ).toEqual([...corpusProjectDirs(feature.id)].sort());
       });
     }
   }

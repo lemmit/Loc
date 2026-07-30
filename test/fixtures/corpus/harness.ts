@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/parse.js";
 import { type Backend, PLATFORM_CLAUSE } from "./backends.js";
+import { CORPUS } from "./manifest.js";
 
 const CORPUS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,8 +22,22 @@ export function corpusSourceFor(featureId: string, backend: Backend): string {
   return src.replaceAll("__PLATFORM__", PLATFORM_CLAUSE[backend]);
 }
 
-/** The deployable name every corpus fixture uses → its emitted project dir. */
+/** The deployable name every SINGLE-service corpus fixture uses → its emitted
+ *  project dir. */
 export const CORPUS_DEPLOYABLE = "d";
+
+/**
+ * The emitted project dirs a corpus feature's compile tier must build.
+ *
+ * Ordinary fixtures declare one deployable named `d`; a feature whose subject
+ * IS the interaction between services (a typed in-system api call, say) needs
+ * two, and both halves have to compile — the caller's client is derived from
+ * the callee, so building only one of them tests half the feature.  The list
+ * lives in the manifest so all five compile harnesses read one source.
+ */
+export function corpusProjectDirs(featureId: string): readonly string[] {
+  return CORPUS.find((f) => f.id === featureId)?.deployables ?? [CORPUS_DEPLOYABLE];
+}
 
 /** Materialise a corpus feature specialised for one backend to a temp `.ddd`
  *  on disk, returning its path.  Lets the per-backend build gates generate the
