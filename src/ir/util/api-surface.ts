@@ -226,8 +226,21 @@ export function deriveAggregateOperations(
       "create",
       opCreate(agg.name),
       "post",
-      `${base}/`,
+      // NO trailing slash.  The callee mounts its sub-router at `/api/<aggs>`
+      // with a `"/"` route inside, which Hono composes to `/api/<aggs>` — and
+      // `/api/<aggs>/` 404s against it.  A client asking for the slashed form
+      // fails at RUNTIME while compiling perfectly, which is exactly the defect
+      // this derivation exists to prevent.  Verified by booting both services:
+      // `POST /api/orders/` answered 404, `POST /api/orders` answered 201.
+      base,
       createBodyParams(agg),
+      // NOTE — the declared type is the aggregate, but the SHIPPED Hono create
+      // route answers `201 { id }` only (`CreateOrderResponse`), not the whole
+      // entity.  Consumers that PARSE the body must use the id envelope, which
+      // is why every client emitter special-cases `kind === "create"`.  The
+      // declared type is left as the entity because the caller's binding is
+      // typed from it and narrowing it to an id is a wire-visible retype of
+      // every existing call site — a separate, deliberate change.
       entityType(agg.name),
       [400, 409],
     );
@@ -307,7 +320,7 @@ export function deriveAggregateOperations(
     }
   }
 
-  // GET /api/<aggs>/ — the auto `all` find, registered last (root path, so it
+  // GET /api/<aggs> — the auto `all` find, registered last (root path, so it
   // cannot be shadowed by `/{id}`).
   const all = repo?.finds.find((f) => f.name === "all");
   if (all) {
@@ -315,7 +328,8 @@ export function deriveAggregateOperations(
       "find",
       opFind(agg.name, "all"),
       "get",
-      `${base}/`,
+      // NO trailing slash — see the create arm above.  `GET /api/orders/` 404s.
+      base,
       findParams(all),
       all.returnType,
       [403],

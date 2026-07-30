@@ -39,6 +39,28 @@ system AC {
           let s = Shipment.create({ orderCode: o.code, status: "Pending" })
         }
       }
+      // The COLLECTION half.  Two things are pinned here that nothing else
+      // covers: that a caller can reach the callee's auto-`findAll` at all (the
+      // resolver's operation set has to include the ENRICHMENT-derived ops, not
+      // just the declared ones), and that the response is the callee's paged
+      // envelope rather than nothing — reading `.total` off it is what makes a
+      // client returning void a compile error instead of a silent no-op.
+      workflow census {
+        create(label: string) {
+          let listing = orders.allOrder()
+          let s = Shipment.create({ orderCode: label, status: listing.total.toString() })
+        }
+      }
+      // The WRITE half: the caller creates a row in the CALLEE's database
+      // through the typed client.  Every other workflow here only reads, so
+      // without this the write methods (`createOrder`/`updateOrder`/
+      // `destroyOrder`) were emitted on all five backends and never exercised.
+      workflow placeOrder {
+        create(code: string) {
+          let created = orders.createOrder({ code: code, status: "Draft" })
+          let s = Shipment.create({ orderCode: code, status: "Placed" })
+        }
+      }
       // The absence-union half: `byCode` may legitimately find nothing, so the
       // caller MUST handle it — the union does not type-check as bare `Order`.
       workflow lookup {

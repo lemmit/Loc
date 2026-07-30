@@ -33,6 +33,7 @@ import { type ApiResourceBinding, servedContextsFor } from "../../ir/util/api-re
 import {
   type ApiOperationIR,
   absenceUnionSuccess,
+  collectionSuccess,
   deriveContextOperations,
 } from "../../ir/util/api-surface.js";
 import { snake } from "../../util/naming.js";
@@ -119,7 +120,13 @@ export function emitElixirApiClients(
         // An ABSENCE union projects the same fields as a plain entity
         // response; only the absent status differs (nil, not a raise).
         const absentAgg = absenceUnionSuccess(op.responseType);
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
+        // A COLLECTION response projects the same per-row atom map, wrapped:
+        // the auto-`findAll` answers with the paged envelope, a declared `T[]`
+        // find with a bare array.  Without this arm both returned `:ok` — the
+        // call was made and every row discarded.
+        const coll = collectionSuccess(op.responseType);
+        const respAgg =
+          op.responseType?.kind === "entity" ? op.responseType.name : (absentAgg ?? coll?.agg);
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
 
         const bodyParams = op.params.filter((p) => p.location === "body");
@@ -183,23 +190,58 @@ export function emitElixirApiClients(
           // callee's wire fields — `o.code` in domain code is map-dot, which
           // only resolves atom keys.  Every key here is a compile-time literal.
           const fields = forApiRead(wireFieldsForAggregate(agg));
-          tail.push(
-            // `payload`, not `body`: a whole-shape create takes a PARAMETER
-            // named `body`, and rebinding it here reads as a bug even though
-            // Elixir permits it.
-            "payload = res.body || %{}",
-            "",
-            "%{",
-            // No trailing comma on the last entry — Elixir map literals reject
-            // one, and it is a parse error the emitter cannot see.
-            ...fields.map(
-              (wf, i) =>
-                `  ${snake(wf.name)}: Map.get(payload, ${JSON.stringify(wf.name)})${
-                  i === fields.length - 1 ? "" : ","
-                }`,
-            ),
-            "}",
-          );
+          // A collection projects EACH row through the same atom-key map, so
+          // the row projection is built once and mapped.  `payload` is the
+          // decoded body: the envelope for `paged`, the array itself otherwise.
+          if (coll) {
+            const rowMap = [
+              "%{",
+              ...fields.map(
+                (wf, i) =>
+                  `  ${snake(wf.name)}: Map.get(row, ${JSON.stringify(wf.name)})${
+                    i === fields.length - 1 ? "" : ","
+                  }`,
+              ),
+              "}",
+            ];
+            tail.push(
+              "payload = res.body || %{}",
+              "",
+              ...(coll.carrier === "paged"
+                ? [
+                    'rows = Map.get(payload, "items") || []',
+                    "",
+                    "%{",
+                    "  items:",
+                    "    Enum.map(rows, fn row ->",
+                    ...rowMap.map((l) => `      ${l}`),
+                    "    end),",
+                    '  page: Map.get(payload, "page"),',
+                    '  page_size: Map.get(payload, "pageSize"),',
+                    '  total: Map.get(payload, "total"),',
+                    '  total_pages: Map.get(payload, "totalPages")',
+                    "}",
+                  ]
+                : ["Enum.map(payload, fn row ->", ...rowMap.map((l) => `  ${l}`), "end)"]),
+            );
+          } else
+            tail.push(
+              // `payload`, not `body`: a whole-shape create takes a PARAMETER
+              // named `body`, and rebinding it here reads as a bug even though
+              // Elixir permits it.
+              "payload = res.body || %{}",
+              "",
+              "%{",
+              // No trailing comma on the last entry — Elixir map literals reject
+              // one, and it is a parse error the emitter cannot see.
+              ...fields.map(
+                (wf, i) =>
+                  `  ${snake(wf.name)}: Map.get(payload, ${JSON.stringify(wf.name)})${
+                    i === fields.length - 1 ? "" : ","
+                  }`,
+              ),
+              "}",
+            );
         } else {
           tail.push(":ok");
         }

@@ -35,6 +35,7 @@ import {
 import {
   type ApiOperationIR,
   absenceUnionSuccess,
+  collectionSuccess,
   deriveContextOperations,
 } from "../../../ir/util/api-surface.js";
 import { escapeCsharpIdent, lowerFirst, upperFirst } from "../../../util/naming.js";
@@ -156,13 +157,42 @@ export function emitDotnetApiClients(
         // rides absence on 404, no `type` discriminator (payloads.md §Union
         // finds).  Only the absent status differs: `null`, not a throw.
         const absentAgg = absenceUnionSuccess(op.responseType);
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
+        // A COLLECTION response deserializes the same per-row record, wrapped:
+        // the auto-`findAll` answers with the paged envelope, a declared `T[]`
+        // find with a bare array.  Without this arm both returned a bare `Task`
+        // — the call was made and every row discarded.
+        const coll = collectionSuccess(op.responseType);
+        const respAgg =
+          op.responseType?.kind === "entity" ? op.responseType.name : (absentAgg ?? coll?.agg);
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const recordName = agg ? `${agg.name}Response` : undefined;
         if (agg && recordName && !emittedRecords.has(recordName)) {
           emittedRecords.add(recordName);
           records.push(...responseRecord(agg, recordName), "");
         }
+        // The paged envelope mirrors the callee's `<Agg>Paged` field for field.
+        // Members are non-nullable value types with defaults: the callee always
+        // sends all five, and a nullable `int?` would push the null check onto
+        // every call site.
+        const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
+        if (pagedName && recordName && !emittedRecords.has(pagedName)) {
+          emittedRecords.add(pagedName);
+          records.push(
+            `    public sealed record ${pagedName}(`,
+            `        System.Collections.Generic.List<${recordName}> Items,`,
+            "        int Page,",
+            "        int PageSize,",
+            "        int Total,",
+            "        int TotalPages);",
+            "",
+          );
+        }
+        // The deserialized shape and the declared return move together.
+        const respType = pagedName
+          ? pagedName
+          : recordName && coll
+            ? `System.Collections.Generic.List<${recordName}>`
+            : recordName;
 
         const bodyParams = op.params.filter((p) => p.location === "body");
         // Two body shapes, both derived (api-surface.ts): `create` carries ONE
@@ -172,7 +202,7 @@ export function emitDotnetApiClients(
         const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
         const query = op.params.filter((p) => p.location === "query");
         const params = op.params.map((p) => `${csParamType(p.type)} ${arg(p.name)}`);
-        const ret = recordName ? `Task<${recordName}${absentAgg ? "?" : ""}>` : "Task";
+        const ret = respType ? `Task<${respType}${absentAgg ? "?" : ""}>` : "Task";
 
         methods.push(
           `        public static async ${ret} ${res}_${upperFirst(op.id)}(${params.join(", ")})`,
@@ -212,13 +242,13 @@ export function emitDotnetApiClients(
           "            if (!res.IsSuccessStatusCode)",
           `                throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, (int)res.StatusCode);`,
         );
-        if (recordName) {
+        if (respType) {
           methods.push(
             // `__payload`, not `body`: a whole-shape create takes a PARAMETER
             // named `body`, and a local of the same name is a C# compile error
             // — invisible to every vitest-tier assertion.
             "            var __payload = await res.Content.ReadAsStringAsync();",
-            `            return JsonSerializer.Deserialize<${recordName}>(__payload, JsonOpts)`,
+            `            return JsonSerializer.Deserialize<${respType}>(__payload, JsonOpts)`,
             `                ?? throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, (int)res.StatusCode);`,
           );
         }

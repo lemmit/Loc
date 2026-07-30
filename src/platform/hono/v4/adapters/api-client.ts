@@ -171,6 +171,15 @@ export function emitApiClientModule(
       // The paged envelope is emitted once per aggregate, beside its row
       // schema.  Its field list mirrors the callee's `<Agg>Paged` exactly —
       // `{ items, page, pageSize, total, totalPages }`.
+      // The SHIPPED create route answers `201 { id }` — not the whole entity
+      // its declared responseType names.  Parsing the entity schema against
+      // that body fails on every other field, which is a RUNTIME error a
+      // compile gate cannot see (the client type-checks perfectly).
+      const createName = agg && op.kind === "create" ? `${agg.name}Created` : undefined;
+      if (createName && !emittedSchemas.has(createName)) {
+        emittedSchemas.add(createName);
+        out.push(`export const ${createName} = z.object({ id: z.string() });`, ``);
+      }
       const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
       if (pagedName && schemaName && !emittedSchemas.has(pagedName)) {
         emittedSchemas.add(pagedName);
@@ -191,12 +200,14 @@ export function emitApiClientModule(
       const params = op.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
       // The parsed shape and the declared return move together: whichever
       // schema the body is parsed against is the one the signature names.
-      const parseSchema = pagedName ?? schemaName;
-      const returns = pagedName
-        ? `z.infer<typeof ${pagedName}>`
-        : schemaName
-          ? `z.infer<typeof ${schemaName}>${absentAgg ? " | null" : ""}${coll ? "[]" : ""}`
-          : "void";
+      const parseSchema = createName ?? pagedName ?? schemaName;
+      const returns = createName
+        ? `z.infer<typeof ${createName}>`
+        : pagedName
+          ? `z.infer<typeof ${pagedName}>`
+          : schemaName
+            ? `z.infer<typeof ${schemaName}>${absentAgg ? " | null" : ""}${coll ? "[]" : ""}`
+            : "void";
       const query = op.params.filter((p) => p.location === "query");
 
       out.push(
@@ -233,7 +244,9 @@ export function emitApiClientModule(
         // A bare-array find is wrapped at the parse site rather than given its
         // own named schema — there is no envelope to name.
         const expr =
-          coll?.carrier === "array" ? `z.array(${parseSchema})` : (parseSchema as string);
+          !createName && coll?.carrier === "array"
+            ? `z.array(${parseSchema})`
+            : (parseSchema as string);
         out.push(`  return ${expr}.parse(await res.json());`);
       }
       out.push(`}`);
