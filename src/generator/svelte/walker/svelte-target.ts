@@ -22,6 +22,7 @@ import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
+  cssPropName,
   defaultInitForJs,
   escapeJsFamilyText,
   hookFnName,
@@ -338,12 +339,15 @@ export const svelteTarget: WalkerTarget = {
   ): string {
     if (entries.length === 0) return "";
     const hasDynamic = entries.some((e) => e.literal === undefined);
+    // Both branches emit a CSS STRING, so each key needs a CSS property name —
+    // the DSL admits the camelCase spelling (legal for the object-form targets),
+    // which as raw text is not a property at all and is dropped by the browser.
     if (!hasDynamic) {
-      const css = entries.map(({ key, literal }) => `${key}: ${literal}`).join("; ");
+      const css = entries.map(({ key, literal }) => `${cssPropName(key)}: ${literal}`).join("; ");
       return ` style="${css.replace(/"/g, "&quot;")}"`;
     }
     const css = entries
-      .map(({ key, rendered, literal }) => `${key}: ${literal ?? `\${${rendered}}`}`)
+      .map(({ key, rendered, literal }) => `${cssPropName(key)}: ${literal ?? `\${${rendered}}`}`)
       .join("; ");
     return ` style={\`${css}\`}`;
   },

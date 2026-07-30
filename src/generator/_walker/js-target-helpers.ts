@@ -230,3 +230,21 @@ export function renderJsVariantMatch(spec: VariantMatchSpec, mutate: string): st
   lines.push("}");
   return lines.join("\n");
 }
+
+/** A `style: { … }` key as a CSS PROPERTY name, for the targets whose style
+ *  attribute is a CSS string (Vue's static `style="…"`, Svelte's `style="…"` /
+ *  `style={`…`}`) rather than an object literal.
+ *
+ *  The DSL accepts either spelling — `background-color` or `backgroundColor` —
+ *  because the object-form targets camelCase on the way out and a camelCase key
+ *  passes through unchanged there.  The string-form targets need the inverse,
+ *  and did not do it: an authored `style: { letterSpacing: "-2px" }` emitted
+ *  `style="letterSpacing: -2px"`, which is not a CSS property and is dropped by
+ *  the browser (the Vue target's own comment claimed "kebab keys" while the code
+ *  passed the key through raw).  A already-kebab key is returned unchanged, and
+ *  a leading capital keeps its dash (`WebkitBackgroundClip` → `-webkit-...`),
+ *  matching how the DOM's CSSOM maps the vendor-prefixed properties. */
+export function cssPropName(key: string): string {
+  if (!/[A-Z]/.test(key)) return key;
+  return key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+}
