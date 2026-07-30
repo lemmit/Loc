@@ -87,7 +87,12 @@ describe("Phoenix typed in-system api client", () => {
     // Req decodes to STRING keys; `o.code` only resolves atom keys.
     const src = await client();
     expect(src).toContain('code: Map.get(payload, "code")');
-    expect(src).toContain('order_code: Map.get(payload, "orderCode")');
+    // A multi-word wire field keeps its camelCase KEY and gets a snake_case
+    // binding — `version` is the boring case, so use the id/`code` pair plus
+    // this to pin both halves.  (This used to assert `order_code` off a
+    // Shipment projection, which the client no longer emits: `ordersSvc` does
+    // not host Shipping, so those operations were 404s waiting to happen.)
+    expect(src).toContain('id: Map.get(payload, "id")');
   });
 
   it("does not shadow a whole-shape `body` parameter", async () => {
@@ -123,6 +128,17 @@ describe("Phoenix typed in-system api client", () => {
     const files = await emit(system("string"));
     const wf = files.get("shipping_svc/lib/shipping_svc/shipping/workflows/fulfil.ex") ?? "";
     expect(wf).toContain("ShippingSvc.Resources.ApiClients.orders_get_order_by_id(");
+  });
+
+  it("exposes ONLY the operations the SERVING deployable mounts", async () => {
+    // `api OrdersApi from Core` names a SUBDOMAIN, and Core holds both Orders
+    // and Shipping — but `ordersSvc` hosts only Orders, so it mounts only the
+    // Order routes.  Emitting client functions for the Shipping operations
+    // would compile clean and 404 at runtime, which is the precise failure this
+    // feature exists to prevent.  Scoping is `servedContextsFor`, shared by all
+    // five backends because each previously had its own wrong copy.
+    const src = await client();
+    expect(src).not.toMatch(/Shipment/);
   });
 
   it("emits no client module for a deployable that binds no api", async () => {

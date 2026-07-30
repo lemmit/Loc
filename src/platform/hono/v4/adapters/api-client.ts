@@ -25,7 +25,10 @@
 import { zodForResponse } from "../../../../generator/_frontend/zod-schemas.js";
 import { forApiRead, wireFieldsForAggregate } from "../../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, SystemIR, TypeIR } from "../../../../ir/types/loom-ir.js";
-import type { ApiResourceBinding } from "../../../../ir/util/api-resource-binding.js";
+import {
+  type ApiResourceBinding,
+  servedContextsFor,
+} from "../../../../ir/util/api-resource-binding.js";
 import { type ApiOperationIR, deriveContextOperations } from "../../../../ir/util/api-surface.js";
 import { resourceEnvUrlVar } from "../../../../util/resource-env.js";
 
@@ -40,14 +43,6 @@ function aggregateNamed(sys: SystemIR, name: string): AggregateIR | undefined {
     }
   }
   return undefined;
-}
-
-/** The contexts the bound api derives its surface from. */
-function servedContexts(sys: SystemIR, apiName: string) {
-  const api = sys.apis.find((a) => a.name === apiName);
-  if (!api) return [];
-  const sd = sys.subdomains.find((s) => s.name === api.sourceModule);
-  return sd?.contexts ?? [];
 }
 
 /** TS parameter type for one operation parameter.  Ids and every scalar the
@@ -139,7 +134,7 @@ export function emitApiClientModule(
 
   for (const b of bindings) {
     const envVar = resourceEnvUrlVar(b.resource.name);
-    const ops = servedContexts(sys, b.apiName).flatMap((ctx) => deriveContextOperations(ctx));
+    const ops = servedContextsFor(b, sys).flatMap((ctx) => deriveContextOperations(ctx));
     out.push(`// ---- ${b.resource.name} → api '${b.apiName}' (served by '${b.server.name}')`);
     out.push(
       `export const ${b.resource.name}BaseUrl = process.env.${envVar} ?? "http://localhost:3000";`,

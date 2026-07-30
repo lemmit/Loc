@@ -136,6 +136,17 @@ describe("Java typed in-system api client", () => {
     ).toBe(true);
   });
 
+  it("exposes ONLY the operations the SERVING deployable mounts", async () => {
+    // `api OrdersApi from Core` names a SUBDOMAIN, and Core holds both Orders
+    // and Shipping — but `ordersSvc` hosts only Orders, so it mounts only the
+    // Order routes.  Emitting client functions for the Shipping operations
+    // would compile clean and 404 at runtime, which is the precise failure this
+    // feature exists to prevent.  Scoping is `servedContextsFor`, shared by all
+    // five backends because each previously had its own wrong copy.
+    const src = await client();
+    expect(src).not.toMatch(/Shipment/);
+  });
+
   it("emits no client class for a deployable that binds no api", async () => {
     const files = await emit(system("string"));
     expect(

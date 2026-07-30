@@ -120,6 +120,15 @@ describe("Hono typed in-system api client", () => {
     expect(ids).toContain("export type OrderId =");
   });
 
+  it("exposes ONLY the operations the SERVING deployable mounts", async () => {
+    // `api OrdersApi from Core` names a SUBDOMAIN holding both Orders and
+    // Shipping, but `ordersSvc` hosts only Orders and so mounts only the Order
+    // routes.  Emitting Shipping client functions would compile clean and 404
+    // at runtime — the precise failure this feature exists to prevent.
+    const src = await client();
+    expect(src).not.toMatch(/Shipment/);
+  });
+
   it("emits no client module for a deployable that binds no api", async () => {
     // The byte-identity gate: the callee itself wires only a state resource.
     const files = await emit(SRC);

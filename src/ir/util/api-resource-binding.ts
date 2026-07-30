@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { descriptorFor } from "../../platform/metadata.js";
-import type { DataSourceIR, DeployableIR, SystemIR } from "../types/loom-ir.js";
+import type { BoundedContextIR, DataSourceIR, DeployableIR, SystemIR } from "../types/loom-ir.js";
 
 export interface ApiResourceBinding {
   /** The `resource` declaration doing the binding. */
@@ -43,6 +43,29 @@ export function apiResourceBindings(deployable: DeployableIR, sys: SystemIR): Ap
     out.push({ resource, apiName: resource.apiName, server });
   }
   return out;
+}
+
+/** The contexts a binding's client may expose operations for.
+ *
+ *  The api's subdomain is NOT the answer.  `api A from D` names a subdomain,
+ *  but the deployable that `serves:` it mounts routes only for the contexts IT
+ *  hosts — so taking every context of the subdomain emits client functions for
+ *  operations the callee does not answer, which compile clean and 404 at
+ *  runtime.  That is exactly the failure this feature exists to prevent (the
+ *  untyped path's "a hand-written `/orders/{id}` compiles and 404s"), so
+ *  getting it wrong here is worse than not having the feature.
+ *
+ *  Lives here, next to the binding it scopes, because all five backend client
+ *  emitters need it and each had its own copy of the wrong version. */
+export function servedContextsFor(
+  binding: ApiResourceBinding,
+  sys: SystemIR,
+): readonly BoundedContextIR[] {
+  const api = sys.apis.find((a) => a.name === binding.apiName);
+  if (!api) return [];
+  const inSubdomain = sys.subdomains.find((s) => s.name === api.sourceModule)?.contexts ?? [];
+  const hosted = new Set(binding.server.contextNames);
+  return inSubdomain.filter((c) => hosted.has(c.name));
 }
 
 /** True when any deployable in the system wires an api-bound resource — the

@@ -29,7 +29,7 @@
 
 import { forApiRead, wireFieldsForAggregate } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, SystemIR } from "../../ir/types/loom-ir.js";
-import type { ApiResourceBinding } from "../../ir/util/api-resource-binding.js";
+import { type ApiResourceBinding, servedContextsFor } from "../../ir/util/api-resource-binding.js";
 import { type ApiOperationIR, deriveContextOperations } from "../../ir/util/api-surface.js";
 import { snake } from "../../util/naming.js";
 import { resourceEnvUrlVar } from "../../util/resource-env.js";
@@ -47,12 +47,6 @@ function aggregateNamed(sys: SystemIR, name: string): AggregateIR | undefined {
     }
   }
   return undefined;
-}
-
-function servedContexts(sys: SystemIR, apiName: string) {
-  const api = sys.apis.find((a) => a.name === apiName);
-  if (!api) return [];
-  return sys.subdomains.find((s) => s.name === api.sourceModule)?.contexts ?? [];
 }
 
 /** `/api/orders/{id}` → an Elixir string expression with path params encoded. */
@@ -116,7 +110,7 @@ export function emitElixirApiClients(
       "",
     );
 
-    for (const ctx of servedContexts(sys, b.apiName)) {
+    for (const ctx of servedContextsFor(b, sys)) {
       for (const op of deriveContextOperations(ctx)) {
         const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : undefined;
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
