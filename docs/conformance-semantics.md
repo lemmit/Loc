@@ -366,12 +366,17 @@ the conforming backends, and the fix that established it.
   the RFC-idiomatic side, and closed in the same change that flipped the four
   runtime mappings + their OpenAPI declarations. Tier: **behavioral**.
 
-### RS-16 · The RFC 7807 `type` member is present and `"about:blank"`
+### RS-16 · The RFC 7807 `type` member is always present
 - **Guarantee.** Every error response carries all five RFC 7807 members —
-  `type`, `title`, `status`, `detail`, `instance` — and `type` is the literal
-  string `"about:blank"` (Loom keeps no per-error type registry).
+  `type`, `title`, `status`, `detail`, `instance` — with `type` never omitted.
+  Its **value** depends on the kind of error: a **framework** problem (the
+  domain floor, wire validation, aggregate-not-found) carries `"about:blank"`;
+  a **declared `error` payload** carries its derived `/errors/<kebab-name>` URI
+  (`errorTypeUri` in `src/util/error-defaults.ts` — `NotFound` →
+  `"/errors/not-found"`). Both forms must be present and identical on all five.
 - **Trigger.** Any error response on any backend serving an api: a tripped
-  `precondition`, a wire-validation failure, a 404.
+  `precondition`, a wire-validation failure, a framework 404, a declared
+  `error` variant.
 - **Why absence is still a divergence.** RFC 9457 §3.1 says a missing `type` is
   equivalent to `about:blank`, so omitting it is *legal*. It is still a wire
   break: a client reading `body.type` gets a string on four backends and
@@ -393,6 +398,48 @@ the conforming backends, and the fix that established it.
   golden contained an error body — which RS-15 had just made possible. A rule
   that existed for months and was invisible until the gate's coverage reached
   it. Verified on a real booted Spring app, not an emitted-string assertion.
+  Tier: **behavioral**.
+
+### RS-17 · A `when` state-gate rejection names the operation it refused — **OPEN**
+- **Guarantee (pending fix).** An `operation … when <pred>` invoked in a state
+  the predicate rejects answers **409** with title `"Disallowed"` and the
+  occurrence-specific detail
+  `operation '<op>' is not allowed in the current state of <Agg>.` on every
+  backend.
+- **Trigger.** The 409 rung of the denial ladder — a `when`-gated operation
+  called in a state its predicate refuses.
+- **Observable — four-vs-one.** Every backend gets the *status* right; the
+  envelope splits.
+
+  | backends | `title` | `detail` |
+  |---|---|---|
+  | node, dotnet, java, python | `"Disallowed"` | `operation 'cancel' is not allowed in the current state of Order.` |
+  | elixir | `"Conflict"` | `Operation not allowed in the current state` |
+
+- **Which side is right — Loom's own rules decide, twice.** This is not a vote
+  (RS-11's lesson), and it does not need one:
+  - **`title`** — `errorTitle` (`src/util/error-defaults.ts`) derives a title by
+    humanising the **error name**, falling back to the status reason phrase only
+    when there is no named error. `Disallowed` **is** a blessed stdlib error
+    name (it sits in `STDLIB_ERROR_STATUS` at 409), so `"Disallowed"` is
+    correct and `"Conflict"` is the miss.
+  - **`detail`** — RFC 7807 wants it specific to the *occurrence*, the same
+    reasoning that settled RS-15.
+
+  Elixir moves on both.
+- **Why it is still open.** The fix is a third pass over the elixir denial
+  protocol: `:disallowed` has to become a `{:disallowed, msg}` tuple exactly as
+  `:precondition_failed` did, and one of its three sites — the event-sourced
+  `command_error/2` clause — is **shared across every command of an aggregate**,
+  so it has no single `op` in scope to name. That is a mechanism change, not a
+  string swap, and it was left out of #2300 rather than bolted on.
+- **Conforms (provisional).** node, dotnet, java, python. **Targets:** elixir.
+- **Provenance.** Found 2026-07-30 while extending the M-T9.11 golden set to the
+  corpus feature cases — by **reading a freshly-minted golden**
+  (`state-gate`), before booting a second backend, then confirming against the
+  emitters. Worth noting how it was found: the gate's *coverage* had not reached
+  this case, so no run would have failed; the finding came from treating the
+  golden as an answer key to be reviewed rather than a file to be committed.
   Tier: **behavioral**.
 
 ---
