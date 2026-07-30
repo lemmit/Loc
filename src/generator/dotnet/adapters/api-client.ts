@@ -32,7 +32,11 @@ import {
   type ApiResourceBinding,
   servedContextsFor,
 } from "../../../ir/util/api-resource-binding.js";
-import { type ApiOperationIR, deriveContextOperations } from "../../../ir/util/api-surface.js";
+import {
+  absenceUnionSuccess,
+  type ApiOperationIR,
+  deriveContextOperations,
+} from "../../../ir/util/api-surface.js";
 import { escapeCsharpIdent, lowerFirst, upperFirst } from "../../../util/naming.js";
 import { resourceEnvUrlVar } from "../../../util/resource-env.js";
 // `API_CLIENT_CLASS` lives in `render-expr.ts`, not here: this module already
@@ -147,7 +151,13 @@ export function emitDotnetApiClients(
 
     for (const ctx of servedContextsFor(b, sys)) {
       for (const op of deriveContextOperations(ctx)) {
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : undefined;
+        // An ABSENCE union deserializes the same record as a plain entity
+        // response — the callee answers the success body directly at 200 and
+        // rides absence on 404, no `type` discriminator (payloads.md §Union
+        // finds).  Only the absent status differs: `null`, not a throw.
+        const absentAgg = absenceUnionSuccess(op.responseType);
+        const respAgg =
+          op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const recordName = agg ? `${agg.name}Response` : undefined;
         if (agg && recordName && !emittedRecords.has(recordName)) {
@@ -163,7 +173,7 @@ export function emitDotnetApiClients(
         const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
         const query = op.params.filter((p) => p.location === "query");
         const params = op.params.map((p) => `${csParamType(p.type)} ${arg(p.name)}`);
-        const ret = recordName ? `Task<${recordName}>` : "Task";
+        const ret = recordName ? `Task<${recordName}${absentAgg ? "?" : ""}>` : "Task";
 
         methods.push(
           `        public static async ${ret} ${res}_${upperFirst(op.id)}(${params.join(", ")})`,
@@ -191,8 +201,15 @@ export function emitDotnetApiClients(
             `            req.Content = new StringContent(JsonSerializer.Serialize(${payload}, JsonOpts), Encoding.UTF8, "application/json");`,
           );
         }
+        methods.push("            using var res = await Http.SendAsync(req);");
+        if (absentAgg) {
+          // Absence is a VALUE the caller matches on, not a failure.
+          methods.push(
+            "            if ((int)res.StatusCode == 404)",
+            "                return null;",
+          );
+        }
         methods.push(
-          "            using var res = await Http.SendAsync(req);",
           "            if (!res.IsSuccessStatusCode)",
           `                throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, (int)res.StatusCode);`,
         );
