@@ -18,6 +18,7 @@ import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
+  cssPropName,
   defaultInitForJs,
   escapeJsFamilyText,
   hookFnName,
@@ -440,7 +441,12 @@ export const vueTarget: WalkerTarget = {
   ): string {
     if (entries.length === 0) return "";
     if (entries.every((e) => e.literal !== undefined)) {
-      const css = entries.map(({ key, literal }) => `${key}: ${literal}`).join("; ");
+      // `cssPropName` — a CSS STRING needs a CSS property name, and the DSL
+      // admits the camelCase spelling too (the object-form targets camelCase on
+      // the way out, so both spellings are legal input).  Without it an authored
+      // `letterSpacing` emitted `style="letterSpacing: …"`, silently dropped by
+      // the browser — the comment above already claimed kebab keys.
+      const css = entries.map(({ key, literal }) => `${cssPropName(key)}: ${literal}`).join("; ");
       return ` style="${css}"`;
     }
     const parts = entries.map(({ key, rendered }) => {

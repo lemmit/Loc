@@ -364,3 +364,89 @@ describe("attribute-escaping — quotes in testid / label attributes (F3)", () =
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// ONE style attribute — a pack's own base declarations merged with the
+// author's `style: { … }`.  Regression for the 07-19 review's F2 finding.
+//
+// Nine templates across seven packs used to emit a hardcoded `style="…"` (or
+// `style={{ … }}`) for `gradient:`/`weight:`/`size:` AND splice `{{{styleAttr}}}`
+// next to it — two `style` attributes on one element.  The failure mode differed
+// per framework, which is why the original audit under-called it as "wrong-value,
+// React unaffected":
+//   - React  `tsc` FAILED outright — TS17001, "JSX elements cannot have multiple
+//            attributes with the same name" (a BUILD-break, verified with the
+//            real compiler on a generated project);
+//   - Vue    kept the FIRST attribute per HTML rules → author's style dropped;
+//   - Svelte the `{{else}}{{{styleAttr}}}` shape omitted the author's
+//            declarations entirely whenever a base declaration was present.
+//
+// The templates now route base declarations through `styleWith`, so there is
+// exactly ONE style attribute and both sets of declarations survive.  This gate
+// is a PROPERTY over the affected packs, not a spot-check: a pack that
+// reintroduces a second `style` attribute fails here.
+// ---------------------------------------------------------------------------
+describe("style-attribute merging — pack base declarations + author style (F2)", () => {
+  const styleSystem = (platform: string, design: string): string => `
+    system Demo {
+      subdomain S { context C { } }
+      ui Web {
+        page Landing {
+          route: "/"
+          body: Stack {
+            Heading {
+              "Title",
+              level: 1,
+              gradient: "linear-gradient(120deg, #b58cff, #6fd1ff)",
+              weight: 800,
+              style: { letterSpacing: "-2px" }
+            }
+          }
+        }
+      }
+      deployable api { platform: node, contexts: [C], port: 3000 }
+      deployable web { platform: ${platform}, targets: api, ui: Web, port: 3001, design: ${design} }
+    }
+  `;
+
+  // Every pack whose heading template carries base declarations.
+  const CASES: ReadonlyArray<readonly [platform: string, design: string]> = [
+    ["react", "mantine"],
+    ["react", "shadcn"],
+    ["vue", "vuetify"],
+    ["vue", "shadcnVue"],
+    ["svelte", "flowbite"],
+    ["svelte", "shadcnSvelte"],
+  ];
+
+  for (const [platform, design] of CASES) {
+    it(`${platform}/${design}: one style attribute carrying BOTH the pack's and the author's declarations`, async () => {
+      const files = await generateSystemFiles(styleSystem(platform, design));
+      const out = renderedText(files);
+      // The heading tag itself — the element that carries both sources.
+      const tag = out.match(/<(?:Title|h1)\b[^>]*b58cff[^>]*>/)?.[0];
+      expect(tag, "the gradient heading was not emitted").toBeTruthy();
+      // EXACTLY ONE style attribute (the pre-fix output had two).
+      expect(tag?.match(/\bstyle=/g) ?? []).toHaveLength(1);
+      // The pack's base declaration survived...
+      expect(tag).toMatch(/background[iI]mage|background-image/);
+      // ...and so did the author's, which the Vue/Svelte packs used to drop.
+      expect(tag).toMatch(/letter[sS]pacing|letter-spacing/);
+    });
+  }
+
+  // The CSS-string targets need a CSS PROPERTY name; the DSL admits the
+  // camelCase spelling because the object-form targets camelCase on the way out.
+  // `letterSpacing` used to reach the wire verbatim as `style="letterSpacing: …"`,
+  // which is not a property and is dropped by the browser — silently.
+  for (const [platform, design] of [
+    ["vue", "vuetify"],
+    ["svelte", "flowbite"],
+  ] as const) {
+    it(`${platform}/${design}: a camelCase style key is kebab-cased for the CSS string`, async () => {
+      const out = renderedText(await generateSystemFiles(styleSystem(platform, design)));
+      expect(out).toContain("letter-spacing: -2px");
+      expect(out).not.toContain("letterSpacing:");
+    });
+  }
+});

@@ -1956,6 +1956,75 @@ export function styleAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): st
   return ctx.target.renderStyleAttr(entries);
 }
 
+/** Split a CSS declaration list on top-level `;` — parenthesis-aware, so a
+ *  value like `linear-gradient(120deg, #aaa, #bbb)` (or a nested
+ *  `calc(var(--x) * 2)`) is never cut mid-call. */
+function splitCssDecls(decls: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < decls.length; i++) {
+    const c = decls[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    else if (c === ";" && depth === 0) {
+      out.push(decls.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(decls.slice(start));
+  return out.map((d) => d.trim()).filter((d) => d.length > 0);
+}
+
+/** The MERGING twin of `styleAttr` — a design pack's OWN base declarations
+ *  plus the author's `style: { … }`, rendered as ONE attribute.
+ *
+ *  Handlebars invokes a context-provided function as a helper, so a template
+ *  splices `{{{styleWith "max-width: 540px"}}}` where it would otherwise have
+ *  written a hardcoded `style="max-width: 540px"` **next to** `{{{styleAttr}}}`.
+ *  That pairing was the bug (fleet-bug-hunt / 07-19 review F2): two `style`
+ *  attributes on one element, whose failure mode differed per framework —
+ *  React `tsc`-failed outright (TS17001, "JSX elements cannot have multiple
+ *  attributes with the same name"), Vue kept the FIRST and dropped the
+ *  author's, and the Svelte packs' `{{else}}{{{styleAttr}}}` shape omitted the
+ *  author's declarations entirely whenever a base declaration was present.
+ *
+ *  Merge order is base-then-author, so an author `style:` overriding a pack
+ *  default wins under CSS's last-declaration-wins (and, for the object-form
+ *  targets, under later-key-wins).  Base values are literal CSS text authored
+ *  in the pack, so they ride the `literal` slot and pick up each target's own
+ *  key spelling — the pack writes `background-image` once and React still gets
+ *  `backgroundImage`. */
+export function styleWith(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): (baseDecls?: unknown) => string {
+  return (baseDecls?: unknown): string => {
+    const raw = typeof baseDecls === "string" ? baseDecls : "";
+    const base = splitCssDecls(raw).flatMap((decl) => {
+      const i = decl.indexOf(":");
+      if (i <= 0) return [];
+      const key = decl.slice(0, i).trim();
+      const literal = decl.slice(i + 1).trim();
+      // `rendered` is the value in expression position (React's object form);
+      // `literal` is the same value as bare CSS text (the string forms).  A bare
+      // NUMBER stays unquoted so `weight: 700` keeps emitting `fontWeight: 700`
+      // rather than the string `"700"` — React would otherwise be free to treat
+      // a numeric length differently from its string form (it appends `px` to
+      // numbers), and the packs' own declarations were numeric before this merge.
+      const numeric = /^-?\d+(\.\d+)?$/.test(literal);
+      return [{ key, rendered: numeric ? literal : JSON.stringify(literal), literal }];
+    });
+    const authored = (call.style?.entries ?? []).map(({ key, value }) => ({
+      key,
+      rendered: emitExpr(value, ctx),
+      literal: value.kind === "literal" && value.lit === "string" ? value.value : undefined,
+    }));
+    const all = [...base, ...authored];
+    return all.length === 0 ? "" : ctx.target.renderStyleAttr(all);
+  };
+}
+
 /** Read the `testid:` named arg from any primitive call
  *  and produce a TSX attribute fragment ready to splice into the
  *  template's opening tag.  Returns `' data-testid="..."'` for

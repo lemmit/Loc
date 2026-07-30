@@ -80,7 +80,7 @@ cosmetic/content defect.
 | F3 | Double-quote in user strings breaks JSX attributes | build-break | **FIXED** (noted inline) |
 | F4/F5 | Vue/Svelte auth gates render literal "null" | UX | **FIXED** (noted inline) |
 | G1 | `this`-referencing field default spliced into the wire schema | boot-break | **FIXED 2026-07-30** — new `loom.field-default-not-constant` (`validate/checks/structural-checks.ts`) rejects a field default that reads `this`/`this.<field>`/`this.id`/an instance function, on aggregates, entity parts AND value objects, pointing at `derived`. Rejecting beats the alternatives: dropping the default or emitting it only where an instance exists both silently change the declared wire contract, and the two behaviours already disagreed per backend. Reproduced with the CLI first — `z.coerce.number().default(this.total / this.count)` at module scope |
-| G2 | Auto-versioning collides with a user `version` field | boot-break | **FIXED 2026-07-30** — `applyDefaultVersioning` now inspects the aggregate for its own `version` PROPERTY first. A plain `int` is structurally the field the capability would have spliced, so that spelling is unchanged (splice skipped — it was dropped anyway — tag still applied); anything else is an error naming both ways out. Reproduced with the CLI: `"version" TEXT NOT NULL DEFAULT 1`, which Postgres rejects at CREATE TABLE, plus `version: 1` inserted into the text column and `expected + 1` on a string |
+| G2 | Auto-versioning collides with a user `version` field | boot-break | **FIXED 2026-07-30** — `applyDefaultVersioning` now inspects the aggregate for its own `version` PROPERTY first. A plain `int` is structurally the field the capability would have spliced, so that spelling is unchanged (splice skipped — it was dropped anyway — tag still applied); anything else is an error naming both ways out. Reproduced with the CLI: `"version" TEXT NOT NULL DEFAULT 1`, which Postgres rejects at CREATE TABLE, plus `version: 1` inserted into the text column and `expected + 1` on a string . **Follow-up:** that guard sits behind `applyDefaultVersioning`'s early return for an already-tagged aggregate, so the EXPLICIT `with versioned` (and the context-level fan-out) still reached the boot-break — the same rule now also runs in `expandCapability`, where the splice happens |
 | H1 | Scaffold-local `plural()` diverges from `util/naming` | wrong-value | **FIXED** (not noted inline) — `_body-builders.ts:29` imports `{ plural, snake }` from `util/naming.js` |
 | I1 | Phoenix multi-module delta versions collide | boot-break | **FIXED 2026-07-30** — the per-module stride moved OUT of the Elixir emitter and INTO `buildMigrations`, which now allocates each module a `versionBlock` and persists it in the module's snapshot. Emitter-side striding was wrong twice over: it was computed only for INITIAL migrations (so every module's first delta collided) and it made the emitted FILENAME disagree with the version the snapshot's `migrationHistory` recorded — which trips the migration-baseline guard, as this fix's own first attempt discovered. A new module now gets a block above every existing one, so inserting one anywhere in the source is safe, and a pre-`versionBlock` snapshot adopts its legacy position-derived block. Verified against real Postgres: `mix ecto.migrate` applies create → delta per module, in order |
 | I2 | Ecto `alterColumnType` omits the `USING` cast | migration-apply failure | **FIXED 2026-07-30** — the arm now `execute/1`s the shared `renderAlterColumnTypeSql` (extracted from `sql-pg.ts`), the renameIndex/backfill precedent in the same file, so Phoenix applies DDL bit-identical with the four SQL backends. Both halves confirmed on a live Postgres: the bare form gives `column "c" cannot be cast automatically to type integer`, the `USING` form succeeds |
@@ -470,6 +470,21 @@ field a required create input. Fix: validator for constant-only wire defaults,
 or treat instance-referencing defaults as "no wire default" uniformly.
 
 ### G2. Auto-versioning collides with a user-declared `version` field *(boot-break)*
+
+> **Follow-up (2026-07-30) — the OTHER door.** The fix above lives in
+> `applyDefaultVersioning`, which handles the default-on path. That function
+> returns early when the aggregate already carries the `versioned` tag, so an
+> aggregate that asks for the capability BY NAME never reached the new guard:
+> `aggregate Release with crudish, versioned { version: string … }` and the
+> context-level `context Ops with versioned { … }` fan-out both still emitted
+> `"version" TEXT NOT NULL DEFAULT 1` — the same boot-break, one door over.
+> Reproduced with the CLI on fresh `main` after the fix landed. The rule now
+> also runs in `expandCapability`, where the splice actually happens, reusing
+> the same helpers and message so the two doors say the same thing. An `int`
+> still keeps working identically (splice skipped, tag applied). Generalisable
+> lesson: when a guard is added to a *caller*, check every other path into the
+> function it was guarding — here the capability splice had two entry points and
+> only one was covered.
 
 `applyDefaultVersioning` (`src/macros/expander.ts:299`) splices `versioned`
 (`version: int = 1`) into every non-eventLog aggregate;

@@ -15,7 +15,7 @@ import {
   stringNamed,
 } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
-import { positionalChildren, styleAttr, testidAttr, walk } from "../walker-core.js";
+import { positionalChildren, styleAttr, styleWith, testidAttr, walk } from "../walker-core.js";
 
 /** Run `fn` with the walk one semantic heading-nesting level deeper — used
  *  by the `nesting: true` a11y-contract containers (`Section` / `Card`) so a
@@ -209,6 +209,11 @@ export function emitContainer(
     hasSize: size !== undefined,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
+    // Vuetify has no `size` prop on `<v-container>`, so its pack expresses the
+    // size as its own `max-width` declaration — which used to sit NEXT TO
+    // `{{{styleAttr}}}` as a second `style` attribute (F2).  `styleWith` merges
+    // the pack's base declarations with the author's into one attribute.
+    styleWith: styleWith(call, ctx),
   });
 }
 

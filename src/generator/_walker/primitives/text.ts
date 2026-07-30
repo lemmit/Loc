@@ -20,6 +20,7 @@ import {
   firstPositionalContent,
   stringOrRefArgValue,
   styleAttr,
+  styleWith,
   testidAttr,
   walk,
 } from "../walker-core.js";
@@ -228,6 +229,10 @@ export function emitHeading(
     hasGradient: gradient !== undefined,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
+    // `gradient:` / `weight:` become pack-authored CSS declarations, which used
+    // to be emitted as a hardcoded `style="…"` NEXT TO `{{{styleAttr}}}` — two
+    // `style` attributes on one element (F2).  `styleWith` merges them.
+    styleWith: styleWith(call, ctx),
   });
 }
 

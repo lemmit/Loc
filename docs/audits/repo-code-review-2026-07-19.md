@@ -52,7 +52,7 @@ cosmetic; **gate** — a CI/test weakness that lets a product bug ship green.
 | H1 | Playground VFS seeder omits `angular/` → browser Angular gen throws | build-break (browser) | **FIXED #2147** |
 | B2 | Scaffold `workflowIsObservable` miscounts an optional id → phantom pages | wrong-value | **FIXED #2143** |
 | G-dap1 | `samePath` single-key match → wrong-file breakpoints | wrong-value (latent) | **FIXED #2149** |
-| F2 | Four Vue/Svelte packs emit duplicate `style=` → user `style:` dropped | wrong-value | OPEN — deliberate cross-framework fix |
+| F2 | SEVEN packs emit a duplicate `style` attribute | **build-break** (React) + wrong-value (Vue/Svelte) | **FIXED 2026-07-30** — scope was UNDER-CALLED, see §F2 |
 | G4 | Distinct deployables collapsing to one `serviceSlug` collide silently | boot-break | OPEN — add a slug-uniqueness validator |
 | A1 | Inherited aggregate fields invisible to type resolution (**= 07-18 L1, still live**) | build-break + fail-open | SURFACE (belongs to the 07-18 L1–L4 member-lookup consolidation) |
 | F1 | Angular/Feliz silently drop non-`extern` user components | content-drop | SURFACE (design) |
@@ -64,7 +64,19 @@ off fresh `main` (each with a failing-pre-fix regression test; E1 additionally
 verified end-to-end against a booted Java jar + Postgres). **F2** and **G4** are
 confirmed but deferred — F2 is a cross-framework style-merge (5 pack templates ×
 Vue/Svelte `style` vs `:style` semantics) better done deliberately than rushed;
-G4 wants a new slug-uniqueness validator. **A1** corroborates the 07-18 audit's
+G4 wants a new slug-uniqueness validator.
+
+> **Correction (2026-07-30, on landing the fix):** F2's scope and severity above
+> are both wrong. It is **9 templates across 7 packs**, not 5 — the four REACT
+> ones (`mantine` v7/v9, `shadcn` v3/v4) were excluded on the reasoning that
+> React "merges `style={{}}`", which it does not: duplicate JSX attributes are
+> **TS17001**, so a `gradient:`/`weight:` heading carrying an author `style:`
+> made the generated project fail `tsc` — a BUILD-break, verified with the real
+> compiler, not the wrong-value this table claimed. The direction of loss also
+> differs per framework (React: error; Vue: author's declarations dropped;
+> Svelte: dropped entirely), which is what made a single severity misleading.
+> G4 is likewise stale — the slug-uniqueness validator ships
+> (`system-checks.ts:656`). **A1** corroborates the 07-18 audit's
 L1 and is best fixed as part of that audit's L1–L4 member-lookup consolidation
 (one shared chain-aware/optional-aware helper across ~6 sites) rather than a
 point patch. The rest are design decisions (F1) or low/latent.
@@ -188,7 +200,7 @@ generates. Narrow. Fix: add `&& !p.type.optional` to the `idProps` filter.
 
 ## F. Frontends / walker
 
-### F2. Vuetify / shadcnVue / flowbite / shadcnSvelte emit a duplicate `style` attribute → user `style:` silently dropped — *wrong-value*
+### F2. Seven packs emit a duplicate `style` attribute — *build-break on React, wrong-value on Vue/Svelte*
 
 When a primitive carries both a pack-styled prop *and* a user `style: { … }`, the
 pack template hardcodes a literal `style="…"` and also splices the
@@ -202,6 +214,32 @@ Vuetify-retargeted landing page. React (merged `style={{}}`) and Angular (uses
 `class`) unaffected. (Distinct from the 07-18 audit's F2, which is the Svelte
 dynamic-style entity-escape bug.) Not test-pinned. Fix: merge the pack's fixed
 declarations into `styleAttr` (one style attribute) or move them to a class.
+
+> **FIXED (2026-07-30).** The blast radius was larger than this entry states:
+> **9 templates across 7 packs**, including the four React ones this entry
+> excluded. On React two `style` props on one element is **TS17001** ("JSX
+> elements cannot have multiple attributes with the same name"), so the
+> generated project did not compile — reproduced and then re-verified clean with
+> a real `tsc --noEmit` on a generated project, plus on `loom-landing.ddd` (the
+> React build-matrix case that actually uses `gradient:`).
+>
+> The fix gives the walker sole ownership of the attribute: `styleWith`
+> (`_walker/walker-core.ts`) is a context-invocable merge function, so a template
+> splices `{{{styleWith (concat "background-image: " gradient …)}}}` where it used
+> to write a hardcoded `style="…"` beside `{{{styleAttr}}}`. Base declarations are
+> authored once in CSS spelling and pick up each target's own key form (React
+> still gets `backgroundImage` / `WebkitBackgroundClip`). Author declarations sort
+> last, so an author `style:` overriding a pack default wins.
+>
+> **A second defect in the same code path**, not in the original finding: the
+> CSS-string targets did not kebab-case keys, so an authored
+> `style: { letterSpacing: … }` emitted `style="letterSpacing: …"` — not a CSS
+> property, silently dropped by the browser. The Vue target's own comment already
+> claimed "kebab keys". Fixed via `cssPropName` in both string-form targets.
+>
+> Gated by a cross-pack property test over all six affected pack/framework pairs
+> (`text-escaping-cross-target.test.ts`), asserting exactly ONE `style` attribute
+> and that both sources' declarations survive — the pre-fix output failed it.
 
 ### F1. Angular and Feliz silently drop non-`extern` user components — *content-drop (DESIGN DECISION — surface)*
 

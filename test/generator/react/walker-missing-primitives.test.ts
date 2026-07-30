@@ -49,7 +49,15 @@ describe("walker primitives — Heading", () => {
 
   it("Heading weight: lands as inline style fontWeight", async () => {
     const tsx = await emit(`Heading { "Bold", weight: 700 }`);
-    expect(tsx).toMatch(/fontWeight: 700/);
+    // Quoted key since F2: `weight:` used to be a hardcoded `style={{ fontWeight:
+    // 700 }}` written by the pack template ALONGSIDE the walker's own
+    // `{{{styleAttr}}}` — two `style` props on one element, which is TS17001.  It
+    // now flows through the same walker-owned attribute as every other style, so
+    // it picks up that path's key spelling (see `walker-style-attr.test.ts`,
+    // which pins `"backgroundColor": "blue"` for an authored style).  The VALUE
+    // stays a number: React appends `px` to numeric lengths and leaves strings
+    // alone, so stringifying it would be a real behaviour change, not cosmetic.
+    expect(tsx).toMatch(/"fontWeight": 700/);
   });
 });
 
