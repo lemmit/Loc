@@ -18,16 +18,14 @@
 //     lifecycle transaction so the audit row commits atomically with the state
 //     change (parity with the Hono transactional route, the .NET IAuditWriter
 //     unit-of-work staging, the Java service insert, the Python session add).
-//   - An extra migration (`…_create_audit.exs`, version 29991231000001 — one
-//     higher than the provenance migration's 29991231000000, the same
-//     audit-after-provenance ordering Python uses) that creates `audit_records`
-//     + the (target_type,target_id) / (correlation_id) indexes.
+//   The `audit_records` DDL is NOT emitted here — it comes from the shared
+//   MigrationsIR (`auditTableShape`), like every other companion table.
 //
 // The per-action capture (the before/after wire snapshots either side of the
 // mutation + the `record/2` call) is wired by `context-emit.ts` (operation
 // update) + `api-emit.ts` / `repository-emit.ts` (create/destroy lifecycle);
-// this module owns the shared runtime + history table — the audit runtime for
-// the elixir backend.
+// this module owns the shared runtime (Ecto schema + insert helper) — the
+// ORM-level half, which is genuinely per-backend.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR } from "../../../ir/types/loom-ir.js";
@@ -35,20 +33,13 @@ import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
-// A version far in the future so this migration sorts after every module's
-// initial + delta migrations.  `…001` is one higher than the provenance
-// migration's `…000` so when both late migrations are present they sort
-// deterministically (audit after provenance — the same ordering Python uses
-// with its `29991231000001_audit` tag).
-const AUDIT_MIGRATION_VERSION = "29991231000001";
-
 /** True iff any aggregate in the given contexts carries an audited command
- *  action — gates the whole runtime (helper module + migration + capture). */
+ *  action — gates the runtime helper module + the per-action capture. */
 export function contextsHaveAudit(contexts: BoundedContextIR[]): boolean {
   return contexts.some((ctx) => contextHasAuditedTarget(ctx));
 }
 
-/** Emit the audit runtime + migration when any audited command action exists.
+/** Emit the audit runtime when any audited command action exists.
  *  No-op otherwise (keeps non-audit projects byte-identical). */
 export function emitVanillaAudit(
   appName: string,
@@ -57,11 +48,11 @@ export function emitVanillaAudit(
   out: Map<string, string>,
 ): void {
   if (!contextsHaveAudit(contexts)) return;
+  // Only the Ecto SCHEMA + insert helper are emitted here.  The `audit_records`
+  // DDL moved to the shared MigrationsIR (`auditTableShape`) so all five
+  // backends derive it from one place — Hono emitted none at all, which made
+  // every audited command fail at runtime there.
   out.set(`lib/${appName}/audit.ex`, renderAuditModule(appModule));
-  out.set(
-    `priv/repo/migrations/${AUDIT_MIGRATION_VERSION}_create_audit.exs`,
-    renderAuditMigration(appModule),
-  );
 }
 
 /** `<App>.Audit.Record` schema + the `<App>.Audit` insert helper. */
@@ -170,36 +161,6 @@ defmodule ${appModule}.Audit do
       { name: "actor", valueExpr: "actor_id" },
     ])}
     inserted
-  end
-end
-`;
-}
-
-/** The `audit_records` CREATE TABLE migration.  The history table lands in
- *  `public` (a cross-context global), exactly like `provenance_records`. */
-function renderAuditMigration(appModule: string): string {
-  return `defmodule ${appModule}.Repo.Migrations.CreateAudit do
-  use Ecto.Migration
-
-  def change do
-    create table(:audit_records, primary_key: false) do
-      add :audit_id, :string, primary_key: true, null: false
-      add :operation_id, :string, null: false
-      add :action, :string, null: false
-      add :target_type, :string, null: false
-      add :target_id, :string, null: false
-      add :actor, :map
-      add :before, :map
-      add :after, :map
-      add :at, :utc_datetime, null: false
-      add :status, :string, null: false
-      add :correlation_id, :string
-      add :scope_id, :string
-      add :parent_id, :string
-    end
-
-    create index(:audit_records, [:target_type, :target_id])
-    create index(:audit_records, [:correlation_id])
   end
 end
 `;

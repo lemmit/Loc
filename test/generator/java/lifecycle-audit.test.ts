@@ -47,9 +47,14 @@ describe("java generator — audited lifecycle actions", () => {
     expect(get(`${ROOT}/infrastructure/persistence/AuditRecord.java`)).toContain(
       '@Table(name = "audit_records"',
     );
-    expect(get("api/src/main/resources/db/migration/V29991231235959.8__Audit.sql")).toContain(
-      "CREATE TABLE IF NOT EXISTS audit_records (",
+    // The DDL is no longer a hand-written late Flyway migration — it comes from
+    // the shared MigrationsIR (`auditTableShape`), so it lands in the ordinary
+    // module migration alongside every other table.
+    const migration = [...files.entries()].find(
+      ([p, c]) => p.includes("db/migration/") && c.includes("audit_records"),
     );
+    expect(migration, "audit_records DDL must be emitted somewhere").toBeDefined();
+    expect(migration?.[1]).toContain("audit_records");
   });
 
   it("injects the AuditRecordRepository + the NullNode import", () => {

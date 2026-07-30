@@ -32,6 +32,7 @@ import type {
   SchemaSnapshot,
   TableShape,
 } from "../ir/types/migrations-ir.js";
+import { contextHasAuditedTarget } from "../ir/util/audit-capability.js";
 import { durableEventTypes } from "../ir/util/channels.js";
 import { directParentOf } from "../ir/util/containment-parent.js";
 import {
@@ -294,6 +295,22 @@ export function schemaFromModule(
   if (module.contexts.some((c) => durableEventTypes(c).size > 0)) {
     tables.push(outboxTableShape(module.name));
   }
+  // Command audit (audit-and-logging.md): one shared append-only table when any
+  // hosted context declares an `audited` command action.  Like the outbox it is
+  // machinery, not domain — cross-context (rows carry `target_type`), so it
+  // takes NO context schema.
+  //
+  // This lives here rather than in per-backend emitters because it was the only
+  // companion table without a platform-neutral shape: .NET, Java, Python and
+  // Elixir each hand-wrote a late CREATE TABLE, and **Hono wrote none at all**
+  // — its `audit_records` existed only as a Drizzle `pgTable` (query-builder
+  // typing, which creates nothing), so every audited command on the DEFAULT
+  // backend failed at runtime with `relation "audit_records" does not exist`
+  // while compiling clean and passing the emitted-string tests.  Deriving the
+  // shape once means the DDL and the writers can no longer disagree.
+  if (module.contexts.some((c) => contextHasAuditedTarget(c))) {
+    tables.push(auditTableShape(module.name));
+  }
   // Cross-context id references get NO foreign key (M-T4.4): the SQL
   // renderer qualifies an FK with the REFERENCING table's schema, so a
   // reference into another context would point at a table that doesn't
@@ -338,6 +355,62 @@ function outboxTableShape(ownerModule: string): TableShape {
     primaryKey: ["id"],
     foreignKeys: [],
     indexes: [],
+  };
+}
+
+/** The command-audit table (audit-and-logging.md) — one per module whose
+ *  contexts declare any `audited` command action.  Append-only: one row per
+ *  SUCCESSFUL public command, carrying who/what/when plus the before+after wire
+ *  snapshots, written inside the same transaction as the aggregate save.
+ *
+ *  Column-for-column the shape the five backends had each hand-written, so
+ *  moving it here is schema-identical for the four that emitted DDL and is a
+ *  fix for Hono, which emitted none.  Indexed on `(target_type, target_id)` —
+ *  the per-entity history read — and on `correlation_id` for tracing one
+ *  command across aggregates. */
+function auditTableShape(ownerModule: string): TableShape {
+  return {
+    name: "audit_records",
+    ownerModule,
+    columns: [
+      { name: "audit_id", type: { kind: "text" }, nullable: false },
+      { name: "operation_id", type: { kind: "text" }, nullable: false },
+      { name: "action", type: { kind: "text" }, nullable: false },
+      { name: "target_type", type: { kind: "text" }, nullable: false },
+      { name: "target_id", type: { kind: "text" }, nullable: false },
+      { name: "actor", type: { kind: "json" }, nullable: true },
+      // NULLABLE, deliberately — and this is a fix, not a transcription of the
+      // hand-written DDL.  A lifecycle action only has one side: `create` has no
+      // `before`, `destroy` has no `after`.  The .NET/Java/Python copies declared
+      // both `NOT NULL` while their writers pass null on exactly those paths, so
+      // an audited create hit a not-null violation — and because the audit insert
+      // rides the action's transaction, it rolled the state change back with it.
+      // Elixir's copy already had it right (`add :before, :map`, and its Json
+      // Ecto type exists specifically to let `nil` through); this adopts that.
+      { name: "before", type: { kind: "json" }, nullable: true },
+      { name: "after", type: { kind: "json" }, nullable: true },
+      { name: "at", type: { kind: "datetime" }, nullable: false },
+      { name: "status", type: { kind: "text" }, nullable: false },
+      { name: "correlation_id", type: { kind: "text" }, nullable: true },
+      { name: "scope_id", type: { kind: "text" }, nullable: true },
+      { name: "parent_id", type: { kind: "text" }, nullable: true },
+    ],
+    primaryKey: ["audit_id"],
+    foreignKeys: [],
+    indexes: [
+      {
+        name: "audit_records_target_idx",
+        table: "audit_records",
+        columns: ["target_type", "target_id"],
+        unique: false,
+      },
+      {
+        name: "audit_records_correlation_idx",
+        table: "audit_records",
+        columns: ["correlation_id"],
+        unique: false,
+      },
+    ],
   };
 }
 
