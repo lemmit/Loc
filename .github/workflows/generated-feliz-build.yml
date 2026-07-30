@@ -133,7 +133,7 @@ jobs:
                 body: Stack {
                   Heading { "Storefront", level: 1 },
                   Badge { "beta" },
-                  Text { "Clicks: " + count },
+                  Text { `Clicks: {count}` },
                   Button { "+", onClick: inc },
                   Divider { },
                   Button { "Browse products", to: "/products" }
@@ -192,7 +192,7 @@ jobs:
                       Text { p.price }
                     }
                   },
-                  Text { "Reserve: " + reserveMsg },
+                  Text { `Reserve: {reserveMsg}` },
                   Button { "Reserve", onClick: reserveNow },
                   OperationForm { of: Product, op: rename },
                   DestroyForm { of: Product },
