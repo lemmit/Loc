@@ -158,7 +158,7 @@ export function renderEntity(
   parentName: string,
   emitTrace = false,
   /** When true, the entity is part of a document-shaped
-   *  (`shape(document)`) aggregate: emit the `ToSnapshot()` /
+   *  (`shape: document`) aggregate: emit the `ToSnapshot()` /
    *  `FromSnapshot(...)` mapping methods the JSONB repository serialises
    *  through.  Additive — byte-identical output when false. */
   document = false,
@@ -745,7 +745,7 @@ export function renderEntity(
         ]
       : [];
 
-  // Document-shape (shape(document)) round-trip mapping.  Emitted
+  // Document-shape (shape: document) round-trip mapping.  Emitted
   // ONLY for entities inside a document aggregate.  Both methods live
   // on the entity class so they can reach private setters + the
   // `_<containment>` backing lists; the repository calls them across

@@ -476,7 +476,7 @@ export interface OperationIR {
 }
 
 /** Event-fold applier — the lowered form of an `apply(e: Event) { … }`
- * member on an event-sourced (`persistedAs(eventLog)`) aggregate.  Folds
+ * member on an event-sourced (`persistedAs: eventLog`) aggregate.  Folds
  * one event type into aggregate state.  Under the event-log discipline
  * the command bodies (`operation`/`create`) only `emit`; the actual
  * state transition lives in the matching applier.  Bodies are pure folds
@@ -656,7 +656,7 @@ export interface AggregateIR {
    * C# `ToString()` override, Elixir `defimpl Inspect`). */
   inspectDerived?: DerivedIR;
   /** Primary truth kind declared on the aggregate's header via the
-   * `persistedAs(…)` modifier (D-DOCUMENT-AXIS; replaces the former
+   * `persistedAs: …` modifier (D-DOCUMENT-AXIS; replaces the former
    * body `persistenceStrategy:` clause).  Values align to the
    * `dataSource` `kind` set — `state` → `kind: state`, `eventLog` →
    * `kind: eventLog` — so `resolve-datasource.ts` is an identity.
@@ -665,7 +665,7 @@ export interface AggregateIR {
    * round-trip. */
   persistedAs?: PersistenceStrategy;
   /** Saving shape of the materialised read model / snapshot
-   * (D-DOCUMENT-AXIS, `shape(relational | embedded | document)` header
+   * (D-DOCUMENT-AXIS, `shape: relational|embedded|document` header
    * modifier).  One of three points on the relational↔document
    * spectrum (see {@link SavingShape}).  Omitted when not declared
    * (default `relational`); a per-projection `dataSource shape:` knob
@@ -673,7 +673,7 @@ export interface AggregateIR {
   savingShape?: SavingShape;
   /** Event-fold appliers declared via `apply(e: Event) { … }` members.
    * One per event type the aggregate folds.  Only meaningful on
-   * event-sourced aggregates (`persistedAs(eventLog)`); the discipline
+   * event-sourced aggregates (`persistedAs: eventLog`); the discipline
    * validator (phase ⑦) rejects appliers on state-sourced aggregates and
    * requires a matching applier for every emitted event.  Omitted /
    * empty when the aggregate declares none.  Not yet consumed by
@@ -684,7 +684,7 @@ export interface AggregateIR {
    * table of its own.  Omitted (≡ false) for ordinary/concrete aggregates. */
   isAbstract?: boolean;
   /** Tenancy header flag (multi-tenancy Phase 1a).  `true` for an
-   * `aggregate X crossTenant { … }` — shared reference data that opts out
+   * `crossTenant aggregate X { … }` — shared reference data that opts out
    * of the tenant filter under a `tenancy by` system.  Omitted (≡ false)
    * when not declared.  The aggregate's tenancy *stance* (owned / cross /
    * unmarked / registry) is classified on demand by the phase-⑦ tenancy
@@ -696,11 +696,11 @@ export interface AggregateIR {
    * inheritance into the concrete's `wireShape` is an I2 concern; in I1 this
    * only records the declared relationship. */
   extendsAggregate?: string;
-  /** Inheritance table layout declared via the `inheritanceUsing(…)` header
+  /** Inheritance table layout declared via the `inheritanceUsing: …` header
    * modifier (D-RENAME).  `sharedTable` = TPH (one table + `kind`
    * discriminator); `ownTable` = TPC (table per concrete).  Omitted when not
    * declared; only meaningful on an `abstract` base or an `extends` subtype.
-   * A `persistedAs(eventLog)` / `shape(document)` concrete of a `sharedTable`
+   * A `persistedAs: eventLog` / `shape: document` concrete of a `sharedTable`
    * base is forced to `ownTable` (D-ES-TPH; enforced by the validator). */
   inheritanceUsing?: InheritanceLayout;
   /** Provenance chain back to the `.ddd` source — see
@@ -711,7 +711,7 @@ export interface AggregateIR {
 
 /** Inheritance table layout — the aggregate-inheritance layout axis
  *  (D-RENAME, amended by D-DOCUMENT-AXIS §4).  Spelled in source as the
- *  `inheritanceUsing(sharedTable | ownTable)` header paren modifier.
+ *  `inheritanceUsing: sharedTable|ownTable` header paren modifier.
  *    - `sharedTable` — TPH: the whole hierarchy shares one table with a
  *      `kind` discriminator column; `Party id` refs target that base table.
  *    - `ownTable` — TPC: one table per concrete, no base table; bare
@@ -736,7 +736,7 @@ export type SavingShape = "relational" | "embedded" | "document";
 
 /** The aggregate's primary truth kind.  Named to match the
  *  `dataSource` `kind` vocabulary (`state` / `eventLog`); surfaced in
- *  source as `persistedAs(state | eventLog)`. */
+ *  source as `persistedAs: state|eventLog`. */
 export type PersistenceStrategy = "state" | "eventLog";
 
 /** A single stamping rule attached to an aggregate.  Backends
@@ -1248,7 +1248,7 @@ export interface WorkflowIR {
   /** `eventSourced` workflow (workflow-and-applier.md A2-S5b): command /
    *  reactor handlers may only `emit`, and state transitions live in
    *  `apply(...)` folds — exactly the event-sourced discipline aggregates
-   *  carry via `persistedAs(eventLog)`. */
+   *  carry via `persistedAs: eventLog`. */
   eventSourced: boolean;
   /** Event-fold appliers declared via `apply(e: Event) { … }` members on an
    *  `eventSourced` workflow.  Lowered with the workflow's `this`-bound env
@@ -2903,7 +2903,7 @@ export interface DataSourceIR {
   readonly?: boolean;
   /** Saving shape of the materialised read model this binding routes
    *  (D-DOCUMENT-AXIS, `shape:` knob).  Per-projection override of the
-   *  aggregate header's `shape(…)` (see {@link SavingShape} /
+   *  aggregate header's `shape: …` (see {@link SavingShape} /
    *  {@link effectiveSavingShape}).  Omitted → the header decides. */
   shape?: SavingShape;
   /** Generic vendor-parameter map for the binding (RFC §3.2). */
@@ -2999,7 +2999,7 @@ export type Platform =
   | "python"
   | "java";
 
-// The `shape(…)` platform-axes lookup (`PLATFORM_SAVING_SHAPES`) lives in
+// The `shape: …` platform-axes lookup (`PLATFORM_SAVING_SHAPES`) lives in
 // `src/util/platform-axes.ts` so the language validators may consume it
 // without a backward `language → ir` value edge.  It type-depends on
 // `Platform` / `SavingShape` here.

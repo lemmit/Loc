@@ -565,7 +565,7 @@ function emitProjectFromContexts(
           idConstruct,
         );
       }
-      // `shape(embedded)` reference collections fold into a jsonb id-array
+      // `shape: embedded` reference collections fold into a jsonb id-array
       // column, mapped via a per-target `AttributeConverter` (domain.ids) so
       // the FormatMapper serialises the bare id `value`s.  Emitted once per
       // distinct target id type across the project (identical content dedups
@@ -769,7 +769,7 @@ function emitProjectFromContexts(
     // foundation the in-process dispatcher and instance reads build on.
     for (const wf of correlationWorkflows(ctx.workflows)) {
       // An `eventSourced` workflow persists as an append-only `<wf>_events`
-      // stream (the saga analogue of a `persistedAs(eventLog)` aggregate), not a
+      // stream (the saga analogue of a `persistedAs: eventLog` aggregate), not a
       // mutable JPA state row — emit the in-memory fold class instead, into the
       // dispatcher's package so the handler body reaches its package-private
       // state fields (workflow-and-applier.md A2-S5b).
@@ -1024,7 +1024,7 @@ function emitProjectFromContexts(
         renderOffsetLimitPageRequest(pkgFor("infra-persistence")),
       );
     }
-    // `shape(embedded)` anywhere → the field-visibility Hibernate JSON
+    // `shape: embedded` anywhere → the field-visibility Hibernate JSON
     // FormatMapper (once per project; the second place() is a no-op).
     if (
       ctx.aggregates.some(

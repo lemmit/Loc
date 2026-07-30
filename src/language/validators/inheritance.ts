@@ -21,7 +21,7 @@ import {
 } from "../generated/ast.js";
 
 /** Default inheritance layout for a participant that omits the
- *  `inheritanceUsing(…)` modifier: TPH (`sharedTable`) — the simplest DSL
+ *  `inheritanceUsing: …` modifier: TPH (`sharedTable`) — the simplest DSL
  *  surface and most performant default (aggregate-inheritance.md §"Decision
  *  guidance"). */
 const DEFAULT_LAYOUT = "sharedTable" as const;
@@ -59,7 +59,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       }
     }
 
-    // Rule 2 — `inheritanceUsing(…)` is only meaningful on a participant in
+    // Rule 2 — `inheritanceUsing: …` is only meaningful on a participant in
     // an inheritance relationship (an `abstract` base or an `extends`
     // subtype).  Flag it on a plain aggregate.
     if (agg.inheritanceUsing && !agg.isAbstract && !agg.superType) {
@@ -90,11 +90,11 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       }
     }
 
-    // Rule 4 — D-ES-TPH: an event-sourced (`persistedAs(eventLog)`) or
-    // document (`shape(document)`) concrete cannot share its base table, so
+    // Rule 4 — D-ES-TPH: an event-sourced (`persistedAs: eventLog`) or
+    // document (`shape: document`) concrete cannot share its base table, so
     // it cannot live under a `sharedTable` (TPH) base.  The validator raises
     // an error rather than silently coercing, so the author writes the
-    // forced `inheritanceUsing(ownTable)` explicitly.
+    // forced `inheritanceUsing: ownTable` explicitly.
     if (base?.isAbstract) {
       const baseLayout = base.inheritanceUsing ?? DEFAULT_LAYOUT;
       const forcesOwn = agg.persistedAs === "eventLog" || agg.shape === "document";

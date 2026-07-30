@@ -260,9 +260,9 @@ function deriveResourceInterfaces(sys: SystemIR): Record<string, LoomInterface> 
 // Need derivation — the implicit "need" layer (RFC §3.3).
 //
 // A context's aggregates determine which data kinds it requires:
-//   - `state`    when at least one aggregate is persistedAs(state) (the
+//   - `state`    when at least one aggregate is persistedAs: state (the
 //                default) — it needs a primary state store;
-//   - `eventLog` when at least one aggregate is persistedAs(eventLog) —
+//   - `eventLog` when at least one aggregate is persistedAs: eventLog —
 //                it needs an event stream.
 // (snapshot / cache / replica are optional secondary stores, never
 // *required* by an aggregate, so they are not needs.)  Capabilities are
@@ -1711,12 +1711,12 @@ function ensureFindAll(
       // page over one queryable table, so the paged route/repo emission doesn't
       // apply.  DEBT-28 targets the unbounded *relational* findAll; bounding the
       // exotic shapes is a separate projection concern (tracked as follow-up):
-      //   - `persistedAs(eventLog)` — `all` folds every event stream, not a
+      //   - `persistedAs: eventLog` — `all` folds every event stream, not a
       //     `LIMIT/OFFSET` query.
-      //   - `shape(document)` — the whole aggregate is one opaque JSONB blob
+      //   - `shape: document` — the whole aggregate is one opaque JSONB blob
       //     loaded by id and rehydrated in memory; there's no queryable column
       //     to page/ORDER BY server-side.
-      //   - `shape(embedded)` — parts fold into JSONB; backends' support for
+      //   - `shape: embedded` — parts fold into JSONB; backends' support for
       //     paging its queryable root diverges, so keep it uniform (bare) across
       //     every backend rather than paged on some and not others.
       //   - inheritance subtypes (`extends` a base) — the polymorphic

@@ -15,7 +15,7 @@ import { renderPyExpr } from "./render-expr.js";
 import { emittableFinds, findExecutedLine, writeGuardAlias } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
-// Event-sourced repository — `persistedAs(eventLog)` aggregates persist
+// Event-sourced repository — `persistedAs: eventLog` aggregates persist
 // to an append-only `<agg>_events` stream keyed by (stream_id, version);
 // there is no state table (fold-from-zero MVP, parity with Hono/.NET):
 //

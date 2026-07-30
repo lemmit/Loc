@@ -24,7 +24,7 @@ export interface PyTraceCtx {
 
 export interface PyStmtCtx {
   /** True when rendering a body on an event-sourced
-   *  (`persistedAs(eventLog)`) aggregate: an `emit` then both records
+   *  (`persistedAs: eventLog`) aggregate: an `emit` then both records
    *  the event AND folds it via `self._apply(ev)` (S14).  Off ⇒ `emit`
    *  is the plain notification-event append. */
   eventSourced?: boolean;

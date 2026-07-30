@@ -1,5 +1,5 @@
 // Compile-gate fixture for the .NET `persistence: dapper` adapter's EMBEDDED
-// SHAPE surface (M-T6.9 wave 3).  A `shape(embedded)` aggregate keeps its own
+// SHAPE surface (M-T6.9 wave 3).  A `shape: embedded` aggregate keeps its own
 // scalar / enum / value-object fields as FLAT columns, but folds each
 // containment into ONE JSONB column (the part sub-graph serialised through the
 // part's persistence-agnostic `ToSnapshot()` / `FromSnapshot(...)`) — no child

@@ -10,7 +10,7 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { csValueTypeForId, renderCsType } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`shape(document)`) persistence emission for .NET.
+// Document-shaped (`shape: document`) persistence emission for .NET.
 //
 // A document aggregate's whole read model lives in ONE JSONB column
 // instead of a normalised table-per-entity tree.  This module emits
@@ -32,7 +32,7 @@ import { csValueTypeForId, renderCsType } from "../render-expr.js";
 // Contained parts fold INTO the document (nested snapshots); cross-
 // aggregate references (`X id` / `X id[]`) ride along as ID values in
 // the JSON — no join table, no part table.  This is the per-projection
-// payoff of `shape(document)` (D-DOCUMENT-AXIS).
+// payoff of `shape: document` (D-DOCUMENT-AXIS).
 // ---------------------------------------------------------------------------
 
 /** Initializer suffix for a snapshot record's `init` property, chosen

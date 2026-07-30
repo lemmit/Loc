@@ -48,7 +48,7 @@ import { valueCollectionModule, valueCollectionsWithVo } from "./value-collectio
 /** An aggregate's nested entity-part containments are persisted RELATIONALLY
  *  (each part a child table the root `has_many`s + `cast_assoc`s, §11c) rather
  *  than folded inline as `embeds_many` jsonb — true only for a relational-shaped
- *  aggregate.  `shape(embedded)` keeps the inline-embed path; `shape(document)`
+ *  aggregate.  `shape: embedded` keeps the inline-embed path; `shape: document`
  *  is routed to `document-emit` before this is consulted.  Without `sys` the
  *  effective shape defaults to `relational` (the IR default). */
 export function usesRelationalContainments(
@@ -109,7 +109,7 @@ export function emitVanillaSchemas(
     sourcemap?.file(schemaPath, schemaContent, agg.origin, `${ctx.name}.${agg.name}`);
     // Each entity part (`entity Line { … }`) becomes either an `embedded_schema`
     // module the aggregate `embeds_many`/`embeds_one`s (stored inline as the
-    // parent's jsonb column) on an `shape(embedded)` aggregate, OR a real
+    // parent's jsonb column) on an `shape: embedded` aggregate, OR a real
     // table-backed schema with a `belongs_to` back to its owner on a relational
     // aggregate (§11c — the runtime side of the child-table migration).
     const relational = usesRelationalContainments(agg, ctx, sys);

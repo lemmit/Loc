@@ -1,5 +1,5 @@
 // Compile-gate fixture for the .NET `persistence: dapper` adapter's DOCUMENT
-// SHAPE surface (M-T6.9 wave 3).  A `shape(document)` aggregate persists as ONE
+// SHAPE surface (M-T6.9 wave 3).  A `shape: document` aggregate persists as ONE
 // JSONB `data` blob (a `(id, data, version)` table) — the whole read model,
 // contained parts + `X id[]` references folded in, no child/join tables —
 // reusing the persistence-agnostic `ToSnapshot()` / `FromSnapshot(...)`

@@ -269,7 +269,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     emitVanillaValueObjects(appModule, ctx, out);
     emitVanillaChangesets(appModule, ctx, out, sys);
     emitVanillaRepositories(appModule, ctx, out, sys, principalIdKey, sourcemap);
-    // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
+    // Event-sourced aggregates (persistedAs: eventLog) — struct + event-log
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.
     // The shared `<ctx>_events` log lives in the context's Postgres schema

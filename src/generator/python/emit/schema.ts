@@ -67,19 +67,19 @@ export function renderPySchema(
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
-    // Event-sourced (`persistedAs(eventLog)`): the aggregate's stream lives in
+    // Event-sourced (`persistedAs: eventLog`): the aggregate's stream lives in
     // the single per-context `<ctx>_events` log emitted once below (shared by
     // every ES aggregate + ES workflow, discriminated by `stream_type`), not a
     // per-aggregate table.
     if (agg.persistedAs === "eventLog") continue;
-    // shape(document): the whole aggregate tree is one jsonb blob — the
+    // shape: document: the whole aggregate tree is one jsonb blob — the
     // canonical document triple `(id, data, version)`.
     if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "document") {
       const dds = resolveDataSource?.(agg);
       models.push(renderDocumentModel(agg, dds?.schema, dds?.tablePrefix));
       continue;
     }
-    // shape(embedded): the root stays a queryable row, but each
+    // shape: embedded: the root stays a queryable row, but each
     // containment folds into one JSONB column and reference collections
     // fold into a JSONB id-array column — no part / join tables.
     if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "embedded") {
@@ -164,7 +164,7 @@ export function renderPySchema(
     }
   }
   // The single per-context event log (event-log-architecture.md): ONE
-  // `<ctx>_events` table shared by every `persistedAs(eventLog)` aggregate and
+  // `<ctx>_events` table shared by every `persistedAs: eventLog` aggregate and
   // every `eventSourced` workflow in the context, discriminated by
   // `stream_type`.  Its schema/prefix follows the context's event-sourced
   // streams (aggregate binding first, else the workflow schema resolver) —
@@ -333,7 +333,7 @@ function renderColumn(c: PyColumn): string {
   return `    ${c.attr}: Mapped[${annotation}] = mapped_column(${args.join(", ")})`;
 }
 
-/** Document-shaped aggregate (`shape(document)`): the whole tree is one
+/** Document-shaped aggregate (`shape: document`): the whole tree is one
  *  jsonb blob, so the table is the canonical document triple — `id` (PK),
  *  `data` (the serialised tree, JSONB), `version` (optimistic counter). */
 function renderDocumentModel(agg: AggregateIR, schema?: string, prefix?: string): string {
@@ -349,7 +349,7 @@ function renderDocumentModel(agg: AggregateIR, schema?: string, prefix?: string)
   );
 }
 
-/** Embedded-children aggregate (`shape(embedded)`): the root is a normal
+/** Embedded-children aggregate (`shape: embedded`): the root is a normal
  *  queryable row — `id` plus its flattened scalar / VO / `X id` columns,
  *  exactly like the relational root — but each containment folds into one
  *  JSONB column and reference collections (`X id[]`) fold into a JSONB
@@ -386,7 +386,7 @@ function renderEmbeddedModel(
 
 /** The single per-context append-only event log `<ctx>_events`
  *  (event-log-architecture.md) — one table per bounded context, shared by
- *  every `persistedAs(eventLog)` aggregate stream AND every `eventSourced`
+ *  every `persistedAs: eventLog` aggregate stream AND every `eventSourced`
  *  workflow stream.  A row is one recorded event keyed by
  *  `(stream_type, stream_id, version)`: `stream_type` discriminates the owning
  *  aggregate/workflow (each fold reads only its own rows), `stream_id` is the

@@ -77,7 +77,7 @@ describe.skipIf(!ENABLED)(
       // the shadow FK column named for the direct parent (labels.shipment_id)
       // and the domain ParentId branded ShipmentId (nested-parts Phase 4 — .NET).
       "test/e2e/fixtures/dotnet-build/nested-parts.ddd",
-      // shape(document) + part-in-part (Cart → Box → Slip/Item): the snapshot
+      // shape: document + part-in-part (Cart → Box → Slip/Item): the snapshot
       // fold recurses the part tree into the JSONB blob, and each nested part's
       // snapshot ParentId brands to its DIRECT parent's id class (Slip/Item →
       // BoxId), matching the entity State.ParentId so the ToSnapshot/FromSnapshot
@@ -1144,12 +1144,12 @@ describe.skipIf(!ENABLED)(
     }, 600_000);
 
     // M-T6.9 wave 3: the Dapper adapter's DOCUMENT SHAPE surface — a
-    // `shape(document)` aggregate persists as one JSONB `data` blob (a `(id,
+    // `shape: document` aggregate persists as one JSONB `data` blob (a `(id,
     // data, version)` table); contained parts + `X id[]` refs fold into the blob
     // (no child/join tables), reusing the persistence-agnostic ToSnapshot/
     // FromSnapshot round-trip.  Build under /warnaserror — the snapshot DTOs +
     // the raw-Npgsql JSONB round-trip + in-memory finds are what this compiles.
-    it("system `persistence: dapper` + shape(document) — JSONB blob repository builds under /warnaserror", () => {
+    it("system `persistence: dapper` + shape: document — JSONB blob repository builds under /warnaserror", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-doc-"));
       try {
         execSync(
@@ -1191,11 +1191,11 @@ describe.skipIf(!ENABLED)(
     }, 600_000);
 
     // M-T6.9 wave 3: the Dapper adapter's EMBEDDED SHAPE surface — a
-    // `shape(embedded)` aggregate keeps its own fields as FLAT columns but folds
+    // `shape: embedded` aggregate keeps its own fields as FLAT columns but folds
     // each containment into ONE JSONB column (serialised part snapshots), no
     // child tables.  Build under /warnaserror — the flat-column + JSONB-column
     // mix + the snapshot round-trip on the flat `Map` are what this compiles.
-    it("system `persistence: dapper` + shape(embedded) — containment JSONB columns build under /warnaserror", () => {
+    it("system `persistence: dapper` + shape: embedded — containment JSONB columns build under /warnaserror", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-emb-"));
       try {
         execSync(
@@ -1236,13 +1236,13 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
-    // M-T6.9 wave 6: shape(embedded) + PART-IN-PART on Dapper.  Each root
+    // M-T6.9 wave 6: shape: embedded + PART-IN-PART on Dapper.  Each root
     // containment folds into one JSONB column via `part.ToSnapshot()`; a nested
     // part (Box → Slip/Item) recurses through its `<Part>Snapshot` records, so
     // the whole subtree round-trips through the one column with NO child tables.
     // The nested-ParentId snapshot fix (BoxId, not CartId) is what /warnaserror
     // compiles here.
-    it("system `persistence: dapper` + shape(embedded) part-in-part — nested JSONB fold builds under /warnaserror", () => {
+    it("system `persistence: dapper` + shape: embedded part-in-part — nested JSONB fold builds under /warnaserror", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-emb-nested-"));
       try {
         execSync(

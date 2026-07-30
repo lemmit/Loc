@@ -100,7 +100,7 @@ const tableOf = (aggName: string): string => plural(snake(aggName));
 const rowClassOf = (aggName: string): string => `${aggName}Row`;
 
 /** Row-entity class name for the shared per-context event-log stream row
- *  (`<Ctx>EventRow`) — one table for every `persistedAs(eventLog)` aggregate in
+ *  (`<Ctx>EventRow`) — one table for every `persistedAs: eventLog` aggregate in
  *  the context, discriminated by `streamType`. */
 /** The MikroORM entity class for a context's shared `<ctx>_events` stream —
  *  exported so the ES-workflow fold helpers (workflow-eventsourced-builder.ts)
@@ -601,7 +601,7 @@ export function renderMikroEntities(
 ): string {
   const blocks: string[] = [];
   const schemaNames: string[] = [];
-  // Event-sourced (`persistedAs(eventLog)`) aggregates share a SINGLE
+  // Event-sourced (`persistedAs: eventLog`) aggregates share a SINGLE
   // per-context `<ctx>_events` stream row (event-log-architecture.md),
   // discriminated by `stream_type`, rather than one table each.  Emitted once
   // after the per-aggregate walk; MikroORM owns the schema (via
@@ -1938,7 +1938,7 @@ export function renderMikroRepository(
 }
 
 // ---------------------------------------------------------------------------
-// Embedded-shape (`shape(embedded)`) MikroORM repository.  The queryable
+// Embedded-shape (`shape: embedded`) MikroORM repository.  The queryable
 // middle of the saving-shape spectrum: the aggregate ROOT stays real columns
 // (hydrated/saved like the relational path), while each CONTAINMENT folds into
 // one jsonb column — (de)serialised through the shared `<part>ToDoc` /
@@ -2239,7 +2239,7 @@ export function renderMikroEmbeddedRepository(
 }
 
 // ---------------------------------------------------------------------------
-// Document-shape (`shape(document)`) MikroORM repository.  The whole aggregate
+// Document-shape (`shape: document`) MikroORM repository.  The whole aggregate
 // tree collapses to ONE opaque jsonb blob (`(id, data, version)`) — the Marten-
 // style end of the saving-shape spectrum.  Row ↔ domain mapping runs entirely
 // through the shared `<agg>ToDoc` / `<agg>FromDoc` (de)serialisers the drizzle
@@ -2464,7 +2464,7 @@ function tsParamType(t: TypeIR): string {
 }
 
 // ---------------------------------------------------------------------------
-// Event-sourced (`persistedAs(eventLog)`) MikroORM repository (appliers,
+// Event-sourced (`persistedAs: eventLog`) MikroORM repository (appliers,
 // MikroORM edition).  The Hono domain fold (`_apply` / `_fromEvents`) + CQRS
 // are persistence-agnostic and reused; this is the EntityManager version of
 // the event store — read the `<agg>_events` stream ordered by version and fold

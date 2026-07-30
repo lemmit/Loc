@@ -1,4 +1,4 @@
-// MikroORM shape(embedded) + Id[] reference collections: the queryable root
+// MikroORM shape: embedded + Id[] reference collections: the queryable root
 // stays real columns, each containment folds into a jsonb column, and an `Id[]`
 // reference collection folds onto the root as one jsonb id-string array (no
 // pivot table — the embedded analogue of the relational pivot).  tsc-checked.

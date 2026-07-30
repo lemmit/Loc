@@ -271,7 +271,7 @@ export class DddValidator {
     guard("ambiguous-part-ref", model, () => checkAmbiguousPartRefs(model, accept));
     // Aggregate-inheritance surface (aggregate-inheritance.md, I1):
     // `extends` may only target an `abstract` base; abstract bases have no
-    // repository and declare no lifecycle actions; `inheritanceUsing(…)` is
+    // repository and declare no lifecycle actions; `inheritanceUsing: …` is
     // only valid on a participant; and an event-sourced / document concrete
     // of a `sharedTable` base is forced to `ownTable` (D-ES-TPH).
     guard("inheritance", model, () => checkInheritance(model, accept));

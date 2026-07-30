@@ -30,7 +30,7 @@ import {
 } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`shape(document)`) repository for the Python backend —
+// Document-shaped (`shape: document`) repository for the Python backend —
 // the SQLAlchemy/asyncpg counterpart of the Hono document emit.
 //
 // A document aggregate persists as ONE jsonb column (`(id, data,

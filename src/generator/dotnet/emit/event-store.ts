@@ -2,7 +2,7 @@
 //
 // Per-context event log (event-log-architecture.md): a single append-only
 // `<ctx>_events` table holds EVERY event-sourced stream in a bounded context —
-// every `persistedAs(eventLog)` aggregate AND every `eventSourced` workflow —
+// every `persistedAs: eventLog` aggregate AND every `eventSourced` workflow —
 // discriminated by `stream_type` (the aggregate/workflow name).  EF maps it
 // through ONE shared persistence POCO (`EventRecord`) + a per-context
 // `IEntityTypeConfiguration` (`<Ctx>EventRecordConfiguration`).  The

@@ -25,7 +25,7 @@ export type JsonSeverity = "error" | "warning" | "info";
  * - `insert`  — position-aware insert of `source` relative to `target`
  *               (`position`): `before` / `after` a sibling node, or
  *               `header-end` (just before the target declaration's opening
- *               `{` — for header clauses, e.g. `inheritanceUsing(...)`).
+ *               `{` — for header clauses, e.g. `inheritanceUsing: ...`).
  * - `rename`  — `target` is the declaration to rename; `source` is the new
  *               name.  The declaration AND every use site (computed by the
  *               rename provider — cross-references included) are rewritten in

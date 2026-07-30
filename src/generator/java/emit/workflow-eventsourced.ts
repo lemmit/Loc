@@ -7,7 +7,7 @@ import { javaStateDefault } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced workflows on Java/Spring (workflow-and-applier.md A2-S5b) — the
-// saga analogue of a `persistedAs(eventLog)` aggregate.  Instead of a mutable
+// saga analogue of a `persistedAs: eventLog` aggregate.  Instead of a mutable
 // `<Wf>State` JPA entity + Spring Data repository, an `eventSourced` workflow
 // persists as an append-only `<wf>_events` stream (keyed by the correlation
 // field) and folds it through its `apply(...)` blocks on load, exactly like the
@@ -40,7 +40,7 @@ export function esWorkflowStateClass(wf: WorkflowIR): string {
 /** The single per-context event log `<ctx>_events`, schema-qualified for native
  *  SQL when the context has a schema (e.g. `catalog_ctx.catalog_events`),
  *  matching the shared migration (`eventLogTableForStream`) and the other ports
- *  (event-log-architecture.md).  Every `persistedAs(eventLog)` aggregate AND
+ *  (event-log-architecture.md).  Every `persistedAs: eventLog` aggregate AND
  *  every `eventSourced` workflow in the context shares this one table,
  *  discriminated by `stream_type`.  Unqualified when no schema — byte-identical
  *  for binding-free systems. */

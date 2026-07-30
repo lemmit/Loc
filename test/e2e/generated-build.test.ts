@@ -842,12 +842,12 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
-    // MikroORM shape(embedded) + `Id[]` reference collections: the reference
+    // MikroORM shape: embedded + `Id[]` reference collections: the reference
     // collection folds onto the root as a jsonb id-string array (no pivot
     // table), containments fold to their own jsonb columns, the queryable root
     // stays real columns, and the versioned (crudish) save is the guarded CAS
     // write.  Type-checks under tsc.
-    it("system `persistence: mikroorm` + shape(embedded) + Id[] reference collection — folds, type-checks", () => {
+    it("system `persistence: mikroorm` + shape: embedded + Id[] reference collection — folds, type-checks", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-mikro-emb-assoc-"));
       try {
         execSync(

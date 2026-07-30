@@ -21,7 +21,7 @@ import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
-// Event-sourced (`persistedAs(eventLog)`) repository for the Hono/Drizzle
+// Event-sourced (`persistedAs: eventLog`) repository for the Hono/Drizzle
 // backend (appliers A2, fold-from-zero MVP).
 //
 // The aggregate's truth is its event stream — one append-only

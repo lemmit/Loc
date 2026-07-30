@@ -63,7 +63,7 @@ export interface OpFragment {
 //
 // Deferred to later slices: provenance backing fields, --trace
 // instrumentation, extern mutators (S16), event-sourced create/appliers
-// (S14 — the IR validator gates `persistedAs(eventLog)` off python
+// (S14 — the IR validator gates `persistedAs: eventLog` off python
 // until then).
 // ---------------------------------------------------------------------------
 
@@ -84,7 +84,7 @@ interface EntityShape {
   invariants: InvariantIR[];
   functions: FunctionIR[];
   operations: OperationIR[];
-  /** Root-only, `persistedAs(eventLog)`: fold appliers + the single
+  /** Root-only, `persistedAs: eventLog`: fold appliers + the single
    *  create lifecycle action whose emit-only body drives the
    *  event-sourced factory (appliers A2). */
   eventSourced?: boolean;

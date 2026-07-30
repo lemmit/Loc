@@ -237,7 +237,7 @@ export function auditRecordCall(args: {
  *  projection the controller's `serialize/1` uses, inlined where `serialize/1`
  *  is out of scope (the context module + the returning-op fn).  Relational
  *  aggregates dump the whole struct (`Map.from_struct |> Map.drop`); a
- *  document-shaped aggregate (`shape(document)`) stores its wire form in the
+ *  document-shaped aggregate (`shape: document`) stores its wire form in the
  *  `<Agg>.Data` embed (Route A) — flatten that struct (dropping `:__struct__`)
  *  and merge under the row id so the audit before/after row carries the flat wire
  *  shape every other backend records, not a nested `%{id:, data: …}`.  Pass

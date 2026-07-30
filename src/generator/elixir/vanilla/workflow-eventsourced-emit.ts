@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Vanilla event-sourced WORKFLOWS — `workflow X eventSourced { … apply(…) }`
 // on the plain Phoenix + Ecto foundation (workflow-and-applier.md A2-S5b).  The
-// saga analogue of a `persistedAs(eventLog)` aggregate (vanilla/eventsourced-emit.ts):
+// saga analogue of a `persistedAs: eventLog` aggregate (vanilla/eventsourced-emit.ts):
 // instead of a mutable `<wf>_state` Ecto row, the workflow persists as an
 // append-only `<wf>_events` stream (keyed by the correlation field) and folds it
 // through its `apply(...)` blocks on load.  Emit-only handlers (A1 discipline).

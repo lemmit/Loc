@@ -984,18 +984,19 @@ ValueObjectMember:
     // normalizers / functions (test-placement.md, Phase 2).
     | TestBlock;
 
-// `abstract` base + `extends` subtype + `inheritanceUsing(…)` layout are
+// `abstract` base + `extends` subtype + `inheritanceUsing:` layout are
 // the aggregate-inheritance surface.  An `abstract` base can never be
 // instantiated, has no repository, and emits no table of its own; `extends
-// <Base>` may only target an `abstract` aggregate.  `inheritanceUsing(…)` is a
+// <Base>` may only target an `abstract` aggregate.  `inheritanceUsing:` is a
 // header colon modifier — all aggregate config lives on the header, alongside
-// `persistedAs(…)` / `shape(…)`.
+// `persistedAs:` / `shape:`.
 Aggregate:
     // `crossTenant` is a header flag mirroring `isAbstract` — declares
     // shared-reference data that opts out of the tenant filter under a
-    // `tenancy by` system.  Positioned before the colon modifiers and the
-    // with-clause: `aggregate Plan crossTenant { … }`,
-    // `aggregate Invoice crossTenant with x { … }`.
+    // `tenancy by` system.  Leads beside `abstract`, before the `aggregate`
+    // keyword: `crossTenant aggregate Plan { … }`,
+    // `crossTenant aggregate Invoice with x { … }`.  (The legacy post-name
+    // position no longer parses — M-T5.17 phase 2.)
     //
     // The aggregate id is always a `guid` — Loom mints it.
     // M-T5.17 (finding #1) — Phase 2 cutover: the enum-axis modifiers are COLON

@@ -127,7 +127,7 @@ export function renderRepositoryImpl(
     /** Strongly-typed id class for this aggregate's key (default `<Agg>Id`); a
      *  TPH concrete passes its base's `<Base>Id` (the shared inherited key). */
     idClass?: string;
-    /** True when this is a `shape(embedded)` aggregate: its reference
+    /** True when this is a `shape: embedded` aggregate: its reference
      *  collections (`X id[]`) fold into a JSONB column on the root row
      *  (mapped by `<Agg>Configuration` via a value-converter), NOT a join
      *  table — so EF round-trips the `List<TargetId>` property automatically
@@ -621,7 +621,7 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`shape(document)`) repository implementation.
+// Document-shaped (`shape: document`) repository implementation.
 //
 // Backed by the `<Agg>Document` persistence record (one JSONB column)
 // rather than the normalised entity table.  `GetById` / `FindManyByIds`
@@ -822,7 +822,7 @@ export function renderDocumentRepositoryImpl(
 }
 
 // ---------------------------------------------------------------------------
-// Event-sourced (`persistedAs(eventLog)`) repository for the .NET/EF backend
+// Event-sourced (`persistedAs: eventLog`) repository for the .NET/EF backend
 // (appliers A2.2b).  The .NET counterpart of the Hono
 // `repository-eventsourced-builder.ts`.
 //

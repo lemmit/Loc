@@ -1317,7 +1317,7 @@ function emitAggregate(
   // one, falling back to the owning aggregate's origin otherwise.
   const repoOrigin = repo?.origin ?? agg.origin;
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
-  // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
+  // tablePrefix) and the saving SHAPE.  `isDoc` (shape: document)
   // switches this aggregate onto the document-persistence path: a
   // single JSONB column + STJ round-trip, no normalised entity table,
   // no join tables.  In the legacy single-context entry there's no
@@ -1325,7 +1325,7 @@ function emitAggregate(
   // `normalised(…)` (the default).
   const ds = emitCtx ? resolveDataSourceConfig(agg, ctx, emitCtx.sys) : undefined;
   const shape = effectiveSavingShape(agg, ds);
-  // Event-sourced (`persistedAs(eventLog)`) wins over the saving-shape axis:
+  // Event-sourced (`persistedAs: eventLog`) wins over the saving-shape axis:
   // the aggregate persists to a `<agg>_events` stream (an EF event-record
   // entity), folded on load — no state table, no document, no join tables.
   const isEs = agg.persistedAs === "eventLog";
@@ -1472,7 +1472,7 @@ function emitAggregate(
     const userFields = authed ? emitCtx?.sys.user?.fields : undefined;
     const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
     const actorIdProp = actorIdField ? upperFirst(actorIdField.name) : undefined;
-    // Dapper event store (persistedAs(eventLog)) reuses the persistence-agnostic
+    // Dapper event store (persistedAs: eventLog) reuses the persistence-agnostic
     // domain fold + CQRS create chain; only the repository is Dapper-specific.
     // The `<agg>_events` table ships in DbSchema.cs (renderDapperSchema).
     place(
@@ -1918,7 +1918,7 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 
-/** Names of document-shaped (`shape(document)`) aggregates across the
+/** Names of document-shaped (`shape: document`) aggregates across the
  *  given contexts, resolved the same way `emitAggregate` does (binding
  *  wins, aggregate header is the default).  `sys` is absent in the
  *  legacy single-context entry, so resolution falls back to the
@@ -1936,7 +1936,7 @@ function documentAggNames(contexts: EnrichedBoundedContextIR[], sys?: SystemIR):
   return names;
 }
 
-/** Names of event-sourced (`persistedAs(eventLog)`) aggregates across the
+/** Names of event-sourced (`persistedAs: eventLog`) aggregates across the
  *  given contexts.  Consumed by `renderDbContext` to route each to a
  *  `DbSet<<Agg>EventRecord>` + the event-record configuration (the
  *  `<agg>_events` stream) instead of the normalised entity DbSet. */
@@ -1951,7 +1951,7 @@ function eventSourcedAggNames(contexts: EnrichedBoundedContextIR[]): Set<string>
 }
 
 /** Bounded contexts (of the given set) that own any event-sourced stream — a
- *  `persistedAs(eventLog)` aggregate OR an `eventSourced` workflow.  Each owns
+ *  `persistedAs: eventLog` aggregate OR an `eventSourced` workflow.  Each owns
  *  one shared `<ctx>_events` log (event-log-architecture.md) holding every such
  *  stream, discriminated by `stream_type`. */
 function eventLogContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedContextIR[] {
@@ -2001,7 +2001,7 @@ function emitEventLogFiles(
   }
 }
 
-/** Names of embedded-shaped (`shape(embedded)`) aggregates across the given
+/** Names of embedded-shaped (`shape: embedded`) aggregates across the given
  *  contexts, resolved the same way `emitAggregate` does (binding wins, header
  *  default).  Consumed by `renderDbContext` to drop their reference-collection
  *  associations from the join-entity DbSet/configuration set — an embedded

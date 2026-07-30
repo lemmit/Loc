@@ -24,7 +24,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines } from "./types.js";
 
-// `SavingShape` (the `shape(relational | embedded | document)` axis) is
+// `SavingShape` (the `shape: relational|embedded|document` axis) is
 // defined canonically in the IR layer; re-exported here so adapter
 // authors import it from the persistence surface alongside
 // `PersistenceAdapter`.
@@ -38,8 +38,8 @@ export interface PersistenceAdapter {
   readonly supportedStrategies: readonly PersistenceStrategy[];
   /** Saving shapes this adapter can emit (D-DOCUMENT-AXIS).  Omitted ⇒
    *  `["relational"]` only.  An adapter advertising `"embedded"` /
-   *  `"document"` can host a `shape(embedded)` / `shape(document)`
-   *  aggregate; the validator rejects a `shape(…)` the target backend
+   *  `"document"` can host a `shape: embedded` / `shape: document`
+   *  aggregate; the validator rejects a `shape: …` the target backend
    *  doesn't list. */
   readonly supportedShapes?: readonly SavingShape[];
   /** Per-binding capability check.  The validator calls this for

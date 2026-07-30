@@ -1,4 +1,4 @@
-// `shape(relational | embedded | document)` saving-shape modifier
+// `shape: relational|embedded|document` saving-shape modifier
 // (D-DOCUMENT-AXIS).  Surface + IR coverage: the aggregate header
 // modifier and the `dataSource` `shape:` knob parse, and both thread
 // through to `AggregateIR.savingShape` / `DataSourceIR.shape`.
@@ -26,7 +26,7 @@ function firstAgg(model: Model): Aggregate {
   return ctx?.members.find((m) => m.$type === "Aggregate") as Aggregate;
 }
 
-describe("aggregate shape(…) saving shape (D-DOCUMENT-AXIS)", () => {
+describe("aggregate shape: … saving shape (D-DOCUMENT-AXIS)", () => {
   it("parses shape: document on the header", async () => {
     const { model, errors } = await parse(`
       context T { aggregate Cart shape: document { name: string } }
