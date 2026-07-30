@@ -3,7 +3,8 @@ import { useMemo, useState } from "react";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 import { LOG_LEVELS, type LogLine, type StructuredLogPayload } from "../util/log-line";
-import { clearDiagnostics, readDiagnostics, type DiagSnapshot } from "../util/diagnostics";
+import { clearDiagnostics, isCrashReason, readDiagnostics, type DiagSnapshot } from "../util/diagnostics";
+import { CrashReportButtons } from "../CrashReportButtons";
 
 // The playground used to scatter read-only status across sibling dock
 // tabs — LSP diagnostics, generator output, bundle errors — so a red dot
@@ -205,6 +206,18 @@ function DiagBody(): JSX.Element {
           </Button>
         )}
       </Group>
+      {/* The ring is only half the answer — without an exit, a maximally
+          cooperative user still has to hand-transcribe it.  These are that
+          exit (M-T8.14 slice 2); the report is assembled redacted and
+          nothing is transmitted. */}
+      <Box
+        px="sm"
+        py={6}
+        data-testid="output-diag-report"
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      >
+        <CrashReportButtons size="xs" />
+      </Box>
       {rows.length === 0 ? (
         <Text c="dimmed" size="sm" p="sm">
           No diagnostics yet. A snapshot is recorded when the tab is backgrounded
@@ -231,7 +244,7 @@ function pctColour(pct: number): "red" | "yellow" | undefined {
 }
 
 function reasonColour(reason: string): "red" | "gray" {
-  return reason === "hidden" || reason === "pagehide" ? "gray" : "red";
+  return isCrashReason(reason) ? "red" : "gray";
 }
 
 function DiagRow({ snap }: { snap: DiagSnapshot }): JSX.Element {
@@ -245,7 +258,32 @@ function DiagRow({ snap }: { snap: DiagSnapshot }): JSX.Element {
         <Text size="xs" c="dimmed" ff="monospace" style={{ flex: 1 }}>
           {when}
         </Text>
+        {snap.build && (
+          <Text size="xs" c="dimmed" ff="monospace">
+            {snap.build.sha}
+          </Text>
+        )}
       </Group>
+      {/* The part that makes a breadcrumb a bug report — before M-T8.14 the
+          message and stack went to `console.error` and died with the tab. */}
+      {snap.detail?.message && (
+        <Text size="xs" ff="monospace" c="red.4" mt={2} pl={2} style={{ wordBreak: "break-word" }}>
+          {snap.detail.pane ? `[${snap.detail.pane}] ` : ""}
+          {snap.detail.message}
+        </Text>
+      )}
+      {snap.detail?.stack && (
+        <Text
+          size="xs"
+          ff="monospace"
+          c="dimmed"
+          mt={2}
+          pl={2}
+          style={{ whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}
+        >
+          {snap.detail.stack}
+        </Text>
+      )}
       <Group gap={12} wrap="wrap" mt={2} pl={2}>
         {snap.storage && (
           <Text size="xs" ff="monospace" c={pctColour(snap.storage.pct)}>

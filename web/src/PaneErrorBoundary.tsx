@@ -14,7 +14,8 @@
 
 import { Alert, Button, Code, Group, Stack, Text } from "@mantine/core";
 import { Component, Fragment, type ErrorInfo, type ReactNode } from "react";
-import { logDiagnostic } from "./util/diagnostics";
+import { errorDetail, logDiagnostic, type DiagDetail } from "./util/diagnostics";
+import { CrashReportButtons } from "./CrashReportButtons";
 
 interface Props {
   children: ReactNode;
@@ -24,6 +25,9 @@ interface Props {
 
 interface State {
   error: Error | null;
+  /** Captured in `componentDidCatch` — the component stack lives on the
+   *  `ErrorInfo`, not on the caught `Error`. */
+  detail?: DiagDetail;
   /** Bumped by "Reset pane" — remounts the children so a fixed source re-renders
    *  from a clean subtree instead of re-throwing on retained state. */
   resetKey: number;
@@ -39,11 +43,16 @@ export class PaneErrorBoundary extends Component<Props, State> {
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // eslint-disable-next-line no-console
     console.error(`Pane crashed (${this.props.name}):`, error, info.componentStack);
-    void logDiagnostic("react-error-pane");
+    const detail = errorDetail(error, {
+      pane: this.props.name,
+      componentStack: info.componentStack ?? undefined,
+    });
+    this.setState({ detail });
+    void logDiagnostic("react-error-pane", detail);
   }
 
   private reset = (): void => {
-    this.setState((s) => ({ error: null, resetKey: s.resetKey + 1 }));
+    this.setState((s) => ({ error: null, detail: undefined, resetKey: s.resetKey + 1 }));
   };
 
   override render(): ReactNode {
@@ -64,6 +73,10 @@ export class PaneErrorBoundary extends Component<Props, State> {
           <Button size="xs" onClick={this.reset} data-testid="pane-crash-reset">
             Reset pane
           </Button>
+          <CrashReportButtons
+            size="xs"
+            live={{ reason: "react-error-pane", detail: this.state.detail }}
+          />
         </Group>
       </Stack>
     );

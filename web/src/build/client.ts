@@ -9,6 +9,7 @@ import type {
   VfsDeleteResult,
   VfsWriteResult,
 } from "./protocol.js";
+import { logDiagnostic } from "../util/diagnostics.js";
 
 /** Anything the worker can return — narrowed by the call-site to the
  *  expected method's result type.  Centralising avoids duplicating
@@ -70,6 +71,30 @@ export class LoomBuildClient {
       else if (msg.result) slot.resolve(msg.result);
       else slot.reject(new Error("Build worker returned an empty response"));
     };
+    // A build worker that dies (uncaught throw at module scope, an OOM kill,
+    // a load failure) used to be completely unobservable: `respawn()` exists,
+    // but nothing recorded WHY the worker went away.  These two handlers give
+    // worker death its own crash class in the diagnostics ring, so a report
+    // filed after "Generate stopped working" carries the worker's own error
+    // instead of only the main thread's downstream rejection.
+    this.worker.addEventListener("error", (ev: ErrorEvent) => {
+      void logDiagnostic("worker-error", {
+        message: ev.message || "Build worker error",
+        stack:
+          ev.error instanceof Error
+            ? ev.error.stack
+            : ev.filename
+              ? `at ${ev.filename}:${ev.lineno}:${ev.colno}`
+              : undefined,
+        pane: "build-worker",
+      });
+    });
+    this.worker.addEventListener("messageerror", () => {
+      void logDiagnostic("worker-error", {
+        message: "Build worker message could not be deserialized (structured clone failed)",
+        pane: "build-worker",
+      });
+    });
     if (this.seedWorkspace) {
       const entries = this.seedWorkspace();
       if (entries.length > 0) {

@@ -128,6 +128,58 @@ suites** — the same files `ddd generate system` writes:
 A Backend console (OpenAPI-driven endpoint picker) and a SQL console round
 out the runtime panel for poking the booted backend by hand.
 
+## Crash reporting & diagnostics
+
+The playground is a static GitHub Pages site: **there is no telemetry and no
+beacon**, and nothing is ever transmitted automatically. A crash is therefore
+only reportable if the app can hand you a self-sufficient artifact — which is
+what this layer does.
+
+**On device.** Every crash-class event lands in a 12-entry ring persisted at
+`localStorage["loom.diag"]`, so it survives the reload a crash causes. Read it
+either in **Output → Diagnostics** (newest first, with the message and stack
+inline) or from the console:
+
+```js
+__loomDiag()          // the whole ring, oldest-first
+```
+
+Five reasons are error classes — `react-error` (the root boundary),
+`react-error-pane` (a pane boundary; carries the pane name),
+`window-error`, `unhandledrejection`, and `worker-error` (the build worker
+died — previously invisible). Everything else (`hidden`, `pagehide`) is a
+pressure breadcrumb: heap and storage readings captured *before* a crash. Each
+entry carries the **build SHA** of the bundle that produced it; the deployed
+bundle ships minified with no sourcemap, so the SHA is the key that makes a
+stack resolvable (rebuild that commit).
+
+**Reporting.** *Copy crash report* and *Report on GitHub* sit on both crash
+fallbacks, on the "crashed last session" notice, and in the Diagnostics
+stream. Copy puts the complete markdown report on the clipboard **and renders
+it on screen** so you can read exactly what you are about to share. *Report on
+GitHub* opens the [crash-report issue form](https://github.com/lemmit/Loc/issues/new?template=crash-report.yml)
+with the report prefilled (abridged to fit the URL — the clipboard copy is
+always complete); it is an ordinary link, nothing is sent until you submit.
+
+**A report contains** the build SHA and build time; the crash class, pane,
+message, stack and React component stack; the user-agent, viewport and page
+URL (path only); heap/storage pressure; and a workspace *fingerprint* — one
+row per file with its path, byte length and a truncated SHA-256.
+
+**A report never contains** `.ddd` or generated source text (files appear as
+the fingerprint only), the URL query or hash (the share hash encodes your
+whole model), any credential shape found in free text (`sk-…`, `ghp_…`,
+bearer tokens, JWTs, `key=`/`token=` parameters — all replaced with
+`[redacted]`), or your BYOK provider key. That last one is structural, not a
+filter: the assembler (`web/src/util/crash-report.ts`) performs no ambient
+storage read at all, and a unit test pins that it never names the settings
+entry the key lives in.
+
+**Self-test.** `?crash=app` forces a throw inside the root boundary and
+`?crash=pane` inside a pane boundary — the way to check that reporting works
+on your device without waiting for a real crash (and how the e2e spec covers
+the boundaries, which run in the production bundle).
+
 ## How it's built and deployed
 
 `npm --prefix web run build` runs `tsc -b` + `vite build`; the output is a

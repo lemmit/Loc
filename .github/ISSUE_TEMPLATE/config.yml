@@ -1,0 +1,8 @@
+# Adding the first issue template would otherwise REMOVE the "Open a blank
+# issue" escape hatch — every other kind of report (a language bug, a codegen
+# gap, a docs fix) has no form here and must stay one click away.
+blank_issues_enabled: true
+contact_links:
+  - name: Playground diagnostics
+    url: https://github.com/lemmit/Loc/blob/main/docs/playground.md#crash-reporting--diagnostics
+    about: How to read the on-device diagnostics ring and what a crash report contains.

@@ -1,6 +1,8 @@
 # M-T8.14 — Playground crash reporting & diagnostics surfacing (design)
 
-> **Status: design (draft claim).** Source: `docs/audits/playground-file-mgmt-review-2026-07.md`
+> **Status: slices 1–3 implemented; slice 4 deferred as recommended.** See
+> `docs/playground.md` → "Crash reporting & diagnostics" for the shipped
+> behaviour. Source: `docs/audits/playground-file-mgmt-review-2026-07.md`
 > §3.3 — "no crash telemetry at all (static-Pages, no beacon) … 'sometimes crashes'
 > reports are currently unfalsifiable". Verified against `main` @ `7938c9b`
 > (post-#2287, which added `web/src/PaneErrorBoundary.tsx`).

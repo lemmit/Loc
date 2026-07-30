@@ -1,0 +1,74 @@
+name: Playground crash report
+description: The Loom playground crashed, hung, or showed an error panel.
+title: "[crash] "
+labels: ["crash-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a crash.
+
+        The playground is a **static site with no telemetry** — nothing is ever
+        sent automatically, so a pasted report is the only way we learn a crash
+        happened. If the playground offered you **Copy crash report** (on the
+        crash panel, on the "crashed last session" notice, or under
+        **Output → Diagnostics**), paste it below and everything else here is
+        optional.
+
+        A report contains the build SHA, the crash class, the error message and
+        stack, browser/viewport, and memory/storage pressure. It contains **no
+        `.ddd` or generated source text** (files appear as path + length + hash
+        only) and **no credentials or API keys**. You can read the whole thing
+        before pasting — it is shown in the panel next to the button.
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Crash report
+      description: >-
+        Paste the report from "Copy crash report". Leave it as-is — the build
+        SHA and stack are what make the minified frames resolvable.
+      placeholder: "### Loom playground crash report …"
+      # Deliberately NOT `render: markdown` — the report already contains
+      # fenced stack blocks, and wrapping it in another fence would break the
+      # nesting (and stop the stack rendering as code).
+    validations:
+      required: true
+
+  - type: textarea
+    id: doing
+    attributes:
+      label: What were you doing?
+      description: The action right before the crash — the one thing a report can't capture.
+      placeholder: "Switched to the Model tab right after importing an example."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Does it happen again?
+      options:
+        - Every time (I can reproduce it)
+        - Sometimes
+        - Once, so far
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / device
+      description: Only needed if it differs from the report's user-agent line.
+      placeholder: "Safari 18 on iPhone 13"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have read the pasted report and it contains nothing I would rather not share.
+          required: true

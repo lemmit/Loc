@@ -19,7 +19,8 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Box, Button, Code, Group, Stack, Text, Title } from "@mantine/core";
-import { logDiagnostic } from "./util/diagnostics";
+import { errorDetail, logDiagnostic, type DiagDetail } from "./util/diagnostics";
+import { CrashReportButtons } from "./CrashReportButtons";
 
 interface Props {
   children: ReactNode;
@@ -27,6 +28,9 @@ interface Props {
 
 interface State {
   error: Error | null;
+  /** Captured in `componentDidCatch` so the fallback's crash report carries
+   *  the component stack, which the caught `Error` alone does not hold. */
+  detail?: DiagDetail;
 }
 
 /** Drop the playground's localStorage UI preferences.  Keys are all
@@ -48,7 +52,13 @@ function clearUiPrefsAndReload(): void {
   location.reload();
 }
 
-function CrashFallback({ error }: { error: Error }): JSX.Element {
+function CrashFallback({
+  error,
+  detail,
+}: {
+  error: Error;
+  detail?: DiagDetail;
+}): JSX.Element {
   return (
     <Box
       p="xl"
@@ -84,6 +94,7 @@ function CrashFallback({ error }: { error: Error }): JSX.Element {
             Reset view &amp; reload
           </Button>
         </Group>
+        <CrashReportButtons live={{ reason: "react-error", detail }} />
       </Stack>
     </Box>
   );
@@ -99,11 +110,17 @@ export class ErrorBoundary extends Component<Props, State> {
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // eslint-disable-next-line no-console
     console.error("Playground crashed:", error, info.componentStack);
-    void logDiagnostic("react-error");
+    const detail = errorDetail(error, {
+      componentStack: info.componentStack ?? undefined,
+    });
+    this.setState({ detail });
+    void logDiagnostic("react-error", detail);
   }
 
   override render(): ReactNode {
-    if (this.state.error) return <CrashFallback error={this.state.error} />;
+    if (this.state.error) {
+      return <CrashFallback error={this.state.error} detail={this.state.detail} />;
+    }
     return this.props.children;
   }
 }
@@ -163,12 +180,12 @@ export function installGlobalErrorLogging(): void {
     if (reloadOnceForStaleChunks(e.error ?? e.message)) return;
     // eslint-disable-next-line no-console
     console.error("Uncaught error:", e.error ?? e.message);
-    void logDiagnostic("window-error");
+    void logDiagnostic("window-error", errorDetail(e.error ?? e.message));
   });
   window.addEventListener("unhandledrejection", (e) => {
     if (reloadOnceForStaleChunks(e.reason)) return;
     // eslint-disable-next-line no-console
     console.error("Unhandled promise rejection:", e.reason);
-    void logDiagnostic("unhandledrejection");
+    void logDiagnostic("unhandledrejection", errorDetail(e.reason));
   });
 }

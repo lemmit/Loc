@@ -1,6 +1,30 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, URL } from "node:url";
+
+// Build identity injected into the bundle (read by `src/util/build-info.ts`).
+//
+// GitHub Pages overwrites the site on every deploy and we ship no sourcemaps,
+// so a crash report's minified frames are only resolvable if the report says
+// WHICH build produced them.  `GITHUB_SHA` is present in every GitHub Actions
+// step (so `pages.yml` needs no change); locally we ask git; failing both the
+// build is honestly labelled `dev`.
+function resolveBuildInfo(): { sha: string; builtAt: string } {
+  const fromCi = (process.env.GITHUB_SHA ?? "").trim();
+  let sha = fromCi ? fromCi.slice(0, 12) : "";
+  if (!sha) {
+    try {
+      sha = execFileSync("git", ["rev-parse", "--short=12", "HEAD"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      sha = "";
+    }
+  }
+  return { sha: sha || "dev", builtAt: new Date().toISOString() };
+}
 
 const browserPackLoader = fileURLToPath(
   new URL("./src/build/loader-vfs.ts", import.meta.url),
@@ -58,6 +82,11 @@ export default defineConfig({
   // on GitHub Pages; relative URLs let the same artifact run from
   // a sub-path or the root of any host.
   base: "./",
+  // Applies to the worker bundles too, so a build-worker crash report carries
+  // the same identity as a main-thread one.
+  define: {
+    __LOOM_BUILD__: JSON.stringify(resolveBuildInfo()),
+  },
   plugins: [codingameExportsResolve(), loomLoaderShim(), react()],
   // The playground speaks real LSP via monaco-languageclient +
   // @codingame/monaco-vscode-api.  That stack ships its own monaco build

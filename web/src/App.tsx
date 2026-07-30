@@ -50,6 +50,8 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
+import { setCrashWorkspaceProvider } from "./util/crash-context";
+import { SHOW_DIAGNOSTICS_EVENT } from "./LastCrashNotice";
 import { filesDroppedByExample } from "./workspace/example-import";
 import { NEW_FILE_SEED, pickInitialSource } from "./workspace/initial-source";
 import type { WorkspaceSourcesController } from "./workspace/workspace-sources";
@@ -499,6 +501,26 @@ export default function App(): JSX.Element {
     });
     return dispose;
   }, [sources.controller]);
+
+  // Crash reports carry the workspace as a FINGERPRINT (path + byte length +
+  // truncated hash), never as content — see `util/crash-report.ts`.  The
+  // report builders render above `App` (the root boundary replaces it), so
+  // they reach the workspace through this registration rather than a prop.
+  useEffect(() => {
+    const ctrl = sources.controller;
+    setCrashWorkspaceProvider(() =>
+      [...ctrl.snapshot().files].map(([path, content]) => ({ path, content })),
+    );
+    return () => setCrashWorkspaceProvider(null);
+  }, [sources.controller]);
+
+  // "View diagnostics" on the crashed-last-session notice — that banner
+  // renders outside `App`, so it asks for the stream switch by event.
+  useEffect(() => {
+    const onShow = (): void => setOutputStream("diag");
+    window.addEventListener(SHOW_DIAGNOSTICS_EVENT, onShow);
+    return () => window.removeEventListener(SHOW_DIAGNOSTICS_EVENT, onShow);
+  }, [setOutputStream]);
 
   useEffect(() => {
     const build = new LoomBuildClient({
