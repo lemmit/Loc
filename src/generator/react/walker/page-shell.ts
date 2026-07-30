@@ -33,7 +33,7 @@ import type {
 } from "../body-walker.js";
 import { emitExpr, walkBodyToTsx } from "../body-walker.js";
 import { idTargetHookVar } from "../form-helpers.js";
-import { renderApiHookImports, renderImportLines } from "./import-lines.js";
+import { renderApiHookImports, renderImportLines, takeReactSpecifiers } from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
 import { tsxTarget } from "./tsx-target.js";
 
@@ -360,6 +360,10 @@ export function renderCustomLayoutPage(
     usesState || usesStateForTitle || usesStateForDerived || usesStateForActions;
   const effectiveUsesRouteId = usesRouteId || usesRouteIdForActions;
 
+  // Drain the walked body's react-hook imports (a hoisted DataGrid child needs
+  // `useMemo`/`useState`/`useEffect`) so they merge into the shell's single
+  // react import line below instead of emitting a second, clashing one.
+  const bodyReactSpecifiers = takeReactSpecifiers(imports);
   const mantineImport = renderImportLines(imports, srcImportPrefix);
   // One default-import line per user component
   // referenced in the body, sorted alphabetically.
@@ -456,6 +460,12 @@ export function renderCustomLayoutPage(
   if (effectiveUsesState) reactSpecifiers.push("useState");
   if (usesEffect) reactSpecifiers.push("useEffect");
   if (usesMemo) reactSpecifiers.push("useMemo");
+  // Body specifiers append AFTER the shell's, in their own sorted order — the
+  // shell's order is load-bearing for existing output bytes, so merging must
+  // not re-sort it.
+  for (const n of [...bodyReactSpecifiers].sort()) {
+    if (!reactSpecifiers.includes(n)) reactSpecifiers.push(n);
+  }
   const reactImport =
     reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
   const stateLines = effectiveUsesState
@@ -965,6 +975,7 @@ export function renderUserComponentFile(
     },
     { decls: "", moduleScope: "", usesNavigate: false },
   );
+  const bodyReactSpecifiers = takeReactSpecifiers(imports);
   const mantineImport = renderImportLines(imports);
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
@@ -979,6 +990,10 @@ export function renderUserComponentFile(
   if (usesFragment) reactSpecifiers.push("Fragment");
   if (compUsesState) reactSpecifiers.push("useState");
   if (usesMemo) reactSpecifiers.push("useMemo");
+  // See the page assembly above — body specifiers append, never re-sort.
+  for (const n of [...bodyReactSpecifiers].sort()) {
+    if (!reactSpecifiers.includes(n)) reactSpecifiers.push(n);
+  }
   const reactImport =
     reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
   const _decimalImport =

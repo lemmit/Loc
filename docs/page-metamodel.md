@@ -462,6 +462,7 @@ Split the problem by where the rule lives:
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
+| `DataGrid` | **React only.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on another frontend is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend. |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
@@ -496,6 +497,74 @@ value-object render shape, not a hand-writable input). The closed set is
 exactly the rows above.
 
 Users freely define their own `component`s, which compose these builtins.
+
+### 9.1 `DataGrid` — the interactive grid (React)
+
+`Table` is deliberately simple and portable: it renders markup around a rows
+expression the walker has already sorted/sliced, so all six frontends (plus the
+parallel HEEx engine) implement it. It covers single-column sort, one substring
+filter, and prev/next paging — and for the scaffold's server-paged list the
+server does the work anyway.
+
+`DataGrid` is the case where hand-rolling stops paying: **multi-column sort,
+per-column filters, and column visibility** are row-model concerns, which is
+exactly what [TanStack Table](https://tanstack.com/table) is. So the primitive
+delegates to it rather than growing `Table` a fourth and fifth interactive mode.
+
+```ddd
+page CustomerList {
+  route: "/customers"
+  state { picked: string[] }
+  body: Stack(
+    Button { label: "Delete selected ({picked.length})", on: bulkDelete },
+    QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+      Column("Name",  o => o.name,  sortable: true, filterable: true),
+      Column("Tier",  o => o.tier,  sortable: true),
+      rows: rows,
+      selection: picked,
+      multiSort: true,
+      columnVisibility: true,
+      pageSize: 25,
+      testid: "customers-grid") }
+  )
+}
+```
+
+| Arg | Meaning |
+|---|---|
+| `rows:` | The collection to render (usually a `QueryView` `data:` lambda param). |
+| `Column(header, accessor, sortable?, filterable?)` | Same children as `Table`. A column whose accessor isn't a simple member has no value to sort or filter *by*, so both flags are forced off rather than emitted and silently ignored. |
+| `multiSort:` | Shift-click accumulates sort columns instead of replacing. |
+| `columnVisibility:` | Renders a per-column show/hide toggle row. |
+| `pageSize:` | Client page size (default 25). |
+| `selection:` | Names a `string[]` field in the page's `state { }`; the grid adds a leading checkbox column and keeps that field in sync with the selected rows' ids. |
+| `testid:` | Test id on the grid root; also names the emitted component (`customers-grid` → `CustomersGrid`). |
+
+**It emits a child component, not inline markup.** `useReactTable` is a hook,
+and a `DataGrid` almost always sits in a `QueryView`'s `data:` slot, which the
+walker emits as a *conditional expression* — a hook cannot run there. Hoisting
+the hook to the page component doesn't work either (it needs `rows`, which only
+exists inside the lambda), and a component declared *inside* the page would get
+a fresh identity every render, remounting the grid and losing its sort state.
+So the walker hoists a generic child to **module scope** and renders
+`<CustomersGrid rows={…} />` at the call site — the same shape shadcn's own
+DataTable recipe uses.
+
+Only `selection:` crosses back out of that child. Sort, filter, and visibility
+are opaque view-state nothing outside the grid reads; a selected-id list is the
+one thing a sibling ("Delete selected (3)") has a real need for, so it lives in
+`state { }` like any other page state. It must be declared `string[]` —
+`loom.datagrid-selection-not-array` rejects any other type, and
+`loom.datagrid-selection-not-state` rejects a ref that isn't a declared state
+field (which the walker would otherwise silently drop).
+
+The grid's **chrome** comes from the active design pack
+(`primitive-data-grid.hbs` — mantine, shadcn, mui and chakra ship one); the
+TanStack wiring above it is framework-level and byte-identical across packs.
+The checkbox column is walker-emitted as a plain `<input type="checkbox">`
+rather than a pack component: it is the one cell whose *behaviour* is
+load-bearing, so keeping it out of the packs means selection needs no template
+change anywhere.
 
 ---
 

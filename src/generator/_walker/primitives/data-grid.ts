@@ -74,6 +74,19 @@ export function emitDataGrid(
   const columnVisibility = boolNamed(call, "columnVisibility");
   const pageSize = numericNamed(call, "pageSize") ?? 25;
 
+  // `selection: <string[] page-state field>` turns on row selection and syncs
+  // the selected row ids back into that field.  Selection is the ONE piece of
+  // grid view-state exposed to the page: a sibling ("Delete selected (3)") has
+  // a real need for it, whereas sort/filter/visibility are opaque and nothing
+  // outside the grid reads them.  That keeps decision (A)'s spirit — state a
+  // sibling needs lives in `state {}` — without forcing TanStack's internal
+  // shapes into the DSL.
+  //
+  // Requires an ARRAY-typed field: a `string[]` is the honest contract, and the
+  // React page-shell only emits `useState<string[]>([])` for it since the
+  // array-state fix (#2294) — before that it was `useState<any>(undefined)`.
+  const selection = stateNameArg(call, "selection", ctx);
+
   const columns = positionalArgs(call)
     .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
     .map((c, i) => resolveColumn(c, ctx, i, depth));
@@ -85,6 +98,7 @@ export function emitDataGrid(
   const componentName = gridComponentName(call, ctx);
 
   addImport(ctx, "react", "useMemo", "useState");
+  if (selection) addImport(ctx, "react", "useEffect");
   addImport(
     ctx,
     "@tanstack/react-table",
@@ -105,6 +119,7 @@ export function emitDataGrid(
     "type SortingState",
     ...(anyFilterable ? ["type ColumnFiltersState"] : []),
     ...(columnVisibility ? ["type VisibilityState"] : []),
+    ...(selection ? ["type RowSelectionState"] : []),
   );
 
   // The grid body markup comes from the design pack, so each pack keeps its
@@ -125,12 +140,20 @@ export function emitDataGrid(
       columnVisibility,
       anyFilterable,
       pageSize,
+      selection: selection !== undefined,
       body,
     }),
   );
 
   // The call site is a single element — the grid's own layout lives inside the
-  // hoisted component, so no depth-based indentation is needed here.
+  // hoisted component, so no depth-based indentation is needed here.  When
+  // selection is bound, the page's state setter is threaded in as a prop so the
+  // child owns TanStack's selection map while the PAGE owns the id list.
+  if (selection) {
+    const setter = `set${selection[0]!.toUpperCase()}${selection.slice(1)}`;
+    ctx.usesState = true;
+    return `<${componentName} rows={${rowsExpr}} onSelectionChange={${setter}} />`;
+  }
   return `<${componentName} rows={${rowsExpr}} />`;
 }
 
@@ -212,6 +235,25 @@ function gridComponentName(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
   return `LoomGrid${n}`;
 }
 
+/** Read a named arg that must reference a declared page-state field
+ *  (`selection: selectedIds`), returning the field name as declared.
+ *
+ *  The walker sees only state NAMES, not their declared types, so the
+ *  "must be `string[]`" half is enforced one layer up by the IR check
+ *  `loom.datagrid-selection-not-array` — where the types are resolved and the
+ *  diagnostic can name the field.  Binding a scalar would otherwise emit
+ *  `setSelectedIds(<string[]>)` against a `useState<string>` and surface as a
+ *  tsc error far from its cause. */
+function stateNameArg(
+  call: Extract<ExprIR, { kind: "call" }>,
+  name: string,
+  ctx: WalkContext,
+): string | undefined {
+  const arg = namedArgValue(call, name);
+  if (arg?.kind !== "ref") return undefined;
+  return ctx.stateNames.has(arg.name) ? arg.name : undefined;
+}
+
 /** Render the hoisted child component: column defs, view state, the
  *  `useReactTable` call, and the pack-rendered markup. */
 function renderGridComponent(args: {
@@ -221,10 +263,49 @@ function renderGridComponent(args: {
   columnVisibility: boolean;
   anyFilterable: boolean;
   pageSize: number;
+  selection: boolean;
   body: string;
 }): string {
-  const { componentName, columns, multiSort, columnVisibility, anyFilterable, pageSize, body } =
-    args;
+  const {
+    componentName,
+    columns,
+    multiSort,
+    columnVisibility,
+    anyFilterable,
+    pageSize,
+    selection,
+    body,
+  } = args;
+
+  // A leading checkbox column when selection is on.  Emitted by the WALKER as
+  // plain `<input type="checkbox">` rather than a pack component: it is the one
+  // cell whose behaviour (not appearance) is load-bearing, and keeping it here
+  // means selection needs no template change in any of the four packs — and
+  // ports to Vue/Svelte/Angular unchanged.
+  const selectCol = selection
+    ? `        {
+          id: "loom-select",
+          header: ({ table: t }) => (
+            <input
+              type="checkbox"
+              aria-label="Select all rows"
+              checked={t.getIsAllPageRowsSelected()}
+              onChange={t.getToggleAllPageRowsSelectedHandler()}
+            />
+          ),
+          cell: ({ row }) => (
+            <input
+              type="checkbox"
+              aria-label="Select row"
+              checked={row.getIsSelected()}
+              disabled={!row.getCanSelect()}
+              onChange={row.getToggleSelectedHandler()}
+            />
+          ),
+          enableSorting: false,
+          enableColumnFilter: false,
+        },`
+    : "";
 
   const colDefs = columns
     .map((c) => {
@@ -237,9 +318,11 @@ function renderGridComponent(args: {
       return `        { ${parts.join(", ")} },`;
     })
     .join("\n");
+  const allColDefs = selectCol === "" ? colDefs : `${selectCol}\n${colDefs}`;
 
   const stateDecls = [
     `  const [sorting, setSorting] = useState<SortingState>([]);`,
+    selection ? `  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});` : "",
     anyFilterable
       ? `  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);`
       : "",
@@ -252,6 +335,7 @@ function renderGridComponent(args: {
 
   const tableState = [
     "sorting",
+    selection ? "rowSelection" : "",
     anyFilterable ? "columnFilters" : "",
     columnVisibility ? "columnVisibility" : "",
   ]
@@ -260,6 +344,8 @@ function renderGridComponent(args: {
 
   const changeHandlers = [
     `    onSortingChange: setSorting,`,
+    selection ? `    onRowSelectionChange: setRowSelection,` : "",
+    selection ? `    enableRowSelection: true,` : "",
     anyFilterable ? `    onColumnFiltersChange: setColumnFilters,` : "",
     columnVisibility ? `    onColumnVisibilityChange: setColumnVisibility,` : "",
   ]
@@ -275,14 +361,35 @@ function renderGridComponent(args: {
     .filter((l) => l !== "")
     .join("\n");
 
+  // Push the selected row ids up to the page's `string[]` state whenever the
+  // selection map changes.  TanStack keys its map by row INDEX by default, so
+  // the ids come from the row originals — falling back to the index only when a
+  // row has no `id`, which keeps the emitted code total without assuming the
+  // wire shape.  The effect depends on `rowSelection` (not the derived array)
+  // so it fires exactly once per selection change.
+  const selectionSync = selection
+    ? `  useEffect(() => {
+    onSelectionChange(
+      table
+        .getSelectedRowModel()
+        .rows.map((r) => String((r.original as { id?: unknown }).id ?? r.index)),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowSelection]);
+`
+    : "";
+
   // `rows` arrives as `readonly T[]` from the walker's binding; TanStack's
   // `data` is mutable, hence the cast.  The component is generic so no DTO
   // type name has to be resolved at generate time.
-  return `function ${componentName}<T extends object>({ rows }: { rows: readonly T[] }) {
+  const props = selection
+    ? `{ rows, onSelectionChange }: { rows: readonly T[]; onSelectionChange: (ids: string[]) => void }`
+    : `{ rows }: { rows: readonly T[] }`;
+  return `function ${componentName}<T extends object>(${props}) {
 ${stateDecls}
   const columns = useMemo<ColumnDef<T>[]>(
     () => [
-${colDefs}
+${allColDefs}
     ],
     [],
   );
@@ -295,7 +402,7 @@ ${changeHandlers}
 ${rowModels}
     initialState: { pagination: { pageSize: ${pageSize} } },
   });
-  return (
+${selectionSync}  return (
 ${body}
   );
 }
