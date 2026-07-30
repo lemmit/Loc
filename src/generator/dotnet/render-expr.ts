@@ -817,7 +817,19 @@ export const CS_COLLECTION_RENDERERS: Record<
   contains: (recv, args) => `${recv}.Contains(${args[0] ?? "default!"})`,
   where: (recv, args) => `${recv}.Where(${args[0] ?? "_ => true"}).ToList()`,
   first: (recv) => `${recv}.First()`,
-  firstOrNull: (recv) => `${recv}.FirstOrDefault()`,
+  // `.FirstOrDefault()` over a VALUE-type element yields `default(T)` — `0`,
+  // `false`, `DateTime.MinValue`, a zeroed id struct — which widens into `T?`
+  // as NON-null and so masks emptiness: `firstOrNull` must mean "null when
+  // empty" everywhere (TS/Python/Java all return null/None).  Projecting to the
+  // nullable element type first makes `default` an honest `null`.  Reference
+  // elements (string / value objects / entities / FileRef) already default to
+  // null, so they keep the plain call.
+  firstOrNull: (recv, _args, e) => {
+    const elem = collectionElementType(e);
+    if (!elem || !isCsValueType(elem)) return `${recv}.FirstOrDefault()`;
+    const nullable = renderCsType({ kind: "optional", inner: elem });
+    return `${recv}.Select(__e => (${nullable})__e).FirstOrDefault()`;
+  },
   map: (recv, args) => `${recv}.Select(${args[0]}).ToList()`,
   sortBy: (recv, args, e) =>
     e && isDescendingSort(e)
@@ -841,6 +853,24 @@ export const CS_COLLECTION_RENDERERS: Record<
     return `(${recv}.Count == 0 ? ${nullSpell} : ${recv}.Max(${args[0]}))`;
   },
 };
+
+/** The ELEMENT type of a collection-op receiver — `undefined` when the receiver
+ *  isn't typed as an array. */
+function collectionElementType(e?: Extract<ExprIR, { kind: "method-call" }>): TypeIR | undefined {
+  const rt = e?.receiverType;
+  const unwrapped = rt?.kind === "optional" ? rt.inner : rt;
+  return unwrapped?.kind === "array" ? unwrapped.element : undefined;
+}
+
+/** True iff the type renders as a C# VALUE type, i.e. one whose `default` is a
+ *  zero value rather than `null`: every primitive except `string` and `File`
+ *  (a `FileRef` record), plus ids (`readonly record struct <T>Id`) and enums.
+ *  Value objects, entities and unions are records — reference types. */
+function isCsValueType(t: TypeIR): boolean {
+  if (t.kind === "id" || t.kind === "enum") return true;
+  if (t.kind !== "primitive") return false;
+  return t.name !== "string" && t.name !== "File";
+}
 
 /** The projected body type of a `min`/`max` reduction's lambda, used to spell
  *  the nullable `null` branch — `undefined` when it can't be typed cheaply. */

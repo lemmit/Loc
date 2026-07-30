@@ -63,6 +63,7 @@ import {
   emitPythonProvenanceMigration,
   MIGRATE_PY,
 } from "./emit/migrations.js";
+import { wireTruncModHelper } from "./emit/numeric.js";
 import { OBS_LOG_PY, OBS_MIDDLEWARE_PY, renderPythonTracingFile } from "./emit/obs.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
@@ -761,6 +762,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // context); no-op for a deployable with none.  The served-api routers that
   // call these were emitted before renderMain.
   for (const ctx of args.contexts) emitPyExplicitHandlers(ctx, out, hasDispatch);
+  // LAST — cross-backend `%` semantics (see emit/numeric.ts).  Runs over the
+  // finished map so every module that rendered a `trunc_mod(` call gets the
+  // import, whichever emitter produced it.
+  wireTruncModHelper(out);
   return out;
 }
 
