@@ -1,0 +1,28 @@
+{
+  "case": "inheritance",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 200,
+      "body": {
+        "creditLimit": 100,
+        "email": "a@x.com",
+        "id": "<volatile:key>",
+        "name": "Acme",
+        "version": 1
+      }
+    }
+  ]
+}

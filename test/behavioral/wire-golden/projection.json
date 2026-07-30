@@ -1,0 +1,51 @@
+{
+  "case": "projection",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/orders/{id}/place",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/projections/order_board/{id}",
+      "status": 200,
+      "body": {
+        "at": "<timestamp>",
+        "orderRef": "<uuid>",
+        "status": "Placed"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders/{id}/ship",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/projections/order_board/{id}",
+      "status": 200,
+      "body": {
+        "at": "<timestamp>",
+        "orderRef": "<uuid>",
+        "status": "Shipped"
+      }
+    }
+  ]
+}
