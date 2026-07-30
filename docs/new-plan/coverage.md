@@ -241,6 +241,7 @@
 | behavioral-parity-bugs-2026-07.md | Living register, currently drained (B1–B18 all ✅). Reopens as the behavioural tier finds more — no standing mission needed |
 | flutter-a11y-audit-2026-07.md | Landed (#2282, Phases A–C) — residue with M-T1.18 / M-T1.12 |
 | frontend-parity-audit-2026-07.md | Reference matrix (supersedes the 06 version; adds the Feliz column) — findings flow through T1 |
+| playground-file-mgmt-review-2026-07.md | Waves 1–3 landed (#2287 — 21 registered defects: store→UI sync epoch, recovered-AST guards, observable file-add, the no-network per-PR Playwright lane, LSP ghost models, write-back parse gates). Documented as out of scope in the PR: **multi-tab write coordination** (defect #8 — LightningFS superblock last-flush-wins), the **v1/v2 system-builder endgame decision**, and a **crash-telemetry beacon** → M-T8.6 (playground sandbox) / M-T8.11 |
 | playground-modeller-audit-2026-07.md | Part 1 + the visibility half of Part 2 landed (#2290); waves 4–5 landed (#2295, #2299). Remaining Part-3 editing surfaces → M-T8.11 / M-T1.17 |
 | unfold-printer-layout-review-2026-07.md | Closed — all eight defects landed |
 | proposal-surface-stability-review-2026-07.md | Reference — a design-review lens on the proposal corpus, not a defect list. Its asks are honoured per-feature at design time (M-T5.9 surface hygiene is the closest standing mission) |
