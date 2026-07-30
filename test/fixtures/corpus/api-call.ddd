@@ -1,0 +1,59 @@
+// Typed in-system api call (M-T4.8): a `resource { kind: api }` bound to an
+// `api` a SIBLING deployable serves, called from a workflow as
+// `orders.getOrderById(id)`.
+//
+// Two deployables on purpose — the whole feature is that the caller's client is
+// DERIVED from the callee's served operation set, so a single-deployable
+// fixture could not exercise it.  Both spell `__PLATFORM__`, so each backend's
+// corpus leg compiles both halves of the call with its own emitter.
+//
+// The workflow reads a field off the response (`o.code`) rather than just
+// issuing the call: that is what pins the response type through lowering, and
+// what makes a client whose response shape drifted from the callee's wire shape
+// fail to compile instead of failing at runtime.
+system AC {
+  subdomain D {
+    context Orders {
+      aggregate Order with crudish {
+        code: string
+        status: string
+      }
+      repository Orders for Order { }
+    }
+    context Shipping {
+      aggregate Shipment with crudish {
+        orderCode: string
+        status: string
+      }
+      repository Shipments for Shipment { }
+      workflow fulfil {
+        // `Order id`, not `string`: a foreign aggregate id the caller does NOT
+        // host, so the deployable has to declare the brand itself — the shape
+        // that broke every backend before `src/ir/util/foreign-ids.ts`.
+        create(orderId: Order id) {
+          let o = orders.getOrderById(orderId)
+          let s = Shipment.create({ orderCode: o.code, status: "Pending" })
+        }
+      }
+    }
+  }
+  api OrdersApi from D
+  storage pg { type: postgres }
+  resource ordersState   { for: Orders,   kind: state, use: pg }
+  resource shippingState { for: Shipping, kind: state, use: pg }
+  // No address anywhere in this source — the binding is what makes it derivable.
+  resource orders        { for: Shipping, kind: api,   use: OrdersApi }
+  deployable ordersSvc {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+  deployable shippingSvc {
+    platform: __PLATFORM__
+    contexts: [Shipping]
+    dataSources: [shippingState, orders]
+    port: 4001
+  }
+}

@@ -18,6 +18,7 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../../ir/util/aggregate-flags.js";
+import { apiResourceBindings } from "../../../ir/util/api-resource-binding.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
@@ -36,6 +37,7 @@ import {
   emitPhoenixResourceFiles,
   resourceModuleName,
 } from "../adapters/resource-clients.js";
+import { emitElixirApiClients } from "../api-client.js";
 import type { ApiRoute } from "../api-emit.js";
 import { toModulePrefix, toSnakeApp } from "../app-naming.js";
 import { actorIdKey, emitAuth } from "../auth-emit.js";
@@ -147,6 +149,21 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const resourceEmission = emitPhoenixResourceFiles(sysWithSources, appName, appModule);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
   const resourceModules = buildPhoenixResourceModules(sysWithSources, appModule);
+  // Typed in-system api clients (M-T4.8).  Separate from the sourceType-routed
+  // resource adapters above: an api-bound resource has no `storage`, so it never
+  // reaches a ResourceAdapter — which is also why `req` has to be declared here
+  // rather than by the `restApi` adapter that normally owns it.  Undefined —
+  // hence no file, no dep — when this deployable binds no in-system api.
+  // Gated on `sysWithSources`, not on `sys` alone, for the SAME reason the
+  // resource emission two lines up is: legacy test paths construct a SystemIR
+  // with no `dataSources`, and `apiResourceBindings` reads it unconditionally.
+  // `sys ? …` looks like a guard and isn't one.
+  const apiBindings = sysWithSources && sys ? apiResourceBindings(deployable, sys) : [];
+  const apiClients =
+    sys && apiBindings.length > 0 ? emitElixirApiClients(apiBindings, sys, appModule) : undefined;
+  if (apiClients) {
+    out.set(`lib/${appName}/resources/api_clients.ex`, apiClients);
+  }
 
   // Broker bindings (channels.md; M-T4.4 slices 6c + 7d): the broker-bound
   // channelSources this deployable wires via `channels:` — redis broadcast
@@ -649,6 +666,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const hexDeps = usesCron
     ? { ...resourceEmission.hexDeps, crontab: '"~> 1.1"', oban: '"~> 2.19"' }
     : resourceEmission.hexDeps;
+  // The emitted client imports `Req`; without this the project references a
+  // package it does not depend on (the exact defect that shipped an
+  // httpx-importing Python client into a project with no httpx).
+  if (apiClients) (hexDeps as Record<string, string>).req = '"~> 0.5"';
   // Channel drivers, wiring-gated so a channel-less mix.exs stays
   // byte-identical: Redix (MIT — design §6a) for redis pub/sub; the hex
   // `amqp` client (MIT, wrapping the official RabbitMQ Erlang client) for

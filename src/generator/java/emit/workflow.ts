@@ -103,6 +103,10 @@ export interface WorkflowCtx {
   routePrefix?: string;
   /** resourceName → client class, for `resource-op` calls (Phase 4c). */
   resourceClasses?: Map<string, string>;
+  /** True when any hosted workflow issues a typed in-system api call (M-T4.8).
+   *  Gates the resources-package import independently of `resourceClasses`,
+   *  which an api-bound resource never populates. */
+  usesRemoteApiOp?: boolean;
   /** Package the resource client classes live in. */
   resourcesPkg?: string;
   /** category-resolved package lookups for cross-package imports. */
@@ -777,7 +781,15 @@ export function renderJavaWorkflows(
       }),
       anyUser ? `import ${wctx.basePkg}.auth.CurrentUserAccessor;` : null,
       anyUser ? `import ${wctx.basePkg}.auth.User;` : null,
-      wctx.resourceClasses?.size && wctx.resourcesPkg && wctx.resourcesPkg !== wctx.pkg
+      // The `.*` import covers BOTH resource-client classes and the typed
+      // in-system api client, which share the resources package.  The
+      // `resourceClasses.size` half is not sufficient on its own: an api-bound
+      // resource has no `storage`, so it never reaches a ResourceAdapter and
+      // never lands in `resourceClasses` — without the second disjunct the
+      // emitted workflow references `ApiClients` with no import at all.
+      (wctx.resourceClasses?.size || wctx.usesRemoteApiOp) &&
+        wctx.resourcesPkg &&
+        wctx.resourcesPkg !== wctx.pkg
         ? `import ${wctx.resourcesPkg}.*;`
         : null,
       hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,

@@ -2631,17 +2631,20 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 // stack trace.  This is the repo's HONEST-gap stance: a `loom.*` code the user
 // can read, not a silent mis-emit.
 //
-// Slice 3 removed "node"; 4a removed "python"; 4b removed "dotnet".  The rest
-// drain in 4c-4d.
-// When the set empties, this check and its arm in every `render-expr.ts` go away.
+// The set is now EMPTY — every backend (node, python, dotnet, java, elixir)
+// emits a typed client, which is what "M-T4.8 is done" means.
+//
+// The check is deliberately KEPT rather than deleted with the last entry.  It
+// costs one `.some()` early-exit on models with no api binding, and it is the
+// honest-gap net for the NEXT backend: a sixth platform added without a client
+// would otherwise reach a `render-expr.ts` arm that has no idea what to emit.
+// Adding the new platform key here turns that into a readable `loom.*` error at
+// validation time, which is the whole stance this check exists to hold.
 // ---------------------------------------------------------------------------
 
-/** Backends with no typed in-system api client yet.  Emptying this is what
- *  "M-T4.8 is done" means. */
-export const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([
-  "java",
-  "elixir",
-]);
+/** Backends with no typed in-system api client.  Empty as of slice 4d — add a
+ *  key here when introducing a backend before its client exists. */
+export const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([]);
 
 export function validateRemoteApiOpSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // Cheap exit: no api-bound resource ⇒ no typed call can exist.

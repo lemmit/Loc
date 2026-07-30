@@ -350,6 +350,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 | `run-obs` | all five `*-obs-e2e` |
 | `run-oidc` | all five `*-oidc-e2e` + `auth-oidc-compose-e2e` |
 | `run-tenancy` | `tenancy-e2e` (10-leg matrix) |
+| `run-api-call` | `api-call-e2e` (typed in-system call, caller-backend matrix) |
 | `run-migration-e2e` | `migration-evolution-e2e` (5 SQL backends) |
 | `run-conformance` | `conformance-full` |
 | `run-channels` | `channels-e2e` |

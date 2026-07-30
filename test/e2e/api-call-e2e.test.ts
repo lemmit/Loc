@@ -20,9 +20,18 @@
 //
 // The CALLER's platform is the knob (LOOM_API_CALL_CALLER, default `node`);
 // the callee stays Hono throughout, because what's under test is the caller's
-// generated client, not the callee's routes.  Adding a backend to this gate as
-// slices 4b-4d land is a row in `CALLERS` plus a matrix row in the workflow —
-// not a new suite.
+// generated client, not the callee's routes.
+//
+// COVERAGE, stated plainly: all five backends emit a typed client and all five
+// are COMPILE-verified (tsc / mypy / dotnet /warnaserror / gradle / mix
+// --warnings-as-errors).  Only `node` and `python` are RUNTIME-verified here.
+// That bound is deliberate — it is the set that boots natively without a
+// container — but it is a real gap, not a formality: the Phoenix client
+// initially read its base URL from a `@module_attribute`, which is evaluated at
+// COMPILE time and so would have baked in the localhost fallback and never seen
+// compose's address.  `mix compile` was perfectly happy with it.  A dotnet /
+// java / elixir leg is a row in `CALLERS` plus that backend's toolchain setup
+// in the workflow — worth adding on a runner that has them.
 //
 // Opt-in: LOOM_API_CALL_E2E=1 (npm run test:api-call).  Needs docker (throwaway
 // postgres) and network for the generated projects' dependency install; the

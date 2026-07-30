@@ -950,16 +950,20 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     case "free":
       return `${snake(e.name)}(${args.join(", ")})`;
     case "remote-api-op": {
-      // M-T4.8 slice 2 lands the LOWERING; the per-backend typed clients are
-      // slices 3-5.  `loom.remote-api-op-unsupported` rejects the model before
-      // codegen, so this is unreachable — it throws rather than emitting a
-      // plausible-looking call that would 404 at runtime.
+      // A typed in-system call (M-T4.8).  `<App>.Resources.ApiClients` exposes
+      // one `<resource>_<operation_id>` per operation the callee exposes.
+      //
+      // Fully qualified, like the `resource-op` arm below — the vanilla emitter
+      // references resource modules by full path rather than aliasing them, so
+      // there is no import gate to get wrong here (unlike .NET and Java).
+      //
+      // No id coercion either: an Elixir id is already the raw value, and the
+      // client `to_string/1`s path params itself.  Synchronous, and the
+      // workflow's `expr-let` lowers to `x <- (expr)`, which always succeeds —
+      // so a failed call RAISES rather than threading an {:error, _}.
       const op = e.remoteApiOp!;
-      throw new Error(
-        `Typed api call '${op.resourceName}.${op.operationId}' reached the renderer, ` +
-          `but no typed client is emitted for this backend yet (M-T4.8 slices 3-5). ` +
-          `This should have been rejected by loom.remote-api-op-unsupported.`,
-      );
+      const app = ctx.contextModule.split(".")[0] ?? ctx.contextModule;
+      return `${app}.Resources.ApiClients.${snake(op.resourceName)}_${snake(op.operationId)}(${args.join(", ")})`;
     }
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
