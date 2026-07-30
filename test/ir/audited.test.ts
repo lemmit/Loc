@@ -221,7 +221,9 @@ system S {
   });
 
   it("an aggregate without the flag stays byte-identical (auditing off pays nothing)", async () => {
-    const { model } = await parseModel(AGG_WIDE.replace("aggregate Cart audited", "aggregate Cart"));
+    const { model } = await parseModel(
+      AGG_WIDE.replace("aggregate Cart audited", "aggregate Cart"),
+    );
     const files = generateSystems(model).files;
     const schema = [...files.entries()].find(([p]) => p.endsWith("db/schema.ts"))?.[1] ?? "";
     expect(schema).not.toContain("audit_records");
