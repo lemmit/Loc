@@ -1,7 +1,22 @@
 # Read-path architecture — the read-only repository query port
 
-> Status: **DRAFT / PROPOSED** (2026-07-14, rev. 13). No code yet. A
-> vision + grammar proposal. rev. 9 added the **Paging** section (call-site
+> Status: **PARTIALLY SHIPPED** (proposal 2026-07-14, rev. 13; status corrected
+> 2026-07-30). The original header read *"No code yet"* and stayed that way
+> while the read path was built — [`coverage.md`](../../new-plan/coverage.md)
+> flagged the drift on 2026-07-21. What ships today: the **paged read path**
+> (`paged` carrier + call-site params, D-ENVELOPE `Paged<T>`), the
+> **`projection` generalisation** to optional clauses, and **query-time
+> projections** (`from … where … join … select …`) emitting on **all five
+> backends** — with `PROJECTION_QT_SUPPORTED` / `loom.projection-*-unsupported`
+> gating the combinations that don't. `view` was hard-removed (read-path slice
+> 7); workflow-instance state is read through `/workflows/<wf>/instances`.
+> Open threads are mission-tracked, not doc-tracked: M-T4.2 (projections),
+> M-T1.1 / M-T2.6 (paging + the scaffold's unbounded `.all`), M-T5.4
+> (retrieval), M-T5.10 (contract records). Treat the rev-notes below as the
+> DESIGN RECORD — they describe intent, and several were realised; verify
+> against the emitters before acting on any specific claim.
+>
+> A vision + grammar proposal. rev. 9 added the **Paging** section (call-site
 > params, D-ENVELOPE `Paged<T>` result, collections-only) and folded in the
 > state audit: this stacks **on top of** the live **M-T5.10** contract-record
 > track (composes, no conflict). rev. 10 **generalises `projection`** to a

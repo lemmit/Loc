@@ -4,6 +4,8 @@
 
 *Reconciled 2026-07-21 — added the 13 proposals/plans authored after the 2026-07-13 classification that the table had never picked up (the flutter set, read-path-architecture, test-placement/test-authoring, email-resource-kind, connection-secret-wiring, model-context-pack, loom-verify-tool, unit-tier-domain-test-coverage, playground-flutter-web-preview, nested-state-writes-copywith-frontends), so the guarantee holds again. Rows added this pass are tagged `(added 2026-07-21)`. Four of them describe features with no dedicated mission yet — see the enlarged "Known unmapped items" section.*
 
+***The guarantee is now TEST-ENFORCED (2026-07-30) — `test/system/coverage-guarantee.test.ts`.*** *It had drifted a second time: two proposals were missing (`integrity-audit-2026-07-residue.md` — carrying a **live** silent-codegen gap, R1, now [M-T6.23](T6-backend-parity.md) — and `realtime-tenant-room-parity.md`), and the Audits section listed 8 of 29 audits, collapsing the rest into an unchecked "others" row that hid the 25-bug `fleet-bug-hunt-2026-07-19` register. A promise only a human re-reads rots like any undocumented invariant, so a doc added under `docs/old/proposals/`, `docs/old/plans/`, or `docs/audits/` without a row here now fails CI. The gate checks a doc is MENTIONED, not that its disposition is right — that stays a judgement call. Rows added this pass are tagged `(added 2026-07-30)`.*
+
 ## Proposals (`docs/old/proposals/`)
 
 | Doc | Status | Open work → missions |
@@ -63,6 +65,7 @@
 | implementation-plan.md | reference (type-system family) | live tails → M-T5.1, M-T5.3, M-T5.4 |
 | implicit-system-composition.md | partial (tiers 1–2 shipped) | M-T5.13 |
 | infrastructure-port.md | proposed (usage-pulled; hold) | no mission until a concrete case appears |
+| integrity-audit-2026-07-residue.md | partial *(added 2026-07-30)* — #2203 shipped the bulk; R2 done (M-T9.10) | R1 → **M-T6.23** (the gate landed; the four sibling gaps it surfaced are in that mission); R3 (`channels-e2e.yml` first-run tune) → M-T4.4 residue; R4 → M-T1.18 |
 | java-backend.md | shipped | — |
 | kubernetes-helm.md | shipped (v1) | hardening → M-T7.2 |
 | lifecycle-operations.md | partial | M-T5.8 |
@@ -99,7 +102,8 @@
 | provenance.md | shipped (all 5) | deferred accessors noted in-doc; wire pair → M-T6.12 |
 | provenanced-wire-pair.md | proposed | M-T6.12 |
 | quickstart-and-day-one-batteries.md | partial | M-T7.5 (dev/deploy), M-T4.6 (batteries), M-T3.12 (saas/identity), M-T3.1 (default-deny) |
-| read-path-architecture.md | partial ⚠ header says "no code yet" but paged read-path + query-time projection emit have shipped — stale, flag *(added 2026-07-21)* | M-T4.2 (projection), M-T1.1/M-T2.6 (paging), M-T5.4 (retrieval), M-T5.10 (contract records) |
+| read-path-architecture.md | partial *(stale header fixed 2026-07-30 — it claimed "no code yet" while paged read-path + query-time projection emit had shipped on all five backends)* | M-T4.2 (projection), M-T1.1/M-T2.6 (paging), M-T5.4 (retrieval), M-T5.10 (contract records) |
+| realtime-tenant-room-parity.md | shipped 2026-07-28 (per-tenant SSE rooms on all four SSE backends) *(added 2026-07-30)* | the runtime cross-tenant SSE isolation e2e leg the doc names as its own follow-up → M-T1.10 (emit-level tests only today) |
 | reference-collection-set-semantics.md | shipped (#1590) | — |
 | reified-criteria.md | partial | M-T5.4(d) |
 | render-expr-target-unification.md | shipped | — |
@@ -120,9 +124,9 @@
 | surface-redundancy-cuts.md | shipped (#1795) | — |
 | tenancy-authorization-final-surface.md | proposed (synthesis) | M-T3.6 |
 | terraform-iac-target.md | proposed | M-T7.6 |
-| test-authoring-language.md | proposed / on paper (2026-07-18) *(added 2026-07-21)* | **no mission yet** — test-DSL family (relates to test-placement); see Known unmapped items |
+| test-authoring-language.md | proposed / on paper (2026-07-18) *(added 2026-07-21)* | **M-T5.19** (open half (b)) *(mapped 2026-07-30)* |
 | test-layout-and-macro-consolidation.md | shipped | — |
-| test-placement.md | partial (Phase 1+2 shipped: `for` target + hoisting, context-integration renderers — #2163/#2179/#2188) *(added 2026-07-21)* | **no mission yet** — actively landing; see Known unmapped items |
+| test-placement.md | partial — Phases 1, 2 (minus the `workflow` anchor) **and 3** shipped; the context-integration renderer is live on all five backends *(status corrected 2026-07-30 — the row said "Phase 1+2")* | **M-T5.19** (the `workflow` unit anchor) *(mapped 2026-07-30)* |
 | type-system-overview.md | reference (orientation) | — |
 | typed-capabilities.md | shipped (#1388) | OQ#1 tail → M-T5.12 |
 | unfoldable-api-derivation-coordination-note.md | reference | M-T5.10 |
@@ -218,6 +222,8 @@
 
 ## Audits (stay in `docs/audits/` — snapshots, not moved)
 
+*Enumerated in full 2026-07-30. This table previously listed 8 of the 29 audits in `docs/audits/`, collapsing the rest into an "others — no open findings" row that had never been checked against them. Two of the unlisted ones — `fleet-bug-hunt-2026-07-19` (25 verified bugs) and `repo-code-review-2026-07-19` (5 explicitly-deferred rows) — carried real open work no mission covered. Every audit now has its own row; a new audit adds one here.*
+
 | Audit | Open findings → missions |
 |---|---|
 | architecture-weak-spots-2026-07.md | §1→T1, §2→T2, §3→T3/M-T7.1, §4→M-T4.1, §5→T9, §6→M-T6.1/M-T6.4, §7→M-T5.16/M-T8.1 |
@@ -228,11 +234,31 @@
 | generated-code-review-2026-06-30.md | SYS-1→M-T6.8 |
 | showcase-coverage-bugs.md | BUG-003→M-T5.15 (open, P2), BUG-004 done (M-T5.18 Track C), BUG-006 verify landed |
 | domain-seam-log-parity.md | §3 residue ⚠ stale → M-T6.14 |
-| others (backend/frontend parity matrices, execution-context parity, gated-features-inventory, stack-versions, e2e-suite review, pack-equivalence, architecture-review-2026-06, generated-code-review-2026-06, frontend-test-parity, test-parity-generated-backends, proposal-surface-stability) | historical/reference — no open findings |
+| **fleet-bug-hunt-2026-07-19.md** | **25 two-lens-verified bugs, no mission tracked them until 2026-07-30 → M-T9.24.** The doc self-annotates fixes inline (C1 carries one), so it is PART-STALE: sampling on fresh `main` found A1 (`int/int` → decimal + `divTrunc`), B2 (money `contains` via `.eq`), C1 and H1/C3 (scaffold `plural` now imports `util/naming`) already fixed independently, while **G2** (auto-versioning collides with a user-declared `version` field → boot-break) has no validator. Re-verify before filing, then group the survivors: numeric semantics (A2/A3/C2), Java Jackson 3 leftovers (E1–E3), boot-breaks (G1/G2/I1/I2), frontend (F1/F1b/F3/F4/F5) |
+| **repo-code-review-2026-07-19.md** | Clean disposition table, 10/12 fixed as individual PRs. **Open: F2** (Vuetify/shadcnVue/flowbite/shadcnSvelte emit a duplicate `style` attribute → the user's `style:` is dropped; **re-verified live 2026-07-30**) → M-T9.4; **F1** (Angular/Feliz silently drop non-`extern` user components — surface/design) → M-T1.4 family; **A1** (= the 07-18 audit's L1) → the L1–L4 member-lookup consolidation below; **I1–I4** (CI gate weaknesses) → M-T9.3/M-T9.8. **G4 is done** (the deployable `serviceSlug`-collision validator ships, `system-checks.ts:656`) |
+| repo-code-review-2026-07.md (07-18, first pass) | Four recurring patterns; the live one is **L1–L4 — the member-lookup consolidation** (`extends`-chain walking present in 1 of ~6 enumeration sites, optional-unwrapping in 2 of 4 lookup paths) → M-T9.4 / M-T5.16 (compiler-internal fragility). C1–C3 fixed; **CI4** = the I1 row above |
+| target-gate-inventory-2026-07-18.md | Drained — its one untracked finding (`java-embedded-refcoll-unsupported`) became M-T6.19, now `done`. The rest is deliberate policy or correct guards; still the reference for "is this gate real" |
+| behavioral-parity-bugs-2026-07.md | Living register, currently drained (B1–B18 all ✅). Reopens as the behavioural tier finds more — no standing mission needed |
+| flutter-a11y-audit-2026-07.md | Landed (#2282, Phases A–C) — residue with M-T1.18 / M-T1.12 |
+| frontend-parity-audit-2026-07.md | Reference matrix (supersedes the 06 version; adds the Feliz column) — findings flow through T1 |
+| playground-modeller-audit-2026-07.md | Part 1 + the visibility half of Part 2 landed (#2290); waves 4–5 landed (#2295, #2299). Remaining Part-3 editing surfaces → M-T8.11 / M-T1.17 |
+| unfold-printer-layout-review-2026-07.md | Closed — all eight defects landed |
+| proposal-surface-stability-review-2026-07.md | Reference — a design-review lens on the proposal corpus, not a defect list. Its asks are honoured per-feature at design time (M-T5.9 surface hygiene is the closest standing mission) |
+| architecture-review-2026-06.md | historical — superseded by `architecture-weak-spots-2026-07` |
+| backend-feature-parity-2026-06.md | reference matrix — superseded per-feature by the T6 missions |
+| frontend-parity-audit-2026-06.md | historical — superseded by `frontend-parity-audit-2026-07` (which adds Feliz) |
+| generated-code-review-2026-06.md | historical — superseded by `generated-code-review-2026-06-30` + the 07 passes |
+| execution-context-parity-2026-06-24.md | drained — the execution-context backbone shipped; tail → M-T3.11 |
+| gated-features-inventory.md | reference — superseded as a live inventory by `target-gate-inventory-2026-07-18` |
+| stack-versions-audit.md | reference — the dependency-currency snapshot; open bumps → M-T9.1 |
+| e2e-suite-review.md | reference — e2e suite shape; gate-tier questions → M-T9.3 / `docs/ci-gating.md` |
+| pack-equivalence-audit.md | reference — per-pack equivalence; open pack work → M-T9.5 / M-T1.x |
+| frontend-test-parity.md | reference — superseded by the behavioural UI tier (M-T9.3) |
+| test-parity-generated-backends.md | reference — superseded by the per-backend behavioural legs (M-T9.3) |
 
 ## Known unmapped items (deliberate)
 
-- **Test-placement DSL** (`test-placement.md` + `test-authoring-language.md`) — the `test … for <aggregate>` target + hoisting + context-integration renderers. **Phases 1–2 have already landed** (#2163/#2179/#2188) with no mission tracking them. This is a real gap, not a deliberate one: whoever next touches it should open a mission under T5 (language core) or T9 (test tooling) and back-fill the shipped slices. Noted here so the coverage guarantee holds meanwhile.
+- ~~**Test-placement DSL**~~ — **resolved 2026-07-30: now [M-T5.19](T5-language-core.md)**, with the shipped Phase 1–2 slices (#2163/#2179/#2188) back-filled into the mission body and the remaining phases scoped. `test-placement.md` + `test-authoring-language.md` point at it.
 - **`connection-secret-wiring`** (draft 2026-07-19) — resource connection/secret provisioning; depends on the resource model. No mission yet; closest homes are M-T2.9 (storage/platform config) and M-T4.8 (resource kinds). Whoever picks it up scopes the mission.
 - **API versioning** (completeness audit) — no proposal exists; whoever picks it up writes one and adds a mission under T5.
 - **`infrastructure-port`** — explicitly usage-pulled; no mission until a concrete case.

@@ -94,4 +94,25 @@ A workflow `let x = <expr>` whose bound `x` is **never referenced downstream** (
 
 Sources: found 2026-07-20 while draining the compose `parity` gate (the .NET `global::` / Phoenix `def/3` / Python indent+`/metrics` chain). Related pattern: M-T6.15 (Feliz unused-binder → `_`).
 
+## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; emitters open) · **M–L** · P2 ⭐ was silent
+M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persistence** axis, and the validator's comment block said so without qualification. But **five non-persistence features are gated `&& !usingMikro` in the Hono emitter** and emitted *nothing*, with no diagnostic — a valid model generated a project with the feature simply absent and the CLI reported success:
+
+| feature | file drizzle writes | mikroorm | now |
+|---|---|---|---|
+| query-time `projection` (`from … select …`) | `http/query-projections.ts` | — | error |
+| `timerSource` | `scheduler.ts` | — | error |
+| broker `channelSource` | `http/channels.ts` | — (compose still starts the broker) | error |
+| durable channel + local reactor | outbox + relay wiring | — (silently at-most-once) | error |
+| realtime (`delivery: broadcast`) | `http/realtime.ts` | — | error / warning (below) |
+
+**Landed (gates, 2026-07-30):** all five are `loom.mikroorm-unsupported` diagnostics naming the omitted file and the way out (`src/ir/validate/checks/system-checks.ts`, `validateMikroOrmSupport`); `test/ir/mikroorm-feature-gates.test.ts` pins both directions per feature (mikroorm rejects, the same model on drizzle stays clean). Only R1 (the projection case) was on record — in [`integrity-audit-2026-07-residue.md`](../old/proposals/integrity-audit-2026-07-residue.md), which proposed exactly this interim; the other four were unrecorded.
+
+**The realtime severity split** is the load-bearing design call: a `broadcast` channel does double duty, and its *routing* half (what makes a projection fold or saga subscribe) works fine on this adapter. A frontend targeting the backend emits `src/api/realtime.ts` off the target's **platform**, not its persistence, so its EventSource would poll a 404 → **error**. With no such frontend the wire is unobserved and the fold/saga path is intact → **warning**. Without that split the gate rejects working models (it broke 4 `test/adapters/` suites and 3 corpus features before the split).
+
+**Open (the principled fix):** port the five emitters to the EntityManager — a projection read-model query path, a `scheduler.ts` on the mikro connection, the broker driver/tee/consumer, an outbox table + relay, and the SSE wire. Each closes by **deleting its clause** here; the gate is the interim, not the answer. Sequence by blast radius: outbox (unblocks the `outbox` corpus feature) → broker → timers → query-time projection → realtime.
+
+**Hollow-cell note (feeds M-T9.8):** `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg (`test/behavioral/run-mikroorm.mjs`) with the feature absent — the api-tier assertions are satisfied by the synchronous in-process dispatch that survives on this adapter, so the missing broker driver and outbox relay were invisible to a green run. Both are now honest entries in that runner's `MIKRO_SKIP` register. A `done` mission's gate can still be hollow; this is what that looks like.
+
+Sources: found 2026-07-30 auditing the archived proposal corpus for unmapped work (R1 was the thread that led to the other four). Gate reproduced as a silent drop first (generate on mikroorm vs drizzle, file trees diffed), then as a diagnostic.
+
 ## M-T6.22 — Drain the M-T9.11 differential findings (RS-11/RS-12) — `done` (2026-07-28) · **M** · P2

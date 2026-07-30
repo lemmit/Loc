@@ -71,3 +71,19 @@ Sources: language-surface review 2026-07-14, `src/language/ddd.langium` (`Aggreg
 
 ## M-T5.18 — Soft-keyword sprawl: dedup, gate, root-cause reduction — `done` (Tracks B + A + C landed) · **M** · P3
 Sources: language-surface review 2026-07-14 #5, `src/language/ddd.langium` (the six identifier rules), M-T5.15 BUG-004.
+
+## M-T5.19 — Test-placement & test-authoring DSL — `partial` (placement largely shipped; authoring unbuilt) · **M–L** · P2
+The back-fill of a feature that shipped **three phases with no mission tracking it** — flagged as a coverage bug in [`coverage.md`](coverage.md) on 2026-07-21 and resolved here 2026-07-30. Two source proposals: [`test-placement.md`](../old/proposals/test-placement.md) (where a `test` block may live) and [`test-authoring-language.md`](../old/proposals/test-authoring-language.md) (what may be written inside one).
+
+**Shipped — placement (re-verified on fresh `main` 2026-07-30, not taken from the proposal):**
+- **Phase 1** — `test … for <Aggregate>` hoisted out of its aggregate to `ContextMember` / `ModelMember` (so tests can live in their own `tests/*.ddd`), attached to `AggregateIR.tests`, re-lowered byte-compatibly (#2163).
+- **Phase 2 (partial)** — the extra unit anchors: `valueobject` and `domainService` host `test` blocks (`ddd.langium` `TestBlock` in both member unions; `checkTestPlacement`'s `isAggregate || isValueObject || isDomainService`) (#2179).
+- **Phase 3 — the context-integration rung, on ALL FIVE backends.** `test "…"` nested in a `context` lowers to `BoundedContextIR.tests` and emits an in-process integration test against live repositories, no HTTP (`INTEGRATION_BACKENDS = {node, python, dotnet, java, elixir}` in `src/language/validators/test-placement.ts`; the `loom.context-test-unsupported` warning now suppresses for every backend) (#2188 + the per-backend follow-ons). *Note: `coverage.md` said "Phase 1+2 shipped" — Phase 3 had landed too, on all five.*
+
+**Open (a) — the `workflow` unit anchor.** Phase 2 named `valueobject` / `workflow` / `domainService`; only two landed. `WorkflowMember` (`ddd.langium:1390`) has no `TestBlock` arm, so a workflow's orchestration has no unit-tier home — it is reachable only through the api/e2e tier or a context integration test. Size **S**: one grammar arm, one `checkTestPlacement` predicate, lower into `WorkflowIR.tests`, route to the existing unit emitters (the pattern the VO/domainService anchors already set).
+
+**Open (b) — the authoring language, unbuilt.** `test-authoring-language.md` is on paper (2026-07-18); none of its surface parses today (`suite` / `background` / `setup` / `cleanup` / `isolation:` / `unique` / `factory` / `make` are absent from the grammar). Its Phase 1 (context `as`/`user`/`system`, grouping + lifecycle, data factories, api-tier retry) is what unblocks the `tenancy-hierarchy` fixture and the three async fixtures currently written by hand; Phase 2 is the test clock (`at`/`advance`) plus its per-backend seam. Land Phase 1 as its own slice stack — it is the larger half of this mission.
+
+**Ordering:** (a) before (b) — the anchor is a one-PR completion of a shipped phase, while the authoring surface is a new grammar family that should not land half-built across five backends.
+
+Sources: [`test-placement.md`](../old/proposals/test-placement.md) (incl. its runtime-grounded Phase 3 design), [`test-authoring-language.md`](../old/proposals/test-authoring-language.md), PRs #2163 / #2179 / #2188. Related: M-T9.3 (per-PR boot gates — the integration rung runs there), `docs/testing.md` (tier placement guide).
