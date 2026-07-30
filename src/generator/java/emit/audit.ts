@@ -27,17 +27,12 @@ import { lines } from "../../../util/code-builder.js";
 // NOT part of the platform-neutral MigrationsIR.
 // ---------------------------------------------------------------------------
 
-/** The `audited` public operations on an aggregate — the per-op audit scope. */
-export function auditedOpsOf(agg: EnrichedAggregateIR): OperationIR[] {
-  return agg.operations.filter((o) => o.audited && o.visibility === "public");
-}
-
-/** True iff this aggregate has any `audited` public operation — gates the
- *  per-service operation audit instrumentation. */
-export function aggHasAuditedOp(agg: EnrichedAggregateIR): boolean {
-  return agg.operations.some((o) => o.audited && o.visibility === "public");
-}
-
+// `auditedOpsOf` / `aggHasAuditedOp` used to live here (and in the .NET and
+// Python siblings) but were never called by anything — the real gate is
+// `service.ts`'s inline `op.visibility === "public" && op.audited`.  Removed
+// rather than centralized: three unused copies had already drifted apart (the
+// .NET one included lifecycle actions and skipped the visibility filter), so
+// they were a trap for the next reader, not a shared seam.
 /** True iff any aggregate in the given contexts carries an `audited` command
  *  action — operation, lifecycle create, OR destroy (the SHARED predicate).
  *  Gates the shared runtime files + the audit_records DDL so a

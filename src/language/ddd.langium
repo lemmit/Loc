@@ -1036,12 +1036,28 @@ Aggregate:
     // `crossTenant` itself declares shared-reference data that opts out of the
     // tenant filter under a `tenancy by` system (multi-tenancy Phase 1a); it is
     // a stance MARKER — it attaches no field, filter, or stamp.
+    //
+    // `audited` is the aggregate-wide form of the per-command `audited` flag:
+    // every PUBLIC command action (operation, canonical create, canonical
+    // destroy) records an `audit_records` row.  Private operations are never
+    // audited — they are not part of the API surface, so an internal/high-churn
+    // command opts out by being `private`, not by a negation keyword.  It is the
+    // same category as `crossTenant`: per-aggregate participation in a
+    // compiler-owned facility, attaching nothing to the aggregate's own row.
+    //
+    // Default-ON matters here: an audit trail's only value is completeness, and
+    // opt-in-per-command means forgetting is SILENT — a history view showing 3
+    // of 7 changes reads as authoritative while lying by omission.  The
+    // aggregate form makes coverage a single declared fact.  It is fully
+    // RESOLVED during lowering (the member flags are set), so no downstream
+    // consumer needs to know the aggregate-level form exists.
     (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])?
         (
             ('persistedAs' ':' persistedAs=TruthKind ','?)
           | ('shape' ':' shape=SavingShape ','?)
           | ('inheritanceUsing' ':' inheritanceUsing=InheritanceLayout ','?)
           | (crossTenant?='crossTenant' ','?)
+          | (audited?='audited' ','?)
         )*
         withClause=WithClause? '{'
         members+=AggregateMember*

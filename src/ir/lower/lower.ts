@@ -1568,6 +1568,22 @@ function lowerAggregate(
   // mutate-only until per-kind emission lands (Phase 3).
   const creates = (agg.members.filter(isCreate) as Create[]).map((c) => lowerCreate(c, inner));
   const destroys = (agg.members.filter(isDestroy) as Destroy[]).map((d) => lowerDestroy(d, inner));
+  // `aggregate X audited { … }` — the aggregate-wide form, RESOLVED HERE into
+  // the per-command flags.  `op.audited` is read directly at ~30 sites across
+  // the five backends with no chokepoint; resolving at lowering means every one
+  // of them keeps working unchanged, and — crucially — a site that forgot to
+  // consult an aggregate-level flag cannot silently drop coverage.  That
+  // failure mode is precisely what this feature exists to prevent, so it must
+  // not be reintroduced by the feature's own plumbing.
+  //
+  // PUBLIC commands only: private operations are not API surface and are never
+  // audited (matching the per-op gates the backends already apply), which is
+  // also the opt-out for an internal high-churn command.
+  if (agg.audited) {
+    for (const op of operations) if (op.visibility === "public") op.audited = true;
+    for (const c of creates) c.audited = true;
+    for (const d of destroys) d.audited = true;
+  }
   const canonicalCreate = creates.find((c) => c.canonical) ?? null;
   const canonicalDestroy = destroys.find((d) => d.canonical) ?? null;
   const appliers = (agg.members.filter(isApply) as Apply[]).map((a) => lowerApply(a, inner));

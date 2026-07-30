@@ -15,20 +15,12 @@ import { lines } from "../../../util/code-builder.js";
 //     roll back together, mirroring the Hono transactional route).
 // ---------------------------------------------------------------------------
 
-/** The `audited` operations on an aggregate (operations + creates + destroys),
- *  matching the validator's gate set (`validateAuditedOperationSupport`). */
-export function auditedOpsOf(agg: EnrichedAggregateIR): OperationIR[] {
-  return [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(
-    (o) => o.audited,
-  );
-}
-
-/** True iff this aggregate has any `audited` public operation — gates the
- *  per-handler audit instrumentation. */
-export function aggHasAuditedOp(agg: EnrichedAggregateIR): boolean {
-  return agg.operations.some((o) => o.audited && o.visibility === "public");
-}
-
+// `auditedOpsOf` / `aggHasAuditedOp` used to live here (and in the Java and
+// Python siblings) but were never called by anything — the real gates are
+// `cqrs-emit.ts` / `cqrs/commands.ts` reading `op.audited` inline.  Removed
+// rather than centralized: this copy had drifted furthest (it folded lifecycle
+// actions in and skipped the visibility filter the siblings applied), so the
+// three of them were a trap for the next reader, not a shared seam.
 /** The append-only audit POCO (Infrastructure/Persistence/AuditRecord.cs).
  *  Mirrors the Hono `audit_records` Drizzle table column-for-column. */
 export function renderAuditRecord(ns: string): string {

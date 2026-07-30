@@ -780,8 +780,11 @@ function printAggregate(node: Aggregate): string {
   // slot.  The group is order-independent; we emit it last for a stable,
   // diff-friendly canonical form.
   const crossTenant = node.crossTenant ? " crossTenant" : "";
+  // `audited` — the aggregate-wide command-audit flag, same header region and
+  // same category as `crossTenant` (participation in a compiler-owned facility).
+  const audited = node.audited ? " audited" : "";
   return declBlock(
-    `${abstract}aggregate ${node.name}${ext}${persistedAs}${shape}${inheritanceUsing}${crossTenant}${printWithClause(node.withClause)}`,
+    `${abstract}aggregate ${node.name}${ext}${persistedAs}${shape}${inheritanceUsing}${crossTenant}${audited}${printWithClause(node.withClause)}`,
     () => node.members.map(printStructural),
   );
 }

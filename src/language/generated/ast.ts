@@ -396,6 +396,7 @@ export function isActionType(item: unknown): item is ActionType {
 export interface Aggregate extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Aggregate';
+    audited: boolean;
     crossTenant: boolean;
     inheritanceUsing?: InheritanceLayout;
     isAbstract: boolean;
@@ -409,6 +410,7 @@ export interface Aggregate extends langium.AstNode {
 
 export const Aggregate = {
     $type: 'Aggregate',
+    audited: 'audited',
     crossTenant: 'crossTenant',
     inheritanceUsing: 'inheritanceUsing',
     isAbstract: 'isAbstract',
@@ -4541,6 +4543,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Aggregate: {
             name: Aggregate.$type,
             properties: {
+                audited: {
+                    name: Aggregate.audited,
+                    defaultValue: false,
+                    optional: true
+                },
                 crossTenant: {
                     name: Aggregate.crossTenant,
                     defaultValue: false,

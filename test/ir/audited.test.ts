@@ -116,6 +116,92 @@ describe("audited — IR lowering", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// `aggregate X audited { … }` — the aggregate-wide form.  Resolved during
+// lowering into the per-command flags, so every existing backend gate keeps
+// working unchanged and no consumer needs to know the aggregate form exists.
+// ---------------------------------------------------------------------------
+
+/** Cart with the aggregate-wide flag: a public op, a PRIVATE op, and both
+ *  lifecycle actions — the full public/private split in one fixture. */
+const AGG_WIDE = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Cart audited {
+        label: string
+        status: int
+        create(label: string) { label := label }
+        operation cancel(reason: int) { status := reason }
+        private operation recalc() { status := 0 }
+        destroy { }
+      }
+      repository Carts for Cart {
+        find byLabel(label: string): Cart? where this.label == label
+      }
+    }
+  }
+  deployable api { platform: node, contexts: [C], port: 3000 }
+}
+`;
+
+describe("audited — aggregate-wide form", () => {
+  it("parses in the header region and sets Aggregate.audited", async () => {
+    const { model, errors } = await parseModel(AGG_WIDE);
+    expect(errors).toEqual([]);
+    const cart = AstUtils.streamAst(model).find(
+      (n): n is Aggregate => n.$type === "Aggregate" && (n as Aggregate).name === "Cart",
+    );
+    expect(cart?.audited).toBe(true);
+  });
+
+  it("is order-independent against the other header modifiers", async () => {
+    for (const header of [
+      "aggregate Cart audited crossTenant",
+      "aggregate Cart crossTenant audited",
+      "aggregate Cart audited persistedAs: state",
+    ]) {
+      const { errors } = await parseModel(AGG_WIDE.replace("aggregate Cart audited", header));
+      expect(errors, `must parse: ${header}`).toEqual([]);
+    }
+  });
+
+  // The completeness guarantee: every PUBLIC command action is covered, so a
+  // history view over this aggregate cannot silently omit a change.
+  it("resolves onto every public command — operations, create AND destroy", async () => {
+    const { model, errors } = await parseModel(AGG_WIDE);
+    expect(errors).toEqual([]);
+    const cart = lowerModel(model).systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!;
+    expect(cart.operations.find((o) => o.name === "cancel")?.audited).toBe(true);
+    expect(cart.creates?.every((c) => c.audited)).toBe(true);
+    expect(cart.destroys?.every((d) => d.audited)).toBe(true);
+  });
+
+  // `private` IS the opt-out — an internal/high-churn command stays out of the
+  // trail by not being API surface, rather than by a negation keyword.
+  it("leaves PRIVATE operations unaudited", async () => {
+    const { model } = await parseModel(AGG_WIDE);
+    const cart = lowerModel(model).systems[0]!.subdomains[0]!.contexts[0]!.aggregates[0]!;
+    expect(cart.operations.find((o) => o.name === "recalc")?.audited).toBe(false);
+  });
+
+  it("emits the same audit runtime the per-command form does", async () => {
+    const { model } = await parseModel(AGG_WIDE);
+    const files = generateSystems(model).files;
+    const schema = [...files.entries()].find(([p]) => p.endsWith("db/schema.ts"))?.[1] ?? "";
+    expect(schema).toContain("audit_records");
+    const routes = [...files.entries()].filter(([p]) => p.includes("routes"));
+    expect(routes.some(([, c]) => c.includes("auditRecords"))).toBe(true);
+  });
+
+  it("an aggregate without the flag stays byte-identical (auditing off pays nothing)", async () => {
+    const { model } = await parseModel(AGG_WIDE.replace("aggregate Cart audited", "aggregate Cart"));
+    const files = generateSystems(model).files;
+    const schema = [...files.entries()].find(([p]) => p.endsWith("db/schema.ts"))?.[1] ?? "";
+    expect(schema).not.toContain("audit_records");
+  });
+});
+
 describe("audited — TypeScript emission", () => {
   it("adds the audit_records table and writes a row transactionally with the save", async () => {
     const { model } = await parseModel(SYSTEM());
