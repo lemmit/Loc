@@ -1,0 +1,58 @@
+{{!-- primitive-data-grid — Flowbite chrome around a TanStack table instance.
+
+  The `table` binding, the column defs and the reactive state all come from the
+  walker-emitted sibling component that wraps this markup
+  (src/generator/svelte/walker/data-grid-child.ts); a pack only decides how the
+  grid LOOKS, never how the row model works.
+
+  `headerBody` / `cellBody` are the walker's header + cell CONTENT.  A Svelte
+  pack cannot get these from the column defs: a TanStack `cell` function
+  returns VNode-ish output, and the walker produces markup.  Same split `Table`
+  already uses on Svelte, whose sortable header is likewise walker-emitted. --}}
+<div class="space-y-2"{{{testidAttr}}}>
+{{#if hasColumnVisibility}}  <div class="flex flex-wrap gap-3">
+    {#each table.getAllLeafColumns() as col (col.id)}
+      <label class="flex items-center gap-1 text-sm">
+        <input type="checkbox" checked={col.getIsVisible()} onchange={() => col.toggleVisibility()} />
+        {String(col.columnDef.header ?? col.id)}
+      </label>
+    {/each}
+  </div>
+{{/if}}  <Table hoverable>
+    <TableHead>
+      {#each table.getHeaderGroups() as hg (hg.id)}
+        {#each hg.headers as h (h.id)}
+          <TableHeadCell aria-sort={h.column.getIsSorted() === "asc" ? "ascending" : h.column.getIsSorted() === "desc" ? "descending" : "none"}>
+{{{headerBody}}}
+{{#if hasFilters}}            {#if h.column.getCanFilter()}
+              <input
+                class="mt-1 block w-full rounded border-gray-300 p-1 text-xs"
+                type="search"
+                placeholder="Filter"
+                aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
+                value={String(h.column.getFilterValue() ?? "")}
+                oninput={(e) => h.column.setFilterValue(e.currentTarget.value)}
+              />
+            {/if}
+{{/if}}          </TableHeadCell>
+        {/each}
+      {/each}
+    </TableHead>
+    <TableBody>
+      {#each table.getRowModel().rows as r (r.id)}
+        <TableBodyRow>
+          {#each r.getVisibleCells() as c (c.id)}
+            <TableBodyCell>
+{{{cellBody}}}
+            </TableBodyCell>
+          {/each}
+        </TableBodyRow>
+      {/each}
+    </TableBody>
+  </Table>
+  <div class="flex items-center justify-between">
+    <Button size="xs" color="alternative" disabled={!table.getCanPreviousPage()} onclick={() => table.previousPage()}>Previous</Button>
+    <span class="text-sm" aria-live="polite">Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}</span>
+    <Button size="xs" color="alternative" disabled={!table.getCanNextPage()} onclick={() => table.nextPage()}>Next</Button>
+  </div>
+</div>

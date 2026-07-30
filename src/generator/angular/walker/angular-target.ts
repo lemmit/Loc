@@ -43,6 +43,7 @@ import { renderAngularDestroyForm } from "../destroy-form.js";
 import { renderAngularModal } from "../modal.js";
 import { renderAngularOperationForm } from "../operation-form.js";
 import { renderAngularWorkflowForm } from "../workflow-form.js";
+import { renderAngularDataGridChild } from "./data-grid-child.js";
 
 /** Angular-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -146,6 +147,21 @@ export const angularTarget: WalkerTarget = {
    *  imports).  Signals read with `()`. */
   renderFilteredRows(rowsExpr, filter) {
     return `filterRows(${rowsExpr}, ${filter.name}())`;
+  },
+
+  // --- DataGrid seam ------------------------------------------------------
+
+  /** A computed cell reads the row through an identity helper whose SIGNATURE
+   *  is the cast — Angular templates evaluate against the instance, so the cast
+   *  has to be a member rather than an inline `as`. */
+  dataGridRowVar: "asRow(c.row.original)",
+
+  /** The grid's child is a sibling `src/app/components/<kebab>.component.ts`;
+   *  the page picks it up through the Angular sink's `dataGrids` list (one
+   *  import line + one `imports: []` entry).  See
+   *  `angular/walker/data-grid-child.ts`. */
+  renderDataGridChild(spec, ctx) {
+    return renderAngularDataGridChild(spec, ctx);
   },
 
   // --- API binding seam ---------------------------------------------------

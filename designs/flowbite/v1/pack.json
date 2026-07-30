@@ -66,6 +66,7 @@
     "primitive-stat": "primitive-stat.hbs",
     "primitive-sticky": "primitive-sticky.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-text": "primitive-text.hbs",
     "primitive-toggle": "primitive-toggle.hbs",
@@ -79,6 +80,7 @@
     "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
+    "primitive-data-grid": [{ "from": "flowbite-svelte", "named": ["Button", "Table", "TableBody", "TableBodyCell", "TableBodyRow", "TableHead", "TableHeadCell"] }],
     "primitive-button": [
       {
         "from": "flowbite-svelte",

@@ -205,6 +205,18 @@ function addOpModuleImports(
   }
 }
 
+/** A rendered page: its `+page.svelte` source, plus any whole SIBLING FILES a
+ *  primitive hoisted out of it.
+ *
+ *  `DataGrid` needs the second half: a `.svelte` file holds exactly ONE
+ *  component, so the grid's child cannot share the page's file the way React's
+ *  does (see `svelte/walker/data-grid-child.ts`).  Empty for every page without
+ *  such a primitive, so the caller can splice unconditionally. */
+export interface RenderedSveltePage {
+  content: string;
+  componentFiles: readonly { path: string; content: string }[];
+}
+
 /** Render a page's full `+page.svelte` module around a walked body. */
 export function renderSveltePage(
   pageName: string,
@@ -246,7 +258,7 @@ export function renderSveltePage(
    *  (byte-identical to pre-i18n).  Threaded into the body walk's last arg,
    *  where the seam turns literal text slots into `{t("<key>", "<default>")}`. */
   i18nPrefix: string | undefined = undefined,
-): string {
+): RenderedSveltePage {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -268,6 +280,7 @@ export function renderSveltePage(
     usedExternFunctions,
     usedActions,
     usedStores,
+    hoistedComponentFiles,
   } = walkBody(
     body,
     svelteTarget,
@@ -432,12 +445,15 @@ export function renderSveltePage(
   const markup = gate.guardOpen
     ? `${gate.guardOpen}\n${indentJsx(tsx, "  ")}\n${gate.guardClose}`
     : indentJsx(tsx, "");
-  return `<!-- Auto-generated.  Do not edit by hand. -->
+  return {
+    content: `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
 ${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
 
 ${markup}
-${templateScope}`;
+${templateScope}`,
+    componentFiles: hoistedComponentFiles ?? [],
+  };
 }
 
 /** Render the page's `requires` UI gate fragments: the `useSession` import, the

@@ -211,10 +211,14 @@ function simpleAccessorField(accessor: ExprIR | undefined): string | undefined {
 
 /** A unique, stable component name for this grid within the emitted module.
  *
- *  Must not collide with a user `component` of the same name: the targets that
- *  hoist the child into `src/components/` would overwrite that component's
- *  file, and the page's import would silently bind the wrong one.  A colliding
- *  derived name falls through to the sequence below. */
+ *  Must not collide with a user `component` OR a page: the targets that hoist
+ *  the child into `src/components/` would overwrite that component's file and
+ *  the page's import would silently bind the wrong one, while React — which
+ *  hoists into the page's OWN file — would emit two declarations of the same
+ *  name (`page ProjectsGrid` with `testid: "projects-grid"` derives
+ *  `ProjectsGrid` twice, a `Duplicate function implementation` error found by
+ *  compiling `showcase.ddd`).  A colliding derived name falls through to the
+ *  sequence below. */
 function gridComponentName(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
   const testid = stringNamed(call, "testid");
   if (testid) {
@@ -227,7 +231,10 @@ function gridComponentName(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
     // (`customers-grid` → `CustomersGrid`, not `CustomersGridGrid`).
     if (pascalCase !== "") {
       const name = pascalCase.endsWith("Grid") ? pascalCase : `${pascalCase}Grid`;
-      if (!ctx.userComponents.has(name)) return name;
+      // `pageRoutes` is keyed by page name, which is what the page component is
+      // named after — so it is the available view of "names this module already
+      // binds", with no new plumbing through `walkBody`'s parameter list.
+      if (!ctx.userComponents.has(name) && !ctx.pageRoutes?.has(name)) return name;
     }
   }
   // Fall back to a per-page sequence.  Counted off the hoist accumulators so no

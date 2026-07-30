@@ -197,19 +197,26 @@ function invokedNames(model: Model): Set<string> {
  *  the cross-target render gate `provenance-info-cross-target.test.ts`). */
 const SHOWCASE_EXCLUDED_PRIMITIVES: ReadonlySet<string> = new Set([
   "ProvenanceInfo",
-  // DataGrid — TEMPORARY, for the duration of its staged pack rollout.
+  // DataGrid — excluded for the same reason as `ProvenanceInfo` above, not the
+  // staged-pack-rollout one an earlier revision of this comment gave.
   //
-  // `showcase.ddd` drives the `generated-react-build` matrix across EVERY
-  // React pack, so putting a DataGrid in it requires `primitive-data-grid`
-  // in all four (mantine, shadcn, mui, chakra).  `required-primitives.ts`
-  // prescribes exactly the opposite order: ship the template in the lead pack
-  // (mantine), prove it, then backfill — precisely so a half-landed primitive
-  // can't break the matrix.
+  // `showcase.ddd` is a CROSS-FRONTEND fixture: `frontend-showcase-render.test.ts`
+  // renders its `Console` ui through every frontend including **Feliz**, and the
+  // python/dotnet fullstack tests embed the built bundle.  DataGrid ships on the
+  // four JS frontends only — Feliz and Flutter emit F# and Dart through their own
+  // toolchains with no TanStack adapter, and HEEx has no client row model — so
+  // putting one here breaks the fixture for the three targets that legitimately
+  // don't have it.  (Verified: adding it turned `feliz:Console renders cleanly`
+  // plus five python-fullstack cases red.)
   //
-  // The primitive is NOT untested meanwhile: `test/generator/react/data-grid.test.ts`
-  // covers emission, and the generated project is verified against the real
-  // `tsc --noEmit`.  Remove this entry in the backfill slice, together with
-  // adding DataGrid to showcase.ddd and to `REQUIRED_PRIMITIVES.tsx.core`.
+  // It is well covered elsewhere: a per-frontend generator suite
+  // (`test/generator/{react,vue,svelte,angular}/data-grid.test.ts`), the
+  // cross-pack `data-grid-packs.test.ts`, and real-toolchain verification of
+  // generated projects (`tsc` / `vue-tsc` / `svelte-check` / `ng build`).  And
+  // `primitive-data-grid` IS required of all four JS formats via
+  // `REQUIRED_PRIMITIVES`, so the pack-completeness half is enforced.
+  //
+  // Remove this entry if/when Feliz and Flutter gain a DataGrid.
   "DataGrid",
 ]);
 

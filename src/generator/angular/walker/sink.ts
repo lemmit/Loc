@@ -16,6 +16,11 @@ import type { AngularWorkflowFormSpec } from "../workflow-form.js";
  *  core never depends on Angular).  Only the Angular target knows this shape —
  *  the other frontends leave the slot untouched. */
 export interface AngularWalkerSink {
+  /** `DataGrid` children the body hoisted into their own component files.  The
+   *  page shell turns each into an `import` line plus an `imports: []` entry —
+   *  the grid is a plain standalone component used by TAG, unlike the extern
+   *  components that route through `NgComponentOutlet`. */
+  dataGrids: { className: string; importPath: string }[];
   forms: AngularCreateFormSpec[];
   actions: AngularActionSpec[];
   modals: AngularModalSpec[];
@@ -34,6 +39,7 @@ export function angularSink(holder: { sink?: unknown }): AngularWalkerSink {
   const h = holder as { sink?: Partial<AngularWalkerSink> };
   h.sink ??= {};
   const s = h.sink;
+  s.dataGrids ??= [];
   s.forms ??= [];
   s.actions ??= [];
   s.modals ??= [];

@@ -47,6 +47,7 @@
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",
@@ -107,6 +108,7 @@
     }
   },
   "imports": {
+    "primitive-data-grid": [{"from": "@mui/material", "named": ["Button", "Checkbox", "FormControlLabel", "FormGroup", "Paper", "Stack", "Table", "TableBody", "TableCell", "TableContainer", "TableHead", "TableRow", "TableSortLabel", "TextField", "Typography"]}],
     "primitive-heading": [
       {
         "from": "@mui/material",

@@ -48,6 +48,14 @@ export const reactBuildExamples = [
   // guards the row templates + the op-form `fieldArrays` hoist across every
   // pack.
   { ddd: "web/src/examples/subform-showcase.ddd", reactDir: "web_app" },
+  // `DataGrid` — the TanStack-backed grid, across every pack version.  It lives
+  // in its own example rather than `showcase.ddd` because that fixture is
+  // rendered through EVERY frontend (Feliz included) by
+  // `frontend-showcase-render.test.ts`, while DataGrid ships on the four JS
+  // frontends only.  This cell is what actually COMPILES each pack's
+  // `primitive-data-grid.hbs` — without it the older pack versions were only
+  // proven to load.
+  { ddd: "web/src/examples/data-grid-showcase.ddd", reactDir: "web_app" },
   // FileUpload primitive (slice 4a): a `File`-typed field on a scaffolded
   // aggregate → the in-form `field-input-file` template (RHF Controller +
   // `api.upload`), and a standalone `FileUpload { bind: … }` → the

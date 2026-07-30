@@ -9,7 +9,8 @@
 //      `flutter` required surface.  Today this is exactly the walker-SEAM-
 //      rendered pair (the whole form family `primitive-form-of` →
 //      CreateForm/OperationForm/WorkflowForm/DestroyForm, and `Modal`): they
-//      render, just not through a pack template.
+//      render, just not through a pack template — PLUS `primitive-data-grid`,
+//      which is a deliberate non-goal on Flutter (see the set's own doc).
 //
 //   2. FLUTTER_UNRENDERED_PRIMITIVES — primitives with NO Flutter renderer at
 //      all: a page using one would emit a `// flutter pack: no renderer` comment
@@ -34,13 +35,26 @@
 // FileUpload all landed this way, so they are absent from both sets below.
 // ---------------------------------------------------------------------------
 
-/** Pack primitive-template ids the flutter pack does NOT ship as a template —
- *  the walker-SEAM-rendered form family + Modal (they WORK, just not via a pack
- *  template).  Subtracted from the `flutter` required surface by
- *  `required-primitives.ts`. */
+/** Pack primitive-template ids the flutter pack does NOT ship as a template.
+ *  Subtracted from the `flutter` required surface by `required-primitives.ts`.
+ *
+ *  Two reasons appear here, and they are not the same:
+ *
+ *    - the walker-SEAM-rendered form family + Modal, which WORK — just not via
+ *      a pack template;
+ *    - `primitive-data-grid`, which does NOT work on Flutter and is not meant
+ *      to.  `DataGrid` is a TanStack row model and TanStack has no Dart
+ *      adapter; hand-rolling multi-column sort + per-column filters + a row
+ *      model in Flutter would fork the grid's BEHAVIOUR from the four JS
+ *      frontends, which is what the shared `renderDataGridChild` seam exists to
+ *      prevent.  It is NOT in {@link FLUTTER_UNRENDERED_PRIMITIVES} because it
+ *      already has a dedicated, better-worded gate —
+ *      `loom.datagrid-unsupported-target` names `Table` as the portable
+ *      alternative — and two gates for one condition is one too many. */
 export const FLUTTER_INLINE_OR_DEFERRED: ReadonlySet<string> = new Set([
   "primitive-form-of",
   "primitive-modal",
+  "primitive-data-grid",
 ]);
 
 /** Pack primitive-template ids with NO Flutter renderer at all — a page using

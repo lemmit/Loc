@@ -198,9 +198,19 @@ const TSX_FORM: readonly string[] = [
 // contract a dedicated groundwork test enforces structurally
 // (`flutter-pack-groundwork.test.ts` / `feliz-pack-groundwork.test.ts`): every
 // `core` name must have a real renderer, not the missing-renderer sentinel.
+// `DataGrid` — the TanStack-Table-backed interactive grid.  Deliberately NOT in
+// `TSX_ONLY_PRIMITIVES`: that list is spread into the `flutter` and `feliz`
+// cores too (they reuse the JSX-family display set), and neither has — or is
+// getting — a TanStack adapter.  Spread into exactly the four formats that ship
+// a `renderDataGridChild` seam instead.  HEEx is out for a different reason: a
+// CLIENT row model has no LiveView analogue, so `Table` is server-driven there.
+// All three stay honest gaps, rejected by `loom.datagrid-unsupported-target`
+// rather than rendering a blank page region.
+const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
+
 export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {
   tsx: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
+    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
     shell: SHARED_SHELL,
     fieldInput: TSX_FIELD_INPUT,
     form: TSX_FORM,
@@ -215,7 +225,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // projects need a `svelte-config` shell template (svelte.config.js)
   // that the TSX/Vite world has no counterpart for.
   svelte: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
+    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
     shell: [...SHARED_SHELL, "svelte-config"],
     fieldInput: TSX_FIELD_INPUT,
     form: TSX_FORM,
@@ -226,7 +236,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // no shell template beyond the shared set (vite config / theme /
   // app shell are all covered by SHARED_SHELL names).
   vue: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES],
+    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
     shell: SHARED_SHELL,
     fieldInput: TSX_FIELD_INPUT,
     // Vue packs additionally own the operation-dialog wrapper the
@@ -247,6 +257,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),
       ...TSX_ONLY_PRIMITIVES.filter((p) => p !== "primitive-modal"),
+      ...DATA_GRID_PRIMITIVES,
     ],
     shell: [
       "app-shell",

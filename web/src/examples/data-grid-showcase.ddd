@@ -1,0 +1,83 @@
+// DataGrid showcase — the TanStack-Table-backed interactive grid.
+//
+// Its own example rather than a page in `showcase.ddd`, because that fixture is
+// rendered through EVERY frontend (including Feliz) by
+// `frontend-showcase-render.test.ts`, and DataGrid ships on the four JS
+// frontends only.  Here it gets what it actually needs: a per-pack compile gate
+// across all eight React pack versions via `generated-react-build`.
+//
+// Exercises the whole surface in one page — multi-column sort, a per-column
+// filter, column-visibility toggles, client pagination, a computed cell (which
+// must bind the row through the emitted cast), and row selection into a
+// `string[]` state field a sibling reads.
+system GridDemo {
+    subdomain Sales {
+        context Orders {
+            enum Tier { Bronze, Silver, Gold }
+
+            aggregate Customer {
+                name: string
+                tier: Tier
+                sequence: int
+                signedUpAt: datetime
+            }
+
+            repository Customers for Customer { }
+        }
+    }
+
+    api SalesApi from Sales
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+
+    ui Console {
+        api Sales: SalesApi
+
+        page CustomerGrid {
+            route: "/customers"
+            title: "Customers"
+            // The one piece of grid view-state the page can read.  Must be
+            // `string[]` — `loom.datagrid-selection-not-array` otherwise.
+            state { selectedIds: string[] }
+            body: Stack {
+                Heading { "Customers", level: 1 },
+                // A sibling reading the selection is the whole reason
+                // `selection:` exists.
+                Text { `Selected: {selectedIds.length}` },
+                QueryView { of: Sales.Customer.all, data: rows => DataGrid {
+                    // Simple member accessors become TanStack `accessorKey`s,
+                    // which is what makes sort + filter work by value.
+                    Column { "Name", o => o.name, sortable: true, filterable: true },
+                    Column { "Sequence", o => o.sequence, sortable: true },
+                    // A computed cell — no accessorKey, so sort/filter are
+                    // forced off and the row binds through the emitted cast.
+                    Column { "Tier", o => EnumBadge { o.tier } },
+                    Column { "Signed up", o => DateDisplay { o.signedUpAt } },
+                    rows: rows,
+                    selection: selectedIds,
+                    multiSort: true,
+                    columnVisibility: true,
+                    pageSize: 25,
+                    testid: "customer-data-grid"
+                } },
+                testid: "customer-grid-page"
+            }
+        }
+    }
+
+    deployable api {
+        platform: node
+        contexts: [Orders]
+        dataSources: [ordersState]
+        serves: SalesApi
+        port: 3000
+    }
+
+    deployable webApp {
+        platform: static
+        targets: api
+        ui: Console { Sales: api }
+        design: mantine
+        port: 3001
+    }
+}

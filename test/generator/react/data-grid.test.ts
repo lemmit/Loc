@@ -64,6 +64,29 @@ describe("DataGrid — child-component emission", () => {
     expect(page).toContain("<CustomersGrid rows={customerAll.data.items} />");
   });
 
+  it("falls back to a sequence when the derived name collides with the page", async () => {
+    // REGRESSION: `page ProjectsGrid` + `testid: "projects-grid"` both derive
+    // `ProjectsGrid`, and React hoists the child into the page's OWN file — so
+    // the file declared the name twice (`Duplicate function implementation`).
+    // Found by putting a DataGrid in `showcase.ddd` and compiling it.
+    const files = await generateSystemFiles(`
+      system S {
+        ${DOMAIN}
+        ui WebApp {
+          api Sales: SalesApi
+          page CustomersGrid { route: "/g"  body: ${GRID} }
+        }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
+      }
+    `);
+    const page = files.get("web/src/pages/customers_grid.tsx")!;
+    expect(page).toContain("export default function CustomersGrid()");
+    // The child took the sequence name instead of colliding.
+    expect(page).toContain("function LoomGrid1<T extends object>");
+    expect(page).toContain("<LoomGrid1 rows={customerAll.data.items} />");
+  });
+
   it("names the component off `testid:` without stuttering", async () => {
     const page = await genPage(GRID);
     // `customers-grid` → `CustomersGrid`, never `CustomersGridGrid`.
