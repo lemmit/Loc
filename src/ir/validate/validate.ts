@@ -21,6 +21,7 @@ import {
   validateEventSourcedDiscipline,
   validateExprIntegrity,
   validateExternOperations,
+  validateFieldDefaults,
   validateFindNameCollisions,
   validateFunctionBlockBodies,
   validateGenericInstancesUnimplemented,
@@ -234,6 +235,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // queryHandler-read-only + commandHandler-single-aggregate layering contracts.
     validateApplicationHandlers(c, diags);
     validateCurrentUserScope(c, diags);
+    validateFieldDefaults(c, diags);
     validatePermissionRefs(c, diags);
     validateGenericInstancesUnimplemented(
       c,
