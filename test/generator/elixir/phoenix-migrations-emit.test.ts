@@ -120,6 +120,36 @@ describe("phoenix migrations-emit — delta path", () => {
     );
   });
 
+  it("routes a column TYPE change through the shared SQL so the USING cast survives (I2)", () => {
+    // Ecto's `modify` emits a bare `ALTER COLUMN … TYPE …`.  Postgres then
+    // refuses anything that isn't implicitly castable — `string → int`
+    // included — so this migration applied on the four SQL backends and failed
+    // on Phoenix alone.  `execute/1` with the shared renderer's statement makes
+    // the DDL bit-identical cross-backend.
+    const ir: MigrationsIR = {
+      module: "Sales",
+      storageName: "",
+      baseline: EMPTY_SNAP,
+      next: EMPTY_SNAP,
+      steps: [
+        {
+          op: "alterColumnType",
+          table: "orders",
+          name: "code",
+          from: { kind: "text" },
+          to: { kind: "int" },
+        },
+      ],
+      version: "20260101000020",
+      name: "RetypeOrderCode",
+    };
+    const body = emit(ir).get("priv/repo/migrations/20260101000020_retype_order_code.exs")!;
+    expect(body).toContain(
+      String.raw`execute("ALTER TABLE \"orders\" ALTER COLUMN \"code\" TYPE INTEGER USING \"code\"::INTEGER")`,
+    );
+    expect(body).not.toContain("modify :code");
+  });
+
   it("modifies a column with its current type on a nullability flip", () => {
     // Ecto's `modify` requires the type to be re-stated even when only
     // nullability changes — the step carries it so the emitter doesn't
@@ -463,7 +493,7 @@ describe("phoenix migrations-emit — multi-module initial versions are unique",
   // collides at 20260101000000 — and Ecto refuses to run a dir with a
   // duplicated version (`migration version ... is duplicated`), crashing the
   // release migrate-on-boot.  This pins that each module's block is offset.
-  const initialModule = (module: string, table: string): MigrationsIR => ({
+  const initialModule = (module: string, table: string, version: string): MigrationsIR => ({
     module,
     storageName: "",
     baseline: null,
@@ -481,7 +511,7 @@ describe("phoenix migrations-emit — multi-module initial versions are unique",
         },
       },
     ],
-    version: "20260101000000",
+    version,
     name: "Initial",
   });
 
@@ -490,9 +520,9 @@ describe("phoenix migrations-emit — multi-module initial versions are unique",
     emitMigrations(
       "phoenix_app",
       [
-        initialModule("Catalog", "projects"),
-        initialModule("Builds", "builds"),
-        initialModule("People", "engineers"),
+        initialModule("Catalog", "projects", "20260101000000"),
+        initialModule("Builds", "builds", "20260102000000"),
+        initialModule("People", "engineers", "20260103000000"),
       ],
       APP_MODULE,
       out,

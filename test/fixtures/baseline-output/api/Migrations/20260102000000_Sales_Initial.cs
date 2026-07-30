@@ -15,20 +15,32 @@ namespace Api.Migrations
     // relative reference resolves against the wrong scope (CS0234);
     // global:: sidesteps the ambiguity for every namespace.
     [DbContext(typeof(global::Api.Infrastructure.Persistence.AppDbContext))]
-    [Migration("20260101000000_CustomerMgmt_Initial")]
-    public partial class M20260101000000_CustomerMgmt_Initial : Migration
+    [Migration("20260102000000_Sales_Initial")]
+    public partial class M20260102000000_Sales_Initial : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"CREATE SCHEMA IF NOT EXISTS ""customers"";
-CREATE TABLE ""customers"".""customers"" (
+            migrationBuilder.Sql(@"CREATE SCHEMA IF NOT EXISTS ""orders"";
+CREATE TABLE ""orders"".""orders"" (
   ""id"" UUID NOT NULL,
-  ""username"" TEXT NOT NULL,
-  ""email"" TEXT NOT NULL,
-  ""age"" INTEGER NOT NULL,
+  ""customer_id"" TEXT NOT NULL,
+  ""status"" TEXT NOT NULL,
+  ""placed_at"" TIMESTAMP WITH TIME ZONE NOT NULL,
   ""version"" INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (""id"")
-);");
+);
+
+CREATE SCHEMA IF NOT EXISTS ""orders"";
+CREATE TABLE ""orders"".""order_lines"" (
+  ""id"" UUID NOT NULL,
+  ""order_id"" UUID NOT NULL,
+  ""product_id"" UUID NOT NULL,
+  ""quantity"" INTEGER NOT NULL,
+  PRIMARY KEY (""id""),
+  FOREIGN KEY (""order_id"") REFERENCES ""orders"".""orders"" ON DELETE CASCADE
+);
+CREATE INDEX ""order_lines_order_id_idx"" ON ""orders"".""order_lines"" (""order_id"");
+CREATE INDEX ""order_lines_product_id_idx"" ON ""orders"".""order_lines"" (""product_id"");");
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

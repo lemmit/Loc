@@ -7,7 +7,7 @@ import type {
   TableShape,
 } from "../../ir/types/migrations-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { renderBackfillSql, renderRenameIndexSql } from "../sql-pg.js";
+import { renderAlterColumnTypeSql, renderBackfillSql, renderRenameIndexSql } from "../sql-pg.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix Ecto migration emitter.
@@ -93,16 +93,6 @@ function schemaCreateLine(schema: string | undefined): string {
   return schema ? `    execute "CREATE SCHEMA IF NOT EXISTS ${schema}"\n` : "";
 }
 
-/** Per-module version stride.  Every backend that serves >1 module writes
- *  all their initial migrations into ONE `priv/repo/migrations/` dir, and
- *  Ecto refuses to run a dir with a duplicated version prefix.  `emitInitial`
- *  allocates each module's versions from `BASE_TIMESTAMP` (parents `+i`, parts
- *  `+N*10+…`, joins `+N*100+k`), so without a per-module offset every module's
- *  first table collides at `BASE_TIMESTAMP`.  Offsetting module M by
- *  `M * STRIDE` keeps each module's block disjoint; the stride is far larger
- *  than any realistic within-module span (`N*100 + joins`). */
-const MODULE_VERSION_STRIDE = 1_000_000;
-
 /** The `timestamps()` line a state-table migration appends — column-aware
  *  so it matches the emitted schema (otherwise `ecto.migrate` fails with
  *  "column updated_at specified more than once").  An audit capability
@@ -130,12 +120,20 @@ export function emitMigrations(
   appModule: string,
   out: Map<string, string>,
 ): void {
-  let initialModuleIndex = 0;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
+    // Both paths take their version straight from the builder, which owns the
+    // per-module block arithmetic (`MODULE_VERSION_STRIDE` /
+    // `INITIAL_SUBBLOCK_SPAN` in migrations-builder.ts).  The emitter used to
+    // apply its OWN offset, derived from the module's position in this array
+    // and computed only for INITIAL migrations — so every module's first delta
+    // came out at the same version (Ecto aborts on the duplicate) and module
+    // 1's delta sorted BEFORE its own create-table ("relation does not
+    // exist").  Deriving it here also made the snapshot's recorded version
+    // disagree with the emitted FILENAME, which the migration-baseline guard
+    // compares.
     if (m.baseline === null) {
-      emitInitial(m, appModule, out, initialModuleIndex * MODULE_VERSION_STRIDE);
-      initialModuleIndex++;
+      emitInitial(m, appModule, out, Number(m.version) - BASE_TIMESTAMP);
     } else {
       emitDelta(m, appModule, out);
     }
@@ -596,11 +594,16 @@ export function renderEctoStep(step: MigrationStep): string[] {
         `end`,
       ];
     case "alterColumnType":
-      return [
-        `alter table(:${step.table}${prefixOpt(step.schema)}) do`,
-        `  modify :${step.name}, ${ectoColumnType(step.to)}, from: ${ectoColumnType(step.from)}`,
-        `end`,
-      ];
+      // Ecto's `modify` emits a bare `ALTER COLUMN … TYPE …` with no `USING`
+      // cast, so Postgres refuses any change that isn't implicitly castable
+      // ("column cannot be cast automatically") — `string → int` and most
+      // others.  The four SQL backends go through the shared renderer, which
+      // does emit the cast; wrap the same statement in `execute/1` (the
+      // renameIndex / backfill precedent in this file) so Phoenix applies the
+      // identical DDL instead of failing alone.  Forward-only single-arg
+      // `execute`, matching D-MIG-NO-DOWN — which is also why dropping Ecto's
+      // rollback-only `from:` costs nothing.
+      return [`execute(${elixirStr(renderAlterColumnTypeSql(step))})`];
     case "addIndex": {
       const cols = ectoIndexColumns(step.index);
       return [

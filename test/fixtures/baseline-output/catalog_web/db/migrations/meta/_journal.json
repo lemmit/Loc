@@ -12,8 +12,8 @@
     {
       "idx": 1,
       "version": "7",
-      "when": 1767225600001,
-      "tag": "20260101000000_customer_mgmt_initial",
+      "when": 1767398400001,
+      "tag": "20260103000000_customer_mgmt_initial",
       "breakpoints": true
     }
   ]

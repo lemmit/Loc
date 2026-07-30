@@ -51,11 +51,12 @@
       "savingShape": "relational"
     }
   ],
-  "lastVersion": "20260101000000",
+  "lastVersion": "20260103500000",
   "migrationHistory": [
     {
-      "version": "20260101000000",
+      "version": "20260103000000",
       "name": "Initial"
     }
-  ]
+  ],
+  "versionBlock": 2
 }
