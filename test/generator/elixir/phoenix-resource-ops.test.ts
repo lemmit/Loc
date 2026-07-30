@@ -53,6 +53,33 @@ describe("Phoenix resource emission", () => {
     expect(api).toMatch(/Req.get!/);
   });
 
+  it("reads every env-backed setting at RUNTIME, not as a @module_attribute", async () => {
+    // A `@module_attribute` is evaluated at COMPILE time, and a Phoenix release
+    // is compiled inside the Docker image build — long before compose sets the
+    // variable.  Every one of these would therefore bake in its LOCAL DEFAULT
+    // and silently never see the real bucket / broker / API address, on code
+    // that `mix compile --warnings-as-errors` is perfectly happy with.
+    //
+    // Not hypothetical, and not a guess: the smtp adapter already read
+    // `MAIL_URL` through a function with a comment saying exactly this, while
+    // its five siblings still used attributes.  The bug class was known for one
+    // variable and left in the rest.
+    const files = await gen();
+    for (const path of [
+      "api/lib/api/resources/s3.ex",
+      "api/lib/api/resources/rabbitmq.ex",
+      "api/lib/api/resources/rest_api.ex",
+    ]) {
+      const src = files.get(path)!;
+      expect(src, path).not.toMatch(/^\s*@\w+ System\.get_env/m);
+      expect(src, path).toMatch(/defp \w+ do\n\s*System\.get_env/);
+    }
+    // …and the call sites go through the function, not a stale attribute.
+    expect(files.get("api/lib/api/resources/rest_api.ex")!).toContain(
+      "Req.get!(sales_api_base_url() <> path)",
+    );
+  });
+
   it("adds the Hex deps to mix.exs (ex_aws + amqp + req, each once)", async () => {
     const mix = (await gen()).get("api/mix.exs")!;
     expect(mix).toMatch(/\{:ex_aws, "~> 2.5"\}/);
