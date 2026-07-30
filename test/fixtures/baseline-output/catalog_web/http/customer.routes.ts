@@ -192,7 +192,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
 
   app.onError((err, c) => {
     const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
-    const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
+    const problem = (status: 403 | 404 | 409 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Customer", message: err.message, status: 403 });
       recordDomainFault("forbidden");

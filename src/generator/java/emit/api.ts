@@ -630,10 +630,21 @@ export function renderApiExceptionAdvice(
     `        return respond(problem(500, "Internal Server Error", "internal", request), 500);`,
     `    }`,
     ``,
+    // RS-9 — the RFC 7807 `type` member must be PRESENT and "about:blank",
+    // matching node/dotnet/python/elixir byte-for-byte.  Spring's
+    // ProblemDetailJacksonMixin annotates getType() @JsonInclude(NON_DEFAULT),
+    // so the default about:blank URI is silently DROPPED from the body — legal
+    // per RFC 9457 (absent means about:blank) but a cross-backend divergence
+    // the wire golden fails on.  Writing it through setProperty routes it via
+    // the mixin's @JsonAnyGetter instead, which has no such suppression; the
+    // suppressed getType() is why this cannot produce a duplicate key.
+    // (`instance` needs no such help — Spring's message converter fills a null
+    // instance with the request URI on the way out.)
     `    private static ProblemDetail problem(int status, String title, String detail, WebRequest request) {`,
     `        var problem = ProblemDetail.forStatus(HttpStatus.valueOf(status));`,
     `        problem.setTitle(title);`,
     `        problem.setDetail(detail);`,
+    `        problem.setProperty("type", "about:blank");`,
     `        return problem;`,
     `    }`,
     ``,

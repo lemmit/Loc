@@ -366,6 +366,35 @@ the conforming backends, and the fix that established it.
   the RFC-idiomatic side, and closed in the same change that flipped the four
   runtime mappings + their OpenAPI declarations. Tier: **behavioral**.
 
+### RS-16 · The RFC 7807 `type` member is present and `"about:blank"`
+- **Guarantee.** Every error response carries all five RFC 7807 members —
+  `type`, `title`, `status`, `detail`, `instance` — and `type` is the literal
+  string `"about:blank"` (Loom keeps no per-error type registry).
+- **Trigger.** Any error response on any backend serving an api: a tripped
+  `precondition`, a wire-validation failure, a 404.
+- **Why absence is still a divergence.** RFC 9457 §3.1 says a missing `type` is
+  equivalent to `about:blank`, so omitting it is *legal*. It is still a wire
+  break: a client reading `body.type` gets a string on four backends and
+  `undefined` on the fifth, and any equality check across backends fails.
+- **The framework trap.** Java was the outlier for a framework reason, not an
+  emitter oversight. `ProblemDetail.forStatus(...)` *does* install
+  `about:blank`, but Spring's `ProblemDetailJacksonMixin` annotates `getType()`
+  `@JsonInclude(NON_DEFAULT)` — so the default value is dropped during
+  serialization and never reaches the wire. No emitted-string assertion could
+  have caught this: the generated Java looks correct, and only a booted
+  response shows the missing key. The fix writes `type` through `setProperty`,
+  which serializes via the mixin's `@JsonAnyGetter`; the still-suppressed
+  `getType()` is exactly why that cannot produce a duplicate key.
+- **`instance` needed no help.** Spring's message converter fills a null
+  `instance` with the request URI on the way out, so it already matched.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found by the M-T9.11 wire-golden gate at
+  `test/behavioral/wire-golden/wire-contract.json` seq #7, the first moment any
+  golden contained an error body — which RS-15 had just made possible. A rule
+  that existed for months and was invisible until the gate's coverage reached
+  it. Verified on a real booted Spring app, not an emitted-string assertion.
+  Tier: **behavioral**.
+
 ---
 
 ## Adding a rule

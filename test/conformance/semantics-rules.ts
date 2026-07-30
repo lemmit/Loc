@@ -303,6 +303,33 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-16",
+    title: 'The RFC 7807 `type` member is present and "about:blank"',
+    trigger:
+      "any error response — a tripped precondition, a wire-validation failure, a 404 — on a backend serving an api",
+    observable:
+      'the problem+json body carries all five RFC 7807 members — `type`, `title`, `status`, `detail`, `instance` — and `type` is the literal "about:blank" (Loom keeps no per-error type registry). Omitting `type` is legal per RFC 9457 (absent means about:blank) but it is a WIRE divergence: a client that reads `body.type` gets a string on four backends and `undefined` on the fifth.',
+    // Found by the M-T9.11 wire-golden gate the moment the error envelope
+    // joined it (RS-15) — the first time any golden contained an error body.
+    // Java was the outlier for a framework reason, not an emitter oversight:
+    // Spring's `ProblemDetailJacksonMixin` annotates `getType()`
+    // `@JsonInclude(NON_DEFAULT)`, so the about:blank URI that
+    // `ProblemDetail.forStatus` installs is silently dropped on the way out.
+    // The fix writes it through `setProperty` instead, which serializes via the
+    // mixin's `@JsonAnyGetter` (no suppression, and no duplicate key precisely
+    // because `getType()` stays suppressed).  Verified on a real boot, not just
+    // an emitted-string assertion.
+    //
+    // `instance` needed no help on any backend: Spring's message converter
+    // fills a null instance with the request URI on the way out.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found by the M-T9.11 wire-golden gate (test/behavioral/systems/wire-contract.ddd seq #7) once RS-15 put an error body in the golden",
+      "fixed (java): ApiExceptionAdvice's problem() sets `type` via setProperty to bypass Spring's NON_DEFAULT suppression",
+    ],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------
