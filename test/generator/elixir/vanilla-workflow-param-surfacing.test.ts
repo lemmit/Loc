@@ -68,7 +68,7 @@ describe("vanilla — workflow create-param surfacing", () => {
       }`,
       "guarded_create",
     );
-    expect(wf).toContain(`%{"initial_title" => initial_title} = params`);
+    expect(wf).toContain(`%{"initialTitle" => initial_title} = params`);
   });
 
   it("surfaces the param as a bare local in the lowered body", async () => {
@@ -87,7 +87,7 @@ describe("vanilla — workflow create-param surfacing", () => {
     expect(wf).toContain("title: initial_title");
   });
 
-  it("maps a camelCase param name to a snake_case map key", async () => {
+  it("keys off the WIRE name and binds a snake_case local", async () => {
     const wf = await workflowFor(
       `workflow placeOrder transactional {
         create(customerId: string) {
@@ -96,7 +96,12 @@ describe("vanilla — workflow create-param surfacing", () => {
       }`,
       "place_order",
     );
-    expect(wf).toContain(`%{"customer_id" => customer_id} = params`);
+    // This test used to assert `%{"customer_id" => …}` — it pinned a real
+    // bug as intended behaviour.  `params` is Phoenix's decoded JSON map, so
+    // its keys are the camelCase wire names; destructuring the snake_case key
+    // raised `MatchError` at runtime on EVERY multi-word workflow param, on
+    // code that compiled perfectly.  Only the bound LOCAL is snake_cased.
+    expect(wf).toContain(`%{"customerId" => customer_id} = params`);
   });
 
   it("binds ONLY referenced params — an unused declared param is not destructured", async () => {
@@ -108,7 +113,7 @@ describe("vanilla — workflow create-param surfacing", () => {
       }`,
       "guarded_create",
     );
-    expect(wf).toContain(`%{"used_title" => used_title} = params`);
+    expect(wf).toContain(`%{"usedTitle" => used_title} = params`);
     // The unused param must NOT appear in the destructure — binding it
     // would leave an unused local that fails `--warnings-as-errors`.
     expect(wf).not.toContain("unused_note");
@@ -124,7 +129,7 @@ describe("vanilla — workflow create-param surfacing", () => {
       }`,
       "guarded_create",
     );
-    expect(wf).toContain(`%{"first_name" => first_name, "last_name" => last_name} = params`);
+    expect(wf).toContain(`%{"firstName" => first_name, "lastName" => last_name} = params`);
   });
 
   it("a param-free workflow emits NO destructure line (byte-identity regression)", async () => {

@@ -71,7 +71,7 @@ describe("vanilla — workflow body lowering (repo-let / getById)", () => {
 
   it("surfaces the id arg as a destructured create-param", async () => {
     const wf = await workflowFor(GET_BY_ID, "complete_existing");
-    expect(wf).toContain(`%{"task_id" => task_id} = params`);
+    expect(wf).toContain(`%{"taskId" => task_id} = params`);
   });
 
   it("the loaded record flows into the subsequent op-call", async () => {

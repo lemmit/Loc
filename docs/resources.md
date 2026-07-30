@@ -317,6 +317,11 @@ difference is worth knowing: zod and pydantic raise on a missing required field;
 System.Text.Json binds it to a default, and the Elixir projection lands it as
 `nil`. All five reject a non-2xx status.
 
+All five are gated at runtime, not just at compile: `api-call-e2e` boots the
+generated caller and callee as separate processes with separate databases and
+asserts the caller persists a value only the callee could have supplied
+(`npm run test:api-call`, `LOOM_API_CALL_CALLER=<backend>`).
+
 ### Rules
 
 - The bound api must be served by **exactly one** backend deployable in the

@@ -28,10 +28,14 @@ name: API call (typed in-system call runtime e2e)
 # MATRIX — one leg per backend that ships a typed client, keyed on the CALLER
 # (`shippingSvc`); the callee stays Hono throughout, because the point under
 # test is the caller's generated client, not the callee's routes (those are
-# already gated per-PR by the conformance/parity tier). Legs get added here as
-# slices 4b-4d land the .NET / Java / Elixir clients — the suite reads the
-# caller platform from LOOM_API_CALL_CALLER, so a new leg is a matrix row plus
-# that backend's toolchain setup step, not a new suite.
+# already gated per-PR by the conformance/parity tier). All five legs are live.
+#
+# node and python boot natively; dotnet, java and elixir boot in the SAME
+# container images their compile gates use. That is not a convenience — two
+# defects were hiding behind the three container legs, both of which compiled
+# clean: a Phoenix base URL read from a compile-time `@module_attribute` (a
+# release would never see compose's address), and a PRE-EXISTING `MatchError` on
+# every Phoenix workflow with a multi-word parameter.
 #
 # Triggers `push: main` + manual dispatch + an on-demand `run-api-call` label,
 # NOT per-PR — the same docker-heavy-suite pattern as channels-e2e.yml /
@@ -73,11 +77,11 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.label.name == 'run-api-call'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        caller: [node, python]
+        caller: [node, python, dotnet, java, elixir]
     name: api-call-e2e (caller=${{ matrix.caller }})
     services:
       postgres:
@@ -103,6 +107,10 @@ jobs:
         if: matrix.caller == 'python'
         uses: astral-sh/setup-uv@v7
 
+      # The dotnet / java / elixir legs need no toolchain step: the suite boots
+      # them inside their compile-gate images via docker, which ubuntu-latest
+      # runners already have running.
+
       - name: Install Loom toolchain
         run: npm ci
 
@@ -118,6 +126,10 @@ jobs:
         env:
           LOOM_API_CALL_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           LOOM_API_CALL_CALLER: ${{ matrix.caller }}
+          # hex.pm is unreachable from the Elixir container behind a
+          # fingerprint-allowlisting proxy; a no-op on runners with direct
+          # access (docs/tools.md).
+          LOOM_HEX_MIRROR: ${{ matrix.caller == 'elixir' && '1' || '' }}
         run: npm run test:api-call -- --reporter=verbose
 
       - name: Surface failure context
