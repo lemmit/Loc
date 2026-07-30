@@ -1,0 +1,29 @@
+{
+  "case": "seeding",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/widgets",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/widgets/{id}",
+      "status": 200,
+      "body": {
+        "display": "Delta",
+        "id": "<volatile:key>",
+        "name": "Delta",
+        "size": 9,
+        "tier": "Free",
+        "version": 1
+      }
+    }
+  ]
+}

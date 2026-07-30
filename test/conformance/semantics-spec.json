@@ -317,6 +317,25 @@
         "fixed (python): the DisallowedError handler titled the response Conflict"
       ],
       "tier": "behavioral"
+    },
+    {
+      "id": "RS-18",
+      "title": "A provenanced field's lineage rides the wire as `<field>_provenance`",
+      "trigger": "a GET on an aggregate carrying a `provenanced` field (provenance.md)",
+      "observable": "the response body carries the lineage under the co-located snake_case key `<field>_provenance` (e.g. `total_provenance`), NOT a camelCase `<field>Provenance`. This is the one key in the wire shape that is deliberately NOT camelCase — it mirrors the backing jsonb column name, it is what `docs/provenance.md` documents, and it is what the SCAFFOLDED FRONTEND reads.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-30 by READING the freshly-minted `provenance` golden during the M-T9.11 coverage expansion — one key out of camelCase in an otherwise camelCase body",
+        "confirmed by generating all five backends and diffing the emitted key, then by booting the Java project",
+        "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

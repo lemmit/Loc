@@ -28,11 +28,13 @@ function orderResponseFile(files: Map<string, string>): string {
   return files.get(chosen!)!;
 }
 
-// Extract the `public record OrderResponse(<components>) {` component list — the
-// components are joined on one line and carry no nested parens, so the capture
-// stops at the first `)`.
+// Extract the `public record OrderResponse(<components>) {` component list.  The
+// components are joined on ONE line, so a greedy capture to the trailing `) {`
+// is exact — and it must be greedy: a component may carry its own parentheses
+// (a `provenanced` field's `@JsonProperty("<field>_provenance")`, RS-18), which
+// a `[^)]*` capture would truncate at.
 function recordComponents(source: string, name: string): string {
-  const m = source.match(new RegExp(`public record ${name}\\(([^)]*)\\) \\{`));
+  const m = source.match(new RegExp(`public record ${name}\\((.*)\\) \\{`));
   expect(m, `record ${name} must be located`).not.toBeNull();
   return m![1];
 }

@@ -439,6 +439,37 @@ the conforming backends, and the fix that established it.
   answer key to be reviewed rather than a file to be committed. Tier:
   **behavioral**.
 
+### RS-18 · A provenanced field's lineage rides the wire as `<field>_provenance`
+- **Guarantee.** A GET on an aggregate with a `provenanced` field carries the
+  lineage under the co-located **snake_case** key `<field>_provenance` (e.g.
+  `total_provenance`), never a camelCase `<field>Provenance`.
+- **Trigger.** Any read of an aggregate declaring `provenanced` (see
+  [`provenance.md`](provenance.md)).
+- **The one deliberate non-camelCase key.** Every other wire key is camelCase
+  (`unitPrice`, `amountDue`, `createdAt`). This one mirrors its backing jsonb
+  column, is the key `provenance.md` documents, and — decisively — is what the
+  **scaffolded frontend reads**: the generated React detail page emits
+  `data.<field>_provenance` verbatim (`scaffold/_body-builders.ts`).
+- **Why it mattered.** Java emitted `totalProvenance` — its DTO record
+  component name went straight onto the wire. A 4-vs-1 split in which, unusually,
+  the **majority was right**. And the consequence was not cosmetic: the camelCase
+  key **silently blanked the provenance "?" disclosure** on every generated UI
+  pointed at a Java backend. No error anywhere — the frontend simply reads a key
+  the backend never sends. This is the failure mode the differential exists for:
+  both halves compile, both look correct in isolation, and only comparing the
+  actual bytes reveals it.
+- **The fix.** `@JsonProperty("<field>_provenance")` on the record component, so
+  Java keeps an idiomatic component name and the wire key matches. Verified on a
+  **real booted Spring app**, not an emitted-string assertion — the entire
+  failure mode is a name that *looks* right in the source.
+- **Warning for future sweeps.** A "normalise the wire to camelCase" change must
+  treat this key as a deliberate exception, or it will re-break the frontend.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-07-30 by **reading** the freshly-minted
+  `provenance` golden during the M-T9.11 coverage expansion — one key out of
+  camelCase in an otherwise camelCase body. Confirmed by generating all five
+  backends and diffing the emitted key. Tier: **behavioral**.
+
 ---
 
 ## Adding a rule

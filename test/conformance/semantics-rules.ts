@@ -366,6 +366,38 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-18",
+    title: "A provenanced field's lineage rides the wire as `<field>_provenance`",
+    trigger: "a GET on an aggregate carrying a `provenanced` field (provenance.md)",
+    observable:
+      "the response body carries the lineage under the co-located snake_case key `<field>_provenance` (e.g. `total_provenance`), NOT a camelCase `<field>Provenance`. This is the one key in the wire shape that is deliberately NOT camelCase — it mirrors the backing jsonb column name, it is what `docs/provenance.md` documents, and it is what the SCAFFOLDED FRONTEND reads.",
+    // Java emitted `totalProvenance` — its DTO record component name went
+    // straight onto the wire.  A 4-vs-1 split where, unusually, the MAJORITY was
+    // right: `<field>_provenance` is the documented key (provenance.md
+    // §"Scaffolded UI") and the generated React detail page reads
+    // `data.<field>_provenance` verbatim (scaffold/_body-builders.ts).  So the
+    // camelCase key did not merely differ — it SILENTLY BLANKED the provenance
+    // "?" disclosure on every generated UI pointed at a Java backend, with no
+    // error anywhere: the frontend reads a key the backend never sends.
+    //
+    // Fixed with `@JsonProperty("<field>_provenance")` so the record keeps an
+    // idiomatic Java component name while the wire key matches.  Verified on a
+    // REAL BOOT (gradle:9-jdk25 + postgres), not an emitted-string assertion —
+    // the whole failure mode here is a name that looks right in the source.
+    //
+    // Note this cuts AGAINST the general convention: every other wire key is
+    // camelCase (`unitPrice`, `amountDue`, `createdAt`).  A future
+    // "normalise the wire to camelCase" sweep must treat this key as a
+    // deliberate exception, or it will re-break the frontend.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-30 by READING the freshly-minted `provenance` golden during the M-T9.11 coverage expansion — one key out of camelCase in an otherwise camelCase body",
+      "confirmed by generating all five backends and diffing the emitted key, then by booting the Java project",
+      "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts",
+    ],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------
