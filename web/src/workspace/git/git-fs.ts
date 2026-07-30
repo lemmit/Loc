@@ -85,6 +85,28 @@ export async function openGitFs(name: string = DEFAULT_GIT_DB): Promise<GitFs> {
  *  Callers use it before `deleteGitDb` — `indexedDB.deleteDatabase`
  *  against a still-open connection fires `blocked` and never completes. */
 export async function closeGitFs(gfs: GitFs): Promise<void> {
+  await deactivateGitFs(gfs);
+}
+
+/** Drop the LightningFS **activation window** so the next read re-reads the
+ *  `!root` superblock from IndexedDB.
+ *
+ *  Same mechanism as `closeGitFs`, different intent — hence the second name.
+ *  `DefaultBackend.activate()` loads the superblock only when the cache is not
+ *  already activated, and `PromisifiedFS` keeps it activated until 500 ms after
+ *  the last fs call.  So a PASSIVE tab told (over the broadcast channel) that
+ *  another tab just wrote can still be inside its own activation window and
+ *  read its STALE metadata cache — the "file added, then gone" defect.  Force a
+ *  deactivate first and the very next read is guaranteed fresh.
+ *
+ *  Safe from a passive tab: `deactivate()` only writes the superblock back
+ *  while it holds LightningFS's own mutex, so it cannot clobber a concurrent
+ *  writer's flush. */
+export async function invalidateGitFsCache(gfs: GitFs): Promise<void> {
+  await deactivateGitFs(gfs);
+}
+
+async function deactivateGitFs(gfs: GitFs): Promise<void> {
   const p = gfs.fs.promises as unknown as {
     _gracefulShutdown?: () => Promise<void>;
     _deactivate?: () => Promise<void>;

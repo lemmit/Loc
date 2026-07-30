@@ -128,6 +128,43 @@ suites** — the same files `ddd generate system` writes:
 A Backend console (OpenAPI-driven endpoint picker) and a SQL console round
 out the runtime panel for poking the booted backend by hand.
 
+## Workspaces across tabs
+
+Each workspace is one git repo over one IndexedDB (LightningFS +
+`isomorphic-git`), so **two tabs on the same workspace are two writers on one
+filesystem**. LightningFS's own mutex only covers 500 ms activation windows,
+which is far shorter than a git sequence (`stageAll` → `commit` → `writeRef`),
+so the playground coordinates a level up:
+
+- **One writer.** Opening a workspace takes an exclusive **Web Lock**
+  (`loom.workspace.<gitDb>.writer`, `web/src/workspace/tab-lock.ts`), held for
+  the tab's session. The first tab is the writer; a second tab opens the same
+  workspace **read-only** — every mutation is refused at the `GitStore` choke
+  point (`WorkspaceReadOnlyError`), so auto-commit, the generated-tree merge
+  and History's "Restore this version" are all suppressed, not just greyed out.
+  Two tabs on *different* workspaces are both writable.
+- **Take over.** The read-only tab shows a header banner and a **Take over**
+  button; it steals the lock, and the previous holder visibly flips to
+  read-only rather than continuing to write. Closing or crashing the writer
+  tab releases the lock automatically (that is the Web Locks contract), and
+  the waiting tab becomes the writer with no reload.
+- **Live readers.** A per-workspace `BroadcastChannel`
+  (`web/src/workspace/tab-channel.ts`) carries file / commit / role /
+  deleted invalidations. The receiving tab drops its stale LightningFS
+  activation window and replays the message into the store's existing
+  notifier, so the editor follows through the same external-content `epoch`
+  a history restore uses, and History reloads on the commit channel.
+  Received messages never re-broadcast, so there is no echo loop.
+- **Deleting a workspace** broadcasts first, so other tabs close their
+  IndexedDB connection and `deleteDatabase` completes instead of hanging on
+  `blocked`; the workspace *list* also syncs across tabs through the
+  registry's localStorage `storage` event (the active workspace stays
+  per-tab).
+
+A browser without `navigator.locks` / `BroadcastChannel` degrades to the old
+single-tab assumption — every tab writable — rather than to a hard failure or
+a spurious read-only banner.
+
 ## Crash reporting & diagnostics
 
 The playground is a static GitHub Pages site: **there is no telemetry and no

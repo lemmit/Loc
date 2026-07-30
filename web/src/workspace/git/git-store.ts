@@ -24,7 +24,7 @@
 import * as git from "isomorphic-git";
 
 import type { VfsEntry, VfsFileEntry, VfsListener, VfsPath } from "../../vfs/types.js";
-import { asFsClient, type GitFs } from "./git-fs.js";
+import { asFsClient, type GitFs, invalidateGitFsCache } from "./git-fs.js";
 import {
   encodeGeneratedBase,
   GENERATED_BASE_REF,
@@ -126,14 +126,94 @@ const REPO_RELATIVE = (path: VfsPath): string => path.replace(/^\//, "");
 const ABSOLUTE = (filepath: string): VfsPath =>
   filepath.startsWith("/") ? filepath : `/${filepath}`;
 
+/** Thrown by EVERY mutating `GitStore` operation while the store is read-only
+ *  — the passive half of the per-workspace writer lock (M-T8.12).
+ *
+ *  Read-only is enforced HERE, at the single choke point every write funnels
+ *  through, rather than only by disabling buttons: the loss paths that matter
+ *  (the debounced autosave, the generated-tree merge, a restore) never go near
+ *  a button.  Disabled controls are the courtesy; this is the guarantee. */
+export class WorkspaceReadOnlyError extends Error {
+  readonly reason = "other-tab" as const;
+  constructor(readonly op: string) {
+    super(
+      `Cannot ${op}: this workspace is open in another tab, which owns the write lock.`,
+    );
+    this.name = "WorkspaceReadOnlyError";
+  }
+}
+
+/** Cross-tab publisher installed by `useWorkspace`.  Every LOCAL change fans
+ *  out through it so other tabs can invalidate; `applyRemote*` deliberately
+ *  bypasses it, which is what keeps a refresh from re-broadcasting. */
+export interface TabPublisher {
+  files(paths: ReadonlyArray<VfsPath>): void;
+  commit(oid: string): void;
+}
+
 export class GitStore {
   private readonly subs = new Set<Subscription>();
   private readonly commitSubs = new Set<CommitListener>();
+  private readonly writableSubs = new Set<(writable: boolean) => void>();
   /** Serialises commits so concurrent callers (debounced autosave +
    *  an intentional regenerate) can't interleave git index/HEAD writes. */
   private commitChain: Promise<unknown> = Promise.resolve();
+  /** Whether this tab currently owns the workspace's writer lock.  Starts
+   *  true so every non-coordinated consumer (tests, the CLI-side helpers)
+   *  behaves exactly as before. */
+  private writableFlag = true;
+  private publisher: TabPublisher | null = null;
 
   constructor(private readonly gfs: GitFs) {}
+
+  // -- write coordination ---------------------------------------------------
+
+  /** False while another tab owns the writer lock. */
+  get writable(): boolean {
+    return this.writableFlag;
+  }
+
+  /** Flip the write role.  Called by `useWorkspace` from the lock's
+   *  ownership callback; same store IDENTITY across the flip, deliberately —
+   *  a wrapper store would change identity and remount the whole editor /
+   *  build pipeline on a take-over, which is exactly what must NOT happen. */
+  setWritable(next: boolean): void {
+    if (this.writableFlag === next) return;
+    this.writableFlag = next;
+    for (const l of this.writableSubs) l(next);
+  }
+
+  /** Subscribe to write-role flips.  Returns an unsubscribe fn. */
+  subscribeWritable(listener: (writable: boolean) => void): () => void {
+    this.writableSubs.add(listener);
+    return () => {
+      this.writableSubs.delete(listener);
+    };
+  }
+
+  /** Install (or clear) the cross-tab publisher. */
+  setTabPublisher(publisher: TabPublisher | null): void {
+    this.publisher = publisher;
+  }
+
+  private assertWritable(op: string): void {
+    if (!this.writableFlag) throw new WorkspaceReadOnlyError(op);
+  }
+
+  /** Apply another tab's file invalidation: drop the stale LightningFS
+   *  activation cache, then fan out to local subscribers WITHOUT
+   *  re-publishing (no echo).  Consumers refresh through the machinery they
+   *  already have — the sources controller's external-content `epoch`. */
+  async applyRemote(paths: ReadonlyArray<VfsPath>): Promise<void> {
+    await invalidateGitFsCache(this.gfs);
+    this.fanOut(paths);
+  }
+
+  /** Commit-channel twin of `applyRemote` (History reloads off this). */
+  async applyRemoteCommit(oid: string): Promise<void> {
+    await invalidateGitFsCache(this.gfs);
+    this.fanOutCommit(oid);
+  }
 
   /** The underlying LightningFS + repo dir — for the composed helpers
    *  in helpers.ts that need raw git access. */
@@ -167,6 +247,7 @@ export class GitStore {
   }
 
   async writeFile(path: VfsPath, content: string): Promise<void> {
+    this.assertWritable(`write "${path}"`);
     const norm = normalizePath(path);
     await this.ensureParentDirs(norm);
     await this.fs.promises.writeFile(norm, content, "utf8");
@@ -176,6 +257,7 @@ export class GitStore {
   /** File-only delete — no-op when the path is missing or is a
    *  directory (callers want `rmdir` for those), mirroring MemoryVfs. */
   async deleteFile(path: VfsPath): Promise<void> {
+    this.assertWritable(`delete "${path}"`);
     const norm = normalizePath(path);
     try {
       const st = await this.fs.promises.stat(norm);
@@ -191,6 +273,7 @@ export class GitStore {
   /** mkdirp + idempotent.  Notifies once with every newly-created dir
    *  (oldest-first), matching MemoryVfs's batched fan-out. */
   async mkdir(path: VfsPath): Promise<void> {
+    this.assertWritable(`create folder "${path}"`);
     const norm = normalizePath(path);
     const created = await this.ensureDirChain(norm);
     if (created.length > 0) {
@@ -202,6 +285,7 @@ export class GitStore {
   /** Remove an empty directory.  No-op when absent or a file; throws
    *  when non-empty (LightningFS surfaces ENOTEMPTY). */
   async rmdir(path: VfsPath): Promise<void> {
+    this.assertWritable(`remove folder "${path}"`);
     const norm = normalizePath(path);
     let st: { isDirectory(): boolean };
     try {
@@ -300,10 +384,20 @@ export class GitStore {
   }
 
   private notifyCommit(oid: string): void {
-    for (const l of this.commitSubs) l(oid);
+    this.fanOutCommit(oid);
+    this.publisher?.commit(oid);
   }
 
   private notify(changed: ReadonlyArray<VfsPath>): void {
+    this.fanOut(changed);
+    this.publisher?.files(changed);
+  }
+
+  private fanOutCommit(oid: string): void {
+    for (const l of this.commitSubs) l(oid);
+  }
+
+  private fanOut(changed: ReadonlyArray<VfsPath>): void {
     for (const sub of this.subs) {
       let matched: VfsPath[] | null = null;
       for (const p of changed) {
@@ -318,6 +412,7 @@ export class GitStore {
   /** Stage every working-tree change (adds, modifications, deletions)
    *  under the repo.  Returns true when anything was staged. */
   async stageAll(): Promise<boolean> {
+    this.assertWritable("stage the working tree");
     // Stage by hashing actual content rather than trusting
     // `statusMatrix`'s stat-based change shortcut: LightningFS (and
     // fake-indexeddb under test) give coarse mtimes, so a same-size edit
@@ -377,6 +472,7 @@ export class GitStore {
   }
 
   async commit(message: string, author: GitAuthor = LOOM_AUTHOR): Promise<string> {
+    this.assertWritable("commit");
     const oid = await git.commit({
       fs: this.fsc,
       dir: this.dir,
@@ -394,6 +490,7 @@ export class GitStore {
     message: string,
     author: GitAuthor = LOOM_AUTHOR,
   ): Promise<string | undefined> {
+    this.assertWritable("commit");
     const run = this.commitChain.then(async () => {
       const staged = await this.stageAll();
       if (!staged) return undefined;
@@ -423,6 +520,7 @@ export class GitStore {
   }
 
   async writeRef(ref: string, value: string, force = true): Promise<void> {
+    this.assertWritable(`write ref "${ref}"`);
     await git.writeRef({ fs: this.fsc, dir: this.dir, ref, value, force });
   }
 
@@ -430,6 +528,7 @@ export class GitStore {
    *  out-of-tree state (e.g. the generated-base snapshot) behind a ref
    *  without materialising a working-tree file. */
   async writeBlobText(text: string): Promise<string> {
+    this.assertWritable("write a blob");
     return git.writeBlob({
       fs: this.fsc,
       dir: this.dir,
@@ -567,6 +666,7 @@ export class GitStore {
    *  output, every rolled-back generated file reads as a hand edit and
    *  the next regenerate sprays conflict markers over the tree. */
   async restoreCommit(oid: string): Promise<VfsPath[]> {
+    this.assertWritable(`restore commit ${oid.slice(0, 7)}`);
     // Target = the commit's /workspace blobs.
     const target = new Map<VfsPath, string>();
     await git.walk({

@@ -97,7 +97,8 @@ describe("WorkspaceSourcesController", () => {
     const c = await makeController(null);
     expect(c.snapshot().files.size).toBe(0);
     expect(c.snapshot().activePath).toBe(DEFAULT_PATH);
-    expect(c.snapshot().persistent).toBe(false);
+    expect(c.snapshot().writable).toBe(false);
+    expect(c.snapshot().readOnlyReason).toBe("ephemeral");
     expect(c.snapshot().hydrated).toBe(false);
 
     await expect(c.write("/workspace/main.ddd", "x")).resolves.toBeUndefined();
@@ -112,10 +113,11 @@ describe("WorkspaceSourcesController", () => {
     c.dispose();
   });
 
-  it("a store-backed controller reports itself persistent and hydrated", async () => {
+  it("a store-backed controller reports itself writable and hydrated", async () => {
     const store = await freshStore({ "/workspace/main.ddd": "m" });
     const c = await makeController(store);
-    expect(c.snapshot().persistent).toBe(true);
+    expect(c.snapshot().writable).toBe(true);
+    expect(c.snapshot().readOnlyReason).toBeNull();
     expect(c.snapshot().hydrated).toBe(true);
     c.dispose();
   });

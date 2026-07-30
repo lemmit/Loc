@@ -37,7 +37,8 @@ import { buildTree, type TreeFolder } from "../preview/file-tree";
 import { FileTree } from "../preview/FileTree";
 import {
   DEFAULT_PATH,
-  EPHEMERAL_MESSAGE,
+  readOnlyMessage,
+  type WorkspaceReadOnlyReason,
   type WorkspaceSourcesError,
 } from "../workspace/workspace-sources";
 import {
@@ -72,11 +73,15 @@ export interface SourceFilesTreeProps {
   onDeleteFolder?: (folder: string) => void;
   /** Rename a file: write `newPath` with the old content, drop `oldPath`. */
   onRename?: (oldPath: string, newPath: string) => void;
-  /** Whether file changes actually persist.  False in ephemeral mode
-   *  (no git store), where every mutator is a no-op — the create /
-   *  rename / delete affordances are disabled and say why rather than
-   *  letting the user add a file that silently evaporates. */
-  persistent?: boolean;
+  /** Whether file changes actually land.  False in ephemeral mode (no git
+   *  store) AND while another tab owns the workspace's writer lock — every
+   *  mutator is suppressed either way, so the create / rename / delete
+   *  affordances are disabled and say why rather than letting the user add a
+   *  file that silently evaporates. */
+  writable?: boolean;
+  /** Which read-only condition applies; picks the explanatory sentence.
+   *  Defaults to `"ephemeral"` (the historical single reason). */
+  readOnlyReason?: WorkspaceReadOnlyReason | null;
   /** Last failed mutation from the sources controller, rendered as a
    *  dismissible Alert above the tree. */
   error?: WorkspaceSourcesError | null;
@@ -157,7 +162,8 @@ const NO_EMPTY_FOLDERS: ReadonlySet<string> = new Set<string>();
 
 export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   const variant = props.variant ?? "accordion";
-  const persistent = props.persistent ?? true;
+  const writable = props.writable ?? true;
+  const readOnlyNote = readOnlyMessage(props.readOnlyReason ?? "ephemeral");
   // Module-level fallback, not `new Set()` inline: an inline literal is a fresh
   // identity every render, which makes the `root` memo below miss every single
   // time (a full workspace-tree rebuild per render) for every caller that
@@ -263,14 +269,14 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         return (
           <>
             <Menu.Item
-              disabled={!persistent}
+              disabled={!writable}
               data-testid="source-files-new-file"
               onClick={() => openForm({ kind: "create-file", parent: "" })}
             >
               New file…
             </Menu.Item>
             <Menu.Item
-              disabled={!persistent}
+              disabled={!writable}
               data-testid="source-files-new-folder"
               onClick={() => openForm({ kind: "create-folder", parent: "" })}
             >
@@ -284,13 +290,13 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         return (
           <>
             <Menu.Item
-              disabled={!persistent}
+              disabled={!writable}
               onClick={() => openForm({ kind: "create-file", parent: folderRel })}
             >
               New file…
             </Menu.Item>
             <Menu.Item
-              disabled={!persistent}
+              disabled={!writable}
               onClick={() => openForm({ kind: "create-folder", parent: folderRel })}
             >
               New folder…
@@ -298,7 +304,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
             <Menu.Divider />
             <Menu.Item
               color="red"
-              disabled={!persistent}
+              disabled={!writable}
               onClick={() => confirmDeleteFolder(folderRel)}
             >
               Delete folder
@@ -312,7 +318,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         <>
           <Menu.Item onClick={() => props.onSelect(fullPath)}>Open</Menu.Item>
           <Menu.Item
-            disabled={isMain || !persistent}
+            disabled={isMain || !writable}
             onClick={() => openForm({ kind: "rename", target: fullPath }, leafNoExt(fullPath))}
           >
             Rename…
@@ -320,7 +326,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           <Menu.Divider />
           <Menu.Item
             color="red"
-            disabled={isMain || !persistent}
+            disabled={isMain || !writable}
             onClick={() => confirmDeleteFile(fullPath)}
           >
             Delete file
@@ -328,7 +334,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         </>
       );
     },
-    [openForm, confirmDeleteFile, confirmDeleteFolder, persistent, props],
+    [openForm, confirmDeleteFile, confirmDeleteFolder, writable, props],
   );
 
   const menuItems = menu ? actionItems(menu.target) : null;
@@ -399,10 +405,10 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     <Menu position="bottom-end" shadow="sm" withinPortal opened={addOpened} onChange={setAddOpened}>
       <Menu.Target>
         <Tooltip
-          label={persistent ? "Add a new .ddd file or folder" : EPHEMERAL_MESSAGE}
+          label={writable ? "Add a new .ddd file or folder" : readOnlyNote}
           withArrow
           multiline
-          w={persistent ? undefined : 260}
+          w={writable ? undefined : 260}
           openDelay={400}
         >
           <ActionIcon
@@ -414,8 +420,8 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
             role="button"
             tabIndex={0}
             aria-label="Add a new .ddd file or folder"
-            aria-disabled={!persistent}
-            data-disabled={persistent ? undefined : true}
+            aria-disabled={!writable}
+            data-disabled={writable ? undefined : true}
             onClick={toggleAdd}
             // `component="span"` (a `<button>` isn't valid inside `<summary>`)
             // means no built-in keyboard activation — wire it up explicitly so
@@ -435,14 +441,14 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
         }}
       >
         <Menu.Item
-          disabled={!persistent}
+          disabled={!writable}
           data-testid="source-files-new-file"
           onClick={() => openForm({ kind: "create-file", parent: "" })}
         >
           New file
         </Menu.Item>
         <Menu.Item
-          disabled={!persistent}
+          disabled={!writable}
           data-testid="source-files-new-folder"
           onClick={() => openForm({ kind: "create-folder", parent: "" })}
         >
@@ -455,9 +461,9 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
   // Why nothing the user does here will stick.  Same condition (and the
   // same explanation) the History panel already shows for its own
   // unavailability — before this the file UI just silently no-op'd.
-  const ephemeralNotice = !persistent && (
-    <Text size="xs" c="dimmed" px="sm" py={6} data-testid="source-files-ephemeral">
-      {EPHEMERAL_MESSAGE}
+  const readOnlyNotice = !writable && (
+    <Text size="xs" c="dimmed" px="sm" py={6} data-testid="source-files-readonly">
+      {readOnlyNote}
     </Text>
   );
 
@@ -553,7 +559,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
       }
     >
       {errorAlert}
-      {ephemeralNotice}
+      {readOnlyNotice}
       {inlineForm}
       <FileTree
         root={root}

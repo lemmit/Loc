@@ -88,7 +88,8 @@ class FakeController {
       activePath: this.activePath,
       epoch: 0,
       hydrated: true,
-      persistent: true,
+      writable: true,
+      readOnlyReason: null,
       lastError: null,
     };
   }

@@ -28,7 +28,10 @@ import type { BundleFail, BundleOk } from "../bundle/protocol";
 import type { LoomExample } from "../examples";
 import type { TreeFolder } from "../preview/file-tree";
 import type { useWorkspace } from "../workspace/use-workspace";
-import type { WorkspaceSourcesError } from "../workspace/workspace-sources";
+import type {
+  WorkspaceReadOnlyReason,
+  WorkspaceSourcesError,
+} from "../workspace/workspace-sources";
 import type { PipelineState } from "../pipeline/state";
 import type { DispatchResult, QueryResult } from "../runtime/protocol";
 import type { ApiEndpoint } from "../backend/openapi";
@@ -196,10 +199,13 @@ export interface LayoutCtx {
   /** Delete an empty folder via the VFS's `rmdir`.  Throws if the
    *  folder still has `.ddd` content inside. */
   deleteEmptySourceFolder: (folder: string) => void;
-  /** Whether source mutations actually persist.  False in ephemeral
-   *  mode (no git store) — the file tree disables its create / rename /
-   *  delete affordances and explains why. */
-  sourcesPersistent: boolean;
+  /** Whether source mutations actually land.  False in ephemeral mode (no
+   *  git store) AND while another tab owns this workspace's writer lock —
+   *  the file tree disables its create / rename / delete affordances and
+   *  explains which of the two it is. */
+  sourcesWritable: boolean;
+  /** Which read-only condition applies, or `null` when writable. */
+  sourcesReadOnlyReason: WorkspaceReadOnlyReason | null;
   /** Last failed source mutation, rendered by the file tree.  Before
    *  this every rejection was swallowed to `console.error`. */
   sourceError: WorkspaceSourcesError | null;
