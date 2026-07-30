@@ -7,6 +7,7 @@ import scaffold from "./scaffold/scaffold.macro.js";
 import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
 import scaffoldApi from "./scaffold/scaffoldApi.macro.js";
 import scaffoldContext from "./scaffold/scaffoldContext.macro.js";
+import scaffoldDashboard from "./scaffold/scaffoldDashboard.macro.js";
 import scaffoldHandlers from "./scaffold/scaffoldHandlers.macro.js";
 import scaffoldPaged from "./scaffold/scaffoldPaged.macro.js";
 import scaffoldPagedApi from "./scaffold/scaffoldPagedApi.macro.js";
@@ -61,6 +62,12 @@ export function loadStdlibMacros(): void {
   // `/projections/<criterion>` route that binds to it.
   registerMacro(scaffoldPaged);
   registerMacro(scaffoldPagedApi);
+  // Dashboard read models (M-T1.3 Phase 2): one SINGLETON query-time projection
+  // per aggregate, aggregating the whole table in SQL.  The ui-side scaffold
+  // renders the matching `Stat` cards from the same derivation
+  // (`_dashboard-shared.ts`), so a card can't bind a projection this didn't
+  // emit — the `scaffoldPaged`/`scaffoldPagedApi` split, applied again.
+  registerMacro(scaffoldDashboard);
 }
 
 /** Test/harness hook: allow tests that reset the registry to

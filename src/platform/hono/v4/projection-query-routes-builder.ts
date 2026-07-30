@@ -359,7 +359,14 @@ function wholeTableAggregates(
   const out: Array<{ field: string; type: TypeIR; aggregate: ProjectionAggregateIR }> = [];
   for (const s of selects) {
     if (!s.aggregate) return null;
-    out.push({ field: s.field, type: s.type, aggregate: s.aggregate });
+    // Coerce to the DECLARED row type, not the select's inferred one.  The
+    // response schema is built from `wireShape`, so a coercion that followed
+    // the inferred type could disagree with it — emitting `Number(...)` into a
+    // field the schema declares `z.string()` (money), which `.parse` then
+    // rejects at runtime.  The declared field IS the contract; fall back to the
+    // inferred type only when no row field matches.
+    const declared = p.wireShape?.find((f) => f.name === s.field)?.type;
+    out.push({ field: s.field, type: declared ?? s.type, aggregate: s.aggregate });
   }
   return out;
 }

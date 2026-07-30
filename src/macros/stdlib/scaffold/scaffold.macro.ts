@@ -1,4 +1,4 @@
-import type { Aggregate, BoundedContext, Subdomain, Workflow } from "../../api/index.js";
+import type { Aggregate, BoundedContext, Subdomain, Ui, Workflow } from "../../api/index.js";
 import { aggregatesIn, defineMacro, workflowsIn } from "../../api/index.js";
 import { homePage, workflowIsEventTriggeredOnly, workflowsIndexPage } from "./_pages.js";
 
@@ -78,12 +78,19 @@ export default defineMacro({
       0;
     if (hasAnyWork) {
       out.push(
-        homePage({
-          aggregates: allAggregates.length,
-          // The Home "N workflows" card counts only command-surfaced workflows
-          // (an event-triggered-only saga has no `/workflows/<wf>` route).
-          workflows: allWorkflows.filter((w) => !workflowIsEventTriggeredOnly(w)).length,
-        }),
+        homePage(
+          {
+            aggregates: allAggregates.length,
+            // The Home "N workflows" card counts only command-surfaced workflows
+            // (an event-triggered-only saga has no `/workflows/<wf>` route).
+            workflows: allWorkflows.filter((w) => !workflowIsEventTriggeredOnly(w)).length,
+          },
+          // Home grows a KPI row per aggregate whose context carries a dashboard
+          // projection — the numbers come from the database, not from a
+          // client-side fold over one page of rows (M-T1.3 Phase 2).
+          allAggregates,
+          target as Ui,
+        ),
       );
     }
     // The WorkflowsIndex singleton (and its menu link) is emitted only when at

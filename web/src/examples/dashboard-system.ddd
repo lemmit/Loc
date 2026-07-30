@@ -14,12 +14,19 @@
 //   3. `Stat` renders each field, with the money figure wrapped in `Money`
 //      (a `money` is a decimal.js `Decimal` client-side, not a React child).
 //
-// Two projections so both filtered and unfiltered aggregation compile, and
-// both a scaffolded CRUD surface and a hand-written dashboard page coexist.
+// Both routes to a dashboard are shown side by side:
+//
+//   * HAND-WRITTEN — the `page Dashboard` below declares its own projections
+//     and binds each tile explicitly.
+//   * SCAFFOLDED — `context Orders with scaffoldDashboard` emits one singleton
+//     projection per aggregate (`OrderTotals`, `CustomerTotals`), and the ui
+//     scaffold grows the `Home` page a matching row of KPI tiles.  Both halves
+//     derive the projection name the same way, so a tile can never bind a
+//     projection the other half didn't emit.
 
 system DashboardShop {
     subdomain Sales {
-        context Orders {
+        context Orders with scaffoldDashboard {
             enum OrderStatus { Draft, Confirmed, Cancelled }
 
             aggregate Customer {

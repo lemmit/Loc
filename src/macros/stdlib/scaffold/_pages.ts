@@ -21,6 +21,7 @@ import {
   scaffoldWorkflowsIndex,
   scalarColumnsForAggregate,
 } from "./_body-builders.js";
+import { dashboardFieldsFor, summableFields } from "./_dashboard-shared.js";
 
 /** The ui's first api handle (`api <name>: <Api>`), or `undefined` when the ui
  *  serves no api — the receiver root the scaffolded aggregate queries reach
@@ -202,11 +203,29 @@ export function pageForWorkflow(wf: Workflow): Page {
   });
 }
 
-export function homePage(counts: { aggregates: number; workflows: number }): Page {
+export function homePage(
+  counts: { aggregates: number; workflows: number },
+  /** Aggregates whose context carries a dashboard projection.  Each becomes a
+   *  row of KPI tiles above the summary cards; an empty list leaves the welcome
+   *  page byte-identical. */
+  aggregates: readonly Aggregate[] = [],
+  ui?: Ui,
+): Page {
+  const apiHandle = ui ? firstApiHandle(ui) : undefined;
+  const kpis = aggregates.flatMap((agg) => {
+    const found = dashboardFieldsFor(agg);
+    if (!found) return [];
+    // A `<field>Sum` tile is money iff the SOURCE field is — the projection row
+    // carries no type the walker can read, so the aggregate decides.
+    const moneyFields = summableFields(agg)
+      .filter((f) => f.primitive === "money")
+      .map((f) => `${f.name}Sum`);
+    return [{ aggregate: agg.name, apiHandle, ...found, moneyFields }];
+  });
   return page({
     name: "Home",
     route: "/",
-    body: scaffoldHome(counts),
+    body: scaffoldHome(counts, kpis),
     menu: { hidden: boolLit(true) },
   });
 }

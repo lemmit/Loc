@@ -338,7 +338,51 @@ canonical dashboard tile, so this was a hard blocker hiding behind the feature.
 **Remaining:** keyed/collection projection reads (they want `Table`-shaped
 binding); the five other frontends.
 
-### 3.3 Phase 2 — `scaffoldDashboard` + the scaffolded projection · `M` · **P1**
+### 3.3 Phase 2 — `scaffoldDashboard` + the scaffolded projection · **LANDED**
+
+```ddd
+context Orders with scaffoldDashboard { aggregate Order { code: string  total: money  lineCount: int } … }
+ui WebApp with scaffold(subdomains: [Sales]) { api Sales: SalesApi }
+```
+→ the context gains `projection OrderTotals { rowCount: int  totalSum: money  lineCountSum: int
+from Order as o  select rowCount = count(), totalSum = sum(o.total), lineCountSum = sum(o.lineCount) }`,
+and `Home` — until now a welcome page whose only numbers were *compile-time counts
+of declarations* — grows a live KPI row:
+
+```tsx
+const orderTotals = useOrderTotals();
+{ orderTotals.data && (
+  <Group data-testid="order-totals">
+    … {orderTotals.data.rowCount} …
+    … <MoneyValue value={ orderTotals.data.totalSum } /> …
+  </Group>
+) }
+```
+
+- **Two macros, one derivation.** A macro attaches to exactly one host, so the
+  projection (`context`) and the page (`ui`) cannot come from one — the
+  `scaffoldPaged`/`scaffoldPagedApi` split. Both halves derive the projection
+  name in `_dashboard-shared.ts`, so a tile can't bind a projection the other
+  half didn't emit.
+- **One projection per aggregate, not per context** — a query-time projection
+  has a single `from` source, so a per-context row would have nothing to
+  aggregate over.
+- **The ui half detects structurally**, so a *hand-written* `OrderTotals` lights
+  up the dashboard too, with its own field list. It falls back to reading the
+  context's `with scaffoldDashboard` clause because macro expansion order is
+  source order (`streamAllContents`) — a ui declared before its context would
+  otherwise see nothing.
+- **Nullable columns are excluded on purpose.** SQL `SUM` skips NULLs, so a
+  nullable column's tile would silently describe a different row set than the
+  `rowCount` next to it — two numbers on one card that quietly disagree.
+- **A coercion bug this surfaced, fixed in the Phase 0 emitter:** the coercion
+  followed the select's *inferred* type while the response schema follows the
+  *declared* row type, so a money sum emitted `Number(...)` into a `z.string()`
+  field — `.parse` would reject it at runtime. The declared field is the
+  contract.
+- Additive: a system that never opts in keeps its welcome page byte-for-byte.
+
+### 3.3b Original plan for Phase 2 (kept for the rationale) · `M` · **P1**
 
 The maintainer's shape, and there is a clean in-tree precedent for the split:
 **`scaffoldPaged` is a `context` macro whose `api` sibling `scaffoldPagedApi`
@@ -472,8 +516,8 @@ stay quiet about IR-tier gates by design.
    node; the four other backends each lift their own gate.
 2. **Phase 1** — ui can read a projection (Defect D). ✅ landed on react
    (singleton only); keyed reads + the five other frontends remain.
-3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. **Dashboard ships
-   here, with no chart dependency anywhere.**
+3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. ✅ landed. **A real
+   dashboard ships here, with no chart dependency anywhere.**
 4. **Phase 3** — `group by` (with M-T4.2).
 5. **Phase 4** — `Chart` on mantine v9, gated, a11y in slice 1.
 6. **Phase 5** — scaffolded chart; pack backfill; flip `REQUIRED_PRIMITIVES`.

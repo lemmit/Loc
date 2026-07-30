@@ -26,7 +26,7 @@ import type {
   ValueObject,
   Workflow,
 } from "../../../language/generated/ast.js";
-import { plural, snake } from "../../../util/naming.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import {
   binaryExpr,
   boolLit,
@@ -39,6 +39,7 @@ import {
   stringLit,
   ternaryExpr,
 } from "../../api/index.js";
+import { ROW_COUNT } from "./_dashboard-shared.js";
 
 /** `scaffoldNewForm` — scaffolds the create page body:
  *  `Stack(Breadcrumbs, Heading "Create <agg>", Card(CreateForm(of:)))`. */
@@ -163,7 +164,23 @@ export function scaffoldWorkflowForm(wfName: string): Expression {
 /** `scaffoldHome` — the welcome page body: one summary `Card` per non-empty
  *  section (aggregates / workflows).
  *  Counts come from the scaffold macro's gathered inventory. */
-export function scaffoldHome(counts: { aggregates: number; workflows: number }): Expression {
+export function scaffoldHome(
+  counts: { aggregates: number; workflows: number },
+  /** KPI tiles to render above the summary cards — one entry per aggregate
+   *  whose context carries a dashboard projection (`_dashboard-shared.ts`).
+   *  Empty ⇒ the welcome page is byte-identical to before, so a system that
+   *  never opted into `scaffoldDashboard` is unchanged. */
+  kpis: readonly {
+    aggregate: string;
+    apiHandle?: string;
+    projection: string;
+    fields: string[];
+    /** Which of `fields` hold money, so their tiles render through `Money`.
+     *  Declared here rather than left to structural typing: the behaviour
+     *  depends on it, and an undeclared field would drop silently. */
+    moneyFields?: readonly string[];
+  }[] = [],
+): Expression {
   const cards: Array<{ value: Expression }> = [];
   if (counts.aggregates > 0) {
     cards.push({
@@ -200,7 +217,7 @@ export function scaffoldHome(counts: { aggregates: number; workflows: number }):
       ]),
     });
   }
-  return callExpr("Stack", [
+  const children: Array<{ name?: string; value: Expression }> = [
     {
       value: callExpr("Heading", [
         { value: stringLit("Welcome") },
@@ -214,9 +231,66 @@ export function scaffoldHome(counts: { aggregates: number; workflows: number }):
         },
       ]),
     },
+    ...kpis.map((k) => ({ value: kpiRow(k) })),
     { value: callExpr("Stack", cards) },
-    { name: "testid", value: stringLit("home") },
+  ];
+  children.push({ name: "testid", value: stringLit("home") });
+  return callExpr("Stack", children);
+}
+
+/** One aggregate's KPI row: a `QueryView` over its dashboard projection whose
+ *  `data:` lambda renders a `Stat` per field.
+ *
+ *  The read is single-record by construction (a singleton projection returns
+ *  one object), which `QueryView` derives from the query itself — the body
+ *  never spells `single:`.  A `money` field goes through `Money`, because a
+ *  money value deserialises client-side to a decimal.js `Decimal` and a bare
+ *  React child would be a type error; the walker can't know the field's type
+ *  from the projection row, so the SUFFIX is the signal: `scaffoldDashboard`
+ *  names every summed money column `<field>Sum`, and the source field's type
+ *  decides. */
+function kpiRow(k: {
+  aggregate: string;
+  apiHandle?: string;
+  projection: string;
+  fields: string[];
+  moneyFields?: readonly string[];
+}): Expression {
+  const money = new Set(k.moneyFields ?? []);
+  const row = "t";
+  const source = k.apiHandle
+    ? memberAccess(nameRefExpr(k.apiHandle), k.projection)
+    : nameRefExpr(k.projection);
+  const tiles: Array<{ name?: string; value: Expression }> = k.fields.map((f) => {
+    const read = memberAccess(nameRefExpr(row), f);
+    return {
+      value: callExpr("Stat", [
+        { value: stringLit(kpiLabel(k.aggregate, f)) },
+        { value: money.has(f) ? callExpr("Money", [{ value: read }]) : read },
+      ]),
+    };
+  });
+  tiles.push({ name: "testid", value: stringLit(`${snake(k.aggregate)}-totals`) });
+  return callExpr("QueryView", [
+    { name: "of", value: source },
+    // One skeleton per tile, so the row reserves its space instead of popping
+    // in — the tiles sit above the fold on the landing page.
+    {
+      name: "loading",
+      value: callExpr("Skeleton", [{ name: "count", value: intLit(k.fields.length) }]),
+    },
+    { name: "data", value: lambda(row, callExpr("Group", tiles)) },
   ]);
+}
+
+/** Human label for a KPI tile.  `rowCount` on `Order` reads "Orders"; a
+ *  `<field>Sum` reads "Total <field>". */
+function kpiLabel(aggName: string, field: string): string {
+  if (field === ROW_COUNT) return humanize(plural(aggName));
+  const base = field.endsWith("Sum") ? field.slice(0, -3) : field;
+  const label = humanize(base).toLowerCase();
+  // A field already named `total` would read "Total total".
+  return label.startsWith("total") ? upperFirst(label) : `Total ${label}`;
 }
 
 /** `scaffoldWorkflowsIndex` — the workflows index page body: Breadcrumbs +

@@ -87,6 +87,7 @@ export {
   returnStmt,
   route,
   selfRef,
+  singletonProjection,
   targetFields,
   thisRef,
   workflowsIn,
