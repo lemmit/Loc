@@ -112,6 +112,91 @@ export interface PagerSpec {
   totalPagesExpr: string;
 }
 
+/** One resolved `DataGrid` column, framework-neutral.
+ *
+ *  `accessorKey` and `cell` are mutually exclusive: a simple member accessor
+ *  (`o => o.sku`) becomes a TanStack `accessorKey` — which is what makes
+ *  sorting and filtering work without a custom comparator — while anything
+ *  richer (a formatting call, a nested primitive) carries already-rendered
+ *  target markup instead.  A column with no `accessorKey` cannot be sorted or
+ *  filtered BY VALUE, so `sortable`/`filterable` are already forced off here
+ *  rather than emitted and silently ignored by TanStack. */
+export interface DataGridColumn {
+  /** Stable column id — also the TanStack `accessorKey` for a simple field. */
+  id: string;
+  /** Header label, already escaped for the target. */
+  header: string;
+  /** Row field this column reads, when the accessor is a simple member. */
+  accessorKey?: string;
+  /** Already-rendered target markup for a non-trivial accessor, with the row
+   *  bound to `row`.  Mutually exclusive with `accessorKey`. */
+  cell?: string;
+  sortable: boolean;
+  filterable: boolean;
+}
+
+/** Everything a target needs to build a `DataGrid`'s child component
+ *  (the `renderDataGridChild` seam). */
+export interface DataGridSpec {
+  /** PascalCase component name, derived from `testid:` or a per-page
+   *  sequence (`CustomersGrid`). */
+  componentName: string;
+  columns: readonly DataGridColumn[];
+  /** Already-rendered expression for the bound row collection. */
+  rowsExpr: string;
+  multiSort: boolean;
+  columnVisibility: boolean;
+  /** True when ANY column asked to be filtered — turns the per-column filter
+   *  row on.  A grid with no filterable column emits no filter state and no
+   *  filtered row model. */
+  anyFilterable: boolean;
+  pageSize: number;
+  /** Page-state field bound to `selection:`, when row selection is on.  The
+   *  page owns a `string[]` of selected row ids; the child owns TanStack's
+   *  selection map and reports ids back through it. */
+  selection?: string;
+  /** `data-testid` attribute string for the grid root, or `""`. */
+  testidAttr: string;
+  /** Render the active design pack's grid body (`primitive-data-grid`).
+   *
+   *  A callback rather than a rendered string because the extra template
+   *  context is TARGET-specific: React's column defs carry the cell renderers,
+   *  so its packs need none, while Vue's cells must render in the template
+   *  (a `cell` function would have to return VNodes, and the walker produces
+   *  markup) — so the Vue target passes walker-built header/cell fragments in.
+   *  The shared keys (`hasFilters`, `hasColumnVisibility`, `hasSelection`,
+   *  `testidAttr`) are supplied for every target.
+   *
+   *  Renders ONLY — it does not register the pack's declared imports, because
+   *  where they belong depends on where the body lands.  React's body is inside
+   *  the page's file, so its imports join the page's block; Vue's is inside the
+   *  sibling SFC, and putting them on the page would import components the page
+   *  never uses (and, under `noUnusedLocals`, fail to compile).  Each target
+   *  places `packImports` itself. */
+  renderBody(extra?: Record<string, unknown>): string;
+  /** The pack's declared `imports["primitive-data-grid"]` entries, for the
+   *  target to place wherever the rendered body lands. */
+  packImports: readonly { from: string; named: readonly string[] }[];
+}
+
+/** What a target returns for a `DataGrid` — where the child component lives,
+ *  and how the page reaches it.
+ *
+ *  The two shapes are not a style choice.  TSX can declare a second component
+ *  in the page's own file (`moduleDecl`), but a Vue SFC and a `.svelte` file
+ *  hold exactly ONE component each, so those targets must return a whole
+ *  sibling `file`, and reach it with an import returned as their `moduleDecl`
+ *  (ESM imports hoist, so a `<script setup>` block may carry one anywhere). */
+export interface DataGridChild {
+  /** Module-scope declaration spliced into the PAGE's file, between the import
+   *  block and the page component (TSX). */
+  moduleDecl?: string;
+  /** A whole sibling component file — path relative to the project root. */
+  file?: { path: string; content: string };
+  /** Call-site markup the page renders in place of the `DataGrid(...)` call. */
+  callSite: string;
+}
+
 /** A single API call site detected by the walker — the
  *  `Sales.Customer.create.mutate(args)` shape.  Carries the
  *  resolved api-handle / aggregate / op so the target can produce
@@ -807,6 +892,39 @@ export interface WalkerTarget {
    *  Called only when the table actually emitted >1 root; a plain table never
    *  reaches it. */
   wrapMultiRoot?(markup: string): string;
+
+  // --- DataGrid seam (M-T1.1 slice 10) ------------------------------------
+  //
+  // Unlike the `Table` seams above, a `DataGrid` cannot be expressed as markup
+  // around a rows expression: it is a TanStack row model driven by a component
+  // full of framework-specific reactive state, and it must live OUTSIDE the
+  // page component (see `DataGridChild`).  The shared primitive
+  // (`primitives/data-grid.ts`) resolves the args and the columns — that part
+  // is framework-neutral — and hands the whole child to the target.
+  //
+  // OPTIONAL, but unlike the `Table` seams the absence is NOT a graceful
+  // degradation: a grid that renders nothing is a blank page region, not a
+  // simpler table.  So `loom.datagrid-unsupported-target` rejects `DataGrid`
+  // on any framework without this seam at IR-validate, and the sentinel the
+  // primitive emits when it is missing is unreachable from valid input.
+
+  /** Expression the walker binds a `DataGrid` `Column` accessor's lambda param
+   *  to, for a column whose accessor is too rich for a TanStack `accessorKey`
+   *  (`Column("Name", o => Badge(o.name))` → the markup must read the row).
+   *
+   *  Target-specific because the row reaches the cell differently: React's
+   *  `cell` callback destructures `{ row }` and casts `row.original` to a local,
+   *  while Vue renders the cell in the template off the visible-cell binding.
+   *  Both go through a cast — the child is generic over the row type, so raw
+   *  property access on it would not typecheck.  Defaults to `"row"`. */
+  dataGridRowVar?: string;
+
+  /** Build the `DataGrid`'s child component and the page's call site.  Takes
+   *  `ctx` so the target can register its own framework imports (`addImport`)
+   *  — the TanStack package differs per framework (`react-table` /
+   *  `vue-table` / `svelte-table` / `angular-table`) and so do the reactive
+   *  primitives the child needs. */
+  renderDataGridChild?(spec: DataGridSpec, ctx: WalkContext): DataGridChild;
 
   // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
   //

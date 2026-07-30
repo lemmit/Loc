@@ -40,7 +40,7 @@ system S {
 `;
 
 describe("loom.datagrid-unsupported-target", () => {
-  for (const fw of ["vue", "svelte", "angular"]) {
+  for (const fw of ["svelte", "angular"]) {
     it(`rejects DataGrid on a ${fw} frontend`, async () => {
       const diags = await validateSource(sys(fw));
       const hit = diags.find((d) => d.code === "loom.datagrid-unsupported-target");
@@ -51,8 +51,12 @@ describe("loom.datagrid-unsupported-target", () => {
     });
   }
 
-  it("accepts DataGrid on react", async () => {
-    const diags = await validateSource(sys("react"));
-    expect(diags.find((d) => d.code === "loom.datagrid-unsupported-target")).toBeUndefined();
-  });
+  // Ported frameworks.  Each entry here is a `renderDataGridChild` seam that
+  // exists; the gate's whole job is to keep the two sets in step.
+  for (const fw of ["react", "vue"]) {
+    it(`accepts DataGrid on ${fw}`, async () => {
+      const diags = await validateSource(sys(fw));
+      expect(diags.find((d) => d.code === "loom.datagrid-unsupported-target")).toBeUndefined();
+    });
+  }
 });

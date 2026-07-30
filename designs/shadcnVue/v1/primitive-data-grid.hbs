@@ -1,0 +1,47 @@
+{{!-- primitive-data-grid — shadcn-vue chrome around a TanStack table instance.
+
+  The `table` binding, the column defs and the reactive state all come from the
+  walker-emitted sibling SFC that wraps this markup
+  (src/generator/vue/walker/data-grid-child.ts); a pack only decides how the
+  grid LOOKS, never how the row model works.
+
+  `headerBody` / `cellBody` are the walker's header + cell CONTENT — see the
+  vuetify sibling for why a Vue pack cannot take those from the column defs. --}}
+    <div class="space-y-2"{{{testidAttr}}}>
+{{#if hasColumnVisibility}}      <div class="flex flex-wrap gap-3">
+        <label v-for="col in table.getAllLeafColumns()" :key="col.id" class="flex items-center gap-1 text-sm">
+          <input type="checkbox" :checked="col.getIsVisible()" @change="col.toggleVisibility()" />
+          \{{ String(col.columnDef.header ?? col.id) }}
+        </label>
+      </div>
+{{/if}}      <Table>
+        <TableHeader>
+          <TableRow v-for="hg in table.getHeaderGroups()" :key="hg.id">
+            <TableHead v-for="h in hg.headers" :key="h.id" :aria-sort="h.column.getIsSorted() === 'asc' ? 'ascending' : h.column.getIsSorted() === 'desc' ? 'descending' : 'none'">
+{{{headerBody}}}
+{{#if hasFilters}}              <Input
+                v-if="h.column.getCanFilter()"
+                class="mt-1 h-7 text-xs"
+                type="search"
+                placeholder="Filter"
+                :aria-label="`Filter by ${String(h.column.columnDef.header ?? h.id)}`"
+                :model-value="String(h.column.getFilterValue() ?? '')"
+                @update:model-value="(v: string | number | undefined) => h.column.setFilterValue(String(v ?? ''))"
+              />
+{{/if}}            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="r in table.getRowModel().rows" :key="r.id">
+            <TableCell v-for="c in r.getVisibleCells()" :key="c.id">
+{{{cellBody}}}
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+      <div class="flex items-center justify-between">
+        <Button size="sm" variant="outline" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">Previous</Button>
+        <span class="text-sm" aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
+        <Button size="sm" variant="outline" :disabled="!table.getCanNextPage()" @click="table.nextPage()">Next</Button>
+      </div>
+    </div>

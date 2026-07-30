@@ -228,7 +228,7 @@ export function validateProjectionSourceProjectionBackend(
  *  COMPILE ERROR rather than a silently missing grid: the page would otherwise
  *  render an empty slot (or a "not supported" comment on HEEx) and the author
  *  would only find out by looking at the running app. */
-const DATA_GRID_FRAMEWORKS = new Set<string>(["react"]);
+const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue"]);
 
 /** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */
 export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -245,9 +245,9 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
         code: "loom.datagrid-unsupported-target",
         message:
           `page '${page.name}' uses 'DataGrid', which deployable '${d.name}' can't render ` +
-          `(frontend '${fw || "unknown"}'). DataGrid is React-only today. Use 'Table' — it supports ` +
+          `(frontend '${fw || "unknown"}'). DataGrid ships on react and vue today. Use 'Table' — it supports ` +
           `column sort and pagination on every frontend, server-driven on Phoenix — or host this page ` +
-          `on a react frontend.`,
+          `on a react or vue frontend.`,
         source: `${ui.name}/${page.name}`,
       });
     }

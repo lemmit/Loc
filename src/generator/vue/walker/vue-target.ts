@@ -36,6 +36,7 @@ import type {
   VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
+import { renderVueDataGridChild } from "./data-grid-child.js";
 import { renderVueDestroyForm } from "./destroy-form.js";
 
 /** Attribute-quote a rendered JS/binding expression for a Vue directive
@@ -172,6 +173,21 @@ export const vueTarget: WalkerTarget = {
    *  auto-unwrap in the template. */
   renderFilteredRows(rowsExpr, filter) {
     return `filterRows(${rowsExpr}, ${filter.name})`;
+  },
+
+  // --- DataGrid seam ------------------------------------------------------
+
+  /** A Vue SFC holds exactly ONE component, so the grid's child cannot share
+   *  the page's file the way React's does — it becomes a sibling
+   *  `src/components/<Name>.vue`.  See `vue/walker/data-grid-child.ts`. */
+  /** Vue renders a computed cell in the TEMPLATE off the visible-cell binding
+   *  `c`, through a script-declared cast helper — a bare `c.row.original.name`
+   *  would not typecheck (the SFC is generic over the row type) and an inline
+   *  `as` cast in a template expression is not portable. */
+  dataGridRowVar: "asRow(c.row.original)",
+
+  renderDataGridChild(spec, ctx) {
+    return renderVueDataGridChild(spec, ctx);
   },
 
   // --- API binding seam ---------------------------------------------------
