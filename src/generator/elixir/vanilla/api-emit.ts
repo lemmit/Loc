@@ -355,11 +355,11 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
         (opHasGuards(op)
           ? `
 
-      {:error, :forbidden} ->
-        ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
+      {:error, {:forbidden, detail}} ->
+        ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
 
-      {:error, :precondition_failed} ->
-        ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`
+      {:error, {:precondition_failed, detail}} ->
+        ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)`
           : "");
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do

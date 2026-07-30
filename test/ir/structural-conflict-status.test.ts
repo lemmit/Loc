@@ -92,9 +92,10 @@ describe("structural-conflict status — Hono route translation", () => {
     // The `problem` helper's status union widens to exactly the emitted set.
     // Versioning is default-on (M-T3.4), so the update path's ConcurrencyConflict
     // arm keeps 409 in the union (only Uniqueness/Disallowed were overridden).
-    expect(routes).toMatch(
-      /const problem = \(status: 400 \| 403 \| 404 \| 409 \| 422 \| 423 \| 500,/,
-    );
+    // 400 is absent: the domain floor is 422 (RS-15) and this handler emits no
+    // malformed-body arm, so the union carries no member it never uses —
+    // `error-status-tiers.test.ts` gates that invariant generically.
+    expect(routes).toMatch(/const problem = \(status: 403 \| 404 \| 409 \| 422 \| 423 \| 500,/);
     // The when-gated operation route declares 423 (Disallowed) in OpenAPI, with
     // its real reason phrase.
     expect(routes).toMatch(/423: \{ description: "Locked"/);

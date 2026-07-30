@@ -130,7 +130,7 @@ describe("vanilla elixir event-sourced workflows", () => {
     expect(h).toContain("[] ->");
     expect(h).toContain("event_unrouted");
     // The precondition reads the folded state.
-    expect(h).toContain("ensure(state.paid >= 0, :precondition_failed)");
+    expect(h).toContain("ensure(state.paid >= 0, {:precondition_failed, ");
   });
 
   it("emits no mutable saga-state Ecto schema for the ES workflow", async () => {

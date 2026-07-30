@@ -75,11 +75,12 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
     expect(ctx).toContain("raise Ecto.NoResultsError");
   });
 
-  it("the operation controller action maps a raised guard to 403/400 (not 500)", async () => {
+  it("the operation controller action maps a raised guard to 403/422 (not 500)", async () => {
     // `confirm` has `requires currentUser.role == "manager"` — its domain core
     // raises `ArgumentError, "Forbidden: …"` on rejection.  Without a rescue that
     // propagates to Phoenix's default 500; the controller action must map it to
-    // 403 (requires) / 400 (precondition), the statuses the other backends return.
+    // 403 (requires) / 422 (precondition, RS-15), the statuses the other
+    // backends return.
     const files = await generateSystemFiles(withOps(""));
     const ctrlKey = [...files.keys()].find((k) => k.endsWith("/customer_controller.ex"))!;
     const ctrl = files.get(ctrlKey)!;
@@ -90,7 +91,7 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
     expect(confirm).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)');
     expect(confirm).toContain('String.starts_with?(guard_msg, "Precondition failed: ")');
     expect(confirm).toContain(
-      'ProblemDetails.problem_response(conn, 400, "Bad Request", guard_msg)',
+      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", guard_msg)',
     );
     // A non-guard ArgumentError still reraises → 500 (unchanged).
     expect(confirm).toContain("reraise(guard_error, __STACKTRACE__)");

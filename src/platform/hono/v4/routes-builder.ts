@@ -926,8 +926,12 @@ export function buildRoutesFile(
   // The status literals this router's `problem()` helper is actually called
   // with — the always-present base set plus each structural-conflict status
   // whose arm is emitted (gated exactly as the arms below). With no override
-  // every conflict is 409, so the union stays `400 | 403 | 404 | 409 | 500`.
-  const emittedProblemStatuses = new Set<number>([400, 403, 404, 500, disallowedStatus]);
+  // every conflict is 409, so the union stays `403 | 404 | 409 | 422 | 500`.
+  // NOTE the domain floor is **422**, not 400 (RS-15) — this handler emits no
+  // 400 at all, so the literal must not be in the union either: an unused
+  // member would let a future `problem(400, …)` typecheck against a status the
+  // route never declares.
+  const emittedProblemStatuses = new Set<number>([403, 404, 422, 500, disallowedStatus]);
   if ((agg.uniqueKeys?.length ?? 0) > 0) emittedProblemStatuses.add(uniquenessStatus);
   if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg))
     emittedProblemStatuses.add(concurrencyStatus);
@@ -978,10 +982,10 @@ export function buildRoutesFile(
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
-    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
+    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 422`)}`,
   );
   lines.push(`      recordDomainFault("domain_error");`);
-  lines.push(`      return problem(400, "Bad Request", err.message);`);
+  lines.push(`      return problem(422, "Unprocessable Entity", err.message);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
@@ -1430,7 +1434,8 @@ function emitReturningOperationRoute(
   const statusFor = (tag: string): number =>
     ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
   // The ProblemDetails statuses this route can produce: the framework defaults
-  // (400 domain, 422 validation, 404 aggregate-not-found from getById), 403 if
+  // (422 for the wire-validation tier AND the domain floor — RS-15; 400 for a
+  // malformed/unparseable body; 404 aggregate-not-found from getById), 403 if
   // guarded, plus each error variant's mapped status.
   const problemStatuses = new Set<number>([400, 422, 404]);
   if (operationIsGuarded(op)) problemStatuses.add(403);

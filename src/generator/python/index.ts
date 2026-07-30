@@ -1413,10 +1413,13 @@ function collectOpUnions(contexts: readonly EnrichedBoundedContextIR[]): PyOpUni
   return out;
 }
 
-// RFC 7807 problem responder + exception handlers — DomainError → 400,
-// ForbiddenError → 403, AggregateNotFoundError → 404, and FastAPI's
-// RequestValidationError → 422 with the §3.2 `errors[]` extension
-// (RFC 6901 pointers), matching the other backends' ProblemDetails.
+// RFC 7807 problem responder + exception handlers — DomainError → 422
+// (RS-15, owner decision 2026-07-29: a domain-floor rejection is a well-formed
+// request refused on SEMANTIC grounds, which is what RFC 9110 reserves 422
+// for; 400 stays for a malformed/unparseable one), ForbiddenError → 403,
+// AggregateNotFoundError → 404, and FastAPI's RequestValidationError → 422
+// with the §3.2 `errors[]` extension (RFC 6901 pointers), matching the other
+// backends' ProblemDetails.
 function renderProblemPy(
   opUnions: PyOpUnion[],
   hasUniqueKeys = false,
@@ -1620,9 +1623,9 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
-        log("warn", "domain_error", message=str(err), status=400)
+        log("warn", "domain_error", message=str(err), status=422)
         record_domain_fault("domain_error")
-        return problem(request, 400, "Bad Request", str(err))
+        return problem(request, 422, "Unprocessable Entity", str(err))
 
 ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:

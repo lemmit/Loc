@@ -192,7 +192,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
 
   app.onError((err, c) => {
     const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
-    const problem = (status: 400 | 403 | 404 | 409 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
+    const problem = (status: 403 | 404 | 409 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     if (err instanceof ForbiddenError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Customer", message: err.message, status: 403 });
       recordDomainFault("forbidden");
@@ -204,9 +204,9 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
       return problem(409, "Disallowed", err.message);
     }
     if (err instanceof DomainError) {
-      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Customer", message: err.message, status: 400 });
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Customer", message: err.message, status: 422 });
       recordDomainFault("domain_error");
-      return problem(400, "Bad Request", err.message);
+      return problem(422, "Unprocessable Entity", err.message);
     }
     if (err instanceof AggregateNotFoundError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Customer", status: 404 });

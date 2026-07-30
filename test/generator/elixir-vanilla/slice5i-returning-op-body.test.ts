@@ -8,7 +8,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // and event emits in its body:
 //   - `precondition` / `requires` → hoisted into a leading `with ensure(...)`
 //     guard chain so an expected denial returns a typed tuple
-//     (`{:error, :precondition_failed}` → 422 / `{:error, :forbidden}` → 403),
+//     (`{:error, {:precondition_failed, detail}}` → 422 / `{:error, {:forbidden, detail}}` → 403),
 //     NOT a `raise(ArgumentError, …)` (which the fallback handler turned into a
 //     500).  Mirrors the vanilla workflow / ES-command guard shape.
 //   - `assign field := value`    → struct-update the threaded `record`,
@@ -58,8 +58,8 @@ describe("vanilla — T2.c returning-op body statements", () => {
     // `precondition` denies 422 (`:precondition_failed`); `requires` denies 403
     // (`:forbidden`) — the same atoms + status the workflow/ES-command renderers
     // use.  The guards run BEFORE the mutation/persist.
-    expect(ctx).toContain("with :ok <- ensure(delta != 0, :precondition_failed),");
-    expect(ctx).toContain(":ok <- ensure(record.quantity + delta >= 0, :forbidden) do");
+    expect(ctx).toContain("with :ok <- ensure(delta != 0, {:precondition_failed, ");
+    expect(ctx).toContain(":ok <- ensure(record.quantity + delta >= 0, {:forbidden, ");
     // The old raise form is gone — an expected denial is no longer a 500.
     expect(ctx).not.toContain("raise(ArgumentError");
     // The `ensure/2` helper is emitted for the state op that now needs it.
@@ -110,10 +110,10 @@ describe("vanilla — T2.c returning-op body statements", () => {
     // `requires` → 403 Forbidden; `precondition` → 422 — matching the atoms the
     // context fn's `with ensure(...)` chain short-circuits to.
     expect(ctl).toContain(
-      'def adjust_item_result(conn, {:error, :forbidden}),\n    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")',
+      'def adjust_item_result(conn, {:error, {:forbidden, detail}}),\n    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)',
     );
     expect(ctl).toContain(
-      'def adjust_item_result(conn, {:error, :precondition_failed}),\n    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")',
+      'def adjust_item_result(conn, {:error, {:precondition_failed, detail}}),\n    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)',
     );
   });
 });

@@ -101,7 +101,7 @@ describe("vanilla — workflow-level currentUser threading (§11a)", () => {
   it("renders the guard against the now-bound current_user", async () => {
     const { approve } = await loadWorkflows();
     expect(approve).toMatch(
-      /:ok <- \(if current_user\.role == "manager", do: :ok, else: \{:error, :forbidden\}\)/,
+      /:ok <- \(if current_user\.role == "manager", do: :ok, else: \{:error, \{:forbidden, .+?\}\}\)/,
     );
   });
 

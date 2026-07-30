@@ -37,6 +37,7 @@ import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
+import { denialTerm } from "./denial.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
@@ -181,8 +182,7 @@ function renderOpGuardClause(
   s: Extract<StmtIR, { kind: "requires" | "precondition" }>,
   rc: RenderCtx,
 ): string {
-  const reason = s.kind === "requires" ? ":forbidden" : ":precondition_failed";
-  return `:ok <- ensure(${renderExpr(s.expr, rc)}, ${reason})`;
+  return `:ok <- ensure(${renderExpr(s.expr, rc)}, ${denialTerm(s)})`;
 }
 
 /** Does the operation declare a `when` canCommand state gate (criterion.md use
@@ -842,10 +842,17 @@ export function renderReturningStmt(
     case "precondition":
       // Raise form — reached only by the pure-core / document / function paths
       // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 denial).
+      // NOTE the message is the DERIVED form even when the author wrote
+      // `message "…"`: `GUARD_RESCUE` below routes this raise to its status by
+      // MESSAGE PREFIX, so an authored message would miss the prefix and
+      // `reraise` into a 500.  The `ensure` path has no such coupling and does
+      // honour the clause.  Closing this needs the typed-exception reshape —
+      // M-T6.20.
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
       // Raise form — reached only by the pure-core / document / function paths
       // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 403 denial).
+      // Prefix-routed by `GUARD_RESCUE`, same coupling as the precondition arm.
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
@@ -1026,7 +1033,9 @@ function collectVanillaLeaves(
 // `renderStatement` above, and the `function-emit` / `domain-service-emit`
 // siblings).  A controller action appends this `rescue` clause so the raise maps
 // to the same HTTP status the other backends return — `requires` → 403 (Hono
-// `ForbiddenError`), `precondition` → 400 (Hono `DomainError` → Bad Request) —
+// `ForbiddenError`), `precondition` → 422 (RS-15 — a domain-floor rejection is
+// well-formed-but-semantically-rejected, not malformed; the typed-denial path
+// below has always answered 422, so this rescue arm was the odd one out) —
 // instead of propagating to Phoenix's default 500.  Any other `ArgumentError`
 // reraises unchanged (still a 500 for a genuine bug).
 export const GUARD_RESCUE = `  rescue
@@ -1038,7 +1047,7 @@ export const GUARD_RESCUE = `  rescue
           ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)
 
         String.starts_with?(guard_msg, "Precondition failed: ") ->
-          ProblemDetails.problem_response(conn, 400, "Bad Request", guard_msg)
+          ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", guard_msg)
 
         true ->
           reraise(guard_error, __STACKTRACE__)
@@ -1090,10 +1099,10 @@ export function renderReturningOpControllerAction(
       : []),
     ...(opHasGuards(op)
       ? [
-          `  def ${resultFn}(conn, {:error, :forbidden}),
-    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")`,
-          `  def ${resultFn}(conn, {:error, :precondition_failed}),
-    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`,
+          `  def ${resultFn}(conn, {:error, {:forbidden, detail}}),
+    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)`,
+          `  def ${resultFn}(conn, {:error, {:precondition_failed, detail}}),
+    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)`,
         ]
       : []),
   ];

@@ -38,7 +38,7 @@ import { collectWireImports, wireJavaType } from "./wire.js";
 //   DELETE /<plural_snake>/{id}         → 204 (lifecycle destroy)
 //
 // Errors flow through ApiExceptionAdvice → RFC 7807 problem+json:
-// DomainException 400, ForbiddenException 403, AggregateNotFound 404,
+// DomainException 422 (RS-15), ForbiddenException 403, AggregateNotFound 404,
 // MethodArgumentNotValidException 422 (+ `errors[]` extension), fallback 500.
 // ---------------------------------------------------------------------------
 
@@ -561,9 +561,15 @@ export function renderApiExceptionAdvice(
     ``,
     `    @ExceptionHandler(DomainException.class)`,
     `    public ResponseEntity<ProblemDetail> onDomain(DomainException e, WebRequest request) {`,
-    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 400);`,
+    // RS-15 (owner decision, 2026-07-29): a domain-floor rejection — a tripped
+    // `precondition`, a violated `invariant` — is 422, not 400.  The request is
+    // well-formed; the domain refuses it on SEMANTIC grounds, which is what RFC
+    // 9110 reserves 422 for.  400 stays for a malformed/unparseable request.
+    // 422 was already a declared response here (MethodArgumentNotValid), so the
+    // published contract does not move.
+    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 422);`,
     `        httpMetrics.recordDomainFault("domain_error");`,
-    `        return respond(problem(400, "Bad Request", e.getMessage(), request), 400);`,
+    `        return respond(problem(422, "Unprocessable Entity", e.getMessage(), request), 422);`,
     `    }`,
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,
@@ -624,10 +630,21 @@ export function renderApiExceptionAdvice(
     `        return respond(problem(500, "Internal Server Error", "internal", request), 500);`,
     `    }`,
     ``,
+    // RS-9 — the RFC 7807 `type` member must be PRESENT and "about:blank",
+    // matching node/dotnet/python/elixir byte-for-byte.  Spring's
+    // ProblemDetailJacksonMixin annotates getType() @JsonInclude(NON_DEFAULT),
+    // so the default about:blank URI is silently DROPPED from the body — legal
+    // per RFC 9457 (absent means about:blank) but a cross-backend divergence
+    // the wire golden fails on.  Writing it through setProperty routes it via
+    // the mixin's @JsonAnyGetter instead, which has no such suppression; the
+    // suppressed getType() is why this cannot produce a duplicate key.
+    // (`instance` needs no such help — Spring's message converter fills a null
+    // instance with the request URI on the way out.)
     `    private static ProblemDetail problem(int status, String title, String detail, WebRequest request) {`,
     `        var problem = ProblemDetail.forStatus(HttpStatus.valueOf(status));`,
     `        problem.setTitle(title);`,
     `        problem.setDetail(detail);`,
+    `        problem.setProperty("type", "about:blank");`,
     `        return problem;`,
     `    }`,
     ``,

@@ -104,11 +104,14 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        // RS-15: a domain-floor rejection (precondition / invariant) is 422 —
+        // the request is well-formed, the domain refuses it on semantic
+        // grounds.  400 stays for a malformed request.
         if (context.Exception is DomainException de)
         {
-            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 400);
+            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 422);
             global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("domain_error");
-            context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
+            context.Result = Problem(context, 422, "Unprocessable Entity", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }

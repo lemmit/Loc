@@ -79,7 +79,7 @@ describe("vanilla extern seam", () => {
     const ctx = files.get("api/lib/api/c.ex")!;
     // Preconditions still run, THEN delegate to the user impl (rebinding record),
     // THEN persist every scalar column off the returned struct.
-    expect(ctx).toContain("with :ok <- ensure(is_mutable(record), :precondition_failed),");
+    expect(ctx).toContain("with :ok <- ensure(is_mutable(record), {:precondition_failed, ");
     expect(ctx).toContain("{:ok, record} <- Api.C.OrderExternImpl.confirm(record, params) do");
     expect(ctx).toContain("|> Ecto.Changeset.force_change(:status, record.status)");
     expect(ctx).toContain("|> Ecto.Changeset.force_change(:risk_score, record.risk_score)");

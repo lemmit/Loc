@@ -16,14 +16,17 @@
 //      collection, and an unset `optional` field's key — present-and-null vs
 //      omitted.  A backend that drops the key, or sends `null` for an empty
 //      list, breaks a client that iterates without a guard.
-// A third class — the ERROR ENVELOPE (RS-9) — is deliberately NOT here yet.  A
-// draft of this system asserted that a tripped `precondition` is a 400 with a
-// 7807 body; node/python/dotnet agree on 400, but **elixir answers 422**, and
-// that is a DELIBERATE mapping (`when` → 409, `requires` → 403, `precondition`
-// → 422, api-emit.ts), not a bug.  Which status is canonical is an OPEN owner
-// decision — see RS-15 — and until it lands, an emitted `toThrow(<status>)`
-// assertion would simply encode one side of it.  Error-envelope coverage joins
-// this system once RS-15 is settled.
+//   3. ERROR ENVELOPE (RS-15).  A tripped `precondition` — the DOMAIN floor —
+//      must answer the same status with the same RFC 7807 body everywhere.
+//      This one arrived last, and it took two fixes to become assertable: the
+//      four backends that answered **400** moved to **422** (elixir's
+//      deliberate `when` → 409 / `requires` → 403 / `precondition` → 422 ladder
+//      turned out to be the right side, not the majority's), and elixir's typed
+//      denial — a bare `{:error, :precondition_failed}` atom carrying no
+//      message — grew the predicate source so its `detail` names what failed
+//      instead of a fixed sentence.  Only then could the golden hold it
+//      byte-exact; a waiver would have parked the divergence rather than
+//      closing it.
 //
 // Deliberately plain otherwise — one relational aggregate, no auth, no
 // tenancy, no inheritance — so a divergence here localizes to the edge under
@@ -58,8 +61,8 @@ system WireContract {
           tags += Tag { label: label }
         }
 
-        // (3) a precondition the second call trips → the 409 arm of the error
-        // envelope.  Discontinuing twice is the failure path.
+        // (3) a precondition the second call trips → the 422 arm of the error
+        // envelope (RS-15).  Discontinuing twice is the failure path.
         operation discontinue() {
           precondition availability != Availability.Discontinued
           availability := Availability.Discontinued
@@ -106,6 +109,19 @@ system WireContract {
     api.listings.addTag(l, { label: "clearance" })
     let read = api.listings.getById(l)
     expect(read.tags.length).toBe(1)
+  }
+
+  // (3) RS-15 — the DOMAIN FLOOR.  The first `discontinue` succeeds; the second
+  // trips `precondition availability != Discontinued`.  `toThrow(422)` pins the
+  // status on all five, and because the recorder captures the RESPONSE BODY the
+  // golden additionally pins the whole RFC 7807 envelope — `type`, `title`,
+  // `status`, and the `detail` that names the failed predicate.  That last field
+  // is why this test could not exist before: elixir's typed denial carried no
+  // message.
+  test e2e "a tripped precondition is a 422 problem+json on every backend" against api {
+    let l = api.listings.create({ sku: "SKU-3", price: "1", availability: "InStock" })
+    api.listings.discontinue(l)
+    expect(api.listings.discontinue(l)).toThrow(422)
   }
 
 }

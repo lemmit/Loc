@@ -41,6 +41,7 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { denialTerm } from "./denial.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
@@ -582,8 +583,15 @@ export function renderEsController(
     : "";
   const commandError = hasCommands
     ? `
-${disallowedClause}  defp command_error(conn, :forbidden) do
-    ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
+${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
+    ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
+  end
+
+  # RS-15 — a tripped precondition names the predicate that failed, matching
+  # node/dotnet/java/python byte-for-byte.  The catch-all below stays for an
+  # untagged reason (a raise the domain core didn't type).
+  defp command_error(conn, {:precondition_failed, detail}) do
+    ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)
   end
 
   # A concurrent append lost the (stream_id, version) race — the append-only PK
@@ -700,10 +708,10 @@ function renderCommandRunner(c: CommandCtx): string {
   for (const s of c.op.statements) {
     switch (s.kind) {
       case "precondition":
-        clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, :precondition_failed)`);
+        clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, ${denialTerm(s)})`);
         break;
       case "requires":
-        clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, :forbidden)`);
+        clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, ${denialTerm(s)})`);
         break;
       case "let":
         lets.push(`    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, exprCtx)}`);

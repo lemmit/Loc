@@ -71,6 +71,8 @@ function renderPureBlock(stmts: StmtIR[], rc: RenderCtx): string[] {
         break;
       case "precondition":
         lines.push(
+          // Derived message, NOT the author's `message "…"` — prefix-routed by
+          // `GUARD_RESCUE` at the controller.  See M-T6.20.
           `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`,
         );
         break;

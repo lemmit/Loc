@@ -86,6 +86,7 @@ import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { denialTerm } from "./denial.js";
 import { renderFunctionBodyLines } from "./function-emit.js";
 
 export interface VanillaWorkflowExecResult {
@@ -283,7 +284,7 @@ function lowerStatement(
       return [
         {
           kind: "with-clause",
-          text: `:ok <- (if ${cond}, do: :ok, else: {:error, :precondition_failed})`,
+          text: `:ok <- (if ${cond}, do: :ok, else: {:error, ${denialTerm(st)}})`,
           bindName: undefined,
         },
       ];
@@ -297,7 +298,7 @@ function lowerStatement(
       return [
         {
           kind: "with-clause",
-          text: `:ok <- (if ${cond}, do: :ok, else: {:error, :forbidden})`,
+          text: `:ok <- (if ${cond}, do: :ok, else: {:error, ${denialTerm(st)}})`,
           bindName: undefined,
         },
       ];
@@ -564,11 +565,11 @@ function lowerStatement(
             const rest = body.slice(i + 1);
             if (inner.kind === "precondition") {
               clauses.push(
-                `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :precondition_failed})`,
+                `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, ${denialTerm(inner)}})`,
               );
             } else if (inner.kind === "requires") {
               clauses.push(
-                `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :forbidden})`,
+                `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, ${denialTerm(inner)}})`,
               );
             } else if (inner.kind === "op-call") {
               clauses.push(`{:ok, _} <- ${opCallSource(inner, renderCtx, contextModule, ctx)}`);
@@ -848,12 +849,12 @@ function renderLoopBody(
       }
       case "precondition":
         clauses.push(
-          `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :precondition_failed})`,
+          `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, ${denialTerm(inner)}})`,
         );
         break;
       case "requires":
         clauses.push(
-          `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :forbidden})`,
+          `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, ${denialTerm(inner)}})`,
         );
         break;
       case "expr-let": {
@@ -1613,11 +1614,11 @@ ${actions}
   def respond(conn, {:error, :not_found}),
     do: ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
 
-  def respond(conn, {:error, :forbidden}),
-    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Workflow guard rejected the request")
+  def respond(conn, {:error, {:forbidden, detail}}),
+    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
 
-  def respond(conn, {:error, :precondition_failed}),
-    do: ProblemDetails.problem_response(conn, 422, "Precondition Failed", "Workflow precondition rejected the request")
+  def respond(conn, {:error, {:precondition_failed, detail}}),
+    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)
 
   def respond(conn, {:error, reason}),
     do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))

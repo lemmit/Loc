@@ -327,7 +327,7 @@ Inside an aggregate or an `entity` part:
 | `operation name(params) { … }` | Public mutating method (root only). |
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
 | `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
-| `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Supported on all five backends (node, dotnet, python, elixir, java). Distinct from `requires` (auth, 403) and `precondition` (argument validation, 400). |
+| `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Supported on all five backends (node, dotnet, python, elixir, java). Distinct from `requires` (auth, 403) and `precondition` (domain validity, 422). |
 | `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs(eventLog)` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
 | `entity Name { … }` | Nested part declaration (inside an aggregate). |
 | `test "name" { … }` | Test block; lowers to vitest / xUnit (root only). |
@@ -844,7 +844,7 @@ decimal`.
 
 | Form | Purpose |
 | --- | --- |
-| `precondition Expression` | Runtime check; failure throws a domain error (HTTP 400). |
+| `precondition Expression` | Runtime check; failure throws a domain error (HTTP 422 — RS-15). |
 | `lhs := Expression` | Assignment to a property reachable from `this`.  Derived properties are not assignable. |
 | `coll += value` | Append to a contained collection. |
 | `coll -= value` | Remove from a contained collection. |
@@ -945,7 +945,7 @@ status **parity** assertion — pass the status to `toThrow`:
 
 ```ddd
 test e2e "creating a project with an empty name is rejected" against api {
-    expect(api.projects.create({ name: "" })).toThrow(400)
+    expect(api.projects.create({ name: "" })).toThrow(422)
 }
 test e2e "reading a non-existent project is 404" against api {
     expect(api.projects.getById("…")).toThrow(404)
@@ -958,7 +958,7 @@ generated fetch helper surfaces in the thrown error message.  The status
 argument is **e2e-only** (an in-process `test` has no wire status — the
 validator rejects it there) and must be an integer literal.  The status
 contract is identical across every backend: an `invariant` / `check` violation
-rejects with **400** (DomainError), a missing aggregate with **404**.  Because
+rejects with **422** (DomainError — RS-15; 400 stays for a malformed body), a missing aggregate with **404**.  Because
 every `test e2e` block replays against each backend serving the referenced
 module, `toThrow(N)` asserts they all reject with the same status — the
 behavioral complement to the static OpenAPI `errorResponseDiffs` parity gate.

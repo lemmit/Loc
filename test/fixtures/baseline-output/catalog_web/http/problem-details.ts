@@ -42,8 +42,11 @@ function pointerOf(path: ReadonlyArray<PropertyKey>): string {
  *
  *  Validation failures get 422 (Unprocessable Entity, RFC 7807 standard
  *  for input-shape errors).  Domain-rule violations carried by
- *  DomainError continue to emit 400 via the router's `app.onError`
- *  catch-all (different fault class, different code). */
+ *  DomainError ALSO emit 422 via the router's `app.onError` catch-all
+ *  (RS-15, owner decision 2026-07-29): both are well-formed requests the
+ *  server refuses on SEMANTIC grounds, which is what RFC 9110 reserves 422
+ *  for, and it makes the denial ladder identical on all five backends.  400
+ *  stays for a genuinely malformed/unparseable request. */
 export function defaultHook(result: { success: boolean; error?: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string; params?: { loomCode?: string } }> } }, c: Context): Response | undefined {
   if (result.success) return undefined;
   const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";

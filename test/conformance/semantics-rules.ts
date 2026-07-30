@@ -273,30 +273,93 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   },
   {
     id: "RS-15",
-    title: "A tripped operation `precondition` maps to one canonical status",
-    trigger: "an `operation` whose `precondition` is false at call time",
+    title: "A domain-floor rejection is 422, not 400",
+    trigger:
+      "an `operation` whose `precondition` is false at call time, or a violated `invariant` — any rejection the DOMAIN makes on a well-formed request",
     observable:
-      'the backends DISAGREE, and this rule exists to name the disagreement rather than to assert a winner. node/python/dotnet answer 400 ("Bad Request") with the specific predicate in `detail` ("Precondition failed: availability != Availability.Discontinued"); elixir answers 422 ("Unprocessable Entity") with a generic "A precondition failed". Neither side is an accident: elixir\'s mapping is deliberate and documented — a coherent denial ladder (`when` -> 409, `requires` -> 403, `precondition` -> 422, api-emit.ts) that replaced an older `raise ArgumentError` -> 500 — and 422 is arguably the better RFC 9110 fit for a well-formed but semantically-rejected request, while 400 is what the other backends emit.',
-    // NOT a one-backend bug, so NOT a majority call: this is the RS-12 shape —
-    // an OPEN canonical decision the owner settles, after which ONE side changes
-    // and this rule flips to a normal conforming-everywhere clause.  Until then
-    // the wire-contract shared system deliberately carries no error-status
-    // assertion, because an emitted `toThrow(<status>)` would silently encode
-    // one side of the undecided question.
-    // PROVISIONAL direction, recorded the way RS-12 originally was: the three
-    // backends MEASURED on 400 are listed as conforming so the registry keeps
-    // its "every rule names a winner" invariant, but the call is NOT settled —
-    // if the owner picks 422 this flips and the fix target becomes the other
-    // four.  `java` sits in `targets` because it was NOT measured on this path,
-    // not because it is known to diverge.
-    conforms: ["node", "dotnet", "python"],
-    targets: ["elixir", "java"],
+      'every backend answers 422 "Unprocessable Entity" with the RFC 7807 body. The request is well-formed; the server refuses it on SEMANTIC grounds, which is exactly what RFC 9110 reserves 422 for — 400 stays for a malformed or unparseable request. This also makes the denial ladder identical everywhere: `when` state gate -> 409, `requires` -> 403, precondition/invariant -> 422.',
+    // Owner decision (2026-07-29).  Found by the M-T9.11 wire-golden gate:
+    // node/python/dotnet/java answered 400 while elixir answered 422 — and
+    // elixir's was the DELIBERATE, documented ladder, not an accident.  So this
+    // was RS-12's shape (an open canonical decision), NOT RS-13's (a
+    // one-backend bug), and the majority was the side that moved.  RS-11 is the
+    // standing reminder that a vote is not an oracle.
+    //
+    // The four backends that moved already DECLARED 422 on these routes
+    // (wire-boundary validation), so the published OpenAPI contract did not
+    // change — only which rejections land on it.
+    //
+    // NOTE the `detail` WORDING is still divergent and is tracked separately:
+    // node/python/dotnet/java name the failed predicate ("Precondition failed:
+    // <expr>"), elixir sends a generic "A precondition failed".  RFC 7807 wants
+    // `detail` specific to the occurrence, so elixir is the side to move; that
+    // needs the predicate source threaded through its `:precondition_failed`
+    // denial atom, which is a mechanism change rather than a status one.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
-      "found by the M-T9.11 wire-golden gate while extending its coverage (test/behavioral/systems/wire-contract.ddd)",
-      "measured on a real boot: node/python/dotnet -> 400; elixir -> 422; java unmeasured",
-      "elixir: ProblemDetails.problem_response(conn, 422, ...) in api-emit.ts denialArms",
-      "node: DomainError(`Precondition failed: ...`) -> 400",
-      "OPEN owner decision: 400 (majority + state-gate precedent) vs 422 (RFC 9110 semantics, elixir's deliberate ladder)",
+      "found by the M-T9.11 wire-golden gate (test/behavioral/systems/wire-contract.ddd)",
+      "owner decision 2026-07-29: 422, adopting elixir's deliberate denial ladder",
+      "node routes/workflow/projection/explicit-handler onError; python _domain handler; dotnet DomainExceptionFilter; java onDomain",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-16",
+    title: "The RFC 7807 `type` member is always present",
+    trigger:
+      "any error response — a tripped precondition, a wire-validation failure, a framework 404, a declared `error` payload — on a backend serving an api",
+    observable:
+      'the problem+json body carries all five RFC 7807 members — `type`, `title`, `status`, `detail`, `instance` — with `type` never omitted. Its VALUE depends on the kind of error: a FRAMEWORK problem (domain floor, wire validation, aggregate-not-found) carries "about:blank"; a DECLARED `error` payload carries its derived `/errors/<kebab-name>` URI (`errorTypeUri`, e.g. "/errors/not-found"). Omitting `type` is legal per RFC 9457 (absent means about:blank) but it is a WIRE divergence: a client reading `body.type` gets a string on four backends and `undefined` on the fifth.',
+    // Found by the M-T9.11 wire-golden gate the moment the error envelope
+    // joined it (RS-15) — the first time any golden contained an error body.
+    // Java was the outlier for a framework reason, not an emitter oversight:
+    // Spring's `ProblemDetailJacksonMixin` annotates `getType()`
+    // `@JsonInclude(NON_DEFAULT)`, so the about:blank URI that
+    // `ProblemDetail.forStatus` installs is silently dropped on the way out.
+    // The fix writes it through `setProperty` instead, which serializes via the
+    // mixin's `@JsonAnyGetter` (no suppression, and no duplicate key precisely
+    // because `getType()` stays suppressed).  Verified on a real boot, not just
+    // an emitted-string assertion.
+    //
+    // `instance` needed no help on any backend: Spring's message converter
+    // fills a null instance with the request URI on the way out.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found by the M-T9.11 wire-golden gate (test/behavioral/systems/wire-contract.ddd seq #7) once RS-15 put an error body in the golden",
+      "fixed (java): ApiExceptionAdvice's problem() sets `type` via setProperty to bypass Spring's NON_DEFAULT suppression",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-17",
+    title: "A `when` state-gate rejection names the operation it refused — OPEN",
+    trigger:
+      "an `operation … when <pred>` invoked in a state the predicate rejects — the 409 rung of the denial ladder",
+    observable:
+      'every backend answers 409, but the ENVELOPE splits four-vs-one. node/dotnet/java/python send title "Disallowed" with the occurrence-specific detail "operation \'<op>\' is not allowed in the current state of <Agg>."; elixir sends title "Conflict" with the fixed sentence "Operation not allowed in the current state".',
+    // OPEN — found, not yet fixed.  Sized and left out of #2300 deliberately:
+    // the fix is a third pass over the elixir denial protocol (the `:disallowed`
+    // atom has to become a `{:disallowed, msg}` tuple the same way
+    // `:precondition_failed` did in RS-15), and one of its three sites — the
+    // event-sourced `command_error/2` clause — is SHARED across every command of
+    // an aggregate, so it has no single `op` in scope to name.  That is a
+    // mechanism change, not a string swap.
+    //
+    // WHICH SIDE IS RIGHT is not a vote here either — Loom's own rule decides
+    // it, twice over:
+    //   * `title` — `errorTitle` (src/util/error-defaults.ts) derives a title by
+    //     humanising the ERROR NAME, falling back to the status reason phrase
+    //     only when there is no named error.  `Disallowed` IS a blessed stdlib
+    //     error name, so "Disallowed" is correct and "Conflict" is the miss.
+    //   * `detail` — RFC 7807 wants it specific to the OCCURRENCE (the same
+    //     reasoning that settled RS-15), so naming the op + aggregate wins.
+    // Elixir moves on both.  Listing only the measured-conforming backends
+    // follows RS-12's precedent for a rule whose direction is decided but whose
+    // fix has not landed.
+    conforms: ["node", "dotnet", "java", "python"],
+    provenance: [
+      "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — reading the freshly-minted `state-gate` golden, before booting a second backend",
+      "predicted from the emitters and confirmed by grep, not by a failing run: the gate's coverage had not reached this case yet",
     ],
     tier: "behavioral",
   },

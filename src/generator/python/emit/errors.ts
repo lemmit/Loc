@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // `app/domain/errors.py` — the domain error taxonomy every layer maps
-// onto HTTP statuses (DomainError → 400, AggregateNotFoundError → 404,
+// onto HTTP statuses (DomainError → 422 per RS-15, AggregateNotFoundError → 404,
 // ForbiddenError → 403, DisallowedError → 409).  Mirrors the TS
 // `domain/errors.ts`.
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ class ConcurrencyError(Exception):
 
 
 class DomainError(Exception):
-    """Precondition or invariant violation (surfaces as HTTP 400)."""
+    """Precondition or invariant violation (surfaces as HTTP 422 — RS-15)."""
 
 
 class AggregateNotFoundError(Exception):

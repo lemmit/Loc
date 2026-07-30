@@ -33,6 +33,7 @@ import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { denialTerm } from "./denial.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 
 /** Event-sourced workflows in a context. */
@@ -428,13 +429,13 @@ export function renderEsWorkflowHandler(
   for (const st of sub.statements) {
     switch (st.kind) {
       case "precondition": {
-        const text = `:ok <- ensure(${renderExpr(st.expr, renderCtx)}, :precondition_failed)`;
+        const text = `:ok <- ensure(${renderExpr(st.expr, renderCtx)}, ${denialTerm(st)})`;
         guards.push(text);
         regions.push({ text, origin: st.origin });
         break;
       }
       case "requires": {
-        const text = `:ok <- ensure(${renderExpr(st.expr, renderCtx)}, :forbidden)`;
+        const text = `:ok <- ensure(${renderExpr(st.expr, renderCtx)}, ${denialTerm(st)})`;
         guards.push(text);
         regions.push({ text, origin: st.origin });
         break;

@@ -89,13 +89,17 @@ describe("named policy functions — per-backend requires enforcement", () => {
     expect(text).toContain('Enum.member?(current_user.permissions, "sales.approve")');
     expect(text).toContain('Enum.member?(current_user.permissions, "sales.manage")');
     expect(text).toContain('Decimal.new("10000")');
-    // The `requires` predicate is inlined into a `with :ok <- ensure(…, :forbidden)`
-    // guard — an expected denial returns `{:error, :forbidden}` (→ 403), not a
+    // The `requires` predicate is inlined into a `with :ok <- ensure(…, {:forbidden, msg})`
+    // guard — an expected denial returns `{:error, {:forbidden, detail}}` (→ 403), not a
     // `raise(ArgumentError, "Forbidden: …")` (→ 500).  See the phoenix op-guards fix.
     expect(text).toContain(
-      'ensure(Enum.member?(current_user.permissions, "sales.manage"), :forbidden)',
+      'ensure(Enum.member?(current_user.permissions, "sales.manage"), {:forbidden, ',
     );
-    expect(text).not.toContain('"Forbidden: CanApprove(amount)"');
+    // …and NOT as a raise.  The message itself is still emitted — it now rides
+    // INSIDE the denial tuple so the ProblemDetails `detail` names the failed
+    // predicate (RS-15) — so the negative has to target the `raise`, not the
+    // string.
+    expect(text).not.toContain('raise(ArgumentError, "Forbidden: CanApprove(amount)")');
   });
 
   it("a plain aggregate with no policy-function gate is unaffected", async () => {
