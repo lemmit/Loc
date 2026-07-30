@@ -49,31 +49,6 @@ const FAST_SLICE = [
 const FULL = process.env.LOOM_MUTATION_FULL === "1";
 const FEATURES = FULL ? CORPUS : CORPUS.filter((f) => FAST_SLICE.includes(f.id));
 
-// ---------------------------------------------------------------------------
-// Ratcheting waiver — codeless macro-expansion diagnostics.
-//
-// The rejection arm below demands a `loom.*` CODE, not merely an error: that is
-// what separates an honest refusal from a mutation that broke the program by
-// accident.  One layer cannot satisfy it yet — `ExpansionDiagnostic`
-// (`src/macros/expander.ts:94`) has no `code` field at all, so all 12
-// macro-expansion refusals reach the user uncoded (and `src/api/report.ts`
-// buckets them as `loom.unknown`, which is why the playground and `--json`
-// surfaces cannot key on them either).
-//
-// Waived by MESSAGE FRAGMENT rather than blanket-allowing codeless errors, so a
-// NEW uncoded diagnostic still fails this gate.  Each entry dies when the macro
-// layer gains codes; the list only shrinks.
-const UNCODED_MACRO_DIAGNOSTICS: readonly { fragment: string; reason: string }[] = [
-  {
-    fragment: "collides with Loom's optimistic-concurrency column",
-    reason: "G2 (#2316) is raised by the expander, whose ExpansionDiagnostic carries no code field",
-  },
-];
-
-function isWaivedCodeless(errors: readonly string[]): boolean {
-  return errors.some((e) => UNCODED_MACRO_DIAGNOSTICS.some((w) => e.includes(w.fragment)));
-}
-
 /** The `loom.*` codes carried by a parse's error diagnostics.  The code lives on
  *  `Diagnostic.code` (or `data.code` for the IR phase) — NOT in the rendered
  *  message, which is what `parseString`'s `errors` gives back. */
@@ -124,7 +99,6 @@ describe("corpus mutation — reject with a loom.* code, or emit on every declar
         // mutation broke the program by accident, not that the seam was caught.
         const verdict = await validateOnce(mutated);
         if (!verdict.ok) {
-          if (isWaivedCodeless(verdict.errors)) return;
           expect(
             verdict.codes,
             `${feature.id} x ${mutation.id} was rejected, but by no loom.* rule ` +

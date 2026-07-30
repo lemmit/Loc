@@ -93,6 +93,12 @@ const buildCapabilityRef: BuildRef = (_node, _property, _refNode, refText) =>
 
 interface ExpansionDiagnostic {
   severity: "error" | "warning";
+  /** `loom.*` diagnostic code.  REQUIRED — a codeless refusal reaches the user
+   *  as `loom.unknown` (see `src/api/report.ts`), which the playground, the
+   *  `--json` surfaces, the MCP catalog and the docs tables cannot key on.
+   *  Typing it as required is the ratchet: a new expansion diagnostic will not
+   *  compile until it names its code. */
+  code: `loom.${string}`;
   message: string;
   node: object;
   property?: string;
@@ -256,6 +262,7 @@ function expandHost(
       } else {
         recordDiagnostic(doc, {
           severity: "error",
+          code: "loom.unknown-capability",
           message: `Unknown capability '${m.cap}' in 'implements'.`,
           node: m,
           property: "cap",
@@ -317,6 +324,7 @@ function applyDefaultVersioning(
     if (!isIntProperty(declared)) {
       recordDiagnostic(doc, {
         severity: "error",
+        code: "loom.version-field-collision",
         message:
           `field 'version' on aggregate '${agg.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
           `Rename this field (e.g. '${lowerFirstSafe(agg.name)}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
@@ -388,6 +396,7 @@ function expandOneCall(
     }
     recordDiagnostic(doc, {
       severity: "error",
+      code: "loom.unknown-macro",
       message: `Unknown macro or capability '${name}'.  Available macros: ${listMacroNames()}.`,
       node: call,
       property: "name",
@@ -397,6 +406,7 @@ function expandOneCall(
   if (macro.target !== hostKind) {
     recordDiagnostic(doc, {
       severity: "error",
+      code: "loom.macro-target-mismatch",
       message: `Macro '${name}' targets '${macro.target}' but was invoked on a '${hostKind}'.`,
       node: call,
       property: "name",
@@ -424,6 +434,7 @@ function expandOneCall(
     if (!child) {
       recordDiagnostic(doc, {
         severity: "error",
+        code: "loom.unknown-macro",
         message:
           `Macro '${name}' invoked unknown macro '${childName}'.  ` +
           `Available: ${listMacroNames()}.`,
@@ -451,6 +462,7 @@ function expandOneCall(
     } catch (err) {
       recordDiagnostic(doc, {
         severity: "error",
+        code: "loom.macro-threw",
         message: `Macro '${childName}' (invoked from '${name}') threw: ${(err as Error).message}`,
         node: call,
         property: "name",
@@ -490,6 +502,7 @@ function expandOneCall(
   } catch (err) {
     recordDiagnostic(doc, {
       severity: "error",
+      code: "loom.macro-threw",
       message: `Macro '${name}' threw during expansion: ${(err as Error).message}`,
       node: call,
       property: "name",
@@ -546,6 +559,7 @@ function expandCapability(
   if (hostKind === "ui" || hostKind === "api") {
     recordDiagnostic(doc, {
       severity: "error",
+      code: "loom.capability-host-invalid",
       message:
         `Capability '${cap.name}' can only be applied to an aggregate or context (got '${hostKind}').  ` +
         "A capability is a pure mixin over domain state, not a UI or API concern.",
@@ -674,6 +688,7 @@ function spliceMembers(
     if (!m || typeof m !== "object") {
       recordDiagnostic(doc, {
         severity: "error",
+        code: "loom.macro-non-ast-result",
         message: `Macro returned a non-AST value (${typeof m}); expected an AST member or capability node.`,
         node: call,
       });
@@ -687,6 +702,7 @@ function spliceMembers(
     if (!isHostOrDescendant(host, dest)) {
       recordDiagnostic(doc, {
         severity: "error",
+        code: "loom.macro-escapes-host",
         message:
           "Macro emitted a node targeting a destination outside the host's subtree.  " +
           "Macros may only modify their host or its descendants (e.g. a context-level macro " +
@@ -807,6 +823,7 @@ function bindArgs(
     if (provided.has(a.name)) {
       record({
         severity: "error",
+        code: "loom.macro-arg-duplicate",
         message: `Duplicate argument '${a.name}' in call to macro '${macro.name}'.`,
         node: a,
         property: "name",
@@ -825,6 +842,7 @@ function bindArgs(
     if (!ps) {
       record({
         severity: "error",
+        code: "loom.macro-arg-unknown",
         message:
           `Unknown argument '${name}' for macro '${macro.name}'.  ` +
           `Declared parameters: ${Object.keys(spec).join(", ") || "(none)"}.`,
@@ -851,6 +869,7 @@ function bindArgs(
     } else {
       record({
         severity: "error",
+        code: "loom.macro-arg-missing",
         message: `Macro '${macro.name}' requires argument '${name}' (kind=${ps.kind}).`,
         node: call,
       });
@@ -893,6 +912,7 @@ function coerceArg(
           if (!silentRefs) {
             record({
               severity: "error",
+              code: "loom.macro-arg-unresolved-ref",
               message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
               node: arg,
               property: "value",
@@ -915,6 +935,7 @@ function coerceArg(
             if (!silentRefs) {
               record({
                 severity: "error",
+                code: "loom.macro-arg-unresolved-ref",
                 message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
                 node: arg,
                 property: "value",
@@ -932,6 +953,7 @@ function coerceArg(
   }
   record({
     severity: "error",
+    code: "loom.macro-arg-kind-mismatch",
     message: `Argument '${argName}' to macro '${macroName}' expected kind '${spec.kind}'.`,
     node: arg,
     property: "value",
@@ -1048,6 +1070,7 @@ export function collectUnresolvedMacroRefs(
     unresolved = true;
     record({
       severity: "error",
+      code: "loom.macro-arg-unresolved-ref",
       message: `Argument '${arg.name}' to macro '${macroName}' references unknown ${kind} '${name}'.`,
       node: arg,
       property: "value",
