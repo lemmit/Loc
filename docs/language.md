@@ -221,7 +221,7 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field (always a `guid`; `ids guid` is an optional explicit spelling — `ids int\|long\|string` were removed, see the identity note below).  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on all five backends — `dotnet`, `node`, `python`, `java`, and `elixir` (Route A — plain Phoenix persists the aggregate as a typed `embeds_one` embed) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
+| `[abstract] [crossTenant] aggregate Name [extends Base] [persistedAs: eventLog\|state] [shape: relational\|embedded\|document] [inheritanceUsing: sharedTable\|ownTable] { … }` | Aggregate root with implicit `Name id` field (always a `guid` — there is no `ids` clause; see the identity note below).  The `abstract`/`crossTenant` adjectives **lead**, and the colon modifiers are **order-independent**.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs: …` picks the primary truth kind (default `state`); `shape: …` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on all five backends — `dotnet`, `node`, `python`, `java`, and `elixir` (Route A — plain Phoenix persists the aggregate as a typed `embeds_one` embed) (a `shape: …` a backend can't emit is a validation error — see `supportedShapes`). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 | `policy [Name] { allow [write] local\|deep\|global on Aggregate … }` | Read/write-scope ladder for `tenantOwned` aggregates under a tenant hierarchy — widens the tenant floor to the caller's org subtree (`deep`) or root-org subtree (`global`); the optional `write` verb gates instance mutations. The name is optional; one rule per aggregate. See [tenancy.md](tenancy.md) → "The `policy {}` read ladder". |
@@ -241,10 +241,12 @@ Cross-aggregate references are written as `Other id`:
 customerId: Customer id
 ```
 
-The underlying value type is always `guid`. `ids guid` may be written
-explicitly (a no-op spelling of the default); `ids int|long|string` were
-removed — no backend implemented id generation for a non-guid primary key, so
-declaring one produced an app that collided on the second insert. See
+The underlying value type is always `guid`, and there is **no `ids` clause** —
+`ids int|long|string` were removed (no backend implemented id generation for a
+non-guid primary key, so declaring one produced an app that collided on the
+second insert), and the no-op `ids guid` spelling was removed with the rest of
+the header normalization (M-T5.17). `aggregate Order { … }` is a parse
+error; write `aggregate Order { … }`. See
 [`docs/old/plans/non-guid-id-http-params.md`](old/plans/non-guid-id-http-params.md).
 
 #### Reference collections — `X id[]`
@@ -299,7 +301,7 @@ can be queried polymorphically:
 | --- | --- |
 | `abstract aggregate <Name> { … }` | A base that is never instantiated: no table / repository / routes of its own. May declare fields and `derived` getters; may **not** declare `create` / `operation` behaviour or a `repository`. |
 | `aggregate <X> extends <Base> { … }` | A concrete subtype. `<Base>` must be an `abstract aggregate` in the same context. Inherits the base's fields (merged into the wire shape ahead of its own; an own field shadows a like-named base field). |
-| `inheritanceUsing(sharedTable \| ownTable)` | Header modifier (on the base, optionally per concrete) choosing the table-mapping strategy. Default `sharedTable` (TPH). `ownTable` (TPC) emits a standalone table per concrete. |
+| `inheritanceUsing: sharedTable\|ownTable` | Header modifier (on the base, optionally per concrete) choosing the table-mapping strategy. Default `sharedTable` (TPH). `ownTable` (TPC) emits a standalone table per concrete. |
 
 `find all <Base>` returns the polymorphic union of all subtypes via a per-backend
 reader. TPC (`ownTable`) is emitted on every backend; TPH (`sharedTable`) is
@@ -328,7 +330,7 @@ Inside an aggregate or an `entity` part:
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
 | `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
 | `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Supported on all five backends (node, dotnet, python, elixir, java). Distinct from `requires` (auth, 403) and `precondition` (domain validity, 422). |
-| `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs(eventLog)` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
+| `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs: eventLog` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
 | `entity Name { … }` | Nested part declaration (inside an aggregate). |
 | `test "name" { … }` | Test block; lowers to vitest / xUnit (root only). |
 
@@ -358,9 +360,9 @@ diagnostic points you at `Order.create({ … })` rather than the older generic
 of the [access-modifier matrix](#field-access-modifiers): a `managed` field
 like `createdAt` is off it, so `Order.create({ createdAt: … })` is rejected.
 
-#### Event sourcing — `persistedAs(eventLog)` + `apply(...)`
+#### Event sourcing — `persistedAs: eventLog` + `apply(...)`
 
-An aggregate marked `persistedAs(eventLog)` in its header is **event-sourced**:
+An aggregate marked `persistedAs: eventLog` in its header is **event-sourced**:
 its truth is an append-only event stream, and its state is a fold of that
 stream. The body contract differs from a state-based aggregate, and the
 compiler enforces it (in the IR validator and live in the editor):
@@ -388,7 +390,7 @@ compiler enforces it (in the IR validator and live in the editor):
 event Opened { account: Account id, owner: string }
 event Deposited { account: Account id, amount: int }
 
-aggregate Account ids guid persistedAs(eventLog) {
+aggregate Account persistedAs: eventLog {
   owner: string
   balance: int
   create open(owner: string) {
@@ -415,7 +417,7 @@ Mark a stored field `provenanced` to capture the lineage of every value it
 holds:
 
 ```
-aggregate Order ids guid {
+aggregate Order {
   total: int provenanced
   operation reprice(qty: int, price: int) {
     total := qty * price - discount   // write-site #1

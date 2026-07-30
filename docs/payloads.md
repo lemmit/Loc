@@ -98,7 +98,7 @@ wire so a consumer can branch. Two surfaces, one IR shape:
 return, no declaration:
 
 ```
-aggregate Order ids guid {
+aggregate Order {
   operation locate(): Order or NotFound { … }   # tagged Order | NotFound wire
 }
 ```

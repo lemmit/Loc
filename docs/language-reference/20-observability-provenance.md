@@ -70,7 +70,7 @@ The catalog spans the full lifecycle: lifecycle bracket (`server_starting` → `
 `provenanced` is a stored-field modifier that captures the **lineage** of every value the field holds. For each distinct assignment site (`:=` / `+=` / `-=`), the compiler content-addresses the right-hand-side expression into a **rule snapshot**, and the backend records a runtime trace on every write — enough to later answer "why is `order.total` 128?".
 
 ```ddd
-aggregate Order ids guid with crudish {
+aggregate Order with crudish {
   reference: string
   quantity: int
   unitPrice: int

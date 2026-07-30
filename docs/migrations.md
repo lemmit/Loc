@@ -120,7 +120,7 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
   zero drop/create (M-T2.1 a). Renaming an aggregate that is the **target** of a
   *sibling* aggregate's reference collection (`Other.xs: Old id[]`) also renames
   that sibling join table's `targetFk` column (`old_id → new_id`), even when the
-  sibling lives in another module (M-T2.1 b). A `persistedAs(eventLog)` aggregate
+  sibling lives in another module (M-T2.1 b). A `persistedAs: eventLog` aggregate
   has no own table — its rename emits a ledgered `sqlExec` fix-up rewriting the
   stranded `stream_type` rows in `<ctx>_events` (M-T2.1 c), mirroring the TPH
   `kind` fix-up. The whole rename stays non-destructive across the system.
@@ -250,7 +250,7 @@ not in per-backend stub files (D-MIG-DSL-STEPS) — one source, five backends.
 
 ## Reshape detection — the `loom.migration-shape-change` gate (M-T2.4)
 
-Flipping an aggregate's `shape(relational|embedded|document)` or its TPH/TPC
+Flipping an aggregate's `shape: relational|embedded|document` or its TPH/TPC
 inheritance strategy **reshapes the physical table** — a full-table data move the
 column diff can't express (a relational row becomes `(id, data, version)`; one
 shared TPH table becomes one table per concrete). To detect it, the snapshot
@@ -271,7 +271,7 @@ move), the new shape is created empty, and a `-- TODO reshape …` recipe marks 
 snapshot, so its cleanup drop is destructive-gated the *next* generation.
 
 ```sql
--- relational Cart → shape(document) Cart, under --allow-destructive
+-- relational Cart → `shape: document` Cart, under --allow-destructive
 ALTER TABLE "carts" RENAME TO "carts__pre_reshape";
 CREATE TABLE "carts" ("id" UUID NOT NULL, "data" JSONB NOT NULL, "version" INTEGER NOT NULL, PRIMARY KEY ("id"));
 -- TODO reshape (…): copy data from "carts__pre_reshape" into the new shape (e.g. INSERT … SELECT), then drop the backup under --allow-destructive
@@ -396,16 +396,16 @@ A VO *array* (`charges: Money[]`) produces an id-less child table
 (`<parent>_<field>`) of flattened VO columns keyed by `(parent_fk, ordinal)`;
 Phoenix skips it (it stores the array inline as `{:array, :map}`).
 
-**Inheritance.** TPC (`inheritanceUsing(ownTable)`): the abstract base emits **no
+**Inheritance.** TPC (`inheritanceUsing: ownTable`): the abstract base emits **no
 table**, each concrete is standalone with the merged field set. TPH
 (`sharedTable`): one shared table named for the base, with `id`, a `kind`
 discriminator (`TEXT NOT NULL`), the base's own columns, then every concrete's own
 columns **forced nullable** and de-duplicated by name. A TPH concrete's contained
 parts FK to the shared base table. See [`inheritance.md`](inheritance.md).
 
-**Other persistence shapes.** `shape(document)` → a `(id, data jsonb, version int)`
-triple; `shape(embedded)` → a queryable root row with one JSONB column per
-containment; `persistedAs(eventLog)` and `eventSourced` workflows → an append-only
+**Other persistence shapes.** `shape: document` → a `(id, data jsonb, version int)`
+triple; `shape: embedded` → a queryable root row with one JSONB column per
+containment; `persistedAs: eventLog` and `eventSourced` workflows → an append-only
 `<name>_events` stream keyed by `(stream_id, version)`. Correlation-bearing
 workflows get a state table; a durable channel adds the shared `__loom_outbox`
 table.

@@ -296,7 +296,7 @@ export const examples: LoomExample[] = [
     label: "Inheritance & event sourcing (Hono + React)",
     source: inheritanceSystemSource,
     blurb:
-      "Abstract aggregate + two `extends` subtypes mapped Table-Per-Hierarchy (`inheritanceUsing(sharedTable)`) with an auto-emitted polymorphic reader, plus an event-sourced aggregate (`persistedAs(eventLog)` + `apply`) whose truth is its event stream.",
+      "Abstract aggregate + two `extends` subtypes mapped Table-Per-Hierarchy (`inheritanceUsing: sharedTable`) with an auto-emitted polymorphic reader, plus an event-sourced aggregate (`persistedAs: eventLog` + `apply`) whose truth is its event stream.",
   },
   {
     id: "auth-capabilities",
@@ -310,7 +310,7 @@ export const examples: LoomExample[] = [
     label: "Persistence shapes & primitives (.NET)",
     source: persistenceShapesSource,
     blurb:
-      "Table-Per-Concrete inheritance (`inheritanceUsing(ownTable)`) with an auto-emitted polymorphic reader, `shape(document)` + `shape(embedded)` storage, the `money` and `json` primitive types, and the realization-axes `directoryLayout: byFeature` knob. Files-only.",
+      "Table-Per-Concrete inheritance (`inheritanceUsing: ownTable`) with an auto-emitted polymorphic reader, `shape: document` + `shape: embedded` storage, the `money` and `json` primitive types, and the realization-axes `directoryLayout: byFeature` knob. Files-only.",
   },
   {
     id: "extern-showcase",

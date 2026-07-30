@@ -33,7 +33,7 @@ Every aggregate, part, and value object carries a canonical ordered `wireShape` 
 A union is a value that is **one of several distinct variants**, tagged on the wire so a consumer can branch. The inline form needs no declaration — write `A or B` directly in a transport position (a repository find return type or a payload field):
 
 ```ddd
-aggregate Order ids guid {
+aggregate Order {
   code: string
   region: string
 }

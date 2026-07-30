@@ -2,14 +2,14 @@
 
 > **Grammar:** `abstract aggregate`, `extends`, `inheritanceUsing` · **Validators:** `loom.extends-non-abstract`, `loom.extends-self`, `loom.inheritance-modifier-misplaced`, `loom.abstract-aggregate-behavior`, `loom.abstract-repository`, `loom.polymorphic-id-ref-unsupported` · **Docs:** [`../inheritance.md`](../inheritance.md)
 
-One aggregate may `extend` another so subtypes share a field set and can be read polymorphically. An `abstract aggregate` declares the base; concrete aggregates `extends` it; the `inheritanceUsing(…)` header modifier chooses how the hierarchy maps to tables. The whole chapter hinges on one fork: **`sharedTable` (TPH) — one table plus a `kind` discriminator — vs `ownTable` (TPC) — one table per concrete subtype.** That choice changes the emitted SQL, the polymorphic reader, and whether `<Base> id` references are legal; everything below shows both.
+One aggregate may `extend` another so subtypes share a field set and can be read polymorphically. An `abstract aggregate` declares the base; concrete aggregates `extends` it; the `inheritanceUsing: …` header modifier chooses how the hierarchy maps to tables. The whole chapter hinges on one fork: **`sharedTable` (TPH) — one table plus a `kind` discriminator — vs `ownTable` (TPC) — one table per concrete subtype.** That choice changes the emitted SQL, the polymorphic reader, and whether `<Base> id` references are legal; everything below shows both.
 
 ## `abstract aggregate` — the base
 
 `abstract aggregate <Name>` is a base that is never instantiated. It owns **no table, repository, controller, or routes** — only the shared fields (and `derived` getters / `invariant`s / `function`s) the subtypes inherit. It may **not** declare lifecycle behaviour (`create` / `operation` → `loom.abstract-aggregate-behavior`) or have a `repository` target it (`loom.abstract-repository`).
 
 ```ddd
-abstract aggregate Party inheritanceUsing(sharedTable) {
+abstract aggregate Party inheritanceUsing: sharedTable {
   name: string
   email: string
   derived display: string = name
@@ -85,13 +85,13 @@ public sealed class Customer : Party
 ```
 ::: end
 
-## `inheritanceUsing(…)` — the storage strategy
+## `inheritanceUsing: …` — the storage strategy
 
-`inheritanceUsing(sharedTable | ownTable)` is a **header modifier** on the abstract base (and optionally each concrete). It is legal only on an abstract base or a subtype (`loom.inheritance-modifier-misplaced`); omitted, it defaults to **`sharedTable`**. This single keyword is the whole fork — the same `.ddd` declaration produces fundamentally different schemas:
+`inheritanceUsing: sharedTable|ownTable` is a **header modifier** on the abstract base (and optionally each concrete). It is legal only on an abstract base or a subtype (`loom.inheritance-modifier-misplaced`); omitted, it defaults to **`sharedTable`**. This single keyword is the whole fork — the same `.ddd` declaration produces fundamentally different schemas:
 
 ```ddd
-abstract aggregate Party inheritanceUsing(sharedTable) { … }   // TPH
-abstract aggregate Party inheritanceUsing(ownTable)    { … }   // TPC
+abstract aggregate Party inheritanceUsing: sharedTable { … }   // TPH
+abstract aggregate Party inheritanceUsing: ownTable    { … }   // TPC
 ```
 
 The SQL the migration emitter derives from the shared `MigrationsIR` is the clearest contrast. (Postgres SQL is byte-identical across node/Hono, Python, and Java — all three consume the same `sql-pg.ts` renderer; .NET wraps the same SQL in an EF `migrationBuilder.Sql(…)` call, and Elixir maps via Ecto, both shown after.)
@@ -293,7 +293,7 @@ def list_parties, do: {:ok, list_parties!()}
 A `<Base> id` cross-aggregate reference is an FK to the base. Under **TPH** the shared table carries a single identity, so the FK target is unambiguous and the reference is allowed (the base reader also exposes a `findById`). Under **TPC** identity stays per-concrete (each keeps its own `<Concrete>Id`); there is no shared `<Base>Id` and the FK would be ambiguous across the N concrete tables — so it is rejected at IR-validate time:
 
 ```ddd
-abstract aggregate Party inheritanceUsing(ownTable) { name: string }
+abstract aggregate Party inheritanceUsing: ownTable { name: string }
 aggregate Customer extends Party { creditLimit: decimal }
 aggregate Order { payer: Party id }   // ← rejected under ownTable
 ```
@@ -306,17 +306,25 @@ across the per-concrete tables. Reference a concrete subtype's id (e.g. 'Custome
 or change 'Party' to inheritanceUsing(sharedTable) (TPH) to allow polymorphic references.
 ```
 
+> **Known drift in the message text.** The diagnostic above is quoted verbatim
+> from `src/language/validators/inheritance.ts` and still spells the modifier in
+> the pre-M-T5.17 **paren** form. That form no longer parses — the fix it
+> suggests must be written `inheritanceUsing: sharedTable`. The message strings
+> are code, not docs; retexting them (and the ~20 sibling diagnostics that
+> mention `persistedAs(eventLog)` / `shape(document)` / `inheritanceUsing(…)`)
+> is a separate change.
+
 The TPC readers therefore expose `findAll` only — no polymorphic `findById` target.
 
 ## Backend gating & validation
 
-Both strategies emit on **all five backends** (node/Hono, .NET, Phoenix LiveView, Python, Java). The one gate is a storage one: a `sharedTable` (TPH) hierarchy whose context is hosted on **no DB backend** is an IR-validate **error** (there is no emission target) — it names the offending platform and suggests either a DB-backend host or switching to `inheritanceUsing(ownTable)`.
+Both strategies emit on **all five backends** (node/Hono, .NET, Phoenix LiveView, Python, Java). The one gate is a storage one: a `sharedTable` (TPH) hierarchy whose context is hosted on **no DB backend** is an IR-validate **error** (there is no emission target) — it names the offending platform and suggests either a DB-backend host or switching to `inheritanceUsing: ownTable`.
 
 | Code | Fires when |
 |---|---|
 | `loom.extends-non-abstract` | `extends` names an aggregate that is not `abstract` |
 | `loom.extends-self` | an aggregate `extends` itself |
-| `loom.inheritance-modifier-misplaced` | `inheritanceUsing(…)` on an aggregate that is neither an abstract base nor a subtype |
+| `loom.inheritance-modifier-misplaced` | `inheritanceUsing: …` on an aggregate that is neither an abstract base nor a subtype |
 | `loom.abstract-aggregate-behavior` | an abstract base declares `create` / `operation` lifecycle behaviour |
 | `loom.abstract-repository` | a `repository` targets an abstract base |
 | `loom.polymorphic-id-ref-unsupported` | a `<Base> id` reference to an `ownTable` (TPC) base |

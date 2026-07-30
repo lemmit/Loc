@@ -92,12 +92,12 @@ relational capability filters, both non-principal and principal-referencing
 (tenancy).  Principal predicates and non-relational shapes have **since
 landed** (DEBT-01 / DEBT-02): Python's relational principal case landed
 (`supportsPrincipalFilter` now returns `true` for it, `system-checks.ts`) and
-Python's `shape(embedded)` filters landed too (#1571 —
+Python's `shape: embedded` filters landed too (#1571 —
 `supportsNonRelationalFilter`/`supportsPrincipalNonRelationalFilter` now
 include `python` for `embedded`).  Principal filters on non-relational shapes
 ship on node/Java (`document` + `embedded`), elixir + Python (`embedded`), and
 .NET (all shapes).  What stays gated is narrow: **a capability filter on a
-`shape(document)` aggregate hosted on Python** (Python wires relational +
+`shape: document` aggregate hosted on Python** (Python wires relational +
 `embedded` only; `document` is a single jsonb blob it doesn't filter in-app) —
 and elixir has no `document` shape at all.  See *Deferred cases* below.
 
@@ -158,8 +158,8 @@ criterion as a first-class, reusable predicate.
 One narrow case remains gated by the IR validator
 (`validateContextFilterSupport`, code `loom.context-filter-unsupported`):
 
-- **A capability filter on a `shape(document)` aggregate hosted on
-  Python.**  Python wires relational + `shape(embedded)` filters
+- **A capability filter on a `shape: document` aggregate hosted on
+  Python.**  Python wires relational + `shape: embedded` filters
   (principal and non-principal, DEBT-01/DEBT-02, #1571) but does not
   filter a `document` blob in-app, so `supportsNonRelationalFilter` /
   `supportsPrincipalNonRelationalFilter` (`system-checks.ts`) include

@@ -83,7 +83,7 @@ Optional<Order> findById(@Param("id") OrderId id);
 > `Deployable 'apiPython' (platform python) hosts aggregate 'Sales.Order' with a 'filter' capability predicate that references currentUser … principal-referencing capability filters are not yet wired on the python backend.`
 > Non-principal filters on relational aggregates (e.g. `filter !this.isDeleted`, below) **are** emitted on Python. Host a tenancy-filtered aggregate on a `.NET` / `node` / `java` / `elixir` deployable.
 
-> **Deferred intersection.** One shape stays gated by `loom.context-filter-unsupported` on the query-layer backends (node / java / phoenix): a principal predicate on a **non-relational** (`shape(document)` / `shape(embedded)`) aggregate — binding the request actor *and* reaching into a jsonb column on the always-on read path. **.NET handles it** (EF's `HasQueryFilter` resolves the principal and queries jsonb transparently — the one backend with no deferred filter cases). See [`../capabilities.md`](../capabilities.md#deferred-cases).
+> **Deferred intersection.** One shape stays gated by `loom.context-filter-unsupported` on the query-layer backends (node / java / phoenix): a principal predicate on a **non-relational** (`shape: document` / `shape: embedded`) aggregate — binding the request actor *and* reaching into a jsonb column on the always-on read path. **.NET handles it** (EF's `HasQueryFilter` resolves the principal and queries jsonb transparently — the one backend with no deferred filter cases). See [`../capabilities.md`](../capabilities.md#deferred-cases).
 
 ### Reifying a named `criterion`
 
