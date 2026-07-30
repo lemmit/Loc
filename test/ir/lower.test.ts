@@ -319,11 +319,26 @@ describe("lowering — A4 avg(λ) desugars to count/sum/count", () => {
     const div = (await avgExpr("avgPrice")).otherwise as Extract<ExprIR, { kind: "binary" }>;
     expect(div.leftType).toEqual(MONEY);
     expect(div.resultType).toEqual(MONEY);
+    // `count` is always int — and leaving this UNSET broke Java, whose money
+    // `divide` has no `int` overload (fleet-bug-hunt A2/A4).
+    expect(div.rightType).toEqual(INT);
   });
 
-  it("widens an int projection to a decimal numeric type", async () => {
+  // Corrected 2026-07-30 (fleet-bug-hunt A2). This previously asserted
+  // `leftType === DECIMAL` for the int-projection case — the DECLARED widening
+  // stamped onto the operand slot. That shape is what caused the bug: the typed
+  // backends box from the OPERAND types, so a `decimal`-stamped left operand
+  // whose emission is really `.Sum(int)` made `isIntDivWidenedToDecimal` miss,
+  // and .NET emitted plain integer division — an average that truncates (1.5 → 1).
+  // The operand slots now describe what `sum`/`count` actually render as, while
+  // `resultType` keeps the declared widening. Same correction C1 needed: a test
+  // can pin a buggy IR shape and read as coverage.
+  it("stamps int operands on an int projection so the backends widen (A2)", async () => {
     const div = (await avgExpr("avgQty")).otherwise as Extract<ExprIR, { kind: "binary" }>;
-    expect(div.leftType).toEqual(DECIMAL);
+    expect(div.leftType).toEqual(INT);
+    expect(div.rightType).toEqual(INT);
+    // The declared result is still the widened decimal — that is the contract
+    // the derived member's type checks against.
     expect(div.resultType).toEqual(DECIMAL);
   });
 

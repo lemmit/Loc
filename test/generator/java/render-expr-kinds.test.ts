@@ -394,6 +394,43 @@ describe("java renderJavaExpr — binary leaf divergences", () => {
     );
   });
 
+  // fleet-bug-hunt A4 — a NON-LITERAL integral operand in a money/decimal
+  // expression used to reach `renderMoneyBinary` raw, emitting
+  // `total.divide(this.qty(), MathContext.DECIMAL128)`: `BigDecimal` has no
+  // `divide(int, MathContext)` / `multiply(int)` / `compareTo(int)` overload, so
+  // `derived unit: money = this.total / this.qty` failed `gradle testClasses`
+  // while TS/.NET/Python compiled the same model.  `promoteMoneyOperands`
+  // promotes numeric LITERALS only, so the field/param spelling was unguarded.
+  const binT = (op: string, left: ExprIR, right: ExprIR, lt: TypeIR, rt: TypeIR): ExprIR =>
+    ({ kind: "binary", op, left, right, leftType: lt, rightType: rt }) as ExprIR;
+
+  it("boxes a non-literal integral operand in money arithmetic (A4)", () => {
+    expect(renderJavaExpr(binT("/", thisProp("total"), thisProp("qty"), MONEY, INT))).toBe(
+      "this.total.divide(java.math.BigDecimal.valueOf(this.qty), MathContext.DECIMAL128)",
+    );
+    expect(renderJavaExpr(binT("*", thisProp("total"), refParam("n"), MONEY, INT))).toBe(
+      "this.total.multiply(java.math.BigDecimal.valueOf(n))",
+    );
+    // `money × scalar` is commutative in `moneyArithmetic`, so money can sit on
+    // the RIGHT — that spelling missed the money arm entirely and fell through
+    // to `qty * total`, an `int * BigDecimal`.
+    expect(renderJavaExpr(binT("*", thisProp("qty"), thisProp("total"), INT, MONEY))).toBe(
+      "java.math.BigDecimal.valueOf(this.qty).multiply(this.total)",
+    );
+    // Comparisons need it too — `compareTo` takes a BigDecimal.
+    expect(renderJavaExpr(binT("<", thisProp("total"), thisProp("qty"), MONEY, INT))).toBe(
+      "this.total.compareTo(java.math.BigDecimal.valueOf(this.qty)) < 0",
+    );
+  });
+
+  it("leaves a money/decimal operand untouched (byte-identical to pre-A4)", () => {
+    // The guard keys on the operand TYPE, so an all-money expression must render
+    // exactly as before — this is what keeps the fixture baselines stable.
+    expect(renderJavaExpr(binT("/", thisProp("a"), thisProp("b"), MONEY, MONEY))).toBe(
+      "this.a.divide(this.b, MathContext.DECIMAL128)",
+    );
+  });
+
   it("money comparison routes through compareTo (BigDecimal.equals is scale-sensitive)", () => {
     expect(renderJavaExpr(bin("==", thisProp("a"), thisProp("b"), MONEY))).toBe(
       "this.a.compareTo(this.b) == 0",

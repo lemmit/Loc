@@ -305,6 +305,23 @@ function isMoneyLike(t: TypeIR | undefined): boolean {
   return t?.kind === "primitive" && (t.name === "money" || t.name === "decimal");
 }
 
+/** `int` / `long` — the Java primitives that have no `BigDecimal` overload. */
+function isIntegralPrimitive(t: TypeIR | undefined): boolean {
+  return t?.kind === "primitive" && (t.name === "int" || t.name === "long");
+}
+
+/** Box an integral operand for a `BigDecimal` method call, leaving anything
+ *  else untouched.  `BigDecimal` exposes no `multiply(int)` /
+ *  `divide(int, MathContext)` / `compareTo(int)`, so an `int`-typed operand in a
+ *  money/decimal expression must be lifted — the same move the widened
+ *  int-division arm makes (fleet-bug-hunt A4).  Fully qualified for consistency
+ *  with that arm: it needs no import bookkeeping at the collector. */
+function boxIntegralForBigDecimal(rendered: string, t: TypeIR | undefined): string {
+  return isIntegralPrimitive(unwrapOptional(t))
+    ? `java.math.BigDecimal.valueOf(${rendered})`
+    : rendered;
+}
+
 /** Reference types whose `==` must be `Objects.equals` in Java.  Enum
  *  constants keep native `==` (identity equality is the Java idiom and
  *  is null-safe); primitives (int/long/bool) keep native operators.
@@ -823,7 +840,25 @@ function renderBinary(l: string, r: string, e: BinaryExpr): string {
   // through methods.  `equals` is scale-sensitive (1.0 ≠ 1.00), so
   // equality routes through compareTo as well.
   if (isMoneyLike(lt)) {
-    return renderMoneyBinary(e.op, l, r);
+    // A `money <op> int` whose integral operand is NOT a literal reaches here
+    // raw: `promoteMoneyOperands` (lower-expr) only promotes numeric LITERALS
+    // via `literalPromotionAnchor`, so `this.total / this.qty` arrives with an
+    // `int`-typed right operand.  `BigDecimal` has no `multiply(int)` /
+    // `divide(int, MathContext)` overload, so the emission failed `gradle
+    // testClasses` — TS/.NET/Python all compile the same model, because their
+    // decimal types coerce.  Box it, exactly as the int-division arm above
+    // does (fleet-bug-hunt A4).
+    return renderMoneyBinary(e.op, l, boxIntegralForBigDecimal(r, e.rightType));
+  }
+  // The MIRROR case — integral left, BigDecimal-backed right (`qty * this.total`).
+  // `money × scalar` is commutative in `moneyArithmetic`, and plain
+  // `int <op> decimal` is ordinary numeric arithmetic, so both spellings reach
+  // codegen; with money on the RIGHT the arm above doesn't fire and the fall-
+  // through emitted `qty * total` — an `int * BigDecimal` that doesn't compile.
+  // Boxing the left operand lets the same method-based renderer serve it (and
+  // `compareTo` handles the comparison arms).
+  if (isIntegralPrimitive(lt) && isMoneyLike(unwrapOptional(e.rightType))) {
+    return renderMoneyBinary(e.op, boxIntegralForBigDecimal(l, e.leftType), r);
   }
   // A5 temporal: datetime ± duration / datetime − datetime / duration ±
   // duration / duration × int — all method-based on java.time.
