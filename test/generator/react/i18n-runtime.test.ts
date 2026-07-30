@@ -106,13 +106,39 @@ describe("React i18n runtime", () => {
     );
   });
 
-  it("upgrades the shim to a 3-arg signature with {name} substitution", async () => {
+  it("formats the shim via @formatjs/intl-messageformat (ICU, not a {name} regex)", async () => {
+    // Slice 1 swaps the old `message.replace(/{name}/)` regex shim for the ICU
+    // engine so a `, number` / `, date` format suffix locale-formats at runtime.
     const files = await generateSystemFiles(SYSTEM(`Heading { "Hi" }`));
     const i18n = [...files].find(([p]) => p.endsWith("src/i18n.ts"))![1];
-    // 3rd optional values arg + the interpolation replace.
-    expect(i18n).toMatch(/values\?: Record<string, string \| number>/);
-    expect(i18n).toContain("message.replace(");
-    // A plain 2-arg call (no values) still returns the message untouched.
+    expect(i18n).toContain('import { IntlMessageFormat } from "@formatjs/intl-messageformat"');
+    expect(i18n).toContain("new IntlMessageFormat(message, locale).format(values)");
+    // `values` widened to admit Date (for `, date`) + boolean alongside string/number.
+    expect(i18n).toMatch(/values\?: Record<string, string \| number \| boolean \| Date>/);
+    // No leftover regex shim.
+    expect(i18n).not.toContain("message.replace(");
+    // A plain 2-arg call (no values) still returns the message untouched (no parse cost).
     expect(i18n).toContain("if (values === undefined) return message;");
+  });
+
+  it("emits a formatted hole as an ICU message with skeleton + the raw value in values", async () => {
+    // `{total, number, ::currency/USD}` — the skeleton rides into the catalog +
+    // the t() default, and `values` carries the RAW money value (not stringified).
+    const withParam = SYSTEM("Heading { `Total: {total, number, ::currency/USD}` }").replace(
+      'page Home { route: "/"',
+      'page Home(total: money) { route: "/:total"',
+    );
+    const files = await generateSystemFiles(withParam);
+    const home = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
+    expect(home).toMatch(
+      /\{t\("[^"]*", "Total: \{total, number, ::currency\/USD\}", \{ total: total \}\)\}/,
+    );
+    const locale = [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1];
+    expect(Object.values(JSON.parse(locale) as Record<string, string>)).toContain(
+      "Total: {total, number, ::currency/USD}",
+    );
+    // The stack carries the ICU engine dependency.
+    const pkg = [...files].find(([p]) => p.endsWith("web/package.json"))![1];
+    expect(pkg).toContain("@formatjs/intl-messageformat");
   });
 });

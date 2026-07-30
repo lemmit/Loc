@@ -72,3 +72,61 @@ describe("A6 interpolation lowering", () => {
     expect(litValues(expr)).toEqual(["just text"]);
   });
 });
+
+// ICU `,format` suffix (i18n, M-T1.11) — a formatted hole wraps its
+// string-concat operand in the TRANSPARENT `i18nFormat` node carrying the raw
+// format text; a format-less hole gets NO wrapper (so its lowering is
+// byte-identical to before the node existed).
+describe("A6 interpolation format-suffix lowering", () => {
+  /** Find the (single) `i18nFormat` node in a tree, if any. */
+  function findI18n(e: ExprIR): Extract<ExprIR, { kind: "i18nFormat" }> | undefined {
+    if (e.kind === "i18nFormat") return e;
+    for (const v of Object.values(e as Record<string, unknown>)) {
+      if (v && typeof v === "object" && "kind" in v) {
+        const hit = findI18n(v as ExprIR);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  }
+
+  it("wraps a formatted hole in `i18nFormat` carrying the raw format, inner intact", async () => {
+    const expr = await derivedExpr(
+      "derived d: string = `Total: {quantity, number, ::currency/USD}`",
+      "d",
+    );
+    const wrap = findI18n(expr);
+    expect(wrap).toBeDefined();
+    expect(wrap!.format).toBe(", number, ::currency/USD");
+    // `inner` is the same string-concat operand a format-less hole would carry —
+    // an int hole stringified via `convert` (NOT re-wrapped).
+    expect(wrap!.inner.kind).toBe("convert");
+    expect(kinds(wrap!.inner)).not.toContain("i18nFormat");
+  });
+
+  it("a format-less hole gets NO wrapper — lowering is unchanged", async () => {
+    const expr = await derivedExpr("derived d: string = `Total: {quantity}`", "d");
+    expect(kinds(expr)).not.toContain("i18nFormat");
+  });
+
+  it("stripping the transparent wrapper yields the format-less tree (provenance aside)", async () => {
+    // `origin` spans carry per-parse CST provenance (different source paths), so
+    // compare STRUCTURE only: drop `origin` and unwrap `i18nFormat`, then the
+    // formatted tree is identical to the format-less one — which is exactly why
+    // every non-i18n target renders the two byte-identically.
+    const strip = (e: ExprIR): unknown =>
+      JSON.parse(
+        JSON.stringify(e, (k, v) => {
+          if (k === "origin") return undefined;
+          if (v && typeof v === "object" && v.kind === "i18nFormat") return v.inner;
+          return v;
+        }),
+      );
+    const fmt = await derivedExpr(
+      "derived d: string = `Total: {quantity, number, ::currency/USD}`",
+      "d",
+    );
+    const plain = await derivedExpr("derived d: string = `Total: {quantity}`", "d");
+    expect(strip(fmt)).toEqual(strip(plain));
+  });
+});
