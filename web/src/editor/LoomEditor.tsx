@@ -107,7 +107,20 @@ export interface LoomEditorProps {
 
 export function LoomEditor(props: LoomEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // The seed the model is created with / reset to when Monaco finally comes
+  // up.  Tracked, NOT frozen at first render: the model isn't created until
+  // the language client is ready, which on a cold load is seconds after this
+  // component first rendered.  Freezing meant a deferred mount reseeded the
+  // model from a value the app had already moved past — the mount looked like
+  // a WRITER that reverted the source.  Following the prop makes the seed
+  // "whatever the active file's content is when the editor actually exists".
   const initialValueRef = useRef(props.initialValue);
+  initialValueRef.current = props.initialValue;
+  // Text pushed through `handleRef.setSource` while Monaco did not yet exist
+  // (see the pre-mount handle below).  Wins over `initialValueRef` as the
+  // mount seed: it is a real user edit, whereas the prop can still be the
+  // pre-edit content when the write hasn't round-tripped the workspace store.
+  const pendingSourceRef = useRef<string | null>(null);
   const clientRef = useRef(props.client);
   clientRef.current = props.client;
   const onChangeRef = useRef(props.onChange);
@@ -138,16 +151,40 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (status !== "ready" || !containerRef.current) return;
+    if (status !== "ready" || !containerRef.current) {
+      // Monaco isn't up yet — the editor is created only once the language
+      // client is ready, which on a cold load lands SECONDS after first paint.
+      // Until then `handleRef.current` was `null`, so every non-editor write
+      // routed through it (a Builder / Requirements "Apply", an agent edit)
+      // hit `editorHandleRef.current?.setSource(text)` and was silently
+      // DROPPED — and the mount below then seeded the model with the pre-edit
+      // text, so the edit was gone from the source for good even though the
+      // rest of the app (`sourceRef`, the panes, the workspace store) had it.
+      // A queueing stand-in makes the handle exist from the first render; the
+      // real one replaces it below and consumes the queue as its seed.
+      const holder = handleRef.current;
+      if (!holder || holder.current) return;
+      const placeholder: EditorHandle = {
+        setSource: (text: string) => {
+          pendingSourceRef.current = text;
+        },
+      };
+      holder.current = placeholder;
+      return () => {
+        // Only retract our own stand-in — the real handle owns its teardown.
+        if (holder.current === placeholder) holder.current = null;
+      };
+    }
     const isMobile = isMobileRef.current;
 
     // Reuse the model across remounts so the LSP document stays attached;
     // refresh its content to the (possibly new) example source.
     const modelUri = monacoUriFor(activePathRef.current);
+    const seed = pendingSourceRef.current ?? initialValueRef.current;
+    pendingSourceRef.current = null;
     const model =
-      monaco.editor.getModel(modelUri) ??
-      monaco.editor.createModel(initialValueRef.current, "ddd", modelUri);
-    if (model.getValue() !== initialValueRef.current) model.setValue(initialValueRef.current);
+      monaco.editor.getModel(modelUri) ?? monaco.editor.createModel(seed, "ddd", modelUri);
+    if (model.getValue() !== seed) model.setValue(seed);
 
     const editor = monaco.editor.create(containerRef.current, {
       model,
