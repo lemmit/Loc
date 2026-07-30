@@ -7,9 +7,8 @@ import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
-import { ariaLabelAttr } from "../a11y-emit.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
-import { localizedText } from "../i18n-emit.js";
+import { localizedAriaLabelAttr, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -165,9 +164,10 @@ export function emitButton(
     iconSvg: resolvedIconSvg,
     hasIcon: resolvedIconSvg !== undefined,
     iconPosition,
-    // HTML-ish frontends consume the ready-made ` aria-label="…"` fragment;
-    // Feliz (F#) reads the raw `ariaLabel` to build `prop.ariaLabel`.
-    a11yAttr: ariaLabelAttr(ariaLabel),
+    // HTML-ish frontends consume the ready-made ` aria-label="…"` fragment —
+    // translated through `t()` on an i18n frontend (M-T1.11, `buttonAria` slot),
+    // static otherwise (byte-identical); Feliz (F#) reads the raw `ariaLabel`.
+    a11yAttr: localizedAriaLabelAttr(call, ctx, "buttonAria"),
     ariaLabel,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),

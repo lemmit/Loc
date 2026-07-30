@@ -4,8 +4,7 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { toolbarA11yAttr } from "../a11y-emit.js";
-import { localizedText } from "../i18n-emit.js";
+import { localizedAriaLabelAttr, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   namedArgValue,
@@ -283,9 +282,11 @@ export function emitToolbar(
     closeIndent,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
-    // role="toolbar" + accessible name (Toolbar a11y contract).  HTML/markup
-    // packs render the fragment; Feliz reads the raw `label` for its F# props.
-    a11yAttr: toolbarA11yAttr({ label: stringNamed(call, "label") }),
+    // role="toolbar" + accessible name (Toolbar a11y contract).  The name is
+    // translated through `t()` on an i18n frontend (M-T1.11, `toolbarAria` slot),
+    // static otherwise (byte-identical).  The default "Actions" has no source
+    // literal → not in the catalog → always static.  Feliz reads the raw `label`.
+    a11yAttr: ` role="toolbar"${localizedAriaLabelAttr(call, ctx, "toolbarAria", "label", "Actions")}`,
     label: stringNamed(call, "label"),
   });
 }

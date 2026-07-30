@@ -137,4 +137,18 @@ describe("Angular i18n runtime", () => {
     const pkg = [...files].find(([p]) => p.endsWith("web/package.json"))![1];
     expect(pkg).toContain("intl-messageformat");
   });
+
+  it("translates named aria-label slots (Button + Toolbar) as Angular attr bindings", async () => {
+    const files = await generateSystemFiles(
+      SYSTEM(`Toolbar { label: "Order actions", Button { "+", label: "Add order", to: "/new" } }`),
+    );
+    const home = homeOf(files);
+    // Angular binds a plain HTML attribute as `[attr.aria-label]="expr"` (single
+    // quotes here because the `t()` call contains double quotes) — NOT
+    // `[aria-label]`, which would target a non-existent property (ng build error).
+    expect(home).toMatch(/\[attr\.aria-label\]='t\("page\.Home\.buttonAria\.\w+", "Add order"\)'/);
+    expect(home).toMatch(
+      /role="toolbar" \[attr\.aria-label\]='t\("page\.Home\.toolbarAria\.\w+", "Order actions"\)'/,
+    );
+  });
 });
