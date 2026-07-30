@@ -110,6 +110,7 @@ import { emitCodeBlock } from "./primitives/code-block.js";
 // Re-exported emitters from the React/TSX walker.  Each function
 // takes `(call, ctx, depth)` and returns the JSX fragment.
 import { emitAction, emitButton, emitIdLink, emitQueryView } from "./primitives/controls.js";
+import { emitDataGrid } from "./primitives/data-grid.js";
 import {
   emitAlert,
   emitBadge,
@@ -503,6 +504,17 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     admissibleInSource: true,
     tsx: emitTable,
     heex: renderTableHeex,
+    a11y: { role: "table", owns: "Column" },
+  },
+  // TanStack-Table-backed grid (multi-sort / per-column filters / column
+  // visibility).  React-only for now: it emits a hook-bearing child component,
+  // which the other frontends need their own port of.  `heex` is intentionally
+  // absent and pinned in heex-parity — LiveView would need a server round-trip
+  // per interaction, a different design, not a markup mapping.
+  DataGrid: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitDataGrid,
     a11y: { role: "table", owns: "Column" },
   },
   Money: {

@@ -174,6 +174,7 @@ export function renderCustomLayoutPage(
     usedActions,
     usedStores,
     usesFragment,
+    hoistedModuleDecls,
   } = walkBodyToTsx(
     body,
     pack,
@@ -492,8 +493,14 @@ export function renderCustomLayoutPage(
     srcImportPrefix,
     new Set([...stateNames, ...paramNames, ...derivedNames]),
   );
+  // Module-scope declarations a primitive hoisted out of the body (DataGrid's
+  // generated child component + its column defs).  They sit between the
+  // imports and the page component: a hook-bearing component cannot be
+  // declared inside the page (fresh identity every render ⇒ remounted subtree)
+  // and cannot run inside `QueryView`'s conditional slot at all.
+  const moduleDecls = (hoistedModuleDecls ?? []).join("\n");
   return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
+${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${store.decls}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${titleEffect}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
@@ -816,6 +823,7 @@ export function renderUserComponentFile(
     usedActions,
     usedStores,
     usesFragment,
+    hoistedModuleDecls,
   } = walkBodyToTsx(
     body,
     pack,
@@ -1065,8 +1073,11 @@ export function renderUserComponentFile(
     "../",
     new Set([...stateNames, ...paramNames, ...derivedNames]),
   );
+  // Module-scope hoists (DataGrid's child component) — same contract as the
+  // page shell above; a user `component` can host a DataGrid too.
+  const moduleDecls = (hoistedModuleDecls ?? []).join("\n");
   return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
+${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
 export default function ${name}(${propDestructure}) {
 ${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${actionLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
@@ -1276,6 +1287,10 @@ function stateTypeAsTsString(type: TypeIR): string {
   if (type.kind === "optional") {
     return `${stateTypeAsTsString(type.inner)} | undefined`;
   }
+  // `string[]` / `int[]` state — without this arm an array-typed field widened
+  // to `any`, which silently disables type-checking on every read of it (the
+  // generated-react-build `tsc` gate can't catch a bug behind `any`).
+  if (type.kind === "array") return `${stateTypeAsTsString(type.element)}[]`;
   return "any";
 }
 

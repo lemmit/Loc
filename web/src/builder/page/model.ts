@@ -162,6 +162,12 @@ export const SPECS = {
   // optional callback lambdas (`onRowClick:` / `rowTestid:`) as named-arg child
   // slots.  A Column carries a header then an accessor lambda child.
   Table: { kind: "container", named: [{ key: "rows", kind: "expr" }], namedChildren: ["onRowClick", "rowTestid"] },
+  // DataGrid is Table's shape — `rows:` plus positional `Column` children — so
+  // it rides the same container spec.  Its extra knobs (`multiSort:`,
+  // `columnVisibility:`, `pageSize:`) are scalar named args the generic
+  // named-arg editor already handles; it has no lambda slots of its own (the
+  // per-column accessors ride the `Column` children, as with Table).
+  DataGrid: { kind: "container", named: [{ key: "rows", kind: "expr" }] },
   Column: { kind: "container", positional: ["header"] },
   // QueryView wraps a `of:` query expression and renders one of its
   // loading/error/empty/data branches — each a nested node (data: is often a

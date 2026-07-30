@@ -1,0 +1,81 @@
+{{!-- primitive-data-grid — Mantine chrome around a TanStack table instance.
+
+  The `table` binding is supplied by the walker-emitted child component that
+  wraps this markup (see src/generator/_walker/primitives/data-grid.ts); a pack
+  only decides how the grid LOOKS, never how the row model works. --}}
+    <Stack gap="xs"{{{testidAttr}}}>
+{{#if hasColumnVisibility}}      <Group gap="xs">
+        {table.getAllLeafColumns().map((col) => (
+          <Checkbox
+            key={col.id}
+            size="xs"
+            label={String(col.columnDef.header ?? col.id)}
+            checked={col.getIsVisible()}
+            onChange={col.getToggleVisibilityHandler()}
+          />
+        ))}
+      </Group>
+{{/if}}      <Table striped highlightOnHover>
+        <Table.Thead>
+          {table.getHeaderGroups().map((hg) => (
+            <Table.Tr key={hg.id}>
+              {hg.headers.map((h) => (
+                <Table.Th key={h.id}>
+                  {h.column.getCanSort() ? (
+                    <UnstyledButton
+                      onClick={h.column.getToggleSortingHandler()}
+                      aria-label={`Sort by ${String(h.column.columnDef.header ?? h.id)}`}
+                    >
+                      {flexRender(h.column.columnDef.header, h.getContext())}
+                      {h.column.getIsSorted() === "asc" ? " ↑" : h.column.getIsSorted() === "desc" ? " ↓" : ""}
+                    </UnstyledButton>
+                  ) : (
+                    flexRender(h.column.columnDef.header, h.getContext())
+                  )}
+{{#if hasFilters}}                  {h.column.getCanFilter() ? (
+                    <TextInput
+                      size="xs"
+                      mt={4}
+                      placeholder="Filter"
+                      aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
+                      value={String(h.column.getFilterValue() ?? "")}
+                      onChange={(e) => h.column.setFilterValue(e.currentTarget.value)}
+                    />
+                  ) : null}
+{{/if}}                </Table.Th>
+              ))}
+            </Table.Tr>
+          ))}
+        </Table.Thead>
+        <Table.Tbody>
+          {table.getRowModel().rows.map((r) => (
+            <Table.Tr key={r.id}>
+              {r.getVisibleCells().map((c) => (
+                <Table.Td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</Table.Td>
+              ))}
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+      <Group justify="space-between">
+        <Button
+          size="xs"
+          variant="default"
+          onClick={() => table.previousPage()}
+          disabled={!table.getCanPreviousPage()}
+        >
+          Previous
+        </Button>
+        <Text size="sm" aria-live="polite">
+          Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
+        </Text>
+        <Button
+          size="xs"
+          variant="default"
+          onClick={() => table.nextPage()}
+          disabled={!table.getCanNextPage()}
+        >
+          Next
+        </Button>
+      </Group>
+    </Stack>

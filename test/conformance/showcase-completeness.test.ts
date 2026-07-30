@@ -195,7 +195,23 @@ function invokedNames(model: Model): Set<string> {
  *  `TenancyDecl`/`Projection`). It's covered by its own fixtures instead
  *  (`examples/provenance.ddd` + `web/src/examples/provenance-system.ddd` +
  *  the cross-target render gate `provenance-info-cross-target.test.ts`). */
-const SHOWCASE_EXCLUDED_PRIMITIVES: ReadonlySet<string> = new Set(["ProvenanceInfo"]);
+const SHOWCASE_EXCLUDED_PRIMITIVES: ReadonlySet<string> = new Set([
+  "ProvenanceInfo",
+  // DataGrid — TEMPORARY, for the duration of its staged pack rollout.
+  //
+  // `showcase.ddd` drives the `generated-react-build` matrix across EVERY
+  // React pack, so putting a DataGrid in it requires `primitive-data-grid`
+  // in all four (mantine, shadcn, mui, chakra).  `required-primitives.ts`
+  // prescribes exactly the opposite order: ship the template in the lead pack
+  // (mantine), prove it, then backfill — precisely so a half-landed primitive
+  // can't break the matrix.
+  //
+  // The primitive is NOT untested meanwhile: `test/generator/react/data-grid.test.ts`
+  // covers emission, and the generated project is verified against the real
+  // `tsc --noEmit`.  Remove this entry in the backfill slice, together with
+  // adding DataGrid to showcase.ddd and to `REQUIRED_PRIMITIVES.tsx.core`.
+  "DataGrid",
+]);
 
 describe("conformance: showcase.ddd completeness", () => {
   it(`parses and validates ${SHOWCASE} with no errors`, async () => {

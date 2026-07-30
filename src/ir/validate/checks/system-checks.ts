@@ -53,6 +53,7 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
+import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
 import { walkExpr } from "./shared.js";
@@ -211,6 +212,49 @@ export function validateProjectionSourceProjectionBackend(
       }
     }
   }
+}
+
+/** Frontends whose walker emits the `DataGrid` primitive.
+ *
+ *  DataGrid is TanStack-Table-backed and emits a hook-bearing child component,
+ *  so it is not a markup mapping another target picks up for free — each
+ *  framework needs its own port.  Until those land, using it elsewhere is a
+ *  COMPILE ERROR rather than a silently missing grid: the page would otherwise
+ *  render an empty slot (or a "not supported" comment on HEEx) and the author
+ *  would only find out by looking at the running app. */
+const DATA_GRID_FRAMEWORKS = new Set<string>(["react"]);
+
+/** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */
+export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    if (!d.uiName) continue;
+    const fw = d.uiFramework ?? "";
+    if (DATA_GRID_FRAMEWORKS.has(fw)) continue;
+    const ui = sys.uis.find((u) => u.name === d.uiName);
+    if (!ui) continue;
+    for (const page of ui.pages) {
+      if (!usesDataGrid(page.body)) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.datagrid-unsupported-target",
+        message:
+          `page '${page.name}' uses 'DataGrid', which deployable '${d.name}' can't render ` +
+          `(frontend '${fw || "unknown"}'). DataGrid is React-only today. Use 'Table' — it supports ` +
+          `column sort and pagination on every frontend, server-driven on Phoenix — or host this page ` +
+          `on a react frontend.`,
+        source: `${ui.name}/${page.name}`,
+      });
+    }
+  }
+}
+
+/** True when a page body contains a `DataGrid(...)` primitive call anywhere. */
+function usesDataGrid(body: ExprIR | undefined): boolean {
+  let found = false;
+  walkExprDeep(body, (e) => {
+    if (e.kind === "call" && e.name === "DataGrid") found = true;
+  });
+  return found;
 }
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {

@@ -52,6 +52,12 @@ export function defaultInitForJs(type: TypeIR): string {
   }
   if (type.kind === "id" || type.kind === "enum") return '""';
   if (type.kind === "optional") return "undefined";
+  // An array-typed field's zero value is the EMPTY ARRAY, not `undefined` —
+  // otherwise a `state { selectedIds: string[] }` mounts as `undefined` and the
+  // first `.map`/`.length` in the page body throws.  The store emitters already
+  // special-cased this (`storeFieldInit`); page state fell through to
+  // `undefined`, so the two paths disagreed for the same declared type.
+  if (type.kind === "array") return "[]";
   return "undefined";
 }
 
