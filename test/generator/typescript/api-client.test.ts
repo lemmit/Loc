@@ -59,6 +59,45 @@ async function client(): Promise<string> {
   return files.get("shipping_svc/resources/api-clients.ts") ?? "";
 }
 
+/** A callee whose find declares an ABSENCE UNION (`Order option`), plus a
+ *  caller that matches on it. */
+function unionSystem(): string {
+  return `
+system Acme {
+  subdomain Core {
+    context Orders {
+      aggregate Order with crudish { code: string  status: string }
+      repository Orders for Order {
+        find byCode(code: string): Order option
+      }
+    }
+    context Shipping {
+      aggregate Shipment with crudish { orderCode: string  status: string }
+      repository Shipments for Shipment { }
+      workflow fulfil {
+        create(code: string) {
+          let o = orders.byCodeOrder(code)
+          let note = match o { Order x => x.code, else => "missing" }
+          let s = Shipment.create({ orderCode: note, status: "Pending" })
+        }
+      }
+    }
+  }
+  api OrdersApi from Core
+  storage primary { type: postgres }
+  resource ordersState   { for: Orders,   kind: state, use: primary }
+  resource shippingState { for: Shipping, kind: state, use: primary }
+  resource orders        { for: Shipping, kind: api,   use: OrdersApi }
+  deployable ordersSvc {
+    platform: node contexts: [Orders]   dataSources: [ordersState] serves: OrdersApi port: 3000
+  }
+  deployable shippingSvc {
+    platform: node contexts: [Shipping] dataSources: [shippingState, orders] port: 3001
+  }
+}
+`;
+}
+
 describe("Hono typed in-system api client", () => {
   it("reads its base URL from the same env seam compose injects", async () => {
     const src = await client();
@@ -127,6 +166,39 @@ describe("Hono typed in-system api client", () => {
     // at runtime — the precise failure this feature exists to prevent.
     const src = await client();
     expect(src).not.toMatch(/Shipment/);
+  });
+
+  it("returns the callee's ABSENCE UNION as a value, not a throw", async () => {
+    // `find byCode(...): Order option` answers the success body directly at 200
+    // and rides absence on 404 — no `type` discriminator on the wire
+    // (payloads.md §Union finds).  So the client returns `T | null` and only
+    // 404 is special; every other non-2xx is still a real error.
+    //
+    // Before this, a union responseType fell through to `void` and the call
+    // site read fields off nothing.
+    const src = await emit(unionSystem()).then(
+      (f) => f.get("shipping_svc/resources/api-clients.ts") ?? "",
+    );
+    expect(src).toContain(
+      "export async function orders$byCodeOrder(code: string): Promise<z.infer<typeof OrderResponse> | null>",
+    );
+    expect(src).toContain("if (res.status === 404) return null;");
+    expect(src).toContain("return OrderResponse.parse(await res.json());");
+    // A plain getById is UNCHANGED — its declared response is `Order` with 404
+    // in errorStatuses, so absence there is an error, not a value.
+    expect(src).toMatch(
+      /orders\$getOrderById\(id: string\): Promise<z\.infer<typeof OrderResponse>>/,
+    );
+  });
+
+  it("narrows a remote absence union on PRESENCE, not on a discriminator", async () => {
+    // The two halves have to agree: the client returns `T | null`, so the
+    // `match` must narrow `o !== null`.  Narrowing `o.type === "Order"` against
+    // a body that carries no `type` field compiles fine and never matches.
+    const files = await emit(unionSystem());
+    const wf = files.get("shipping_svc/http/workflows.ts") ?? "";
+    expect(wf).toContain("const o = (await orders$byCodeOrder(code));");
+    expect(wf).toContain('const note = o !== null ? o.code : "missing";');
   });
 
   it("emits no client module for a deployable that binds no api", async () => {
