@@ -41,6 +41,28 @@ function renderVueStateInit(field: StateFieldIR): string {
   return lit ?? vueTarget.defaultInitFor(field.type);
 }
 
+/** A page-state field's TS type, for the cases `ref()` can't infer.  Only the
+ *  shapes reachable from an explicit annotation are spelled out; anything else
+ *  falls back to `unknown[]`-free `any`-free inference at the `ref()` call. */
+function vueStateTypeAsTs(t: TypeIR): string {
+  switch (t.kind) {
+    case "array":
+      return `${vueStateTypeAsTs(t.element)}[]`;
+    case "optional":
+      return `${vueStateTypeAsTs(t.inner)} | null`;
+    case "primitive":
+      return t.name === "bool"
+        ? "boolean"
+        : t.name === "int" || t.name === "long" || t.name === "decimal"
+          ? "number"
+          : "string";
+    // An id / enum / value-object / entity element is carried as its wire
+    // string form in page state (the walker binds ids as strings).
+    default:
+      return "string";
+  }
+}
+
 function renderInitLiteral(e: ExprIR): string | undefined {
   if (e.kind === "literal") {
     if (e.lit === "string") return JSON.stringify(e.value);
@@ -296,6 +318,13 @@ export function renderVuePage(input: VuePageShellInput): string {
         const set = apiImports.get("../api/client") ?? new Set<string>();
         set.add("FileRef");
         apiImports.set("../api/client", set);
+      } else if (base.kind === "array") {
+        // `ref([])` infers `Ref<never[]>`, so any later assignment is a type
+        // error — an array field must carry its element type explicitly.  Same
+        // gap the React/Svelte shells had before #2294 (`useState<any>`).
+        stateLines.push(
+          `const ${f.name} = ref<${vueStateTypeAsTs(base)}>(${renderVueStateInit(f)});`,
+        );
       } else {
         stateLines.push(`const ${f.name} = ref(${renderVueStateInit(f)});`);
       }

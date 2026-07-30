@@ -42,6 +42,7 @@
     "primitive-stack": "primitive-stack.hbs",
     "primitive-stat": "primitive-stat.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-text": "primitive-text.hbs",
     "primitive-toggle": "primitive-toggle.hbs",
@@ -431,6 +432,21 @@
         "from": "../api/client",
         "named": [
           "api"
+        ]
+      }
+    ],
+    "primitive-data-grid": [
+      {
+        "from": "@/components/ui",
+        "named": [
+          "Button",
+          "Input",
+          "Table",
+          "TableBody",
+          "TableCell",
+          "TableHead",
+          "TableHeader",
+          "TableRow"
         ]
       }
     ]

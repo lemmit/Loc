@@ -1,0 +1,56 @@
+{{!-- primitive-data-grid — Vuetify chrome around a TanStack table instance.
+
+  The `table` binding, the column defs and the reactive state all come from the
+  walker-emitted sibling SFC that wraps this markup
+  (src/generator/vue/walker/data-grid-child.ts); a pack only decides how the
+  grid LOOKS, never how the row model works.
+
+  `headerBody` / `cellBody` are the walker's header + cell CONTENT.  Unlike the
+  React packs, a Vue pack cannot get these from the column defs: a TanStack
+  `cell` function must return VNodes, and the walker produces template markup.
+  Same split `Table` already uses on Vue, whose sortable header is likewise
+  walker-emitted. --}}
+    <div{{{testidAttr}}}>
+{{#if hasColumnVisibility}}      <div class="d-flex flex-wrap ga-2 mb-2">
+        <v-checkbox
+          v-for="col in table.getAllLeafColumns()"
+          :key="col.id"
+          density="compact"
+          hide-details
+          :label="String(col.columnDef.header ?? col.id)"
+          :model-value="col.getIsVisible()"
+          @update:model-value="col.toggleVisibility()"
+        />
+      </div>
+{{/if}}      <v-table hover>
+        <thead>
+          <tr v-for="hg in table.getHeaderGroups()" :key="hg.id">
+            <th v-for="h in hg.headers" :key="h.id" :aria-sort="h.column.getIsSorted() === 'asc' ? 'ascending' : h.column.getIsSorted() === 'desc' ? 'descending' : 'none'">
+{{{headerBody}}}
+{{#if hasFilters}}              <v-text-field
+                v-if="h.column.getCanFilter()"
+                density="compact"
+                hide-details
+                variant="outlined"
+                placeholder="Filter"
+                :aria-label="`Filter by ${String(h.column.columnDef.header ?? h.id)}`"
+                :model-value="String(h.column.getFilterValue() ?? '')"
+                @update:model-value="(v: string) => h.column.setFilterValue(v)"
+              />
+{{/if}}            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in table.getRowModel().rows" :key="r.id">
+            <td v-for="c in r.getVisibleCells()" :key="c.id">
+{{{cellBody}}}
+            </td>
+          </tr>
+        </tbody>
+      </v-table>
+      <div class="d-flex align-center justify-space-between mt-3">
+        <v-btn size="small" variant="tonal" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">Previous</v-btn>
+        <span class="text-body-2" aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
+        <v-btn size="small" variant="tonal" :disabled="!table.getCanNextPage()" @click="table.nextPage()">Next</v-btn>
+      </div>
+    </div>

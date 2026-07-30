@@ -349,6 +349,11 @@ export function generateVueForContexts(
       bcByAggregate,
     });
     out.set(renderedPagePath, renderedPageContent);
+    // Sibling component files a primitive hoisted out of the page — a Vue SFC
+    // holds exactly one component, so `DataGrid` emits its child as its own
+    // `src/components/<Name>.vue` (the page's import comes from the same
+    // `usedUserComponents` channel a hand-written component uses).
+    for (const f of result.hoistedComponentFiles ?? []) out.set(f.path, f.content);
     options.sourcemap?.file(
       renderedPagePath,
       renderedPageContent,

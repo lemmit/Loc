@@ -225,6 +225,16 @@ export interface WalkResult {
    *  *inside* the page would be a fresh identity every render and remount its
    *  subtree.  Optional — only hoisting primitives write it. */
   hoistedModuleDecls?: string[];
+  /** Whole SIBLING FILES a primitive emitted, keyed by path relative to the
+   *  generated project root.  The frontend orchestrator writes each into its
+   *  output map alongside the page file.
+   *
+   *  `hoistedModuleDecls` suffices where a second component can share the
+   *  page's file — React/TSX.  It cannot on Vue or Svelte: an SFC and a
+   *  `.svelte` file hold exactly ONE component each, so `DataGrid`'s child has
+   *  nowhere to go but its own file.  Same accumulator discipline as
+   *  `hoistedModuleDecls` (created EAGERLY on the root context). */
+  hoistedComponentFiles?: { path: string; content: string }[];
   /** True when any walked node emitted a `CodeBlock`
    *  primitive.  The React generator's orchestrator aggregates this
    *  across every page in the deployable and threads the result into
@@ -459,6 +469,8 @@ export function walkBody(
     // from a nested walk (a DataGrid inside a QueryView's `data:` lambda) lands
     // in the array this root's `WalkResult` returns.
     hoistedModuleDecls: [],
+    // Same shared-reference rationale as `hoistedModuleDecls` above.
+    hoistedComponentFiles: [],
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -490,6 +502,7 @@ export function walkBody(
     actionMutations: ctx.actionMutations,
     hoistedHandlers: ctx.hoistedHandlers,
     hoistedModuleDecls: ctx.hoistedModuleDecls,
+    hoistedComponentFiles: ctx.hoistedComponentFiles,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
     usesFileUpload: ctx.usesFileUpload,
@@ -657,6 +670,9 @@ export interface Sink {
    *  nested context would be a fresh array the root never sees, and the
    *  declaration would be silently dropped. */
   hoistedModuleDecls?: string[];
+  /** Sibling component FILES hoisted by a primitive; see the `WalkContext`
+   *  field.  Same eager-creation discipline as `hoistedModuleDecls`. */
+  hoistedComponentFiles?: { path: string; content: string }[];
   /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;

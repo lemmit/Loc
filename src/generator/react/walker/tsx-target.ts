@@ -45,6 +45,7 @@ import type {
   VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
+import { renderReactDataGridChild } from "./data-grid-child.js";
 
 /** TSX-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.  Consumed
@@ -176,6 +177,19 @@ export const tsxTarget: WalkerTarget = {
    *  `<>…</>` shorthand needs no import. */
   wrapMultiRoot(markup) {
     return `<>${markup}</>`;
+  },
+
+  // --- DataGrid seam ------------------------------------------------------
+
+  /** TSX puts the grid's child component at MODULE scope in the page's own
+   *  file — legal here, impossible on Vue/Svelte (one component per file). */
+  /** React's `cell` callback destructures `{ row }`; the child binds
+   *  `row.original` to this local through one cast (the child is generic over
+   *  the row type, so `row.original.name` would not typecheck). */
+  dataGridRowVar: "__loomRow",
+
+  renderDataGridChild(spec, ctx) {
+    return renderReactDataGridChild(spec, ctx);
   },
 
   // --- API binding seam ---------------------------------------------------

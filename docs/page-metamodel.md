@@ -462,7 +462,7 @@ Split the problem by where the rule lives:
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
-| `DataGrid` | **React only.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on another frontend is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend. |
+| `DataGrid` | **React and Vue.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on a frontend without a port is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend. |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
@@ -559,12 +559,21 @@ one thing a sibling ("Delete selected (3)") has a real need for, so it lives in
 field (which the walker would otherwise silently drop).
 
 The grid's **chrome** comes from the active design pack
-(`primitive-data-grid.hbs` — mantine, shadcn, mui and chakra ship one); the
-TanStack wiring above it is framework-level and byte-identical across packs.
-The checkbox column is walker-emitted as a plain `<input type="checkbox">`
-rather than a pack component: it is the one cell whose *behaviour* is
-load-bearing, so keeping it out of the packs means selection needs no template
-change anywhere.
+(`primitive-data-grid.hbs` — mantine, shadcn, mui, chakra, vuetify and shadcnVue
+ship one); the TanStack wiring above it is framework-level. The checkbox column
+is walker-emitted as a plain `<input type="checkbox">` rather than a pack
+component: it is the one cell whose *behaviour* is load-bearing, so keeping it
+out of the packs means selection needs no template change anywhere.
+
+**Where the child lands differs by framework, and that is the whole reason the
+grid is a walker seam rather than a pack template.** React declares the child at
+module scope in the page's own file. A Vue SFC cannot — `<script setup>` compiles
+to exactly one component per file — so the Vue target emits a whole
+`src/components/<Name>.vue` and the page imports it like any other component.
+Cells diverge for the same reason: React's column defs carry `cell: ({ row }) =>
+<JSX/>`, while a Vue `cell` function would have to return VNodes, so a computed
+column renders in the template selected by column id. Svelte and Angular are not
+ported yet; `loom.datagrid-unsupported-target` says so at compile time.
 
 ---
 

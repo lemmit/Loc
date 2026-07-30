@@ -114,6 +114,27 @@ describe("DataGrid — feature gating", () => {
     expect(page).not.toContain("VisibilityState");
   });
 
+  it("binds the row into a computed cell, and casts it once", async () => {
+    // REGRESSION: the first cut emitted `cell: () => <Badge>{row.name}</Badge>`
+    // with `row` UNBOUND, so any grid with a formatting accessor failed `tsc`.
+    // It shipped because the sort/filter assertions below never compiled the
+    // emitted file — the generated-project `tsc` gate has no computed-cell grid.
+    const page = await genPage(
+      `QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+        Column("Name", o => Badge(o.name)),
+        Column("Tier", o => o.tier, sortable: true),
+        rows: rows, testid: "computed-grid") }`,
+    );
+    expect(page).toContain(
+      "cell: ({ row }) => { const __loomRow = row.original as CellRow; " +
+        "return <Badge>{__loomRow.name}</Badge>; }",
+    );
+    // The cast type is declared once per grid, and only when a cell needs it.
+    expect(page).toContain("type CellRow = Record<string, any>;");
+    const plain = await genPage(GRID);
+    expect(plain).not.toContain("CellRow");
+  });
+
   it("forces sort/filter off for a column whose field can't be resolved", async () => {
     // A formatting call has no simple member accessor, so there is no
     // accessorKey to sort or filter BY VALUE — the flags must not be emitted

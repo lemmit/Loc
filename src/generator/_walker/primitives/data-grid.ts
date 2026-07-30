@@ -15,28 +15,31 @@
 //
 // WHY IT EMITS A COMPONENT, NOT MARKUP
 // ------------------------------------
-// `useReactTable` is a React hook, so it must run at a component's top level.
-// A DataGrid almost always renders inside a `QueryView`'s `data:` slot, which
-// the walker emits as a CONDITIONAL expression (`{rows && <…/>}`) — hooks
-// cannot run there.  Hoisting the hook to the page component's top level does
-// not work either: it needs `rows`, which only exists inside the QueryView
-// lambda.  And a component declared *inside* the page would get a fresh
-// identity on every render, remounting the grid and losing its sort state.
+// A `DataGrid` is a TanStack row model driven by framework-specific reactive
+// state, and that state cannot live in the page component: the grid almost
+// always renders inside a `QueryView`'s `data:` slot, which the walker emits as
+// a CONDITIONAL expression, and it needs `rows`, which only exists inside that
+// lambda.  So each target emits a CHILD component and renders a call site here.
 //
-// So the primitive hoists a child component to MODULE scope (via
-// `ctx.hoistedModuleDecls`) and renders `<XGrid rows={…} />` at the call site.
-// This is the same shape shadcn's own DataTable recipe uses, and it ports to
-// Vue/Svelte/Angular (each emits a child component too) in the next slice.
+// WHAT IS SHARED AND WHAT IS NOT
+// ------------------------------
+// Arg parsing, column resolution and the component name are framework-neutral
+// and live in this file.  Everything about the child itself — the reactive
+// idiom, the TanStack package, and whether the child can share the page's file
+// at all — is the `renderDataGridChild` seam (`_walker/target.ts`).  TSX puts
+// the child at module scope in the page's own file; a Vue SFC and a `.svelte`
+// file hold exactly ONE component each, so those targets return a whole
+// sibling file through `ctx.hoistedComponentFiles`.
 //
-// The emitted shape is compile-verified against real `@tanstack/react-table`
-// v8 + React 19 under `strict` + `noUnusedLocals`; in particular the child is
-// generic over the row type (`<T extends object>`) so no DTO type name has to
-// be resolved here, and `data:` takes a `as T[]` cast because the walker binds
-// `rows` as `readonly T[]`.
+// Unlike the `Table` sort/filter/pager seams, a missing seam here is NOT a
+// graceful degradation — a grid that renders nothing is a blank page region.
+// `loom.datagrid-unsupported-target` rejects `DataGrid` on any framework
+// without the seam at IR-validate, so the sentinel below is unreachable from
+// valid input.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
-import { addImport, renderPrimitive } from "../render-primitive.js";
+
 import {
   boolNamed,
   namedArgValue,
@@ -44,23 +47,9 @@ import {
   positionalArgs,
   stringNamed,
 } from "../shared/args.js";
+import type { DataGridColumn } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, extendLambdaParams, propagateChildFlags, walk } from "../walker-core.js";
-
-/** One resolved grid column. */
-interface GridColumn {
-  /** Stable column id — also the TanStack `accessorKey` for a simple field. */
-  id: string;
-  /** Header label (already escaped for the target). */
-  header: string;
-  /** Row field this column reads, when the accessor is a simple member. */
-  accessorKey?: string;
-  /** Rendered cell JSX for a non-trivial accessor (formatting, a nested
-   *  primitive).  Mutually exclusive with `accessorKey`. */
-  cellJsx?: string;
-  sortable: boolean;
-  filterable: boolean;
-}
 
 export function emitDataGrid(
   call: ExprIR & { kind: "call" },
@@ -86,6 +75,12 @@ export function emitDataGrid(
   // React page-shell only emits `useState<string[]>([])` for it since the
   // array-state fix (#2294) — before that it was `useState<any>(undefined)`.
   const selection = stateNameArg(call, "selection", ctx);
+  // A bound selection is a state USE even though no `ref` node was walked —
+  // the page shell only emits the field's reactive declaration (React's
+  // `useState`, Vue's `ref`) when something in the body used it, and here the
+  // consumer is the grid's own prop wiring rather than an expression.  Without
+  // this the page loses the very field the grid writes to.
+  if (selection) ctx.usesState = true;
 
   const columns = positionalArgs(call)
     .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
@@ -97,64 +92,62 @@ export function emitDataGrid(
 
   const componentName = gridComponentName(call, ctx);
 
-  addImport(ctx, "react", "useMemo", "useState");
-  if (selection) addImport(ctx, "react", "useEffect");
-  addImport(
-    ctx,
-    "@tanstack/react-table",
-    "flexRender",
-    "getCoreRowModel",
-    "getPaginationRowModel",
-    "getSortedRowModel",
-    "useReactTable",
-    ...(anyFilterable ? ["getFilteredRowModel"] : []),
-  );
-  // Type-only names are imported alongside; the emitted file uses `import type`
-  // via the shared import renderer's `type ` prefix convention where the pack
-  // supports it, else a plain value import (erased by the bundler).
-  addImport(
-    ctx,
-    "@tanstack/react-table",
-    "type ColumnDef",
-    "type SortingState",
-    ...(anyFilterable ? ["type ColumnFiltersState"] : []),
-    ...(columnVisibility ? ["type VisibilityState"] : []),
-    ...(selection ? ["type RowSelectionState"] : []),
-  );
+  const testid = stringNamed(call, "testid");
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
 
-  // The grid body markup comes from the design pack, so each pack keeps its
-  // own table chrome; the hook wiring above it is framework-level and lives
-  // here.
-  const body = renderPrimitive(ctx, "primitive-data-grid", {
-    hasColumnVisibility: columnVisibility,
-    hasFilters: anyFilterable,
-    testidAttr: stringNamed(call, "testid") ? ` data-testid="${stringNamed(call, "testid")}"` : "",
-  });
-
-  ctx.hoistedModuleDecls ??= [];
-  ctx.hoistedModuleDecls.push(
-    renderGridComponent({
+  const child = ctx.target.renderDataGridChild?.(
+    {
       componentName,
       columns,
+      rowsExpr,
       multiSort,
       columnVisibility,
       anyFilterable,
       pageSize,
-      selection: selection !== undefined,
-      body,
-    }),
+      selection,
+      testidAttr,
+      // The grid body markup comes from the active design pack, so each pack
+      // keeps its own table chrome while the reactive wiring around it belongs
+      // to the target.  Rendered through a callback rather than eagerly: a
+      // target supplies its own extra template context (Vue splices
+      // walker-built header/cell fragments, which React puts in its column
+      // defs instead), and only the target knows what those are.
+      packImports: ctx.pack.manifest.imports?.["primitive-data-grid"] ?? [],
+      renderBody: (extra) =>
+        ctx.pack.render("primitive-data-grid", {
+          hasColumnVisibility: columnVisibility,
+          hasFilters: anyFilterable,
+          hasSelection: selection !== undefined,
+          testidAttr,
+          // Every target-specific key a pack may reference is defaulted here,
+          // not just supplied by the target that uses it.  `emitPageObjectsForUi`
+          // drives the REACT tsx walker over whichever pack is active — Vue and
+          // Svelte included — purely to collect `testid:` strings, so a Vue pack
+          // template gets rendered with React's context on that throwaway pass.
+          // Handlebars runs in strict mode, so a missing key is a hard error
+          // rather than a blank.  The pass's output is discarded (only testids
+          // survive), so an empty fragment here is harmless; the real Vue page
+          // comes from the Vue walker, which overrides both.
+          headerBody: "",
+          cellBody: "",
+          ...extra,
+        }),
+    },
+    ctx,
   );
+  // Unreachable from valid input — `loom.datagrid-unsupported-target` rejects a
+  // DataGrid on any framework without the seam.  Kept so the walker is total.
+  if (!child) return `{/* DataGrid: not supported on ${ctx.target.framework} */}`;
 
-  // The call site is a single element — the grid's own layout lives inside the
-  // hoisted component, so no depth-based indentation is needed here.  When
-  // selection is bound, the page's state setter is threaded in as a prop so the
-  // child owns TanStack's selection map while the PAGE owns the id list.
-  if (selection) {
-    const setter = `set${selection[0]!.toUpperCase()}${selection.slice(1)}`;
-    ctx.usesState = true;
-    return `<${componentName} rows={${rowsExpr}} onSelectionChange={${setter}} />`;
+  if (child.moduleDecl !== undefined) {
+    ctx.hoistedModuleDecls ??= [];
+    ctx.hoistedModuleDecls.push(child.moduleDecl);
   }
-  return `<${componentName} rows={${rowsExpr}} />`;
+  if (child.file !== undefined) {
+    ctx.hoistedComponentFiles ??= [];
+    ctx.hoistedComponentFiles.push(child.file);
+  }
+  return child.callSite;
 }
 
 /** Resolve one `Column("Header", accessor, sortable:, field:, filterable:)`.
@@ -169,7 +162,7 @@ function resolveColumn(
   ctx: WalkContext,
   index: number,
   depth: number,
-): GridColumn {
+): DataGridColumn {
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
   const accessorArg = positionals[1];
@@ -182,15 +175,17 @@ function resolveColumn(
   const inferred = simpleAccessorField(accessorArg);
   const accessorKey = explicitField ?? inferred;
 
-  let cellJsx: string | undefined;
+  let cell: string | undefined;
   if (!accessorKey && accessorArg?.kind === "lambda" && accessorArg.body) {
-    const rowVar = "row";
+    // How the row reaches the cell is target-specific — see
+    // `WalkerTarget.dataGridRowVar`.
+    const rowVar = ctx.target.dataGridRowVar ?? "row";
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, accessorArg.param, rowVar),
     };
     const b = accessorArg.body;
-    cellJsx = b.kind === "call" ? walk(b, childCtx, depth) : `{${emitExpr(b, childCtx)}}`;
+    cell = b.kind === "call" ? walk(b, childCtx, depth) : `{${emitExpr(b, childCtx)}}`;
     propagateChildFlags(ctx, childCtx);
   }
 
@@ -198,7 +193,7 @@ function resolveColumn(
     id: accessorKey ?? `col${index + 1}`,
     header: headerStr,
     accessorKey,
-    cellJsx,
+    cell,
     // A column with no resolvable field can't be sorted or filtered BY VALUE,
     // so those flags are forced off rather than emitted and silently ignored.
     sortable: boolNamed(call, "sortable") && accessorKey !== undefined,
@@ -214,7 +209,12 @@ function simpleAccessorField(accessor: ExprIR | undefined): string | undefined {
   return undefined;
 }
 
-/** A unique, stable component name for this grid within the emitted module. */
+/** A unique, stable component name for this grid within the emitted module.
+ *
+ *  Must not collide with a user `component` of the same name: the targets that
+ *  hoist the child into `src/components/` would overwrite that component's
+ *  file, and the page's import would silently bind the wrong one.  A colliding
+ *  derived name falls through to the sequence below. */
 function gridComponentName(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
   const testid = stringNamed(call, "testid");
   if (testid) {
@@ -226,12 +226,16 @@ function gridComponentName(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
     // Don't stutter when the testid already names it a grid
     // (`customers-grid` → `CustomersGrid`, not `CustomersGridGrid`).
     if (pascalCase !== "") {
-      return pascalCase.endsWith("Grid") ? pascalCase : `${pascalCase}Grid`;
+      const name = pascalCase.endsWith("Grid") ? pascalCase : `${pascalCase}Grid`;
+      if (!ctx.userComponents.has(name)) return name;
     }
   }
-  // Fall back to a per-module sequence.  Counted off the hoist array so no
-  // extra walker state is needed; every grid pushes exactly one declaration.
-  const n = (ctx.hoistedModuleDecls?.length ?? 0) + 1;
+  // Fall back to a per-page sequence.  Counted off the hoist accumulators so no
+  // extra walker state is needed; every grid pushes exactly one entry, into
+  // whichever channel its target uses (module decl on TSX, sibling file on
+  // Vue/Svelte) — so BOTH are counted or the second grid on a file-hoisting
+  // target would reuse the first one's name.
+  const n = (ctx.hoistedModuleDecls?.length ?? 0) + (ctx.hoistedComponentFiles?.length ?? 0) + 1;
   return `LoomGrid${n}`;
 }
 
@@ -252,159 +256,4 @@ function stateNameArg(
   const arg = namedArgValue(call, name);
   if (arg?.kind !== "ref") return undefined;
   return ctx.stateNames.has(arg.name) ? arg.name : undefined;
-}
-
-/** Render the hoisted child component: column defs, view state, the
- *  `useReactTable` call, and the pack-rendered markup. */
-function renderGridComponent(args: {
-  componentName: string;
-  columns: readonly GridColumn[];
-  multiSort: boolean;
-  columnVisibility: boolean;
-  anyFilterable: boolean;
-  pageSize: number;
-  selection: boolean;
-  body: string;
-}): string {
-  const {
-    componentName,
-    columns,
-    multiSort,
-    columnVisibility,
-    anyFilterable,
-    pageSize,
-    selection,
-    body,
-  } = args;
-
-  // A leading checkbox column when selection is on.  Emitted by the WALKER as
-  // plain `<input type="checkbox">` rather than a pack component: it is the one
-  // cell whose behaviour (not appearance) is load-bearing, and keeping it here
-  // means selection needs no template change in any of the four packs — and
-  // ports to Vue/Svelte/Angular unchanged.
-  const selectCol = selection
-    ? `        {
-          id: "loom-select",
-          header: ({ table: t }) => (
-            <input
-              type="checkbox"
-              aria-label="Select all rows"
-              checked={t.getIsAllPageRowsSelected()}
-              onChange={t.getToggleAllPageRowsSelectedHandler()}
-            />
-          ),
-          cell: ({ row }) => (
-            <input
-              type="checkbox"
-              aria-label="Select row"
-              checked={row.getIsSelected()}
-              disabled={!row.getCanSelect()}
-              onChange={row.getToggleSelectedHandler()}
-            />
-          ),
-          enableSorting: false,
-          enableColumnFilter: false,
-        },`
-    : "";
-
-  const colDefs = columns
-    .map((c) => {
-      const parts = [`id: ${JSON.stringify(c.id)}`];
-      if (c.accessorKey) parts.push(`accessorKey: ${JSON.stringify(c.accessorKey)}`);
-      parts.push(`header: ${JSON.stringify(c.header)}`);
-      if (c.cellJsx) parts.push(`cell: () => ${c.cellJsx}`);
-      parts.push(`enableSorting: ${c.sortable}`);
-      parts.push(`enableColumnFilter: ${c.filterable}`);
-      return `        { ${parts.join(", ")} },`;
-    })
-    .join("\n");
-  const allColDefs = selectCol === "" ? colDefs : `${selectCol}\n${colDefs}`;
-
-  const stateDecls = [
-    `  const [sorting, setSorting] = useState<SortingState>([]);`,
-    selection ? `  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});` : "",
-    anyFilterable
-      ? `  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);`
-      : "",
-    columnVisibility
-      ? `  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});`
-      : "",
-  ]
-    .filter((l) => l !== "")
-    .join("\n");
-
-  const tableState = [
-    "sorting",
-    selection ? "rowSelection" : "",
-    anyFilterable ? "columnFilters" : "",
-    columnVisibility ? "columnVisibility" : "",
-  ]
-    .filter((s) => s !== "")
-    .join(", ");
-
-  const changeHandlers = [
-    `    onSortingChange: setSorting,`,
-    selection ? `    onRowSelectionChange: setRowSelection,` : "",
-    selection ? `    enableRowSelection: true,` : "",
-    anyFilterable ? `    onColumnFiltersChange: setColumnFilters,` : "",
-    columnVisibility ? `    onColumnVisibilityChange: setColumnVisibility,` : "",
-  ]
-    .filter((l) => l !== "")
-    .join("\n");
-
-  const rowModels = [
-    `    getCoreRowModel: getCoreRowModel(),`,
-    `    getSortedRowModel: getSortedRowModel(),`,
-    anyFilterable ? `    getFilteredRowModel: getFilteredRowModel(),` : "",
-    `    getPaginationRowModel: getPaginationRowModel(),`,
-  ]
-    .filter((l) => l !== "")
-    .join("\n");
-
-  // Push the selected row ids up to the page's `string[]` state whenever the
-  // selection map changes.  TanStack keys its map by row INDEX by default, so
-  // the ids come from the row originals — falling back to the index only when a
-  // row has no `id`, which keeps the emitted code total without assuming the
-  // wire shape.  The effect depends on `rowSelection` (not the derived array)
-  // so it fires exactly once per selection change.
-  const selectionSync = selection
-    ? `  useEffect(() => {
-    onSelectionChange(
-      table
-        .getSelectedRowModel()
-        .rows.map((r) => String((r.original as { id?: unknown }).id ?? r.index)),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowSelection]);
-`
-    : "";
-
-  // `rows` arrives as `readonly T[]` from the walker's binding; TanStack's
-  // `data` is mutable, hence the cast.  The component is generic so no DTO
-  // type name has to be resolved at generate time.
-  const props = selection
-    ? `{ rows, onSelectionChange }: { rows: readonly T[]; onSelectionChange: (ids: string[]) => void }`
-    : `{ rows }: { rows: readonly T[] }`;
-  return `function ${componentName}<T extends object>(${props}) {
-${stateDecls}
-  const columns = useMemo<ColumnDef<T>[]>(
-    () => [
-${allColDefs}
-    ],
-    [],
-  );
-  const table = useReactTable({
-    data: (rows ?? []) as T[],
-    columns,
-    state: { ${tableState} },
-${changeHandlers}
-    enableMultiSort: ${multiSort},
-${rowModels}
-    initialState: { pagination: { pageSize: ${pageSize} } },
-  });
-${selectionSync}  return (
-${body}
-  );
-}
-`;
 }
