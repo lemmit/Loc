@@ -108,7 +108,11 @@ export function defaultAgentSettings(): AgentSettings {
   return { providerId: p.id, baseUrl: p.baseUrl, model: p.defaultModel, apiKey: "" };
 }
 
-const STORAGE_KEY = "loom.agent.settings";
+/** Where the BYOK provider settings — including the `apiKey` — are persisted.
+ *  Exported so the crash-reporting tests can pin the exact key a report must
+ *  never read (M-T8.14 redaction rule 2); a rename here surfaces there. */
+export const AGENT_SETTINGS_STORAGE_KEY = "loom.agent.settings";
+const STORAGE_KEY = AGENT_SETTINGS_STORAGE_KEY;
 
 /** True once the settings name a provider that can actually be called — a
  *  base URL, a model, and (unless the provider is keyless) a key. */

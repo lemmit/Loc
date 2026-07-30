@@ -74,6 +74,7 @@ jobs:
         e2e/mobile-builder.spec.ts
         e2e/mobile-model-builder.spec.ts
         e2e/mobile-requirements.spec.ts
+        e2e/crash-reporting.spec.ts
     steps:
       - uses: actions/checkout@v6
 
