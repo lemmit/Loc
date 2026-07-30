@@ -185,6 +185,32 @@ describe("audited — aggregate-wide form", () => {
     expect(cart.operations.find((o) => o.name === "recalc")?.audited).toBe(false);
   });
 
+  // An empty trail is worse than an absent one — a History view over it still
+  // reads as authoritative. Surface the mistake at authoring time.
+  it("warns when the aggregate declares no public command action", async () => {
+    const src = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Cart audited {
+        label: string
+        private operation recalc() { label := "x" }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  deployable api { platform: node, contexts: [C], port: 3000 }
+}
+`;
+    const { warnings } = await parseModel(src);
+    expect(warnings.some((w) => w.includes("no public command action"))).toBe(true);
+  });
+
+  it("does NOT warn when a public command exists", async () => {
+    const { warnings } = await parseModel(AGG_WIDE);
+    expect(warnings.some((w) => w.includes("no public command action"))).toBe(false);
+  });
+
   it("emits the same audit runtime the per-command form does", async () => {
     const { model } = await parseModel(AGG_WIDE);
     const files = generateSystems(model).files;

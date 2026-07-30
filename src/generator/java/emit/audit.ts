@@ -1,8 +1,4 @@
-import type {
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  OperationIR,
-} from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { aggHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { lines } from "../../../util/code-builder.js";
 
