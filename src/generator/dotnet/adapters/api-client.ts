@@ -174,6 +174,14 @@ export function emitDotnetApiClients(
         // Members are non-nullable value types with defaults: the callee always
         // sends all five, and a nullable `int?` would push the null check onto
         // every call site.
+        // The SHIPPED create route answers `201 {id}` — not the whole entity
+        // its declared responseType names.  Deserializing the entity record
+        // against that body leaves every other member null, at RUNTIME.
+        const createName = agg && op.kind === "create" ? `${agg.name}Created` : undefined;
+        if (createName && !emittedRecords.has(createName)) {
+          emittedRecords.add(createName);
+          records.push(`    public sealed record ${createName}(string Id);`, "");
+        }
         const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
         if (pagedName && recordName && !emittedRecords.has(pagedName)) {
           emittedRecords.add(pagedName);
@@ -188,11 +196,13 @@ export function emitDotnetApiClients(
           );
         }
         // The deserialized shape and the declared return move together.
-        const respType = pagedName
-          ? pagedName
-          : recordName && coll
-            ? `System.Collections.Generic.List<${recordName}>`
-            : recordName;
+        const respType = createName
+          ? createName
+          : pagedName
+            ? pagedName
+            : recordName && coll
+              ? `System.Collections.Generic.List<${recordName}>`
+              : recordName;
 
         const bodyParams = op.params.filter((p) => p.location === "body");
         // Two body shapes, both derived (api-surface.ts): `create` carries ONE

@@ -45,10 +45,15 @@ system AC {
       // just the declared ones), and that the response is the callee's paged
       // envelope rather than nothing — reading `.total` off it is what makes a
       // client returning void a compile error instead of a silent no-op.
+      // (Deliberately a `match` on the count rather than a string conversion:
+      //  there is no `toString` intrinsic in the stdlib, and writing one anyway
+      //  compiles on node/.NET/Java — which have a native method of that name —
+      //  while failing at RUNTIME on Python and Elixir.)
       workflow census {
         create(label: string) {
           let listing = orders.allOrder()
-          let s = Shipment.create({ orderCode: label, status: listing.total.toString() })
+          let note = match { listing.total > 0 => "SEEN", else => "EMPTY" }
+          let s = Shipment.create({ orderCode: label, status: note })
         }
       }
       // The WRITE half: the caller creates a row in the CALLEE's database

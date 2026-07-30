@@ -328,7 +328,8 @@ system Acme {
       workflow census {
         create(label: string) {
           let listing = orders.allOrder()
-          let s = Shipment.create({ orderCode: label, status: listing.total.toString() })
+          let note = match { listing.total > 0 => "SEEN", else => "EMPTY" }
+          let s = Shipment.create({ orderCode: label, status: note })
         }
       }
     }
@@ -635,10 +636,11 @@ describe.skipIf(!ENABLED)(`typed in-system api call (api-call-e2e, caller=${CALL
     const rows = await shipments();
     const row = rows.find((s) => s.orderCode === label);
     expect(row, `no census row:\n${JSON.stringify(rows)}`).toBeDefined();
-    // `total` counts the orders the callee holds — at least the ones the
-    // earlier tests created, so a real number, never "0" or empty.
-    expect(row?.status).toMatch(/^\d+$/);
-    expect(Number(row?.status)).toBeGreaterThan(0);
+    // "SEEN" can only be reached by reading `total` off the parsed envelope
+    // and finding it > 0 — the earlier tests created orders, so the callee
+    // holds some.  A client that issued the request and discarded the body
+    // yields "EMPTY" (or fails to compile), so this distinguishes them.
+    expect(row?.status).toBe("SEEN");
   }, 120_000);
 
   it("surfaces a callee 404 as a failed call rather than a silent success", async () => {

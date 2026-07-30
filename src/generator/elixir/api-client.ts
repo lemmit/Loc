@@ -185,7 +185,13 @@ export function emitElixirApiClients(
           "end",
           "",
         ];
-        if (agg) {
+        // The SHIPPED create route answers `201 {id}` — not the whole entity
+        // its declared responseType names.  Projecting the full field list
+        // against that body lands `nil` in every other key, at RUNTIME.
+        const isCreate = agg !== undefined && op.kind === "create";
+        if (isCreate) {
+          tail.push("payload = res.body || %{}", "", "%{", '  id: Map.get(payload, "id")', "}");
+        } else if (agg) {
           // Project the STRING-keyed decoded body onto atom keys naming the
           // callee's wire fields — `o.code` in domain code is map-dot, which
           // only resolves atom keys.  Every key here is a compile-time literal.

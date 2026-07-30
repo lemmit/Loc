@@ -156,6 +156,14 @@ export function emitJavaApiClients(
         // Components stay BOXED for the same reason the row record's are: a
         // missing field binds null, and null into an `int` throws at parse time
         // pointing at the record rather than at the callee.
+        // The SHIPPED create route answers `201 {id}` — not the whole entity
+        // its declared responseType names.  Reading the entity record against
+        // that body leaves every other component null, at RUNTIME.
+        const createName = agg && op.kind === "create" ? `${agg.name}Created` : undefined;
+        if (createName && !emittedRecords.has(createName)) {
+          emittedRecords.add(createName);
+          records.push(`    public record ${createName}(String id) { }`, "");
+        }
         const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
         if (pagedName && recordName && !emittedRecords.has(pagedName)) {
           emittedRecords.add(pagedName);
@@ -167,18 +175,22 @@ export function emitJavaApiClients(
         // Jackson needs a TypeReference for a generic container — `List<T>.class`
         // does not exist, and `List.class` erases to `List<LinkedHashMap>`,
         // which fails on the first field read rather than at the boundary.
-        const readExpr = pagedName
-          ? `MAPPER.readValue(res.body(), ${pagedName}.class)`
-          : recordName && coll
-            ? `MAPPER.readValue(res.body(), new tools.jackson.core.type.TypeReference<java.util.List<${recordName}>>() { })`
-            : recordName
-              ? `MAPPER.readValue(res.body(), ${recordName}.class)`
-              : undefined;
-        const respType = pagedName
-          ? pagedName
-          : recordName && coll
-            ? `java.util.List<${recordName}>`
-            : recordName;
+        const readExpr = createName
+          ? `MAPPER.readValue(res.body(), ${createName}.class)`
+          : pagedName
+            ? `MAPPER.readValue(res.body(), ${pagedName}.class)`
+            : recordName && coll
+              ? `MAPPER.readValue(res.body(), new tools.jackson.core.type.TypeReference<java.util.List<${recordName}>>() { })`
+              : recordName
+                ? `MAPPER.readValue(res.body(), ${recordName}.class)`
+                : undefined;
+        const respType = createName
+          ? createName
+          : pagedName
+            ? pagedName
+            : recordName && coll
+              ? `java.util.List<${recordName}>`
+              : recordName;
 
         const bodyParams = op.params.filter((p) => p.location === "body");
         // Two body shapes, both derived (api-surface.ts): `create` carries ONE
