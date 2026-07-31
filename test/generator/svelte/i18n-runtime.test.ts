@@ -157,4 +157,19 @@ describe("Svelte i18n runtime", () => {
       /role="toolbar" aria-label=\{t\("page\.Home\.toolbarAria\.\w+", "Order actions"\)\}/,
     );
   });
+
+  it("translates the Alert title named slot (alertTitle) at the text position", async () => {
+    // The shadcn-svelte pack renders the Alert title in TEXT-children position —
+    // the `title:` named slot emits a `{t(key, def)}` interpolation under i18n
+    // (M-T1.11), keyed to the `alertTitle` catalog slot.
+    const files = await generateSystemFiles(
+      SYSTEM(`Alert { "Disk almost full", title: "Heads up", color: "yellow" }`),
+    );
+    const home = await homeOf(files);
+    expect(home).toMatch(/\{t\("page\.Home\.alertTitle\.\w+", "Heads up"\)\}/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Heads up");
+  });
 });

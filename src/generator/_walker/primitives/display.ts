@@ -4,7 +4,12 @@
 // recurse via the shared `positionalChildren`).
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedRaw, localizedText } from "../i18n-emit.js";
+import {
+  localizedNamedAttr,
+  localizedNamedText,
+  localizedRaw,
+  localizedText,
+} from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import { numericNamed, stringNamed, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
@@ -162,15 +167,20 @@ export function emitAlert(
 ): string {
   void depth;
   const color = stringNamed(call, "color");
-  const title = stringNamed(call, "title");
+  // `hasTitle` gates the title block exactly as before — true only for a literal
+  // `title:` (a dynamic/absent title is byte-identical to the pre-i18n path).
+  const hasTitle = stringNamed(call, "title") !== undefined;
   return renderPrimitive(ctx, "primitive-alert", {
-    // The alert message is a user-visible positional slot (the `title` named
-    // slot stays raw for now — attribute-position i18n is a follow-up).
+    // Both the message and the `title` named slot are user-visible text: a plain
+    // literal translates through `t()` under i18n (keyed to the catalog), else
+    // byte-identical.  `title` is the text-children form (shadcn/chakra/mui/…),
+    // `titleAttr` the complete bound-attribute fragment (Mantine/Vuetify).
     message: localizedText(call, ctx, "alert", '""'),
     hasColor: color !== undefined,
     color: color ?? "red",
-    hasTitle: title !== undefined,
-    title: title ?? "",
+    title: localizedNamedText(call, ctx, "alertTitle", "title", '""'),
+    titleAttr: localizedNamedAttr(call, ctx, "alertTitle", "title", "title"),
+    hasTitle,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

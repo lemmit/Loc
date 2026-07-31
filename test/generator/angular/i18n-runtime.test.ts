@@ -151,4 +151,17 @@ describe("Angular i18n runtime", () => {
       /role="toolbar" \[attr\.aria-label\]='t\("page\.Home\.toolbarAria\.\w+", "Order actions"\)'/,
     );
   });
+
+  it("translates the Alert title named slot (alertTitle) at the text position", async () => {
+    // The Angular-Material pack renders the Alert title in TEXT position — the
+    // `title:` named slot emits a `{{ t(key, def) }}` interpolation under i18n
+    // (M-T1.11), keyed to the `alertTitle` catalog slot.
+    const files = await generateSystemFiles(
+      SYSTEM(`Alert { "Disk almost full", title: "Heads up", color: "yellow" }`),
+    );
+    const home = homeOf(files);
+    expect(home).toMatch(/\{\{ t\("page\.Home\.alertTitle\.\w+", "Heads up"\) \}\}/);
+    const locale = [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1];
+    expect(Object.values(JSON.parse(locale) as Record<string, string>)).toContain("Heads up");
+  });
 });

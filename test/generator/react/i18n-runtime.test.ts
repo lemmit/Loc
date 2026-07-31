@@ -190,4 +190,20 @@ describe("React i18n runtime", () => {
     expect(Object.values(catalog)).toContain("Add order");
     expect(Object.values(catalog)).toContain("Order actions");
   });
+
+  it("translates the Alert title named slot (alertTitle) at the attribute position", async () => {
+    // The Mantine pack renders the Alert title in ATTRIBUTE position — the
+    // `title:` named slot binds through `t()` as ` title={t(key, def)}` under
+    // i18n (M-T1.11), keyed to the `alertTitle` catalog slot; the message keeps
+    // its own text-slot `t()` call.
+    const files = await generateSystemFiles(
+      SYSTEM(`Alert { "Disk almost full", title: "Heads up", color: "yellow" }`),
+    );
+    const home = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
+    expect(home).toMatch(/title=\{t\("page\.Home\.alertTitle\.\w+", "Heads up"\)\}/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Heads up");
+  });
 });
