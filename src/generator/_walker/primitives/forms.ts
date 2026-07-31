@@ -517,7 +517,15 @@ function emitFormOfAggregate(
   }
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
-  const createFormStateType = formStateTypeFor(`Create${agg.name}`, fields, bc);
+  // Gate on the FULL create-input set, not the `!optional`-filtered `fields`
+  // the form RENDERS.  The generic has to describe what `zodResolver` parses —
+  // `Create<Agg>Request`, built by `api-module.ts` from the UNFILTERED
+  // `createInputFields(agg)` — and that is also the set its `dualTypeAliases`
+  // gate reads.  Reading the filtered list here made the two disagree for an
+  // aggregate whose only money field is OPTIONAL: the alias was emitted, the
+  // schema carried the transform, and the form still took the single generic —
+  // the original F1b TS2322/TS2345, one case narrower.
+  const createFormStateType = formStateTypeFor(`Create${agg.name}`, createInputFields(agg), bc);
   if (createFormStateType) {
     addImport(ctx, `../api/${lowerFirst(agg.name)}`, createFormStateType);
   }
