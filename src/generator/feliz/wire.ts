@@ -1136,16 +1136,20 @@ export interface FelizBoundState {
   type: TypeIR;
 }
 
-/** The `bind:`-carrying input primitives (name → the arg holding the state ref).
- *  `Modal`'s visibility ref is `open:`; the rest bind a value via `bind:`. */
-const BOUND_INPUT_PRIMITIVES: ReadonlyMap<string, string> = new Map([
-  ["Field", "bind"],
-  ["NumberField", "bind"],
-  ["PasswordField", "bind"],
-  ["MultilineField", "bind"],
-  ["SelectField", "bind"],
-  ["Toggle", "bind"],
-  ["Modal", "open"],
+/** The state-writing primitives (name → the args holding the state refs).
+ *  `Modal`'s visibility ref is `open:` and the input primitives bind a value via
+ *  `bind:`, so those carry ONE ref each.  `Table` carries up to FOUR — its sort,
+ *  page and filter controls each write a page-state field, and each needs the
+ *  same `Set<Field>` Msg + update arm a `bind:` gets (M-T1.1). */
+const BOUND_INPUT_PRIMITIVES: ReadonlyMap<string, readonly string[]> = new Map([
+  ["Field", ["bind"]],
+  ["NumberField", ["bind"]],
+  ["PasswordField", ["bind"]],
+  ["MultilineField", ["bind"]],
+  ["SelectField", ["bind"]],
+  ["Toggle", ["bind"]],
+  ["Modal", ["open"]],
+  ["Table", ["sortKey", "sortDir", "page", "filter"]],
 ]);
 
 /** Collect the page `state` fields a controlled input primitive two-way-binds —
@@ -1160,15 +1164,17 @@ export function collectPageBoundState(page: PageIR): FelizBoundState[] {
   const out: FelizBoundState[] = [];
   const walk = (e: ExprIR): void => {
     if (e.kind === "call") {
-      const bindArg = BOUND_INPUT_PRIMITIVES.get(e.name);
-      if (bindArg) {
+      const bindArgs = BOUND_INPUT_PRIMITIVES.get(e.name);
+      if (bindArgs) {
         const names = e.argNames ?? [];
-        const idx = names.indexOf(bindArg);
-        const a = idx >= 0 ? e.args[idx] : undefined;
-        const type = a && a.kind === "ref" ? stateByName.get(a.name) : undefined;
-        if (a && a.kind === "ref" && type && !seen.has(a.name)) {
-          seen.add(a.name);
-          out.push({ name: a.name, type });
+        for (const bindArg of bindArgs) {
+          const idx = names.indexOf(bindArg);
+          const a = idx >= 0 ? e.args[idx] : undefined;
+          const type = a && a.kind === "ref" ? stateByName.get(a.name) : undefined;
+          if (a && a.kind === "ref" && type && !seen.has(a.name)) {
+            seen.add(a.name);
+            out.push({ name: a.name, type });
+          }
         }
       }
     }

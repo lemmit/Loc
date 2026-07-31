@@ -166,7 +166,9 @@ export const tsxTarget: WalkerTarget = {
   /** Inline case-insensitive substring filter across every row value.  `Object
    *  .values` hits the `{}` overload (→ `any[]`), so no per-value cast; the row
    *  cast satisfies strict indexing.  An empty query passes all rows. */
-  renderFilteredRows(rowsExpr, filter) {
+  renderFilteredRows({ rowsExpr, filter }) {
+    // `columns` unused: `Object.values` enumerates the row at runtime, so the
+    // searchable field list a statically-typed target needs is redundant here.
     const q = filter.name;
     return (
       `((${rowsExpr}) ?? []).filter((r) => { const __q = (${q}).trim().toLowerCase(); ` +

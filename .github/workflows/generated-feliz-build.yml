@@ -27,6 +27,7 @@ on:
       - 'test/e2e/fixtures/java-build/hosts-feliz.ddd'
       - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-embed-feliz.ddd'
       - 'scripts/feliz-smoke.mjs'
+      - 'scripts/feliz-table-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
@@ -42,6 +43,7 @@ on:
       - 'test/e2e/fixtures/java-build/hosts-feliz.ddd'
       - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-embed-feliz.ddd'
       - 'scripts/feliz-smoke.mjs'
+      - 'scripts/feliz-table-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
@@ -155,7 +157,34 @@ jobs:
                     }
                   },
                   Button { "Add a product", to: "/products/new" },
+                  Button { "See the table", to: "/products/table" },
                   Button { "Back home", to: "/" }
+                }
+              }
+              // M-T1.1 — the sorted / paged / filtered `Table` on Feliz.  Its own
+              // page (not folded into Products above) so the existing
+              // no-backend assertions there stay untouched; the smoke stubs the
+              // list response to drive the controls against real rows.
+              page ProductTable {
+                route: "/products/table"
+                state { sortKey: string = ""  sortDir: string = "asc"  pageNum: int = 1  q: string = "" }
+                body: Stack {
+                  Heading { "Product table", level: 1 },
+                  QueryView {
+                    of:      Shop.Product.all,
+                    loading: Text { "Loading…" },
+                    error:   Text { "Failed to load" },
+                    empty:   Text { "No products yet." },
+                    data:    rows => Table(
+                      Column("Name", p => p.name, sortable: true),
+                      Column("Price", p => p.price, sortable: true),
+                      rows: rows,
+                      sortKey: sortKey, sortDir: sortDir,
+                      page: pageNum, pageSize: 3,
+                      filter: q,
+                      testid: "product-table")
+                  },
+                  Button { "Back to products", to: "/products" }
                 }
               }
               page ProductNew {
@@ -240,6 +269,11 @@ jobs:
             sleep 1
           done
           SMOKE_URL=http://localhost:4173/ node "$GITHUB_WORKSPACE/scripts/feliz-smoke.mjs"
+          # M-T1.1 — the Table's sort / pager / filter, driven against stubbed
+          # rows (`page.route`) so the controls have data to act on.  Same
+          # preview server; kept a separate script because it needs that stub
+          # while the smoke above deliberately runs backend-less.
+          SMOKE_URL=http://localhost:4173/ node "$GITHUB_WORKSPACE/scripts/feliz-table-smoke.mjs"
 
       # Scaffold parity — the hand-built showcase above exercises the MVU/wire
       # paths; this proves a `with scaffold(...)`-generated app (List/New/Detail/

@@ -211,10 +211,24 @@ function primitiveAnchor(c: Ctx): string {
  *  `[ … ]` children list); each column is a header cell + a per-row value cell
  *  (the accessor already walked against the row var). */
 function primitiveTable(c: Ctx): string {
-  const cols = (c.columns as unknown as { header: string; cellJsx: string }[] | undefined) ?? [];
+  const cols =
+    (c.columns as unknown as
+      | { header: string; headerMarkup?: boolean; cellJsx: string }[]
+      | undefined) ?? [];
   const rowsExpr = String(c.rowsExpr ?? "[]");
   const rowVar = String(c.rowVar ?? "row");
-  const headCells = cols.map((col) => `Html.th [ Html.text "${col.header}" ]`).join("; ");
+  // A `sortable:` column's header is an ELEMENT (the clickable sort button the
+  // target rendered), not text — so it goes into the cell's children rather
+  // than being wrapped in `Html.text "…"`, which would emit the whole button as
+  // a string literal.  The flag comes from the walker; the header text itself
+  // is never inspected for markup (a label of "(net)" is still just a label).
+  const headCells = cols
+    .map((col) =>
+      col.headerMarkup
+        ? `Html.th [ prop.children [ ${col.header} ] ]`
+        : `Html.th [ Html.text "${col.header}" ]`,
+    )
+    .join("; ");
   const bodyCells = cols
     .map((col) => `Html.td [ prop.children [ ${asChild(col.cellJsx)} ] ]`)
     .join("; ");
