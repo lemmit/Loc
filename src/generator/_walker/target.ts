@@ -143,6 +143,19 @@ export interface FilteredRowsSpec {
   columns: readonly string[];
 }
 
+/** A member read off a paged query's `data:` binding (`rows.items`,
+ *  `rows.totalPages`) — the input to `renderPagedEnvelopeMember`. */
+export interface PagedEnvelopeMemberSpec {
+  /** The member being read (`"items"` / `"totalPages"`). */
+  member: string;
+  /** The already-emitted binding the member is read off (`allOrders`). */
+  binding: string;
+  /** The query handle that produced the binding — the Feliz Model field
+   *  (`AllOrders`), the JSX hook var.  Lets the target name a sibling of the
+   *  read rather than a member of the binding. */
+  handle: string;
+}
+
 /** The data a target needs to render a pager control below a paged `Table`
  *  (M-T1.1 / M-T2.6 — the `renderPager` seam). */
 export interface PagerSpec {
@@ -723,12 +736,18 @@ export interface WalkerTarget {
     autoPaged?: boolean,
   ): string;
 
-  /** OPTIONAL — set when the target decodes a paged `.all` straight to a
-   *  list (Feliz: the Elmish decoder pulls `items` out of the envelope, so
-   *  the Model holds a `'T list`).  The scaffold's `rows.items` unwrap is then
-   *  a no-op — the shared member walk strips it.  Omitted (falsy) on every
-   *  JSX target, which keeps the `Paged<T>` envelope and reads `.items`. */
-  pagedDataIsList?: boolean;
+  /** OPTIONAL — resolve a member read off a PAGED query binding for a target
+   *  whose Model does NOT hold the `Paged<T>` envelope.
+   *
+   *  The scaffold's server-paged list writes `rows.items` and `rows.totalPages`
+   *  against the envelope its `data:` lambda binds.  Every JSX target holds
+   *  exactly that, so they omit this seam and the accesses render verbatim.
+   *  Feliz splits the envelope at the decoder — the rows land in the read's
+   *  `Remote<'T list>` Model field and the count in a sibling int — so it
+   *  resolves `items` to the binding itself and `totalPages` to that sibling.
+   *  Returning `undefined` for an unrecognised member falls through to the
+   *  plain `<recv>.<member>` emit. */
+  renderPagedEnvelopeMember?(spec: PagedEnvelopeMemberSpec): string | undefined;
 
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The

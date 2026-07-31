@@ -1153,7 +1153,7 @@ function renderAppFs(
     // Realtime subscription module (channels.md Part I) — references `Msg`,
     // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
     hasRealtime ? "" : false,
-    hasRealtime ? renderFelizRealtime(ui) : false,
+    hasRealtime ? renderFelizRealtime(ui, reads) : false,
     "",
     views.join("\n"),
     "",
