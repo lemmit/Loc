@@ -260,7 +260,11 @@ describe("angular generator — display + layout primitives", () => {
       '<div class="loom-stat"><div class="loom-stat-label">{{ t("page.Home.statLabel.xf3i18", "Orders") }}</div><div class="loom-stat-value">{{ t("page.Home.statValue.1pcryb", "42") }}</div></div>',
     );
     expect(page).toContain('<div class="loom-alert loom-alert-yellow" role="alert">');
-    expect(page).toContain('<div class="loom-alert-title">Heads up</div>');
+    // The Alert `title:` named slot walks through the i18n seam (M-T1.11) —
+    // Angular renders the text-position title as `{{ t(...) }}` interpolation.
+    expect(page).toContain(
+      '<div class="loom-alert-title">{{ t("page.Home.alertTitle.v1ku65", "Heads up") }}</div>',
+    );
   });
 
   it("needs no Material module imports for the pure-markup primitives", async () => {

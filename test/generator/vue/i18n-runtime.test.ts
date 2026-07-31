@@ -154,4 +154,20 @@ describe("Vue i18n runtime", () => {
       /role="toolbar" :aria-label='t\("page\.Home\.toolbarAria\.\w+", "Order actions"\)'/,
     );
   });
+
+  it("translates the Alert title named slot (alertTitle) as a Vue attr binding", async () => {
+    // The Vuetify pack renders the Alert title in ATTRIBUTE position — the
+    // `title:` named slot binds through `t()` as ` :title="t(key, def)"` under
+    // i18n (single-quoted here because the `t()` call contains double quotes),
+    // keyed to the `alertTitle` catalog slot.
+    const files = await generateSystemFiles(
+      SYSTEM(`Alert { "Disk almost full", title: "Heads up", color: "yellow" }`),
+    );
+    const home = await homeOf(files);
+    expect(home).toMatch(/:title='t\("page\.Home\.alertTitle\.\w+", "Heads up"\)'/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Heads up");
+  });
 });

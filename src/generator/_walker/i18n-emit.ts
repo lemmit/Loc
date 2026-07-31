@@ -32,7 +32,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
-import { ariaLabelAttr } from "./a11y-emit.js";
+import { ariaLabelAttr, escapeHtmlAttr } from "./a11y-emit.js";
 import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
 import { addImport } from "./render-primitive.js";
 import { namedArgValue, positionalArgs, unwrapTextLiteral } from "./shared/args.js";
@@ -61,7 +61,20 @@ export function localizedRaw(
   fallback: string,
   argIndex = 0,
 ): string {
-  const arg = positionalArgs(call)[argIndex];
+  return localizedRawOf(positionalArgs(call)[argIndex], ctx, role, fallback);
+}
+
+/** The shared body behind {@link localizedRaw} (positional) and
+ *  {@link localizedNamedRaw} (named) — the three literal / ICU-template /
+ *  dynamic-or-off branches over an ALREADY-RESOLVED slot arg.  Keeps the two
+ *  entry points reading their arg from different sources (a positional index vs
+ *  a named key) while sharing one translation decision. */
+function localizedRawOf(
+  arg: ExprIR | undefined,
+  ctx: WalkContext,
+  role: string,
+  fallback: string,
+): string {
   const literal = literalString(arg);
   if (literal !== undefined && ctx.i18nPrefix) {
     const key = messageKey(ctx.i18nPrefix, role, literal);
@@ -86,6 +99,74 @@ export function localizedRaw(
   }
   // Non-i18n / dynamic / empty — exactly the pre-i18n behaviour, at `argIndex`.
   return (arg ? renderTextContent(arg, ctx) : undefined) ?? fallback;
+}
+
+/** The NAMED-arg twin of {@link localizedRaw} (`Alert.title` → `alertTitle`,
+ *  role in `USER_VISIBLE_SLOTS`).  Reads the named arg (`namedArgValue`) rather
+ *  than a positional index, then runs the identical literal / ICU-template /
+ *  dynamic / off branches — so a literal `title:` under i18n becomes a `t()`
+ *  call keyed to the catalog, and every non-i18n path stays byte-identical.
+ *  `fallback` is the quoted placeholder used when the slot is empty. */
+export function localizedNamedRaw(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  name: string,
+  fallback = '""',
+): string {
+  return localizedRawOf(namedArgValue(call, name), ctx, role, fallback);
+}
+
+/** {@link localizedNamedRaw} unwrapped for a JSX/markup-children text position —
+ *  the named-slot twin of {@link localizedText} (packs that render the title as
+ *  element text, e.g. shadcn's `<AlertTitle>…</AlertTitle>`). */
+export function localizedNamedText(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  name: string,
+  fallback: string,
+): string {
+  return unwrapTextLiteral(
+    localizedNamedRaw(call, ctx, role, name, fallback),
+    ctx.target.escapeText,
+  );
+}
+
+/** A COMPLETE bound-attribute fragment for a NAMED user-visible slot rendered
+ *  in ATTRIBUTE position (`Alert.title` on Mantine/Vuetify's `title="…"`),
+ *  leading space included — the attribute-position twin of {@link localizedText}
+ *  and the byte-identical analogue of the old `{{#if hasTitle}} title="{{title}}"`.
+ *
+ *   - literal + `ctx.i18nPrefix` → a BOUND attribute `renderAttrBinding`-emitted
+ *     per frontend (` title={t(key, def)}` React/Svelte, ` :title="t(…)"` Vue,
+ *     ` [title]="t(…)"` Angular), keyed identically to the catalog;
+ *   - a literal with NO i18n → the static ` title="<escaped-literal>"` fragment
+ *     (byte-identical to the pre-i18n Handlebars `title="{{title}}"`);
+ *   - a dynamic / absent slot → the empty string (the pre-i18n `hasTitle` guard
+ *     already withheld the fragment; nothing to bind).
+ *
+ *  Unlike {@link localizedAriaLabelAttr} this uses NO `ariaAttrPrefix` — `title`
+ *  is a real HTML attribute, not an aria-* one, and no Alert pack binds it on
+ *  Angular. */
+export function localizedNamedAttr(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  name: string,
+  attrName: string,
+): string {
+  const literal = literalString(namedArgValue(call, name));
+  if (literal === undefined) return "";
+  if (ctx.i18nPrefix) {
+    const key = messageKey(ctx.i18nPrefix, role, literal);
+    addImport(ctx, I18N_MODULE, "t");
+    return ctx.target.renderAttrBinding(
+      attrName,
+      `t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`,
+    );
+  }
+  return ` ${attrName}="${escapeHtmlAttr(literal)}"`;
 }
 
 /** An ` aria-label="…"` attribute fragment for a NAMED user-visible slot

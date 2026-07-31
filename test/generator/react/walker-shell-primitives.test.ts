@@ -109,8 +109,10 @@ describe("shell primitives", () => {
 
   it('Alert { message, color: "yellow", title: "Heads up" } threads both', async () => {
     const tsx = await emit(`Alert { "Disk almost full", color: "yellow", title: "Heads up" }`);
+    // The `title:` named slot binds through `t()` at the attribute position under
+    // i18n (M-T1.11), keyed to the `alertTitle` catalog slot.
     expect(tsx).toMatch(
-      /<Alert color="yellow"[^>]*title="Heads up"[^>]*>\{t\("[^"]*", "Disk almost full"\)\}<\/Alert>/,
+      /<Alert color="yellow"[^>]*title=\{t\("[^"]*", "Heads up"\)\}[^>]*>\{t\("[^"]*", "Disk almost full"\)\}<\/Alert>/,
     );
   });
 
