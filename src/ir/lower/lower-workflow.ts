@@ -875,9 +875,23 @@ function lowerWorkflowStatementInner(
     // expr-let: scalar / generic expression
     const exprIR = lowerExpr(stmt.expr, env);
     const t = inferExprType(stmt.expr, env);
+    // A typed in-system api call (M-T4.8) whose callee declares a union find
+    // carries the SAME runtime shape as a local one: the callee answers the
+    // success body directly at 200 and rides the absent variant on its own
+    // status (payloads.md §Union finds) — there is no tagged carrier on the
+    // wire.  So it gets the same `absenceUnion` stamp the repo-read path sets
+    // above, and a variant-`match` over it lowers to a presence check.
+    //
+    // Without this the call site narrows with `o.type === "Order"` against a
+    // body that never carries a `type` discriminator — the arm silently never
+    // matches, which no compiler can see.
+    const remoteAbsenceUnion =
+      exprIR.kind === "call" && exprIR.callKind === "remote-api-op" && t.kind === "union";
     return {
       stmt: { kind: "expr-let", name: stmt.name, type: t, expr: exprIR },
-      envAfter: withLocal(env, stmt.name, "let", t),
+      envAfter: withLocal(env, stmt.name, "let", t, {
+        ...(remoteAbsenceUnion ? { absenceUnion: true } : {}),
+      }),
     };
   }
   if (isAssignOrCallStmt(stmt)) {

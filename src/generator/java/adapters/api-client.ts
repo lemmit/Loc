@@ -32,7 +32,11 @@ import {
   type ApiResourceBinding,
   servedContextsFor,
 } from "../../../ir/util/api-resource-binding.js";
-import { type ApiOperationIR, deriveContextOperations } from "../../../ir/util/api-surface.js";
+import {
+  type ApiOperationIR,
+  absenceUnionSuccess,
+  deriveContextOperations,
+} from "../../../ir/util/api-surface.js";
 import { escapeJavaIdent, lowerFirst, upperFirst } from "../../../util/naming.js";
 import { resourceEnvUrlVar } from "../../../util/resource-env.js";
 // `API_CLIENT_CLASS` lives in `render-expr.ts` for the same reason as on .NET:
@@ -130,7 +134,11 @@ export function emitJavaApiClients(
 
     for (const ctx of servedContextsFor(b, sys)) {
       for (const op of deriveContextOperations(ctx)) {
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : undefined;
+        // An ABSENCE union reads the same record as a plain entity response;
+        // only the absent status differs (null, not a throw).  See
+        // payloads.md §Union finds — there is no `type` discriminator.
+        const absentAgg = absenceUnionSuccess(op.responseType);
+        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const recordName = agg ? `${agg.name}Response` : undefined;
         if (agg && recordName && !emittedRecords.has(recordName)) {
@@ -189,6 +197,14 @@ export function emitJavaApiClients(
           "            if (e instanceof InterruptedException) Thread.currentThread().interrupt();",
           `            throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, 0, e);`,
           "        }",
+          ...(absentAgg
+            ? [
+                // Absence is a VALUE the caller matches on, not a failure.
+                "        if (res.statusCode() == 404) {",
+                "            return null;",
+                "        }",
+              ]
+            : []),
           "        if (res.statusCode() >= 400) {",
           `            throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.statusCode(), null);`,
           "        }",

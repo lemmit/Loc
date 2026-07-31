@@ -989,10 +989,21 @@ function collectRefNames(e: ExprIR | undefined, acc: Set<string>): void {
       collectRefNames(e.value, acc);
       return;
     case "match":
+      // BOTH match forms.  The boolean form has `arms`; the VARIANT form has a
+      // `subject` plus `variantArms`, and the subject was missing here — so a
+      // `let` whose only use was as a variant-match scrutinee looked unread,
+      // got `_`-prefixed to satisfy `--warnings-as-errors`, and then the arm
+      // referenced the un-prefixed name: `** (CompileError) undefined variable`.
+      //
+      // Only reachable from an `expr-let` binding (a `repo-let` binds the
+      // `{:ok, x}` tuple pattern, which this rule never touches), which is why
+      // it went unnoticed until a typed in-system api call produced one.
       for (const arm of e.arms) {
         collectRefNames(arm.cond, acc);
         collectRefNames(arm.value, acc);
       }
+      collectRefNames(e.subject, acc);
+      for (const arm of e.variantArms ?? []) collectRefNames(arm.value, acc);
       collectRefNames(e.otherwise, acc);
       return;
   }

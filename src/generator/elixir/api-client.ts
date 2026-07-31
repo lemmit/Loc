@@ -30,7 +30,11 @@
 import { forApiRead, wireFieldsForAggregate } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, SystemIR } from "../../ir/types/loom-ir.js";
 import { type ApiResourceBinding, servedContextsFor } from "../../ir/util/api-resource-binding.js";
-import { type ApiOperationIR, deriveContextOperations } from "../../ir/util/api-surface.js";
+import {
+  type ApiOperationIR,
+  absenceUnionSuccess,
+  deriveContextOperations,
+} from "../../ir/util/api-surface.js";
 import { snake } from "../../util/naming.js";
 import { resourceEnvUrlVar } from "../../util/resource-env.js";
 
@@ -112,7 +116,10 @@ export function emitElixirApiClients(
 
     for (const ctx of servedContextsFor(b, sys)) {
       for (const op of deriveContextOperations(ctx)) {
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : undefined;
+        // An ABSENCE union projects the same fields as a plain entity
+        // response; only the absent status differs (nil, not a raise).
+        const absentAgg = absenceUnionSuccess(op.responseType);
+        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
 
         const bodyParams = op.params.filter((p) => p.location === "body");
@@ -156,39 +163,51 @@ export function emitElixirApiClients(
           "        retry: false",
           "      )",
           "",
-          "    if res.status >= 400 do",
-          "      raise RemoteCallError,",
-          `        resource: ${JSON.stringify(b.resource.name)},`,
-          `        operation_id: ${JSON.stringify(op.id)},`,
-          "        status: res.status",
-          "    end",
-          "",
         );
+
+        // The status ladder and the success projection, built as ONE block so
+        // the absence arm can indent it as a unit.  Absence is a VALUE the
+        // caller matches on (`match o { Order x => …, else => … }`), so a 404
+        // yields `nil`; every other non-2xx is still a real failure.
+        const tail: string[] = [
+          "if res.status >= 400 do",
+          "  raise RemoteCallError,",
+          `    resource: ${JSON.stringify(b.resource.name)},`,
+          `    operation_id: ${JSON.stringify(op.id)},`,
+          "    status: res.status",
+          "end",
+          "",
+        ];
         if (agg) {
           // Project the STRING-keyed decoded body onto atom keys naming the
           // callee's wire fields — `o.code` in domain code is map-dot, which
           // only resolves atom keys.  Every key here is a compile-time literal.
           const fields = forApiRead(wireFieldsForAggregate(agg));
-          out.push(
+          tail.push(
             // `payload`, not `body`: a whole-shape create takes a PARAMETER
             // named `body`, and rebinding it here reads as a bug even though
             // Elixir permits it.
-            "    payload = res.body || %{}",
+            "payload = res.body || %{}",
             "",
-            "    %{",
+            "%{",
             // No trailing comma on the last entry — Elixir map literals reject
             // one, and it is a parse error the emitter cannot see.
             ...fields.map(
               (wf, i) =>
-                `      ${snake(wf.name)}: Map.get(payload, ${JSON.stringify(wf.name)})${
+                `  ${snake(wf.name)}: Map.get(payload, ${JSON.stringify(wf.name)})${
                   i === fields.length - 1 ? "" : ","
                 }`,
             ),
-            "    }",
+            "}",
           );
         } else {
-          out.push("    :ok");
+          tail.push(":ok");
         }
+
+        const indent = absentAgg ? "      " : "    ";
+        if (absentAgg) out.push("    if res.status == 404 do", "      nil", "    else");
+        out.push(...tail.map((l) => (l === "" ? "" : indent + l)));
+        if (absentAgg) out.push("    end");
         out.push("  end", "");
       }
     }

@@ -135,6 +135,26 @@ function idParam(): ApiOperationParamIR {
   return { name: "id", type: { kind: "primitive", name: "guid" }, location: "path" };
 }
 
+/** The success aggregate of an ABSENCE union (`Order option` / `Order or
+ *  NotFound`), or undefined when the type is not one.
+ *
+ *  This is the one union shape a client has to treat specially, and the reason
+ *  is on the wire, not in the type: a union find answers the success body
+ *  DIRECTLY at 200 and rides the absent variant on its own status — there is no
+ *  `type` discriminator (payloads.md §"Union finds — the untagged exception").
+ *  So a client returns `T | null`, matching what a local union find binds and
+ *  what a variant-`match` narrows against.
+ *
+ *  Shared rather than re-derived per backend: five client emitters need the
+ *  same answer, and five copies of a rule is how this feature already shipped
+ *  the same defect five times over. */
+export function absenceUnionSuccess(t: TypeIR | undefined): string | undefined {
+  if (t?.kind !== "union" || t.variants.length !== 2) return undefined;
+  const entity = t.variants.find((v) => v.kind === "entity");
+  const absent = t.variants.find((v) => v.kind !== "entity");
+  return entity?.kind === "entity" && absent ? entity.name : undefined;
+}
+
 function entityType(aggName: string): TypeIR {
   return { kind: "entity", name: aggName };
 }

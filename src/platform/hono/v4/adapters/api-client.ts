@@ -29,7 +29,11 @@ import {
   type ApiResourceBinding,
   servedContextsFor,
 } from "../../../../ir/util/api-resource-binding.js";
-import { type ApiOperationIR, deriveContextOperations } from "../../../../ir/util/api-surface.js";
+import {
+  type ApiOperationIR,
+  absenceUnionSuccess,
+  deriveContextOperations,
+} from "../../../../ir/util/api-surface.js";
 import { resourceEnvUrlVar } from "../../../../util/resource-env.js";
 
 /** The aggregate an operation answers with, looked up ACROSS the system — the
@@ -142,7 +146,14 @@ export function emitApiClientModule(
     out.push(``);
 
     for (const op of ops) {
-      const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : undefined;
+      // A union find answers the success body directly at 200 and rides the
+      // absent variant on its own status — no `type` discriminator on the wire
+      // (payloads.md §Union finds).  So it parses the SAME schema as a plain
+      // entity response; only the absent status becomes `null` instead of a
+      // throw.  Without this arm a union responseType fell through to `void`,
+      // and the call site read fields off nothing.
+      const absentAgg = absenceUnionSuccess(op.responseType);
+      const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
       const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
       const schemaName = agg ? `${agg.name}Response` : undefined;
       if (agg && schemaName && !emittedSchemas.has(schemaName)) {
@@ -160,7 +171,9 @@ export function emitApiClientModule(
       // every argument after the first.
       const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
       const params = op.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
-      const returns = schemaName ? `z.infer<typeof ${schemaName}>` : "void";
+      const returns = schemaName
+        ? `z.infer<typeof ${schemaName}>${absentAgg ? " | null" : ""}`
+        : "void";
       const query = op.params.filter((p) => p.location === "query");
 
       out.push(
@@ -182,6 +195,12 @@ export function emitApiClientModule(
         out.push(`    body: JSON.stringify(${payload}),`);
       }
       out.push(`  });`);
+      if (absentAgg) {
+        // The absent variant is a VALUE, not a failure: `match o { Order x =>
+        // …, else => … }` narrows on presence.  Every OTHER non-2xx is still a
+        // real error.
+        out.push(`  if (res.status === 404) return null;`);
+      }
       out.push(
         `  if (!res.ok) throw new RemoteCallError(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.status);`,
       );

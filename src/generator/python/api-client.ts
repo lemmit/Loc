@@ -20,7 +20,11 @@
 import { forApiRead, wireFieldsForAggregate } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, SystemIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { type ApiResourceBinding, servedContextsFor } from "../../ir/util/api-resource-binding.js";
-import { type ApiOperationIR, deriveContextOperations } from "../../ir/util/api-surface.js";
+import {
+  type ApiOperationIR,
+  absenceUnionSuccess,
+  deriveContextOperations,
+} from "../../ir/util/api-surface.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { resourceEnvUrlVar } from "../../util/resource-env.js";
@@ -124,7 +128,12 @@ export function emitPythonApiClients(
 
     for (const ctx of servedContextsFor(b, sys)) {
       for (const op of deriveContextOperations(ctx)) {
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : undefined;
+        // An ABSENCE union parses the same model as a plain entity response —
+        // the callee answers the success body directly at 200 and rides
+        // absence on 404, with no `type` discriminator (payloads.md §Union
+        // finds).  Only the absent status differs: `None`, not a raise.
+        const absentAgg = absenceUnionSuccess(op.responseType);
+        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const modelName = agg ? `${agg.name}Response` : undefined;
         if (agg && modelName && !emittedModels.has(modelName)) {
@@ -138,7 +147,7 @@ export function emitPythonApiClients(
         // JSON object.  Sending only the first silently drops the rest.
         const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
         const params = op.params.map((p) => `${snake(p.name)}: ${pyParamType(p.type)}`);
-        const ret = modelName ?? "None";
+        const ret = modelName ? (absentAgg ? `${modelName} | None` : modelName) : "None";
 
         body.push(
           `async def ${base}_${snake(op.id)}(${params.join(", ")}) -> ${ret}:`,
@@ -161,6 +170,11 @@ export function emitPythonApiClients(
         }
         call.push(`        )`);
         body.push(...call);
+        if (absentAgg) {
+          // Absence is a VALUE the caller matches on, not a failure.  Every
+          // other non-2xx is still a real error.
+          body.push(`        if res.status_code == 404:`, `            return None`);
+        }
         body.push(
           `        if res.status_code >= 400:`,
           `            raise RemoteCallError(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.status_code)`,
