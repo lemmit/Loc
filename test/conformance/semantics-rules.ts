@@ -455,6 +455,52 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-21",
+    title: "A union response carries its `type` discriminator",
+    trigger:
+      "an operation returning `T or <Error>` (payloads.md) that selects a SUCCESS variant — `operation accept(): string or NotFound`",
+    observable:
+      'the 200 body is the tagged form `{"type":"string","value":"OR1"}` — the discriminator named by `_payload/union-wire.ts`, the single source of truth for the tagged-wire shape. A typed client narrows on `type`; without it the union is unreadable.',
+    // dotnet dropped the tag.  Its DTO carried the right attribute all along —
+    // `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]` — but
+    // System.Text.Json only WRITES the discriminator when it serializes through
+    // the BASE type, and `Ok(object)` leaves `ObjectResult.DeclaredType` null,
+    // so STJ used the runtime type and the tag vanished.  The `(Union)` cast in
+    // the emitted source does not survive the boxing: the code reads correct and
+    // the wire is not, which is why only a booted round-trip found it.
+    // Fixed with an explicit `ObjectResult { DeclaredType = typeof(<Union>) }`.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      'found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` (dotnet leg): $.type — golden "string" vs dotnet null',
+      "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-22",
+    title: "The RFC 7807 envelope is exactly five members plus declared extensions",
+    trigger: "any error response — a framework problem or a declared `error` payload",
+    observable:
+      "the body carries `type`, `title`, `status`, `detail` and `instance` (the request path) — and NOTHING a framework adds on its own. `instance` is never null, and no `traceId`/correlation member rides the body: trace correlation is an `x-request-id` HEADER, deliberately moved off the body so the envelope is byte-identical across backends. Only a declared error payload's own fields (RS-19) may extend it.",
+    // dotnet diverged both ways at once — `instance` null AND an extra
+    // `traceId` — because those arms called `ControllerBase.Problem(...)`, which
+    // routes through ProblemDetailsFactory: the factory fills neither `instance`
+    // nor the content type, and injects `traceId` from the ambient Activity.
+    // The app's OWN exception filter already hand-builds the envelope for
+    // exactly this reason; the union arms and the find-absence arm were the
+    // sites that had not been converted.
+    //
+    // Worth stating as a rule rather than a fix note: "the framework helper adds
+    // a member nobody else sends" is invisible to every static gate — the
+    // emitted source names none of it.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` + `union-find-absence` (dotnet leg): $.instance golden path vs dotnet null, and $.traceId golden absent vs dotnet present",
+      "fixed (dotnet): the union + find-absence arms build ProblemDetails by hand with Instance = HttpContext.Request.Path, src/generator/dotnet/emit/api.ts",
+    ],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------

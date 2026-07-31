@@ -373,6 +373,42 @@
         "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2"
       ],
       "tier": "behavioral"
+    },
+    {
+      "id": "RS-21",
+      "title": "A union response carries its `type` discriminator",
+      "trigger": "an operation returning `T or <Error>` (payloads.md) that selects a SUCCESS variant — `operation accept(): string or NotFound`",
+      "observable": "the 200 body is the tagged form `{\"type\":\"string\",\"value\":\"OR1\"}` — the discriminator named by `_payload/union-wire.ts`, the single source of truth for the tagged-wire shape. A typed client narrows on `type`; without it the union is unreadable.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` (dotnet leg): $.type — golden \"string\" vs dotnet null",
+        "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-22",
+      "title": "The RFC 7807 envelope is exactly five members plus declared extensions",
+      "trigger": "any error response — a framework problem or a declared `error` payload",
+      "observable": "the body carries `type`, `title`, `status`, `detail` and `instance` (the request path) — and NOTHING a framework adds on its own. `instance` is never null, and no `traceId`/correlation member rides the body: trace correlation is an `x-request-id` HEADER, deliberately moved off the body so the envelope is byte-identical across backends. Only a declared error payload's own fields (RS-19) may extend it.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` + `union-find-absence` (dotnet leg): $.instance golden path vs dotnet null, and $.traceId golden absent vs dotnet present",
+        "fixed (dotnet): the union + find-absence arms build ProblemDetails by hand with Instance = HttpContext.Request.Path, src/generator/dotnet/emit/api.ts"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

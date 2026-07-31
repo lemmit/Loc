@@ -536,6 +536,48 @@ the conforming backends, and the fix that established it.
 - **Provenance.** Found 2026-07-30 by the M-T9.11 gate on the newly-minted
   `single-containment` and `value-collections` goldens. Tier: **behavioral**.
 
+### RS-21 · A union response carries its `type` discriminator
+- **Guarantee.** An operation returning `T or <Error>` that selects a **success**
+  variant answers 200 with the tagged form — `{"type":"string","value":"OR1"}` —
+  using the discriminator named by `_payload/union-wire.ts`, the single source of
+  truth for the tagged-wire shape. A typed client narrows on `type`; without it
+  the union is unreadable.
+- **Trigger.** `operation accept(): string or NotFound`.
+- **Why it hid.** dotnet's DTO carried the right attribute the whole time —
+  `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]`. But
+  System.Text.Json only **writes** the discriminator when it serializes through
+  the **base** type, and `Ok(object)` leaves `ObjectResult.DeclaredType` null, so
+  STJ used the runtime type and the tag vanished. The `(Union)` cast in the
+  emitted source does not survive the boxing. **The code reads correct and the
+  wire is not** — no static gate can see this; only a booted round-trip can.
+- **Fix.** An explicit `ObjectResult { DeclaredType = typeof(<Union>) }`.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-07-31 by the M-T9.11 gate on `operation-returns`
+  (dotnet leg). Tier: **behavioral**.
+
+### RS-22 · The RFC 7807 envelope is exactly five members plus declared extensions
+- **Guarantee.** An error body carries `type`, `title`, `status`, `detail` and
+  `instance` (the request path) — and **nothing a framework adds on its own**.
+  `instance` is never null; no `traceId`/correlation member rides the body,
+  because trace correlation is deliberately an **`x-request-id` header** so the
+  envelope stays byte-identical across backends. Only a declared error payload's
+  own fields (RS-19) may extend it.
+- **Trigger.** Any error response — framework problem or declared `error`.
+- **Why it hid.** dotnet diverged **both ways at once** — `instance` null *and*
+  an extra `traceId` — because those arms called `ControllerBase.Problem(...)`,
+  which routes through `ProblemDetailsFactory`: the factory fills neither
+  `instance` nor the content type, and injects `traceId` off the ambient
+  Activity. The app's *own* exception filter already hand-built the envelope for
+  exactly this reason; the union arms and the find-absence arm were simply the
+  sites nobody had converted.
+- **Why it is a rule and not just a fix note.** "The framework helper adds a
+  member nobody else sends" is invisible to every static gate — the emitted
+  source names none of it. This is the same class as RS-16 (java) and RS-21
+  (dotnet): a wire shape decided by a framework rather than by the emitter.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-07-31 by the M-T9.11 gate on `operation-returns`
+  and `union-find-absence` (dotnet leg). Tier: **behavioral**.
+
 ---
 
 ## Adding a rule
