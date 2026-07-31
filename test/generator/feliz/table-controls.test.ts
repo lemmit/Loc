@@ -150,4 +150,28 @@ describe("feliz Table controls", () => {
     expect(fs).not.toContain('data-testid", "pager"');
     expect(fs).not.toContain("SetSortKey");
   });
+
+  it("renders a SERVER-paged table plain — controls need an envelope Feliz doesn't decode", async () => {
+    // Caught by the CI scaffold app, not by the hand-written showcase: a
+    // scaffolded list page IS server-paged, and implementing `renderPager`
+    // made it emit `rows.totalPages` — against a plain `'T list`, because the
+    // Feliz wire decodes only the envelope's `items`.  `dotnet fable` rejected
+    // it outright ("The type 'List<_>' does not define … 'totalPages'").
+    //
+    // The sortable header would have been the SILENT half of the same bug: it
+    // compiles, writes sort state, and nothing refetches on it.  So server mode
+    // suppresses both (`serverPagedControls: false`) and renders the plain,
+    // server-ORDERED page the backend already sent.
+    const fs = await appFs(
+      `Table(${COLS}, rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, ` +
+        `serverPaged: true, totalPages: 3)`,
+    );
+    expect(fs).not.toContain("totalPages");
+    expect(fs).not.toContain('data-testid", "pager"');
+    expect(fs).toContain('Html.th [ Html.text "Name" ]');
+    // …and no dead Msg cases either: the refs contribute nothing when no
+    // control dispatches them.
+    expect(fs).not.toContain("SetSortKey");
+    expect(fs).not.toContain("SetPageNum");
+  });
 });

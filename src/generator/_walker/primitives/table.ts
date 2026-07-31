@@ -66,6 +66,12 @@ export function emitTable(
   // the envelope's page count (drives the pager's "of M" + Next-disable).
   const serverPaged = boolNamed(call, "serverPaged");
   const totalPagesArg = namedArgValue(call, "totalPages");
+  // …but only where the target can actually consume the envelope AND refetch on
+  // the state it writes.  A target that decodes just `items` (Feliz) would emit
+  // `rows.totalPages` against a plain list and a header writing state nothing
+  // refetches on, so server mode falls back to a plain table there.  Client mode
+  // is unaffected — this is exactly the `serverPaged` branch.
+  const serverControls = !serverPaged || ctx.target.serverPagedControls !== false;
 
   // Column filter (M-T1.1 client).  A `filter:` state ref binds a search box
   // (rendered ABOVE the table) that narrows the rows by a case-insensitive
@@ -105,6 +111,7 @@ export function emitTable(
   const sortActive =
     sortKeyName !== undefined &&
     sortDirName !== undefined &&
+    serverControls &&
     ctx.target.renderSortableHeader !== undefined;
   const sortKeyRef = sortKeyName !== undefined ? stateRefFor(sortKeyName) : undefined;
   const sortDirRef = sortDirName !== undefined ? stateRefFor(sortDirName) : undefined;
@@ -137,7 +144,10 @@ export function emitTable(
   const pageName = refArgName(call, "page");
   const pageSize = numericNamed(call, "pageSize") ?? 10;
   const pagedActive =
-    pageName !== undefined && pageSize > 0 && ctx.target.renderPager !== undefined;
+    pageName !== undefined &&
+    pageSize > 0 &&
+    serverControls &&
+    ctx.target.renderPager !== undefined;
   const pageRef = pageName !== undefined ? stateRefFor(pageName) : undefined;
   let pagerMarkup: string | undefined;
   if (pagedActive && pageRef) {

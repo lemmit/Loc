@@ -965,6 +965,19 @@ export interface WalkerTarget {
    *  it would still be JavaScript. */
   renderClientPaging?(spec: ClientPagingSpec): ClientPagingResult;
 
+  /** OPTIONAL — set `false` when this target cannot drive a SERVER-paged
+   *  `Table`, even though it implements the control seams.  Server mode needs
+   *  two things the client mode doesn't: a `totalPages` off the paged ENVELOPE,
+   *  and a refetch that feeds the sort/page state back through the query's
+   *  `of:` args.  Feliz's wire layer decodes only the envelope's `items` into a
+   *  plain `'T list` (M-T2.6 left the Feliz envelope unwrap pinned), so
+   *  `rows.totalPages` doesn't type-check and a sortable header would write
+   *  state nothing refetches on.  Suppressing both there renders the table as
+   *  the plain, server-ORDERED page it already is — correct, just not
+   *  interactive — rather than emitting a control that lies.  Omitted → server
+   *  mode is supported (every JSX target). */
+  serverPagedControls?: boolean;
+
   /** Clamp the SERVER-supplied page count to at least 1.  Omitted → the JS
    *  default `Math.max(1, <expr>)`.  Split from `renderClientPaging` because
    *  server mode does no windowing at all — the envelope already carries one

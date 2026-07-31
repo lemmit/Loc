@@ -736,6 +736,15 @@ export const felizTarget: WalkerTarget = {
 
   renderServerTotalPages: (totalPagesExpr: string) => `(max 1 (${totalPagesExpr}))`,
 
+  // Server-paged mode is OFF here: the Feliz wire layer decodes the envelope's
+  // `items` into a plain `'T list` (M-T2.6 left the Feliz unwrap pinned), so
+  // `rows.totalPages` has nothing to read from, and the query's `of:` args carry
+  // no page/sort to refetch on.  A scaffolded list page — which IS server-paged
+  // — therefore renders the plain server-ordered page it already receives.
+  // `renderServerTotalPages` above stays implemented so flipping this to true is
+  // the only change once the envelope lands.
+  serverPagedControls: false,
+
   /** Prev / "Page N of M" / Next.  `page` is an int state field, but the shared
    *  `Set<Field>` arm parses from a string (that is how every bound input
    *  dispatches), so the new page number is stringified on the way in. */
