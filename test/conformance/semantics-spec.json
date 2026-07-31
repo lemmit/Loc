@@ -336,6 +336,42 @@
         "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts"
       ],
       "tier": "behavioral"
+    },
+    {
+      "id": "RS-19",
+      "title": "A declared `error` variant's fields ride the problem body",
+      "trigger": "an operation returning `T or <Error>` (payloads.md) whose error variant is selected — e.g. `operation reject(): string or NotFound { return NotFound { resource: code } }`",
+      "observable": "the RFC 7807 response carries the error payload's DECLARED FIELDS as extension members alongside type/title/status/detail — `NotFound { resource: string }` puts `\"resource\": \"OR1\"` on the body. The emitted OpenAPI for the union already declares them, so omitting them is a spec violation as well as a wire divergence.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `operation-returns` case (java leg): $.resource — golden \"OR1\" vs java null",
+        "fixed (java): the union error arm projects `a.member.fields` via setProperty, src/generator/java/emit/api.ts"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-20",
+      "title": "`version` counts persisted mutations, not entity-graph dirtiness — OPEN (java)",
+      "trigger": "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), or whose create also writes a value-object collection",
+      "observable": "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14). Java diverges in BOTH directions: a `ship` op mutating a single containment reads back 1 where the canonical value is 2 (the bump is missed), and a create carrying a value-object collection reads back 2 where the canonical value is 1 (an extra bump).",
+      "conforms": [
+        "node",
+        "dotnet",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `single-containment` and `value-collections` cases (java leg)",
+        "single-containment #2 GET /api/orders/{id} $.version — golden 2 vs java 1",
+        "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

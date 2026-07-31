@@ -398,6 +398,62 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-19",
+    title: "A declared `error` variant's fields ride the problem body",
+    trigger:
+      "an operation returning `T or <Error>` (payloads.md) whose error variant is selected — e.g. `operation reject(): string or NotFound { return NotFound { resource: code } }`",
+    observable:
+      'the RFC 7807 response carries the error payload\'s DECLARED FIELDS as extension members alongside type/title/status/detail — `NotFound { resource: string }` puts `"resource": "OR1"` on the body. The emitted OpenAPI for the union already declares them, so omitting them is a spec violation as well as a wire divergence.',
+    // Java emitted the arm's status, title, type and detail and then dropped the
+    // payload entirely: the client got a 404 with the right shape and NO DATA,
+    // and `body.resource` read null on java alone.  The failure is quiet in a way
+    // a status-only assertion cannot see — `toThrow(404)` passes on all five.
+    //
+    // Note java's sibling FIND-absence arm already set `resource` (hardcoded to
+    // the aggregate name), which is why `union-find-absence` passed while
+    // `operation-returns` did not — the two arms were written independently.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      'found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `operation-returns` case (java leg): $.resource — golden "OR1" vs java null',
+      "fixed (java): the union error arm projects `a.member.fields` via setProperty, src/generator/java/emit/api.ts",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-20",
+    title: "`version` counts persisted mutations, not entity-graph dirtiness — OPEN (java)",
+    trigger:
+      "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), or whose create also writes a value-object collection",
+    observable:
+      "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14). Java diverges in BOTH directions: a `ship` op mutating a single containment reads back 1 where the canonical value is 2 (the bump is missed), and a create carrying a value-object collection reads back 2 where the canonical value is 1 (an extra bump).",
+    // Root cause is one mechanism, not two bugs: java maps `version` to JPA
+    // `@Version`, and Hibernate bumps it from the dirtiness of the ROOT entity's
+    // own state.  A change confined to a child/collection does not mark the root
+    // dirty (no bump); a second flush that writes the collection during create
+    // does (extra bump).  The other four backends set the counter explicitly at
+    // the persist site, so they count MUTATIONS the way the capability declares.
+    //
+    // This is RS-14's family — "the version increment is shape-dependent and
+    // inverted between backends" — in two shapes RS-14's fixture set never
+    // reached.  RS-14 lists java as conforming; that holds for the shapes it
+    // measured (document/embedded) and not for these.  Rather than edit RS-14's
+    // history, this rule names the shapes it missed.
+    //
+    // Left OPEN deliberately: the fix is Hibernate-semantics work (forcing an
+    // optimistic increment on child-only mutations without double-bumping the
+    // collection write), it needs a container build + boot per iteration, and it
+    // is a different unit from the golden-coverage expansion that found it.  The
+    // two divergences are WAIVED in test/_helpers/wire-waivers.ts, which
+    // ratchets: the waivers go stale and fail the moment java is fixed.
+    conforms: ["node", "dotnet", "python", "elixir"],
+    provenance: [
+      "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `single-containment` and `value-collections` cases (java leg)",
+      "single-containment #2 GET /api/orders/{id} $.version — golden 2 vs java 1",
+      "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2",
+    ],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------

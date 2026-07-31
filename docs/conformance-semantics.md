@@ -470,6 +470,64 @@ the conforming backends, and the fix that established it.
   camelCase in an otherwise camelCase body. Confirmed by generating all five
   backends and diffing the emitted key. Tier: **behavioral**.
 
+### RS-19 · A declared `error` variant's fields ride the problem body
+- **Guarantee.** An operation returning `T or <Error>` that selects the error
+  variant answers with the RFC 7807 envelope **plus the payload's declared
+  fields** as extension members: `error NotFound { resource: string }` puts
+  `"resource": "OR1"` alongside `type`/`title`/`status`/`detail`.
+- **Trigger.** `operation reject(): string or NotFound { return NotFound { resource: code } }`
+  — see [`payloads.md`](payloads.md).
+- **Why it hid.** Java emitted the arm's status, title, type and detail and then
+  dropped the payload entirely, so a client got a 404 with the right *shape* and
+  **no data**. A `toThrow(404)` assertion passes on all five backends — the
+  status is right; only the body differs. The emitted OpenAPI for the union
+  already declared the fields, so this was a spec violation too.
+- **A near miss worth noting.** Java's *sibling* arm — the find-absence 404 —
+  already set `resource`. The two arms were written independently, which is why
+  `union-find-absence` passed while `operation-returns` failed on the same
+  release.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-07-30 by the M-T9.11 gate on the newly-minted
+  `operation-returns` golden. Fixed in java by projecting the arm's declared
+  fields through `setProperty`; verified on a booted Spring app. Tier:
+  **behavioral**.
+
+### RS-20 · `version` counts persisted mutations, not entity-graph dirtiness — **OPEN (java)**
+- **Guarantee (pending fix).** `version` is `1` at create and `+1` per persisted
+  mutation, **independent of which part of the aggregate graph changed**
+  (RS-11 + RS-14).
+- **Trigger.** A `versioned` aggregate whose mutation touches only a **child**
+  (a single `contains`), or whose create also writes a **value-object
+  collection**.
+- **Observable — java diverges in both directions, from one cause.**
+
+  | case | canonical | java |
+  |---|---|---|
+  | `single-containment` — `ship` mutates the contained child | `2` | **`1`** (bump missed) |
+  | `value-collections` — create writes a VO collection | `1` | **`2`** (extra bump) |
+
+  Java maps `version` to JPA `@Version`, and Hibernate bumps it from the
+  dirtiness of the **root entity's own state**. A change confined to a child or
+  collection doesn't mark the root dirty; a second flush that writes the
+  collection during create does. The other four backends set the counter
+  explicitly at the persist site, so they count *mutations* the way the
+  capability declares.
+- **Relationship to RS-14.** This is RS-14's family — "the increment is
+  shape-dependent and inverted between backends" — in two shapes RS-14's fixture
+  set never reached. RS-14 lists java as conforming; that holds for the shapes it
+  measured (document/embedded) and not for these. This rule names the gap rather
+  than rewriting RS-14's history.
+- **Why still open.** The repair is Hibernate-semantics work (force an optimistic
+  increment on child-only mutations *without* double-bumping the collection
+  write), it needs a container build + boot per iteration, and it is a different
+  unit from the coverage expansion that found it. Both divergences are **waived**
+  in `test/_helpers/wire-waivers.ts`, scoped to the exact case + path so any
+  other `version` divergence still fails. The registry ratchets: the waivers go
+  stale and fail the gate the moment java is fixed.
+- **Conforms.** node, dotnet, python, elixir. **Targets:** java.
+- **Provenance.** Found 2026-07-30 by the M-T9.11 gate on the newly-minted
+  `single-containment` and `value-collections` goldens. Tier: **behavioral**.
+
 ---
 
 ## Adding a rule

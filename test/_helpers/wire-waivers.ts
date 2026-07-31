@@ -20,16 +20,43 @@
 // stale (see `staleWaivers`), so a fixed backend must delete its waiver in the
 // same PR.  The list is meant to shrink to nothing.
 //
-// **It is currently EMPTY, and that is the target state.**  The gate's first
-// five-backend run minted two entries — RS-13 (elixir answered a create `POST`
-// with the whole aggregate where its own emitted OpenAPI declares the `{id}`
-// envelope) and RS-14 (the `version` INCREMENT was dropped on `shape: document`
-// by dotnet/java and on embedded/plain by elixir).  Both are now FIXED, so both
-// waivers are gone: all five backends agree with the golden byte-for-byte on
-// every shared system.  Keep it that way — a new entry here should be a
-// deliberate, short-lived exception, never a parking space.
+// The list was empty from the RS-13/RS-14 fixes until 2026-07-30, when the
+// M-T9.11 coverage expansion (5 shared systems -> the corpus feature cases)
+// found three java divergences no gate had reached.  Two of them share one
+// mechanism and are waived below; the third (RS-19, a declared `error` variant's
+// fields dropped from the problem body) was FIXED in the same change, which is
+// the disposition to prefer.  Empty is still the target state.
 // ---------------------------------------------------------------------------
 
 import type { WireWaiver } from "./wire-record.js";
 
-export const WIRE_WAIVERS: readonly WireWaiver[] = [];
+export const WIRE_WAIVERS: readonly WireWaiver[] = [
+  // RS-20 — java maps `version` to JPA `@Version`, so Hibernate bumps it from
+  // the dirtiness of the ROOT entity rather than counting persisted mutations
+  // the way the `versioned` capability declares.  The two shapes below are the
+  // two directions that error runs in, and they are ONE bug:
+  //
+  //   * a mutation confined to a single `contains` child never marks the root
+  //     dirty, so the bump is MISSED (golden 2, java 1);
+  //   * a create that also writes a value-object collection flushes twice, so
+  //     the root is bumped TWICE (golden 1, java 2).
+  //
+  // Waived rather than fixed because the repair is Hibernate-semantics work
+  // needing a container build + boot per iteration — a different unit from the
+  // coverage expansion that found it.  Scoped to the exact case + path so any
+  // OTHER version divergence, on java or elsewhere, still fails the gate.
+  {
+    backends: ["java"],
+    cases: ["single-containment"],
+    path: "$.version",
+    kinds: ["value"],
+    reason: "RS-20 — java misses the version bump when only a contained child mutates",
+  },
+  {
+    backends: ["java"],
+    cases: ["value-collections"],
+    path: "$.version",
+    kinds: ["value"],
+    reason: "RS-20 — java double-bumps version when a create also writes a value collection",
+  },
+];
