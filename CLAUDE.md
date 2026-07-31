@@ -108,6 +108,14 @@ npm run test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir}
 # harness (one pg server, chain+fresh DBs, order-independent schema fingerprint via host psql):
 npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}   # LOOM_MIGRATION_E2E[_<BACKEND>]=1
 
+# Schema-load gate — does the emitted DDL actually LOAD?  The compile tiers are blind to the
+# emitted SCHEMA (it is data, not code), so a chain Postgres will refuse still compiles green on
+# every backend (G2/#2316).  Generates every corpus fixture and `psql -f`s its migration chain into
+# a throwaway db — nothing compiled, nothing booted.  One db per (fixture, deployable), matching how
+# compose provisions them.  node only: MigrationsIR + sql-pg.ts are shared, so one chain covers the
+# derivation python/java also emit from.  Runs per-PR (schema-load.yml), not behind a label.
+npm run test:schema-load           # LOOM_SCHEMA_LOAD=1 (docker sidecar, or LOOM_MIGRATION_PG_URL)
+
 # Auth/OIDC runtime e2e — generated OIDC code flow (PKCE + refresh rotation) against dockerized Keycloak:
 npm run test:auth-e2e              # LOOM_AUTH_E2E=1 — Hono, native boot
 npm run test:auth-e2e-{dotnet,java,python}         # LOOM_AUTH_E2E_<BACKEND>=1 — native per backend
@@ -334,6 +342,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - `elixir-vanilla-vo-e2e.yml` — vanilla-Phoenix value-object wire round-trip against postgres (main-push + `run-e2e` label).
 - `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch + `run-tenancy` label.
 - `migration-evolution-e2e.yml` — the runtime companion to the rename/baseline/data-migration language work (M-T2.13). Per SQL backend (5-cell matrix), against a postgres service: (1) migrate-chain schema ≡ fresh-create schema (order-independent fingerprint), and (2) seed v1 → regenerate `.ddd` to v2 → forward-migrate → the seeded row survives with correct values. Proves migrations **evolve** on data, not just emit/first-boot (the silent-data-loss class). Main-push + dispatch + the per-PR `run-migration-e2e` label.
+- `schema-load.yml` — **per-PR**: loads every corpus fixture's emitted migration chain into a real Postgres (`psql -f`, one db per deployable). The oracle the compile gates structurally lack — emitted schema is data, not code, so invalid DDL compiles green everywhere (G2). No build, no boot, <1min, so it runs on every PR rather than behind a label.
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
 - `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
