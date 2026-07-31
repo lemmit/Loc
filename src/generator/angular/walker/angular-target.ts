@@ -459,6 +459,9 @@ export const angularTarget: WalkerTarget = {
       `angularTarget.renderAttrBinding: expression for '[${name}]' mixes single and double quotes — cannot be attribute-quoted. Simplify the expression (e.g. avoid apostrophes inside string literals used in bindings).`,
     );
   },
+  // A bound plain HTML attribute (aria-label) needs `[attr.…]`, not `[…]`
+  // (which would target a non-existent element property — `ng build` error).
+  ariaAttrPrefix: "attr.",
 
   /** `@if (cond) { … } @else { … }` control-flow block pair.  Angular
    *  template expressions can't evaluate to markup, so conditional

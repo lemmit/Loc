@@ -32,9 +32,10 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
+import { ariaLabelAttr } from "./a11y-emit.js";
 import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
 import { addImport } from "./render-primitive.js";
-import { positionalArgs, unwrapTextLiteral } from "./shared/args.js";
+import { namedArgValue, positionalArgs, unwrapTextLiteral } from "./shared/args.js";
 import { emitExpr, renderTextContent, type WalkContext } from "./walker-core.js";
 
 /** Import specifier for the generated translation helper. Written with the
@@ -85,6 +86,42 @@ export function localizedRaw(
   }
   // Non-i18n / dynamic / empty — exactly the pre-i18n behaviour, at `argIndex`.
   return (arg ? renderTextContent(arg, ctx) : undefined) ?? fallback;
+}
+
+/** An ` aria-label="…"` attribute fragment for a NAMED user-visible slot
+ *  (`Button.label` → `buttonAria`, `Toolbar.label` → `toolbarAria`), translated
+ *  through `t()` when the body opted into i18n (M-T1.11).  Reads the named arg's
+ *  string literal (mirroring the extraction pass's `namedArgValue`+`literalString`,
+ *  so the emitted key equals the catalog key), and:
+ *
+ *   - literal + `ctx.i18nPrefix` → a BOUND attribute `renderAttrBinding`-emitted
+ *     per frontend (` aria-label={t(key, def)}` on React/Svelte, ` :aria-label="…"`
+ *     on Vue, ` [attr.aria-label]="…"` on Angular via `target.ariaAttrPrefix`);
+ *   - otherwise (no prefix, a dynamic/absent label) → the static
+ *     `ariaLabelAttr(literal ?? defaultLabel)` fragment — BYTE-IDENTICAL to the
+ *     pre-i18n path, so every non-JS frontend + a string-less app are unchanged.
+ *
+ *  `role` MUST match the slot's role in `USER_VISIBLE_SLOTS`.  `defaultLabel`
+ *  (Toolbar's "Actions") is a canonical fallback with no source literal — it is
+ *  not in the catalog, so it always renders static, never a `t()` call. */
+export function localizedAriaLabelAttr(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  name = "label",
+  defaultLabel?: string,
+): string {
+  const literal = literalString(namedArgValue(call, name));
+  if (literal !== undefined && ctx.i18nPrefix) {
+    const key = messageKey(ctx.i18nPrefix, role, literal);
+    addImport(ctx, I18N_MODULE, "t");
+    const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
+    return ctx.target.renderAttrBinding(
+      attrName,
+      `t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`,
+    );
+  }
+  return ariaLabelAttr(literal ?? defaultLabel);
 }
 
 /** {@link localizedRaw} unwrapped for a JSX-children text position — the

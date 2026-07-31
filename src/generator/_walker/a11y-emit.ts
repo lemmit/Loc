@@ -33,17 +33,6 @@ export function ariaLabelAttr(label: string | undefined): string {
   return ` aria-label="${escapeHtmlAttr(label)}"`;
 }
 
-/** The a11y attribute fragment for the `Toolbar` primitive.  Its contract
- *  (`{ role: "toolbar", needsName: true }`) makes it a labelled ARIA toolbar —
- *  a screen reader announces the grouped controls as a toolbar and can jump to
- *  it.  The accessible name isn't derivable from the IR, so it defaults to
- *  "Actions" (the canonical page-header action cluster) and is overridable with
- *  a `label:` hint when a page carries more than one. */
-export function toolbarA11yAttr(opts: { label?: string }): string {
-  const name = opts.label && opts.label !== "" ? opts.label : "Actions";
-  return ` role="toolbar" aria-label="${escapeHtmlAttr(name)}"`;
-}
-
 /** The a11y attribute fragment for the `Icon` primitive.  Loom's `Icon` is
  *  decorative-by-default (its contract's `decorativeByDefault`): a glyph next
  *  to a labelled control conveys nothing to a screen reader and must be hidden,

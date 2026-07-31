@@ -609,6 +609,17 @@ export interface WalkerTarget {
    *  sites keep them inline. */
   renderAttrBinding(name: string, jsExpr: string): string;
 
+  /** Prefix a bound HTML ATTRIBUTE (aria-*, data-*) needs before its name when
+   *  it rides `renderAttrBinding` (M-T1.11 i18n aria labels).  Angular binds
+   *  plain element attributes as `[attr.aria-label]="…"` — a bare
+   *  `[aria-label]` targets a non-existent property and fails `ng build` — so
+   *  the Angular target sets this to `"attr."`; every other frontend binds the
+   *  attribute directly (` aria-label={…}` / ` :aria-label="…"`) and leaves it
+   *  undefined.  Only the i18n-prefixed JS frontends read it (Feliz/Flutter
+   *  never reach the aria-`t()` path), so it is an optional data field, not a
+   *  method every target must implement. */
+  ariaAttrPrefix?: string;
+
   /** Render a conditional CHILD — a ternary whose arms are markup
    *  (`body: cond ? Stack(…) : Empty(…)`).  `cond` is a rendered JS
    *  expression; `thenS` / `elseS` are rendered markup fragments.

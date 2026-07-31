@@ -169,4 +169,25 @@ describe("React i18n runtime", () => {
       "Status: {status, select, shipped {Shipped} other {Pending}}",
     );
   });
+
+  it("translates named aria-label attribute slots (Button + Toolbar)", async () => {
+    // The named slots `Button.label` (buttonAria) and `Toolbar.label`
+    // (toolbarAria) bind their accessible name through `t()` at the attribute
+    // position (M-T1.11), keyed identically to the catalog.  The Toolbar's
+    // `role="toolbar"` stays static; a Toolbar with no `label:` keeps the
+    // static default `aria-label="Actions"` (not cataloged).
+    const files = await generateSystemFiles(
+      SYSTEM(`Toolbar { label: "Order actions", Button { "+", label: "Add order", to: "/new" } }`),
+    );
+    const home = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
+    expect(home).toMatch(/aria-label=\{t\("page\.Home\.buttonAria\.\w+", "Add order"\)\}/);
+    expect(home).toMatch(
+      /role="toolbar" aria-label=\{t\("page\.Home\.toolbarAria\.\w+", "Order actions"\)\}/,
+    );
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Add order");
+    expect(Object.values(catalog)).toContain("Order actions");
+  });
 });

@@ -126,7 +126,11 @@ describe("Button disabled: + loading: named args", () => {
     `);
     const content = files.get("web/src/pages/x.tsx")!;
     // The `label:` hint becomes the button's aria-label (its accessible name);
-    // the glyph rides the rightSection icon slot.
-    expect(content).toMatch(/<Button[^>]*\baria-label="Delete order"/);
+    // the glyph rides the rightSection icon slot.  This app has extractable
+    // strings, so i18n is on and the name binds through `t()` (M-T1.11,
+    // `buttonAria` slot) — a string-less app keeps the static `aria-label="…"`.
+    expect(content).toMatch(
+      /<Button[^>]*\baria-label=\{t\("page\.X\.buttonAria\.\w+", "Delete order"\)\}/,
+    );
   });
 });
