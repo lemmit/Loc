@@ -417,6 +417,7 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     provenance: [
       'found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `operation-returns` case (java leg): $.resource — golden "OR1" vs java null',
       "fixed (java): the union error arm projects `a.member.fields` via setProperty, src/generator/java/emit/api.ts",
+      "fixed (dotnet, 2026-07-31): the same arm discarded the variant with `case <Union>_<Tag> _:` and so could project nothing — found only when the dotnet leg was actually run; the rule was briefly recorded as all-five conforming after the java fix alone",
     ],
     tier: "behavioral",
   },

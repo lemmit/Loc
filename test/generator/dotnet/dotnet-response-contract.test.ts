@@ -22,8 +22,12 @@ function responsesFile(files: Map<string, string>, agg: string, plural: string):
   return files.get(key!)!;
 }
 
+// The record is emitted on ONE line ending `);`, so a greedy capture to that
+// terminator is exact — and it must be greedy: a param may carry its own
+// parentheses (a `provenanced` field's `[JsonPropertyName("<field>_
+// provenance")]`, RS-18), which a `[^)]*` capture would truncate at.
 function recordDecl(source: string, name: string): string {
-  const m = source.match(new RegExp(`public sealed record ${name}\\([^)]*\\);`));
+  const m = source.match(new RegExp(`public sealed record ${name}\\(.*\\);`));
   expect(m, `record ${name} must be located`).not.toBeNull();
   return m![0];
 }

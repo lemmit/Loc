@@ -467,8 +467,13 @@ the conforming backends, and the fix that established it.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found 2026-07-30 by **reading** the freshly-minted
   `provenance` golden during the M-T9.11 coverage expansion — one key out of
-  camelCase in an otherwise camelCase body. Confirmed by generating all five
-  backends and diffing the emitted key. Tier: **behavioral**.
+  camelCase in an otherwise camelCase body. Fixed on java, then **the rule was
+  briefly recorded as all-five conforming — and it was 3-of-5.** The check that
+  cleared dotnet grepped *generated text* for `total_provenance` and matched the
+  **EF column mapping**, not the wire DTO; only booting dotnet (2026-07-31)
+  showed it sending `totalProvenance` too. A generated-source grep is not a wire
+  observation — that is the standing lesson, and it is why the loop's boot step
+  is not optional. Tier: **behavioral**.
 
 ### RS-19 · A declared `error` variant's fields ride the problem body
 - **Guarantee.** An operation returning `T or <Error>` that selects the error
@@ -488,9 +493,12 @@ the conforming backends, and the fix that established it.
   release.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found 2026-07-30 by the M-T9.11 gate on the newly-minted
-  `operation-returns` golden. Fixed in java by projecting the arm's declared
-  fields through `setProperty`; verified on a booted Spring app. Tier:
-  **behavioral**.
+  `operation-returns` golden (java leg). Fixed in java by projecting the arm's
+  declared fields through `setProperty`. **dotnet had the same bug** — its arm
+  discarded the variant entirely (`case <Union>_<Tag> _:`), so it could project
+  nothing — and that only surfaced when the dotnet leg was actually run
+  (2026-07-31), after the rule had already been recorded as all-five conforming.
+  Both verified on booted apps. Tier: **behavioral**.
 
 ### RS-20 · `version` counts persisted mutations, not entity-graph dirtiness — **OPEN (java)**
 - **Guarantee (pending fix).** `version` is `1` at create and `+1` per persisted
