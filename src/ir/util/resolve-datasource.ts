@@ -33,13 +33,13 @@ import type {
 } from "../types/loom-ir.js";
 
 /** The dataSource kind an aggregate's truth kind reads from.  Identity:
- *  `persistedAs(…)` values are the `kind` names (default `state`). */
+ *  `persistedAs: …` values are the `kind` names (default `state`). */
 export function dataSourceKindForAggregate(agg: EnrichedAggregateIR): DataSourceKind {
   return agg.persistedAs ?? "state";
 }
 
 /** True when the aggregate's primary truth is its event stream
- *  (`persistedAs(eventLog)`).  Parallel to {@link dataSourceKindForAggregate}
+ *  (`persistedAs: eventLog`).  Parallel to {@link dataSourceKindForAggregate}
  *  (the `state` default means anything not `eventLog` is stateful) but takes a
  *  bare `AggregateIR` so backend index gates can call it before enrichment.
  *
@@ -93,7 +93,7 @@ export interface ResolvedDataSource {
   schema: string;
   tablePrefix?: string;
   /** Saving shape of this binding (D-DOCUMENT-AXIS, the `shape:` knob).
-   *  When set, overrides the aggregate header's `shape(…)` for this
+   *  When set, overrides the aggregate header's `shape: …` for this
    *  projection (see {@link effectiveSavingShape}).  Carried verbatim
    *  from the binding here; the header fallback is applied by
    *  {@link effectiveSavingShape}, not folded in, so callers can tell
@@ -148,11 +148,11 @@ export function resolveContextSchema(ctx: BoundedContextIR, sys: SystemIR): stri
 /** Effective saving shape for an aggregate's primary read model.
  *
  *  Per-projection resolution (D-DOCUMENT-AXIS §8 Q4): the binding's
- *  `shape:` governs *that* projection; the aggregate header's `shape(…)`
+ *  `shape:` governs *that* projection; the aggregate header's `shape: …`
  *  is the default; absent everywhere ⇒ `relational`.
  *
  *  Pure; `resolved` may be `undefined` (no binding declared) — the
- *  header still decides, so an aggregate can be `shape(document)`
+ *  header still decides, so an aggregate can be `shape: document`
  *  without an explicit dataSource. */
 export function effectiveSavingShape(
   agg: EnrichedAggregateIR,
@@ -162,7 +162,7 @@ export function effectiveSavingShape(
 }
 
 /** Convenience predicate — true when the effective shape is the opaque
- *  whole-aggregate JSON document (`shape(document)`, Marten-style).
+ *  whole-aggregate JSON document (`shape: document`, Marten-style).
  *  Kept as a thin derivation over {@link effectiveSavingShape} so the
  *  existing document-emit call sites read naturally. */
 export function isDocumentShaped(
@@ -174,7 +174,7 @@ export function isDocumentShaped(
 
 /** Convenience predicate — true when the effective shape is the queryable
  *  root row whose containments / reference-collections fold into JSONB
- *  columns (`shape(embedded)`).  Thin derivation over
+ *  columns (`shape: embedded`).  Thin derivation over
  *  {@link effectiveSavingShape}, mirroring {@link isDocumentShaped}. */
 export function isEmbeddedShaped(
   agg: EnrichedAggregateIR,

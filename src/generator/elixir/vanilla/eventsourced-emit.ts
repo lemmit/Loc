@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Vanilla event-sourced emit — `persistedAs(eventLog)` aggregates on the
+// Vanilla event-sourced emit — `persistedAs: eventLog` aggregates on the
 // plain Phoenix + Ecto foundation (D-VANILLA-ES-HOME).  Slice P4.1/P4.2 of
 // docs/old/plans/elixir-eventsourcing-vanilla-plan.md.
 //

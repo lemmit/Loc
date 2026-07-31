@@ -48,7 +48,7 @@ const srcDir = path.join(repoRoot, "src");
  *  all resolved by relocating the shared, mislocated code to the layer
  *  its consumers actually live at:
  *    - `generator/_packs/builtin-formats.ts` → `util/builtin-formats.ts`
- *    - the `application:`/`shape(…)` platform-axes lookups in
+ *    - the `application:`/`shape: …` platform-axes lookups in
  *      `ir/types/loom-ir.ts`     → `util/platform-axes.ts`
  *    - `ir/source-types.ts`      → `util/source-types.ts`
  *    - `system/sql-pg.ts`        → `generator/sql-pg.ts` (the Postgres

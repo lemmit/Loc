@@ -36,8 +36,8 @@ The four propagation axes:
 | tenant-scope (`crossTenant` / `platform`) | aggregate-level; a contained part shares the root's tenancy | the auto-stamped `TenantId` column is **not** a wire field (callers never pass it, D-tenancy) | n/a | every query for a scoped aggregate gets `WHERE TenantId = ctx.tenantId`; writes stamp it from `RequestContext` |
 | `mask:` (sensitivity phase 3) | follows the masked field | **transforms** the wire value (redact/partial) per `RequestContext.currentUser` | masks the rendered form, not the stored value | DTO + React render layer |
 | `authorized(<tag>, …)` | expression-scoped declassification | n/a | narrows a sensitive value back to plain **within the authorized scope only** | the escape hatch for the sink constraint above |
-| `persistedAs(eventLog\|state)` | aggregate-level header (D-DOCUMENT-AXIS) | n/a — affects persistence, not wire | n/a | selects event-log vs state datasource; gates the applier body contract |
-| `shape(relational\|embedded\|document)` | aggregate-level header | n/a | n/a | selects the saving shape — relational tables, embedded-children JSONB, or one opaque JSONB document |
+| `persistedAs: eventLog\|state` | aggregate-level header (D-DOCUMENT-AXIS) | n/a — affects persistence, not wire | n/a | selects event-log vs state datasource; gates the applier body contract |
+| `shape: relational\|embedded\|document` | aggregate-level header | n/a | n/a | selects the saving shape — relational tables, embedded-children JSONB, or one opaque JSONB document |
 
 ## Binding rules
 
@@ -53,7 +53,7 @@ The four propagation axes:
   Backends never re-decide propagation.
 
 - **Containment inherits structural modifiers, not behavioural ones.** A
-  contained part shares the root's **tenancy** and **`shape(…)`
+  contained part shares the root's **tenancy** and **`shape: …`
   saving shape** (they are storage-structural). It does **not** inherit
   the root's `audited` mode (audit is an action-level concern keyed to
   the aggregate's lifecycle operations).

@@ -1,5 +1,5 @@
 // Saving-shape capability validator (D-DOCUMENT-AXIS).  An aggregate's
-// effective `shape(…)` must be one the hosting backend can emit today:
+// effective `shape: …` must be one the hosting backend can emit today:
 // .NET / Hono / elixir (vanilla) do all three (relational / embedded /
 // document).  The check turns an unsupported combination into a hard error
 // instead of silently emitting relational.

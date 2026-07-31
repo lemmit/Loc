@@ -16,7 +16,7 @@ import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced workflows on Hono (workflow-and-applier.md A2-S5b) — the saga
-// analogue of a `persistedAs(eventLog)` aggregate.  Instead of a mutable
+// analogue of a `persistedAs: eventLog` aggregate.  Instead of a mutable
 // `<wf>` correlation-state row, an `eventSourced` workflow persists as an
 // append-only `<wf>_events` stream (keyed by the correlation field) and folds
 // it through the `apply(...)` blocks at load time, exactly like the aggregate

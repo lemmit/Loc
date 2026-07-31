@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Vanilla `shape(document)` persistence (DEBT-07) — the plain-Ecto counterpart
+// Vanilla `shape: document` persistence (DEBT-07) — the plain-Ecto counterpart
 // of the node/dotnet/python/java document emit.
 //
 // A document-shaped aggregate persists as ONE jsonb column — the canonical

@@ -160,7 +160,7 @@ export function renderSchema(
       tables.push(emitTphTable(agg, ctx, { schema, prefix }));
       continue;
     }
-    // Event-sourced (`persistedAs(eventLog)`): the aggregate's truth is its
+    // Event-sourced (`persistedAs: eventLog`): the aggregate's truth is its
     // event stream, which lives in the single per-context `<ctx>_events` log
     // (emitted once after this loop, event-log-architecture.md) — no
     // per-aggregate table.  State is rehydrated by folding the stream, filtered
@@ -169,13 +169,13 @@ export function renderSchema(
       continue;
     }
     const shape = effectiveSavingShape(agg, lookup?.(agg));
-    // Document (`shape(document)`): the whole aggregate is one opaque
+    // Document (`shape: document`): the whole aggregate is one opaque
     // jsonb blob (`id, data, version`).  No part/join tables.
     if (shape === "document") {
       tables.push(emitDocumentTable(agg.name, agg.idValueType, { schema, prefix }));
       continue;
     }
-    // Embedded (`shape(embedded)`): queryable root row + one jsonb column
+    // Embedded (`shape: embedded`): queryable root row + one jsonb column
     // per containment.  No part tables, no join tables.
     if (shape === "embedded") {
       tables.push(emitEmbeddedTable(agg, ctx, indexedColumnsFor(agg, ctx), { schema, prefix }));
@@ -217,7 +217,7 @@ export function renderSchema(
     }
   }
   // The per-context event log (event-log-architecture.md): one `<ctx>_events`
-  // table shared by every `persistedAs(eventLog)` aggregate and every
+  // table shared by every `persistedAs: eventLog` aggregate and every
   // `eventSourced` workflow in the context, discriminated by `stream_type`.
   // Keyed by OWNING context, because this `ctx` may be a merged union of
   // several contexts (multi-context deployable) — each owning context that has
@@ -504,7 +504,7 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
   }
 }
 
-/** Embedded-children persistence table (`shape(embedded)`): the root's
+/** Embedded-children persistence table (`shape: embedded`): the root's
  *  scalar / `X id` fields stay queryable columns (like the relational
  *  root), but each containment folds into a single jsonb column and
  *  reference collections into a jsonb id-array column.  No part tables,

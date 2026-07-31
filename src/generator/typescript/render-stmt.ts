@@ -16,7 +16,7 @@ export interface TraceCtx {
   emitTrace: boolean;
   aggregate: string;
   op: string;
-  /** True when rendering a body on an event-sourced (`persistedAs(eventLog)`)
+  /** True when rendering a body on an event-sourced (`persistedAs: eventLog`)
    *  aggregate.  An `emit` then both records the event AND folds it into
    *  state via `this._apply(ev)` so the in-memory aggregate stays consistent
    *  for the command's response — the state transition the appliers own.

@@ -49,8 +49,8 @@ export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
 /** Whether the aggregate's implicit `all` is the paged `Paged<T>` findAll
  *  (M-T2.6) rather than a bare `T[]`.  Macro-time mirror of the enrichment
  *  exclusion in `ensureFindAll` (src/ir/enrich/enrichments.ts): only a plain
- *  single-table relational aggregate pages; event-sourced, `shape(document)` /
- *  `shape(embedded)`, and inheritance-subtype (`extends`) aggregates keep the
+ *  single-table relational aggregate pages; event-sourced, `shape: document` /
+ *  `shape: embedded`, and inheritance-subtype (`extends`) aggregates keep the
  *  unbounded `T[]` (their read path can't be a plain SQL `LIMIT/OFFSET` page),
  *  so their scaffold list stays CLIENT-paged. */
 function aggregateHasPagedFindAll(agg: Aggregate): boolean {

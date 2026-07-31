@@ -769,7 +769,7 @@ export function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagn
 // ---------------------------------------------------------------------------
 // Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
 //
-// `persistedAs(eventLog)` makes an aggregate event-sourced: its truth is
+// `persistedAs: eventLog` makes an aggregate event-sourced: its truth is
 // the event stream, and state is a fold of that stream.  That imposes a
 // body contract distinct from a state-based aggregate:
 //

@@ -179,7 +179,7 @@ export function schemaFromModule(
     if (isTphBase(agg, pool)) {
       return [tphTableForAggregate(agg, pool, module.name, voLookup)];
     }
-    // Event-sourced (`persistedAs(eventLog)`): no per-aggregate table — its
+    // Event-sourced (`persistedAs: eventLog`): no per-aggregate table — its
     // stream lives in the single per-context `<ctx>_events` log, emitted once in
     // the per-context pass below (event-log-architecture.md).  State is folded
     // from that stream (filtered by `stream_type`) at load time.
@@ -253,7 +253,7 @@ export function schemaFromModule(
     const ctxSchema = contextSchemaOf(ctx);
     // The single per-context event log (event-log-architecture.md): one
     // `<ctx>_events` table when the context has ANY event-sourced stream — a
-    // `persistedAs(eventLog)` aggregate or an `eventSourced` workflow.  Every
+    // `persistedAs: eventLog` aggregate or an `eventSourced` workflow.  Every
     // such stream shares it, discriminated by `stream_type`.
     const hasEventStream =
       ctx.aggregates.some((a) => a.persistedAs === "eventLog") ||
@@ -469,7 +469,7 @@ function orderTablesByFkDependency(tables: TableShape[]): TableShape[] {
   return order;
 }
 
-/** Embedded-children aggregate (`shape(embedded)`): the root stays a
+/** Embedded-children aggregate (`shape: embedded`): the root stays a
  *  normal queryable row — `id` plus its scalar / `X id` columns, exactly
  *  like the relational root — but each containment folds into a single
  *  JSONB column (the contained parts serialised inline) and reference
@@ -514,7 +514,7 @@ function embeddedTableForAggregate(agg: AggregateIR, ownerModule: string): Table
   return { name: tableName, ownerModule, columns, primaryKey: ["id"], foreignKeys, indexes };
 }
 
-/** Document-shaped aggregate (`shape(document)`): the whole aggregate
+/** Document-shaped aggregate (`shape: document`): the whole aggregate
  *  tree is one JSON document, so the table is the canonical document
  *  triple — `id` (PK), `data` (the serialised tree, JSONB), and `version`
  *  (the single-value optimistic-concurrency token; invariant §2.2#1 —
@@ -540,7 +540,7 @@ function documentTableForAggregate(agg: AggregateIR, ownerModule: string): Table
 
 /** The single per-context append-only event log `<ctx>_events`
  *  (event-log-architecture.md) — the shared event-sourcing store, one table per
- *  bounded context, holding every `persistedAs(eventLog)` aggregate stream AND
+ *  bounded context, holding every `persistedAs: eventLog` aggregate stream AND
  *  every `eventSourced` workflow stream in that context.  `stream_type`
  *  discriminates the owner (aggregate/workflow name); `stream_id` is the
  *  aggregate id or workflow correlation key; a row is keyed `(stream_type,
@@ -1842,7 +1842,7 @@ function resolveTableRenames(
       continue;
     }
 
-    // Event-sourced (`persistedAs(eventLog)`): no owned table either — the
+    // Event-sourced (`persistedAs: eventLog`): no owned table either — the
     // aggregate's stream lives in the shared per-context `<ctx>_events` log,
     // discriminated by `stream_type = "<Agg>"` (the emitters stamp the exact
     // aggregate NAME — every backend: hono/dotnet/java/python/elixir).  A rename

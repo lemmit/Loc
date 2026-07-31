@@ -129,7 +129,7 @@ available. The matured axis today is **`persistence:`**:
   repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
   can switch persistence without touching its domain code.
 
-**Event-sourcing** (`persistedAs(eventLog)` + `apply(...)`) emits on **node,
+**Event-sourcing** (`persistedAs: eventLog` + `apply(...)`) emits on **node,
 .NET, Python, Java and Elixir** (append-only per-aggregate `<agg>_events`
 stream, fold-on-load). A dedicated **Marten**
 document/event-store backend is **3rd priority (if ever)**: `D-DOCUMENT-AXIS`
@@ -158,10 +158,10 @@ The document sub-case below is the one feature with a partial story:
 
 | Feature | `elixir` (vanilla) | Gate (fail-fast) |
 |---|---|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ emits (incl. every `apply(…)` fold shape²) | — |
+| Event-sourced storage `persistedAs: eventLog` | ✓ emits (incl. every `apply(…)` fold shape²) | — |
 | Event-sourced **workflow** (`eventSourced` saga) | ✓ emits (per-correlation stream + fold) | — (`loom.event-sourced-workflow-unsupported` gates only non-supporting backends) |
 | Provenanced fields (runtime trace) | ✓ emits | — |
-| `shape(document)` aggregate | ✓ CRUD + finds/ops/functions/returning-ops; small residual gated¹ | `loom.vanilla-document-unsupported` (sub-case) |
+| `shape: document` aggregate | ✓ CRUD + finds/ops/functions/returning-ops; small residual gated¹ | `loom.vanilla-document-unsupported` (sub-case) |
 | `or`-union-returning op with `emit`/`add`/`remove` body | ✓ full bodies | — |
 | State persistence, unions, carriers, filters, stamping, inheritance | ✓ emits | — |
 

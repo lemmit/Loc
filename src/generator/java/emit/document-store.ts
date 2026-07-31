@@ -18,7 +18,7 @@ import {
 } from "./repository.js";
 
 // ---------------------------------------------------------------------------
-// Document-shaped persistence (`shape(document)`, D-DOCUMENT-AXIS) — the
+// Document-shaped persistence (`shape: document`, D-DOCUMENT-AXIS) — the
 // whole aggregate (contained parts inline, cross-aggregate refs as id
 // values) lives in ONE jsonb column: the shared MigrationsIR emits
 // `(id, data jsonb, version int)` and this JdbcTemplate repository

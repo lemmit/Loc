@@ -10,9 +10,9 @@
 
 import type { Platform, SavingShape } from "../ir/types/loom-ir.js";
 
-/** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
+/** Saving shapes (D-DOCUMENT-AXIS `shape: …`) each backend platform can
  *  EMIT today — the single source of truth for the `supportedShapes`
- *  capability check.  A `shape(…)` not listed for the target platform is
+ *  capability check.  A `shape: …` not listed for the target platform is
  *  a hard error (the backend has no emitter for it yet).  Keyed by the
  *  bareword family (a `family@version` pin resolves via `platformFamily`
  *  in the validator).  Frontend platforms (`react`/`static`) own no
@@ -28,7 +28,7 @@ export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingSha
   // elixir branch.
   elixir: ["relational", "embedded"],
   // Python emits all three: relational (table-per-entity + join tables),
-  // document (shape(document): one jsonb (id, data, version) blob), and
+  // document (shape: document: one jsonb (id, data, version) blob), and
   // embedded (queryable root row + one jsonb column per containment).
   python: ["relational", "document", "embedded"],
   java: ["relational", "embedded", "document"],

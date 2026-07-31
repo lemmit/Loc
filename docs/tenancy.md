@@ -19,7 +19,7 @@ system Billder {
 
   subdomain Billing {
     context Catalog {
-      aggregate Plan crossTenant { code: string  monthlyPrice: decimal }
+      crossTenant aggregate Plan { code: string  monthlyPrice: decimal }
     }
     context Invoicing {
       aggregate Invoice with tenantOwned { number: string  amountDue: decimal }
@@ -130,7 +130,7 @@ at each backend's accessor site**:
 | Claim type vs `ids` | Result |
 |---|---|
 | same-typed (`guid`/`guid`, `string`/`string`, …) | compared directly on every backend |
-| `string` claim, `ids guid` | bound as a guid at the accessor site: pg casts the text parameter (node/elixir/python), .NET wraps `Guid.Parse(...)`, Java converts in the SpEL principal expression (`T(java.util.UUID).fromString(...)`, null-guarded → fail-closed `= NULL`) |
+| `string` claim, `guid` aggregate id | bound as a guid at the accessor site: pg casts the text parameter (node/elixir/python), .NET wraps `Guid.Parse(...)`, Java converts in the SpEL principal expression (`T(java.util.UUID).fromString(...)`, null-guarded → fail-closed `= NULL`) |
 | anything else | `loom.tenancy-claim-type-mismatch` (error, with the fix spelled out) |
 
 A **malformed** tenant claim (not a parseable guid) under a guid-id registry
@@ -209,7 +209,7 @@ tree fields; the author writes neither (unfold the capability to see them):
 ```ddd
 tenancy by user.tenantId of Organization
 
-aggregate Organization ids guid {
+aggregate Organization {
   name: string
   implements tenantRegistry
   // — what `implements tenantRegistry` provides —
@@ -274,7 +274,7 @@ hierarchy: P2.1–P2.3 wrote `dataKey`; P2.4 reads by it.
 ```loom
 context Ledger {
   aggregate Invoice with tenantOwned { amount: Money }
-  aggregate Org ids guid { name: string  implements tenantRegistry }
+  aggregate Org { name: string  implements tenantRegistry }
   // …
   policy {
     allow deep on Invoice        // caller's org + all descendant orgs

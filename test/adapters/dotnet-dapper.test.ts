@@ -482,7 +482,7 @@ system D {
       "CREATE TABLE IF NOT EXISTS o_events (",
     );
   });
-  it("accepts a part-in-part under shape(embedded) — the nested subtree folds via snapshots", async () => {
+  it("accepts a part-in-part under shape: embedded — the nested subtree folds via snapshots", async () => {
     // Embedded folds each root containment into one JSONB column serialised
     // through `part.ToSnapshot()`, and the `<Part>Snapshot` recurses into the
     // part's own `contains` — so a part-in-part round-trips through the one
@@ -783,7 +783,7 @@ system D {
   });
 });
 
-// Document shape (`shape(document)`) on Dapper (M-T6.9 wave 3): the whole
+// Document shape (`shape: document`) on Dapper (M-T6.9 wave 3): the whole
 // aggregate persists as one JSONB `data` blob (a `(id, data, version)` table),
 // reusing the persistence-agnostic ToSnapshot/FromSnapshot round-trip; contained
 // parts + `X id[]` references fold into the blob (no child/join tables).  Finds
@@ -811,7 +811,7 @@ system D {
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
 
-  it("no longer rejects shape(document); emits a (id, data, version) blob table + JSONB repository", async () => {
+  it("no longer rejects shape: document; emits a (id, data, version) blob table + JSONB repository", async () => {
     const { files, errors } = await emit(DOC);
     expect(errors).toEqual([]); // the dapper document gate is lifted
     // Blob table (no per-field columns, no child/join tables).
@@ -847,7 +847,7 @@ system D {
   });
 });
 
-// Embedded shape (`shape(embedded)`) on Dapper (M-T6.9 wave 3): flat root
+// Embedded shape (`shape: embedded`) on Dapper (M-T6.9 wave 3): flat root
 // columns PLUS one JSONB column per containment (the part sub-graph folds into
 // it via the ToSnapshot/FromSnapshot round-trip), no child tables.  The flat
 // `Map` hydrates each containment from its JSONB column.
@@ -877,7 +877,7 @@ system D {
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
 
-  it("no longer rejects shape(embedded); folds containments into JSONB columns (no child tables)", async () => {
+  it("no longer rejects shape: embedded; folds containments into JSONB columns (no child tables)", async () => {
     const { files, errors } = await emit(EMB);
     expect(errors).toEqual([]); // the dapper embedded gate is lifted
     const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;

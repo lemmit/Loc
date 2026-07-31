@@ -26,7 +26,7 @@ import {
 import { entityFromDoc, entityToDoc } from "./repository-document-builder.js";
 
 // ---------------------------------------------------------------------------
-// Embedded-children (`shape(embedded)`) repository for the Python backend.
+// Embedded-children (`shape: embedded`) repository for the Python backend.
 //
 // The root stays a normal queryable row — `id` plus its scalar / `X id`
 // columns, exactly like the relational root, so finds run as real SQL

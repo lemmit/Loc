@@ -179,7 +179,7 @@ column references). Phase ⑨ renders them to SQL text.
   Type check rides the existing type system: `loom.backfill-type-mismatch`
   (expr type = field type).
 - **Shape restriction**: backfill targets relational (and embedded
-  *root-scalar*) columns. On a `shape(document)` aggregate there is no column
+  *root-scalar*) columns. On a `shape: document` aggregate there is no column
   to backfill — rejected with `loom.migration-step-shape-unsupported` (honest
   gate; the `sql` step over the `data` jsonb column is the v1 story there).
 - **Layering** is clean: `system/migrations-builder.ts` already sits above
@@ -253,7 +253,7 @@ UPDATE "fleet"."vehicles" SET "kind" = 'Sedan' WHERE "kind" = 'Car';
 | `loom.backfill-type-mismatch` | backfill expr type ≠ field type |
 | `loom.backfill-duplicate` | two backfills for one `Agg.field` within one block |
 | `loom.migration-sql-empty` | `sql ""` |
-| `loom.migration-step-shape-unsupported` | backfill on a `shape(document)` aggregate |
+| `loom.migration-step-shape-unsupported` | backfill on a `shape: document` aggregate |
 
 A backfill's `Agg` stays a live cross-reference (its field must exist *now* —
 it names the new column) with the field name raw, mirroring `ColumnRename`.

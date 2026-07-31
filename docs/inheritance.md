@@ -2,7 +2,7 @@
 
 Loom lets one aggregate **extend** another so subtypes share a common field set
 and can be queried polymorphically. An `abstract aggregate` declares the shared
-base; concrete aggregates `extends` it; the `inheritanceUsing(…)` header modifier
+base; concrete aggregates `extends` it; the `inheritanceUsing: …` header modifier
 picks how the hierarchy maps to tables.
 
 > Design rationale, the full strategy comparison, and the deferred patterns live
@@ -14,16 +14,16 @@ picks how the hierarchy maps to tables.
 ```ddd
 context Parties {
   // The abstract base: shared fields, no table/repo/routes of its own.
-  abstract aggregate Party inheritanceUsing(ownTable) {
+  abstract aggregate Party inheritanceUsing: ownTable {
     name: string
     email: string
   }
 
   // Concrete subtypes inherit Party's fields and add their own.
-  aggregate Customer extends Party inheritanceUsing(ownTable) {
+  aggregate Customer extends Party inheritanceUsing: ownTable {
     creditLimit: decimal
   }
-  aggregate Supplier extends Party inheritanceUsing(ownTable) {
+  aggregate Supplier extends Party inheritanceUsing: ownTable {
     rating: int
   }
 }
@@ -37,7 +37,7 @@ context Parties {
 - **`aggregate <X> extends <Base>`** — a concrete subtype. `<Base>` must be an
   `abstract aggregate` in the same context (`loom.extends-non-abstract`,
   `loom.extends-self`).
-- **`inheritanceUsing(sharedTable | ownTable)`** — the table-mapping strategy,
+- **`inheritanceUsing: sharedTable|ownTable`** — the table-mapping strategy,
   declared on the base (and optionally each concrete). Allowed only on an
   abstract base or a concrete subtype (`loom.inheritance-modifier-misplaced`).
   When omitted it defaults to **`sharedTable`** (TPH).
@@ -60,7 +60,7 @@ DTO for `Customer` carries the same `name` / `email` / `creditLimit` shape.
 | Backends | **all five** (node/Hono, .NET, Phoenix, Python, Java) | **all five** (node/Hono, .NET, Phoenix, Python, Java) |
 | `<Base> id` references | rejected (`loom.polymorphic-id-ref-unsupported` — ambiguous FK across N tables) | allowed (unambiguous single-table FK) |
 
-The default is `sharedTable`, so a hierarchy with no `inheritanceUsing(…)` is TPH.
+The default is `sharedTable`, so a hierarchy with no `inheritanceUsing: …` is TPH.
 
 ### Polymorphic reads (`find all <Base>`)
 
@@ -92,7 +92,7 @@ TPC emission is wired on every backend. TPH emission ships on all five backends
 backend** hosts the context, which is an **IR-validate error** (not a warning):
 there is no implemented emission target. The error names the offending
 platform(s) and suggests either hosting the context on a DB backend deployable
-or switching to `inheritanceUsing(ownTable)` (which works everywhere).
+or switching to `inheritanceUsing: ownTable` (which works everywhere).
 
 > Platform-literal note (D-PHOENIX-SURFACE / D-NODE-PLATFORM): the canonical
 > backend literals are `node` (the JS runtime, ex-`hono`), `dotnet`, and
@@ -104,7 +104,7 @@ or switching to `inheritanceUsing(ownTable)` (which works everywhere).
 |---|---|
 | `loom.extends-non-abstract` | `extends` names an aggregate that is not `abstract` |
 | `loom.extends-self` | an aggregate `extends` itself |
-| `loom.inheritance-modifier-misplaced` | `inheritanceUsing(…)` on an aggregate that is neither an abstract base nor a subtype |
+| `loom.inheritance-modifier-misplaced` | `inheritanceUsing: …` on an aggregate that is neither an abstract base nor a subtype |
 | `loom.abstract-aggregate-behavior` | an abstract base declares `create` / `operation` lifecycle behaviour |
 | `loom.abstract-repository` | a `repository` targets an abstract base |
 | `loom.polymorphic-id-ref-unsupported` | a `<Base> id` reference to an `ownTable` (TPC) base |
@@ -113,7 +113,7 @@ or switching to `inheritanceUsing(ownTable)` (which works everywhere).
 
 ## Deferred (gated, not emitted)
 
-- **Mixed strategy (proposal Pattern 3)** — a per-concrete `inheritanceUsing(ownTable)`
+- **Mixed strategy (proposal Pattern 3)** — a per-concrete `inheritanceUsing: ownTable`
   override of a TPH base, and the `UNION ALL` `find all <Base>` it would require,
   are rejected (`loom.tph-own-override-unsupported`,
   `loom.polymorphic-id-ref-mixed-strategy`).

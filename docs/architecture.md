@@ -142,9 +142,9 @@ compatibility matrix:
 
 | Kind | Compatible storage types | Aggregate predicate |
 |---|---|---|
-| `state` | postgres, mysql, sqlite, inMemory | at least one `persistedAs(state)` aggregate (the default) |
-| `eventLog` | postgres, mysql, sqlite, inMemory, kafka | at least one `persistedAs(eventLog)` aggregate |
-| `snapshot` | postgres, mysql, sqlite, inMemory | at least one `persistedAs(eventLog)` aggregate (snapshot policy) |
+| `state` | postgres, mysql, sqlite, inMemory | at least one `persistedAs: state` aggregate (the default) |
+| `eventLog` | postgres, mysql, sqlite, inMemory, kafka | at least one `persistedAs: eventLog` aggregate |
+| `snapshot` | postgres, mysql, sqlite, inMemory | at least one `persistedAs: eventLog` aggregate (snapshot policy) |
 | `cache` | redis, inMemory | any aggregate |
 | `replica` | postgres, mysql, sqlite | any aggregate |
 | `objectStore` | s3 | consumed from a workflow (`files.put(…)` etc.) |
@@ -251,7 +251,7 @@ persistence — see "Resource bindings" above.
 Validators enforce:
 
 - Every hosted `(context, aggregate.persistedAs)` pair (the
-  `persistedAs(…)` value *is* the resource kind) must have a matching
+  `persistedAs: …` value *is* the resource kind) must have a matching
   resource listed (no under-binding).
 - Every listed resource must cover at least one aggregate in the
   hosted contexts (no dead binding — warning, not error).

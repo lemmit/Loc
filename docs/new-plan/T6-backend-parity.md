@@ -35,7 +35,7 @@ Sources: weak-spots §6, parity audit findings.
 ## M-T6.5 — Java `hosts:` fullstack embed (DEBT-14) — `done` (this session) · **M→S** · P3
 
 ## M-T6.6 — Python document filters — `open` · **M** · P3
-The last capability-filter cell: `filter` on a python `shape(document)` aggregate (in-app blob filtering like node/java do). Principal-on-document stays a design decision — either implement or pin the gate as permanent with a D-tag.
+The last capability-filter cell: `filter` on a python `shape: document` aggregate (in-app blob filtering like node/java do). Principal-on-document stays a design decision — either implement or pin the gate as permanent with a D-tag.
 Sources: parity register row 1, DEBT-02 residue.
 
 ## M-T6.7 — Node criterion filter leak — `done` (verified 2026-07-13) · —
@@ -78,7 +78,7 @@ Sources: this session's parameter-passing validation audit (repros under the aud
 ## M-T6.14 — Small parity leftovers — `open` · **S** · P3
 DEBT-12 Phoenix `verify_token` niche; DEBT-08 `envelope` carrier (deferred — no live use; signpost via M-T5.9a); saga/projection EF `HasColumnName` correlation-column bug (from S7 Slice C review); domain-seam log-catalog §3 residue ⚠ partly stale.
 
-## M-T6.19 — Java `shape(embedded)` jsonb id-array reference collections — `done` · **M** · P3
+## M-T6.19 — Java `shape: embedded` jsonb id-array reference collections — `done` · **M** · P3
 
 ## M-T6.20 — Elixir (vanilla Phoenix) `precondition` custom messages + wire `code` — `partial` · **M** · P3 ⭐ parity gap
 The one remaining gap in the custom-validation-messages feature: a **`precondition`** on the vanilla Phoenix/Ecto backend carries neither its author `message "..."` nor the per-error wire `code`. Everything else shipped on all five backends (carriers + wire `code` + `loom.blank-message`); on the other four, op preconditions ride `preconditionsAsInvariants` into the wire validator and get message+code for free, but Elixir preconditions use a separate control-flow-error path with no slot for either. Full site map, mechanism, design options, and verification plan in the brief: [`missions/M-T6.20-elixir-precondition-messages-brief.md`](missions/M-T6.20-elixir-precondition-messages-brief.md).

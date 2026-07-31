@@ -21,7 +21,7 @@ export type OwnerOf = (streamName: string) => string;
 
 // ---------------------------------------------------------------------------
 // Event-sourced workflows on .NET (workflow-and-applier.md A2-S5b) — the saga
-// analogue of a `persistedAs(eventLog)` aggregate.  Instead of a mutable
+// analogue of a `persistedAs: eventLog` aggregate.  Instead of a mutable
 // `<Wf>State` correlation row, an `eventSourced` workflow persists as an
 // append-only `<wf>_events` stream (keyed by the correlation field) and folds
 // it through its `apply(...)` blocks on load, exactly like the aggregate event

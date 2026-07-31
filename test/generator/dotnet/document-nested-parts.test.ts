@@ -1,5 +1,5 @@
-// Part-in-part under the snapshot-fold shapes (`shape(document)` on every
-// backend; `shape(embedded)` on Dapper).  The `<Agg>Snapshot` DTOs mirror the
+// Part-in-part under the snapshot-fold shapes (`shape: document` on every
+// backend; `shape: embedded` on Dapper).  The `<Agg>Snapshot` DTOs mirror the
 // entity tree, and a NESTED part's `ParentId` must brand to its DIRECT parent's
 // id class (a sibling part), NOT the aggregate root's — otherwise the snapshot
 // record's `ParentId` type diverges from the entity's own `State.ParentId`

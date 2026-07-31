@@ -531,7 +531,7 @@ export function renderDockerignore(
   );
 }
 
-/** `shape(embedded)` — Hibernate's default Jackson FormatMapper only
+/** `shape: embedded` — Hibernate's default Jackson FormatMapper only
  *  sees getters; the generated part classes carry package-private
  *  fields with record-style accessors, so the JSON columns ride a
  *  field-visibility mapper installed via HibernatePropertiesCustomizer.

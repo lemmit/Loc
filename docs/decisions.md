@@ -208,15 +208,15 @@ the F1 micro-plan PRs; reopens after F1.
 numbered **Open sub-questions** below remain OPEN.
 
 **Implementation: SHIPPED.** `json` primitive (#703);
-`persistedAs(eventLog | state)` (#711); the saving-shape axis —
+`persistedAs: eventLog|state` (#711); the saving-shape axis —
 originally drafted as the boolean `normalised(true | false)` (#713),
-**reworked to the 3-valued `shape(relational | embedded | document)`**
+**reworked to the 3-valued `shape: relational|embedded|document`**
 (#724) once it was clear the axis is a spectrum, not a boolean — with
 emission across the backends: **`embedded`** on all of dotnet/hono/
 phoenixLiveView (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded
 resources, #724/#735/#750), **`document`** on dotnet/hono (STJ /
 jsonb blob, #724), and a **`supportedShapes` capability validator**
-(#738) that errors on a `shape(…)` the target backend can't emit. No
+(#738) that errors on a `shape: …` the target backend can't emit. No
 new Marten backend. Remaining (deferred): Ash `document` (non-idiomatic
 single-`:map`, allowed-but-warned) and `eventLog` + snapshot
 rehydration (gated behind the appliers feature). See
@@ -237,25 +237,30 @@ sits anomalously inside the aggregate body. Full analysis in
 
 | Modifier | Axis | Values | Default |
 |---|---|---|---|
-| `persistedAs(...)` | primary truth kind | `eventLog` \| `state` | `state` |
-| `shape(...)` | saving shape of the materialised read model / snapshot | `relational` \| `embedded` \| `document` | `relational` |
+| `persistedAs: ...` | primary truth kind | `eventLog` \| `state` | `state` |
+| `shape: ...` | saving shape of the materialised read model / snapshot | `relational` \| `embedded` \| `document` | `relational` |
 
-(`shape(...)` superseded the original boolean `normalised(true\|false)`
-in #724 — `shape(relational)` == old `shape(relational)`, `shape(document)`
-== old `shape(document)`, with `embedded` added as the queryable middle.)
+(`shape: ...` superseded the original boolean `normalised(true\|false)`
+in #724 — `shape: relational` == old `normalised(true)`, `shape: document`
+== old `normalised(false)`, with `embedded` added as the queryable middle.)
 
 - `persistedAs` values align to the D-STORAGE-SPLIT `kind` set, so
   `resolve-datasource.ts`'s `eventSourced→eventLog` /
   `stateBased→state` mapping becomes an **identity**.
 - `persistedAs` **renames + relocates** the shipped body
   `persistenceStrategy: stateBased | eventSourced` → header
-  `persistedAs(eventLog | state)`. Breaking change; **hard cutover** —
+  `persistedAs: eventLog|state`. Breaking change; **hard cutover** —
   `persistenceStrategy:` is removed (not accepted in parallel);
   existing `.ddd` sources migrate in one step (codemod offered).
-- **All** aggregate-level config lives on the **header** as paren
-  modifiers (`ids`, `with`, `extends`, `persistedAs(…)`,
-  `shape(…)`, `inheritanceUsing(…)`; bare `abstract`/`audited`).
+- **All** aggregate-level config lives on the **header**
+  (`with`, `extends`, `persistedAs: …`,
+  `shape: …`, `inheritanceUsing: …`; bare `abstract`/`crossTenant`).
   **Nothing configures in the body** — the body holds members only.
+  (The enum-axis modifiers were drafted as *paren* calls
+  `persistedAs(eventLog)`; **M-T5.17 phase 2 cut them over to colon
+  clauses** — order-independent — and hoisted `crossTenant` to lead
+  beside `abstract`. The paren form and the trailing `crossTenant` no
+  longer parse; the `ids` clause was removed outright.)
 - New `json` **primitive field type** — opaque JSONB; a leaf in
   `wireShape` (never expanded/diffed).
 - **Rejected:** `document` as an aggregate peer. **Deferred:** a
@@ -273,31 +278,31 @@ in #724 — `shape(relational)` == old `shape(relational)`, `shape(document)`
   document half *is* EF `.ToJson()`, and its event-store half (stream +
   document-snapshot rehydration) needs appliers
   (`workflow-and-applier.md`) regardless of backend. So Slice D's
-  achievable target is **`persistedAs(state)` + `shape(document)`**;
+  achievable target is **`persistedAs: state` + `shape: document`**;
   the `eventLog` + document case is deferred behind appliers.
 
 **Validator rules implied.**
 
-- `persistedAs(eventLog)` is the **declaration** of event-sourcing (the
+- `persistedAs: eventLog` is the **declaration** of event-sourcing (the
   rename of `persistenceStrategy: eventSourced`); there is no separate
   `eventSourced` body marker.
 - The **body-discipline enforcement** — operations change state only by
   emitting events, an `apply` exists per event, no direct `:=` mutation
   — is **owned by the event-sourcing behavioral feature (appliers,
-  `workflow-and-applier.md`)** and is *gated on* `persistedAs(eventLog)`.
+  `workflow-and-applier.md`)** and is *gated on* `persistedAs: eventLog`.
   It is **not** implemented by the `persistedAs` rename itself, and
   cannot land before `apply` exists in the grammar. So the rename slice
   ships no body-contract validator; that enforcement arrives with the
   applier feature.
-- `persistedAs(state)` (default / absent): operations mutate state
+- `persistedAs: state` (default / absent): operations mutate state
   directly; no `apply`.
 - `persistedAs` is **explicit**, default `state` (omitted entirely
   for state-based aggregates). **No inference and no suggestion lint.**
-- `shape(document)` requires the context to resolve a
+- `shape: document` requires the context to resolve a
   document-capable store/adapter; it constrains the `snapshot` binding
-  under `persistedAs(eventLog)`, the `state` binding under
-  `persistedAs(state)`.
-- Interaction (D-ES-TPH, generalised): a `persistedAs(eventLog)`
+  under `persistedAs: eventLog`, the `state` binding under
+  `persistedAs: state`.
+- Interaction (D-ES-TPH, generalised): a `persistedAs: eventLog`
   concrete subtype of a `sharedTable` base is forced to `ownTable`
   regardless of `shape`.
 
@@ -315,23 +320,23 @@ in #724 — `shape(relational)` == old `shape(relational)`, `shape(document)`
    per-projection.** The shape is settable per read-model: the
    per-binding `dataSource shape:` knob (on the `state` / `snapshot`
    / `replica` binding) governs that projection's shape; the
-   aggregate-header `shape(…)` is the default. This stays within
+   aggregate-header `shape: …` is the default. This stays within
    D-GRANULARITY (per `(context, kind)` binding, not per-aggregate). Richer
    *named* projections (multiple read models of one ES aggregate, each a
    different shape) depend on future read-model modelling and are out of
    v1 scope.
 5. **Real document DB** — **RESOLVED: Postgres-JSONB only in v1**
-   (Marten's own bet); `shape(document)` resolves to JSONB / Marten
+   (Marten's own bet); `shape: document` resolves to JSONB / Marten
    docs on Postgres. `StorageType += mongo` deferred.
 
 **Affects.**
 
 - `document-and-json-hierarchies.md` — this is its decision record.
 - `aggregate-inheritance.md` — its `storage: shared|own` header clause
-  is renamed by D-RENAME (below) to the `inheritanceUsing(…)` paren
+  is renamed by D-RENAME (below) to the `inheritanceUsing: …`
   header modifier; same header line.
 - Shipped grammar — `persistenceStrategy:` (body) **removed** in favour
-  of `persistedAs(…)` (header); hard cutover, one-step source migration
+  of `persistedAs: …` (header); hard cutover, one-step source migration
   (codemod).
 - `resolve-datasource.ts` — mode→kind mapping collapses to identity.
 
@@ -442,11 +447,13 @@ survive the alignment pass.
 
 **Status:** PINNED.
 
-**Decision.** Inheritance table layout is a **header paren modifier**
-`inheritanceUsing(sharedTable | ownTable)` (was the body clause
+**Decision.** Inheritance table layout is a **header colon modifier**
+`inheritanceUsing: sharedTable|ownTable` (was the body clause
 `inheritanceStrategy: shareTable | ownTable`). Amended by
-D-DOCUMENT-AXIS §4 — all aggregate config moves to the header as paren
-modifiers; nothing in the body. Values stay **table-baked**, spelled
+D-DOCUMENT-AXIS §4 — all aggregate config moves to the header;
+nothing in the body. (Drafted as the paren call
+`inheritanceUsing(ownTable)`; recolonized by M-T5.17 phase 2 — the
+paren form no longer parses.) Values stay **table-baked**, spelled
 `sharedTable | ownTable` (refines the earlier `shareTable`, reads as
 "shared table"); the medium-neutral `shared | own` spelling is
 rejected (the choice is specifically about table layout, and naming it
@@ -454,7 +461,7 @@ so keeps it honest when document/JSON saving enters via `shape`).
 
 **Validator rules implied.**
 
-- `inheritanceUsing(…)` is only valid on an aggregate that participates
+- `inheritanceUsing: …` is only valid on an aggregate that participates
   in inheritance (`abstract` base or `extends` subtype).
 - `sharedTable` = TPH (single table + discriminator column);
   `ownTable` = TPC/TPT (table per concrete). The exact TPC-vs-TPT
@@ -470,11 +477,11 @@ header line). Interacts with D-ES-TPH below.
 
 **Status:** PINNED.
 
-**Decision.** A `persistedAs(eventLog)` concrete subtype of a
+**Decision.** A `persistedAs: eventLog` concrete subtype of a
 `sharedTable` (TPH) abstract base is **forced to
-`inheritanceUsing(ownTable)`** — an event-sourced stream cannot share a
+`inheritanceUsing: ownTable`** — an event-sourced stream cannot share a
 state table with its siblings. Generalises across `shape` per
-D-DOCUMENT-AXIS: a `shape(document)` (document) concrete of a
+D-DOCUMENT-AXIS: a `shape: document` (document) concrete of a
 `sharedTable` base is likewise forced to `ownTable`. The validator
 raises an error (not a silent coercion) so the author writes the
 forced modifier explicitly.
@@ -956,7 +963,7 @@ Ash *foundation*, on the Elixir *platform*). (Resolves the
 D-VANILLA-PHOENIX-FOUNDATION**.)
 
 **Problem.** `validateEventSourcedStorage` (`src/ir/validate/checks/system-checks.ts`)
-rejects `persistedAs(eventLog)` aggregates on Phoenix today;
+rejects `persistedAs: eventLog` aggregates on Phoenix today;
 `ash-postgres-persistence.ts:60` advertises `supportedStrategies: ["state"]`
 only. Once vanilla exists, the gate can lift on a foundation-sensitive basis —
 but the question of *whether to also pursue Ash-foundation ES* (via AshEvents
@@ -964,7 +971,7 @@ adoption, AshCommanded adoption, or a custom `Ash.DataLayer`) is independent
 and material.
 
 **Decision.** Pure event sourcing on Phoenix lands **only** under `foundation:
-vanilla`. `foundation: ash` + `persistedAs(eventLog)` stays a hard error after
+vanilla`. `foundation: ash` + `persistedAs: eventLog` stays a hard error after
 vanilla ships, with a structured diagnostic naming the Ash foundation as the
 constraint and pointing the user at `foundation: vanilla` or a non-Phoenix
 backend. The following alternatives are **explicitly not pursued**:
@@ -1007,7 +1014,7 @@ Generalises **D-VANILLA-ES-HOME** from event sourcing to *every* feature with
 no idiomatic Ash fit; **depends on D-VANILLA-PHOENIX-FOUNDATION**.
 
 **Problem.** Several features (event-sourced storage, event-sourced workflows,
-provenanced fields, full `shape(document)` ops, `emit`/`add`/`remove`-bodied
+provenanced fields, full `shape: document` ops, `emit`/`add`/`remove`-bodied
 `or`-union-returning ops) emit cleanly on `foundation: vanilla` but have **no
 idiomatic Ash fit**. The recurring question is whether to close the
 Phoenix-side gap by routing those contexts to `vanilla` (treating the `ash`

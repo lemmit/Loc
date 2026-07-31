@@ -499,7 +499,7 @@ export function aggUsesPrincipalContextFilter(agg: EnrichedAggregateIR): boolean
 }
 
 // ---------------------------------------------------------------------------
-// IN-APP capability filter for a `shape(document)` aggregate (DEBT-02 tail).
+// IN-APP capability filter for a `shape: document` aggregate (DEBT-02 tail).
 //
 // A document aggregate persists as ONE jsonb blob, which isn't per-field
 // queryable, so its repository filters the REHYDRATED domain instances in-app

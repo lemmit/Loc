@@ -43,20 +43,20 @@ function contextAssociations(ctx: EnrichedBoundedContextIR): AssociationIR[] {
 export function renderDbContext(
   ctx: EnrichedBoundedContextIR,
   ns: string,
-  /** Names of document-shaped (`shape(document)`) aggregates in this
+  /** Names of document-shaped (`shape: document`) aggregates in this
    *  context.  Each contributes a `DbSet<<Agg>Document>` + the document
    *  configuration instead of the normalised entity DbSet/config, and
    *  its reference-collection join tables are skipped (they fold into
    *  the JSON document).  Empty / omitted ⇒ byte-identical with the
    *  all-normalised output. */
   documentAggs: ReadonlySet<string> = new Set(),
-  /** Names of event-sourced (`persistedAs(eventLog)`) aggregates.  Each
+  /** Names of event-sourced (`persistedAs: eventLog`) aggregates.  Each
    *  contributes a `DbSet<<Agg>EventRecord>` + the event-record
    *  configuration (the append-only `<agg>_events` stream) instead of the
    *  normalised entity DbSet/config; its reference-collection join tables
    *  are skipped (state lives in the stream).  Empty ⇒ byte-identical. */
   eventSourcedAggs: ReadonlySet<string> = new Set(),
-  /** Names of embedded-shaped (`shape(embedded)`) aggregates.  Each is a
+  /** Names of embedded-shaped (`shape: embedded`) aggregates.  Each is a
    *  queryable root row whose reference-collections fold into a JSONB
    *  column on the row (mapped by `<Agg>Configuration` via a value-
    *  converter), NOT a join table — so its associations are dropped from
@@ -76,7 +76,7 @@ export function renderDbContext(
    *  table (AuditRecord entity + configuration).  False ⇒ byte-identical. */
   hasAudit = false,
   /** Per-context event log (event-log-architecture.md): the NAMES of the
-   *  bounded contexts that own any event-sourced stream (`persistedAs(eventLog)`
+   *  bounded contexts that own any event-sourced stream (`persistedAs: eventLog`
    *  aggregate or `eventSourced` workflow).  Each maps a distinct
    *  `DbSet<<Ctx>EventRecord> <Ctx>Events` + applies its
    *  `<Ctx>EventRecordConfiguration` — one entity type per `<ctx>_events` table,
@@ -457,7 +457,7 @@ export function renderConfiguration(
   //     primitive-collection support would pin it as a JSON column AND the
   //     repository's join-sync would double-write).
   //
-  //   • embedded (`shape(embedded)`): the migration folds the collection into
+  //   • embedded (`shape: embedded`): the migration folds the collection into
   //     a single `<field> JSONB` column on the root row (no join table — the
   //     node backend stores it identically), so we map `List<TargetId>` to
   //     that column via a value-converter that (de)serialises a bare JSON
@@ -1050,7 +1050,7 @@ function containmentConfigLines(
 ): string[] {
   const part = agg.parts.find((p) => p.name === c.partName);
   const partFields = part?.fields ?? [];
-  // Embedded (`shape(embedded)`) fold: the containment serialises into a
+  // Embedded (`shape: embedded`) fold: the containment serialises into a
   // single JSONB column on the root via EF owned-types `.ToJson(...)` —
   // no child table.  The nested owned entities need no key/FK/table;
   // `HasConversion` on their id/enum/VO fields still applies inside JSON.

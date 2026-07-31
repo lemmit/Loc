@@ -1,6 +1,6 @@
 // Compile-gate fixture for the .NET `persistence: dapper` adapter's EMBEDDED
 // SHAPE with PART-IN-PART (recursive containment) — M-T6.9 wave 6.  A
-// `shape(embedded)` `Cart` keeps its own scalar fields as FLAT columns and folds
+// `shape: embedded` `Cart` keeps its own scalar fields as FLAT columns and folds
 // each ROOT containment into ONE JSONB column serialised through the part's
 // `ToSnapshot()` / `FromSnapshot(...)`.  When a contained part itself declares
 // `contains` (`Box` -> `Slip` / `Item`s), the `<Part>Snapshot` records recurse

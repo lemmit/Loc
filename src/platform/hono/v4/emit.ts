@@ -759,7 +759,7 @@ export function generateTypeScriptForContexts(
       } else {
         place("domain-aggregate", agg.name, aggContent, agg.origin, construct, opFragments);
       }
-      // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
+      // Persistence routing.  Event-sourced (`persistedAs: eventLog`) wins
       // over the saving-shape axis — its repository appends to / folds the
       // event stream rather than reading a state table.  Otherwise the
       // saving-shape routing applies: `document` → one jsonb blob + JSON
@@ -769,8 +769,8 @@ export function generateTypeScriptForContexts(
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
       const repoContent = usingMikro
         ? // mikroorm: event-sourced aggregates use the EntityManager event
-          // store (appliers, MikroORM edition); `shape(document)` folds the
-          // whole tree into one jsonb blob; `shape(embedded)` folds only the
+          // store (appliers, MikroORM edition); `shape: document` folds the
+          // whole tree into one jsonb blob; `shape: embedded` folds only the
           // containments into jsonb columns.
           agg.persistedAs === "eventLog"
           ? renderMikroEventSourcedRepository(agg, repo, ctx)

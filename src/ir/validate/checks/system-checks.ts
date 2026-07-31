@@ -1055,10 +1055,10 @@ export function validateFileFieldObjectStorage(sys: SystemIR, diags: LoomDiagnos
 
 // ---------------------------------------------------------------------------
 // Saving-shape capability (D-DOCUMENT-AXIS).  An aggregate's effective
-// `shape(…)` must be one the hosting backend can actually emit.  Today
+// `shape: …` must be one the hosting backend can actually emit.  Today
 // the matrix is partial — .NET / Hono emit all three (relational /
 // embedded / document); Phoenix emits only relational — so a
-// `shape(document)` aggregate on a Phoenix deployable would otherwise
+// `shape: document` aggregate on a Phoenix deployable would otherwise
 // emit *relationally*, silently mismatching the per-shape migration.
 // This turns that footgun into a clear error (the capability tier).
 //
@@ -1104,7 +1104,7 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 }
 
 // ---------------------------------------------------------------------------
-// Vanilla `shape(document)` scope (DEBT-07).  The vanilla document path emits the
+// Vanilla `shape: document` scope (DEBT-07).  The vanilla document path emits the
 // CRUD surface (list / get / create / update / delete) over the `(id, data,
 // version)` jsonb row, PLUS — since DEBT-07 — SCALAR custom finds (in-memory
 // filter over the loaded rows) and SCALAR named operations (the body runs over
@@ -1452,7 +1452,7 @@ export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagn
 //      always-on read path is deferred (Hono: thread through findById +
 //      callers; Phoenix: an actor-bound Ecto `where:`) — see
 //      docs/old/proposals/criterion-everywhere.md.
-//   2. Non-relational shapes (`shape(document)` / `shape(embedded)`).
+//   2. Non-relational shapes (`shape: document` / `shape: embedded`).
 //      Fields live inside a jsonb column, so `this.isDeleted` is not a
 //      top-level column the predicate can reference without JSON-path
 //      lowering — deferred.  (Phoenix only emits relational anyway, so
@@ -1570,7 +1570,7 @@ export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   validateStampSupport(sys, diags, STAMP_BACKENDS[4]);
 }
 
-// M-T6.19: `shape(embedded)` reference collections (`X id[]`) now map on
+// M-T6.19: `shape: embedded` reference collections (`X id[]`) now map on
 // java.  The jsonb id-array column rides a per-target `AttributeConverter`
 // (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
 // `List<XId>` to its bare `value`s so the Jackson FormatMapper serialises
@@ -2108,15 +2108,15 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
-        // so the `shape(...)` axis is moot — skip that check for it.
+        // so the `shape: ...` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        // shape(document) IS supported now (D-DOCUMENT-AXIS, Dapper edition): the
+        // shape: document IS supported now (D-DOCUMENT-AXIS, Dapper edition): the
         // whole aggregate persists as one JSONB `data` blob (a `(id, data,
         // version)` table), reusing the persistence-agnostic ToSnapshot/
         // FromSnapshot round-trip.  Contained parts + `X id[]` references fold
         // INTO the blob, so the relational-only containment/association gates
-        // below are moot for it — skip them.  shape(embedded) is still gated.
-        // shape(embedded) IS supported too (Dapper edition): flat root columns
+        // below are moot for it — skip them.  shape: embedded is still gated.
+        // shape: embedded IS supported too (Dapper edition): flat root columns
         // PLUS one JSONB column per containment (the part sub-graph folds into
         // it via the ToSnapshot/FromSnapshot round-trip), no child tables.  A
         // part-in-part folds through the same snapshot recursion (the nested
@@ -2174,7 +2174,7 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // the containment TREE, each grandchild a table FK'd to its DIRECT parent
         // part; hydration recurses bottom-up (children grouped by parent-part id,
         // slotted into the parent's `Map`), save recurses the object graph, and
-        // delete relies on the FK cascade.  The `shape(embedded)` fold (one JSONB
+        // delete relies on the FK cascade.  The `shape: embedded` fold (one JSONB
         // column per root containment) folds a part-in-part too — the containment
         // column serialises `part.ToSnapshot()`, whose `<Part>Snapshot` recurses
         // into the part's own `contains` (nested snapshot records + the
@@ -2366,17 +2366,17 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
-        // so the `shape(...)` axis is moot for it — every saving shape is now
+        // so the `shape: ...` axis is moot for it — every saving shape is now
         // supported (no per-shape reject remains), so the shape need not be
         // resolved here.
-        // `shape(embedded)` IS supported (wave 2): the root stays queryable
+        // `shape: embedded` IS supported (wave 2): the root stays queryable
         // columns and each containment folds into a jsonb column, (de)serialised
         // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
         // analogue of the drizzle embedded repository).  An `Id[]` reference
         // collection FOLDS onto the root as one jsonb id-string array (no pivot
         // table — `embeddedColumnsOf` + the embedded repo's hydrate/save fold),
         // the embedded analogue of the relational pivot and the mirror of the
-        // drizzle `emitEmbeddedTable` ref-collection column.  `shape(document)`
+        // drizzle `emitEmbeddedTable` ref-collection column.  `shape: document`
         // IS supported (wave 3): the whole aggregate tree collapses to one `(id,
         // data, version)` jsonb blob round-tripped through the shared doc
         // (de)serialisers — no per-field / containment / pivot columns, so
@@ -2972,7 +2972,7 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
 // hosted by at least one of those backends; otherwise it's an error (not a
 // warning) — there is no implemented emission target.
 // `sharedTable` is the omitted-modifier
-// default, so an inheritance hierarchy with no `inheritanceUsing(…)` is TPH
+// default, so an inheritance hierarchy with no `inheritanceUsing: …` is TPH
 // too. Polymorphic `Party id` refs and `find all Party` remain deferred (the
 // language validator rejects the former); document / TPT shapes are later.
 const DEFAULT_INHERITANCE_LAYOUT = "sharedTable" as const;
@@ -3011,7 +3011,7 @@ export function validateInheritanceStorage(
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
     // A concrete's layout defaults to its base's (resolved within the
-    // context); a per-concrete `inheritanceUsing(…)` override wins. The
+    // context); a per-concrete `inheritanceUsing: …` override wins. The
     // abstract base uses its own declared layout. Either way an omitted
     // modifier means `sharedTable` (TPH), the documented default.
     const base = agg.extendsAggregate ? byName.get(agg.extendsAggregate) : undefined;
@@ -3042,7 +3042,7 @@ export function validateInheritanceStorage(
   }
 }
 
-// Event-sourced storage emission (`persistedAs(eventLog)`, appliers A2) is
+// Event-sourced storage emission (`persistedAs: eventLog`, appliers A2) is
 // implemented for the Hono (`node`) and .NET (`dotnet`, EF Core) backends:
 // the `<agg>_events` stream table + fold-on-load repository. So an
 // event-sourced aggregate is allowed iff every backend deployable hosting
@@ -3085,7 +3085,7 @@ export function validateEventSourcedStorage(
 
 // Event-sourced *workflow* storage gate (workflow-and-applier.md A2-S5b).  A
 // `workflow X eventSourced { … apply(…) }` folds its own emitted events into
-// state via appliers — the saga analogue of a `persistedAs(eventLog)`
+// state via appliers — the saga analogue of a `persistedAs: eventLog`
 // aggregate (emit-only handlers + pure `apply` folds, no mutable state table).
 // The surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) and the
 // emit-only / pure-fold discipline (A1) have landed, and the **node, .NET,

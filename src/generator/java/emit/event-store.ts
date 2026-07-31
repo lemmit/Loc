@@ -17,7 +17,7 @@ import {
 import { esEventLogTable } from "./workflow-eventsourced.js";
 
 // ---------------------------------------------------------------------------
-// Event-sourced persistence (`persistedAs(eventLog)`, appliers A2) — the
+// Event-sourced persistence (`persistedAs: eventLog`, appliers A2) — the
 // java counterpart of the Hono / .NET event store.  No state table and
 // no Spring Data interface: the repository impl reads/appends the single
 // per-context `<ctx>_events` log (stream_type, stream_id, version, type,

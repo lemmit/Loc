@@ -1,4 +1,4 @@
-// `shape(document)` DOCUMENT SHAPE with PART-IN-PART (recursive containment) —
+// `shape: document` DOCUMENT SHAPE with PART-IN-PART (recursive containment) —
 // .NET (efcore) compile gate.  `Cart` folds its whole read model into one JSONB
 // `data` blob via the `ToSnapshot()` / `FromSnapshot(...)` round-trip; a nested
 // part (`Box` contains `Slip` + `Item`s) must brand its snapshot `ParentId` to

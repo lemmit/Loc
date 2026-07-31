@@ -956,11 +956,11 @@ describe("mikroorm — collection-bearing contained parts", () => {
 });
 
 // ---------------------------------------------------------------------------
-// shape(embedded) on mikroorm — wave 2.  The root stays queryable columns and
+// shape: embedded on mikroorm — wave 2.  The root stays queryable columns and
 // each containment folds into a jsonb column, (de)serialised through the shared
-// `<part>ToDoc`/`<part>FromDoc` helpers.  shape(document) stays gated.
+// `<part>ToDoc`/`<part>FromDoc` helpers.  shape: document stays gated.
 // ---------------------------------------------------------------------------
-describe("mikroorm — shape(embedded) (wave 2)", () => {
+describe("mikroorm — shape: embedded (wave 2)", () => {
   const EMB_SRC = `system M {
   api A from S
   subdomain S {
@@ -979,7 +979,7 @@ describe("mikroorm — shape(embedded) (wave 2)", () => {
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
 
-  it("no longer trips loom.mikroorm-unsupported for shape(embedded)", async () => {
+  it("no longer trips loom.mikroorm-unsupported for shape: embedded", async () => {
     const { errors } = await emit(EMB_SRC);
     expect(errors).toEqual([]);
   });
@@ -1013,14 +1013,14 @@ describe("mikroorm — shape(embedded) (wave 2)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// shape(document) on mikroorm — wave 3.  The whole aggregate tree collapses to
+// shape: document on mikroorm — wave 3.  The whole aggregate tree collapses to
 // ONE opaque `(id, data, version)` jsonb blob (Marten-style), round-tripped
 // through the shared `<agg>ToDoc`/`<agg>FromDoc` (de)serialisers the drizzle
 // document repository uses — so contained parts nest in the blob (no child
 // tables), `Id[]` references ride as id strings (no pivot tables), and finds /
 // capability filters evaluate in-app over the rehydrated read model.
 // ---------------------------------------------------------------------------
-describe("mikroorm — shape(document) (wave 3)", () => {
+describe("mikroorm — shape: document (wave 3)", () => {
   const DOC_SRC = `system M {
   api A from S
   subdomain S {
@@ -1044,7 +1044,7 @@ describe("mikroorm — shape(document) (wave 3)", () => {
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
 
-  it("no longer trips loom.mikroorm-unsupported for shape(document)", async () => {
+  it("no longer trips loom.mikroorm-unsupported for shape: document", async () => {
     const { errors } = await emit(DOC_SRC);
     expect(errors).toEqual([]);
   });
@@ -1312,13 +1312,13 @@ describe("mikroorm — event-sourced intersections (in-memory fold)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// shape(embedded) + `Id[]` reference collections — the reference collection
+// shape: embedded + `Id[]` reference collections — the reference collection
 // FOLDS onto the root as one jsonb id-string array (no pivot table), the
 // embedded analogue of the relational pivot and the mirror of the drizzle
 // `emitEmbeddedTable` ref-collection column.  Containments still fold to their
 // own jsonb columns; the queryable root stays real columns.
 // ---------------------------------------------------------------------------
-describe("mikroorm — shape(embedded) + Id[] reference collections (fold)", () => {
+describe("mikroorm — shape: embedded + Id[] reference collections (fold)", () => {
   const EMB_ASSOC_SRC = `system M {
   api A from S
   subdomain S {
@@ -1341,7 +1341,7 @@ describe("mikroorm — shape(embedded) + Id[] reference collections (fold)", () 
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
 
-  it("no longer trips loom.mikroorm-unsupported for shape(embedded) with an Id[]", async () => {
+  it("no longer trips loom.mikroorm-unsupported for shape: embedded with an Id[]", async () => {
     const { errors } = await emit(EMB_ASSOC_SRC);
     expect(errors).toEqual([]);
   });

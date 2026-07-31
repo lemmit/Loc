@@ -27,7 +27,7 @@ import { projectFieldEntries } from "./repository-save-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
-// Embedded-children (`shape(embedded)`) repository for the Hono/Drizzle
+// Embedded-children (`shape: embedded`) repository for the Hono/Drizzle
 // backend — the queryable middle of the saving-shape spectrum.
 //
 // The aggregate ROOT stays a normal row (its scalar / `X id` fields are
@@ -97,7 +97,7 @@ export function buildEmbeddedRepositoryFile(
     const lowered = lowerToDrizzle(f.filter, tableName, ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
-  // A `shape(embedded)` aggregate keeps its root scalars as real columns, so a
+  // A `shape: embedded` aggregate keeps its root scalars as real columns, so a
   // (non-principal) capability `filter` AND-s into every root read as a Drizzle
   // SQL predicate — the same machinery the relational repository uses (DEBT-02).
   // null when the aggregate has no such filter → embedded reads stay identical.

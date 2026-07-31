@@ -289,7 +289,7 @@ function provColumn(f: FieldIR): DapperColumn {
   };
 }
 
-/** Embedded (`shape(embedded)`) containment column — one JSONB column per
+/** Embedded (`shape: embedded`) containment column — one JSONB column per
  *  containment holding the serialised part snapshot(s).  The whole contained
  *  sub-graph folds into this one column (no child table): a collection stores a
  *  JSON array of snapshots, a single (optional) containment stores one snapshot
@@ -351,7 +351,7 @@ function columnsOf(
     ...agg.fields.filter((f) => !assocFields.has(f.name)).map((f) => fieldColumn(f)),
     // One co-located `<field>_provenance` lineage column per provenanced field.
     ...agg.fields.filter((f) => f.provenanced).map(provColumn),
-    // shape(embedded): each containment folds into one JSONB column (no child
+    // shape: embedded: each containment folds into one JSONB column (no child
     // table).  Relational (default) keeps them as child tables (partChildrenOf).
     ...(embedded ? (agg.contains ?? []).map(embeddedContainmentColumn) : []),
   ];
@@ -769,7 +769,7 @@ export function renderDapperRepository(
    *  mirroring the EF AuditableInterceptor.  Undefined ⇒ no principal stamp
    *  reaches this emitter (rejected upstream by loom.dotnet-stamp-unsupported). */
   actorIdProp?: string,
-  /** shape(embedded): each containment folds into one JSONB column (serialised
+  /** shape: embedded: each containment folds into one JSONB column (serialised
    *  part snapshots) instead of a child table.  Adds the STJ `__json` options
    *  field the containment (de)serialisation uses. */
   embedded = false,
@@ -1314,7 +1314,7 @@ export function renderDapperRepository(
       "{",
       "    private readonly NpgsqlDataSource _db;",
       "    private readonly IDomainEventDispatcher _events;",
-      // shape(embedded): the STJ options the containment-column (de)serialisation
+      // shape: embedded: the STJ options the containment-column (de)serialisation
       // uses (Web defaults — matching the document path + the entity snapshots).
       embedded
         ? "    private static readonly System.Text.Json.JsonSerializerOptions __json =\n        new(System.Text.Json.JsonSerializerDefaults.Web);"
@@ -1426,7 +1426,7 @@ export function renderDapperRepository(
 }
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`shape(document)`) Dapper repository (D-DOCUMENT-AXIS,
+// Document-shaped (`shape: document`) Dapper repository (D-DOCUMENT-AXIS,
 // Dapper edition).  The whole aggregate read model persists as ONE JSONB
 // `data` column keyed by `id` (plus a `version` concurrency column) — no
 // normalised table-per-entity tree, no join tables: contained parts fold into
@@ -1582,7 +1582,7 @@ export function renderDapperDocumentRepository(
 }
 
 // ---------------------------------------------------------------------------
-// Event-sourced (`persistedAs(eventLog)`) Dapper repository (appliers, Dapper
+// Event-sourced (`persistedAs: eventLog`) Dapper repository (appliers, Dapper
 // edition).  The .NET domain layer's fold (`_Apply` / `_FromEvents`) and the
 // CQRS create chain are persistence-agnostic and reused as-is; this is the raw
 // Npgsql/Dapper version of the event store — read the `<agg>_events` stream
@@ -1749,14 +1749,14 @@ export function renderDapperSchema(
   ns: string,
   /** Snake-case names of the bounded contexts that own any event-sourced
    *  stream — one shared `<ctx>_events` log per context (event-log-architecture.md),
-   *  holding every `persistedAs(eventLog)` aggregate stream discriminated by
+   *  holding every `persistedAs: eventLog` aggregate stream discriminated by
    *  `stream_type`.  Empty ⇒ no event log. */
   eventLogContexts: readonly string[] = [],
-  /** Names of `shape(document)` aggregates — each persists as ONE `(id, data
+  /** Names of `shape: document` aggregates — each persists as ONE `(id, data
    *  jsonb, version)` table (the whole read model in the JSONB `data` column,
    *  no normalised child/join tables) instead of the flat relational shape. */
   documentAggNames: ReadonlySet<string> = new Set(),
-  /** Names of `shape(embedded)` aggregates — flat root columns PLUS one JSONB
+  /** Names of `shape: embedded` aggregates — flat root columns PLUS one JSONB
    *  column per containment (the part sub-graph folds into it), no child tables. */
   embeddedAggNames: ReadonlySet<string> = new Set(),
   /** Extra `CREATE TABLE` statements (M-T6.9): the workflow saga-state,

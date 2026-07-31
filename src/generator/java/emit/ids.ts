@@ -53,7 +53,7 @@ function parseIdValueExpr(idValueType: string, varName: string): string {
   }
 }
 
-/** `shape(embedded)` reference-collection converter (`X id[]` → jsonb
+/** `shape: embedded` reference-collection converter (`X id[]` → jsonb
  *  id-array).  A `List<XId>` can't ride Hibernate's `@JdbcTypeCode(JSON)`
  *  path directly: the @Embeddable id routes through the STRUCTURED-JSON
  *  aggregate mapping, which bypasses the Jackson FormatMapper and

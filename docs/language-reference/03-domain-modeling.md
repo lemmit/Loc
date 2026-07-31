@@ -8,7 +8,7 @@ Every backend reads the same fully-resolved IR, so the table layout is structura
 
 ## `aggregate`
 
-An `aggregate` is a consistency root. It owns a table, gets a synthetic `Name id` primary key automatically (you never declare `id`), and gets a repository. Header modifiers tune it: `ids guid|int|long|string` picks the id type (default `guid`), `persistedAs(eventLog|state)` the truth kind, `shape(relational|embedded|document)` the physical layout, and `inheritanceUsing(sharedTable|ownTable)` the TPH/TPC strategy (see [Inheritance](08-inheritance-and-polymorphism.md)).
+An `aggregate` is a consistency root. It owns a table, gets a synthetic `Name id` primary key automatically (you never declare `id`), and gets a repository. The id type is always `guid` and is not configurable. Order-independent header colon modifiers tune it: `persistedAs: eventLog|state` the truth kind, `shape: relational|embedded|document` the physical layout, and `inheritanceUsing: sharedTable|ownTable` the TPH/TPC strategy (see [Inheritance](08-inheritance-and-polymorphism.md)); the `abstract` and `crossTenant` adjectives lead, before the `aggregate` keyword.
 
 ```ddd
 context Orders {

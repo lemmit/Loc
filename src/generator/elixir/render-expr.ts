@@ -137,7 +137,7 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
-  /** Document-shape STRUCT rendering (Route A slice 2).  A `shape(document)`
+  /** Document-shape STRUCT rendering (Route A slice 2).  A `shape: document`
    *  aggregate now rehydrates its blob into a typed `%<Agg>.Data{}` struct, so a
    *  `this.<field>` read is genuine struct access (`record.<field>`) — same as the
    *  relational path — NOT a `data["<field>"]` bracket.  But the blob keeps enums

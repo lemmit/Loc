@@ -282,7 +282,7 @@ function expandHost(
  * aggregate is already versioned or is event-sourced.
  *
  * Skips:
- *   - **event-sourced** aggregates (`persistedAs(eventLog)`) — the append-only
+ *   - **event-sourced** aggregates (`persistedAs: eventLog`) — the append-only
  *     `(stream_id, version)` stream IS their optimistic-concurrency control, so
  *     a redundant state-table `version` column would be wrong (there is no
  *     state table to carry it).

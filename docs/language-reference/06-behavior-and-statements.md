@@ -111,7 +111,7 @@ Three distinct gates, three distinct HTTP failures. They type identically (each 
 | `when Expr` (op header) | the aggregate is in a state that admits this op | `DisallowedError` | **409** Conflict |
 
 ```ddd
-aggregate Order ids guid {
+aggregate Order {
   status: Status
   operation addLine(price: money, isStaff: bool) when status == Status.Draft {
     requires isStaff
@@ -241,14 +241,14 @@ Phoenix.PubSub.broadcast(Orders.PubSub, "events", %Orders.Events.LinePriced{orde
 ```
 ::: end
 
-On an event-sourced aggregate (`persistedAs(eventLog)`), `emit` does **double duty** — it records the event *and* folds it immediately via `_apply`, so the in-memory aggregate reflects the transition before the command returns. There, command bodies may *only* `emit`; the state change lives in the `apply` block (next section). On the Hono/.NET backends the event-sourced `emit` becomes `{ const __ev = …; this._events.push(__ev); this._apply(__ev); }` / `{ var __ev = …; _domainEvents.Add(__ev); _Apply(__ev); }`.
+On an event-sourced aggregate (`persistedAs: eventLog`), `emit` does **double duty** — it records the event *and* folds it immediately via `_apply`, so the in-memory aggregate reflects the transition before the command returns. There, command bodies may *only* `emit`; the state change lives in the `apply` block (next section). On the Hono/.NET backends the event-sourced `emit` becomes `{ const __ev = …; this._events.push(__ev); this._apply(__ev); }` / `{ var __ev = …; _domainEvents.Add(__ev); _Apply(__ev); }`.
 
 ## Assignment — `:=`, `+=`, `-=`
 
 `target := Expr` is scalar assignment; `target += Expr` / `target -= Expr` are collection append / remove. A numeric/decimal literal flowing into a `money` target is elaborated to the precise money constructor at lowering (`subtotal := 0.50` → `money("0.50")`).
 
 ```ddd
-aggregate Order ids guid {
+aggregate Order {
   status: Status
   notes: string[]
   contains lines: OrderLine[]
@@ -304,7 +304,7 @@ changeset = Ecto.Changeset.put_assoc(changeset, :notes, record.notes -- ["draft"
 `create [name](params) { body }` is a factory: the body populates a pre-bound fresh `this`, and the framework owns allocate-id → persist → return. An **unnamed** `create(...)` is the aggregate's canonical creator (routed to the bare collection `POST`); a **named** `create quote(...)` is an additional factory. `destroy [name][(params)] { body }` is the terminator — the instance is loaded by id, the body runs (cleanup / soft-delete state), then the framework removes it; a body that throws aborts removal. Both accept `audited`. Neither is ever `private` or `extern`.
 
 ```ddd
-aggregate Order ids guid {
+aggregate Order {
   status: Status
   subtotal: money
 
@@ -361,10 +361,10 @@ destroy(): void {
 
 ## `apply(e: Event)` — the event-sourcing fold
 
-On a `persistedAs(eventLog)` aggregate, `apply(e: SomeEvent) { body }` is the fold that turns an emitted event into state. Applier bodies are **pure folds** — assignments and derivations only, no `emit` and no side-effecting calls. The command bodies decide and `emit`; the appliers own the actual state transition. (`apply` lowers to its own `ApplyIR` and never joins `agg.operations`.)
+On a `persistedAs: eventLog` aggregate, `apply(e: SomeEvent) { body }` is the fold that turns an emitted event into state. Applier bodies are **pure folds** — assignments and derivations only, no `emit` and no side-effecting calls. The command bodies decide and `emit`; the appliers own the actual state transition. (`apply` lowers to its own `ApplyIR` and never joins `agg.operations`.)
 
 ```ddd
-aggregate Account ids guid persistedAs(eventLog) {
+aggregate Account persistedAs: eventLog {
   owner: string
   balance: int
 
@@ -448,7 +448,7 @@ The full runnable example is [`examples/event-sourcing.ddd`](../../examples/even
 ```ddd
 context Orders {
   error NotAllowed { reason: string }
-  aggregate Order ids guid {
+  aggregate Order {
     status: Status
     operation place(): Order or NotAllowed {
       precondition status == Status.Draft

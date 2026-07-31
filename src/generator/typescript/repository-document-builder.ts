@@ -22,7 +22,7 @@ import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
-// Document-shaped (`shape(document)`) repository for the Hono/Drizzle
+// Document-shaped (`shape: document`) repository for the Hono/Drizzle
 // backend — the TS counterpart of the .NET document emit.
 //
 // A document aggregate persists as ONE jsonb column (`(id, data,
@@ -233,7 +233,7 @@ export function buildDocumentRepositoryFile(
 
 // --- find methods (in-memory over rehydrated documents) -------------------
 
-/** A `shape(document)` aggregate stores every field inside the `data` jsonb
+/** A `shape: document` aggregate stores every field inside the `data` jsonb
  *  column, so a capability `filter` can't be a SQL column predicate — it's
  *  applied in-app against the rehydrated aggregate (the read already
  *  deserialises every row, so this matches the document read model).  Returns

@@ -1658,7 +1658,7 @@ mid-task, your half-written edits silently become **wrong**, not just behind.
 synced `main` at start (`740b823`), read `system-checks.ts`
 (`supportsNonRelationalFilter` omitted python), and wrote edits asserting *"python
 wires relational filters only / no non-relational filters."* By push time `main`
-was `d2b8e70` — **#1571 had landed python `shape(embedded)` filters mid-session** —
+was `d2b8e70` — **#1571 had landed python `shape: embedded` filters mid-session** —
 so every "python relational-only" edit was now false. It was caught **only** by a
 rebase conflict in `platform-parity-debt.md`, which `main` had *also* refreshed
 (#1549/#1571), partly duplicating the work. Without that overlapping-file collision
@@ -1775,6 +1775,12 @@ Removing the non-guid aggregate-id kinds (`ids int|long|string`, keeping only
   `ids guid` still parses; `ids int` is a hard parse error. Grep the corpus for
   the default spelling (`grep -rn "ids guid" test/ examples/ web/`) *before*
   touching a shared header clause.
+  **[2026-07-30 update — the clause is now gone entirely.]** The `ids` clause was
+  later removed outright by the M-T5.17 aggregate-header normalization, which
+  codemodded the whole corpus in the same PR. `ids guid` no longer parses either;
+  the id type is always `guid` and unspellable. The lesson above still holds for
+  the *staging* — narrowing first is what made the corpus-wide codemod tractable
+  — but don't read "`ids guid` still parses" as current behaviour.
 - **A backend emitting *type-consistent* code for a construct is NOT evidence the
   feature works — generate the project and read the create/runtime path.** The
   first cut of this work shipped a validator gate claiming .NET/Java/Elixir
@@ -1795,9 +1801,9 @@ Removing the non-guid aggregate-id kinds (`ids int|long|string`, keeping only
   refactor. Narrowing the *grammar* and letting the field always resolve to `guid`
   removes the feature with a ~90-line diff instead of a ~48-file one.
 
-## 21. Converging a forked codegen render path onto the shared renderer (Route A, elixir `shape(document)`, 2026-07-05)
+## 21. Converging a forked codegen render path onto the shared renderer (Route A, elixir `shape: document`, 2026-07-05)
 
-Route A converged the vanilla-Elixir `shape(document)` path off its parallel
+Route A converged the vanilla-Elixir `shape: document` path off its parallel
 map-mode renderer (`RenderCtx.docMap` → `data["field"]`) onto the SAME struct
 renderer the relational path uses (`record = row.data` over a typed
 `embeds_one :data, <Agg>.Data` embed), then deleted the fork and un-gated

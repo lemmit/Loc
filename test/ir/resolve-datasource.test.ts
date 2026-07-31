@@ -270,7 +270,7 @@ system Sys {
 // ---------------------------------------------------------------------------
 // isDocumentShaped — per-projection saving-shape resolution
 // (D-DOCUMENT-AXIS §8 Q4).  Binding `shape:` wins; aggregate header
-// `shape(…)` is the default; absent everywhere ⇒ relational (false).
+// `shape: …` is the default; absent everywhere ⇒ relational (false).
 // ---------------------------------------------------------------------------
 
 describe("isDocumentShaped", () => {

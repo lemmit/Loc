@@ -181,7 +181,7 @@ export interface JavaEntityOptions {
      *  unidirectional one-to-one with the FK on the part table) and its
      *  `_create` factory takes the parent entity instead of the parent id. */
     oneToOneParentOf?: string;
-    /** `shape(embedded)`: containments + reference collections fold
+    /** `shape: embedded`: containments + reference collections fold
      *  into jsonb columns (no part / join tables); the Hibernate JSON
      *  FormatMapper handles the package-private-field part classes. */
     embedded?: boolean;
@@ -416,7 +416,7 @@ export function renderJavaEntity(
     }
   }
   for (const c of entity.contains) {
-    // `shape(embedded)`: the containment folds into a jsonb column —
+    // `shape: embedded`: the containment folds into a jsonb column —
     // the parts serialize inline (no part table, no relation).
     if (persistence?.embedded) {
       fieldLines.push(

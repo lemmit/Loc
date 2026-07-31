@@ -128,7 +128,7 @@ export function aggHasFunctions(agg: AggregateIR): boolean {
  *  context-facade module body.  Returns `[]` for a function-less aggregate, so
  *  such an aggregate emits byte-identical output.
  *
- *  `doc` (Route A slice 2): a `shape(document)` aggregate rehydrates its blob into
+ *  `doc` (Route A slice 2): a `shape: document` aggregate rehydrates its blob into
  *  a `%<Agg>.Data{}` embedded struct, so its functions take THAT struct (guarded
  *  `%<Agg>.Data{} = record`) and read fields off it (`record.<field>`) in struct
  *  mode — same relational renderer, no `docMap` fork.  The op bodies call them as

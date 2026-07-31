@@ -412,7 +412,7 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
 }
 
 // Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
-// `persistedAs(eventLog)` makes the event stream the source of truth, so
+// `persistedAs: eventLog` makes the event stream the source of truth, so
 // command bodies decide and `emit`, and state transitions live in
 // `apply(...)` folds.  This is the AST-level mirror of the IR validator
 // `validateEventSourcedDiscipline`; keeping both means the contract is

@@ -71,7 +71,7 @@ interface EntityShape {
    *  event-sourced.  Drive the `_apply` fold dispatch + `_fromEvents`
    *  rehydrator (appliers A2). */
   appliers?: ApplyIR[];
-  /** True when the aggregate is `persistedAs(eventLog)` — gates the
+  /** True when the aggregate is `persistedAs: eventLog` — gates the
    *  fold/rehydrate emission and flips `emit` to push-and-apply. */
   eventSourced?: boolean;
   /** Explicit `create` lifecycle actions (root only).  On an event-sourced
@@ -755,7 +755,7 @@ function renderEntity(
   // applier (body rendered at the natural method-body depth), a `_apply`
   // dispatcher that switches on `ev.type`, and a `_fromEvents` rehydrator
   // that folds a stream from an empty shell.  Emitted root-only and only
-  // for `persistedAs(eventLog)` aggregates; the repository calls
+  // for `persistedAs: eventLog` aggregates; the repository calls
   // `_fromEvents` on load, and the push-and-apply `emit` calls `_apply`.
   const appliersBlock =
     e.isRoot && e.eventSourced && (e.appliers?.length ?? 0) > 0

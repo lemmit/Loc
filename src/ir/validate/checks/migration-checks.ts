@@ -14,7 +14,7 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 //     SQL-renderable subset (`sqlRenderableExpr`, ir/util).
 //   - `loom.backfill-target-unsupported`  — the target field has no single
 //     scalar column: value-object / collection / entity fields, and
-//     `shape(document)` / `persistedAs(eventLog)` aggregates (no row columns
+//     `shape: document` / `persistedAs: eventLog` aggregates (no row columns
 //     to backfill — use a raw `sql` step over the document payload instead).
 //   - `loom.backfill-type-mismatch`       — the expression's inferred type
 //     doesn't fit the field's declared type.  Best-effort: an unknown side

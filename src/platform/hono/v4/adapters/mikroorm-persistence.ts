@@ -17,8 +17,8 @@
 // inheritance (TPH `sharedTable` shared-Row + TPC `ownTable` per-concrete
 // tables), contained entity parts (relational child tables) INCLUDING nested
 // part-in-part (recursive child tables) and collection-bearing parts (a jsonb
-// column per array-typed part field), `shape(embedded)` (root columns + jsonb
-// containments), `shape(document)` (the whole tree as one `(id, data, version)`
+// column per array-typed part field), `shape: embedded` (root columns + jsonb
+// containments), `shape: document` (the whole tree as one `(id, data, version)`
 // jsonb blob), provenanced fields (co-located lineage column + EntityManager
 // history flush), and per-op / lifecycle `audited` writes.  The only remaining
 // containment reject is genuinely-unmappable: parts on an event-sourced /
