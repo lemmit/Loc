@@ -315,6 +315,23 @@ system Acme {
           let s = Shipment.create({ orderCode: note, status: "Looked" })
         }
       }
+      // A WRITE through the typed client: the row is created in the CALLEE's
+      // database, which the caller has no other way to reach.
+      workflow placeOrder {
+        create(code: string) {
+          let created = orders.createOrder({ code: code, status: "Draft" })
+          let s = Shipment.create({ orderCode: code, status: "Placed" })
+        }
+      }
+      // A COLLECTION read through the typed client — the callee's paged
+      // envelope, whose total only the callee can know.
+      workflow census {
+        create(label: string) {
+          let listing = orders.allOrder()
+          let note = match { listing.total > 0 => "SEEN", else => "EMPTY" }
+          let s = Shipment.create({ orderCode: label, status: note })
+        }
+      }
     }
   }
   api OrdersApi from Core
@@ -564,6 +581,66 @@ describe.skipIf(!ENABLED)(`typed in-system api call (api-call-e2e, caller=${CALL
       rows.some((s) => s.orderCode === "MISSING" && s.status === "Looked"),
       `no shipment carried the absence arm:\n${JSON.stringify(rows)}\n${tail("shipping_svc")}`,
     ).toBe(true);
+  }, 120_000);
+
+  it("WRITES through the typed client into the callee's own database", async () => {
+    // The reverse direction of the round-trip test.  Everything else here reads
+    // from the callee; this creates a row THERE, through the generated client's
+    // POST method, and verifies it by asking the callee — whose database the
+    // caller cannot reach (each deployable gets its own, created separately in
+    // beforeAll for exactly this reason).
+    //
+    // Without this the write half of every client (`createOrder` /
+    // `updateOrder` / `destroyOrder`) was emitted on all five backends and
+    // never once exercised: "the typed call saved a row in the other service"
+    // was true by construction and unobserved.
+    const code = `NEW-${Date.now()}`;
+    const ran = await fetch(`http://localhost:${SHIPPING_PORT}/api/workflows/place_order`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    expect(ran.ok, `placeOrder failed:\n${tail("shipping_svc")}`).toBe(true);
+
+    // Ask the CALLEE.  A row here can only exist because the caller's typed
+    // POST created it — the caller never touches this database.
+    const found = await fetch(
+      `http://localhost:${ORDERS_PORT}/api/orders/by_code?code=${encodeURIComponent(code)}`,
+    );
+    expect(found.status, `callee has no order ${code}:\n${tail("orders_svc")}`).toBe(200);
+    const order = (await found.json()) as { code: string; status: string };
+    expect(order.code).toBe(code);
+    expect(order.status).toBe("Draft");
+
+    // …and the caller kept the callee's echoed value, so the response was
+    // parsed rather than discarded.
+    const rows = await shipments();
+    expect(
+      rows.some((s) => s.orderCode === code && s.status === "Placed"),
+      `caller did not record the created order:\n${JSON.stringify(rows)}`,
+    ).toBe(true);
+  }, 120_000);
+
+  it("reads the callee's paged envelope through the typed client", async () => {
+    // A collection call must return the callee's envelope, not nothing.  The
+    // caller writes `listing.total` into its own row, so a client that issued
+    // the request and discarded the body cannot produce a numeric status here.
+    const label = `CENSUS-${Date.now()}`;
+    const ran = await fetch(`http://localhost:${SHIPPING_PORT}/api/workflows/census`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label }),
+    });
+    expect(ran.ok, `census failed:\n${tail("shipping_svc")}`).toBe(true);
+
+    const rows = await shipments();
+    const row = rows.find((s) => s.orderCode === label);
+    expect(row, `no census row:\n${JSON.stringify(rows)}`).toBeDefined();
+    // "SEEN" can only be reached by reading `total` off the parsed envelope
+    // and finding it > 0 — the earlier tests created orders, so the callee
+    // holds some.  A client that issued the request and discarded the body
+    // yields "EMPTY" (or fails to compile), so this distinguishes them.
+    expect(row?.status).toBe("SEEN");
   }, 120_000);
 
   it("surfaces a callee 404 as a failed call rather than a silent success", async () => {

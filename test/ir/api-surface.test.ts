@@ -82,15 +82,28 @@ describe("api-surface lift", () => {
     const routesFile = [...files.entries()].find(([p]) => p.endsWith("order.routes.ts"));
     expect(routesFile, "hono emitted an order.routes.ts").toBeDefined();
 
-    // Hono's paths are router-RELATIVE (`/{id}`); the lift's are absolute
-    // (`/api/orders/{id}`).  Compare on the relative form by stripping the
-    // aggregate mount prefix the derivation adds.
-    const rel = (p: string): string => p.replace("/api/orders", "") || "/";
+    // Compare ABSOLUTE paths — what a client actually puts on the wire.
+    //
+    // This used to normalize the lift's absolute path down to Hono's
+    // router-relative one with `p.replace("/api/orders", "") || "/"`, and that
+    // `|| "/"` made the test blind to the one difference that matters at
+    // runtime: `/api/orders/` and `/api/orders` BOTH collapsed to `"/"`, so a
+    // derivation emitting the trailing-slash form compared equal to a callee
+    // serving the bare form.  It does not answer equal on the wire — Hono 404s
+    // the slashed request — and `createOrder`/`allOrder` were broken on all
+    // five backends behind that green assertion.
+    //
+    // So the composition runs the other way now: Hono's relative path is
+    // resolved to the absolute one it actually serves (a `"/"` sub-route under
+    // `app.route("/api/orders", …)` mounts at `/api/orders`, NOT
+    // `/api/orders/`), and the lift's absolute path is compared verbatim.
+    const abs = (relPath: string): string =>
+      relPath === "/" ? "/api/orders" : `/api/orders${relPath}`;
 
     const emitted = scrapeHonoRoutes(routesFile![1])
-      .map((r) => `${r.method} ${r.path}`)
+      .map((r) => `${r.method} ${abs(r.path)}`)
       .sort();
-    const lifted = derived.map((o) => `${o.method} ${rel(o.path)}`).sort();
+    const lifted = derived.map((o) => `${o.method} ${o.path}`).sort();
 
     expect(lifted).toEqual(emitted);
   });

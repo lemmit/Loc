@@ -23,6 +23,7 @@ import { type ApiResourceBinding, servedContextsFor } from "../../ir/util/api-re
 import {
   type ApiOperationIR,
   absenceUnionSuccess,
+  collectionSuccess,
   deriveContextOperations,
 } from "../../ir/util/api-surface.js";
 import { lines } from "../../util/code-builder.js";
@@ -133,12 +134,41 @@ export function emitPythonApiClients(
         // absence on 404, with no `type` discriminator (payloads.md §Union
         // finds).  Only the absent status differs: `None`, not a raise.
         const absentAgg = absenceUnionSuccess(op.responseType);
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
+        // A COLLECTION response validates the same per-row model, wrapped: the
+        // auto-`findAll` answers with the paged envelope, a declared `T[]` find
+        // with a bare array.  Without this arm both returned `None` — the call
+        // was made and every row discarded.
+        const coll = collectionSuccess(op.responseType);
+        const respAgg =
+          op.responseType?.kind === "entity" ? op.responseType.name : (absentAgg ?? coll?.agg);
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const modelName = agg ? `${agg.name}Response` : undefined;
         if (agg && modelName && !emittedModels.has(modelName)) {
           emittedModels.add(modelName);
           body.push(...responseModel(agg, modelName), "", "");
+        }
+        // The paged envelope mirrors the callee's `<Agg>Paged` field for field.
+        // The SHIPPED create route answers `201 {id}` — not the whole entity
+        // its declared responseType names.  Validating the entity model
+        // against that body fails on every other field, at RUNTIME.
+        const createName = agg && op.kind === "create" ? `${agg.name}Created` : undefined;
+        if (createName && !emittedModels.has(createName)) {
+          emittedModels.add(createName);
+          body.push(`class ${createName}(BaseModel):`, "    id: str", "", "");
+        }
+        const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
+        if (pagedName && modelName && !emittedModels.has(pagedName)) {
+          emittedModels.add(pagedName);
+          body.push(
+            `class ${pagedName}(BaseModel):`,
+            `    items: list[${modelName}]`,
+            "    page: int",
+            "    pageSize: int",
+            "    total: int",
+            "    totalPages: int",
+            "",
+            "",
+          );
         }
 
         const bodyParams = op.params.filter((p) => p.location === "body");
@@ -147,7 +177,17 @@ export function emitPythonApiClients(
         // JSON object.  Sending only the first silently drops the rest.
         const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
         const params = op.params.map((p) => `${snake(p.name)}: ${pyParamType(p.type)}`);
-        const ret = modelName ? (absentAgg ? `${modelName} | None` : modelName) : "None";
+        const ret = createName
+          ? createName
+          : pagedName
+            ? pagedName
+            : modelName
+              ? absentAgg
+                ? `${modelName} | None`
+                : coll
+                  ? `list[${modelName}]`
+                  : modelName
+              : "None";
 
         body.push(
           `async def ${base}_${snake(op.id)}(${params.join(", ")}) -> ${ret}:`,
@@ -179,7 +219,16 @@ export function emitPythonApiClients(
           `        if res.status_code >= 400:`,
           `            raise RemoteCallError(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.status_code)`,
         );
-        if (modelName) {
+        if (createName) {
+          body.push(`        return ${createName}.model_validate(res.json())`);
+        } else if (pagedName) {
+          body.push(`        return ${pagedName}.model_validate(res.json())`);
+        } else if (modelName && coll) {
+          // A bare-array find has no envelope to name, so each row validates
+          // individually — mypy --strict needs the comprehension typed, which
+          // the declared `list[...]` return already provides.
+          body.push(`        return [${modelName}.model_validate(row) for row in res.json()]`);
+        } else if (modelName) {
           // Validate at the boundary — the pydantic twin of zod's `.parse`.
           body.push(`        return ${modelName}.model_validate(res.json())`);
         } else {

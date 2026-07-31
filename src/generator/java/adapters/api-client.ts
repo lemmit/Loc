@@ -35,6 +35,7 @@ import {
 import {
   type ApiOperationIR,
   absenceUnionSuccess,
+  collectionSuccess,
   deriveContextOperations,
 } from "../../../ir/util/api-surface.js";
 import { escapeJavaIdent, lowerFirst, upperFirst } from "../../../util/naming.js";
@@ -138,13 +139,58 @@ export function emitJavaApiClients(
         // only the absent status differs (null, not a throw).  See
         // payloads.md §Union finds — there is no `type` discriminator.
         const absentAgg = absenceUnionSuccess(op.responseType);
-        const respAgg = op.responseType?.kind === "entity" ? op.responseType.name : absentAgg;
+        // A COLLECTION response reads the same per-row record, wrapped: the
+        // auto-`findAll` answers with the paged envelope, a declared `T[]` find
+        // with a bare array.  Without this arm both returned `void` — the call
+        // was made and every row discarded.
+        const coll = collectionSuccess(op.responseType);
+        const respAgg =
+          op.responseType?.kind === "entity" ? op.responseType.name : (absentAgg ?? coll?.agg);
         const agg = respAgg ? aggregateNamed(sys, respAgg) : undefined;
         const recordName = agg ? `${agg.name}Response` : undefined;
         if (agg && recordName && !emittedRecords.has(recordName)) {
           emittedRecords.add(recordName);
           records.push(...responseRecord(agg, recordName));
         }
+        // The paged envelope mirrors the callee's `<Agg>Paged` field for field.
+        // Components stay BOXED for the same reason the row record's are: a
+        // missing field binds null, and null into an `int` throws at parse time
+        // pointing at the record rather than at the callee.
+        // The SHIPPED create route answers `201 {id}` — not the whole entity
+        // its declared responseType names.  Reading the entity record against
+        // that body leaves every other component null, at RUNTIME.
+        const createName = agg && op.kind === "create" ? `${agg.name}Created` : undefined;
+        if (createName && !emittedRecords.has(createName)) {
+          emittedRecords.add(createName);
+          records.push(`    public record ${createName}(String id) { }`, "");
+        }
+        const pagedName = agg && coll?.carrier === "paged" ? `${agg.name}Paged` : undefined;
+        if (pagedName && recordName && !emittedRecords.has(pagedName)) {
+          emittedRecords.add(pagedName);
+          records.push(
+            `    public record ${pagedName}(java.util.List<${recordName}> items, Integer page, Integer pageSize, Integer total, Integer totalPages) { }`,
+            "",
+          );
+        }
+        // Jackson needs a TypeReference for a generic container — `List<T>.class`
+        // does not exist, and `List.class` erases to `List<LinkedHashMap>`,
+        // which fails on the first field read rather than at the boundary.
+        const readExpr = createName
+          ? `MAPPER.readValue(res.body(), ${createName}.class)`
+          : pagedName
+            ? `MAPPER.readValue(res.body(), ${pagedName}.class)`
+            : recordName && coll
+              ? `MAPPER.readValue(res.body(), new tools.jackson.core.type.TypeReference<java.util.List<${recordName}>>() { })`
+              : recordName
+                ? `MAPPER.readValue(res.body(), ${recordName}.class)`
+                : undefined;
+        const respType = createName
+          ? createName
+          : pagedName
+            ? pagedName
+            : recordName && coll
+              ? `java.util.List<${recordName}>`
+              : recordName;
 
         const bodyParams = op.params.filter((p) => p.location === "body");
         // Two body shapes, both derived (api-surface.ts): `create` carries ONE
@@ -154,7 +200,7 @@ export function emitJavaApiClients(
         const wholeShapeBody = bodyParams.length === 1 && bodyParams[0]?.type.kind === "entity";
         const query = op.params.filter((p) => p.location === "query");
         const params = op.params.map((p) => `${javaParamType(p.type)} ${arg(p.name)}`);
-        const ret = recordName ?? "void";
+        const ret = respType ?? "void";
 
         methods.push(
           `    public static ${ret} ${res}${upperFirst(op.id)}(${params.join(", ")}) {`,
@@ -209,10 +255,10 @@ export function emitJavaApiClients(
           `            throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.statusCode(), null);`,
           "        }",
         );
-        if (recordName) {
+        if (readExpr) {
           methods.push(
             "        try {",
-            `            return MAPPER.readValue(res.body(), ${recordName}.class);`,
+            `            return ${readExpr};`,
             "        } catch (Exception e) {",
             `            throw new RemoteCallException(${JSON.stringify(b.resource.name)}, ${JSON.stringify(op.id)}, res.statusCode(), e);`,
             "        }",
