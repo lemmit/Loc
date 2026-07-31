@@ -96,7 +96,10 @@ export const svelteTarget: WalkerTarget = {
   /** Sort the rows via the shared `sortRows` helper (`$lib/table-sort`) —
    *  Svelte's strict `svelte-check` can't index a typed row by a dynamic
    *  string key inline, so the cast lives in the helper module. */
-  renderSortedRows(rowsExpr, sortKey, sortDir) {
+  renderSortedRows({ rowsExpr, sortKey, sortDir }) {
+    // `columns` is unused here: JS indexes the row by the runtime sort key
+    // directly, so the sortable-column list a statically-typed target needs is
+    // information this target already has at runtime.
     return `sortRows(${rowsExpr}, ${sortKey.name}, ${sortDir.name})`;
   },
 

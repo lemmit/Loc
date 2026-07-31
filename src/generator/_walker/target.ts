@@ -100,6 +100,29 @@ export interface SortableHeaderSpec {
   sortDir: StateRef;
 }
 
+/** What a target needs to sort a `Table`'s rows client-side (M-T1.1 — the
+ *  `renderSortedRows` seam).
+ *
+ *  `columns` is the load-bearing field for a STATICALLY-TYPED target.  The sort
+ *  key is a RUNTIME string, so JS just indexes (`row[sortKey]`) — but F# and
+ *  Dart records cannot be indexed by a runtime string, so those targets have to
+ *  emit a `match` over the key with one arm per sortable column.  That needs
+ *  the column list, which the original positional signature did not carry: the
+ *  seam was unimplementable off the JSX family however the rest of the Table
+ *  behaved. */
+export interface SortedRowsSpec {
+  /** The rows expression to sort, AFTER any filter. */
+  rowsExpr: string;
+  /** Page-state field holding the active sort column. */
+  sortKey: StateRef;
+  /** Page-state field holding the active direction (`"asc"` / `"desc"`). */
+  sortDir: StateRef;
+  /** The `field:` of every `sortable:` column, in declaration order — the exact
+   *  set of values `sortKey` can hold.  A target that indexes at runtime (all
+   *  four JSX targets) ignores it. */
+  columns: readonly string[];
+}
+
 /** The data a target needs to render a pager control below a paged `Table`
  *  (M-T1.1 / M-T2.6 — the `renderPager` seam). */
 export interface PagerSpec {
@@ -109,6 +132,42 @@ export interface PagerSpec {
    *  "Page N of M" label and disables "Next" on the last page (`page >= M`).
    *  Client mode passes `Math.max(1, Math.ceil(rows.length / pageSize))`;
    *  server mode passes the envelope's `totalPages`.  Always ≥ 1. */
+  totalPagesExpr: string;
+}
+
+/** What a target needs to build the CLIENT-side page window under a paged
+ *  `Table` (M-T1.1 — the `renderClientPaging` seam).
+ *
+ *  Windowing used to be built generically in `primitives/table.ts` with literal
+ *  JavaScript (`.slice(…)`, `Math.max`, `Math.ceil`, `.length`).  That is fine
+ *  for the four JSX targets — which share JS — but it is not source the F# and
+ *  Dart targets can host, so client paging was structurally unreachable for
+ *  them no matter what `renderPager` did.  The arithmetic is now a seam with
+ *  the JS form as its default, so the JSX targets stay byte-identical and a
+ *  non-JS target can express the same window in its own language. */
+export interface ClientPagingSpec {
+  /** The rows expression AFTER any filter/sort, BEFORE windowing.  Its element
+   *  count is the pager's pre-slice total (neither transform changes count). */
+  rowsExpr: string;
+  /** The raw bound rows, before filter/sort.  May be nullish, so the default
+   *  JS form guards it; used only when `rowsTransformed` is false. */
+  boundRowsExpr: string;
+  /** True when filter or sort already ran, so `rowsExpr` is a non-null array
+   *  and needs no nullish guard — a redundant guard on a never-nullish operand
+   *  is a strict-Angular error (TS2869). */
+  rowsTransformed: boolean;
+  /** Page-state field holding the current 1-based page number. */
+  page: StateRef;
+  /** Rows per page (the `Table`'s `pageSize:`, default 10). */
+  pageSize: number;
+  /** The page-state read, already rendered through `renderStateRead`. */
+  pageRead: string;
+}
+
+/** The two expressions client paging produces: the windowed rows the table
+ *  renders, and the total page COUNT the pager labels and clamps against. */
+export interface ClientPagingResult {
+  rowsExpr: string;
   totalPagesExpr: string;
 }
 
@@ -856,7 +915,7 @@ export interface WalkerTarget {
   /** Wrap a `Table`'s already-rendered `rows` expression in a client-side
    *  sort by the active `sortKey` / `sortDir` state fields.  React returns a
    *  `[...(rows)].sort((a, b) => …)` chain; omitted → rows render unsorted. */
-  renderSortedRows?(rowsExpr: string, sortKey: StateRef, sortDir: StateRef): string;
+  renderSortedRows?(spec: SortedRowsSpec): string;
 
   /** Render the client-side pager control emitted below a paged `Table` — a
    *  "Prev" / "Next" pair around a "Page N" label, wired to the `page` state
@@ -865,6 +924,21 @@ export interface WalkerTarget {
    *  seam; the `.slice(...)` windowing itself is built generically from
    *  `renderStateRead`.  Omitted → the table renders unpaged (all rows). */
   renderPager?(spec: PagerSpec): string;
+
+  /** Build the CLIENT-side page window: the sliced rows expression + the total
+   *  page count.  Omitted → the shared JS default (`.slice(…)` +
+   *  `Math.max(1, Math.ceil(len / size))`), which is what every JSX target
+   *  uses.  A non-JS target (Feliz's F#, Flutter's Dart) implements this to
+   *  express the same window in its own language — without it, `renderPager`
+   *  alone cannot make client paging work there, because the arithmetic around
+   *  it would still be JavaScript. */
+  renderClientPaging?(spec: ClientPagingSpec): ClientPagingResult;
+
+  /** Clamp the SERVER-supplied page count to at least 1.  Omitted → the JS
+   *  default `Math.max(1, <expr>)`.  Split from `renderClientPaging` because
+   *  server mode does no windowing at all — the envelope already carries one
+   *  page — so a target can support one mode without the other. */
+  renderServerTotalPages?(totalPagesExpr: string): string;
 
   /** Render the search `<input>` emitted ABOVE a filterable `Table` — bound
    *  to the `filter:` page-state string field, it drives a case-insensitive

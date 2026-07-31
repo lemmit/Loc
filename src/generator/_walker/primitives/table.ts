@@ -17,7 +17,7 @@ import {
   slugify,
   stringNamed,
 } from "../shared/args.js";
-import type { StateRef } from "../target.js";
+import type { ClientPagingResult, ClientPagingSpec, StateRef } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -108,7 +108,15 @@ export function emitTable(
       // targets that call the helper (Vue/Svelte/Angular — their strict
       // templates reject the inline `as`-cast comparator) read it to import.
       ctx.usesTableSort = true;
-      rowsExpr = ctx.target.renderSortedRows(rowsExpr, sortKeyRef, sortDirRef);
+      rowsExpr = ctx.target.renderSortedRows({
+        rowsExpr,
+        sortKey: sortKeyRef,
+        sortDir: sortDirRef,
+        // Pre-scanned rather than collected during the column walk below,
+        // which runs AFTER this: a statically-typed target needs the whole set
+        // up front to emit its `match` over the sort key.
+        columns: sortableColumnFields(call),
+      });
     }
   }
 
@@ -128,31 +136,23 @@ export function emitTable(
     ctx.usesState = true;
     let totalPagesExpr: string;
     if (serverPaged) {
-      // Server owns the page window; the envelope carries the page count.
+      // Server owns the page window; the envelope carries the page count.  The
+      // clamp is a seam so a non-JS target can spell it in its own language.
       const tp = totalPagesArg ? emitExpr(totalPagesArg, ctx) : "1";
-      totalPagesExpr = `Math.max(1, ${tp})`;
+      totalPagesExpr = (ctx.target.renderServerTotalPages ?? jsServerTotalPages)(tp);
     } else {
-      const pageRead = ctx.target.renderStateRead(pageRef, "template");
-      // The (post-sort, pre-slice) rows expression — its `.length` is the pager's
-      // pre-slice total (sort preserves count).  When sort is active this is a
-      // sorted array guaranteed non-null (`sortRows(…)` returns `T[]`; the React
-      // inline `[...].sort` too), so no `?? []` guard is added — a redundant
-      // guard on a never-nullish operand is a strict-Angular error (TS2869).
-      const preSliceExpr = rowsExpr;
-      rowsExpr = `(${preSliceExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
-      // Filter and sort both leave `rowsExpr` a non-null array (`.filter(...)` /
-      // `sortRows(...)` / `[...].sort(...)`), so when either is active the total
-      // reads off the transformed (post-filter) expression with no `?? []`
-      // guard — a redundant guard on a never-nullish operand is a strict-Angular
-      // error (TS2869).  Untransformed rows keep the guard.
-      const rowsTransformed = sortActive || filterActive;
-      const totalBase = rowsTransformed ? preSliceExpr : boundRowsExpr;
-      const lengthExpr = /\?\?\s*\[\]\s*$/.test(totalBase.trim())
-        ? `(${totalBase}).length`
-        : rowsTransformed
-          ? `(${totalBase}).length`
-          : `((${totalBase}) ?? []).length`;
-      totalPagesExpr = `Math.max(1, Math.ceil(${lengthExpr} / ${pageSize}))`;
+      const paged = (ctx.target.renderClientPaging ?? jsClientPaging)({
+        rowsExpr,
+        boundRowsExpr,
+        // Filter and sort both leave `rowsExpr` a non-null array, so a target
+        // can skip its nullish guard when either ran.
+        rowsTransformed: sortActive || filterActive,
+        page: pageRef,
+        pageSize,
+        pageRead: ctx.target.renderStateRead(pageRef, "template"),
+      });
+      rowsExpr = paged.rowsExpr;
+      totalPagesExpr = paged.totalPagesExpr;
     }
     pagerMarkup = ctx.target.renderPager!({ page: pageRef, totalPagesExpr });
   }
@@ -346,6 +346,19 @@ function emitColumn(
   };
 }
 
+/** The `field:` of every `sortable:` Column under a `Table`, in declaration
+ *  order — the exact set of values its `sortKey` state can hold.  Resolved the
+ *  same way `emitColumn` resolves a single column's sort field (explicit
+ *  `field:`, else the accessor's member), so the two cannot disagree about
+ *  which columns are sortable. */
+function sortableColumnFields(call: Extract<ExprIR, { kind: "call" }>): string[] {
+  return call.args
+    .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
+    .filter((c) => boolNamed(c, "sortable") === true)
+    .map((c) => stringNamed(c, "field") ?? sortFieldFromAccessor(c.args[1]))
+    .filter((f): f is string => f !== undefined);
+}
+
 /** Infer a column's sort field from a simple accessor lambda `o => o.<field>`.
  *  Returns undefined for anything more complex (a formatting call, a nested
  *  chain) — those columns need an explicit `field:` to be sortable. */
@@ -354,4 +367,36 @@ function sortFieldFromAccessor(accessorArg: ExprIR | undefined): string | undefi
   const body = accessorArg.body;
   if (body?.kind === "member" && body.receiver.kind === "ref") return body.member;
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// The JavaScript client-paging default.
+//
+// Every JSX-family target (react / vue / svelte / angular) shares JS, so they
+// omit the `renderClientPaging` / `renderServerTotalPages` seams and land here
+// — byte-identical to when this arithmetic was inlined above.  A non-JS target
+// (Feliz's F#, Flutter's Dart) supplies its own; without the seam, `.slice(…)`
+// and `Math.ceil(…)` were emitted into F#/Dart source, which is why client
+// paging was unreachable there however `renderPager` behaved.
+// ---------------------------------------------------------------------------
+
+function jsServerTotalPages(totalPagesExpr: string): string {
+  return `Math.max(1, ${totalPagesExpr})`;
+}
+
+function jsClientPaging(spec: ClientPagingSpec): ClientPagingResult {
+  const { rowsExpr, boundRowsExpr, rowsTransformed, pageSize, pageRead } = spec;
+  const sliced = `(${rowsExpr}).slice((${pageRead} - 1) * ${pageSize}, ${pageRead} * ${pageSize})`;
+  // A redundant `?? []` on a never-nullish operand is a strict-Angular error
+  // (TS2869), so the guard is added only for untransformed bound rows that
+  // don't already carry one.
+  const totalBase = rowsTransformed ? rowsExpr : boundRowsExpr;
+  const lengthExpr =
+    rowsTransformed || /\?\?\s*\[\]\s*$/.test(totalBase.trim())
+      ? `(${totalBase}).length`
+      : `((${totalBase}) ?? []).length`;
+  return {
+    rowsExpr: sliced,
+    totalPagesExpr: `Math.max(1, Math.ceil(${lengthExpr} / ${pageSize}))`,
+  };
 }

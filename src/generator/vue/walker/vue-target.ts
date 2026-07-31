@@ -137,7 +137,10 @@ export const vueTarget: WalkerTarget = {
    *  can't carry the inline `as`-cast comparator React uses, so the typed
    *  dynamic-key indexing lives in `src/lib/table-sort.ts` and the `v-for`
    *  expression just calls it.  Refs auto-unwrap in the template. */
-  renderSortedRows(rowsExpr, sortKey, sortDir) {
+  renderSortedRows({ rowsExpr, sortKey, sortDir }) {
+    // `columns` is unused here: JS indexes the row by the runtime sort key
+    // directly, so the sortable-column list a statically-typed target needs is
+    // information this target already has at runtime.
     return `sortRows(${rowsExpr}, ${sortKey.name}, ${sortDir.name})`;
   },
 
