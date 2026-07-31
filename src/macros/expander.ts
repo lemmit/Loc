@@ -591,6 +591,7 @@ function expandCapability(
         if (!isIntProperty(declared)) {
           recordDiagnostic(doc, {
             severity: "error",
+            code: "loom.version-field-collision",
             message:
               `field 'version' on aggregate '${agg.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
               `Rename this field (e.g. '${lowerFirstSafe(agg.name)}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
