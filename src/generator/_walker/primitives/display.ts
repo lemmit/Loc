@@ -75,12 +75,19 @@ export function emitDivider(
   depth: number,
 ): string {
   void depth;
-  // Optional `label:` named arg — packs that support a labelled
-  // divider can use the slot; packs that don't drop it.
-  const label = stringNamed(call, "label");
+  // Optional `label:` named arg — packs that support a labelled divider can use
+  // the slot; packs that don't drop it.  `hasLabel` gates the labelled branch
+  // exactly as before (true only for a literal `label:` — a dynamic/absent label
+  // is byte-identical to the pre-i18n path).  The label is user-visible text: a
+  // plain literal translates through `t()` under i18n (keyed to the `dividerLabel`
+  // catalog slot), else byte-identical.  `label` is the text-children form
+  // (mui/vuetify/shadcn*/flowbite render the label as element text); `labelAttr`
+  // is the complete bound-attribute fragment (mantine's `<Divider label=…>`).
+  const hasLabel = stringNamed(call, "label") !== undefined;
   return renderPrimitive(ctx, "primitive-divider", {
-    label,
-    hasLabel: label !== undefined,
+    label: localizedNamedText(call, ctx, "dividerLabel", "label", '""'),
+    labelAttr: localizedNamedAttr(call, ctx, "dividerLabel", "label", "label"),
+    hasLabel,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

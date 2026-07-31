@@ -172,4 +172,37 @@ describe("Svelte i18n runtime", () => {
     ) as Record<string, string>;
     expect(Object.values(catalog)).toContain("Heads up");
   });
+
+  it("translates the Divider label named slot (dividerLabel) at the text position", async () => {
+    // The shadcn-svelte pack renders the Divider label in TEXT-children position
+    // (a `<span>…</span>`) — the `label:` named slot emits a `{t(key, def)}`
+    // interpolation under i18n (M-T1.11), keyed to the `dividerLabel` slot.
+    const files = await generateSystemFiles(SYSTEM(`Divider { label: "Section break" }`));
+    const home = await homeOf(files);
+    expect(home).toMatch(/\{t\("page\.Home\.dividerLabel\.\w+", "Section break"\)\}/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Section break");
+  });
+
+  it("translates the Modal title named slot (modalTitle) at the text position", async () => {
+    // The shadcn-svelte pack renders the controlled-Modal title in TEXT-children
+    // position (an `<h3>…</h3>`) — the `title:` named slot emits a `{t(key, def)}`
+    // interpolation under i18n (M-T1.11), keyed to the `modalTitle` slot.  Needs a
+    // page `state` bool for the `open:` binding.
+    const src = SYSTEM(
+      `Modal { Text { "Confirm archive?" }, open: archiveOpen, title: "Archive" }`,
+    ).replace(
+      'page Home { route: "/"',
+      'page Home { route: "/" state { archiveOpen: bool = false }',
+    );
+    const files = await generateSystemFiles(src);
+    const home = await homeOf(files);
+    expect(home).toMatch(/\{t\("page\.Home\.modalTitle\.\w+", "Archive"\)\}/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Archive");
+  });
 });

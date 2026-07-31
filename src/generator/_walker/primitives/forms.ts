@@ -18,6 +18,7 @@ import {
 } from "../../_frontend/form-helpers.js";
 import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
+import { localizedNamedAttr, localizedNamedText } from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
   addImport,
@@ -793,7 +794,9 @@ function emitControlledModal(
   ctx.usesState = true;
   const stateName = openArg.name;
   const setter = `set${stateName[0]!.toUpperCase()}${stateName.slice(1)}`;
-  const title = stringNamed(call, "title");
+  // `hasTitle` gates the title block exactly as before — true only for a literal
+  // `title:` (a dynamic/absent title is byte-identical to the pre-i18n path).
+  const hasTitle = stringNamed(call, "title") !== undefined;
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   // Children = the modal body (every positional except the op-form, which this
@@ -804,8 +807,13 @@ function emitControlledModal(
   return renderPrimitive(ctx, "primitive-modal-controlled", {
     opened: stateName,
     setter,
-    hasTitle: title !== undefined,
-    title,
+    hasTitle,
+    // The `title` named slot is user-visible text: a plain literal translates
+    // through `t()` under i18n (keyed to the `modalTitle` catalog slot), else
+    // byte-identical.  `title` is the text-children form (shadcn/chakra/mui/…),
+    // `titleAttr` the complete bound-attribute fragment (mantine/vuetify).
+    title: localizedNamedText(call, ctx, "modalTitle", "title", '""'),
+    titleAttr: localizedNamedAttr(call, ctx, "modalTitle", "title", "title"),
     childrenJsx,
     indent,
     closeIndent,
