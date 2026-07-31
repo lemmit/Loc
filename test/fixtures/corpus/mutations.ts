@@ -25,6 +25,7 @@
 import { AstUtils } from "langium";
 import {
   isAggregate,
+  isDerivedProp,
   isEntityPart,
   isProperty,
   isValueObject,
@@ -126,7 +127,50 @@ export function capabilityCollisionMutations(): Mutation[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// M2 — slot transposition
+// ---------------------------------------------------------------------------
+//
+// G1 was ONE cell of this family: a field `= default` whose expression reads
+// `this`.  A default is not a body — it is spliced where no instance exists,
+// most visibly into the create-request wire schema at MODULE scope — so
+// `avgPrice: decimal = this.total / this.count` emitted
+// `z.coerce.number().default(this.total / this.count)` (TS2683 plus a boot-time
+// TypeError) on Hono, a `NameError` on Python, and was silently DROPPED on .NET
+// and Java, quietly turning the field into required create input.
+//
+// The seam is "an expression moves into a slot where no instance exists", and a
+// fixture's own `derived` members are exactly the supply of instance-dependent
+// expressions.  Transposing one into a default slot is mechanical, derived from
+// the fixture rather than from the bug: `derived isDraft: bool = status ==
+// Status.Draft` becomes `isDraft: bool = status == Status.Draft`.
+//
+// Note this reaches a case G1's own regression test does not: the reference is
+// a BARE sibling (`status`), not a spelled-out `this.status`.  Both lower to a
+// this-prop ref, so `loom.field-default-not-constant` should own both — but only
+// if it tests the resolved refKind rather than the surface syntax.
+
+/** `derived <name>: <type> = <expr>` → `<name>: <type> = <expr>`, dropping the
+ *  keyword so the computed expression lands in a stored field's default slot. */
+const DERIVED_DECL = /^([ \t]*)derived[ \t]+(\w+)[ \t]*:/m;
+
+export function slotTranspositionMutations(): Mutation[] {
+  return [
+    {
+      id: "M2.derived-to-default",
+      seam: "an instance-dependent `derived` expression moves into a default slot, where no instance exists",
+      apply(src, ast) {
+        // AST-gated: only mutate a fixture that actually declares one, so the
+        // textual rewrite can't fire on a stray comment mentioning `derived`.
+        const hasDerived = [...AstUtils.streamAllContents(ast)].some(isDerivedProp);
+        if (!hasDerived || !DERIVED_DECL.test(src)) return null;
+        return src.replace(DERIVED_DECL, "$1$2:");
+      },
+    },
+  ];
+}
+
 /** The deterministic, per-PR mutation set for a fixture. */
 export function mutationsFor(): Mutation[] {
-  return [...capabilityCollisionMutations()];
+  return [...capabilityCollisionMutations(), ...slotTranspositionMutations()];
 }

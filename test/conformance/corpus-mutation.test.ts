@@ -27,28 +27,21 @@ import { mutationsFor } from "../fixtures/corpus/mutations.js";
 // site in a fixture returns null and is skipped — not every seam exists in
 // every feature.
 //
-// SCOPE.  The full product (32 fixtures x ~30 mutations x 5 backends) is ~5k
-// in-memory generations, too slow for the fast suite.  Per-PR runs the
-// representative slice below — fixtures chosen to cover the three declaration
-// kinds plus the capability-carrying features, where the M1 seam actually
-// bites.  The full cross-product runs nightly (LOOM_MUTATION_FULL=1).
+// SCOPE — the WHOLE corpus, deliberately.
+//
+// This was first written with a 6-fixture fast slice and the cross-product
+// behind LOOM_MUTATION_FULL=1, on the estimate that ~1k in-memory generations
+// would be too slow for the fast tier.  That estimate was made when a
+// `parseString` cost ~173ms; sharing the Langium service instance took it to
+// ~2ms, and the full product now runs in ~43s.  So the cap is gone: every
+// fixture x every mutation, per PR.
+//
+// Keeping the slice would have been a SILENT cap — a gate that reads as
+// "corpus covered" while quietly mutating 6 of 34 fixtures.  Cheap enough not
+// to need one is the better answer than documenting one.
 // ---------------------------------------------------------------------------
 
-/** Fixtures the fast tier mutates.  `core-domain` alone carries an aggregate, an
- *  entity part and a value object; the rest are the features that actually
- *  apply a capability, which is what M1 collides with. */
-const FAST_SLICE = [
-  "core-domain",
-  "field-defaults",
-  "stamps",
-  "tenancy-owned",
-  "tenancy-hierarchy",
-  "provenance",
-  "event-sourcing",
-];
-
-const FULL = process.env.LOOM_MUTATION_FULL === "1";
-const FEATURES = FULL ? CORPUS : CORPUS.filter((f) => FAST_SLICE.includes(f.id));
+const FEATURES = CORPUS;
 
 /** The `loom.*` codes carried by a parse's error diagnostics.  The code lives on
  *  `Diagnostic.code` (or `data.code` for the IR phase) — NOT in the rendered
