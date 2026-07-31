@@ -101,3 +101,40 @@ describe("money forms use RHF's three-generic useForm", () => {
     expect(files.get("web/src/api/invoice.ts")).not.toContain("CreateInvoiceFormState");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Follow-up: the create-form gate read the wrong field list.
+//
+// The form RENDERS only non-optional create-input fields, but the SCHEMA it
+// resolves against — `Create<Agg>Request` — is built from the UNFILTERED
+// `createInputFields(agg)`, which is also what `api-module.ts` gates
+// `dualTypeAliases` on.  Gating the generic on the rendered (filtered) list
+// made the two disagree for an aggregate whose only money field is OPTIONAL:
+// the alias was emitted, the schema carried the transform, and the form still
+// took the single generic — the same TS2322/TS2345, one case narrower.
+//
+// The rule: the generic describes what `zodResolver` PARSES, so it must be
+// keyed on the schema's field set, never on the subset the form draws.
+// ---------------------------------------------------------------------------
+
+describe("the create-form generic follows the SCHEMA's field set, not the rendered one", () => {
+  it("an OPTIONAL money field still forces the three-generic form", async () => {
+    const files = await build("money?");
+    const api = files.get("web/src/api/invoice.ts")!;
+    // The alias is emitted — the schema carries the transform either way…
+    expect(api).toContain(
+      "export type CreateInvoiceFormState = z.input<typeof CreateInvoiceRequest>;",
+    );
+    // …so the form must name it, even though the field is never rendered.
+    const page = files.get("web/src/pages/invoices/new.tsx")!;
+    expect(page).toContain("useForm<CreateInvoiceFormState, unknown, CreateInvoiceRequest>(");
+    expect(page).toContain("CreateInvoiceFormState");
+  });
+
+  it("a money-free aggregate is untouched — still the single generic", async () => {
+    const files = await build("decimal");
+    const page = files.get("web/src/pages/invoices/new.tsx")!;
+    expect(page).toContain("useForm<CreateInvoiceRequest>(");
+    expect(page).not.toContain("FormState");
+  });
+});
