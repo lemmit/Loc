@@ -44,18 +44,15 @@ describe("feliz pack format groundwork", () => {
       // form inputs inline via the walker seams, so none of the field-input-* /
       // form-* / op-dialog templates (nor the Vite/npm shell files) are pack
       // templates — the shell is emitted by `feliz/index.ts` directly.
-      // `DataGrid` is the one DISPLAY primitive Feliz is exempt from, and the
-      // exemption is a decision rather than an oversight: the grid is a
-      // TanStack row model, and TanStack has no F#/Fable adapter.  Hand-rolling
-      // multi-column sort + per-column filters + a row model in Elmish would
-      // fork the grid's BEHAVIOUR from the four JS frontends, which is exactly
-      // what the shared `renderDataGridChild` seam exists to prevent.  A
-      // `DataGrid` on a feliz frontend is `loom.datagrid-unsupported-target` at
-      // compile time; `Table` (which Feliz does render) covers the portable
-      // sort/filter/page surface.
+      // `primitive-data-grid` used to be exempt here on the theory that
+      // TanStack has no F#/Fable adapter.  It needs none: Fable compiles F# to
+      // JavaScript, so the Feliz target binds `@tanstack/table-core` — the
+      // framework-agnostic package every official adapter wraps — directly
+      // (M-T1.1 slice 10e).  Feliz therefore REQUIRES the grid like every JS
+      // pack.  Flutter remains exempt, for the reason this exemption was
+      // wrongly borrowed from: its native build has no JS runtime at all.
       if (
         name === "primitive-form-of" ||
-        name === "primitive-data-grid" ||
         name.startsWith("field-input-") ||
         name.startsWith("form-") ||
         name === "op-dialog" ||

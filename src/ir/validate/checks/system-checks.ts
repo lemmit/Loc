@@ -224,12 +224,18 @@ export function validateProjectionSourceProjectionBackend(
 
 /** Frontends whose walker emits the `DataGrid` primitive.
  *
- *  DataGrid is TanStack-Table-backed and emits a hook-bearing child component,
- *  so it is not a markup mapping another target picks up for free — each
- *  framework needs its own port.  Until those land, using it elsewhere is a
- *  COMPILE ERROR rather than a silently missing grid: the page would otherwise
- *  render an empty slot (or a "not supported" comment on HEEx) and the author
- *  would only find out by looking at the running app. */
+ *  The membership rule is D-DATAGRID-TARGETS: a frontend ships `DataGrid` iff
+ *  it can run **TanStack Table** itself — not iff it emits JSX, and not iff its
+ *  UI kit happens to have a grid widget.  `DataGrid` IS a TanStack row model
+ *  behind the `renderDataGridChild` seam, so any other way of satisfying it
+ *  forks the behaviour the seam exists to share.  Feliz qualifies because Fable
+ *  compiles F# to JavaScript (it binds `@tanstack/table-core` directly, as the
+ *  Svelte target does); Flutter never will, because its shipping target is a
+ *  native build with no JS runtime.
+ *
+ *  Using it elsewhere is a COMPILE ERROR rather than a silently missing grid:
+ *  the page would otherwise render an empty slot (or a "not supported" comment
+ *  on HEEx) and the author would only find out by looking at the running app. */
 const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular", "feliz"]);
 
 /** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */

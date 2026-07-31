@@ -93,12 +93,20 @@ describe("DataGrid on Svelte — table-core, not the Svelte 3/4 adapter", () => 
     );
     // No `selection:` on this grid, so `rowSelection` is absent — the slice
     // list is exactly what the grid asked for, plus pagination.
-    expect(child).toContain("state: { sorting, columnFilters, columnVisibility, pagination },");
+    // `defaultState` is spread in FIRST: `table-core` returns the raw `state`
+    // option from `getState()` and does not merge its own defaults, so a state
+    // carrying only our slices throws inside `getHeaderGroups()`.
+    expect(child).toContain(
+      "state: { ...defaultState, sorting, columnFilters, columnVisibility, pagination },",
+    );
     expect(child).toContain(
       "onPaginationChange: (u) => { pagination = applyUpdater(u, pagination); },",
     );
-    // …and there is no `initialState`, which would be the uncontrolled route.
-    expect(child).not.toContain("initialState");
+    // …and no slice is seeded through the `initialState` OPTION, which would be
+    // the uncontrolled route.  Reading `.initialState` off a throwaway instance
+    // for the defaults above is the opposite thing and must not be confused
+    // with it — hence matching the option key, not the bare identifier.
+    expect(child).not.toContain("initialState:");
   });
 
   it("supplies the resolved-options fields table-core requires", async () => {
@@ -106,7 +114,10 @@ describe("DataGrid on Svelte — table-core, not the Svelte 3/4 adapter", () => 
     // `TableOptionsResolved` demands both; the adapters normally fill them in.
     expect(child).toContain("onStateChange: () => {},");
     expect(child).toContain("renderFallbackValue: null,");
-    expect(child).toContain("const table: Table<T> = $derived.by(() => {");
+    // `Table` is ALIASED — several Svelte packs import a component of that name
+    // (flowbite-svelte does), and the two declarations collide in the Svelte
+    // preprocessor.
+    expect(child).toContain("const table: TanstackTable<T> = $derived.by(() => {");
     expect(child).toContain("enableMultiSort: true,");
   });
 
