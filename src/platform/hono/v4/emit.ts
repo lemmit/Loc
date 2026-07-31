@@ -87,9 +87,11 @@ import {
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { aggregatesNeedConcurrency } from "../../../ir/util/aggregate-flags.js";
+import { apiResourceBindings } from "../../../ir/util/api-resource-binding.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
+import { foreignIdBrandNames, workflowIdTypeSources } from "../../../ir/util/foreign-ids.js";
 import {
   isTpcBase,
   isTphBase,
@@ -107,6 +109,7 @@ import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../../util/api-base.js";
 import { lowerFirst, plural } from "../../../util/naming.js";
+import { emitApiClientModule } from "./adapters/api-client.js";
 import {
   byLayerLayoutAdapter,
   type HonoArtifact,
@@ -448,17 +451,10 @@ export function generateTypeScriptForContexts(
   const hostedIdNames = new Set(
     merged.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]),
   );
-  const foreignIdNames = [
-    ...new Set(
-      [
-        ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
-        ...merged.workflows.flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
-      ]
-        .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
-        .map((t) => t.targetName)
-        .filter((n) => !hostedIdNames.has(n)),
-    ),
-  ];
+  const foreignIdNames = foreignIdBrandNames(hostedIdNames, [
+    ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+    ...workflowIdTypeSources(merged.workflows),
+  ]);
   out.set("domain/ids.ts", renderIds(merged, foreignIdNames));
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
   const servicesFile = renderDomainServices(merged);
@@ -994,6 +990,15 @@ export function generateTypeScriptForContexts(
       );
       Object.assign(resourceDeps, adapter.emitProjectDeps(resourceCtx));
       resourceImports.push(`import "./resources/${sourceType}";`);
+    }
+    // Typed in-system api clients (M-T4.8 slice 3).  Emitted alongside the
+    // sourceType-keyed adapters above, NOT through them: an api-bound resource
+    // has no `storage`, so `storeType.get(r.storageName)` misses by design and
+    // the loop above skips it.
+    const apiBindings = apiResourceBindings(system.deployable, system.sys);
+    const apiClient = emitApiClientModule(apiBindings, system.sys);
+    if (apiClient.length > 0) {
+      out.set("resources/api-clients.ts", `${apiClient.join("\n")}\n`);
     }
   }
 

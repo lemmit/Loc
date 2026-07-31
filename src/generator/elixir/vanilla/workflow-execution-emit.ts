@@ -58,10 +58,16 @@
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
 // gets a leading destructure of exactly the referenced params off the
-// `run/1` map — `%{"initial_title" => initial_title} = params` — so the
-// bare-local rendering of a `param` ref resolves.  Params arrive as a
-// string-keyed snake_case map (the wire shape).  Only referenced params
+// `run/1` map — `%{"initialTitle" => initial_title} = params` — so the
+// bare-local rendering of a `param` ref resolves.  Only referenced params
 // are bound: an unused binding would trip `--warnings-as-errors`.
+//
+// The KEY is the declared param name verbatim; only the BOUND LOCAL is
+// snake_cased.  `params` is Phoenix's decoded JSON map, so its keys are the
+// camelCase wire names every other backend also accepts — this used to
+// destructure `"initial_title"` and raise `MatchError` at runtime on any
+// multi-word param, on a workflow that compiled perfectly.  `mix compile`
+// cannot see it; only a booted request can, which is how it was found.
 // ---------------------------------------------------------------------------
 
 import {
@@ -1474,7 +1480,7 @@ function renderWorkflowModule(
   const params = referencedParams(wf);
   const paramDestructure =
     params.length > 0
-      ? `    %{${params.map((n) => `"${snake(n)}" => ${snake(n)}`).join(", ")}} = params\n`
+      ? `    %{${params.map((n) => `${JSON.stringify(n)} => ${snake(n)}`).join(", ")}} = params\n`
       : "";
   // `workflow_started` runs first thing in the body (before the destructure +
   // the with-chain), so it fires at run/1 entry on every invocation.

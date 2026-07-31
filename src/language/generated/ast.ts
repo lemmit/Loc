@@ -3081,7 +3081,7 @@ export interface Resource extends langium.AstNode {
     shape?: SavingShape;
     tablePrefix?: string;
     ttl?: number;
-    use?: langium.Reference<Storage>;
+    use?: langium.Reference<ResourceTarget>;
 }
 
 export const Resource = {
@@ -3105,6 +3105,16 @@ export const Resource = {
 
 export function isResource(item: unknown): item is Resource {
     return reflection.isInstance(item, Resource.$type);
+}
+
+export type ResourceTarget = Api | Storage;
+
+export const ResourceTarget = {
+    $type: 'ResourceTarget'
+} as const;
+
+export function isResourceTarget(item: unknown): item is ResourceTarget {
+    return reflection.isInstance(item, ResourceTarget.$type);
 }
 
 export interface Retrieval extends langium.AstNode {
@@ -4425,6 +4435,7 @@ export type DddAstType = {
     RequiresProp: RequiresProp
     RequiresStmt: RequiresStmt
     Resource: Resource
+    ResourceTarget: ResourceTarget
     Retrieval: Retrieval
     RetrievalLiteral: RetrievalLiteral
     ReturnStmt: ReturnStmt
@@ -4608,7 +4619,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ModelMember.$type, SystemMember.$type, Targetable.$type]
+            superTypes: [ModelMember.$type, ResourceTarget.$type, SystemMember.$type, Targetable.$type]
         },
         ApiStatus: {
             name: ApiStatus.$type,
@@ -6794,11 +6805,17 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 use: {
                     name: Resource.use,
-                    referenceType: Storage.$type,
+                    referenceType: ResourceTarget.$type,
                     optional: true
                 }
             },
             superTypes: [ModelMember.$type, SystemMember.$type]
+        },
+        ResourceTarget: {
+            name: ResourceTarget.$type,
+            properties: {
+            },
+            superTypes: []
         },
         Retrieval: {
             name: Retrieval.$type,
@@ -7077,7 +7094,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: Storage.type
                 }
             },
-            superTypes: [ModelMember.$type, SystemMember.$type]
+            superTypes: [ModelMember.$type, ResourceTarget.$type, SystemMember.$type]
         },
         Store: {
             name: Store.$type,

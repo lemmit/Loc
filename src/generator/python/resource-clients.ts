@@ -5,8 +5,10 @@ import type {
   SystemIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { resourceEnvBase } from "../../util/resource-env.js";
 import { supportsSurfaceKind } from "../../util/source-types.js";
 
 // ---------------------------------------------------------------------------
@@ -45,10 +47,9 @@ function cfg(store: StorageIR | undefined, key: string): string | undefined {
   return entry && entry.value.kind === "string" ? entry.value.value : undefined;
 }
 
-/** `salesFiles` → `SALES_FILES` (the env-var stem). */
-function envVar(resourceName: string): string {
-  return resourceName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
-}
+/** `salesFiles` → `SALES_FILES` (the env-var stem).  Shared with compose so
+ *  the injected name and the read name cannot drift. */
+const envVar = resourceEnvBase;
 
 function storeOf(resource: DataSourceIR, stores: readonly StorageIR[]): StorageIR | undefined {
   return stores.find((s) => s.name === resource.storageName);
@@ -670,6 +671,21 @@ export function resourceImportLines(
     const fns = byModule.get(resolved.module) ?? new Set<string>();
     fns.add(resolved.fn);
     byModule.set(resolved.module, fns);
+  }
+  // Typed in-system api helpers (M-T4.8): `<resource>_<operation_id>` from the
+  // single generated client module.  Collected with the DEEP expression walker
+  // — `stmtResourceOps` above only reaches top-level statement shapes, and a
+  // typed call nested inside another expression is legal.
+  const apiFns = new Set<string>();
+  for (const st of statements) {
+    walkWorkflowStmtExprsDeep(st, (e) => {
+      if (e.kind === "call" && e.callKind === "remote-api-op" && e.remoteApiOp) {
+        apiFns.add(`${snake(e.remoteApiOp.resourceName)}_${snake(e.remoteApiOp.operationId)}`);
+      }
+    });
+  }
+  if (apiFns.size > 0) {
+    byModule.set("app.resources.api_clients", apiFns);
   }
   return [...byModule.entries()]
     .sort(([a], [b]) => a.localeCompare(b))

@@ -50,6 +50,7 @@ import type {
   TypeIR,
   UserIR,
 } from "../types/loom-ir.js";
+import type { ApiOperationIR } from "../util/api-surface.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -137,6 +138,13 @@ export interface Env {
    *  (`files.put(...)`) in workflow bodies (Phase 4).  Undefined / empty
    *  outside a context or when none are declared for it. */
   resources?: Map<string, DataSourceKind>;
+  /** For each in-system api-bound resource in scope, the `api` it binds
+   *  (M-T4.8) — resource name → api name.  A `.op(...)` call on such a handle
+   *  resolves against that api's operation set (the ambient `apiOperations`
+   *  index) instead of the closed per-kind verb registry, and lowers to a
+   *  TYPED `remote-api-op` rather than the untyped `get`/`post`.  Undefined
+   *  when no resource in scope binds an api. */
+  resourceApis?: Map<string, string>;
   /** The variants of the enclosing operation's `or`-union return type
    *  (exception-less.md, producer).  Set while lowering a union-returning
    *  operation body so a `return <expr>` can tag its value with the matching
@@ -301,13 +309,29 @@ export interface AmbientDeclIndex {
    *  `Pricing.quote(...)` resolves its receiver here when the service is
    *  declared in a sibling context (domain-services.md). */
   domainServices: ReadonlyMap<string, DomainService>;
+  /** Operation set of every `api` some `resource { kind: api, use: <Api> }`
+   *  binds, keyed by api name (M-T4.8).  Populated by the structural pre-pass
+   *  in `lowerModel`: the target contexts are lowered STRUCTURALLY first (no
+   *  enrichment, result discarded) purely so `deriveContextOperations` can run
+   *  on them, because a typed remote call must know its result type at the
+   *  moment `let o = orders.getById(id)` lowers — one statement before `o.code`
+   *  needs it.  Only contexts behind a bound api are pre-lowered; a system
+   *  with no api-bound resource never enters the pre-pass. */
+  apiOperations: ReadonlyMap<string, readonly ApiOperationIR[]>;
 }
 let ambientDeclIndex: AmbientDeclIndex = {
   valueObjects: new Map(),
   enums: new Map(),
   entities: new Map(),
   domainServices: new Map(),
+  apiOperations: new Map(),
 };
+
+/** The operation set of a bound `api`, or undefined when the name isn't one
+ *  the pre-pass indexed (not bound by any resource, or unresolvable). */
+export function findApiOperations(apiName: string): readonly ApiOperationIR[] | undefined {
+  return ambientDeclIndex.apiOperations.get(apiName);
+}
 
 export function setAmbientDeclIndex(index: AmbientDeclIndex): void {
   ambientDeclIndex = index;

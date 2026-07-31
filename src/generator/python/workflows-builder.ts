@@ -12,6 +12,7 @@ import {
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { type ReadPort, readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
+import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
 import {
   camelId,
   opWorkflow,
@@ -498,9 +499,19 @@ function collectEmits(sts: WorkflowStmtIR[]): { eventName: string }[] {
 }
 
 function scanIdNames(scan: string, ctx: BoundedContextIR): string[] {
-  return ctx.aggregates
-    .map((a) => `${a.name}Id`)
-    .filter((n) => new RegExp(`\\b${n}\\b`).test(scan));
+  // Hosted aggregates PLUS the foreign id brands this deployable emits into
+  // `app/domain/ids.py` (M-T4.8).  Python imports id names explicitly — unlike
+  // Hono, which namespace-imports `* as Ids` and so never saw this — so a
+  // workflow starter param typed `orderId: Order id` on a deployable that
+  // doesn't host `Order` produced `OrderId(...)` with no import and failed
+  // `mypy` / `ruff` F821.  Same source rule as the brand emission itself, so
+  // the two cannot disagree about which foreign ids exist.
+  const hosted = new Set(ctx.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]));
+  const names = [
+    ...ctx.aggregates.map((a) => `${a.name}Id`),
+    ...foreignIdBrandNames(hosted, workflowIdTypeSources(ctx.workflows)).map((n) => `${n}Id`),
+  ];
+  return [...new Set(names)].filter((n) => new RegExp(`\\b${n}\\b`).test(scan));
 }
 
 /** Postgres `isolation_level` execution-option string for a DSL level. */

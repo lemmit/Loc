@@ -10,6 +10,7 @@
 
 import type { DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
+import { resourceEnvUrlVar } from "../../../util/resource-env.js";
 import { supportsSurfaceKind } from "../../../util/source-types.js";
 
 export interface DotnetResourceAdapter {
@@ -30,9 +31,9 @@ function cfg(store: StorageIR | undefined, key: string): string | undefined {
   return entry && entry.value.kind === "string" ? entry.value.value : undefined;
 }
 
-function envVar(resourceName: string): string {
-  return `${resourceName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}_URL`;
-}
+/** Compose injects this name; a private copy of the rule would drift from it
+ *  silently, so both sides read one helper. */
+const envVar = resourceEnvUrlVar;
 
 function storeOf(resource: DataSourceIR, stores: readonly StorageIR[]): StorageIR | undefined {
   return stores.find((s) => s.name === resource.storageName);

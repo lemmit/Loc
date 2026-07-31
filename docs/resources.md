@@ -171,11 +171,16 @@ The vocabulary is registry-defined (`src/ir/resource-verbs.ts`). Rules:
 - resource-ops are async; the generated call site awaits the verb helper.
 
 The `api` verbs (`get(path): json` / `post(path, body): json`) are
-**untyped** — raw paths in, raw `json` out. For a typed call surface over a
-`kind: api` resource (named operations, typed request/response derived from
-an OpenAPI spec), see the proposed `contract` layer in
-[`proposals/contract-typed-resources.md`](old/proposals/contract-typed-resources.md);
-the untyped verbs remain as the escape hatch for spec-less APIs.
+**untyped** — raw paths in, raw `json` out. That is the right shape for a
+third-party API Loom knows nothing about.
+
+When the callee is **another deployable in this same system**, don't use them:
+bind the `api` instead of a `storage` and you get a typed call surface with
+named operations and a derived request/response — see
+[Calling another Loom service](#calling-another-loom-service--use-api) below.
+The untyped verbs remain the escape hatch for spec-less external APIs. (A
+typed surface over an *external* OpenAPI spec is still only proposed —
+[`proposals/contract-typed-resources.md`](old/proposals/contract-typed-resources.md).)
 
 ### Interface selection
 
@@ -204,6 +209,132 @@ with a dev sidecar.
 Dev `docker-compose` gains a sidecar per object-store / queue / smtp-mailer
 storage (MinIO for `s3`, `rabbitmq`, **Mailpit** for `smtp`); deployables with
 no such resources are byte-identical.
+
+## Calling another Loom service — `use: <Api>`
+
+The two things a `resource` can bind are not symmetric:
+
+| `use:` target | what it is | who knows the address |
+|---|---|---|
+| a `storage` | infrastructure Loom does **not** own — S3, RabbitMQ, someone else's REST API | only you. It rides `config: { baseUrl: … }` |
+| an `api` | infrastructure Loom **does** own — a sibling deployable in this system `serves:` it | Loom. Both the address *and* the operation set are derivable from the model |
+
+So when the callee is another Loom deployable, bind the **api**, not a storage:
+
+```ddd
+system Acme {
+  subdomain Core {
+    context Orders {
+      aggregate Order with crudish { code: string  status: string }
+      repository Orders for Order { }
+    }
+    context Shipping {
+      aggregate Shipment with crudish { orderCode: string  status: string }
+      repository Shipments for Shipment { }
+      workflow fulfil {
+        create(orderId: Order id) {
+          let o = orders.getOrderById(orderId)     // typed in-system call
+          let s = Shipment.create({ orderCode: o.code, status: "Pending" })
+        }
+      }
+    }
+  }
+  api OrdersApi from Core
+  storage primary { type: postgres }
+  resource ordersState   { for: Orders,   kind: state, use: primary }
+  resource shippingState { for: Shipping, kind: state, use: primary }
+  resource orders        { for: Shipping, kind: api,   use: OrdersApi }
+
+  deployable ordersSvc {
+    platform: node   contexts: [Orders]   dataSources: [ordersState]
+    serves: OrdersApi port: 3000
+  }
+  deployable shippingSvc {
+    platform: python contexts: [Shipping] dataSources: [shippingState, orders] port: 3001
+  }
+}
+```
+
+No URL is written anywhere in that source. `docker compose` gets the wiring:
+
+```yaml
+  shipping_svc:
+    environment:
+      ORDERS_URL: "http://orders_svc:3000"
+    depends_on:
+      orders_svc:
+        condition: service_healthy
+```
+
+and the generated client reads the same `<RESOURCE>_URL` variable — both sides
+go through one helper (`resourceEnvUrlVar`), so the injected name and the read
+name cannot drift.
+
+### What gets generated
+
+The caller gets one typed function **per operation the callee actually mounts**,
+in a module of its own (`resources/api-clients.ts`, `app/resources/api_clients.py`,
+`Resources/ApiClients.cs`, …):
+
+```ts
+// shipping_svc/resources/api-clients.ts  (excerpt)
+export const ordersBaseUrl = process.env.ORDERS_URL ?? "http://localhost:3000";
+
+export const OrderResponse = z.object({
+  id: z.string(), code: z.string(), status: z.string(), version: z.number().int(),
+});
+
+export async function orders$getOrderById(id: string): Promise<z.infer<typeof OrderResponse>> {
+  const url = new URL(`/api/orders/${encodeURIComponent(String(id))}`, ordersBaseUrl);
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) throw new RemoteCallError("orders", "getOrderById", res.status);
+  return OrderResponse.parse(await res.json());
+}
+```
+
+Both halves are **derived, not written**: the path from the same operation
+derivation the callee's own routes answer to, and the response schema from the
+same wire-shape walk the callee serializes with. That is the difference from the
+untyped `get(path): json` verbs — a hand-written `"/orders/{id}"` compiles clean
+and 404s at runtime; this cannot.
+
+The call site is checked all the way through. `let o = orders.getOrderById(id)`
+binds `o` to the callee's aggregate type, so `o.code` type-checks and `o.nope`
+is a compile error in your `.ddd`, not a runtime `undefined`.
+
+### Per-backend shape
+
+| | client module | boundary check |
+|---|---|---|
+| hono | `resources/api-clients.ts` | `zod.parse` |
+| python | `app/resources/api_clients.py` | pydantic `model_validate` |
+| .NET | `Resources/ApiClients.cs` | `JsonSerializer` + null guard |
+| java | `ApiClients.java` | Jackson `readValue` |
+| phoenix | `<App>.Resources.ApiClients` | atom-key projection of the wire shape |
+
+The .NET and Phoenix checks are **weaker than their siblings**, and the
+difference is worth knowing: zod and pydantic raise on a missing required field;
+System.Text.Json binds it to a default, and the Elixir projection lands it as
+`nil`. All five reject a non-2xx status.
+
+All five are gated at runtime, not just at compile: `api-call-e2e` boots the
+generated caller and callee as separate processes with separate databases and
+asserts the caller persists a value only the callee could have supplied
+(`npm run test:api-call`, `LOOM_API_CALL_CALLER=<backend>`).
+
+### Rules
+
+- The bound api must be served by **exactly one** backend deployable in the
+  system — `loom.resource-api-unserved` / `loom.resource-api-ambiguous-server`
+  otherwise, so a client is never generated against a guess.
+- A deployable may not bind an api it serves itself
+  (`loom.resource-api-self-call`) — compose rejects the `depends_on` cycle.
+- `use: <Api>` is only meaningful on `kind: api`
+  (`loom.resource-api-target-kind`).
+- Failures raise, they do not return a sentinel. Each backend's client throws a
+  status-carrying `RemoteCallError` / `RemoteCallException`. A `T or NotFound`
+  union return — where a 404 is a *value* the caller must match on rather than
+  an exception — is **not** implemented; only the success body is typed today.
 
 ## Custom source types (out-of-tree)
 

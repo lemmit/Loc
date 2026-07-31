@@ -130,7 +130,7 @@ describe("vanilla — workflow body lowering (emit)", () => {
       "rename",
     );
     expect(wf).toContain(
-      `%{"task_id" => task_id, "old_title" => old_title, "new_title" => new_title} = params`,
+      `%{"taskId" => task_id, "oldTitle" => old_title, "newTitle" => new_title} = params`,
     );
     expect(wf).toContain("task: task_id");
     expect(wf).toContain("old_title: old_title");

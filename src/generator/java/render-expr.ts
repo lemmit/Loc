@@ -740,6 +740,24 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
       // A workflow's own helper — a `private` method on the shared
       // `<Ctx>Workflows` bean, scoped by workflow (two workflows share the class).
       return `${ctx.thisName}.${workflowFnCamel(e.wfScope!, e.name)}(${argList})`;
+    case "remote-api-op": {
+      // A typed in-system call (M-T4.8).  `ApiClients.java` exposes one
+      // `<resource><OperationId>` static per operation the callee exposes.
+      //
+      // No `await` wrapper, unlike the .NET sibling: Spring's workflow beans are
+      // plain blocking methods and the client uses `HttpClient.send`, so the
+      // call is an ordinary expression.
+      //
+      // An id ARGUMENT still needs `.toString()` — a Java id is a
+      // `record OrderId(UUID value)` with `toString()` overridden to the raw
+      // value, while the client parameter is the WIRE type (`String`).  Keyed
+      // off the argument's resolved type, not the callee's parameter type: a
+      // path id rides the wire as `guid`/`string`, so the parameter side cannot
+      // tell an id apart from a plain string.
+      const op = e.remoteApiOp!;
+      const coerced = args.map((a, i) => (isJavaIdTyped(e.args[i]) ? `${a}.toString()` : a));
+      return `${API_CLIENT_CLASS}.${lowerFirst(op.resourceName)}${upperFirst(op.operationId)}(${coerced.join(", ")})`;
+    }
     case "resource-op": {
       const op = e.resourceOp!;
       const cls = ctx.resourceClasses?.get(op.resourceName);
@@ -1046,6 +1064,24 @@ const JAVA_TYPE_TARGET: TypeTarget = {
   union: (t) => unionInstanceName(t.variants),
   none: () => "Object",
 };
+
+/** The static class `ApiClients.java` declares — the call target for a typed
+ *  in-system api call.  Declared here rather than in the emitter so the emitter
+ *  (which imports the type printer) and this renderer are not mutually
+ *  importing.  Same rule as the .NET sibling. */
+/** True when an argument expression is statically an aggregate id.  Covers the
+ *  shapes an id actually arrives in — a `let`/param ref, a member read, and the
+ *  bare `id` of the enclosing aggregate — and answers `false` when the IR
+ *  carries no resolved type rather than guessing. */
+function isJavaIdTyped(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "id") return true;
+  if (e.kind === "ref") return e.type?.kind === "id";
+  if (e.kind === "member") return e.memberType.kind === "id";
+  return false;
+}
+
+export const API_CLIENT_CLASS = "ApiClients";
 
 export function renderJavaType(t: TypeIR): string {
   return renderTypeWith(t, JAVA_TYPE_TARGET);

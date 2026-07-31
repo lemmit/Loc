@@ -117,6 +117,16 @@ to different stores.  The full model — sourceType registry, capabilities,
 interfaces, and workflow-level consumption — is in [`resources.md`](resources.md);
 this section covers the persistence-routing essentials.
 
+`use:` binds one of two things, and the distinction is about **who knows the
+address**.  A `storage` is infrastructure Loom does not own, so its location is
+a fact only the author has (`config: { baseUrl: … }`).  An `api` is
+infrastructure Loom *does* own — a sibling deployable in this system `serves:`
+it — so both the address and the operation set are derivable from the model.
+Binding the api (`resource orders { for: Shipping, kind: api, use: OrdersApi }`)
+is therefore how one Loom service calls another: compose injects the address
+and each backend emits a typed client against the callee's real operation set.
+See [`resources.md` → Calling another Loom service](resources.md#calling-another-loom-service--use-api).
+
 ```ddd
 resource ordersState {
   for: Orders, kind: state, use: primarySql

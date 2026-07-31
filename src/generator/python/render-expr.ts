@@ -588,6 +588,13 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       const prefix = e.targetPrivate ? (ctx.fnPrefix ?? "_") : "";
       return `${ctx.thisName}.${prefix}${snake(e.name)}(${argList})`;
     }
+    case "remote-api-op": {
+      // A typed in-system call (M-T4.8).  `app/resources/api_clients.py`
+      // exports one `<resource>_<operation_id>` per operation the callee
+      // exposes; awaited inline like `resource-op`.
+      const op = e.remoteApiOp!;
+      return `(await ${snake(op.resourceName)}_${snake(op.operationId)}(${argList}))`;
+    }
     case "resource-op": {
       // Resource adapters land with the extern/auth slice (S16); the
       // call shape mirrors TS's awaited helper.

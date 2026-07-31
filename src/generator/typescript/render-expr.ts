@@ -518,6 +518,14 @@ function renderCall(
       // its workflow (workflows share the generated file).  Call and def sites
       // both derive the name via `workflowFnCamel`.
       return `${workflowFnCamel(e.wfScope!, e.name)}(${argList})`;
+    case "remote-api-op": {
+      // A typed in-system call (M-T4.8).  The generated client module exports
+      // one `<resource>$<operationId>` per operation the callee exposes, with
+      // the response parsed at the boundary.  Awaited inline so it composes in
+      // any expression position, exactly like `resource-op`.
+      const op = e.remoteApiOp!;
+      return `(await ${op.resourceName}$${op.operationId}(${argList}))`;
+    }
     case "resource-op": {
       // A verb call on an ambient resource handle (Phase 4).  The
       // resource client module exports an async `<resource>$<verb>`

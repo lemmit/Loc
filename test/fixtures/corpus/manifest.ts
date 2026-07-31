@@ -28,6 +28,18 @@ export interface CorpusFeature {
   readonly backends: readonly Backend[];
   /** Notes on any backend exclusions. */
   readonly note?: string;
+  /**
+   * Emitted project dirs the compile tiers build — one per `deployable` in the
+   * `.ddd`.  Defaults to the single `d` (`CORPUS_DEPLOYABLE`) every ordinary
+   * fixture declares, so only a MULTI-service fixture needs this key.
+   *
+   * It is declared here rather than discovered from the file map because the
+   * compile harnesses must know what to build BEFORE they generate — and
+   * because a fixture that quietly renames its deployable would otherwise turn
+   * a compile gate into a no-op.  `corpus-coverage.test.ts` cross-checks this
+   * list against the dirs actually emitted, so the two cannot drift.
+   */
+  readonly deployables?: readonly string[];
 }
 
 export const CORPUS: readonly CorpusFeature[] = [
@@ -64,6 +76,17 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "extern-handlers", title: "extern commandHandler / queryHandler — bodyless, scaffold-once user impl", backends: ALL },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
+  {
+    id: "api-call",
+    title: "typed in-system api call — `resource { kind: api, use: <Api> }` a sibling deployable serves",
+    doc: "resources",
+    backends: ALL,
+    note: "Two deployables: the caller's client is DERIVED from the callee's served operation set, so a single-deployable fixture cannot exercise it.",
+    // The emitted DIR names, which are snake_cased from the deployable names
+    // (`ordersSvc` → `orders_svc`) — the coverage gate cross-checks these
+    // against what actually lands on disk.
+    deployables: ["orders_svc", "shipping_svc"],
+  },
   { id: "provenance", title: "provenanced stored fields — per-write-site rule snapshots", doc: "provenance", backends: ALL },
   {
     id: "criterion-filter",

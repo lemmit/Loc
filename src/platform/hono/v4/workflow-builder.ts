@@ -37,6 +37,7 @@ import {
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.js";
 import { emitsCommandRoute } from "../../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
@@ -444,6 +445,26 @@ export function buildWorkflowsFile(
   }
   for (const [mod, helpers] of helperByModule) {
     imports.push(`import { ${[...helpers].sort().join(", ")} } from "${mod}";`);
+  }
+  // Typed in-system api helpers (M-T4.8): `<resource>$<operationId>` from the
+  // single generated client module.  Collected with the DEEP expression walker,
+  // unlike `resourceOpsIn` above which only scans top-level statements — a
+  // typed call nested inside another expression is legal and would otherwise
+  // lose its import and fail `tsc`.
+  const apiHelpers = new Set<string>();
+  for (const wf of ctx.workflows) {
+    for (const st of wf.statements) {
+      walkWorkflowStmtExprsDeep(st, (e) => {
+        if (e.kind === "call" && e.callKind === "remote-api-op" && e.remoteApiOp) {
+          apiHelpers.add(`${e.remoteApiOp.resourceName}$${e.remoteApiOp.operationId}`);
+        }
+      });
+    }
+  }
+  if (apiHelpers.size > 0) {
+    imports.push(
+      `import { ${[...apiHelpers].sort().join(", ")} } from "../resources/api-clients";`,
+    );
   }
 
   return [...imports, "", ...body].join("\n") + "\n";

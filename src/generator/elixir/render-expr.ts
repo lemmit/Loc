@@ -949,6 +949,22 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     // `<Store>.<action>()` call (Stage 5) — frontend-only; plain-call fall-through.
     case "free":
       return `${snake(e.name)}(${args.join(", ")})`;
+    case "remote-api-op": {
+      // A typed in-system call (M-T4.8).  `<App>.Resources.ApiClients` exposes
+      // one `<resource>_<operation_id>` per operation the callee exposes.
+      //
+      // Fully qualified, like the `resource-op` arm below — the vanilla emitter
+      // references resource modules by full path rather than aliasing them, so
+      // there is no import gate to get wrong here (unlike .NET and Java).
+      //
+      // No id coercion either: an Elixir id is already the raw value, and the
+      // client `to_string/1`s path params itself.  Synchronous, and the
+      // workflow's `expr-let` lowers to `x <- (expr)`, which always succeeds —
+      // so a failed call RAISES rather than threading an {:error, _}.
+      const op = e.remoteApiOp!;
+      const app = ctx.contextModule.split(".")[0] ?? ctx.contextModule;
+      return `${app}.Resources.ApiClients.${snake(op.resourceName)}_${snake(op.operationId)}(${args.join(", ")})`;
+    }
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
       // helper function the Phoenix ResourceAdapter emits.  Routed by

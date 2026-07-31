@@ -28,9 +28,11 @@ import {
   aggregatesHaveUniqueKeys,
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
+import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
+import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
@@ -52,6 +54,7 @@ import { generateFelizForContexts } from "../feliz/index.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
+import { emitJavaApiClients } from "./adapters/api-client.js";
 import { byFeatureLayoutAdapter } from "./adapters/by-feature-layout.js";
 import type {
   JavaArtifact,
@@ -203,6 +206,7 @@ import {
 } from "./emit/workflow-state.js";
 import { emitExplicitHandlers, emitExplicitRouteController } from "./explicit-handlers-emit.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
+import { API_CLIENT_CLASS as JAVA_API_CLIENT_CLASS } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Java backend entry point — Spring Boot 3 / Spring Data JPA / Postgres.
@@ -333,6 +337,18 @@ function emitProjectFromContexts(
   );
   for (const [name, content] of resourceEmission.files) {
     place(name, "resource-client", content);
+  }
+  // Typed in-system api clients (M-T4.8).  Separate from the sourceType-routed
+  // resource adapters above on purpose: an api-bound resource has no `storage`,
+  // so it never reaches a ResourceAdapter at all.  Undefined — hence no file —
+  // when this deployable binds no in-system api.
+  if (system) {
+    const apiClients = emitJavaApiClients(
+      apiResourceBindings(system.deployable, system.sys),
+      system.sys,
+      pkgFor("resource-client"),
+    );
+    if (apiClients) place(`${JAVA_API_CLIENT_CLASS}.java`, "resource-client", apiClients);
   }
   // Broker bindings (channels.md; M-T4.4 slice 6b): the redis-bound broadcast
   // channelSources this deployable wires via `channels:`.  A wired-but-foreign
@@ -717,6 +733,11 @@ function emitProjectFromContexts(
         pkg: pkgFor("workflow-service"),
         routePrefix,
         resourceClasses: resourceEmission.classes,
+        // Derived from the SAME binding query the client emitter uses, so the
+        // import and the emitted file cannot disagree.
+        usesRemoteApiOp: system
+          ? apiResourceBindings(system.deployable, system.sys).length > 0
+          : false,
         resourcesPkg: pkgFor("resource-client"),
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
@@ -1086,40 +1107,43 @@ function emitProjectFromContexts(
   // byte-identical.  Foreign vocabulary first (Hono/Python/.NET parity): a
   // consumed foreign event's record class + the id brands it (and correlating
   // workflow state) reference join the deployable's domain packages.
-  if (hasChannels && system) {
-    const knownEventNames = new Set(contexts.flatMap((c) => c.events).map((e) => e.name));
-    const foreignConsumedEvents = [...new Set(consumerHandlers.map((h) => h.event))]
-      .filter((name) => !knownEventNames.has(name))
-      .flatMap((name) => {
-        for (const sub of system.sys.subdomains) {
-          for (const c of sub.contexts) {
-            const ev = c.events.find((e) => e.name === name);
-            if (ev) return [ev];
-          }
-        }
-        return [];
-      });
-    for (const ev of foreignConsumedEvents) {
-      place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
-    }
+  // Foreign consumed events — channel vocabulary, so genuinely channel-gated.
+  const foreignConsumedEvents =
+    hasChannels && system
+      ? (() => {
+          const known = new Set(contexts.flatMap((c) => c.events).map((e) => e.name));
+          return [...new Set(consumerHandlers.map((h) => h.event))]
+            .filter((name) => !known.has(name))
+            .flatMap((name) => {
+              for (const sub of system.sys.subdomains) {
+                for (const c of sub.contexts) {
+                  const ev = c.events.find((e) => e.name === name);
+                  if (ev) return [ev];
+                }
+              }
+              return [];
+            });
+        })()
+      : [];
+
+  // Foreign id brands are NOT channel vocabulary, and gating them on
+  // `hasChannels` was a latent bug: a workflow starter param naming an
+  // aggregate this deployable does not host (`create(orderId: Order id)`)
+  // emitted `new OrderId(...)` with no `OrderId.java` anywhere, in any
+  // channel-less java project.  Valid model, emitter reports success, javac
+  // says "cannot find symbol" — the same shape as the four-way duplication
+  // `src/ir/util/foreign-ids.ts` was extracted to kill.  The SOURCES were
+  // already right here; only the gate was wrong.
+  if (system) {
     const hostedIdNames = new Set(
       contexts.flatMap((c) =>
         c.aggregates.flatMap((a) => [a.name, ...a.parts.map((pt) => pt.name)]),
       ),
     );
-    const foreignIdNames = [
-      ...new Set(
-        [
-          ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
-          ...contexts
-            .flatMap((c) => c.workflows)
-            .flatMap((w) => (w.stateFields ?? []).map((f) => f.type)),
-        ]
-          .filter((t): t is Extract<TypeIR, { kind: "id" }> => t.kind === "id")
-          .map((t) => t.targetName)
-          .filter((n) => !hostedIdNames.has(n)),
-      ),
-    ];
+    const foreignIdNames = foreignIdBrandNames(hostedIdNames, [
+      ...foreignConsumedEvents.flatMap((e) => e.fields.map((f) => f.type)),
+      ...workflowIdTypeSources(contexts.flatMap((c) => c.workflows)),
+    ]);
     for (const name of foreignIdNames) {
       let idValueType = "uuid";
       for (const sub of system.sys.subdomains) {
@@ -1129,6 +1153,12 @@ function emitProjectFromContexts(
         }
       }
       place(`${name}Id.java`, "id", renderJavaId(name, idValueType, basePkg));
+    }
+  }
+
+  if (hasChannels && system) {
+    for (const ev of foreignConsumedEvents) {
+      place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
     }
     const carriedEvents = [...contexts.flatMap((c) => c.events), ...foreignConsumedEvents];
     for (const [name, content] of renderJavaChannelFiles(

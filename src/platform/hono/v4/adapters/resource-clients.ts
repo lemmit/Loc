@@ -10,6 +10,7 @@
 
 import type { Lines, ResourceAdapter } from "../../../../generator/_adapters/index.js";
 import type { DataSourceIR, StorageIR } from "../../../../ir/types/loom-ir.js";
+import { resourceEnvBase } from "../../../../util/resource-env.js";
 import { supportsSurfaceKind } from "../../../../util/source-types.js";
 
 /** Read a string `config` value from a storage by key. */
@@ -18,10 +19,11 @@ function cfg(store: StorageIR | undefined, key: string): string | undefined {
   return entry && entry.value.kind === "string" ? entry.value.value : undefined;
 }
 
-/** `SALES_FILES`-style SCREAMING_SNAKE env-var base for a resource. */
-function envBase(resourceName: string): string {
-  return resourceName.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
-}
+/** `SALES_FILES`-style SCREAMING_SNAKE env-var base for a resource.
+ *  Re-exported from the shared helper rather than re-derived: compose writes
+ *  `<RESOURCE>_URL` through `resourceEnvUrlVar`, and a private copy of the rule
+ *  here would drift from it silently (no compiler sees a string mismatch). */
+const envBase = resourceEnvBase;
 
 /** `SALES_FILES_URL`-style env var name for a resource's connection. */
 function envVar(resourceName: string): string {

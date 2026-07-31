@@ -28,10 +28,12 @@ import type {
   SystemIR,
 } from "../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../ir/types/migrations-ir.js";
+import { apiResourceBindings } from "../ir/util/api-resource-binding.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
 import { hasAdapters, resolveLayout, resolveStyle } from "../platform/resolve-adapters.js";
 import { AUTH_BASE_PATH } from "../util/api-base.js";
+import { resourceEnvUrlVar } from "../util/resource-env.js";
 import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
@@ -1017,10 +1019,28 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   // env below and orders startup after the Valkey sidecar's healthcheck.
   const brokerBindings = brokerChannelBindings(d, sys);
   const brokerServices = [...new Set(brokerBindings.map((b) => serviceSlug(b.storageName)))];
+  // In-system typed api bindings (M-T4.8): each wired `resource { kind: api,
+  // use: <Api> }` resolves to the sibling deployable that serves it.  The
+  // address is DERIVED — service slug + that platform's container port — so
+  // no `baseUrl` is authored and a deployable rename can't silently rot it.
+  const apiBindings = apiResourceBindings(d, sys).map((b) => {
+    const targetSlug = serviceSlug(b.server.name);
+    const targetPort = platformFor(b.server.platform).composeService({
+      deployable: b.server,
+      sys,
+      slug: targetSlug,
+    }).internalPort;
+    return {
+      envVar: resourceEnvUrlVar(b.resource.name),
+      url: `http://${targetSlug}:${targetPort}`,
+      slug: targetSlug,
+    };
+  });
+  const apiServices = [...new Set(apiBindings.map((b) => b.slug))];
   const lines: string[] = [];
   lines.push(`${slug}:`);
   lines.push(`  build: ./${slug}`);
-  if (shape.dependsOnDb || oidc || brokerServices.length > 0) {
+  if (shape.dependsOnDb || oidc || brokerServices.length > 0 || apiServices.length > 0) {
     lines.push(`  depends_on:`);
     if (shape.dependsOnDb) {
       lines.push(`    db:`);
@@ -1031,6 +1051,12 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
       lines.push(`      condition: service_started`);
     }
     for (const svc of brokerServices) {
+      lines.push(`    ${svc}:`);
+      lines.push(`      condition: service_healthy`);
+    }
+    // Wait for the called service's own healthcheck: a caller that boots
+    // first would otherwise fail its first remote call with ECONNREFUSED.
+    for (const svc of apiServices) {
       lines.push(`    ${svc}:`);
       lines.push(`      condition: service_healthy`);
     }
@@ -1050,6 +1076,12 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     lines.push(
       `    ${b.envVar}: ${JSON.stringify(brokerUrl(b, d.name, serviceSlug(b.storageName)))}`,
     );
+  }
+  // Derived in-system api addresses (M-T4.8).  Same seam the emitted client
+  // reads (`resourceEnvUrlVar`), so compose and the generated code cannot
+  // disagree about the variable name.
+  for (const b of apiBindings) {
+    lines.push(`    ${b.envVar}: ${JSON.stringify(b.url)}`);
   }
   // CORS allowlist for a backend that a separate-origin frontend may call:
   // pin it to the frontend origins the topology declares (the generator knows

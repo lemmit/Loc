@@ -14,7 +14,7 @@ import {
   sourceTypesForSurfaceKind,
   supportsSurfaceKind,
 } from "../../util/source-types.js";
-import type { Resource, Storage } from "../generated/ast.js";
+import { type Api, isApi, isStorage, type Resource, type Storage } from "../generated/ast.js";
 
 // Kind↔storage-type and knob↔storage-type compatibility is sourced from
 // the platform-internal sourceType registry (`src/util/source-types.ts`),
@@ -28,7 +28,26 @@ import type { Resource, Storage } from "../generated/ast.js";
  *  storage points at the `use:` property so the squiggle is local. */
 export function checkDataSource(ds: Resource, accept: ValidationAcceptor): void {
   const kind = ds.kind;
-  const storage = ds.use?.ref as Storage | undefined;
+  // `use:` binds either a physical `storage` or an in-system `api`
+  // (M-T4.8).  NARROW it — the old `as Storage` cast silently mistyped an
+  // api target as a storage, so every `storage.type` read below would have
+  // been `undefined` at runtime with no diagnostic.
+  const target = ds.use?.ref;
+  const storage: Storage | undefined = target && isStorage(target) ? target : undefined;
+  const api: Api | undefined = target && isApi(target) ? target : undefined;
+
+  // (0) An `api` target is only meaningful on `kind: api` — every other kind
+  // names a persistence/infra role a sibling deployable's HTTP surface can't
+  // realise.  Checked before (1) so the message names the real mismatch
+  // rather than falling through to the storage-type branch.
+  if (api && kind && kind !== "api") {
+    accept(
+      "error",
+      `resource '${ds.name}' binds api '${api.name}', which is only valid on kind: api.  ` +
+        `Got kind: ${kind}.  Bind a storage for kind '${kind}', or change the kind to 'api'.`,
+      { node: ds, property: "use", code: "loom.resource-api-target-kind" },
+    );
+  }
 
   // (1) kind ↔ storage.type compatibility — only when both are
   // present.  Missing-required-field diagnostics live elsewhere

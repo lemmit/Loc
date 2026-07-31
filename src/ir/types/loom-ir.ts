@@ -2887,8 +2887,18 @@ export interface DataSourceIR {
   contextName: string;
   /** Which datalogue kind this binding satisfies for the context. */
   kind: DataSourceKind;
-  /** Name of the physical `storage` declaration this binding routes to. */
+  /** Name of the physical `storage` declaration this binding routes to.
+   *  Empty when the binding targets an in-system `api` instead — see
+   *  {@link DataSourceIR.apiName}. */
   storageName: string;
+  /** Name of the in-system `api` this binding routes to, when `use:` names an
+   *  `Api` rather than a `Storage` (M-T4.8).  The address and the operation
+   *  set are then DERIVED from the deployable that `serves:` it, so no
+   *  `baseUrl` is authored and the emitted client is typed.  Mutually
+   *  exclusive with {@link DataSourceIR.storageName} — exactly one is
+   *  non-empty on a well-formed binding, which `loom.resource-api-target-kind`
+   *  and the IR store checks pin. */
+  apiName?: string;
   schema?: string;
   tablePrefix?: string;
   keyPrefix?: string;
@@ -3318,6 +3328,7 @@ export type CallKind =
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "remote-api-op" // a TYPED call on an in-system api-bound resource (M-T4.8)
   | "repo-read" // a read-only repository query in a `reading` domain-service body (domain-services.md rev. 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "action" // a bare call to a SIBLING page/component `action` (Proposal A Stage 1)
@@ -3395,6 +3406,10 @@ export type ExprIR =
        *  lower to a `resource-op` without re-resolving (Phase 4). */
       resourceName?: string;
       resourceKind?: DataSourceKind;
+      /** Populated when the resource binds an in-system `api` (M-T4.8) — a
+       *  `.op(...)` call on it resolves against that api's derived operation
+       *  set, not the closed per-kind verb registry. */
+      resourceApiName?: string;
       /** Populated when `refKind === "store-field"` — the declaring store's
        *  name, so a `<Store>.<field>` read renders against the right store
        *  module without re-resolving the receiver (Stage 5).  `name` is the
@@ -3468,6 +3483,35 @@ export type ExprIR =
         verb: string;
         capability: string;
         interface?: LoomInterface;
+      };
+      /** Populated when `callKind === "remote-api-op"` (M-T4.8) — a typed call
+       *  on a resource that binds an in-system `api`.  Fully resolved at
+       *  lowering: the caller's emitter needs no knowledge of how the CALLEE
+       *  mounts its routers, because `path` is already absolute and the
+       *  parameter locations are decided.  `errorStatuses` is what lets a
+       *  client type its failure union instead of collapsing every non-2xx
+       *  into a throw. */
+      remoteApiOp?: {
+        /** The binding resource — names the `<RESOURCE>_URL` env seam. */
+        resourceName: string;
+        apiName: string;
+        /** `ApiOperationIR.id` — the cross-backend operation identity. */
+        operationId: string;
+        method: string;
+        /** Absolute wire path, `API_BASE_PATH` included (`/api/orders/{id}`). */
+        path: string;
+        /** The callee's declared parameters, in call-argument order.  `type` is
+         *  carried, not just the name/location, because a backend whose id
+         *  representation is not a string (.NET's `readonly record struct`)
+         *  has to coerce an id argument at the CALL SITE, and it must decide
+         *  that from the same source the client's parameter type is derived
+         *  from — otherwise the two can disagree silently. */
+        params: readonly {
+          name: string;
+          location: "path" | "query" | "body";
+          type: TypeIR;
+        }[];
+        errorStatuses: readonly number[];
       };
       /** Populated when `callKind === "domain-service"` (domain-services.md)
        *  — the resolved `domainService` name and the operation invoked.

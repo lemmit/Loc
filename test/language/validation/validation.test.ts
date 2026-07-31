@@ -1261,6 +1261,42 @@ describe("validation", () => {
       ).toBe(true);
     });
 
+    // M-T4.8: `use:` accepts an `Api` as well as a `Storage`.  The pairing is
+    // AST-level because the cross-ref is already resolved here — the address
+    // derivation (which deployable serves it) is the IR-level half.
+    it("accepts an api target on kind: api", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          api CApi from M
+          storage pg { type: postgres }
+          resource cState { for: C, kind: state, use: pg }
+          resource cApi   { for: C, kind: api,   use: CApi }
+          deployable d { platform: node contexts: [C] dataSources: [cState] serves: CApi port: 3000 }
+        }
+      `);
+      expect(
+        errors.some((e) => /cApi/.test(e)),
+        errors.join("\n"),
+      ).toBe(false);
+    });
+
+    it("rejects an api target on a non-api kind", async () => {
+      const { errors } = await parse(`
+        system S {
+          subdomain M { context C { aggregate A { x: int } } }
+          api CApi from M
+          resource cState { for: C, kind: state, use: CApi }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /resource 'cState' binds api 'CApi', which is only valid on kind: api/.test(e),
+        ),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
     it("rejects kind: state backed by a kv storage (redis)", async () => {
       const { errors } = await parse(`
         system S {

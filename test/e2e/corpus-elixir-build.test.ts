@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CORPUS_DEPLOYABLE, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
+import { corpusProjectDirs, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror.js";
 
@@ -61,6 +61,19 @@ const elixirFeatures = CORPUS.filter((f) => f.backends.includes("vanilla"))
   .filter((f) => !CASE || f.id === CASE)
   .map((f) => f.id);
 
+// A hex PACKAGE cache shared by every container this file starts.
+//
+// `docker run --rm` throws away the container's `~/.hex`, so each project
+// re-downloads the entire dependency closure from scratch.  That was invisible
+// while a feature meant exactly one project; a multi-deployable feature doubles
+// it, and behind the loopback hex mirror the second `deps.get` reliably dies
+// with `Request failed (:timeout)` fetching a tarball the first run had already
+// pulled.  Mounting one host dir at `/root/.hex` makes the second project a
+// cache hit — correctness behind the mirror, and a straight speed-up on CI's
+// direct hex.pm access.  Same shape as the NuGet cache mount in
+// `api-call-e2e.test.ts`.
+const HEX_CACHE = path.join(os.tmpdir(), "loom-corpus-elixir-hex");
+
 // `mix deps.get --only prod && mix compile --warnings-as-errors` inside the
 // elixir image.  When `mirror` is set (LOOM_HEX_MIRROR=1) hex.pm traffic is
 // routed through the loopback mirror so this gate also runs behind a
@@ -68,8 +81,10 @@ const elixirFeatures = CORPUS.filter((f) => f.backends.includes("vanilla"))
 function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
   const shellPrefix = mirror?.shellPrefix ?? "";
+  fs.mkdirSync(HEX_CACHE, { recursive: true });
   execSync(
-    `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app -e MIX_ENV=prod ${IMAGE} ` +
+    `docker run --rm ${dockerArgs}-v ${projDir}:/app -v ${HEX_CACHE}:/root/.hex ` +
+      `-w /app -e MIX_ENV=prod ${IMAGE} ` +
       `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
       `mix deps.get --only prod && mix compile --warnings-as-errors'`,
     { stdio: "inherit", timeout: 600_000 },
@@ -97,13 +112,16 @@ describe.skipIf(!ENABLED)(
           stdio: "inherit",
           cwd: repoRoot,
         });
-        // The deployable is named `d` → its elixir project lands under `d/`.
-        const proj = path.join(outDir, CORPUS_DEPLOYABLE);
-        expect(
-          fs.existsSync(path.join(proj, "mix.exs")),
-          `${featureId}: elixir project emitted`,
-        ).toBe(true);
-        runMixCompile(proj, mirror);
+        // One project per declared deployable (`d` for every single-service
+        // fixture; a multi-service feature names both, and BOTH must compile).
+        for (const dir of corpusProjectDirs(featureId)) {
+          const proj = path.join(outDir, dir);
+          expect(
+            fs.existsSync(path.join(proj, "mix.exs")),
+            `${featureId}: elixir project '${dir}' emitted`,
+          ).toBe(true);
+          runMixCompile(proj, mirror);
+        }
       } finally {
         // Best-effort: the docker container runs as root and writes root-owned
         // `deps/` + `_build/` into the mounted project dir, so a non-root CI

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateCorpusCase } from "../fixtures/corpus/harness.js";
+import { corpusProjectDirs, generateCorpusCase } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -45,18 +45,21 @@ describe.skipIf(!ENABLED)("corpus features type-check under strict tsc (Hono/nod
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, content);
       }
-      // The deployable is named `d` → its project lands under `d/`.
-      const proj = path.join(outDir, "d");
-      expect(
-        fs.existsSync(path.join(proj, "package.json")),
-        `${featureId}: node project emitted`,
-      ).toBe(true);
-      execSync("npm install --silent --no-audit --no-fund", {
-        cwd: proj,
-        stdio: "inherit",
-        timeout: 180_000,
-      });
-      execSync("npx tsc --noEmit", { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      // One project per declared deployable (`d` for every single-service
+      // fixture; a multi-service feature names both, and BOTH must compile).
+      for (const dir of corpusProjectDirs(featureId)) {
+        const proj = path.join(outDir, dir);
+        expect(
+          fs.existsSync(path.join(proj, "package.json")),
+          `${featureId}: node project '${dir}' emitted`,
+        ).toBe(true);
+        execSync("npm install --silent --no-audit --no-fund", {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync("npx tsc --noEmit", { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      }
     } finally {
       try {
         fs.rmSync(outDir, { recursive: true, force: true });

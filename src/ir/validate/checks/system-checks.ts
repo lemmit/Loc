@@ -33,6 +33,7 @@ import type {
   ExprIR,
   FunctionIR,
   OperationIR,
+  Platform,
   SavingShape,
   StmtIR,
   SubdomainIR,
@@ -59,7 +60,7 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
-import { walkExprDeep } from "../../util/walk.js";
+import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
 import { walkExpr } from "./shared.js";
@@ -2617,6 +2618,122 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
           `${missing.map((c) => `'${c}'`).join(", ")} required by context ` +
           `'${need.contextName}' for kind '${need.kind}'.`,
         source: `${sys.name}/${resource.name}`,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Typed remote-call backend support (M-T4.8).  Slice 2 lands the LOWERING —
+// `orders.getOrderById(id)` resolves against the callee's derived operation set
+// and types its result — but no backend emits the typed client yet (slices
+// 3-5).  Without this gate, such a model reaches the renderer and dies on a
+// stack trace.  This is the repo's HONEST-gap stance: a `loom.*` code the user
+// can read, not a silent mis-emit.
+//
+// The set is now EMPTY — every backend (node, python, dotnet, java, elixir)
+// emits a typed client, which is what "M-T4.8 is done" means.
+//
+// The check is deliberately KEPT rather than deleted with the last entry.  It
+// costs one `.some()` early-exit on models with no api binding, and it is the
+// honest-gap net for the NEXT backend: a sixth platform added without a client
+// would otherwise reach a `render-expr.ts` arm that has no idea what to emit.
+// Adding the new platform key here turns that into a readable `loom.*` error at
+// validation time, which is the whole stance this check exists to hold.
+// ---------------------------------------------------------------------------
+
+/** Backends with no typed in-system api client.  Empty as of slice 4d — add a
+ *  key here when introducing a backend before its client exists. */
+export const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([]);
+
+export function validateRemoteApiOpSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  // Cheap exit: no api-bound resource ⇒ no typed call can exist.
+  if (!sys.dataSources.some((r) => r.apiName)) return;
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const dep of sys.deployables) {
+    if (!REMOTE_API_OP_UNSUPPORTED.has(dep.platform)) continue;
+    for (const cn of dep.contextNames) {
+      const ctx = ctxByName.get(cn);
+      if (!ctx) continue;
+      for (const wf of ctx.workflows) {
+        for (const st of wf.statements) {
+          walkWorkflowStmtExprsDeep(st, (e) => {
+            if (e.kind !== "call" || e.callKind !== "remote-api-op") return;
+            const op = e.remoteApiOp;
+            if (!op) return;
+            diags.push({
+              severity: "error",
+              code: "loom.remote-api-op-unsupported",
+              message:
+                `workflow '${wf.name}' calls '${op.resourceName}.${op.operationId}' on the ` +
+                `in-system api '${op.apiName}', but deployable '${dep.name}' (platform ` +
+                `'${dep.platform}') emits no typed client for it yet (M-T4.8 slices 3-5).  ` +
+                `Use the untyped 'get'/'post' verbs over a 'storage restApi' binding until then.`,
+              source: `${sys.name}/${ctx.name}/${wf.name}`,
+            });
+          });
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-system typed api bindings (M-T4.8).  `resource { kind: api, use: <Api> }`
+// derives its address from the deployable that `serves:` that api — so the
+// binding is only well-formed when exactly ONE backend deployable serves it.
+// These are IR-level (not AST) checks because they need the whole system's
+// deployable set, which the AST validator does not have resolved.
+// ---------------------------------------------------------------------------
+
+export function validateApiResourceBindings(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const apiBound = sys.dataSources.filter((r) => r.apiName);
+  if (apiBound.length === 0) return;
+  for (const r of apiBound) {
+    const apiName = r.apiName as string;
+    // Frontends `consumes:` an api; they never serve its routes, so a
+    // frontend in `serves:` can't supply an address for a backend caller.
+    const servers = sys.deployables.filter(
+      (d) => d.serves.includes(apiName) && !descriptorFor(d.platform).isFrontend,
+    );
+    if (servers.length === 0) {
+      diags.push({
+        severity: "error",
+        code: "loom.resource-api-unserved",
+        message:
+          `resource '${r.name}' binds api '${apiName}', but no backend deployable serves it, ` +
+          `so its address cannot be derived.  Add 'serves: ${apiName}' to the deployable that hosts it.`,
+        source: `${sys.name}/${r.name}`,
+      });
+      continue;
+    }
+    if (servers.length > 1) {
+      diags.push({
+        severity: "error",
+        code: "loom.resource-api-ambiguous-server",
+        message:
+          `resource '${r.name}' binds api '${apiName}', which ${servers.length} deployables serve ` +
+          `(${servers.map((d) => `'${d.name}'`).join(", ")}).  The caller's address would be ambiguous — ` +
+          `have exactly one deployable serve it.`,
+        source: `${sys.name}/${r.name}`,
+      });
+      continue;
+    }
+    // Self-call: the deployable wiring this resource is the one serving the
+    // api.  That is always a mistake — the context is already in-process, so
+    // the call would leave the process only to re-enter it, paying a network
+    // hop and losing the ambient transaction.
+    const server = servers[0] as (typeof servers)[number];
+    for (const dep of sys.deployables) {
+      if (!dep.dataSourceNames.includes(r.name)) continue;
+      if (dep.name !== server.name) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.resource-api-self-call",
+        message:
+          `deployable '${dep.name}' wires resource '${r.name}', which binds api '${apiName}' that ` +
+          `'${dep.name}' itself serves.  Call the context directly instead — it is already in-process.`,
+        source: `${sys.name}/${r.name}`,
       });
     }
   }
