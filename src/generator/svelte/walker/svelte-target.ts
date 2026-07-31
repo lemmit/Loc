@@ -133,7 +133,8 @@ export const svelteTarget: WalkerTarget = {
   /** Filter via the shared `filterRows` helper (`$lib/table-sort`) — Svelte's
    *  strict `svelte-check` can't carry the inline `Object.values` cast, so it
    *  lives in the helper module. */
-  renderFilteredRows(rowsExpr, filter) {
+  renderFilteredRows({ rowsExpr, filter }) {
+    // `columns` unused: the shared helper enumerates row values at runtime.
     return `filterRows(${rowsExpr}, ${filter.name})`;
   },
 

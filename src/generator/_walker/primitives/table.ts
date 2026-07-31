@@ -66,6 +66,12 @@ export function emitTable(
   // the envelope's page count (drives the pager's "of M" + Next-disable).
   const serverPaged = boolNamed(call, "serverPaged");
   const totalPagesArg = namedArgValue(call, "totalPages");
+  // …but only where the target can actually consume the envelope AND refetch on
+  // the state it writes.  A target that decodes just `items` (Feliz) would emit
+  // `rows.totalPages` against a plain list and a header writing state nothing
+  // refetches on, so server mode falls back to a plain table there.  Client mode
+  // is unaffected — this is exactly the `serverPaged` branch.
+  const serverControls = !serverPaged || ctx.target.serverPagedControls !== false;
 
   // Column filter (M-T1.1 client).  A `filter:` state ref binds a search box
   // (rendered ABOVE the table) that narrows the rows by a case-insensitive
@@ -84,7 +90,15 @@ export function emitTable(
   if (filterActive && filterRef) {
     ctx.usesState = true;
     ctx.usesTableFilter = true;
-    rowsExpr = ctx.target.renderFilteredRows!(rowsExpr, filterRef);
+    rowsExpr = ctx.target.renderFilteredRows!({
+      rowsExpr,
+      filter: filterRef,
+      // Every column with a resolvable member accessor — the searchable field
+      // set for a target that can't enumerate a record's values at runtime.
+      // Pre-scanned for the same reason `sortableColumnFields` is: the column
+      // walk below runs after this.
+      columns: columnFields(call),
+    });
     filterMarkup = ctx.target.renderFilterInput!(filterRef);
   }
 
@@ -97,6 +111,7 @@ export function emitTable(
   const sortActive =
     sortKeyName !== undefined &&
     sortDirName !== undefined &&
+    serverControls &&
     ctx.target.renderSortableHeader !== undefined;
   const sortKeyRef = sortKeyName !== undefined ? stateRefFor(sortKeyName) : undefined;
   const sortDirRef = sortDirName !== undefined ? stateRefFor(sortDirName) : undefined;
@@ -129,7 +144,10 @@ export function emitTable(
   const pageName = refArgName(call, "page");
   const pageSize = numericNamed(call, "pageSize") ?? 10;
   const pagedActive =
-    pageName !== undefined && pageSize > 0 && ctx.target.renderPager !== undefined;
+    pageName !== undefined &&
+    pageSize > 0 &&
+    serverControls &&
+    ctx.target.renderPager !== undefined;
   const pageRef = pageName !== undefined ? stateRefFor(pageName) : undefined;
   let pagerMarkup: string | undefined;
   if (pagedActive && pageRef) {
@@ -261,6 +279,15 @@ export function emitTable(
   // `Paper`); the filter box renders as a sibling ABOVE it.  Concatenation
   // keeps the table markup untouched for a plain table (byte-identical) and
   // wraps it only with the controls actually requested.
+  //
+  // An EXPRESSION-language target can't concatenate siblings at all (adjacent
+  // F# expressions sequence rather than compose), so it builds its own
+  // container through `joinRoots` — reached only when there IS more than one
+  // root, so a plain table stays a bare table there too.
+  const roots = [filterMarkup, tableMarkup, pagerMarkup].filter(
+    (p): p is string => p !== undefined,
+  );
+  if (ctx.target.joinRoots && roots.length > 1) return ctx.target.joinRoots(roots);
   let result = pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
   if (filterMarkup) {
     result = `${filterMarkup}\n${closeIndent}${result}`;
@@ -289,7 +316,7 @@ function emitColumn(
   index: number,
   depth: number,
   sortRefs?: { sortKeyRef: StateRef; sortDirRef: StateRef },
-): { header: string; cellJsx: string; key: string } {
+): { header: string; headerMarkup: boolean; cellJsx: string; key: string } {
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
   const accessorArg = positionals[1];
@@ -327,6 +354,7 @@ function emitColumn(
   // the explicit `field:` arg, else the accessor's member (`o => o.name` →
   // `"name"`); a column whose field can't be resolved stays a plain header.
   let header = ctx.target.escapeText(headerStr);
+  let headerMarkup = false;
   if (boolNamed(call, "sortable") && sortRefs && ctx.target.renderSortableHeader) {
     const field = stringNamed(call, "field") ?? sortFieldFromAccessor(accessorArg);
     if (field) {
@@ -336,11 +364,17 @@ function emitColumn(
         sortKey: sortRefs.sortKeyRef,
         sortDir: sortRefs.sortDirRef,
       });
+      headerMarkup = true;
     }
   }
 
   return {
     header,
+    // A sortable header is an ELEMENT (a clickable button), a plain one is
+    // TEXT.  The markup packs splice either into the same `<th>` slot and can
+    // ignore the distinction; a pack that has to wrap text itself (Feliz's
+    // `Html.text "…"`) would emit the button as a string literal without it.
+    headerMarkup,
     cellJsx,
     key,
   };
@@ -352,11 +386,27 @@ function emitColumn(
  *  `field:`, else the accessor's member), so the two cannot disagree about
  *  which columns are sortable. */
 function sortableColumnFields(call: Extract<ExprIR, { kind: "call" }>): string[] {
-  return call.args
-    .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
+  return columnCalls(call)
     .filter((c) => boolNamed(c, "sortable") === true)
     .map((c) => stringNamed(c, "field") ?? sortFieldFromAccessor(c.args[1]))
     .filter((f): f is string => f !== undefined);
+}
+
+/** Every column's row field, in declaration order — the SEARCHABLE set, so
+ *  unlike `sortableColumnFields` this ignores `sortable:`.  A column whose
+ *  accessor is richer than `o => o.<field>` (a formatting call, a nested
+ *  primitive) contributes nothing: there is no single row property behind it. */
+function columnFields(call: Extract<ExprIR, { kind: "call" }>): string[] {
+  return columnCalls(call)
+    .map((c) => stringNamed(c, "field") ?? sortFieldFromAccessor(c.args[1]))
+    .filter((f): f is string => f !== undefined);
+}
+
+/** The `Column(...)` calls under a `Table`, in declaration order. */
+function columnCalls(call: Extract<ExprIR, { kind: "call" }>): (ExprIR & { kind: "call" })[] {
+  return call.args.filter(
+    (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column",
+  );
 }
 
 /** Infer a column's sort field from a simple accessor lambda `o => o.<field>`.

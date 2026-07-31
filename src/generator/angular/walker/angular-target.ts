@@ -148,7 +148,8 @@ export const angularTarget: WalkerTarget = {
   /** Filter via the shared `filterRows` helper, which the Angular page-shell
    *  re-exposes as a component member (templates can only call members, not free
    *  imports).  Signals read with `()`. */
-  renderFilteredRows(rowsExpr, filter) {
+  renderFilteredRows({ rowsExpr, filter }) {
+    // `columns` unused: the shared helper enumerates row values at runtime.
     return `filterRows(${rowsExpr}, ${filter.name}())`;
   },
 

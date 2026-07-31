@@ -123,6 +123,26 @@ export interface SortedRowsSpec {
   columns: readonly string[];
 }
 
+/** What a target needs to filter a `Table`'s rows client-side (M-T1.1 — the
+ *  `renderFilteredRows` seam).
+ *
+ *  `columns` is here for the same reason it is on `SortedRowsSpec`: JS reads
+ *  every row value generically (`Object.values(row)`), but an F# or Dart record
+ *  has no runtime value enumeration Fable/Dart can rely on, so a statically-
+ *  typed target has to name the fields it searches.  It searches the columns
+ *  the table actually DISPLAYS — a narrower set than `Object.values`, which is
+ *  a deliberate, documented divergence rather than a silent one. */
+export interface FilteredRowsSpec {
+  /** The bound rows expression to filter, BEFORE sort/slice. */
+  rowsExpr: string;
+  /** Page-state field holding the search query. */
+  filter: StateRef;
+  /** The field of every column whose accessor resolves to a simple member, in
+   *  declaration order.  A target that enumerates row values at runtime (all
+   *  four JSX targets) ignores it. */
+  columns: readonly string[];
+}
+
 /** The data a target needs to render a pager control below a paged `Table`
  *  (M-T1.1 / M-T2.6 — the `renderPager` seam). */
 export interface PagerSpec {
@@ -945,6 +965,19 @@ export interface WalkerTarget {
    *  it would still be JavaScript. */
   renderClientPaging?(spec: ClientPagingSpec): ClientPagingResult;
 
+  /** OPTIONAL — set `false` when this target cannot drive a SERVER-paged
+   *  `Table`, even though it implements the control seams.  Server mode needs
+   *  two things the client mode doesn't: a `totalPages` off the paged ENVELOPE,
+   *  and a refetch that feeds the sort/page state back through the query's
+   *  `of:` args.  Feliz's wire layer decodes only the envelope's `items` into a
+   *  plain `'T list` (M-T2.6 left the Feliz envelope unwrap pinned), so
+   *  `rows.totalPages` doesn't type-check and a sortable header would write
+   *  state nothing refetches on.  Suppressing both there renders the table as
+   *  the plain, server-ORDERED page it already is — correct, just not
+   *  interactive — rather than emitting a control that lies.  Omitted → server
+   *  mode is supported (every JSX target). */
+  serverPagedControls?: boolean;
+
   /** Clamp the SERVER-supplied page count to at least 1.  Omitted → the JS
    *  default `Math.max(1, <expr>)`.  Split from `renderClientPaging` because
    *  server mode does no windowing at all — the envelope already carries one
@@ -966,7 +999,7 @@ export interface WalkerTarget {
    *  an inline `.filter(...)`; the strict-template frameworks (Vue/Svelte/
    *  Angular) call the shared `filterRows` helper.  Omitted → rows render
    *  unfiltered. */
-  renderFilteredRows?(rowsExpr: string, filter: StateRef): string;
+  renderFilteredRows?(spec: FilteredRowsSpec): string;
 
   /** OPTIONAL — wrap a `Table`'s multi-root markup (a filter box and/or a
    *  pager rendered as siblings of the `<table>`) into a SINGLE root.  JSX
@@ -977,6 +1010,18 @@ export interface WalkerTarget {
    *  Called only when the table actually emitted >1 root; a plain table never
    *  reaches it. */
   wrapMultiRoot?(markup: string): string;
+
+  /** OPTIONAL — combine a `Table`'s sibling roots (filter box, table, pager)
+   *  into one expression.  The markup languages need nothing here: adjacent
+   *  elements separated by a newline ARE the concatenation, which is why the
+   *  four JSX targets omit this and only reach for `wrapMultiRoot`.  An
+   *  EXPRESSION language cannot do that — two adjacent F# expressions are a
+   *  sequential expression that discards the first, and two adjacent Dart
+   *  expressions do not parse at all — so those targets implement this to build
+   *  a real container (`Html.div [ prop.children [ a; b ] ]`).  Called only
+   *  when the table emitted >1 root; a plain table returns its markup
+   *  untouched either way. */
+  joinRoots?(parts: readonly string[]): string;
 
   // --- DataGrid seam (M-T1.1 slice 10) ------------------------------------
   //

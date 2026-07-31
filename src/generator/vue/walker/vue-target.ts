@@ -175,7 +175,8 @@ export const vueTarget: WalkerTarget = {
    *  carry the inline `Object.values` cast, so the logic lives in
    *  `src/lib/table-sort.ts` and the `v-for` expression just calls it.  Refs
    *  auto-unwrap in the template. */
-  renderFilteredRows(rowsExpr, filter) {
+  renderFilteredRows({ rowsExpr, filter }) {
+    // `columns` unused: the shared helper enumerates row values at runtime.
     return `filterRows(${rowsExpr}, ${filter.name})`;
   },
 

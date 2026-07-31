@@ -665,6 +665,146 @@ export const felizTarget: WalkerTarget = {
   // wraps it in `Html.text "…"` or `prop.text "…"`).
   escapeText: (text: string) => text.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
 
+  // --- Table control seams (M-T1.1) --------------------------------------
+  //
+  // Every write here dispatches a `Set<Field>` Msg rather than assigning: the
+  // Feliz `renderStateWrite` is a no-op because Elmish state lives in `update`.
+  // Those Msg cases exist because `Table` is registered in `wire.ts`'s
+  // `BOUND_INPUT_PRIMITIVES` — its `sortKey`/`sortDir`/`page`/`filter` refs are
+  // collected exactly like a `Field`'s `bind:`, so `boundSetMsg`/`boundSetArm`
+  // generate the case and the arm (including the string→int parse `page` needs).
+  //
+  // Everything below stays on ONE line: these render INSIDE an enclosing
+  // `prop.children [ … ]`, and F# is offside-sensitive (§24).
+
+  /** Clickable column header driving `sortKey`/`sortDir`.  Re-clicking the
+   *  ACTIVE column flips the direction; clicking a new one selects it and
+   *  resets to ascending — which needs two Msgs, so that branch dispatches
+   *  twice (Elmish folds each in turn; no combined Msg case required). */
+  renderSortableHeader(spec) {
+    const { header, field } = spec;
+    const k = `model.${upperFirst(spec.sortKey.name)}`;
+    const d = `model.${upperFirst(spec.sortDir.name)}`;
+    const setK = `Set${upperFirst(spec.sortKey.name)}`;
+    const setD = `Set${upperFirst(spec.sortDir.name)}`;
+    const q = `"${field}"`;
+    const onClick =
+      `fun _ -> if ${k} = ${q} then dispatch (${setD} (if ${d} = "asc" then "desc" else "asc")) ` +
+      `else (dispatch (${setK} ${q}); dispatch (${setD} "asc"))`;
+    const indicator = `(if ${k} = ${q} then (if ${d} = "asc" then " ↑" else " ↓") else "")`;
+    // A real `<button>`, like the JSX targets emit — keyboard-focusable, with
+    // the implicit ARIA role the a11y gate wants.  `btn-ghost` keeps the header
+    // reading as a header rather than a control.
+    return (
+      `Html.button [ prop.className "btn btn-ghost btn-xs px-1 font-bold"; prop.type'.button; ` +
+      `prop.onClick (${onClick}); prop.text ("${header}" + ${indicator}) ]`
+    );
+  },
+
+  /** Client-side sort.  The sort key is a runtime string but an F# record can't
+   *  be indexed by one, so this matches the key against the sortable columns and
+   *  compares the FIELD — which also types each comparison correctly (F#
+   *  `compare` orders ints numerically, strings lexicographically), matching
+   *  JS's relational `<` instead of stringifying everything. */
+  renderSortedRows({ rowsExpr, sortKey, sortDir, columns }) {
+    const k = `model.${upperFirst(sortKey.name)}`;
+    const d = `model.${upperFirst(sortDir.name)}`;
+    const arms = columns.map((f) => `| "${f}" -> compare a.${f} b.${f}`).join(" ");
+    // No sortable column resolved a field → nothing to sort by; leave the rows
+    // alone rather than emitting a `match` whose only arm is the wildcard.
+    if (arms === "") return rowsExpr;
+    return (
+      `(${rowsExpr} |> List.sortWith (fun a b -> ` +
+      `let c = (match ${k} with ${arms} | _ -> 0) in if ${d} = "desc" then -c else c))`
+    );
+  },
+
+  /** Client-side page window.  `List.skip` raises when the count exceeds the
+   *  list length, so this filters on the index instead — total-safe, and it
+   *  mentions the rows expression once. */
+  renderClientPaging({ rowsExpr, page, pageSize }) {
+    const p = `model.${upperFirst(page.name)}`;
+    const lo = `((${p} - 1) * ${pageSize})`;
+    return {
+      rowsExpr:
+        `(${rowsExpr} |> List.indexed |> List.filter ` +
+        `(fun (i, _) -> i >= ${lo} && i < ${p} * ${pageSize}) |> List.map snd)`,
+      // Ceiling division on ints — F# has no `Math.ceil` over an int quotient.
+      totalPagesExpr: `(max 1 ((List.length (${rowsExpr}) + ${pageSize} - 1) / ${pageSize}))`,
+    };
+  },
+
+  renderServerTotalPages: (totalPagesExpr: string) => `(max 1 (${totalPagesExpr}))`,
+
+  // Server-paged mode is OFF here: the Feliz wire layer decodes the envelope's
+  // `items` into a plain `'T list` (M-T2.6 left the Feliz unwrap pinned), so
+  // `rows.totalPages` has nothing to read from, and the query's `of:` args carry
+  // no page/sort to refetch on.  A scaffolded list page — which IS server-paged
+  // — therefore renders the plain server-ordered page it already receives.
+  // `renderServerTotalPages` above stays implemented so flipping this to true is
+  // the only change once the envelope lands.
+  serverPagedControls: false,
+
+  /** Prev / "Page N of M" / Next.  `page` is an int state field, but the shared
+   *  `Set<Field>` arm parses from a string (that is how every bound input
+   *  dispatches), so the new page number is stringified on the way in. */
+  renderPager({ page, totalPagesExpr }) {
+    const p = `model.${upperFirst(page.name)}`;
+    const setP = `Set${upperFirst(page.name)}`;
+    // The page count is read four times (label, Next's disabled, Next's target
+    // clamp) and in client mode it carries the whole filter+sort chain, so bind
+    // it ONCE.  `let … in …` keeps that on one line, which the offside rule
+    // needs here (§24).
+    const tp = "__tp";
+    const go = (v: string) => `prop.onClick (fun _ -> dispatch (${setP} (string ${v})))`;
+    const prev =
+      `Html.button [ prop.className "btn btn-sm"; prop.type'.button; ` +
+      `prop.disabled (${p} <= 1); ${go(`(max 1 (${p} - 1))`)}; prop.text "Prev" ]`;
+    const label = `Html.span [ prop.text (sprintf "Page %d of %d" ${p} ${tp}) ]`;
+    const next =
+      `Html.button [ prop.className "btn btn-sm"; prop.type'.button; ` +
+      `prop.disabled (${p} >= ${tp}); ${go(`(min ${tp} (${p} + 1))`)}; prop.text "Next" ]`;
+    return (
+      `(let ${tp} = ${totalPagesExpr} in ` +
+      `Html.div [ prop.className "flex items-center justify-end gap-2 mt-3"; ` +
+      `prop.custom("data-testid", "pager"); prop.children [ ${prev}; ${label}; ${next} ] ])`
+    );
+  },
+
+  /** The search box above a filterable table — the same controlled-input idiom
+   *  the pack's `Field` uses (`prop.value` + `onChange` dispatching `Set…`). */
+  renderFilterInput(filter) {
+    const v = `model.${upperFirst(filter.name)}`;
+    const set = `Set${upperFirst(filter.name)}`;
+    return (
+      `Html.input [ prop.className "input input-bordered input-sm w-full max-w-xs mb-3"; ` +
+      `prop.type'.search; prop.placeholder "Filter…"; prop.ariaLabel "Filter table"; ` +
+      `prop.custom("data-testid", "table-filter"); prop.value ${v}; ` +
+      `prop.onChange (fun (s: string) -> dispatch (${set} s)) ]`
+    );
+  },
+
+  /** Case-insensitive substring filter.  The JSX targets search `Object.values
+   *  (row)`; Fable has no reliable runtime value enumeration for an F# record,
+   *  so this searches the fields the table DISPLAYS — narrower than every row
+   *  value, and named as such in `docs/new-plan/T1-ui-frontend.md` rather than
+   *  left to be discovered. */
+  renderFilteredRows({ rowsExpr, filter, columns }) {
+    const q = `model.${upperFirst(filter.name)}`;
+    if (columns.length === 0) return rowsExpr;
+    const vals = columns.map((f) => `string r.${f}`).join("; ");
+    return (
+      `(${rowsExpr} |> List.filter (fun r -> let __q = (${q}).Trim().ToLower() in ` +
+      `__q = "" || ([ ${vals} ] |> List.exists (fun v -> v.ToLower().Contains(__q)))))`
+    );
+  },
+
+  /** F# has no adjacent-sibling concatenation — `a\nb` sequences and discards
+   *  `a` — so a table with a filter box and/or a pager becomes a real flex
+   *  column.  A plain table never reaches here. */
+  joinRoots: (parts: readonly string[]) =>
+    `Html.div [ prop.className "flex flex-col"; prop.children [ ${parts.join("; ")} ] ]`,
+
   // --- Handler seams — MVU dispatch --------------------------------------
   // A button's `onClick: inc` reaches this with statements `["inc();"]`; the
   // hoisted wrapper (`renderNamedHandler`) turns `inc` into `dispatch Inc`.
