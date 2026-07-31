@@ -340,3 +340,45 @@ hard rule): retarget those trigger examples at `docs/new-plan/README.md` +
 `docs/new-plan/coverage.md`, and add a boundary line: archived docs under `docs/old/` get
 banner/link fixes only, never status refreshes. Second sighting not required — this is a
 mechanical consequence of a landed refactor, same class as a rename scrub.
+
+---
+
+## PATCH proposal (2026-07-31, session: M-T4.8 typed in-system api calls): `generated-stack-verifier` is single-stack; the multi-service topology is a real gap
+
+**Cited friction.** M-T4.8 (#2291/#2318/#2326) needed the verifier's exact recipe —
+`dockerd` bring-up + readiness gate, per-backend container boot in the same image the
+compile gate uses, `LOOM_HEX_MIRROR=1` for Elixir, a real read **and** write
+round-trip — and ran it **five times** (once per caller backend). The skill never
+fired and the harness was written by hand (`test/e2e/api-call-e2e.test.ts`, ~600
+lines). Two costs were paid that the skill's `references/docker-recipes.md` would
+have removed outright: the `--rm`-discards-the-package-cache trap (NuGet, then again
+for hex — see `experience_gathered.md` §58) and the postgres initdb-restart race
+(`pg_isready` passes against the FIRST server; the `CREATE DATABASE` must itself be
+the retried probe).
+
+**Why the trigger didn't match.** The description is framed for ONE stack — "boot the
+generated app stack", "the backend reaches its database". This task was *two*
+generated services with *separate* databases proving a **cross-service** call, so
+nothing in the trigger text ("do the migrations apply?", "why is the obs-e2e gate
+red?") reads as covering it. The gap is real, not just phrasing: step 2 of the
+skill's recipe has no notion of a second deployable, a `<RESOURCE>_URL` seam, or an
+assertion that reads back from the *callee* to prove the caller wrote there.
+
+**Proposed patch** (propose-only, per the hard rule):
+
+1. Widen the trigger with the multi-service phrasings actually used: "boot two
+   generated services", "prove service A can call service B", "cross-service /
+   in-system api call", "the `api-call-e2e` gate is red".
+2. Add a short multi-service arm to the recipe: one database **per deployable**
+   (the isolation is what makes the round-trip assertion mean anything — a shared DB
+   lets the caller read the callee's rows locally and proves nothing); inject
+   `<RESOURCE>_URL` exactly as `src/system/index.ts` writes it into compose; assert
+   the write by querying the **callee**, not the caller.
+3. Add two landmines to `references/runtime-landmines.md`: `docker run --rm` discards
+   `/root/.nuget` and `/root/.hex` between the restore container and the boot
+   container (mount a shared host dir); and postgres restarts once after initdb, so
+   `CREATE DATABASE` must be the retried probe rather than a step after `pg_isready`.
+
+**Evidence strength: n=1.** One session, one feature. The trigger-widening in (1) is
+mechanical and low-risk; (2) and (3) add scope and should wait for a second sighting
+(any future task that boots more than one generated deployable) before being built.
