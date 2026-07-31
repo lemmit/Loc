@@ -570,11 +570,13 @@ export interface WalkEnv {
    *  walks the accessor body with `o → "row"`; refs to `o` resolve
    *  to the JS identifier `row`.  Outer scope is unaffected. */
   lambdaParams: ReadonlyMap<string, string>;
-  /** Lambda-param names bound to a PAGED query result on a target that
-   *  decodes the envelope straight to a list (Feliz).  The scaffold's
-   *  `rows.items` unwrap is a no-op on such a binding, so the member walk
-   *  strips the `.items`.  Empty/absent on every JSX target (envelope kept). */
-  pagedListBindings?: ReadonlySet<string>;
+  /** Lambda params bound to a PAGED query result, mapped to the query HANDLE
+   *  that produced them (the Feliz Model field `AllOrders`, the JSX hook var).
+   *  Only populated on a target implementing `renderPagedEnvelopeMember` — a
+   *  target whose Model doesn't hold the envelope, so the scaffold's
+   *  `rows.items` / `rows.totalPages` have to be resolved against something
+   *  else.  Absent on every JSX target (they keep the envelope verbatim). */
+  pagedListBindings?: ReadonlyMap<string, string>;
   /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
    *  `CreateForm(of:, onSubmit:)` lambda, `create` is the mutation hook
@@ -1492,18 +1494,22 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         ctx.usesCurrentUser = true;
         return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
       }
-      // Feliz decodes a paged `.all` straight to a `'T list` (no envelope),
-      // so the scaffold's `rows.items` unwrap is a no-op there — strip the
-      // `.items` on a paged-list binding rather than emit `list.items` (which
-      // doesn't type-check under Fable).  Every JSX target keeps the envelope,
-      // so the flag is off and the access renders verbatim.
-      if (
-        ctx.target.pagedDataIsList &&
-        expr.member === "items" &&
-        expr.receiver.kind === "ref" &&
-        ctx.pagedListBindings?.has(expr.receiver.name)
-      ) {
-        return emitExpr(expr.receiver, ctx);
+      // A member read off a PAGED query binding, on a target whose Model does
+      // not hold the envelope (Feliz decodes the rows and the page count into
+      // separate fields).  `rows.items` there is a plain list and `rows
+      // .totalPages` lives elsewhere entirely, so the target resolves both;
+      // returning undefined falls through to the verbatim access.  Every JSX
+      // target keeps the envelope and omits the seam.
+      if (expr.receiver.kind === "ref" && ctx.target.renderPagedEnvelopeMember) {
+        const handle = ctx.pagedListBindings?.get(expr.receiver.name);
+        if (handle !== undefined) {
+          const resolved = ctx.target.renderPagedEnvelopeMember({
+            member: expr.member,
+            binding: emitExpr(expr.receiver, ctx),
+            handle,
+          });
+          if (resolved !== undefined) return resolved;
+        }
       }
       // Plain JS member access: `<recv>.<member>`.  Recursive
       // emit on the receiver — if it was a hook-eligible chain

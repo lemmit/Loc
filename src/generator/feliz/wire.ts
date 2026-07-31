@@ -81,6 +81,71 @@ export interface FelizRead {
   /** For a byId read, the `Page` union case hosting it (`ProductDetail`) — the
    *  arm `pageCmd` fires the fetch from.  Undefined for list reads. */
   pageCase?: string;
+  /** SERVER-paged list read (M-T2.6) — present when the hosting `QueryView`'s
+   *  `of:` threads page/sort controls, which is what a scaffolded list page
+   *  emits.  Absent for a plain `.all` (an FK-select's option source, a
+   *  non-paged aggregate shape); those keep the paramless read verbatim. */
+  paging?: FelizReadPaging;
+}
+
+/** The page/sort controls a server-paged list read is driven by.  The three
+ *  field names are the MODEL (Pascal) fields the page's `state {}` declares —
+ *  the same cells the `Table`'s sortable headers and pager write through their
+ *  `Set<Field>` Msgs, which is what makes a control change refetch. */
+export interface FelizPageControls {
+  /** Model field holding the 1-based page number (`PageNum`). */
+  pageField: string;
+  /** Model field holding the active sort column (`SortKey`). */
+  sortKeyField: string;
+  /** Model field holding the sort direction (`SortDir`). */
+  sortDirField: string;
+  /** Rows per page — a literal in the scaffold's `of:`, not page state. */
+  pageSize: number;
+}
+
+/** A list read consumed as a PAGED envelope — the `QueryView paged: true` the
+ *  scaffold emits alongside its `Table serverPaged: true`.  The page COUNT is
+ *  always decoded; the CONTROLS are separate because a paged read is only
+ *  refetchable when its `of:` actually threads page/sort state. */
+export interface FelizReadPaging {
+  /** The page/sort cells that drive a refetch, when the `of:` threads them.
+   *  Absent → the count still renders (truthfully), but the pager can't
+   *  navigate: `Next` stays disabled rather than writing state nothing reads. */
+  controls?: FelizPageControls;
+  /** Model field the envelope's `totalPages` lands in (`AllOrdersTotalPages`).
+   *  A SIBLING of the list field rather than an envelope wrapping it: the list
+   *  field is also read by `View.idOptions` (FK selects) and by the realtime
+   *  refetch, so widening its type would break both for no gain. */
+  totalPagesField: string;
+}
+
+/** The Model field a server-paged read's `totalPages` lands in. */
+export function totalPagesFieldName(readField: string): string {
+  return `${readField}TotalPages`;
+}
+
+/** The `Msg` case that asks for a paged read to be re-issued with the model's
+ *  CURRENT page/sort — the realtime handler has no `model` in scope, so it
+ *  dispatches this instead of building the `Cmd` itself (dispatching a
+ *  paramless read there would silently reset the user's page and sort). */
+export function refetchMsgCase(readField: string): string {
+  return `Refetch${readField}`;
+}
+
+/** The `Cmd` that (re-)issues a paged list read from a model expression — the
+ *  one place the argument ORDER is spelled, so init / refetch / control-change
+ *  can't drift apart from `renderApiFn`'s parameter list. */
+export function pagedReadCmd(r: FelizRead, modelExpr: string): string {
+  const c = r.paging?.controls;
+  if (!c) return `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`;
+  const args = `${modelExpr}.${c.pageField} ${c.pageSize} ${modelExpr}.${c.sortKeyField} ${modelExpr}.${c.sortDirField}`;
+  return `Cmd.OfAsync.perform (fun () -> Api.${r.apiFn} ${args}) () ${r.msgCase}`;
+}
+
+/** The F# type a read's `Loaded` Msg carries.  A paged read carries the page
+ *  COUNT alongside the rows, so the update arm can store both in one step. */
+export function readLoadedType(r: FelizRead): string {
+  return r.paging ? `${r.resultType} * int` : r.resultType;
 }
 
 /** The Model field name for an aggregate list read (`Order` → `AllOrders`). */
@@ -93,9 +158,21 @@ export function byIdFieldName(aggregate: string): string {
   return `${upperFirst(aggregate)}ById`;
 }
 
+/** How a `.all` read is consumed.  `paged` marks the `QueryView paged: true`
+ *  envelope; `controls` the page/sort state its `of:` threads (only meaningful
+ *  under `paged`). */
+export interface FelizAllReadOpts {
+  paged?: boolean;
+  controls?: FelizPageControls;
+}
+
 /** Build the `FelizRead` for a `.all` read of `aggregate`. */
-export function felizAllRead(aggregate: string): FelizRead {
+export function felizAllRead(aggregate: string, opts: FelizAllReadOpts = {}): FelizRead {
   const field = readFieldName(aggregate);
+  const paging: FelizReadPaging | undefined = opts.paged
+    ? { controls: opts.controls, totalPagesField: totalPagesFieldName(field) }
+    : undefined;
+  const items = `(Decode.field "items" (Decode.list Decoders.${lowerFirst(aggregate)}))`;
   return {
     field,
     msgCase: `${field}Loaded`,
@@ -103,13 +180,17 @@ export function felizAllRead(aggregate: string): FelizRead {
     aggregate,
     resultType: `${upperFirst(aggregate)} list`,
     // The auto-`findAll` is paged-by-default (M-T2.6): `GET /<aggs>` returns the
-    // `{items, page, …}` wire envelope, so the list read decodes the `items`
-    // field out of it (the Model still holds a plain `'T list` — page 1, no
-    // pager/sort UI, matching the M-T1.1 Feliz "attempt / fail-fast" disposition).
-    decoderExpr: `(Decode.field "items" (Decode.list Decoders.${lowerFirst(aggregate)}))`,
+    // `{items, page, …}` wire envelope.  An UNCONTROLLED read wants only the
+    // rows; a page/sort-CONTROLLED one also needs the page count, so it decodes
+    // the pair the `Loaded` Msg carries.  Both keep the Model's list field a
+    // plain `'T list` — see `FelizReadPaging.totalPagesField`.
+    decoderExpr: paging
+      ? `(Decode.map2 (fun __items __tp -> (__items, __tp)) ${items} (Decode.field "totalPages" Decode.int))`
+      : items,
     route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
     binding: lowerFirst(field),
     single: false,
+    paging,
   };
 }
 
@@ -869,13 +950,15 @@ function exprChildren(e: ExprIR): ExprIR[] {
 }
 
 /** Every `QueryView(of: <expr>)` `of:` argument in a page body, in tree order. */
-function queryViewOfArgs(body: ExprIR): ExprIR[] {
-  const out: ExprIR[] = [];
+function queryViewOfArgs(body: ExprIR): { of: ExprIR; paged: boolean }[] {
+  const out: { of: ExprIR; paged: boolean }[] = [];
   const walk = (e: ExprIR): void => {
     if (e.kind === "call" && e.name === "QueryView") {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
-      if (idx >= 0 && e.args[idx]) out.push(e.args[idx]);
+      // `paged: true` marks the `Paged<T>` envelope the auto-`findAll` returns
+      // (M-T2.6) — the scaffold emits it beside its `Table serverPaged: true`.
+      if (idx >= 0 && e.args[idx]) out.push({ of: e.args[idx], paged: boolNamed(e, "paged") });
     }
     for (const c of exprChildren(e)) walk(c);
   };
@@ -900,19 +983,62 @@ export function collectPageReads(
   const pageCase = upperFirst(pageEmitName(page, nameCtx));
   const out: FelizRead[] = [];
   const seen = new Set<string>();
-  for (const ofArg of queryViewOfArgs(page.body)) {
+  for (const { of: ofArg, paged } of queryViewOfArgs(page.body)) {
     const detected = tryDetectApiHook(ofArg, detCtx);
     if (detected?.kind !== "aggregate") continue;
     // List (`.all`) or single (`byId`) reads.  A byId read is keyed to the
     // hosting page's `Page` case so `pageCmd` can fire it on entry.
     let read: FelizRead | undefined;
-    if (detected.operation === "all") read = felizAllRead(detected.aggregateName);
+    if (detected.operation === "all")
+      read = felizAllRead(detected.aggregateName, {
+        paged,
+        controls: pagingFromArgs(detected.args, page),
+      });
     else if (detected.operation === "byId") read = felizByIdRead(detected.aggregateName, pageCase);
-    if (!read || seen.has(read.field)) continue;
+    if (!read) continue;
+    // The same aggregate can be read twice on one page — a controlled list plus,
+    // say, an FK-select's option source.  They share a Model field, so keep the
+    // PAGED one: its list field is identical, it just carries the extra page
+    // count and the controlled api signature the uncontrolled caller can reuse.
+    const prior = out.findIndex((r) => r.field === read.field);
+    if (prior >= 0) {
+      if (read.paging && !out[prior]!.paging) out[prior] = read;
+      continue;
+    }
     seen.add(read.field);
     out.push(read);
   }
   return out;
+}
+
+/** Read the page/sort controls out of a server-paged `of:`.
+ *
+ *  The scaffold emits `<Agg>.all(pageNum, 10, sortKey, sortDir)` — three refs to
+ *  page `state {}` cells around a literal page size.  Anything else (a bare
+ *  `.all()`, a hand-written call with a different shape) yields `undefined` and
+ *  the read stays uncontrolled, so this recognises the scaffold's shape without
+ *  claiming to interpret arbitrary arguments. */
+function pagingFromArgs(args: readonly ExprIR[], page: PageIR): FelizPageControls | undefined {
+  if (args.length !== 4) return undefined;
+  const [pageArg, sizeArg, sortKeyArg, sortDirArg] = args;
+  if (pageArg?.kind !== "ref" || sortKeyArg?.kind !== "ref" || sortDirArg?.kind !== "ref") {
+    return undefined;
+  }
+  if (sizeArg?.kind !== "literal" || sizeArg.lit !== "int") return undefined;
+  // Each control must be a declared `state {}` cell: that is what gives it a
+  // Model field to read and a `Set<Field>` Msg to refetch on.
+  const stateNames = new Set(page.state.map((s) => s.name));
+  for (const a of [pageArg, sortKeyArg, sortDirArg]) {
+    if (!stateNames.has(a.name)) return undefined;
+  }
+  const pageSize = Number(sizeArg.value);
+  if (!Number.isInteger(pageSize) || pageSize <= 0) return undefined;
+  return {
+    pageField: upperFirst(pageArg.name),
+    sortKeyField: upperFirst(sortKeyArg.name),
+    sortDirField: upperFirst(sortDirArg.name),
+    pageSize,
+  };
 }
 
 /** Every `<PrimitiveName>(of: <Agg>)` aggregate a page body hosts, in tree order
@@ -1166,12 +1292,7 @@ export function collectPageBoundState(page: PageIR): FelizBoundState[] {
   const walk = (e: ExprIR): void => {
     if (e.kind === "call") {
       const bindArgs = BOUND_INPUT_PRIMITIVES.get(e.name);
-      // A SERVER-paged `Table` renders no controls on Feliz (the target's
-      // `serverPagedControls: false` — the wire decodes only the envelope's
-      // `items`, so there is no `totalPages` and no refetch to drive), so its
-      // refs must not contribute Msg cases either: they would be dead arms
-      // nothing dispatches.  Keeps a scaffolded list page byte-identical.
-      if (bindArgs && !(e.name === "Table" && boolNamed(e, "serverPaged"))) {
+      if (bindArgs) {
         const names = e.argNames ?? [];
         for (const bindArg of bindArgs) {
           const idx = names.indexOf(bindArg);
@@ -1979,6 +2100,26 @@ function renderApiFn(r: FelizRead): (string | undefined)[] {
       "        | Error e -> return Error e",
       "      elif status = 404 then",
       "        return Ok None",
+      "      else",
+      '        return Error (sprintf "HTTP %d" status)',
+      "    }",
+    ];
+  }
+  // A page/sort-CONTROLLED list read takes the controls as parameters and
+  // sends the paged findAll's query string.  `sort`/`dir` are appended only
+  // when a column is actually selected: the initial `sortKey` is "", and
+  // `?sort=` would ask the backend to order by a column that doesn't exist.
+  if (r.paging?.controls) {
+    return [
+      `  let ${r.apiFn} (page: int) (pageSize: int) (sortKey: string) (sortDir: string) : Async<Result<${readLoadedType(r)}, string>> =`,
+      "    async {",
+      `      let baseQuery = sprintf "${r.route}?page=%d&pageSize=%d" page pageSize`,
+      '      let query = if sortKey = "" then baseQuery else baseQuery + sprintf "&sort=%s&dir=%s" sortKey sortDir',
+      "      let! (status, body) = Http.get query",
+      "      if status = 200 then",
+      `        match Decode.fromString ${r.decoderExpr} body with`,
+      "        | Ok data -> return Ok data",
+      "        | Error e -> return Error e",
       "      else",
       '        return Error (sprintf "HTTP %d" status)',
       "    }",

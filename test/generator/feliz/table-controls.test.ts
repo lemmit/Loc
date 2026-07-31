@@ -151,27 +151,130 @@ describe("feliz Table controls", () => {
     expect(fs).not.toContain("SetSortKey");
   });
 
-  it("renders a SERVER-paged table plain — controls need an envelope Feliz doesn't decode", async () => {
-    // Caught by the CI scaffold app, not by the hand-written showcase: a
-    // scaffolded list page IS server-paged, and implementing `renderPager`
-    // made it emit `rows.totalPages` — against a plain `'T list`, because the
-    // Feliz wire decodes only the envelope's `items`.  `dotnet fable` rejected
-    // it outright ("The type 'List<_>' does not define … 'totalPages'").
-    //
-    // The sortable header would have been the SILENT half of the same bug: it
-    // compiles, writes sort state, and nothing refetches on it.  So server mode
-    // suppresses both (`serverPagedControls: false`) and renders the plain,
-    // server-ORDERED page the backend already sent.
+  it("a SERVER-paged table with an UNCONTROLLED query pages truthfully, not decoratively", async () => {
+    // `serverPaged:` is an internal scaffold marker, and the scaffold always
+    // threads page/sort through the query's `of:`.  Reaching this shape by hand
+    // (a paged QueryView whose `of:` takes no controls) leaves nothing to
+    // refetch on, so the pager reports the count it actually has — 1 — and
+    // `Next` is disabled.  A pager that navigated here would write page state
+    // no request ever reads, which is the exact silent failure the M-T1.1 slice
+    // had to gate off.
     const fs = await appFs(
       `Table(${COLS}, rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, ` +
         `serverPaged: true, totalPages: 3)`,
     );
-    expect(fs).not.toContain("totalPages");
-    expect(fs).not.toContain('data-testid", "pager"');
-    expect(fs).toContain('Html.th [ Html.text "Name" ]');
-    // …and no dead Msg cases either: the refs contribute nothing when no
-    // control dispatches them.
-    expect(fs).not.toContain("SetSortKey");
-    expect(fs).not.toContain("SetPageNum");
+    // No control params on the api fn, and no refetch arms.
+    expect(fs).toContain("let allProducts () :");
+    expect(fs).toContain("| SetPageNum v -> { model with PageNum = ");
+    expect(fs).toContain("Cmd.none");
+    // `totalPages: 3` is a literal here, so the pager reads it directly — the
+    // sibling field only exists for a `paged:` QueryView.
+    expect(fs).toContain("(max 1 (3))");
+    expect(fs).not.toContain("AllProductsTotalPages");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-T2.6 Feliz leg — the SERVER-paged scaffold list.
+//
+// The M-T1.1 slice above had to gate server mode off (`serverPagedControls:
+// false`): the wire decoded only the envelope's `items`, so `rows.totalPages`
+// had nothing to read and a sortable header would have written state nothing
+// refetched on.  Both halves are now in place — a controlled `.all` decodes the
+// page count into a sibling Model field, and the control setters refetch — so
+// the flag is gone and a scaffolded list pages and sorts against the server.
+//
+// The emitted F# is `dotnet fable`-compiled and its REQUESTS are asserted at
+// runtime by `scripts/feliz-scaffold-paging-smoke.mjs` (a pager that renders and
+// a pager that pages are indistinguishable in the DOM against a stub).
+// ---------------------------------------------------------------------------
+
+const SCAFFOLD = `
+system Shop {
+  subdomain S {
+    context C {
+      aggregate Product with crudish { name: string  qty: int }
+      repository Products for Product { }
+    }
+  }
+  api ShopApi from S
+  storage db { type: postgres }
+  resource st { for: C, kind: state, use: db }
+  ui WebApp with scaffold(aggregates: [Product]) { api Shop: ShopApi }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: ShopApi port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+}
+`;
+
+async function scaffoldFs(): Promise<string> {
+  const files = await generateSystemFiles(SCAFFOLD);
+  return [...files.entries()].find(([p]) => p.endsWith("src/App.fs"))![1];
+}
+
+describe("feliz server-paged scaffold list", () => {
+  it("takes the page/sort controls as api parameters and sends the paged query", async () => {
+    const fs = await scaffoldFs();
+    expect(fs).toContain(
+      "let allProducts (page: int) (pageSize: int) (sortKey: string) (sortDir: string)",
+    );
+    expect(fs).toContain(
+      'let baseQuery = sprintf "/api/products?page=%d&pageSize=%d" page pageSize',
+    );
+    // `?sort=` with no column selected would ask the backend to order by a
+    // column that doesn't exist, so the sort pair is conditional.
+    expect(fs).toContain(
+      'let query = if sortKey = "" then baseQuery else baseQuery + sprintf "&sort=%s&dir=%s" sortKey sortDir',
+    );
+  });
+
+  it("decodes the page count into a SIBLING field, leaving the list a plain 'T list", async () => {
+    const fs = await scaffoldFs();
+    // The list field is also read by `View.idOptions` (FK selects) and by the
+    // realtime refetch, so widening it to the envelope would break both.
+    expect(fs).toContain("AllProducts: Remote<Product list>");
+    expect(fs).toContain("AllProductsTotalPages: int");
+    expect(fs).toContain("| AllProductsLoaded of Result<Product list * int, string>");
+    expect(fs).toContain(
+      "| AllProductsLoaded (Ok (data, totalPages)) -> { model with AllProducts = Loaded data; AllProductsTotalPages = totalPages }, Cmd.none",
+    );
+    // The pager reads the sibling, not a member of the list binding.
+    expect(fs).toContain("(max 1 (model.AllProductsTotalPages))");
+  });
+
+  it("issues the FIRST fetch from the model's own initial page and sort", async () => {
+    const fs = await scaffoldFs();
+    // Bound before the Cmd is built, so what the pager renders and what the
+    // server was asked for cannot disagree.
+    expect(fs).toContain("let __m =");
+    expect(fs).toContain(
+      "Cmd.OfAsync.perform (fun () -> Api.allProducts __m.PageNum 10 __m.SortKey __m.SortDir) () AllProductsLoaded",
+    );
+    expect(fs).toContain("AllProductsTotalPages = 1");
+  });
+
+  it("refetches ONCE per control change — on page and on direction, not on key", async () => {
+    const fs = await scaffoldFs();
+    // A header selecting a NEW column dispatches SetSortKey then SetSortDir.
+    // If both refetched, two requests would be in flight carrying different
+    // sorts and the later ARRIVAL would win.  The direction arm is dispatched
+    // last on every header branch, so the refetch rides it alone.
+    expect(fs).toContain(
+      "| SetSortDir v -> let __m = { model with SortDir = v } in __m, Cmd.OfAsync.perform (fun () -> Api.allProducts __m.PageNum 10 __m.SortKey __m.SortDir) () AllProductsLoaded",
+    );
+    expect(fs).toContain("| SetSortKey v -> { model with SortKey = v }, Cmd.none");
+    expect(fs).toMatch(
+      /\| SetPageNum v -> let __m = \{ model with PageNum = [^}]+\} in __m, Cmd\.OfAsync\.perform/,
+    );
+  });
+
+  it("pins the header's dispatch ORDER, which the single-refetch rule depends on", async () => {
+    const fs = await scaffoldFs();
+    // Re-clicking the active column dispatches only the direction; selecting a
+    // new one dispatches the key FIRST and the direction LAST.  If that order
+    // ever flips, the refetch above would fire on a stale sort key.
+    expect(fs).toContain(
+      'if model.SortKey = "name" then dispatch (SetSortDir (if model.SortDir = "asc" then "desc" else "asc")) ' +
+        'else (dispatch (SetSortKey "name"); dispatch (SetSortDir "asc"))',
+    );
   });
 });

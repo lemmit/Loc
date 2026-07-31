@@ -24,7 +24,7 @@
 
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { felizAllRead } from "./wire.js";
+import { type FelizRead, felizAllRead, refetchMsgCase } from "./wire.js";
 
 // A single self-contained JS toast: append a transient message element to a
 // fixed-position host in document.body (created on first use), auto-removed
@@ -58,7 +58,12 @@ export function felizHasRealtimeHandlers(ui: UiIR): boolean {
 /** The realtime subscription module (helpers + `realtimeSub`), spliced into
  *  `App.fs` after `update` (it references `Msg`/`Api`/the reads' `Loaded`
  *  cases) and wired via `Program.withSubscription realtimeSub`. */
-export function renderFelizRealtime(ui: UiIR): string {
+export function renderFelizRealtime(ui: UiIR, reads: readonly FelizRead[] = []): string {
+  // A SERVER-paged read can't be re-issued from here: the subscription runs
+  // outside `update`, so it has no `model` and would have to guess the page and
+  // sort — silently snapping the user back to page 1 of the default order.  It
+  // dispatches a `Refetch<Field>` Msg instead, and `update` builds the Cmd.
+  const pagedFields = new Set(reads.filter((r) => r.paging).map((r) => r.field));
   const notifications = ui.notifications ?? [];
   const byEvent = new Map<string, UiNotificationIR[]>();
   for (const n of notifications) {
@@ -93,6 +98,10 @@ export function renderFelizRealtime(ui: UiIR): string {
         if (seen.has(r.aggregate)) continue;
         seen.add(r.aggregate);
         const read = felizAllRead(r.aggregate);
+        if (pagedFields.has(read.field)) {
+          handlerLines.push(`      dispatch ${refetchMsgCase(read.field)}`);
+          continue;
+        }
         handlerLines.push("      Async.StartImmediate(async {");
         handlerLines.push(`        let! result = Api.${read.apiFn} ()`);
         handlerLines.push(`        dispatch (${read.msgCase} result) })`);

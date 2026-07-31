@@ -29,6 +29,7 @@ import {
   formTouchMsg,
   idLabelsFrom,
   readFieldName,
+  totalPagesFieldName,
 } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`). */
@@ -306,10 +307,17 @@ export const felizTarget: WalkerTarget = {
   // (`| Loaded <binding> -> …`), so a read handle's data dereferences to that
   // binding directly (no `.data` — the arm already unwrapped the `Remote`).
   renderQueryDataAccess: (handle) => lowerFirst(handle),
-  // The Elmish decoder pulls `items` out of the paged envelope, so the Model
-  // holds a `'T list` — the scaffold's `rows.items` unwrap is a no-op here and
-  // the member walk strips it (Feliz M-T1.1 "list, page 1, no pager").
-  pagedDataIsList: true,
+  // The Elmish decoder SPLITS the paged envelope: the rows land in the read's
+  // `Remote<'T list>` Model field and the page count in a sibling int (see
+  // `FelizReadPaging`).  So the scaffold's `rows.items` is the binding itself,
+  // and `rows.totalPages` is that sibling — named off the read's handle, since
+  // the binding is a list with no such member.
+  renderPagedEnvelopeMember: ({ member, binding, handle }) =>
+    member === "items"
+      ? binding
+      : member === "totalPages"
+        ? `model.${totalPagesFieldName(handle)}`
+        : undefined,
 
   // --- Control-flow seams — QueryView's loading/error/empty/data + Table's
   // per-row `For` exercise these in a parseable, Fable-verifiable position. --
@@ -736,14 +744,10 @@ export const felizTarget: WalkerTarget = {
 
   renderServerTotalPages: (totalPagesExpr: string) => `(max 1 (${totalPagesExpr}))`,
 
-  // Server-paged mode is OFF here: the Feliz wire layer decodes the envelope's
-  // `items` into a plain `'T list` (M-T2.6 left the Feliz unwrap pinned), so
-  // `rows.totalPages` has nothing to read from, and the query's `of:` args carry
-  // no page/sort to refetch on.  A scaffolded list page — which IS server-paged
-  // — therefore renders the plain server-ordered page it already receives.
-  // `renderServerTotalPages` above stays implemented so flipping this to true is
-  // the only change once the envelope lands.
-  serverPagedControls: false,
+  // Server-paged mode is ON as of the M-T2.6 Feliz leg: a controlled `.all`
+  // read decodes the envelope's `totalPages` into a sibling Model field, and
+  // the page/sort `Set<Field>` arms refetch, so both halves the pager needs are
+  // in place.
 
   /** Prev / "Page N of M" / Next.  `page` is an int state field, but the shared
    *  `Set<Field>` arm parses from a string (that is how every bound input

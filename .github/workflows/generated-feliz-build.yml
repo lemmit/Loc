@@ -29,6 +29,7 @@ on:
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-table-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
+      - 'scripts/feliz-scaffold-paging-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   pull_request:
@@ -45,6 +46,7 @@ on:
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-table-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
+      - 'scripts/feliz-scaffold-paging-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   workflow_dispatch:
@@ -335,6 +337,12 @@ jobs:
             sleep 1
           done
           SMOKE_URL=http://localhost:4175/ node "$GITHUB_WORKSPACE/scripts/feliz-scaffold-smoke.mjs"
+          # M-T2.6 Feliz leg — the scaffolded list is SERVER-paged, so this
+          # asserts the query strings it actually sends on Prev/Next and on a
+          # header click.  A pager that renders and a pager that pages look
+          # identical in the DOM against a stub; only the request tells them
+          # apart.
+          SMOKE_URL=http://localhost:4175/ node "$GITHUB_WORKSPACE/scripts/feliz-scaffold-paging-smoke.mjs"
 
       # Third leg: the UI AUTHORIZATION GATE (D-AUTH-OIDC).  A page carrying
       # `requires currentUser.role == "admin"` decodes the verified session

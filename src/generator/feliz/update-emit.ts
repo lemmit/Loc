@@ -28,6 +28,9 @@ import {
   formTouchedField,
   formTouchMsg,
   opHasForm,
+  pagedReadCmd,
+  readLoadedType,
+  refetchMsgCase,
 } from "./wire.js";
 
 /** The F# Model type for a `state {}` field.  A `File`-typed field holds the
@@ -71,8 +74,13 @@ function boundSetMsg(b: FelizBoundState): string {
 
 /** The `update` arm a two-way-bound input contributes — assign the Model field
  *  from the dispatched value, converting the raw input `string` to the field's
- *  type (a bad/partial number parses to the zero value, never throwing). */
-function boundSetArm(b: FelizBoundState): string {
+ *  type (a bad/partial number parses to the zero value, never throwing).
+ *
+ *  `refetch` names the server-paged read this field is a CONTROL for (a
+ *  scaffolded list's `pageNum`/`sortKey`/`sortDir`): the arm then binds the
+ *  updated model first and fires the read off THAT, so the request carries the
+ *  new page/sort rather than the one it just replaced. */
+function boundSetArm(b: FelizBoundState, refetch?: FelizRead): string {
   const field = upperFirst(b.name);
   const fs = typeToFs(b.type);
   const conv =
@@ -83,7 +91,35 @@ function boundSetArm(b: FelizBoundState): string {
         : fs === "decimal"
           ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
           : "v";
+  if (refetch) {
+    return (
+      `  | Set${field} v -> let __m = { model with ${field} = ${conv} } in ` +
+      `__m, ${pagedReadCmd(refetch, "__m")}`
+    );
+  }
   return `  | Set${field} v -> { model with ${field} = ${conv} }, Cmd.none`;
+}
+
+/** Model field name → the server-paged read it controls, so `boundSetArm` can
+ *  turn that field's setter into a refetch.  Built from the reads rather than
+ *  passed in, so a control can never be wired to a read that isn't paged.
+ *
+ *  The SORT KEY is deliberately absent.  A sortable header dispatches the
+ *  direction LAST on both of its branches — `SetSortDir` alone when re-clicking
+ *  the active column, and `SetSortKey` then `SetSortDir "asc"` when selecting a
+ *  new one (`renderSortableHeader`, pinned by `table-controls.test.ts`).  So
+ *  refetching on the key as well would fire TWO requests for one click, with a
+ *  window where they are in flight carrying different sorts and the later
+ *  ARRIVAL — not the later request — wins.  Riding the direction arm gives
+ *  exactly one request per user action. */
+function refetchByControlField(reads: readonly FelizRead[]): Map<string, FelizRead> {
+  const m = new Map<string, FelizRead>();
+  for (const r of reads) {
+    const c = r.paging?.controls;
+    if (!c) continue;
+    for (const f of [c.pageField, c.sortDirField]) m.set(f, r);
+  }
+  return m;
 }
 
 /** The `Msg` cases a form's dynamic-row fields contribute — an `Add`/`Remove of
@@ -138,7 +174,13 @@ export function renderModel(
     ...(pageGate ? ["    CurrentUser: CurrentUser option"] : []),
     ...(routed ? ["    CurrentPage: Page"] : []),
     ...state.map((f) => `    ${upperFirst(f.name)}: ${stateFieldFsType(f)}`),
-    ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
+    ...reads.flatMap((r) => [
+      `    ${r.field}: Remote<${r.resultType}>`,
+      // A server-paged read carries the envelope's page count in a SIBLING int
+      // field, so the list field stays a plain `'T list` for `View.idOptions`
+      // and the realtime refetch (M-T2.6 Feliz leg).
+      ...(r.paging ? [`    ${r.paging.totalPagesField}: int`] : []),
+    ]),
     ...forms.flatMap((f) => [
       `    ${f.formField}: ${f.formType}`,
       // The set of field names the user has blurred — gates each inline error so
@@ -197,7 +239,12 @@ export function renderInit(
       const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f);
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
-    ...reads.map((r) => `      ${r.field} = Loading`),
+    ...reads.flatMap((r) => [
+      `      ${r.field} = Loading`,
+      // 1, not 0: the pager labels "Page 1 of N" before the first response
+      // lands, and `Next` must not be enabled against an unknown count.
+      ...(r.paging ? [`      ${r.paging.totalPagesField} = 1`] : []),
+    ]),
     ...forms.flatMap((f) => [
       `      ${f.formField} = ${f.emptyBinding}`,
       ...(formHasFieldErrors(f) ? [`      ${formTouchedField(f.formField)} = Set.empty`] : []),
@@ -206,7 +253,13 @@ export function renderInit(
   // List reads fire eagerly; byId reads fire on page entry via `pageCmd page`.
   const cmds = reads
     .filter((r) => !r.single)
-    .map((r) => `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`);
+    .map((r) =>
+      // A paged read's first fetch already carries the state's initial page and
+      // sort, so it can't disagree with what the pager renders.
+      r.paging?.controls
+        ? pagedReadCmd(r, "__m")
+        : `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`,
+    );
   if (hasPageCmd) cmds.push("pageCmd page");
   // The auth gate probes the session at init (batched with the reads).
   if (authUi) cmds.push("Cmd.OfAsync.perform Auth.checkSession () SessionChecked");
@@ -220,6 +273,13 @@ export function renderInit(
     ? "let init () =\n  let page = parseUrl (Router.currentPath ())\n"
     : "let init () =\n";
   if (inits.length === 0) return `let init () = { Unit = () }, ${cmd}`;
+  // A paged read's init `Cmd` reads the model's own page/sort cells, so the
+  // record has to be BOUND before the `Cmd` is built rather than returned
+  // inline as the tuple's first element.
+  if (reads.some((r) => r.paging?.controls)) {
+    const body = inits.map((l) => `  ${l}`).join("\n");
+    return `${prefix}  let __m =\n    {\n${body}\n    }\n  __m, ${cmd}`;
+  }
   return `${prefix}  {\n${inits.join("\n")}\n  }, ${cmd}`;
 }
 
@@ -259,7 +319,13 @@ export function renderMsg(
       const p = a.params[0];
       return p ? `  | ${msgCase(a.name)} of ${typeToFs(p.type)}` : `  | ${msgCase(a.name)}`;
     }),
-    ...reads.map((r) => `  | ${r.msgCase} of Result<${r.resultType}, string>`),
+    ...reads.flatMap((r) => [
+      `  | ${r.msgCase} of Result<${readLoadedType(r)}, string>`,
+      // The realtime handler has no `model` in scope, so it asks for a refetch
+      // rather than issuing one — dispatching a paramless read there would
+      // silently reset the user's page and sort.
+      ...(r.paging ? [`  | ${refetchMsgCase(r.field)}`] : []),
+    ]),
     ...mutations.flatMap((m) => [
       `  | ${m.dispatchCase} of string`,
       `  | ${m.resultCase} of Result<unit, string>`,
@@ -475,7 +541,10 @@ export function renderUpdate(
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   // One `| Set<Field> v -> …` arm per two-way-bound controlled input.
-  const boundArms = boundState.map(boundSetArm);
+  // A control of a server-paged read turns its setter into a refetch; every
+  // other bound input keeps the plain `Cmd.none` assignment.
+  const refetches = refetchByControlField(reads);
+  const boundArms = boundState.map((b) => boundSetArm(b, refetches.get(upperFirst(b.name))));
   // Per standalone `FileUpload(bind:)`: the file-picked trigger fires the upload
   // `Cmd` (multipart POST /files), and the result sets the `File` Model field to
   // `Some ref` on success (an error is dropped — the field stays as it was).
@@ -558,11 +627,19 @@ export function renderUpdate(
       return assembleArm(head, a.body, ctx);
     });
   });
-  const readArms = reads.map(
-    (r) =>
+  const readArms = reads.map((r) => {
+    if (r.paging) {
+      return (
+        `  | ${r.msgCase} (Ok (data, totalPages)) -> { model with ${r.field} = Loaded data; ${r.paging.totalPagesField} = totalPages }, Cmd.none\n` +
+        `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none\n` +
+        `  | ${refetchMsgCase(r.field)} -> model, ${pagedReadCmd(r, "model")}`
+      );
+    }
+    return (
       `  | ${r.msgCase} (Ok data) -> { model with ${r.field} = Loaded data }, Cmd.none\n` +
-      `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none`,
-  );
+      `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none`
+    );
+  });
   // A delete: the trigger fires the `Cmd`; on success navigate to the list
   // route (the record is gone), on error stay put.
   const mutationArms = mutations.map((m) => {

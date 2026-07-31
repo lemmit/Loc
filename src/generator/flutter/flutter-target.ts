@@ -190,9 +190,12 @@ export const flutterTarget: WalkerTarget = {
   // `autoPaged` are no-ops here.
   renderQueryDataAccess: (handle: string) => lowerFirst(handle),
   // The Flutter read provider decodes the paged `.all` envelope straight to a
-  // `List<T>` (pulls `items` out), so the binding IS the array — the scaffold's
-  // `rows.items` unwrap is a no-op the shared member walk strips (as on Feliz).
-  pagedDataIsList: true,
+  // `List<T>` (pulls `items` out), so the binding IS the array and the
+  // scaffold's `rows.items` unwrap is a no-op.  `totalPages` has nowhere to
+  // come from here — Flutter keeps no page count — so it falls through to the
+  // verbatim access, which is what the (unrendered, `serverPagedControls`-less)
+  // pager would have read anyway.
+  renderPagedEnvelopeMember: ({ member, binding }) => (member === "items" ? binding : undefined),
 
   // --- Match expression seam — Dart-3 guarded switch -----------------------
   renderMatch: (arms, elseArm) => dartPredicateSwitch(arms, elseArm),

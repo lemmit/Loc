@@ -442,11 +442,12 @@ export function emitQueryView(
     const dataAccess =
       ctx.target.renderQueryDataAccess?.(queryExpr, single, paged, autoPaged) ??
       (autoPaged ? `${queryExpr}.data.items` : `${queryExpr}.data`);
-    // On a list-decoding target (Feliz), a paged binding IS already the array,
-    // so mark it for the member walk to strip the scaffold's `rows.items`.
+    // On a target whose Model doesn't hold the envelope (Feliz), record which
+    // query handle this paged binding came from, so the member walk can resolve
+    // the scaffold's `rows.items` / `rows.totalPages` against it.
     const childPagedListBindings =
-      paged && ctx.target.pagedDataIsList
-        ? new Set([...(ctx.pagedListBindings ?? []), data.param])
+      paged && ctx.target.renderPagedEnvelopeMember
+        ? new Map([...(ctx.pagedListBindings ?? []), [data.param, queryExpr] as const])
         : ctx.pagedListBindings;
     const childCtx: WalkContext = {
       ...ctx,

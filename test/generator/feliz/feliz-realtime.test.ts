@@ -76,11 +76,36 @@ describe("realtime SSE consumption — Feliz (`on <channel>.<Event>`)", () => {
     expect(app).toContain('es?addEventListener("OrderPlaced", fun (m: obj) ->');
     // Toast: the v1 message subset, event field read dynamically + string-coerced.
     expect(app).toContain('showToast ("Order " + (string (payload?order)) + " placed")');
-    // Refetch: re-issues the SAME read wiring the app already carries.
-    expect(app).toContain("let! result = Api.allOrders ()");
-    expect(app).toContain("dispatch (AllOrdersLoaded result)");
+    // Refetch.  This ui is SCAFFOLDED, so its list read is server-paged
+    // (M-T2.6 Feliz leg) — and the subscription runs OUTSIDE `update`, with no
+    // `model` in scope.  Re-issuing the read from here would have to guess the
+    // page and sort, silently snapping the user back to page 1 of the default
+    // order, so it asks for a refetch and `update` builds the Cmd from the
+    // model it has.
+    expect(app).toContain("dispatch RefetchAllOrders");
+    expect(app).toContain(
+      "| RefetchAllOrders -> model, Cmd.OfAsync.perform (fun () -> Api.allOrders model.PageNum 10 model.SortKey model.SortDir) () AllOrdersLoaded",
+    );
     // Wired into the Elmish program.
     expect(app).toContain("|> Program.withSubscription realtimeSub");
+  });
+
+  it("an UNPAGED list read still refetches inline — the Msg hop is paged-only", async () => {
+    // A hand-written (non-scaffolded) ui whose `of:` threads no page/sort has
+    // nothing to preserve, so the subscription re-issues the read directly.
+    // Pins that the paged branch above didn't replace the plain path.
+    const src = BASE.replace(
+      "ui WebApp with scaffold(subdomains: [Shipping]) {",
+      `ui WebApp {
+    page Orders {
+      route: "/"
+      body: QueryView { of: Fulfillment.Order.all, data: rows => Text { "loaded" } }
+    }`,
+    );
+    const app = await appFs(src);
+    expect(app).toContain("let! result = Api.allOrders ()");
+    expect(app).toContain("dispatch (AllOrdersLoaded result)");
+    expect(app).not.toContain("RefetchAllOrders");
   });
 
   it("a toast-only handler emits the toast but no refetch and no payload decode", async () => {
