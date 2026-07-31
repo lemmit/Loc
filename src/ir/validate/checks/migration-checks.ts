@@ -41,7 +41,7 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
         severity: "error",
         code: "loom.backfill-target-unsupported",
         message: `backfill '${intent.aggregate}.${intent.field}': a ${
-          agg.persistedAs === "eventLog" ? "persistedAs(eventLog)" : "shape(document)"
+          agg.persistedAs === "eventLog" ? "persistedAs: eventLog" : "shape: document"
         } aggregate stores no scalar columns to backfill — use a raw sql step over its payload instead.`,
         source,
       });

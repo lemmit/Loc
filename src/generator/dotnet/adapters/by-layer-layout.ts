@@ -70,8 +70,8 @@ export type DotnetArtifactCategory =
   | "join-entity"
   | "join-entity-configuration"
   | "repository-impl"
-  | "document-poco" // Infrastructure/Persistence/Documents/<Agg>Document.cs (shape(document))
-  | "event-record-poco" // Infrastructure/Persistence/Events/<Agg>EventRecord.cs (persistedAs(eventLog))
+  | "document-poco" // Infrastructure/Persistence/Documents/<Agg>Document.cs (shape: document)
+  | "event-record-poco" // Infrastructure/Persistence/Events/<Agg>EventRecord.cs (persistedAs: eventLog)
   | "event-dispatcher"
   | "auditable-interceptor"
   | "domain-log"

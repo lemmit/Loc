@@ -1338,12 +1338,12 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           severity: "error",
           code: "loom.vanilla-document-unsupported",
           message:
-            `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which emits ` +
+            `aggregate '${ctxName}.${agg.name}' is shape: document on elixir, which emits ` +
             `scalar custom finds + named operations but not ${bits.join(" and ")} ` +
             `(audited returning / provenanced ops, collection mutation, value-object/derived/` +
             `function reads, or non-scalar find predicates). Simplify them to scalar form, host this ` +
             `aggregate on a backend with full document support (node / dotnet / python / java), ` +
-            `or use shape(relational) / shape(embedded).`,
+            `or use shape: relational / shape: embedded.`,
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -1538,7 +1538,7 @@ function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[], backend: S
               `Deployable '${dep.name}' (platform ${backend.family}) hosts event-sourced aggregate ` +
               `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
               `event-sourced aggregate's state is folded from its event stream. ` +
-              `Record the timestamp in an event instead, or drop persistedAs(eventLog).`,
+              `Record the timestamp in an event instead, or drop persistedAs: eventLog.`,
             source: `${sys.name}/${dep.name}`,
             code: backend.code,
           });
@@ -2890,10 +2890,10 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
   const hasState = aggs.some((a) => (a.persistedAs ?? "state") === "state");
   const hasES = aggs.some((a) => a.persistedAs === "eventLog");
   if (kind === "state" && !hasState) {
-    return "every aggregate is persistedAs(eventLog) (none need kind: state persistence)";
+    return "every aggregate is persistedAs: eventLog (none need kind: state persistence)";
   }
   if ((kind === "eventLog" || kind === "snapshot") && !hasES) {
-    return "no aggregate is persistedAs(eventLog) (kind: " + kind + " has no event stream to back)";
+    return "no aggregate is persistedAs: eventLog (kind: " + kind + " has no event stream to back)";
   }
   // cache / replica only require at least one aggregate, already
   // checked above.
@@ -3021,7 +3021,7 @@ export function validateInheritanceStorage(
     if (hostedByCapable) continue;
     const role = agg.isAbstract ? "abstract base" : `extends ${agg.extendsAggregate}`;
     const how = agg.inheritanceUsing
-      ? "inheritanceUsing(sharedTable)"
+      ? "inheritanceUsing: sharedTable"
       : "the omitted-modifier default (sharedTable)";
     const others = [...backendPlatforms].filter((p) => !TPH_CAPABLE.has(p));
     const hostNote =
@@ -3035,7 +3035,7 @@ export function validateInheritanceStorage(
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
         `${how}, but TPH storage emission is implemented for the ${tphList} backends only — ` +
         `${hostNote}. Host the context on one of those deployables, or declare ` +
-        `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
+        `'inheritanceUsing: ownTable' to use the per-concrete (TPC) layout (all backends). ` +
         `Tracked in aggregate-inheritance.md I2/I3.`,
       source: `${ctx.name}/${agg.name}`,
     });
@@ -3073,10 +3073,10 @@ export function validateEventSourcedStorage(
       severity: "error",
       code: "loom.event-sourcing-backend-unsupported",
       message:
-        `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
+        `aggregate '${agg.name}' is persistedAs: eventLog, but event-sourced storage emission ` +
         `is implemented for the Hono (node), .NET (dotnet), Java (java), Python (python) and elixir ` +
         `backends — ${hostNote}. Host the context on a supported deployable, or drop ` +
-        `persistedAs(eventLog) to use state persistence (all backends). ` +
+        `persistedAs: eventLog to use state persistence (all backends). ` +
         `Tracked in workflow-and-applier.md (appliers A2).`,
       source: `${ctx.name}/${agg.name}`,
     });
@@ -3119,7 +3119,7 @@ export function validateEventSourcedWorkflowStorage(
         `the context on a supported deployable, drop the eventSourced modifier ` +
         `to use a state-based saga (a persisted correlation-state row, supported on ` +
         `node / dotnet / java / python / elixir), or move the event-fold logic ` +
-        `into an event-sourced aggregate (persistedAs(eventLog)). ` +
+        `into an event-sourced aggregate (persistedAs: eventLog). ` +
         `Tracked in workflow-and-applier.md (A2-S5b).`,
       source: `${ctx.name}/${wf.name}`,
     });

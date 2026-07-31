@@ -300,19 +300,11 @@ aggregate Order { payer: Party id }   // ← rejected under ownTable
 
 ```
 error  loom.polymorphic-id-ref-unsupported
-'Party id' references the abstract base 'Party', which uses inheritanceUsing(ownTable)
+'Party id' references the abstract base 'Party', which uses inheritanceUsing: ownTable
 (TPC) — there is no single table to key against, so the foreign-key target is ambiguous
 across the per-concrete tables. Reference a concrete subtype's id (e.g. 'Customer id'),
-or change 'Party' to inheritanceUsing(sharedTable) (TPH) to allow polymorphic references.
+or change 'Party' to inheritanceUsing: sharedTable (TPH) to allow polymorphic references.
 ```
-
-> **Known drift in the message text.** The diagnostic above is quoted verbatim
-> from `src/language/validators/inheritance.ts` and still spells the modifier in
-> the pre-M-T5.17 **paren** form. That form no longer parses — the fix it
-> suggests must be written `inheritanceUsing: sharedTable`. The message strings
-> are code, not docs; retexting them (and the ~20 sibling diagnostics that
-> mention `persistedAs(eventLog)` / `shape(document)` / `inheritanceUsing(…)`)
-> is a separate change.
 
 The TPC readers therefore expose `findAll` only — no polymorphic `findById` target.
 

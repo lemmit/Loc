@@ -55,7 +55,7 @@ export function renderEventRecordPoco(ns: string, ctxName: string): string {
       `namespace ${ns}.Infrastructure.Persistence.Events;`,
       "",
       "/// <summary>Append-only row in the per-context event log (<ctx>_events),",
-      "/// shared by every event-sourced aggregate (persistedAs(eventLog)) and",
+      "/// shared by every event-sourced aggregate (persistedAs: eventLog) and",
       "/// workflow (eventSourced) in the context; StreamType discriminates the",
       "/// owning stream, keyed by (StreamType, StreamId, Version).  Data is the",
       "/// JSON event payload; Seq is the DB-assigned context-global cursor.</summary>",
