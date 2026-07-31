@@ -578,6 +578,34 @@ the conforming backends, and the fix that established it.
 - **Provenance.** Found 2026-07-31 by the M-T9.11 gate on `operation-returns`
   and `union-find-absence` (dotnet leg). Tier: **behavioral**.
 
+### RS-23 · An absent collection is `[]` on every **persistence adapter**
+- **Guarantee.** An optional collection (`surcharges: Money[]?`) that was never
+  written reads back as `[]` — on **every** `persistence:` adapter, not just the
+  default one.
+- **Trigger.** The same `.ddd`, the same backend, a different `persistence:`
+  clause: `dapper` (.NET) or `mikroorm` (node).
+- **Why RS-8 wasn't enough.** RS-8 already says a collection is `[]`, never
+  null — but it was only ever *proven* on the default adapters, and they get it
+  right **by accident of storage topology**: EF Core maps the collection to an
+  `OwnsMany` child table and Drizzle to a join, and an empty child set
+  materializes as an empty list. Both alternative adapters store it as **one
+  nullable jsonb column** and faithfully round-trip SQL NULL. Two adapters, one
+  class:
+  - **dapper** — the row→domain hydrate emitted `is null ? (List<T>?)null`.
+  - **mikroorm** — the shared `deserializeField` optional arm short-circuited on
+    null *before* the array arm's `?? []` could apply.
+
+  Fixed on the **read** in both, not the write, so rows already stored as NULL
+  are repaired rather than only newly-written ones.
+- **The generalisable lesson.** A persistence adapter is a **wire-visible**
+  choice, not an internal one. Any rule proven only on the default adapter is
+  proven on exactly one storage topology — which is why the `dapper` and
+  `mikroorm` legs carry the goldens too, and why "the backend is correct" is not
+  the same claim as "every adapter of that backend is correct".
+- **Conforms.** node, dotnet, java, python, elixir (all adapters).
+- **Provenance.** Found 2026-07-31 by the M-T9.11 gate once the expanded golden
+  set reached the dapper + mikroorm legs. Tier: **behavioral**.
+
 ---
 
 ## Adding a rule

@@ -501,6 +501,38 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-23",
+    title: "An absent collection is `[]` on every PERSISTENCE ADAPTER, not just the default",
+    trigger:
+      "an optional value-object collection (`surcharges: Money[]?`) never written, read back on a non-default persistence adapter — `persistence: dapper` (.NET) or `persistence: mikroorm` (node)",
+    observable:
+      "the collection reads back as `[]`. This is RS-8's absence shape, but the point of THIS rule is that it holds per ADAPTER: the wire contract for a collection is the empty array, never null, so a client can iterate without a guard.",
+    // RS-8 was only ever proven on the DEFAULT adapters, and they get it for
+    // free by accident of storage topology: EF Core maps the collection to an
+    // `OwnsMany` CHILD TABLE and Drizzle to a join, and an empty child set
+    // materializes as an empty list.  Both alternative adapters store it as ONE
+    // NULLABLE JSONB COLUMN instead, and faithfully round-trip SQL NULL — so the
+    // same `.ddd`, same backend, different `persistence:` clause put `null` on
+    // the wire.  Two adapters, one class:
+    //   * dapper   — the row->domain hydrate emitted `is null ? (List<T>?)null`
+    //   * mikroorm — the shared `deserializeField` optional arm short-circuited
+    //     on null BEFORE the array arm's `?? []` could apply
+    // Fixed on the READ in both, not the write, so rows already stored as NULL
+    // are repaired rather than only new ones.
+    //
+    // The generalisable lesson: a persistence adapter is a WIRE-VISIBLE choice,
+    // not an internal one.  Any rule proven only on the default adapter is
+    // proven on one storage topology — which is why the dapper/mikroorm legs
+    // carry the goldens too.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-31 by the M-T9.11 golden gate once the expanded set reached the dapper + mikroorm legs: value-collections #1 $.surcharges — golden [] vs null on BOTH",
+      "fixed (dapper): src/generator/dotnet/emit/dapper.ts hydrates an absent jsonb collection to an empty list",
+      "fixed (mikroorm): src/generator/typescript/repository-document-builder.ts deserializeField delegates an optional ARRAY to the coalescing array arm",
+    ],
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------

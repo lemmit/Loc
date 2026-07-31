@@ -445,6 +445,16 @@ export function deserializeField(
   ctx: EnrichedBoundedContextIR,
 ): string {
   if (t.kind === "optional") {
+    // An OPTIONAL COLLECTION still hydrates to `[]`, never null (RS-8): the wire
+    // contract for a collection is the empty array, so a client can iterate
+    // without a guard.  Delegating to the array arm below (which already
+    // coalesces `?? []`) instead of short-circuiting on null is what makes an
+    // absent `Money[]?` column read back as `[]` — the null-guard here was
+    // winning first, which is how the adapters that store the collection as a
+    // nullable jsonb COLUMN (mikroorm; .NET's dapper does the same in its own
+    // emitter) round-tripped SQL NULL onto the wire.  A nullable SCALAR keeps
+    // its null — only collections are coalesced.
+    if (t.inner.kind === "array") return deserializeField(t.inner, accessor, ctx);
     return `(${accessor} == null ? null : ${deserializeField(t.inner, accessor, ctx)})`;
   }
   if (t.kind === "primitive") {
