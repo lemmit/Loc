@@ -13,6 +13,7 @@ import { stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
+import { FELIZ_GRID_ROW_VAR, renderFelizDataGridChild } from "./data-grid-child.js";
 import { FS_LEAVES, fsString, storeModelField } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
@@ -672,6 +673,34 @@ export const felizTarget: WalkerTarget = {
   // Raw text for markup TEXT position — F# string-body escaping (the pack
   // wraps it in `Html.text "…"` or `prop.text "…"`).
   escapeText: (text: string) => text.replace(/\\/g, "\\\\").replace(/"/g, '\\"'),
+
+  /** F# member SPELLING for a plain read.  The walker's default is the JS
+   *  `<recv>.<member>`, which Fable rejects for the handful of members F#
+   *  capitalises: an F# `list`/`array`/`string` exposes `.Length`, not
+   *  `.length`.  Everything else falls through unchanged (a wire record's
+   *  fields keep their DSL casing, so `row.name` is already correct).
+   *
+   *  This mirrors the method-call mapping `fs-expr.ts` applies on the update
+   *  path — the same members, reached from the view side. */
+  renderMemberRead: ({ receiver, member }) => {
+    switch (member) {
+      case "length":
+        return `(${receiver}.Length)`;
+      default:
+        return undefined;
+    }
+  },
+
+  // --- DataGrid seam (M-T1.1 slice 10e) ----------------------------------
+  //
+  // Feliz hosts the REAL TanStack row model — `@tanstack/table-core` through
+  // Fable interop — so the grid behaves identically to the four JSX frontends
+  // rather than being re-implemented.  The child is a `[<ReactComponent>]`
+  // declaration spliced into `App.fs` (React's `moduleDecl` shape: an F# module
+  // holds many declarations, unlike a Vue SFC or a `.svelte` file).  See
+  // `data-grid-child.ts` for the whole rationale.
+  dataGridRowVar: FELIZ_GRID_ROW_VAR,
+  renderDataGridChild: (spec, ctx) => renderFelizDataGridChild(spec, ctx),
 
   // --- Table control seams (M-T1.1) --------------------------------------
   //

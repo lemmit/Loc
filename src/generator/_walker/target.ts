@@ -749,6 +749,26 @@ export interface WalkerTarget {
    *  plain `<recv>.<member>` emit. */
   renderPagedEnvelopeMember?(spec: PagedEnvelopeMemberSpec): string | undefined;
 
+  /** OPTIONAL — spell a plain member READ in the target's own language.
+   *
+   *  The default emit is `<recv>.<member>`, which is right for every frontend
+   *  whose embedded language is JavaScript.  Feliz's is F#, where the same IR
+   *  member has a different name: `xs.length` is `xs.Length` on an F# list, and
+   *  a body that reads a `string[]` page-state field's length (the sibling that
+   *  makes `DataGrid(selection:)` worth having) otherwise emits code Fable
+   *  rejects.  Returning `undefined` — or omitting the seam — falls through to
+   *  the verbatim access, so the JSX targets are byte-identical.
+   *
+   *  Reads only.  Member CALLS (`xs.contains(y)`) already route through
+   *  `emitMethodCall`, and Feliz maps those in `fs-expr.ts`. */
+  renderMemberRead?(spec: {
+    /** The already-rendered receiver. */
+    receiver: string;
+    member: string;
+    receiverType: TypeIR | undefined;
+    memberType: TypeIR | undefined;
+  }): string | undefined;
+
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The
    *  shared `emitExpr` sets `ctx.usesRouteId` and returns this; the page-shell

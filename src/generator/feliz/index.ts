@@ -20,6 +20,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime } from "../../ir/util/channels.js";
+import { uiUsesDataGrid } from "../../ir/util/data-grid.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
@@ -44,6 +45,7 @@ import {
   renderFelizGate,
   uiHasPageGate,
 } from "./auth-gate.js";
+import { FELIZ_GRID_PRELUDE } from "./data-grid-child.js";
 import { felizTarget } from "./feliz-target.js";
 import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
 import { felizPack } from "./pack.js";
@@ -242,7 +244,18 @@ function renderPageView(
   externFunctionNames: ReadonlySet<string> = new Set(),
   /** Accumulator: names actually USED across the ui's pages, so the App.fs head
    *  can `open` exactly the extern modules referenced (F# unused-open warns). */
-  used?: { components: Set<string>; functions: Set<string> },
+  used?: {
+    components: Set<string>;
+    functions: Set<string>;
+    /** `DataGrid` child components hoisted out of the page bodies (M-T1.1).
+     *  Feliz has no per-component FILE, so each grid is a `[<ReactComponent>]`
+     *  declaration `renderAppFs` splices into `App.fs` ahead of the page views
+     *  that call it — F# is order-sensitive. */
+    gridDecls: string[];
+    /** True when any page emitted a grid — gates the `table-core` interop
+     *  preamble, the `Fable.Core` opens, and the package.json dependency. */
+    usesDataGrid: boolean;
+  },
   /** Action names whose body is a `match await` async effect — their dispatch
    *  wrapper passes the route `id` to the trigger Msg. */
   asyncEffectActions: ReadonlyMap<string, FelizAsyncEffect> = new Map(),
@@ -283,6 +296,8 @@ function renderPageView(
   if (used) {
     for (const c of result.usedUserComponents) used.components.add(c);
     for (const f of result.usedExternFunctions ?? []) used.functions.add(f);
+    for (const d of result.hoistedModuleDecls ?? []) used.gridDecls.push(d);
+    if (result.usesDataGrid) used.usesDataGrid = true;
   }
   const wrappers = [
     ...dispatchWrappers(page, result.usedActions ?? new Set(), asyncEffectActions),
@@ -817,7 +832,12 @@ function renderAppFs(
     ui.components.filter((c) => c.extern).map((c) => [c.name, c.params]),
   );
   const externFunctionNames = new Set((ui.functions ?? []).map((f) => f.name));
-  const used = { components: new Set<string>(), functions: new Set<string>() };
+  const used = {
+    components: new Set<string>(),
+    functions: new Set<string>(),
+    gridDecls: [] as string[],
+    usesDataGrid: false,
+  };
   // Module lookup for a used extern name → its `from`-path-derived F# module.
   const componentModule = new Map(
     ui.components
@@ -1084,8 +1104,8 @@ function renderAppFs(
     // A FileUpload mints its multipart FormData via the JS-interop escape
     // hatch; the realtime subscription uses `?`/`jsNative`/`Emit` too
     // (`jsNative` lives in `Fable.Core`, the `?` operator in `.JsInterop`).
-    hasRealtime && "open Fable.Core",
-    (hasFileUploads || hasRealtime) && "open Fable.Core.JsInterop",
+    (hasRealtime || used.usesDataGrid) && "open Fable.Core",
+    (hasFileUploads || hasRealtime || used.usesDataGrid) && "open Fable.Core.JsInterop",
     // Auth session gate — SessionState (gates the Model) + the Auth probe module.
     // Under a page gate the probe decodes the verified claims into `CurrentUser`
     // (record + decoder ahead of the claims-variant Auth module); a gate-free
@@ -1154,6 +1174,13 @@ function renderAppFs(
     // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
     hasRealtime ? "" : false,
     hasRealtime ? renderFelizRealtime(ui, reads) : false,
+    // DataGrid (M-T1.1) — the `@tanstack/table-core` interop bindings, then one
+    // `[<ReactComponent>]` child per grid.  BEFORE the page views: F# is
+    // order-sensitive and the views call these.  After `update`, so nothing here
+    // constrains the MVU declarations either.
+    used.usesDataGrid ? "" : false,
+    used.usesDataGrid ? FELIZ_GRID_PRELUDE : false,
+    ...used.gridDecls.flatMap((d) => ["", d]),
     "",
     views.join("\n"),
     "",
@@ -1221,7 +1248,12 @@ const DOTNET_TOOLS = `{
 }
 `;
 
-const PACKAGE_JSON = (name: string): string =>
+/** `usesDataGrid` adds `@tanstack/table-core` — the framework-agnostic TanStack
+ *  package the emitted `[<ReactComponent>]` grid binds through Fable interop
+ *  (`data-grid-child.ts`).  Same package the Svelte target uses, so the two
+ *  adapter-less frontends run the same row model at the same version.  Omitted
+ *  from a grid-free app so its dependency list stays minimal. */
+const PACKAGE_JSON = (name: string, usesDataGrid = false): string =>
   `${JSON.stringify(
     {
       name,
@@ -1232,7 +1264,11 @@ const PACKAGE_JSON = (name: string): string =>
         build: "npm run fable && vite build",
         dev: "npm run fable && vite",
       },
-      dependencies: { react: "^18.2.0", "react-dom": "^18.2.0" },
+      dependencies: {
+        react: "^18.2.0",
+        "react-dom": "^18.2.0",
+        ...(usesDataGrid ? { "@tanstack/table-core": "^8.21.3" } : {}),
+      },
       // Tailwind + daisyUI drive the design system: the pack emits daisyUI
       // component classes (`btn` / `card` / `table` / `badge` / …), Vite runs
       // the Tailwind PostCSS plugin over `styles.css` at build, and daisyUI
@@ -1424,7 +1460,7 @@ export function generateFelizForContexts(
   out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi, hasFileUploads));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);
-  out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
+  out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`, uiUsesDataGrid(ui)));
   out.set("vite.config.js", renderViteConfig(basePath));
   out.set("index.html", INDEX_HTML(theme));
   out.set("styles.css", STYLES_CSS);

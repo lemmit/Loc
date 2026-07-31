@@ -28,6 +28,7 @@ on:
       - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-embed-feliz.ddd'
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-table-smoke.mjs'
+      - 'scripts/feliz-data-grid-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
       - 'scripts/feliz-scaffold-paging-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
@@ -45,6 +46,7 @@ on:
       - 'test/e2e/fixtures/elixir-vanilla-build/vanilla-embed-feliz.ddd'
       - 'scripts/feliz-smoke.mjs'
       - 'scripts/feliz-table-smoke.mjs'
+      - 'scripts/feliz-data-grid-smoke.mjs'
       - 'scripts/feliz-scaffold-smoke.mjs'
       - 'scripts/feliz-scaffold-paging-smoke.mjs'
       - 'scripts/feliz-authgate-smoke.mjs'
@@ -189,6 +191,40 @@ jobs:
                   Button { "Back to products", to: "/products" }
                 }
               }
+              // M-T1.1 slice 10e — the TanStack-backed `DataGrid` on Feliz.  Its
+              // own page so the existing pages' assertions stay untouched.  The
+              // smoke stubs the list response, because a grid with no rows has
+              // nothing to sort, filter, hide or select — and every one of those
+              // is a RUNTIME behaviour the F# compiler cannot check.
+              page ProductGrid {
+                route: "/products/grid"
+                state { selectedIds: string[] }
+                body: Stack {
+                  Heading { "Product grid", level: 1 },
+                  // The sibling that justifies `selection:` existing at all —
+                  // it reads the page `state` field the grid writes.
+                  Text { `Selected: {selectedIds.length}` },
+                  QueryView {
+                    of:      Shop.Product.all,
+                    loading: Text { "Loading…" },
+                    error:   Text { "Failed to load" },
+                    empty:   Text { "No products yet." },
+                    data:    rows => DataGrid(
+                      Column("Name", p => p.name, sortable: true, filterable: true),
+                      Column("Status", p => p.status, sortable: true),
+                      // No accessorKey — renders through the projected row's
+                      // lazy markup thunk instead.
+                      Column("Price", p => Money { p.price }),
+                      rows: rows,
+                      selection: selectedIds,
+                      multiSort: true,
+                      columnVisibility: true,
+                      pageSize: 25,
+                      testid: "product-grid")
+                  },
+                  Button { "Back to products", to: "/products" }
+                }
+              }
               page ProductNew {
                 route: "/products/new"
                 body: Stack {
@@ -276,6 +312,13 @@ jobs:
           # preview server; kept a separate script because it needs that stub
           # while the smoke above deliberately runs backend-less.
           SMOKE_URL=http://localhost:4173/ node "$GITHUB_WORKSPACE/scripts/feliz-table-smoke.mjs"
+          # M-T1.1 slice 10e — the DataGrid's multi-sort / per-column filter /
+          # column visibility / selection round-trip, against stubbed rows.  The
+          # `dotnet fable` + `vite build` steps above prove the grid COMPILES;
+          # only this proves the `@tanstack/table-core` interop actually drives a
+          # row model (a partial `state` throws inside `getHeaderGroups()` and
+          # renders a blank region, which both build steps report as green).
+          SMOKE_URL=http://localhost:4173/ node "$GITHUB_WORKSPACE/scripts/feliz-data-grid-smoke.mjs"
 
       # Scaffold parity — the hand-built showcase above exercises the MVU/wire
       # paths; this proves a `with scaffold(...)`-generated app (List/New/Detail/

@@ -48,6 +48,7 @@ import {
   durableEventTypes,
   realtimeEventTypes,
 } from "../../util/channels.js";
+import { bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -229,7 +230,7 @@ export function validateProjectionSourceProjectionBackend(
  *  COMPILE ERROR rather than a silently missing grid: the page would otherwise
  *  render an empty slot (or a "not supported" comment on HEEx) and the author
  *  would only find out by looking at the running app. */
-const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular"]);
+const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular", "feliz"]);
 
 /** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */
 export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -240,28 +241,21 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
     const ui = sys.uis.find((u) => u.name === d.uiName);
     if (!ui) continue;
     for (const page of ui.pages) {
-      if (!usesDataGrid(page.body)) continue;
+      if (!bodyUsesDataGrid(page.body)) continue;
       diags.push({
         severity: "error",
         code: "loom.datagrid-unsupported-target",
         message:
           `page '${page.name}' uses 'DataGrid', which deployable '${d.name}' can't render ` +
-          `(frontend '${fw || "unknown"}'). DataGrid ships on every JS frontend (react, vue, svelte, angular). Use 'Table' — it supports ` +
-          `column sort and pagination on every frontend, server-driven on Phoenix — or host this page ` +
-          `on one of those frontends.`,
+          `(frontend '${fw || "unknown"}'). DataGrid is a TanStack row model, so it ships wherever ` +
+          `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
+          `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
+          `analogue). Use 'Table' — it supports column sort, pagination and filtering on every ` +
+          `frontend, server-driven on Phoenix — or host this page on one of the five above.`,
         source: `${ui.name}/${page.name}`,
       });
     }
   }
-}
-
-/** True when a page body contains a `DataGrid(...)` primitive call anywhere. */
-function usesDataGrid(body: ExprIR | undefined): boolean {
-  let found = false;
-  walkExprDeep(body, (e) => {
-    if (e.kind === "call" && e.name === "DataGrid") found = true;
-  });
-  return found;
 }
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
