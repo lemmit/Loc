@@ -1686,7 +1686,14 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
             if code.startswith("msg."):
                 entry["code"] = code
             errors.append(entry)
-        return problem(request, 422, "Unprocessable Entity", "Request validation failed.", errors)
+        # RS-27 — the WIRE-VALIDATION rung's title/detail, byte-identical to the
+        # other four backends.  Deliberately NOT the status reason phrase: the
+        # domain floor above already answers 422 with "Unprocessable Entity", and
+        # a client that sees only a status + reason phrase cannot tell a malformed
+        # BODY from a rejected DOMAIN operation.  "Validation failed" plus the
+        # \`errors[]\` pointer array is what distinguishes them, and python was
+        # the one backend collapsing the two.
+        return problem(request, 422, "Validation failed", "One or more fields are invalid.", errors)
 
     @app.exception_handler(Exception)
     async def _internal(request: Request, err: Exception) -> JSONResponse:

@@ -806,6 +806,40 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // an `extern` stub returning an unmodelled error would do it in one case.
     tier: "static",
   },
+  {
+    id: "RS-27",
+    title: "The wire-validation rung is `Validation failed`, distinct from the domain floor",
+    trigger:
+      "a POST whose body fails wire validation — a missing required field, a wrong type, a tripped `invariant` expressible at the boundary",
+    observable:
+      'the 422 body carries title "Validation failed" and detail "One or more fields are invalid.", plus the `errors[]` pointer array. This is DELIBERATELY not the status reason phrase, because the DOMAIN FLOOR also answers 422 (RS-15) with title "Unprocessable Entity". Both rungs are 422; `title` plus `errors[]` is the only thing that tells a client "your JSON is malformed" from "your request was understood and refused". A backend that titles the validation rung with the reason phrase collapses the two.',
+    // 4-vs-1, python the outlier: `"Unprocessable Entity"` / `"Request
+    // validation failed."` against the other four's `"Validation failed"` /
+    // `"One or more fields are invalid."`.  Both halves of the body differed.
+    //
+    // WHERE IT SAT is what makes it worth naming: wire validation is the
+    // highest-traffic error path in any API — every malformed request hits it —
+    // and it was invisible to every gate.  The M-T9.11 golden cannot see it
+    // because NOT ONE of the 31 goldens records a 4xx body; conformance-parity
+    // compares declared response SHAPES, not the values in them.
+    //
+    // Found by the M-T9.25 census probe on its first run: enumerate every 7807
+    // arm each backend emits and diff them.  That probe exists because the two
+    // bugs before it (a router that ignored an override, and mergeContexts
+    // dropping the override maps) were both INTRA-backend — a backend
+    // disagreeing with itself, which no comparison-to-another-backend gate can
+    // see.  This one turned out to be cross-backend, found by the same sweep.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-08-01 by the M-T9.25 7807-arm census, first run; confirmed by generating all five and reading the emitted arm, not by grepping the emitter",
+      "fixed (python): src/generator/python/index.ts RequestValidationError handler",
+      "pinned by test/conformance/problem-arm-census.test.ts, verified to FAIL on all three assertions with the fix reverted",
+    ],
+    // STATIC: assertable on emitted source.  Promote to `behavioral` the moment
+    // a golden records a 4xx — that coverage hole is the larger finding here and
+    // is tracked in M-T9.11's follow-on.
+    tier: "static",
+  },
 ];
 
 // ---------------------------------------------------------------------------
