@@ -38,7 +38,15 @@ import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
-import { denialTerm, disallowedTerm } from "./denial.js";
+import {
+  denialClause,
+  denialOverrides,
+  denialResponse,
+  denialTerm,
+  disallowedResponse,
+  disallowedTerm,
+  type ErrorStatusMap,
+} from "./denial.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
@@ -1126,20 +1134,27 @@ function collectVanillaLeaves(
 // below has always answered 422, so this rescue arm was the odd one out) —
 // instead of propagating to Phoenix's default 500.  Any other `ArgumentError`
 // reraises unchanged (still a 500 for a genuine bug).
-export const GUARD_RESCUE = `  rescue
+// The two prefixes below are the CONTRACT this `cond` routes on — do not
+// reword them without rewording the matching `raise(ArgumentError, …)` in
+// `renderStatement` / `function-emit` / `domain-service-emit`, or the raise
+// misses its prefix and `reraise`s into a 500.  Only the STATUS + TITLE are
+// resolved (M-T5.20); the message prefixes stay literal.
+export function guardRescue(overrides?: ErrorStatusMap): string {
+  return `  rescue
     guard_error in ArgumentError ->
       guard_msg = Exception.message(guard_error)
 
       cond do
         String.starts_with?(guard_msg, "Forbidden: ") ->
-          ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)
+          ${denialResponse("forbidden", "guard_msg", overrides)}
 
         String.starts_with?(guard_msg, "Precondition failed: ") ->
-          ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", guard_msg)
+          ${denialResponse("precondition", "guard_msg", overrides)}
 
         true ->
           reraise(guard_error, __STACKTRACE__)
       end`;
+}
 
 export function renderReturningOpControllerAction(
   ctxModule: string,
@@ -1182,16 +1197,14 @@ export function renderReturningOpControllerAction(
     ...(opHasWhenGate(op)
       ? [
           `  def ${resultFn}(conn, {:error, {:disallowed, detail}}),
-    do: ProblemDetails.problem_response(conn, 409, "Disallowed", detail)`,
+    do: ${disallowedResponse("detail", denialOverrides(ctx))}`,
         ]
       : []),
     ...(opHasGuards(op)
-      ? [
-          `  def ${resultFn}(conn, {:error, {:forbidden, detail}}),
-    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)`,
-          `  def ${resultFn}(conn, {:error, {:precondition_failed, detail}}),
-    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)`,
-        ]
+      ? (["forbidden", "precondition"] as const).map((rung) => {
+          const { head, body } = denialClause(rung, resultFn, denialOverrides(ctx));
+          return `  ${head},\n    do: ${body}`;
+        })
       : []),
   ];
   // A scalar money RETURN carries the FIXED money wire scale (RS-12), same as a
@@ -1239,7 +1252,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
-${GUARD_RESCUE}
+${guardRescue(denialOverrides(ctx))}
   end
 
 ${resultClauses}`;

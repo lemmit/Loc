@@ -63,6 +63,7 @@ import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaAudit } from "./audit-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
+import { denialOverrides, denialStatus } from "./denial.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-handlers-emit.js";
@@ -125,6 +126,19 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   )?.structuralErrorStatuses;
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralStatuses);
+  // The `NotFound` rung of the denial ladder rides the same override path
+  // (M-T5.20) — `httpStatus NotFound -> 410` moves both `not_found_response/3`
+  // and every per-controller 404 arm, together.  `not_found_response/3` is
+  // app-global (no per-context tag), so fold the ladder overrides across every
+  // hosted context; FIRST declaration wins, the rule the structural-conflict
+  // fold already uses.
+  const ladderStatuses: Record<string, number> = {};
+  for (const c of contexts) {
+    for (const [name, code] of Object.entries(denialOverrides(c) ?? {})) {
+      if (!(name in ladderStatuses)) ladderStatuses[name] = code;
+    }
+  }
+  const notFoundStatus = denialStatus("notFound", ladderStatuses);
   out.set(
     `lib/${appName}_web/problem_details.ex`,
     renderVanillaProblemDetailsModule(
@@ -133,6 +147,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       hasConcurrency,
       uniquenessStatus,
       concurrencyStatus,
+      notFoundStatus,
     ),
   );
 

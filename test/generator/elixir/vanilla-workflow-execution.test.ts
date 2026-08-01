@@ -130,7 +130,14 @@ describe("vanilla — Slice 5c workflow execution", () => {
     expect(ctl).toContain("ProblemDetails.validation_error_response(conn, changeset)");
     expect(ctl).toContain('ProblemDetails.problem_response(conn, 404, "Not Found"');
     expect(ctl).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden"');
-    expect(ctl).toContain('ProblemDetails.problem_response(conn, 400, "Bad Request"');
+    // M-T6.24 — an UNRECOGNISED `{:error, reason}` term is a fault the server
+    // did not model: a sanitized 500 with the fixed `"internal"` detail (the
+    // other four backends' unhandled-fault arm), NOT a 400 that blames the
+    // caller with an `inspect/1` dump of an internal Elixir term.
+    expect(ctl).toContain(
+      'ProblemDetails.problem_response(conn, 500, "Internal Server Error", "internal")',
+    );
+    expect(ctl, "an internal term still leaks through inspect/1").not.toContain("inspect(reason)");
   });
 
   it("splices POST /workflows/<snake> into the /api scope", async () => {
