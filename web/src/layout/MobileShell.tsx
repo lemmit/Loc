@@ -17,8 +17,7 @@ import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 // Model graph (React Flow) are heavy — lazily loaded so neither lands in
 // the main mobile chunk until its sub-view is opened, mirroring DesktopShell.
 const BuilderPane = lazy(() => import("../builder/BuilderPane"));
-const SystemBuilderPane = lazy(() => import("../builder/system/SystemBuilderPane"));
-const SystemBuilderV2Pane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
+const ModelBuilderPane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
 const RequirementsPane = lazy(() => import("../builder/requirements/RequirementsPane"));
 
 interface Props {
@@ -91,7 +90,6 @@ export function MobileShell({ ctx }: Props): JSX.Element {
               { value: "source", label: <span data-testid="mobile-doc-tab-source">Source</span> },
               { value: "builder", label: <span data-testid="mobile-doc-tab-builder">Builder</span> },
               { value: "model", label: <span data-testid="mobile-doc-tab-model">Model</span> },
-              { value: "model-v2", label: <span data-testid="mobile-doc-tab-model-v2">Model v2</span> },
               { value: "requirements", label: <span data-testid="mobile-doc-tab-requirements">Reqs</span> },
             ]}
           />
@@ -123,16 +121,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
             <PaneErrorBoundary name="Model">
               <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
-                <SystemBuilderPane ctx={ctx} />
-              </Suspense>
-            </PaneErrorBoundary>
-          </Box>
-        )}
-        {codeView === "model-v2" && (
-          <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-            <PaneErrorBoundary name="Model v2">
-              <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
-                <SystemBuilderV2Pane ctx={ctx} />
+                <ModelBuilderPane ctx={ctx} />
               </Suspense>
             </PaneErrorBoundary>
           </Box>

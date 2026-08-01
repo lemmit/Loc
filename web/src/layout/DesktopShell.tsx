@@ -5,8 +5,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 // loaded so neither lands in the main chunk until the Builder tab is opened.
 const BuilderPane = lazy(() => import("../builder/BuilderPane"));
 // React Flow + the structural graph land only when the Model tab is opened.
-const SystemBuilderPane = lazy(() => import("../builder/system/SystemBuilderPane"));
-const SystemBuilderV2Pane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
+const ModelBuilderPane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
 const RequirementsPane = lazy(() => import("../builder/requirements/RequirementsPane"));
 import {
   Group,
@@ -65,7 +64,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // read-only view of a file opened from the Explorer.  The editor
   // stays mounted underneath so Monaco keeps its model + undo history.
   const [centerView, setCenterView] = useState<
-    "source" | "secondary" | "builder" | "model" | "model-v2" | "requirements"
+    "source" | "secondary" | "builder" | "model" | "requirements"
   >("source");
   const [secondaryDoc, setSecondaryDoc] = useState<SecondaryDoc | null>(null);
   const [explorerMode, setExplorerMode] = usePersistedState<ExplorerMode>(
@@ -252,15 +251,12 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       size="xs"
                       value={centerView === "secondary" ? "" : centerView}
                       onChange={(v) =>
-                        setCenterView(
-                          v as "source" | "builder" | "model" | "model-v2" | "requirements",
-                        )
+                        setCenterView(v as "source" | "builder" | "model" | "requirements")
                       }
                       data={[
                         { value: "source", label: <span data-testid="doc-tab-source">Source</span> },
                         { value: "builder", label: <span data-testid="doc-tab-builder">Builder</span> },
                         { value: "model", label: <span data-testid="doc-tab-model">Model</span> },
-                        { value: "model-v2", label: <span data-testid="doc-tab-model-v2">Model v2</span> },
                         { value: "requirements", label: <span data-testid="doc-tab-requirements">Requirements</span> },
                       ]}
                     />
@@ -299,16 +295,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
                       <PaneErrorBoundary name="Model">
                         <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
-                          <SystemBuilderPane ctx={ctx} />
-                        </Suspense>
-                      </PaneErrorBoundary>
-                    </Box>
-                  )}
-                  {centerView === "model-v2" && (
-                    <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-                      <PaneErrorBoundary name="Model v2">
-                        <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
-                          <SystemBuilderV2Pane ctx={ctx} />
+                          <ModelBuilderPane ctx={ctx} />
                         </Suspense>
                       </PaneErrorBoundary>
                     </Box>

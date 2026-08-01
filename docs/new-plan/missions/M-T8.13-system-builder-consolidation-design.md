@@ -1,7 +1,11 @@
 # M-T8.13 — System-builder v1/v2 consolidation (design)
 
-> **Status: design-in-progress (brief).** The endgame decision flagged as
-> wave-3 "structural" work in
+> **Status: DONE — all phases landed.** The owner-gated decision below went to
+> **alternative 4**: v2 is the single editing pane, v1's flat canvas survives
+> inside it as a read-only **Overview** mode. Phase 1 (shared harness) landed
+> first; phases 2–4 (feature ports → Overview mode → default flip → delete)
+> landed together — see "Phases 2–4 — as landed" at the end of this doc.
+> Originally flagged as wave-3 "structural" work in
 > `docs/audits/playground-file-mgmt-review-2026-07.md` §2 and left explicitly
 > out of scope by PR #2287.
 > Sources: that review (defect #6), `docs/audits/playground-modeller-audit-2026-07.md`
@@ -96,7 +100,7 @@ graph is actually better at without keeping a second mutation surface.
 
 | # | Slice | Size | Gate |
 |---|---|:--:|---|
-| 1 | **Shared pane harness** — `web/src/builder/pane-harness.ts`: `useModelSource(ctx)` returning `{ parsed, parseOk, rev, apply, applyOrRefuse, refusal }`, composing the existing `use-live-source-tick` + `refusal` + `edit-engine.ifParses` into the one `rev`/parse-memo/choke-point shape all four panes hand-roll today. | **M** | unconditional |
+| 1 | ✅ **Shared pane harness** — `web/src/builder/pane-harness.ts`: `usePaneHarness(ctx)` returning `{ parsed, parseOk, rev, bumpRev, liveTick, externalTick, refusal, apply, applyOrRefuse, applyOrSkip, commit }`, composing the existing `use-live-source-tick` + `refusal` + `edit-engine.ifParses` into the one `rev`/parse-memo/choke-point shape all four panes hand-rolled. | **M** | unconditional |
 | 2 | Port **wire shape** + **infra props** (fixing the 5-of-12 `PLATFORMS` list) + **find params/return** to v2's node-detail panel — all three ride pure, already-tested modules. | S ×3 | decision |
 | 3 | Port **field retype + modifiers** (`fields.ts` mutators exist; this is v2 node-detail UI). | **M** | decision |
 | 4 | Port **coverage overlay** + **search** to a v2 **Overview** mode (search must cross levels → a jump-to-path result list, not dimming). | **M–L** | decision |
@@ -113,6 +117,47 @@ makes the #2287 drift class *unrepeatable*. Slices 2–5: each ported feature ke
 its v1 e2e assertion, re-pointed at v2 testids. Slice 6: the label flip lands with
 the spec rename in one PR. Slice 7: `rg 'builder/system/'` returns no hits outside
 the new home.
+
+## Phase 1 — as landed
+
+Two modules, mirroring the `live-source-tick.ts` / `use-live-source-tick.ts`
+split (the root vitest suite has no `web/node_modules`, so the react-free half
+has to be importable on its own):
+
+- **`web/src/builder/pane-write.ts`** — the pure decisions. `isParseOk(parsed)`
+  is the READ gate (false on a recovered AST); `writeDecision(next, gate,
+  nullMeans)` is the WRITE gate, folding `edit-engine.ifParses` and the
+  "helper returned null" case into `"commit" | "refuse" | "skip"`.
+- **`web/src/builder/pane-harness.ts`** — `usePaneHarness(ctx, options?)`, the
+  react composition: the `[getSource, rev, liveTick, externalTick]` parse memo,
+  `parseOk`, `useRefusal`, and the `apply` / `applyOrRefuse` / `applyOrSkip` /
+  `commit` choke-point. `ctx` is the narrow structural `PaneSourceCtx`
+  (`getSource`, `onSourceChange`, `editorSourceTick`, `initialSource`,
+  `activeSourcePath`, `sourceEpoch`) rather than the whole `LayoutCtx`.
+
+The two genuine pane divergences became **options**, not parallel copies:
+
+| Pane | Divergence | How the harness carries it |
+|---|---|---|
+| `BuilderPane` | must not re-derive on an external reseed (a new `liveNodes` reference echoes into a craft `deserialize` that clobbers in-flight settings-panel edits) | `externalReseed: false` — the tick hook still runs, fed frozen inputs, so it never bumps |
+| v1 `SystemBuilderPane` | preview mode stages an edit's diff instead of committing; the staged write carries a `keepSelection` flag | `onCommit(next, commitNow, ...args)` override + `usePaneHarness<[keepSelection?: boolean]>` |
+
+`RequirementsPane`'s `apply(node, text)` / `append(text)` and v1/v2's per-handler
+wrappers survive as 1–3-line pane-local shims over the harness — they carry
+pane semantics (which node to splice, whether to clear the selection), not
+rails. v1's coverage-overlay and wire-shape effects stay in the pane; only the
+rails moved.
+
+The pin lives in `test/playground/builder-pane-harness.test.ts`: it *discovers*
+`web/src/builder/**/*Pane.tsx` (so a new pane is covered the day it lands),
+asserts each takes `usePaneHarness`, and fails on any of the hand-rolled rails
+reappearing (`useLiveSourceTick(`, `useExternalSourceTick(`, `useRefusal(`,
+`parseDdd(getSource())`, `parseDdd(ctx.getSource())`, `parsed.parserErrors`).
+
+One latent bug fell out: v1 called `useRefusal()` *after* its
+`parserErrors` early return, so the render that first saw a syntax error
+dropped a hook — React's "rendered fewer hooks than expected". Hoisting the
+rails to the top of the component removes it.
 
 ## Test / e2e migration strategy
 
@@ -132,3 +177,89 @@ the new home.
   rename/delete in slices 6–7 must update that list in the same PR.
 - Add `system-builder-v2.spec.ts` cases *before* retiring the v1 equivalents, so
   no window exists where a shared helper has zero browser coverage.
+
+## Phases 2–4 — as landed
+
+The owner picked **alternative 4**. The end state is one pane: `Model` mounts
+`system-v2/SystemBuilderV2Pane`, on desktop **and** mobile; there is no
+`Model v2` tab and no second mutation surface.
+
+**Slice re-cut.** The brief's slices 2–7 collapsed into one commit because they
+are not independently shippable once the flip is in it: deleting v1 without the
+ports loses features, and porting without deleting leaves the duplication the
+mission exists to remove. Order inside the commit was still the brief's:
+port → Overview → flip → delete → e2e → docs.
+
+### Overview mode (`system-v2/OverviewCanvas.tsx`)
+
+Reached from the breadcrumb's **Overview** button, offered only at the drill
+root (Overview *is* the root, seen flat). The pane shell owns the drill `path`
+and the mode, so the round-trip is lossless; each mode gets its own keyed
+`ReactFlowProvider` (two React Flow instances must never share a store, and
+only one is mounted at a time).
+
+| Ported | How |
+|---|---|
+| Flat whole-model graph | `buildSystemGraph` + the same column-per-kind layout, diagnostics attributed by `nodeDiagnostics` (border + count) |
+| Coverage heatmap | `Coverage` toggle → async linked build → `lowerModel` + `enrichLoomModel` → `coverageByNode`, tinting every node; legend + a per-selection `coverage:` line |
+| Search + kind filter | `matchNodes` → non-matching nodes/edges dim in place; match count + `Focus` (fitView over the matched set) |
+| Group nesting | `groupedLayout` → module / context container nodes, edges remapped to the group |
+| Persisted layout | `positions.ts` (`loadPositions`/`savePositions`), drag-end persisted, `Reset layout` restores the derived arrangement |
+| Wire shape | selecting an aggregate / value object runs the same async lower+enrich and lists `wireShapeOf` in the detail panel |
+
+**Read-only by construction**: no add palette, no rename/delete/`ƒx`, no
+write-back path — `usePaneHarness` is taken for the READ gate (`parseOk`) and
+the shared refusal line only.
+
+**Deviation from the brief.** The brief said "clicking a node drills into it".
+A single click also has to serve the wire-shape inspector, which needs a
+selection, so: **click selects** (detail panel opens), **`Open ↳` or a
+double-click drills**. The drill target is not a bare one-step path — the
+construct's `System` / `Subdomain` / `BoundedContext` ancestors are read off
+the AST container chain, so the navigator lands with the breadcrumb it would
+have had if you had drilled there by hand. Kinds `buildViewGraph` has no view
+for (value object, event, api, storage, ui, deployable) open their CONTAINER
+instead of an empty leaf, so the node is shown in situ with its affordances.
+
+### Feature ports (so the delete costs nothing)
+
+| v1-only surface | Where it landed |
+|---|---|
+| Infra props | Storage node's `type:` select, deployable node's `platform:` select + `port:` input. `PLATFORMS` corrected from 5 barewords to the 12 the grammar's `Platform` rule accepts |
+| Field retype + modifiers | Field node's collapsed `ƒ` block: `type`, `= default`, `check`, `check message`, `mask unless`, `sensitive`, plus the `access` select (with the keyword-less `editable` default as its own option) |
+| Find params + return | Find node: `returns`, one `name: Type` row per parameter with `×`, and a `+ param` action |
+| Repository / api rebind | `⇄`-collapsed select on the node (`for` / `from`) — collapsed because a repository is drillable and an always-open select would sit under the drill click |
+| Preview / staged diff | **Dropped.** It was v1-pane-only chrome over `lineDiff`; every v2 write is already parse-gated and refusal-visible, and the brief itself listed it as owner-droppable |
+| Edge drag-rebind (`edge-rebind.ts`) | **Dropped** with its unit suite — v2 has `deployable-edge-rebind.ts` for the deployable edges, and the repository/api reference it also covered is now a select |
+
+`ConstructNode` gained exactly three affordances to carry these: single-value
+`selects`, node `actions` (buttons), and a `detailsLabel` that collapses the
+whole detail block behind a per-node toggle. `retypeField` / `retypeFindParam`
+/ `setFindReturnType` were widened from `TypeSpec` to the shared
+`TypeInput = TypeSpec | string` that `op-surface.ts` already used (moved to
+`fields.ts`, re-exported), so a node's text input and the old pickers splice
+identically.
+
+### What was deleted
+
+`web/src/builder/system/SystemBuilderPane.tsx` (1 511 lines),
+`web/src/builder/system/edge-rebind.ts` (58) and
+`test/system/system-edge-rebind.test.ts` (82). Nothing else: every other module
+under `builder/system/` has a v2 or page-builder importer and stays exactly
+where it is — the brief's slice-7 move to `builder/model-edit/` was **not**
+done (a pure rename with no consumer benefit, and it would have churned every
+import in the same commit as the behaviour change).
+
+### E2e migration
+
+| v1 spec case(s) | Disposition |
+|---|---|
+| search + kind filter, coverage overlay, group nesting, wire shape, dragged-position persistence + reset | **ported** → `system-builder-overview.spec.ts` (plus a new case: opening a construct jumps the drill-down to it) |
+| infra props, find params, repository rebind, field retype + modifiers | **ported** → `system-builder-v2.spec.ts` (4 new cases against the node-level surfaces) |
+| add/delete construct, rename construct, add/rename/delete field, palette kinds, workflow + operation body statements, emit repoint, deployable bindings, every expression-editor case (~26) | **dropped as duplicates** — `system-builder-v2.spec.ts` already drives the same shared helpers through v2's chrome |
+| staged preview diff | **dropped with the feature** |
+| `mobile-model-builder.spec.ts` (v1 drawer FAB) | **repurposed** — the mobile Overview toolbar |
+| `mobile-builder.spec.ts` "mobile Model" | **migrated** to the v2 palette |
+
+`playground-e2e-no-network.yml`'s `SPECS` list swaps `system-builder.spec.ts`
+for `system-builder-overview.spec.ts`; the existence guard passes.

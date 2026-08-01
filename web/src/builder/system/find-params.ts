@@ -9,7 +9,15 @@ import type {
 import { parseDdd } from "../parse";
 import { applyEdits, ifParses, type TextEdit } from "../edit-engine";
 import { IDENTIFIER } from "./rename";
-import { baseLabel, baseSpecOf, typeText, type BaseSpec, type TypeSpec } from "./fields";
+import {
+  baseLabel,
+  baseSpecOf,
+  typeInputText,
+  typeText,
+  type BaseSpec,
+  type TypeInput,
+  type TypeSpec,
+} from "./fields";
 
 // ---------------------------------------------------------------------------
 // Repository `find` parameter editing — add / delete / retype / rename params
@@ -107,10 +115,10 @@ export function deleteFindParam(source: string, repoName: string, findName: stri
   return ifParses(applyEdits(source, [{ offset, end, newText: "" }]));
 }
 
-export function retypeFindParam(source: string, repoName: string, findName: string, index: number, type: TypeSpec): string | null {
+export function retypeFindParam(source: string, repoName: string, findName: string, index: number, type: TypeInput): string | null {
   const cst = locate(source, repoName, findName)?.params[index]?.type.$cstNode;
   if (!cst) return null;
-  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]));
+  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeInputText(type) }]));
 }
 
 export function renameFindParam(source: string, repoName: string, findName: string, index: number, newName: string): string | null {
@@ -134,10 +142,10 @@ export function renameFindParam(source: string, repoName: string, findName: stri
   return ifParses(applyEdits(source, edits));
 }
 
-export function setFindReturnType(source: string, repoName: string, findName: string, type: TypeSpec): string | null {
+export function setFindReturnType(source: string, repoName: string, findName: string, type: TypeInput): string | null {
   const cst = locate(source, repoName, findName)?.returnType.$cstNode;
   if (!cst) return null;
-  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeText(type) }]));
+  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: typeInputText(type) }]));
 }
 
 /** A param name not already used by the find. */

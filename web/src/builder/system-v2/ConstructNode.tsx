@@ -4,7 +4,7 @@
 // can put a pencil affordance for **inline rename** and an `×` for **delete**
 // right on the node — same parse-guarded paths v1 already uses.
 
-import { Box, Button, Group, MultiSelect, Stack, Text, TextInput } from "@mantine/core";
+import { Box, Button, Group, MultiSelect, Select, Stack, Text, TextInput } from "@mantine/core";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { VBadge, ViewKind } from "./view-graph";
@@ -30,6 +30,28 @@ export interface NodeTextInput {
   placeholder?: string;
   testid: string;
   onCommit: (value: string) => void;
+  /** Provide to hang an `×` beside the field — a find parameter's row delete. */
+  onDelete?: () => void;
+}
+
+/** A small inline single-value select on the node — the closed vocabularies
+ *  that used to live in v1's inspector: a storage's `type:`, a deployable's
+ *  `platform:`, a property's access modifier. */
+export interface NodeSelect {
+  label: string;
+  data: string[];
+  value: string | null;
+  placeholder?: string;
+  searchable?: boolean;
+  testid: string;
+  onChange: (value: string | null) => void;
+}
+
+/** A button in the node's detail block (`+ param`). */
+export interface NodeAction {
+  label: string;
+  testid: string;
+  onClick: () => void;
 }
 
 export interface ConstructNodeData {
@@ -46,6 +68,19 @@ export interface ConstructNodeData {
   /** Optional inline text fields (stacked below the name) for single-clause
    *  header edits — a find's `requires` gate / `ignoring` list. */
   inputs?: NodeTextInput[];
+  /** Optional inline single-value selects (closed vocabularies). */
+  selects?: NodeSelect[];
+  /** Optional buttons under the detail block (`+ param`). */
+  actions?: NodeAction[];
+  /** When set, the detail block (`inputs` / `selects` / `actions`) is COLLAPSED
+   *  behind a toggle button carrying this label — a property's five modifier
+   *  clauses would otherwise make every field node a form.  The open/closed
+   *  state is the PANE's (`detailsOpen` + `onToggleDetails`), not local: an
+   *  expanded node is taller than its layout row, so the pane also has to lift
+   *  it above the siblings it now overlaps. */
+  detailsLabel?: string;
+  detailsOpen?: boolean;
+  onToggleDetails?: () => void;
   /** Inline structured editor for the construct's expression (find filter,
    *  invariant condition, …) — rendered below the name while expanded. */
   expressionEditor?: ReactNode;
@@ -83,13 +118,14 @@ const BADGE_ICON: Record<VBadge["label"], string> = {
 function NodeInput({ spec }: { spec: NodeTextInput }): JSX.Element {
   const [draft, setDraft] = useState(spec.value);
   useEffect(() => setDraft(spec.value), [spec.value]);
-  return (
+  const field = (
     <TextInput
       size="xs"
       label={spec.label}
       value={draft}
       placeholder={spec.placeholder}
       className="nodrag"
+      style={spec.onDelete ? { flex: 1, minWidth: 0 } : undefined}
       data-testid={spec.testid}
       aria-label={spec.label}
       onChange={(e) => setDraft(e.currentTarget.value)}
@@ -103,12 +139,58 @@ function NodeInput({ spec }: { spec: NodeTextInput }): JSX.Element {
       }}
     />
   );
+  if (!spec.onDelete) return field;
+  return (
+    <Group gap={2} wrap="nowrap" align="flex-end">
+      {field}
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        color="red"
+        data-testid={`${spec.testid}-del`}
+        styles={{ root: { paddingInline: 4, height: 22, minHeight: 22, color: "white" } }}
+        onClick={(e) => {
+          e.stopPropagation();
+          spec.onDelete!();
+        }}
+      >
+        ×
+      </Button>
+    </Group>
+  );
+}
+
+/** One inline select. Stateless — the source-derived `value` is the truth, and
+ *  a pick commits immediately (there is no half-typed state to protect). */
+function NodeSelectField({ spec }: { spec: NodeSelect }): JSX.Element {
+  return (
+    <Select
+      size="xs"
+      label={spec.label}
+      data={spec.data}
+      value={spec.value}
+      placeholder={spec.placeholder}
+      searchable={spec.searchable}
+      className="nodrag"
+      data-testid={spec.testid}
+      aria-label={spec.label}
+      onChange={spec.onChange}
+      onClick={(e) => e.stopPropagation()}
+      styles={{
+        label: { fontSize: 9, color: "rgba(255,255,255,0.7)", marginBottom: 2 },
+        input: { fontSize: 11, minHeight: 24 },
+      }}
+    />
+  );
 }
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
   const d = data as unknown as ConstructNodeData;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(d.name);
+  const hasDetail =
+    (d.inputs?.length ?? 0) > 0 || (d.selects?.length ?? 0) > 0 || (d.actions?.length ?? 0) > 0;
+  const detailShown = hasDetail && (!d.detailsLabel || d.detailsOpen === true);
   // Re-seed the draft + collapse the editor when the source-derived name
   // changes (after a successful rename the parent re-builds this node).
   useEffect(() => {
@@ -157,7 +239,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
             ? d.compact
               ? 320
               : 360
-            : (d.multiSelects && d.multiSelects.length > 0) || (d.inputs && d.inputs.length > 0)
+            : (d.multiSelects && d.multiSelects.length > 0) || detailShown
               ? d.compact
                 ? 210
                 : 240
@@ -288,13 +370,29 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
           ))}
         </Stack>
       )}
-      {(d.onRename || d.onDelete || d.onToggleExpression) && !editing && (
+      {(d.onRename || d.onDelete || d.onToggleExpression || (d.detailsLabel && hasDetail)) && !editing && (
         <Group
           gap={2}
-          // Drag-exempt: clicking ✎ / × / ƒx should never start a node drag.
+          // Drag-exempt: clicking ✎ / × / ƒx / ƒ should never start a node drag.
           className="nodrag"
           style={{ position: "absolute", top: 2, right: 2 }}
         >
+          {d.detailsLabel && hasDetail && (
+            <Button
+              size="compact-xs"
+              variant={d.detailsOpen ? "filled" : "subtle"}
+              color="gray"
+              data-testid="c4system-v2-details-toggle"
+              title="edit this member's clauses"
+              styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onToggleDetails?.();
+              }}
+            >
+              {d.detailsLabel}
+            </Button>
+          )}
           {d.onToggleExpression && (
             <Button
               size="compact-xs"
@@ -348,11 +446,42 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
           {d.expressionEditor}
         </Box>
       )}
-      {d.inputs && d.inputs.length > 0 && (
-        <Stack gap={4} mt={6} className="nodrag" data-testid="c4system-v2-node-inputs">
-          {d.inputs.map((spec) => (
+      {detailShown && (
+        <Stack
+          gap={4}
+          mt={6}
+          className="nodrag"
+          data-testid="c4system-v2-node-inputs"
+          // One guard for the whole detail block: a click inside it must never
+          // reach the node (which would DRILL). Per-control `onClick` handlers
+          // are not enough — Mantine's `Select` sets its own `onClick` on the
+          // input to open the dropdown, overriding a spread one.
+          onClick={(e) => e.stopPropagation()}
+        >
+          {(d.inputs ?? []).map((spec) => (
             <NodeInput key={spec.testid} spec={spec} />
           ))}
+          {(d.selects ?? []).map((spec) => (
+            <NodeSelectField key={spec.testid} spec={spec} />
+          ))}
+          {(d.actions ?? []).length > 0 && (
+            <Group gap={4} wrap="wrap">
+              {(d.actions ?? []).map((a) => (
+                <Button
+                  key={a.testid}
+                  size="compact-xs"
+                  variant="light"
+                  data-testid={a.testid}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    a.onClick();
+                  }}
+                >
+                  {a.label}
+                </Button>
+              ))}
+            </Group>
+          )}
         </Stack>
       )}
       {d.multiSelects && d.multiSelects.length > 0 && (

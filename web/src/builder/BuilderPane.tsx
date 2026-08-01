@@ -6,9 +6,9 @@ import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
 import { isAggregate, isOperation, isPage, isUi, isWorkflow } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
-import { ifParses, spliceNodeIfParses } from "./edit-engine";
-import { RefusalLine, useRefusal } from "./refusal";
-import { useLiveSourceTick } from "./use-live-source-tick";
+import { spliceNodeIfParses } from "./edit-engine";
+import { RefusalLine } from "./refusal";
+import { usePaneHarness } from "./pane-harness";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
@@ -145,21 +145,16 @@ function diagSignature(nodes: SerializedNodes | null): string {
 }
 
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
-  // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
-  const [rev, setRev] = useState(0);
-  // Debounced mirror of `ctx.editorSourceTick` — bumped after the user has
-  // stopped typing.  Separate from `rev` (the Apply-path counter that fully
-  // remounts the craft Editor); the live path must NOT remount or the user's
-  // selection / open inputs would tear down.  See `use-live-source-tick.ts`
-  // for the baseline rule (the first tick a pane sees is not a change).
-  const liveTick = useLiveSourceTick(ctx.editorSourceTick);
-  // `rev` re-reads on Apply; `liveTick` re-reads on the debounced editor
-  // change (in-place re-seed inside PageBuilder).  Don't depend on `ctx`
-  // here — re-parsing on every render makes `liveNodes` a new reference each
-  // time, which would echo into a deserialize that clobbers the user's
-  // in-flight settings-panel edits.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [rev, liveTick]);
+  // The shared safety rails (parse memo + `rev` + write gate + refusal line) —
+  // see `pane-harness.ts`.  `rev` re-reads on Apply; `liveTick` re-reads on the
+  // debounced editor change (in-place re-seed inside PageBuilder).
+  //
+  // This is the one pane that opts OUT of the external-reseed tick: a file-tab
+  // switch / import remounts the craft Editor by other means, and folding that
+  // tick into the parse memo would make `liveNodes` a new reference, echoing
+  // into a deserialize that clobbers the user's in-flight settings-panel edits.
+  const harness = usePaneHarness(ctx, { externalReseed: false });
+  const { parsed, rev, refusal } = harness;
   const pages = useMemo(() => collectBodies(parsed.ast), [parsed]);
   const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
   const operations = useMemo(() => collectOperations(parsed.ast), [parsed]);
@@ -167,23 +162,14 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const componentNames = useMemo(() => [...components.keys()].sort(), [components]);
   const stateTypes = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const enumCases = useMemo(() => collectEnums(parsed.ast), [parsed]);
-  const refusal = useRefusal();
 
   // Apply a source-level state edit (splice) and re-seed, like handleApply.
   // The State panel's helpers splice a reprinted `state { … }` block; a bad
   // reprint would otherwise commit a source the builder itself can't reopen,
-  // so the candidate is re-parsed here before it reaches the editor.
-  const applyState = (next: string | null): void => {
-    // null here means the helper found nothing to edit — not a refusal.
-    if (next == null) return;
-    if (ifParses(next) == null) {
-      refusal.refuse();
-      return;
-    }
-    refusal.clear();
-    ctx.onSourceChange(next, "builder");
-    setRev((r) => r + 1);
-  };
+  // so the candidate is re-parsed by the harness before it reaches the editor.
+  // `applyOrSkip`, not `applyOrRefuse`: null here means the helper found
+  // nothing to edit — not a refusal.
+  const applyState = harness.applyOrSkip;
 
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
@@ -294,9 +280,9 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // after mount; until then it points at `initialNodes` so a deserialize
   // can't fire spuriously.  The `firstSeenTickRef` guard above ensures
   // the first liveTick bump after mount is one we actually want.
-  const liveNodes = liveTick > 0 ? seedNodes : initialNodes;
+  const liveNodes = harness.liveTick > 0 ? seedNodes : initialNodes;
 
-  if (parsed.parserErrors.length > 0) {
+  if (!harness.parseOk) {
     return <Message>Source has syntax errors — fix them in the editor to use the builder.</Message>;
   }
   if (!current || !initialNodes) {
@@ -314,14 +300,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const page = collectBodies(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    const next = spliceNodeIfParses(source, page.expr, emitted);
-    if (next == null) {
-      refusal.refuse();
-      return;
-    }
-    refusal.clear();
-    ctx.onSourceChange(next, "builder");
-    setRev((r) => r + 1);
+    harness.applyOrRefuse(spliceNodeIfParses(source, page.expr, emitted));
   };
 
   return (

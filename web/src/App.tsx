@@ -370,11 +370,16 @@ export default function App(): JSX.Element {
     setCodeViewRaw(v);
   };
   const isHeavyCodeView = (v: MobileCodeView): boolean =>
-    v === "builder" || v === "model" || v === "model-v2" || v === "requirements";
+    v === "builder" || v === "model" || v === "requirements";
+  // A session persisted before the v1/v2 model panes were consolidated can
+  // still hold the retired `"model-v2"` — read it as the surviving Model view
+  // rather than rendering nothing.
+  const persistedCodeView: MobileCodeView =
+    (codeViewRaw as string) === "model-v2" ? "model" : codeViewRaw;
   const codeView: MobileCodeView =
-    !isDesktop && !userPickedCodeViewRef.current && isHeavyCodeView(codeViewRaw)
+    !isDesktop && !userPickedCodeViewRef.current && isHeavyCodeView(persistedCodeView)
       ? "source"
-      : codeViewRaw;
+      : persistedCodeView;
 
   // Test runner results, lifted here so the Output panel's Tests stream
   // can read them independently of the (sometimes-unmounted) Tests tab.

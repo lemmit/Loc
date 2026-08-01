@@ -1,8 +1,14 @@
-// Model builder v2 — drill-down backbone (Phase 1).
+// The Model builder — drill-down navigator (the playground's ONE structural
+// editing pane since M-T8.13 phases 2–4; the flat canvas it absorbed is gated
+// by `system-builder-overview.spec.ts`).
 //
 // The canvas IS the navigator: clicking a drillable construct (a system /
 // module / context / aggregate) pushes a breadcrumb step and the view swaps to
 // the children of that node. The breadcrumb home (Model) pops back to root.
+//
+// The `v2` token survives in the file name and the `c4system-v2-*` testids on
+// purpose — they are stable identifiers, not the user-facing label (which is
+// just "Model"); renaming them would churn every spec for no signal.
 
 import { expect, test } from "@playwright/test";
 import { selectExample, waitForPlaygroundReady } from "./_helpers";
@@ -14,7 +20,7 @@ test("Model v2 drills system → context → aggregate via clicks, and the bread
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
 
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("c4system-v2-crumb-home")).toBeVisible();
 
@@ -49,7 +55,7 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Drill all the way into Order.confirm — system → module → context → Order →
@@ -84,7 +90,7 @@ test("Model v2 adds a construct via the per-view palette (system + context)", as
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // System view exposes +Module / +Storage / etc; adding a storage bumps the
@@ -112,7 +118,7 @@ test("Model v2 renames and deletes a construct from the node itself", async ({ p
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
   await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
@@ -148,7 +154,7 @@ test("Model v2 — module / aggregate / operation palettes (context / operation 
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // System → module: + Context bumps the context node count by one.
@@ -192,7 +198,7 @@ test("Model v2 renames a context and deletes an operation (v2-only kinds)", asyn
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Drill in to the module so contexts show as nodes.
@@ -229,7 +235,7 @@ test("Model v2 renames and deletes an aggregate field (renameMember + deleteFiel
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Drill into Order's aggregate view to see its fields.
@@ -266,7 +272,7 @@ test("Model v2 shows inline modules / serves multi-selects on a deployable", asy
   await waitForPlaygroundReady(page);
   // Banking System has a `deployable api { modules: Banking }` plus `webApp`.
   await selectExample(page, /Banking System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
 
@@ -281,7 +287,7 @@ test("Model v2 surfaces invariants as nodes and edits the condition inline", asy
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Banking System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Banking System's Account aggregate declares two invariants.
@@ -304,7 +310,7 @@ test("Model v2 edits a repository find's filter inline", async ({ page }) => {
   await waitForPlaygroundReady(page);
   // Acme has repositories with finds and filters; storefront-dotnet also.
   await selectExample(page, /Acme \(multi-deployable system\)/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Drill to the first repository node (acme has `repository Products` /
@@ -328,7 +334,7 @@ test("Model v2 persists hand-dragged node positions across a reload, and Reset c
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   // Drill system → module → context so the aggregate nodes are visible.
@@ -356,7 +362,7 @@ test("Model v2 persists hand-dragged node positions across a reload, and Reset c
   await page.reload();
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
   await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
@@ -378,7 +384,7 @@ test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
   // Banking System declares four sibling events — Account.deposit emits
   // MoneyDeposited; we repoint it to MoneyWithdrawn.
   await selectExample(page, /Banking System/);
-  await page.getByTestId("doc-tab-model-v2").click();
+  await page.getByTestId("doc-tab-model").click();
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
 
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
@@ -395,4 +401,180 @@ test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
   await eventSelect.click();
   await page.getByRole("option", { name: "MoneyWithdrawn", exact: true }).click();
   await expect(eventSelect).toHaveValue("MoneyWithdrawn");
+});
+
+// ---------------------------------------------------------------------------
+// Ported from the retired v1 spec (M-T8.13 phases 2–4). These surfaces existed
+// only in v1's side inspector; they now live on the node itself, so the
+// assertions moved here rather than dying with the pane.
+// ---------------------------------------------------------------------------
+
+test("Model edits infra construct properties (deployable platform + port, storage type)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Storage + deployables are system-level, so they render in the system view.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+
+  const dep = page.locator('[data-construct-kind="deployable"][data-construct-name="webApp"]');
+  await expect(dep).toBeVisible();
+  const platform = dep.getByTestId("c4system-v2-deployable-platform");
+  await expect(platform).toHaveValue("react");
+  await platform.click();
+  // `static` is one of the twelve the grammar's `Platform` rule accepts — the
+  // old list offered five, so this pick used to be unreachable for most.
+  await page.getByRole("option", { name: "static", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-construct-kind="deployable"][data-construct-name="webApp"]')
+      .getByTestId("c4system-v2-deployable-platform"),
+  ).toHaveValue("static");
+
+  // The optional `port:` clause rides the same node.
+  const port = page
+    .locator('[data-construct-kind="deployable"][data-construct-name="webApp"]')
+    .getByTestId("c4system-v2-deployable-port");
+  await port.fill("3999");
+  await port.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-construct-kind="deployable"][data-construct-name="webApp"]')
+      .getByTestId("c4system-v2-deployable-port"),
+  ).toHaveValue("3999");
+
+  // Storage `type:` — the closed vocabulary select.
+  const stype = page
+    .locator('[data-construct-kind="storage"][data-construct-name="primary"]')
+    .getByTestId("c4system-v2-storage-type");
+  await expect(stype).toHaveValue("postgres");
+  await stype.click();
+  await page.getByRole("option", { name: "redis", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-construct-kind="storage"][data-construct-name="primary"]')
+      .getByTestId("c4system-v2-storage-type"),
+  ).toHaveValue("redis");
+});
+
+test("Model edits a repository find's parameters and return type", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Banking System exposes `repository Accounts` with the parameterised
+  // `byHolder(holder: Customer id): Account[]` find this spec edits.
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('[data-construct-kind="repository"][data-construct-name="Accounts"]').click();
+
+  // The header clauses + signature live behind the find node's ⋯ toggle (a
+  // repository view stacks its finds; expanded by default they would overlap).
+  const find = page.locator('[data-construct-kind="find"][data-construct-name="byHolder"]');
+  await expect(find).toBeVisible();
+  await find.getByTestId("c4system-v2-details-toggle").click();
+  await expect(find.getByTestId("c4system-v2-find-return")).toHaveValue("Account[]");
+  await expect(find.getByTestId("c4system-v2-find-param-0")).toHaveValue("holder: Customer id");
+
+  // `+ param` appends one; its `×` takes it away again. Source stays valid.
+  await find.getByTestId("c4system-v2-find-param-add").click();
+  await expect(
+    page
+      .locator('[data-construct-kind="find"][data-construct-name="byHolder"]')
+      .getByTestId("c4system-v2-find-param-1"),
+  ).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  await page
+    .locator('[data-construct-kind="find"][data-construct-name="byHolder"]')
+    .getByTestId("c4system-v2-find-param-1-del")
+    .click();
+  await expect(
+    page
+      .locator('[data-construct-kind="find"][data-construct-name="byHolder"]')
+      .getByTestId("c4system-v2-find-param-1"),
+  ).toHaveCount(0, { timeout: 5_000 });
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+test("Model rebinds a repository's target aggregate", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+
+  // `repository Customers for Customer` — the reference lives behind the
+  // node's ⇄ toggle (a repository is drillable; an always-open select would
+  // sit where the drill click lands).
+  const repo = page.locator('[data-construct-kind="repository"][data-construct-name="Customers"]');
+  await expect(repo).toBeVisible();
+  await repo.getByTestId("c4system-v2-details-toggle").click();
+  const rebind = repo.getByTestId("c4system-v2-rebind");
+  await expect(rebind).toHaveValue("Customer");
+  await rebind.click();
+  await page.getByRole("option", { name: "Order", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-construct-kind="repository"][data-construct-name="Customers"]')
+      .getByTestId("c4system-v2-rebind"),
+  ).toHaveValue("Order");
+});
+
+test("Model retypes an aggregate field and edits its modifier clauses", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+
+  // `placedAt: datetime` — retype it, then give it a `= default`. The six
+  // clauses live behind the field node's ƒ toggle.
+  const field = page.locator('[data-construct-kind="field"][data-construct-name="placedAt"]');
+  await expect(field).toBeVisible();
+  await field.getByTestId("c4system-v2-details-toggle").click();
+  const type = field.getByTestId("c4system-v2-field-type");
+  await expect(type).toHaveValue("datetime");
+  await type.fill("string");
+  await type.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-construct-kind="field"][data-construct-name="placedAt"]')
+      .getByTestId("c4system-v2-field-type"),
+  ).toHaveValue("string", { timeout: 5_000 });
+
+  // The modifier clauses splice narrowly — an empty one means "no clause".
+  const check = page
+    .locator('[data-construct-kind="field"][data-construct-name="placedAt"]')
+    .getByTestId("c4system-v2-field-check");
+  await expect(check).toHaveValue("");
+  await check.fill("placedAt.length > 0");
+  await check.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-construct-kind="field"][data-construct-name="placedAt"]')
+      .getByTestId("c4system-v2-field-check"),
+  ).toHaveValue("placedAt.length > 0", { timeout: 5_000 });
 });

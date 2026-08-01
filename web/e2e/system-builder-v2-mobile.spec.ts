@@ -27,7 +27,7 @@ async function pickExample(page: Page, label: RegExp): Promise<void> {
 test("Model v2 on mobile: drill into Sales System → context → aggregate", async ({ page }) => {
   await page.goto("/");
   await pickExample(page, /Sales System/);
-  await page.getByTestId("mobile-doc-tab-model-v2").click({ timeout: 30_000 });
+  await page.getByTestId("mobile-doc-tab-model").click({ timeout: 30_000 });
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("c4system-v2-crumb-home")).toBeVisible();
 
@@ -48,7 +48,7 @@ test("Model v2 on mobile: drill into Sales System → context → aggregate", as
 test("Model v2 on mobile: operation body renders as a statement flow", async ({ page }) => {
   await page.goto("/");
   await pickExample(page, /Sales System/);
-  await page.getByTestId("mobile-doc-tab-model-v2").click({ timeout: 30_000 });
+  await page.getByTestId("mobile-doc-tab-model").click({ timeout: 30_000 });
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 20_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
   await page.locator('.react-flow__node[data-id^="subdomain:"]').first().click();

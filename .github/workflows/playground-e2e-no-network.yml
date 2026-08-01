@@ -69,7 +69,7 @@ jobs:
         e2e/multi-tab.spec.ts
         e2e/requirements-pane.spec.ts
         e2e/builder-page.spec.ts
-        e2e/system-builder.spec.ts
+        e2e/system-builder-overview.spec.ts
         e2e/system-builder-v2.spec.ts
         e2e/system-builder-v2-mobile.spec.ts
         e2e/mobile-builder.spec.ts

@@ -2,7 +2,6 @@ import { AstUtils, type AstNode, type Reference } from "langium";
 import type { Api, Model, Repository } from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
-import type { NodeKind } from "./model";
 
 // ---------------------------------------------------------------------------
 // Rebind a construct's single outgoing reference from the inspector:
@@ -19,8 +18,10 @@ import type { NodeKind } from "./model";
 export type RebindKind = "repository" | "api";
 
 const REBINDABLE: RebindKind[] = ["repository", "api"];
-export const isRebindKind = (kind: NodeKind): kind is RebindKind =>
-  (REBINDABLE as NodeKind[]).includes(kind);
+/** Widened to `string` so both graph vocabularies can ask — the flat graph's
+ *  `NodeKind` and the drill-down's `ViewKind` both spell these two the same. */
+export const isRebindKind = (kind: string): kind is RebindKind =>
+  (REBINDABLE as string[]).includes(kind);
 
 const KIND_TO_TYPE: Record<RebindKind, string> = {
   repository: "Repository",
