@@ -3235,3 +3235,47 @@ on create where its own emitted OpenAPI declares the `{id}` envelope) and RS-14
 Neither was visible to the spec-diff, because in both cases the emitted specs
 **agree** and only the bytes differ — and the behavioral tiers assert *locally*,
 each backend passing its own emitted asserts.
+
+## 58. Parallel agents: claim before you build, and re-fetch while CI queues (2026-07-31)
+
+Draining the fleet bug-hunt register (M-T9.24), I built five rows — G1, G2, F1b,
+I2 — and reasoned about a sixth (I1). **Four of the five landed in someone
+else's PR before mine merged**: #2316 took G1+G2, #2317 took I1+I2, #2319 took
+F1b. I shipped two things in the end: repo-review F2 (a different register, so
+nobody collided) and a G2 *follow-up*.
+
+Two mechanical causes, both already written down in CLAUDE.md, both ignored:
+
+1. **No draft PR.** CLAUDE.md says open a draft PR FIRST as the claim ticket,
+   before writing code. I opened none for any of the five. The cost is not
+   subtle — it is the whole PR, re-derived by two agents in parallel.
+2. **No `git fetch` during a long CI wait.** The required `tests-passed` gate sat
+   queued **83 minutes** (runner starvation; jobs queued at 15:48 got a runner at
+   16:33). I polled the queue five times across that window and never once
+   fetched `origin/main`. #2317 and #2319 both landed *inside* that window. One
+   `git fetch` on any of those five wake-ups would have caught it while the work
+   was still redirectable.
+
+**The rule that generalises: `git fetch origin main` on every CI wake-up, not
+only when something breaks.** A CI wait is exactly the window in which `main`
+moves under you, because it is long and you are not touching the tree.
+
+Two smaller traps from the same session, both worth their own note:
+
+- **I "verified" a competing implementation against a stale local `main`** and
+  concluded it had a bug it didn't have — §53 above, already logged, hit anyway.
+  The tell was `git merge-base --is-ancestor HEAD origin/main` returning "no".
+  When judging someone else's merged fix, pin the base first:
+  `git checkout -B verify origin/main`, then re-run the repro.
+- **A torn working tree produces fake test failures.** Editing source while a
+  vitest run is in flight (and `tsc -b` is rewriting `out/`) gave 15 failing
+  files clustered in code I had never touched. They vanished on a frozen
+  checkout. If a failure set looks topically unrelated to the diff, suspect the
+  tree before the change — and re-run on a quiet tree before believing it.
+
+The one thing that DID survive was the one thing verified against fresh `main`
+rather than against memory of it: the G2 follow-up reproduced on `origin/main`
+*after* #2316 had supposedly closed G2, because that guard sits behind
+`applyDefaultVersioning`'s early return and the explicit `with versioned` path
+walks past it. **Corollary worth keeping: when a guard is added to a CALLER,
+check every other entry point into the callee it was guarding.**
