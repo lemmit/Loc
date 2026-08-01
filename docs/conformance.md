@@ -322,6 +322,18 @@ actual runtime behaviour. Things that slip through:
   request/response pair still belongs to the behavioral wire-golden
   differential.
 
+- **A dimension whose feature no fixture exercises.** The harness boots ONE
+  system (`examples/showcase.ddd`), so a dimension can be present, correct,
+  and permanently silent. The `errorResponses` dimension compares per-op
+  4xx sets and still missed python + java omitting the `when`-gate
+  `Disallowed` 409 from their published contracts — because showcase has no
+  `when`-gated operation anywhere (every op there uses `requires` +
+  `precondition`). Adding a dimension is only half the work; something has
+  to exercise the feature it compares. The per-PR
+  `test/ir/api-surface-parity.test.ts` now covers the aggregate route
+  surface (paths, success-body shapes, error statuses) on a fixture built to
+  carry the gaps — `when` gate included.
+
 - **Header / query parameter drift.** The current `pathParamSignatures`
   helper filters to `in: "path"` parameters. Query / header parameters
   ARE part of the contract but currently invisible. A future dimension

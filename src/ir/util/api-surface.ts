@@ -48,14 +48,16 @@
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake } from "../../util/naming.js";
 import { emitsRestCreate } from "../enrich/wire-projection.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  FindIR,
-  OperationIR,
-  RepositoryIR,
-  TypeIR,
+import {
+  type AggregateIR,
+  type BoundedContextIR,
+  type FindIR,
+  type OperationIR,
+  operationIsGuarded,
+  type RepositoryIR,
+  type TypeIR,
 } from "../types/loom-ir.js";
+import { errorStatuses } from "./openapi-errors.js";
 import {
   camelId,
   type OpIdTokens,
@@ -65,6 +67,7 @@ import {
   opGetById,
   opOperation,
 } from "./openapi-ids.js";
+import { aggregateIsVersioned } from "./versioned-capability.js";
 
 /** HTTP method, lowercase — the form every backend's route table uses. */
 export type ApiMethod = "get" | "post" | "put" | "patch" | "delete";
@@ -180,6 +183,51 @@ export function collectionSuccess(
   return undefined;
 }
 
+/**
+ * The error statuses a find declares, keyed the same way every backend keys
+ * them: an ABSENCE-returning find (`T option` / `T or NotFound`) can 404; a
+ * collection or single-valued find cannot.
+ *
+ * `guarded` is passed through but is INERT TODAY: `errorStatuses` branches on
+ * it only for `operation`/`workflow`, so every find declares the same set gated
+ * or not.  That is a real gap — a `requires`-gated read DOES answer 403 at
+ * runtime, and the negative-authz half of M-T3.13 asserts exactly that against
+ * a booted backend — but it is a gap in all five backends equally, not in this
+ * derivation.  Threading the flag here rather than hardcoding `false` is the
+ * point of having one table: when the shared arm learns about guarded finds,
+ * every backend AND this derivation gain the 403 together, instead of this
+ * module declaring a status no backend publishes and recreating the two-truths
+ * problem it exists to remove.
+ */
+function findErrorStatuses(find: FindIR, guarded: boolean): number[] {
+  if (absenceUnionSuccess(find.returnType) || find.returnType?.kind === "optional") {
+    return errorStatuses("findOptional", guarded);
+  }
+  return errorStatuses(collectionSuccess(find.returnType) ? "findList" : "findSingle", guarded);
+}
+
+/**
+ * The error statuses a domain operation declares.
+ *
+ * The base set comes from the shared table; the two CONFLICT statuses are
+ * per-operation facts the table cannot know, and each backend adds them at its
+ * own call site: a `when` state gate can answer `Disallowed` (409), and a
+ * versioned aggregate's `update` can answer `ConcurrencyConflict` (409) on a
+ * stale `If-Match`. With no `httpStatus` override both collapse to one 409.
+ *
+ * NOT resolved through `httpStatus` here.  The overrides live on
+ * `BoundedContextIR.structuralErrorStatuses`, and this derivation is
+ * per-aggregate — a caller that needs the remapped status reads it off the
+ * context the same way the emitters do.  Declaring the default is strictly
+ * better than declaring nothing, which is what this returned before.
+ */
+function operationErrorStatuses(agg: AggregateIR, op: OperationIR): number[] {
+  const statuses = new Set(errorStatuses("operation", operationIsGuarded(op)));
+  if (op.when) statuses.add(409);
+  if (op.name === "update" && aggregateIsVersioned(agg)) statuses.add(409);
+  return [...statuses].sort((a, b) => a - b);
+}
+
 function entityType(aggName: string): TypeIR {
   return { kind: "entity", name: aggName };
 }
@@ -242,7 +290,7 @@ export function deriveAggregateOperations(
       // typed from it and narrowing it to an id is a wire-visible retype of
       // every existing call site — a separate, deliberate change.
       entityType(agg.name),
-      [400, 409],
+      errorStatuses("create"),
     );
   }
 
@@ -258,7 +306,7 @@ export function deriveAggregateOperations(
       `${base}/${snake(find.name)}`,
       findParams(find),
       find.returnType,
-      [403],
+      findErrorStatuses(find, find.requires !== undefined),
     );
   }
 
@@ -270,7 +318,7 @@ export function deriveAggregateOperations(
     `${base}/{id}`,
     [idParam()],
     entityType(agg.name),
-    [404],
+    errorStatuses("getById"),
   );
 
   // DELETE /api/<aggs>/{id} — only when the aggregate has a canonical destroy.
@@ -282,7 +330,7 @@ export function deriveAggregateOperations(
       `${base}/{id}`,
       [idParam()],
       undefined,
-      [404, 409],
+      errorStatuses("destroy"),
     );
   }
 
@@ -304,7 +352,7 @@ export function deriveAggregateOperations(
       // that compiles perfectly on both sides.  Caught by the success-body-shape
       // gate in `api-surface.test.ts`; `updateOrder` was live when it landed.
       op.returnType,
-      [400, 403, 404, 409],
+      operationErrorStatuses(agg, op),
     );
     // The `GET /{id}/can_<op>` companion exists ONLY for a `when`-gated
     // operation — it is the canCommand probe for that gate, so an ungated
@@ -322,7 +370,7 @@ export function deriveAggregateOperations(
         `${base}/{id}/can_${slug}`,
         [idParam()],
         { kind: "primitive", name: "bool" },
-        [404],
+        errorStatuses("getById"),
       );
     }
   }
@@ -339,7 +387,7 @@ export function deriveAggregateOperations(
       base,
       findParams(all),
       all.returnType,
-      [403],
+      findErrorStatuses(all, all.requires !== undefined),
     );
   }
 
