@@ -171,13 +171,30 @@ export function dtoParam(
    *  (`Type Name = <lit>`) and carries no `[Required]` — STJ applies the
    *  default when the field is omitted, dropping it from the required-set. */
   defaultLiteral?: string,
+  /** Which request slot this DTO is.  `create` keeps the implicit-bool
+   *  optionality (RS-6); `operation` requires every declared param (RS-26). */
+  slot: "create" | "operation" = "create",
 ): string {
   if (defaultLiteral !== undefined && dir === "request") {
     return `${csType} ${name} = ${defaultLiteral}`;
   }
-  const optionalBoolRequest = dir === "request" && csType === "bool";
+  const optionalBoolRequest = dir === "request" && csType === "bool" && slot === "create";
   const required = !csType.endsWith("?") && !optionalBoolRequest;
   if (!required) return `${csType} ${name}`;
+  // RS-26 on an OPERATION body: `[Required]` alone cannot reject an omitted
+  // VALUE TYPE.  RequiredAttribute tests for null, and a missing `int qty` /
+  // `bool active` binds to the CLR default (0/false) — non-null, so validation
+  // passes and the update silently overwrites stored state with a zero value.
+  // `[property: JsonRequired]` moves the check to deserialization, where the
+  // question is "was the MEMBER present", which is the one actually being
+  // asked.  Deliberately not applied to create bodies: there an omitted field
+  // is legitimately absent (RS-6 / a declared `= default`), and adding it would
+  // change the create contract this rule is not about.
+  // Emitted ALONGSIDE `[Required]`, not instead of it: the two answer different
+  // questions.  JsonRequired asks "was the member present"; Required asks "is
+  // the bound value null".  Dropping Required here would let an explicit
+  // `"name": null` reach the domain, which it does not today.
+  const jsonRequired = dir === "request" && slot === "operation" ? "[property: JsonRequired] " : "";
   // Request → parameter target (bare `[Required]`) so ASP.NET record
   // validation doesn't throw at model-binding time; response → property
   // target (`[property: Required]`).  See the doc comment above.
@@ -192,11 +209,12 @@ export function dtoParam(
   // a `RequiredAttribute`, so Swashbuckle's `RequiredFromCtorParamFilter`
   // keeps the field in the OpenAPI required-set.
   const attr =
-    dir === "request"
+    jsonRequired +
+    (dir === "request"
       ? csType === "string"
         ? "[Required(AllowEmptyStrings = true)] "
         : "[Required] "
-      : "[property: Required] ";
+      : "[property: Required] ");
   return `${attr}${csType} ${name}`;
 }
 

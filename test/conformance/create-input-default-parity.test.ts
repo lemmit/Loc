@@ -136,7 +136,8 @@ describe("create-input defaults reach every backend's create surface", () => {
 //
 // It began 1-vs-4 with the MINORITY correct — node's `.default(false)` had been
 // added to match .NET model-binding and Phoenix, so four backends agreed and the
-// agreement was wrong.  Four now conform, each having needed a different fix:
+// agreement was wrong.  All five conform now, and NO TWO NEEDED THE SAME FIX,
+// which is why the rule was worth numbering rather than patching one emitter:
 //
 //   node     zodFor gained a `create-body` context
 //   python   requestFieldDecl gained a `slot`
@@ -145,23 +146,17 @@ describe("create-input defaults reach every backend's create surface", () => {
 //   java     BOTH halves wrong — primitive components meant Jackson supplied
 //            0/false for an omitted key while RequiredSet claimed required;
 //            now boxed + @NotNull
+//   dotnet   `[Required]` cannot express this at all: it tests for null, and an
+//            omitted value type binds to 0/false.  Presence is a
+//            DESERIALIZATION question → `[property: JsonRequired]`
 //
 // Each waiver dies when its backend lands the rule; the list only shrinks.
 // ---------------------------------------------------------------------------
 
-const UPDATE_BOOL_WAIVED: Partial<Record<Backend, string>> = {
-  // .NET is the one still open, and its fix is not the same shape as the other
-  // three.  It already emits `[Required]` on the non-bool components — but on a
-  // NON-NULLABLE VALUE TYPE that annotation cannot reject absence: model binding
-  // always produces a value (`false`/`0`), so validation sees a non-null and
-  // passes.  Closing it means making the component nullable (`bool?`) so there
-  // is an absence to detect, then unwrapping at the domain call — the same
-  // boxing Java needed.  Left waived rather than guessed at: unlike the other
-  // three, the emitted-source shape alone does not prove the runtime rejects,
-  // so this one wants a booted check before the waiver comes out.
-  dotnet:
-    "emits `bool Active`; [Required] on a non-nullable value type cannot reject an omitted key",
-};
+// Empty, and kept as a ratchet rather than deleted: a backend that REGRESSES
+// gets an entry here plus an RS-26 `targets` row, instead of the assertion
+// being quietly relaxed.
+const UPDATE_BOOL_WAIVED: Partial<Record<Backend, string>> = {};
 
 /** Is `field` REQUIRED (no default, no optionality) in the update request? */
 function updateRequiresField(files: Map<string, string>, backend: Backend, field: string): boolean {
@@ -180,8 +175,12 @@ function updateRequiresField(files: Map<string, string>, backend: Backend, field
       return new RegExp(`^\\s*${field}:\\s*[^=\\n]+$`, "m").test(block);
     }
     case "dotnet": {
+      // `[property: JsonRequired]`, not `[Required]`: RequiredAttribute tests
+      // for null, and an omitted value type binds to 0/false — non-null, so it
+      // passes.  Presence is a DESERIALIZATION question, which is the one
+      // JsonRequired asks.
       const block = sliceBlock(all, "public sealed record UpdateItemRequest(", ");");
-      return new RegExp(`\\[Required[^\\]]*\\]\\s*bool\\s+${pascal}\\b`).test(block);
+      return new RegExp(`\\[property: JsonRequired\\][^,]*\\b${pascal}\\b`).test(block);
     }
     case "java": {
       const block = sliceBlock(all, 'new RequiredSet("UpdateItemRequest"', ")");

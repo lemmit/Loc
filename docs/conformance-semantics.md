@@ -718,7 +718,18 @@ the conforming backends, and the fix that established it.
   shape. Node's `.default(false)` was added deliberately to match .NET
   model-binding and Phoenix, so four backends agreed and the agreement was
   wrong.
-- **Conforms.** node (dotnet/java/python/elixir are targets).
+- **Conforms.** node, dotnet, java, python, elixir — and **no two backends
+  needed the same fix**, which is the case for numbering the rule rather than
+  patching one emitter: node scoped `zodFor` to a `create-body` context; python
+  gave `requestFieldDecl` a slot; elixir's runtime *already* conformed and only
+  its **spec** disagreed (`@update_required` listed every bool while the
+  OpenApiSpex schema did not — RS-25's divergence inverted); java had **both**
+  halves wrong (primitive record components let Jackson supply `0`/`false` for
+  an omitted key while `RequiredSet` claimed the field required) and needed
+  boxing + `@NotNull`; and .NET could not express it with `[Required]` at all —
+  that attribute tests for **null**, and an omitted value type binds to
+  `0`/`false`, so presence had to become a *deserialization* question via
+  `[property: JsonRequired]`.
 - **Provenance.** Found 2026-08-01 reconciling where `= default` belongs (domain
   vs wire boundary); node fixed by scoping the implicit-bool rule to a
   `create-body` context in `routes-builder.ts`. Tier: **static** — the four open
