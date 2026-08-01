@@ -105,7 +105,7 @@ function renderInstanceActions(contextModule: string, appModule: string, wf: Wor
     return `  @doc "GET /api/workflows/${slug}/instances"
   def ${slug}_instances(conn, _params) do
     data = Enum.map(${streamMod}.list_instances(), fn row -> %{${mapFields}} end)
-    json(conn, %{data: data})
+    json(conn, data)
   end
 
   @doc "GET /api/workflows/${slug}/instances/:id"
@@ -123,7 +123,7 @@ function renderInstanceActions(contextModule: string, appModule: string, wf: Wor
   return `  @doc "GET /api/workflows/${slug}/instances"
   def ${slug}_instances(conn, _params) do
     data = Enum.map(${appModule}.Repo.all(${stateMod}), fn row -> %{${mapFields}} end)
-    json(conn, %{data: data})
+    json(conn, data)
   end
 
   @doc "GET /api/workflows/${slug}/instances/:id"

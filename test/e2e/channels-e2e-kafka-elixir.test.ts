@@ -123,6 +123,27 @@ function consumedEntries(log: string): { type: string; key: string }[] {
   return out;
 }
 
+/** Count catalog events in a structured-JSON backend log.
+ *
+ *  Counts LINES carrying the quoted event name, not substring occurrences.
+ *  A backend whose formatter emits BOTH a rendered message string AND the
+ *  structured metadata writes the event name TWICE per entry.  Phoenix's
+ *  `LogFormatter` does exactly that:
+ *
+ *    base = %{..., message: IO.iodata_to_binary(message)}   # "channel_consumed ..."
+ *    Jason.encode!(Map.merge(base, meta_map))               # event: "channel_consumed"
+ *
+ *  so `log.match(/channel_consumed/g).length` reports exactly 2x the real
+ *  count — 6 consumed events read as 12.  The .NET `AddJsonConsole` legs have
+ *  the identical shape (`Message` + `State`).  node/python/java log the event
+ *  only as a structured field (`{ event: "channel_consumed", ... }`), one
+ *  occurrence per entry, which is why the naive count happens to work there
+ *  and only these two backends were red.
+ *
+ *  The axis is the LOG FORMAT, not the backend. */
+const countEvents = (log: string, event: string): number =>
+  log.split("\n").filter((l) => l.includes(`"${event}"`)).length;
+
 describe.skipIf(!ENABLED)("kafka log semantics — elixir leg (M-T4.4 slice 8d)", () => {
   let dir: string;
   const apps: ChildProcess[] = [];
@@ -338,7 +359,7 @@ describe.skipIf(!ENABLED)("kafka log semantics — elixir leg (M-T4.4 slice 8d)"
     }
     // The producer relay announced every publish (design §5: all durable).
     const salesLog = readFileSync(join(dir, `sales_api-${SALES_PORT}.log`), "utf8");
-    expect((salesLog.match(/channel_published/g) ?? []).length).toBe(ORDERS * 2);
+    expect(countEvents(salesLog, "channel_published")).toBe(ORDERS * 2);
   }, 120_000);
 
   it("parks a poisoned record on <address>.dlq instead of stalling the partition", async () => {

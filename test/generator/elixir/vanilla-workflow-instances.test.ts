@@ -201,3 +201,66 @@ describe("vanilla foundation — event-sourced workflow-instance reads", () => {
     expect(files.get(routerKey!)!).toContain("/workflows/order_fulfillment/instances");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The instance LIST is a bare array — the shape this backend's own OpenAPI
+// spec already declares, and the shape the other four backends serve.
+//
+// Phoenix wrapped it: `json(conn, %{data: data})`, i.e. `{"data": [...]}`,
+// while `renderWorkflowInstanceListResponseSchema` emitted
+// `type: :array` for the very same endpoint.  The backend disagreed with
+// ITSELF, which is why the spec-diffing conformance-parity gate stayed green —
+// the spec was right, only the runtime was wrong.
+//
+// It surfaced instead in `channels-e2e`, whose elixir leg reads
+// `GET /api/workflows/fulfil/instances` and calls `.some(...)` on the body.
+// On a wrapper that throws, the suite's probe swallows it, and the failure
+// arrives 10s later as an unexplained "timed out waiting for correlated Fulfil
+// instance" — the delivery half having already passed.
+//
+//   node    httpCtx.json(rows)                      → [...]
+//   python  return [{"orderId": row.order_id} …]    → [...]
+//   java    public List<FulfilInstanceResponse> …   → [...]
+//   elixir  json(conn, %{data: data})               → {"data": [...]}   ← was
+// ---------------------------------------------------------------------------
+
+describe("workflow-instance LIST wire shape", () => {
+  const SRC = `
+  system Api {
+    subdomain F { context F {
+      aggregate Order with crudish { code: string }
+      repository Orders for Order {}
+      workflow OrderFulfillment {
+        orderId: Order id
+        create(code: string) { let o = Order.create({ code: code }) }
+      }
+    } }
+    api A from F
+    storage pg { type: postgres }
+    resource fState { for: F, kind: state, use: pg }
+    deployable api { platform: elixir  contexts: [F]  serves: A  dataSources: [fState]  port: 4000 }
+  }`;
+
+  it("returns the bare list, not a `data` wrapper", async () => {
+    const { model } = await parseString(SRC, { validate: false });
+    const files = generateSystems(model).files;
+    const key = [...files.keys()].find((k) =>
+      k.endsWith("/controllers/workflow_instances_controller.ex"),
+    )!;
+    const ctrl = files.get(key)!;
+    expect(ctrl).toContain("json(conn, data)");
+    // The regression, verbatim.
+    expect(ctrl).not.toContain("json(conn, %{data: data})");
+  });
+
+  it("agrees with the array-typed list schema this backend emits for it", async () => {
+    const { model } = await parseString(SRC, { validate: false });
+    const files = generateSystems(model).files;
+    const schemaKey = [...files.keys()].find((k) =>
+      k.endsWith("order_fulfillment_instance_list_response.ex"),
+    );
+    expect(schemaKey, "instance list-response schema not emitted").toBeDefined();
+    // Spec says array; the controller above must therefore send an array.
+    expect(files.get(schemaKey!)!).toContain("type: :array");
+  });
+});
