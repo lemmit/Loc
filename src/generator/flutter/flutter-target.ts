@@ -183,19 +183,133 @@ export const flutterTarget: WalkerTarget = {
   },
   // A QueryView `data:` lambda param binds to the LOADED value the `.when(data:
   // …)` callback yields — the `AsyncValue`'s var name (`orderAll` / `orderById`)
-  // shadowed inside the callback as the unwrapped `List<T>` / `T?`.  So the
-  // handle dereferences to that bare binding (no `.data` envelope), mirroring
-  // Feliz's match-arm binding.  The list provider already unwraps the paged
-  // `{items,…}` envelope to a `List<T>` (see `pagedDataIsList`), so `paged` /
-  // `autoPaged` are no-ops here.
-  renderQueryDataAccess: (handle: string) => lowerFirst(handle),
+  // shadowed inside the callback as the unwrapped value.
+  //
+  // An UNPAGED list provider yields a bare `List<T>`, so the handle is the
+  // binding itself.  A PAGED one yields a `LoomPage<T>` (rows + page count), so
+  // an auto-paged body — one that binds `rows` and maps over it — takes
+  // `.items`; a body that keeps the envelope (the scaffold, which also reads
+  // `rows.totalPages` for its pager) keeps the whole page.
+  renderQueryDataAccess: (handle: string, _single, _paged, autoPaged) =>
+    autoPaged ? `${lowerFirst(handle)}.items` : lowerFirst(handle),
   // The Flutter read provider decodes the paged `.all` envelope straight to a
   // `List<T>` (pulls `items` out), so the binding IS the array and the
   // scaffold's `rows.items` unwrap is a no-op.  `totalPages` has nowhere to
   // come from here — Flutter keeps no page count — so it falls through to the
   // verbatim access, which is what the (unrendered, `serverPagedControls`-less)
   // pager would have read anyway.
-  renderPagedEnvelopeMember: ({ member, binding }) => (member === "items" ? binding : undefined),
+  renderPagedEnvelopeMember: ({ member, binding }) =>
+    member === "items" || member === "totalPages" ? `${binding}.${member}` : undefined,
+
+  /** Dart NAMED RECORD for a find's query bag — `(page: 1, pageSize: 10, …)`.
+   *  The shared default is a JavaScript object literal, whose bare `page:` keys
+   *  are not Dart identifiers; emitting it verbatim is what made every
+   *  server-paged scaffold list fail to compile.  A record is also exactly what
+   *  the `.family` provider wants as a key (structural `==`). */
+  renderQueryArgsBag: (pairs) => `(${pairs.map((p) => `${p.name}: ${p.value}`).join(", ")})`,
+
+  // --- Table control seams (M-T1.1) — SERVER-DRIVEN ------------------------
+  //
+  // Flutter's list reads are Riverpod `.family` providers keyed by the query
+  // record (`reads-emit.ts`), so sort and page are just STATE WRITES: the key
+  // changes, Riverpod refetches, the server does the ordering and windowing.
+  // That is the same rationale as the Phoenix/LiveView leg — the topology
+  // already hands the work to the server, so re-deriving it client-side would
+  // be strictly worse — and unlike the JSX targets there is no client fallback
+  // to keep byte-identical, because Flutter never had these controls at all.
+  //
+  // Every write goes through the Notifier (`renderStateWrite`'s setter), and
+  // every read through the projected `state.<field>`, so the page shell's
+  // existing bindings are all these need.
+
+  /** Tappable column header driving `sortKey`/`sortDir`.  Re-tapping the ACTIVE
+   *  column flips the direction; tapping a new one selects it and resets to
+   *  ascending.  The arrow mirrors the JSX targets' `↑`/`↓` indicator, and
+   *  `Semantics(sortKey:)` is what makes the affordance announceable — a bare
+   *  `InkWell` around text reads as undifferentiated tappable content. */
+  renderSortableHeader(spec) {
+    const { header, field } = spec;
+    const k = `state.${spec.sortKey.name}`;
+    const d = `state.${spec.sortDir.name}`;
+    const setK = setterName(spec.sortKey.name);
+    const setD = setterName(spec.sortDir.name);
+    const q = dartString(field);
+    const onTap =
+      `() { if (${k} == ${q}) { notifier.${setD}(${d} == 'asc' ? 'desc' : 'asc'); } ` +
+      `else { notifier.${setK}(${q}); notifier.${setD}('asc'); } }`;
+    const arrow =
+      `${k} == ${q} ? Icon(${d} == 'asc' ? Icons.arrow_upward : Icons.arrow_downward, size: 16) ` +
+      `: const SizedBox.shrink()`;
+    return (
+      `InkWell(onTap: ${onTap}, child: Semantics(button: true, ` +
+      `label: ${dartString(`Sort by ${header}`)}, child: Row(mainAxisSize: MainAxisSize.min, ` +
+      `children: <Widget>[Text(${dartString(header)}), ${arrow}])))`
+    );
+  },
+
+  /** Prev / "Page N of M" / Next, wired to the `page` state field.  Prev
+   *  disables on page 1, Next on the last page — a disabled `TextButton` takes
+   *  `onPressed: null`, which is also what greys it out. */
+  renderPager(spec) {
+    const p = `state.${spec.page.name}`;
+    const setP = setterName(spec.page.name);
+    const total = spec.totalPagesExpr;
+    return (
+      `Row(mainAxisAlignment: MainAxisAlignment.end, children: <Widget>[` +
+      `TextButton(onPressed: ${p} <= 1 ? null : () => notifier.${setP}(${p} - 1), ` +
+      `child: const Text('Prev')), ` +
+      `Semantics(liveRegion: true, child: Text('Page \${${p}} of \${${total}}')), ` +
+      `TextButton(onPressed: ${p} >= ${total} ? null : () => notifier.${setP}(${p} + 1), ` +
+      `child: const Text('Next'))])`
+    );
+  },
+
+  /** CLIENT-side sort, for a `Table` bound to rows the server did NOT page.
+   *
+   *  Dart is statically typed, so there is no `row[sortKey]` — the comparator
+   *  switches on the key with one arm per `sortable:` column and compares the
+   *  typed field.  (This is exactly why `SortedRowsSpec` carries `columns`; the
+   *  four JSX targets index at runtime and ignore it.)  `Comparable` covers
+   *  String / num / DateTime, which is every sortable scalar the wire carries.
+   *  Unknown key → the rows unchanged, matching the JS targets' `if (!key)`. */
+  renderSortedRows(spec) {
+    const k = `state.${spec.sortKey.name}`;
+    const d = `state.${spec.sortDir.name}`;
+    if (spec.columns.length === 0) return spec.rowsExpr;
+    const arms = spec.columns
+      .map((f) => `${dartString(f)} => (a.${f} as Comparable).compareTo(b.${f} as Comparable)`)
+      .join(", ");
+    return (
+      `(List.of(${spec.rowsExpr})..sort((a, b) { final c = switch (${k}) { ${arms}, ` +
+      `_ => 0 }; return ${d} == 'desc' ? -c : c; }))`
+    );
+  },
+
+  /** CLIENT-side page window.  The shared default is literal JavaScript
+   *  (`.slice(…)`, `Math.max`, `Math.ceil`), which is not Dart — emitting it
+   *  produced `Math.max(1, Math.ceil((rows).length / 3))` in a `.dart` file.
+   *  `skip`/`take` is the Dart idiom and needs no clamping: both tolerate
+   *  running past the end. */
+  renderClientPaging(spec) {
+    const src = spec.rowsTransformed ? spec.rowsExpr : `(${spec.boundRowsExpr})`;
+    const size = spec.pageSize;
+    return {
+      rowsExpr: `${src}.skip((${spec.pageRead} - 1) * ${size}).take(${size}).toList()`,
+      totalPagesExpr: `(((${src}.length - 1) ~/ ${size}) + 1).clamp(1, 1 << 30)`,
+    };
+  },
+
+  /** A `Table` that emitted a filter box and/or a pager alongside the table is
+   *  MULTI-ROOT, and every slot the walker puts it in takes exactly one Widget.
+   *  Wrap the parts in a `Column` — Dart has no fragment, and adjacent widgets
+   *  with no separator are a parse error, not a layout quirk. */
+  joinRoots: (parts: readonly string[]) =>
+    `Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${parts.join(", ")}])`,
+
+  /** The server's page COUNT.  `LoomPage.fromJson` already clamps it to at
+   *  least 1, so unlike the JS default (`Math.max(1, …)`) no extra guard is
+   *  needed — the clamp lives where the value is decoded, once. */
+  renderServerTotalPages: (totalPagesExpr: string) => totalPagesExpr,
 
   // --- Match expression seam — Dart-3 guarded switch -----------------------
   renderMatch: (arms, elseArm) => dartPredicateSwitch(arms, elseArm),
@@ -426,7 +540,14 @@ export const flutterTarget: WalkerTarget = {
   defaultInitFor: (type) => dartZeroValue(type),
 
   // --- Markup seams — Dart/Flutter flavoured -------------------------------
-  renderComment: (text: string) => `/* ${text} */`,
+  // A diagnostic sentinel has to be a valid Dart EXPRESSION, not a bare
+  // comment: every place the walker emits one is a child slot, and Flutter's
+  // children are COMMA-SEPARATED list elements (`interChildSeparator`), so
+  // `<Widget>[ /* … */, ]` is a parse error — "Expected an identifier".  A
+  // zero-size widget carries the same diagnostic while keeping the file
+  // compilable, which is the whole point of a sentinel: it must survive to be
+  // read.  (A scaffolded detail page hit exactly this and would not build.)
+  renderComment: (text: string) => `const SizedBox.shrink() /* ${text} */`,
   // Child-position interpolation → a `Text(…)` widget.  A provably-string value
   // is passed straight; anything else is coerced via Dart string interpolation
   // (`Text('${expr}')`), which stringifies any type.

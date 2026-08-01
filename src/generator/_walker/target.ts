@@ -778,6 +778,18 @@ export interface WalkerTarget {
    *  plain `<recv>.<member>` emit. */
   renderPagedEnvelopeMember?(spec: PagedEnvelopeMemberSpec): string | undefined;
 
+  /** OPTIONAL — spell the QUERY-ARGS bag a paged / user find takes.
+   *
+   *  `adjustFindHookArgs` collapses a find's positional args into one named bag
+   *  (`useAllProducts({ page, pageSize, sort, dir })`).  That literal is
+   *  JavaScript, which is right for the four JSX targets and wrong everywhere
+   *  else: Flutter emitted it verbatim into Dart, where bare `page:` keys are
+   *  not identifiers and the whole page failed to compile.  A target returning
+   *  its own spelling (Dart's named record, `(page: 1, …)`) gets valid source;
+   *  omitting the seam keeps the JS object, so the JSX targets are
+   *  byte-identical. */
+  renderQueryArgsBag?(pairs: ReadonlyArray<{ name: string; value: string }>): string;
+
   /** OPTIONAL — spell a plain member READ in the target's own language.
    *
    *  The default emit is `<recv>.<member>`, which is right for every frontend

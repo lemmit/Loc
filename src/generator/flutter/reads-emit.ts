@@ -21,6 +21,7 @@
 // vars the walker's `buildHookUse` seam resolves through — the page's hoisted
 // `ref.watch(<var>Provider)` and the emitted `<var>Provider` always agree.
 
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type { EnrichedBoundedContextIR, ExprIR, UiIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -38,6 +39,12 @@ export interface FlutterRead {
   /** Collection route path RELATIVE to the api base (`/products`); a byId read
    *  appends `/$id`. */
   routePath: string;
+  /** True when the backend's find returns the `Paged<T>` envelope (the
+   *  paged-by-default auto-`findAll`, M-T2.6).  Such a read becomes a `.family`
+   *  keyed by the query record, returns a `LoomPage<T>` (items + totalPages),
+   *  and is what makes a SERVER-DRIVEN `Table` possible: a sort or page tap
+   *  writes page state, the family key changes, and Riverpod refetches. */
+  paged: boolean;
 }
 
 /** The provider-local var a detected api read resolves to (`Product` + `all` →
@@ -117,11 +124,19 @@ export function collectFlutterReads(
       const varName = readVarName(detected.aggregateName, detected.operation);
       if (seen.has(varName)) continue;
       seen.add(varName);
+      // Paged-ness is read off the owning repository's find, exactly as the
+      // walker's `adjustFindHookArgs` reads it — so the provider's shape and the
+      // call site's args can never disagree about whether this read takes a
+      // query bag.
+      const bc = contexts.find((c) => c.aggregates.some((a) => a.name === detected.aggregateName));
+      const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
+      const find = repo?.finds.find((f) => f.name === detected.operation);
       out.push({
         varName,
         aggregate: upperFirst(detected.aggregateName),
         single: detected.operation === "byId",
         routePath: `/${snake(plural(detected.aggregateName))}`,
+        paged: detected.operation !== "byId" && !!find && pagedReturn(find.returnType) !== null,
       });
     }
   }
@@ -175,6 +190,32 @@ function renderReadProvider(read: FlutterRead): string {
       "});",
     );
   }
+  if (read.paged) {
+    // SERVER-DRIVEN list: a `.family` keyed by the query record.  Riverpod
+    // caches per key and refetches when it changes, so a sort or page tap is
+    // just a state write — the same "let the server do it" shape the Phoenix
+    // LiveView leg uses, expressed in Riverpod instead of assigns.
+    //
+    // The key is a Dart RECORD, which matters: `.family` compares keys by
+    // `==`, and records have structural equality for free.  A class without a
+    // hand-written `==` would miss the cache on every rebuild and refetch
+    // forever.
+    return lines(
+      `final ${varName}Provider =`,
+      `    FutureProvider.family<LoomPage<${aggregate}>, LoomQuery>((ref, q) async {`,
+      `  final res = await http.get(apiUri('${routePath}').replace(queryParameters: {`,
+      "    'page': '${q.page}',",
+      "    'pageSize': '${q.pageSize}',",
+      "    if (q.sort.isNotEmpty) 'sort': q.sort,",
+      "    if (q.dir.isNotEmpty) 'dir': q.dir,",
+      "  }));",
+      "  if (res.statusCode != 200) {",
+      `    throw Exception('GET ${routePath} failed (\${res.statusCode})');`,
+      "  }",
+      `  return LoomPage.fromJson(res.body, ${aggregate}.fromJson);`,
+      "});",
+    );
+  }
   return lines(
     `final ${varName}Provider = FutureProvider<List<${aggregate}>>((ref) async {`,
     `  final res = await http.get(apiUri('${routePath}'));`,
@@ -190,12 +231,50 @@ function renderReadProvider(read: FlutterRead): string {
   );
 }
 
+/** The paged-read vocabulary: the query key and the decoded envelope.
+ *
+ *  `LoomQuery` is a named RECORD, not a class — `.family` keys are compared by
+ *  `==`, and records give structural equality for free.  `LoomPage` carries the
+ *  page COUNT alongside the rows, which is what a server-driven pager needs to
+ *  know whether "Next" is live; the unpaged provider shape (a bare `List<T>`)
+ *  cannot express that, which is why `Table`'s pager was unreachable on Flutter
+ *  however the seam behaved. */
+const PAGED_PREAMBLE = lines(
+  "/// Query key for a server-paged read.  A record so Riverpod's `.family`",
+  "/// caches by VALUE — a class without a hand-written `==` would miss the",
+  "/// cache on every rebuild and refetch forever.",
+  "typedef LoomQuery = ({int page, int pageSize, String sort, String dir});",
+  "",
+  "/// One page of a server-paged read: the rows plus the page count the pager",
+  "/// needs.  `totalPages` is clamped to at least 1 so an empty collection",
+  '/// still reads "Page 1 of 1" rather than "of 0".',
+  "class LoomPage<T> {",
+  "  const LoomPage({required this.items, required this.totalPages});",
+  "",
+  "  final List<T> items;",
+  "  final int totalPages;",
+  "",
+  "  static LoomPage<T> fromJson<T>(",
+  "    String body,",
+  "    T Function(Map<String, dynamic>) fromItem,",
+  "  ) {",
+  "    final map = jsonDecode(body) as Map<String, dynamic>;",
+  "    final items = (map['items'] as List<dynamic>)",
+  "        .map((e) => fromItem(e as Map<String, dynamic>))",
+  "        .toList();",
+  "    final pages = (map['totalPages'] as num?)?.toInt() ?? 1;",
+  "    return LoomPage<T>(items: items, totalPages: pages < 1 ? 1 : pages);",
+  "  }",
+  "}",
+);
+
 /** Emit `lib/reads.dart` — every read provider a ui's pages issue, over
  *  `package:http` + the Track A `fromJson` models.  Returns "" when the ui has
  *  no reads (the caller then emits neither this file nor `lib/config.dart`). */
 export function renderReadProviders(reads: readonly FlutterRead[]): string {
   if (reads.length === 0) return "";
   const blocks = reads.map(renderReadProvider);
+  const pagedPreamble = reads.some((r) => r.paged) ? [PAGED_PREAMBLE, ""] : [];
   return `${lines(
     "// Riverpod read providers — one FutureProvider per QueryView read, fetching",
     "// over package:http and mapping the Track A wire models. Generated by the",
@@ -209,6 +288,7 @@ export function renderReadProviders(reads: readonly FlutterRead[]): string {
     "import 'config.dart';",
     "import 'models.dart';",
     "",
+    ...pagedPreamble,
     ...blocks.flatMap((b, i) => (i === 0 ? [b] : ["", b])),
   )}\n`;
 }

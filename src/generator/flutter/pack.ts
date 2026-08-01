@@ -443,14 +443,29 @@ function primitiveIcon(c: Ctx): string {
  *  rendered as a horizontally-scrollable `DataTable` whose rows map the
  *  `rowsExpr` collection under `rowVar`. */
 function primitiveTable(c: Ctx): string {
-  const cols = (c.columns as unknown as { header: string; cellJsx: string }[] | undefined) ?? [];
+  const cols =
+    (c.columns as unknown as
+      | { header: string; headerMarkup?: boolean; cellJsx: string }[]
+      | undefined) ?? [];
   const rowsExpr = String(c.rowsExpr ?? "const []");
   const rowVar = String(c.rowVar ?? "row");
+  // A `sortable:` column's header is a WIDGET (the tappable sort control the
+  // target rendered), not text — wrapping it in `Text('…')` would emit the whole
+  // widget as a string literal, which is not even valid Dart.  Same distinction
+  // the Feliz pack draws; the flag comes from the walker, so the header text is
+  // never inspected for markup.
   const headCells = cols
-    .map((col) => `DataColumn(label: Text('${dartStr(col.header)}'))`)
+    .map((col) =>
+      col.headerMarkup
+        ? `DataColumn(label: ${col.header})`
+        : `DataColumn(label: Text('${dartStr(col.header)}'))`,
+    )
     .join(", ");
   const bodyCells = cols.map((col) => `DataCell(${asWidget(col.cellJsx)})`).join(", ");
-  const rowTid = c.rowTestid ? `key: Key(${String(c.rowTestid)}), ` : "";
+  // `DataRow.key` is a `LocalKey?`, NOT a `Key?` — `Key(…)` is a factory that
+  // returns `Key`, so it doesn't assign.  `ValueKey` is a `LocalKey`, which is
+  // what the row identity wants anyway (value equality across rebuilds).
+  const rowTid = c.rowTestid ? `key: ValueKey(${String(c.rowTestid)}), ` : "";
   const dataRow = `DataRow(${rowTid}cells: <DataCell>[${bodyCells}])`;
   const rows = `${rowsExpr}.map((${rowVar}) => ${dataRow}).toList()`;
   const table = `DataTable(columns: <DataColumn>[${headCells}], rows: ${rows})`;
@@ -484,8 +499,14 @@ function primitiveQueryView(c: Ctx): string {
   const empty = branchWidget(c.emptyJsx as string);
   const data = branchWidget(c.dataJsx as string);
   // byId (single): the loaded value is `T?` — empty when `null`, else the
-  // flow-promoted record.  List: empty when the `List<T>` is empty.
-  const emptyGuard = c.single ? `${binding} == null` : `${binding}.isEmpty`;
+  // flow-promoted record.  List: empty when the `List<T>` is empty.  A
+  // SERVER-PAGED list yields a `LoomPage<T>` instead (rows + page count), so the
+  // emptiness test goes through `.items` — the envelope itself is never empty.
+  const emptyGuard = c.single
+    ? `${binding} == null`
+    : c.paged
+      ? `${binding}.items.isEmpty`
+      : `${binding}.isEmpty`;
   return `${field}.when(loading: () => ${loading}, error: (error, stack) => ${error}, data: (${binding}) => ${emptyGuard} ? ${empty} : ${data})`;
 }
 

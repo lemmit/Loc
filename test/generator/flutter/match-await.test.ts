@@ -75,7 +75,10 @@ describe("flutter match await (async effect)", () => {
     const src = [...files.entries()].find(([k]) => k.endsWith("order_detail_page.dart"))![1];
     // Route id bound, action tear-off captures it.
     expect(src).toContain(
-      "final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';",
+      // Route args now come off one `routeArgs` local, and read by NAME when a
+      // Map is passed — the shape a page's DECLARED route params also need (a
+      // scaffolded detail page referenced `id` with nothing binding it).
+      "final id = routeArgs is Map ? (routeArgs['id'] as String? ?? '') : (routeArgs as String? ?? '');",
     );
     expect(src).toContain("final confirm = () => notifier.confirm(id);");
   });

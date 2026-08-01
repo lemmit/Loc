@@ -30,6 +30,7 @@ on:
       - 'src/platform/metadata.ts'
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
+      - 'scripts/flutter-table-controls-test.dart'
       - '.github/workflows/generated-flutter-build.yml'
   pull_request:
     branches: [main]
@@ -41,6 +42,7 @@ on:
       - 'src/platform/metadata.ts'
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
+      - 'scripts/flutter-table-controls-test.dart'
       - '.github/workflows/generated-flutter-build.yml'
   workflow_dispatch:
 
@@ -218,6 +220,50 @@ jobs:
       - name: flutter build web (the real compile gate)
         working-directory: ${{ steps.proj.outputs.dir }}
         run: flutter build web --release
+      # SCAFFOLD PARITY — the gate this workflow was missing.  Everything above
+      # builds a HAND-WRITTEN showcase, so nothing here ever compiled a
+      # `with scaffold(...)` app; the scaffolded List/Detail pages were broken
+      # in four independent ways (a JS object literal emitted into Dart, a
+      # provider referenced before its state binding, unbound route params, and
+      # a comment where a Widget was required) and the gate could not see any of
+      # them.  This leg generates one and holds it to the same bar, plus a
+      # widget test that drives the SERVER-DRIVEN `Table` controls: Flutter web
+      # renders to canvas, so a DOM smoke is not available and `flutter test` is
+      # where runtime behaviour is provable.
+      - name: Generate the scaffold-parity app
+        run: |
+          mkdir -p ci-flutter-scaffold
+          cat > ci-flutter-scaffold/scaffold.ddd <<'DDD'
+          system Shop {
+            subdomain Sales {
+              context Orders {
+                aggregate Product with crudish { name: string  price: money }
+                repository Products for Product { }
+              }
+            }
+            api ShopApi from Sales
+            storage pg { type: postgres }
+            resource ordersState { for: Orders, kind: state, use: pg }
+            ui App with scaffold(aggregates: [Product]) { api Shop: ShopApi }
+            deployable api { platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 }
+            deployable app { platform: flutter targets: api ui: App { Shop: api } port: 3006 }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter-scaffold/scaffold.ddd -o ci-flutter-scaffold/out
+      - name: Locate the scaffold project
+        id: sproj
+        run: echo "dir=$(dirname "$(find ci-flutter-scaffold/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: Drop in the Table-controls widget test
+        working-directory: ${{ steps.sproj.outputs.dir }}
+        run: cp "$GITHUB_WORKSPACE/scripts/flutter-table-controls-test.dart" test/table_controls_test.dart
+      - name: flutter analyze + test + build web (scaffold)
+        working-directory: ${{ steps.sproj.outputs.dir }}
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-warnings --no-fatal-infos
+          flutter test
+          flutter build web --release
+
       # Native mobile surface (Phase 3) — prove the SAME kind of emitted Dart
       # source compiles for Android too.  `flutter build apk` is the native "is
       # the Dart real" gate.  It builds a SEPARATE, minimal Loom app (no

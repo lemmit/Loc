@@ -877,21 +877,37 @@ function adjustFindHookArgs(
   // (paged-by-default, M-T2.6), which takes the same object-shaped query arg a
   // user find does (`useAll<Plural>({ page, pageSize, sort, dir })`).
   if (STANDARD_AGG_OPS.has(detected.operation) && !isPaged) return hookUse;
-  if (!find || hookUse.argsRendered.length === 0) return hookUse;
-  const pairs = find.params.map((p, i) => `${p.name}: ${hookUse.argsRendered[i] ?? "undefined"}`);
+  // A PAGED read still needs its query bag when the call site passed nothing
+  // (a hand-written `QueryView { of: Shop.Product.all }` — the scaffold threads
+  // its page state, but this shape does not), because a target whose provider
+  // is KEYED by that bag has no zero-arg form to fall back on: Flutter's
+  // `.family` provider would be referenced bare and fail to compile.  Gated on
+  // the target declaring `renderQueryArgsBag`, so the JSX frontends — whose
+  // hooks do have a zero-arg form — stay byte-identical.
+  const needsExplicitBag = isPaged && !!ctx.target.renderQueryArgsBag;
+  if (!find || (hookUse.argsRendered.length === 0 && !needsExplicitBag)) return hookUse;
+  const pairs = find.params.map((p, i) => ({
+    name: p.name,
+    value: hookUse.argsRendered[i] ?? "undefined",
+  }));
   if (isPaged) {
     // The paged controls follow the user params in the call's args (the scaffold
     // list threads its `pageNum`/`sortKey`/`sortDir` state here); any omitted →
     // the shared 1-based / default-order defaults.
     const extra = hookUse.argsRendered.slice(find.params.length);
     pairs.push(
-      `page: ${extra[0] ?? "1"}`,
-      `pageSize: ${extra[1] ?? "20"}`,
-      `sort: ${extra[2] ?? '"id"'}`,
-      `dir: ${extra[3] ?? '"asc"'}`,
+      { name: "page", value: extra[0] ?? "1" },
+      { name: "pageSize", value: extra[1] ?? "20" },
+      { name: "sort", value: extra[2] ?? '"id"' },
+      { name: "dir", value: extra[3] ?? '"asc"' },
     );
   }
-  return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`], reactiveQuery: true };
+  // The BAG's spelling is the target's — a JS object literal for the JSX
+  // frontends, a Dart named record for Flutter (see `renderQueryArgsBag`).
+  const bag =
+    ctx.target.renderQueryArgsBag?.(pairs) ??
+    `{ ${pairs.map((p) => `${p.name}: ${p.value}`).join(", ")} }`;
+  return { ...hookUse, argsRendered: [bag], reactiveQuery: true };
 }
 
 const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([

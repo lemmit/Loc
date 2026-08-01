@@ -186,7 +186,10 @@ describe("flutter form pages (generate system)", () => {
     const adminPage = files.get(keys.find((k) => k.endsWith("product_admin_page.dart"))!)!;
     expect(adminPage).toContain("import '../forms.dart';");
     expect(adminPage).toContain(
-      "final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';",
+      // Route args now come off one `routeArgs` local, and read by NAME when a
+      // Map is passed — the shape a page's DECLARED route params also need (a
+      // scaffolded detail page referenced `id` with nothing binding it).
+      "final id = routeArgs is Map ? (routeArgs['id'] as String? ?? '') : (routeArgs as String? ?? '');",
     );
     expect(adminPage).toContain("DiscountProductForm(id: id),");
     expect(adminPage).toContain("DeleteProductForm(id: id),");

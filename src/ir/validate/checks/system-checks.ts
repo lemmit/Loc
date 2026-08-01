@@ -256,8 +256,8 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
           `(frontend '${fw || "unknown"}'). DataGrid is a TanStack row model, so it ships wherever ` +
           `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
           `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
-          `analogue). Use 'Table' — it supports column sort, pagination and filtering on every ` +
-          `frontend, server-driven on Phoenix — or host this page on one of the five above.`,
+          `analogue). Use 'Table' — it supports column sort and pagination on every frontend, ` +
+          `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
         source: `${ui.name}/${page.name}`,
       });
     }
