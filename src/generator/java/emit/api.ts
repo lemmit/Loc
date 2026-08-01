@@ -160,12 +160,25 @@ export function renderJavaController(
         }
         const arms = spec.arms.flatMap((a) => {
           if (a.isError) {
+            // The error variant's DECLARED FIELDS ride the problem body as 7807
+            // extension members — `error NotFound { resource: string }` puts
+            // `"resource": "<value>"` alongside type/title/status/detail, which
+            // is what the other four backends send and what the emitted OpenAPI
+            // for this union already declares.  Omitting them shipped a body
+            // whose declared payload was silently empty (RS-19): the arm
+            // carried the right STATUS and no DATA, so a client reading
+            // `body.resource` got null on java alone.
+            const props = a.member.shape === "record" ? a.member.fields : [];
             return [
               `            case ${spec.name}_${a.tag} v -> {`,
               `                var problem = ProblemDetail.forStatus(${a.status});`,
               `                problem.setTitle(${JSON.stringify(a.title)});`,
               `                problem.setType(URI.create(${JSON.stringify(a.typeUri)}));`,
               `                problem.setDetail(${JSON.stringify(a.title)});`,
+              ...props.map(
+                (f) =>
+                  `                problem.setProperty(${JSON.stringify(f.name)}, v.${f.name}()${f.isId ? ".value()" : ""});`,
+              ),
               `                yield ResponseEntity.status(${a.status}).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);`,
               `            }`,
             ];

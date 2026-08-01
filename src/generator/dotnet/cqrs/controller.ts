@@ -35,6 +35,11 @@ export interface ReturnUnionArm {
   /** Success arm: the App-DTO variant constructor args (`v.Id`, `v.Code`, …);
    *  `["v.Value"]` for a scalar, `[]` for `none`. */
   ctorArgs: string[];
+  /** ERROR arm: the declared payload fields as `{ wire key, C# accessor }` —
+   *  `error NotFound { resource: string }` → `[{ json: "resource",
+   *  accessor: "v.Resource" }]`.  They ride the problem body as 7807 extension
+   *  members (RS-19); dropping them shipped a 404 with no payload. */
+  errorFields: { json: string; accessor: string }[];
 }
 
 /** Controller-side translation spec for an exception-less operation return. */
@@ -137,6 +142,10 @@ function buildReturnUnionSpec(
       title: errorTitle(m.tag),
       typeUri: errorTypeUri(m.tag),
       ctorArgs,
+      errorFields:
+        m.shape === "record"
+          ? m.fields.map((f) => ({ json: f.name, accessor: `v.${upperFirst(f.name)}` }))
+          : [],
     };
   });
   const errorStatuses = [...new Set(arms.filter((a) => a.isError).map((a) => a.status))].sort(

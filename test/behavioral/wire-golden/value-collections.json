@@ -1,0 +1,37 @@
+{
+  "case": "value-collections",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "lineItems": [
+          {
+            "amount": 9.99,
+            "currency": "USD"
+          },
+          {
+            "amount": 5,
+            "currency": "USD"
+          }
+        ],
+        "reference": "INV-1",
+        "surcharges": [],
+        "version": 1
+      }
+    }
+  ]
+}

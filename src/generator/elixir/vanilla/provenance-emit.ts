@@ -190,11 +190,11 @@ defmodule ${appModule}.Provenance do
       Enum.map(drain(), fn lin ->
         %{
           trace_id: UUIDv7.generate(),
-          snapshot_id: lin.snapshot_id,
+          snapshot_id: lin.snapshotId,
           target_type: lin.target.type,
           field: lin.target.field,
           inputs: lin.inputs,
-          computed_value: lin.computed_value,
+          computed_value: lin.computedValue,
           at: now,
           correlation_id: RequestContext.correlation_id(),
           scope_id: RequestContext.scope_id(),

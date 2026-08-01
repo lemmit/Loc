@@ -1,0 +1,59 @@
+{
+  "case": "provenance",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/orders/{id}/reprice",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "discount": 0,
+        "id": "<volatile:key>",
+        "quantity": 3,
+        "reference": "R1",
+        "total": 120,
+        "total_provenance": {
+          "computedValue": 120,
+          "inputs": [
+            {
+              "path": "qty",
+              "value": 3
+            },
+            {
+              "path": "price",
+              "value": 40
+            },
+            {
+              "path": "discount",
+              "value": 0
+            }
+          ],
+          "snapshotId": "<volatile:key>",
+          "target": {
+            "field": "total",
+            "type": "Order"
+          }
+        },
+        "unitPrice": 40,
+        "version": 2
+      }
+    }
+  ]
+}

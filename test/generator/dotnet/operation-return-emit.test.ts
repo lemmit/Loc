@@ -62,14 +62,27 @@ describe("dotnet — exception-less operation returns (A3)", () => {
     const c = find(await files(), "OrdersController.cs");
     expect(c).toContain("var result = await _mediator.Send(cmd);");
     // error variant → ProblemDetails with the stdlib status / RFC-7807 fields.
-    expect(c).toMatch(/case \S+\.OrderOrNotFound_NotFound _:/);
+    // Binds the variant (RS-19) rather than discarding it with `_`: the arm
+    // projects the error payload's declared fields onto the problem body, so it
+    // needs the value.  A discard shipped a 404 with no payload.
+    expect(c).toMatch(/case \S+\.OrderOrNotFound_NotFound v:/);
+    // Built by hand rather than via ControllerBase.Problem(...): that helper
+    // routes through ProblemDetailsFactory, which leaves `instance` null and
+    // injects a `traceId` extension no other backend sends (both caught by the
+    // wire golden), and it has no slot for the payload's declared fields.
     expect(c).toContain(
-      'return Problem(statusCode: 404, title: "Not Found", type: "/errors/not-found", detail: "Not Found");',
+      'var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails { Status = 404, Title = "Not Found", Type = "/errors/not-found", Detail = "Not Found", Instance = HttpContext.Request.Path };',
     );
-    // success variant → 200 wrapped in the App wire DTO (cast to the base).
+    expect(c).toContain(
+      'return new ObjectResult(problem) { StatusCode = 404, ContentTypes = { "application/problem+json" } };',
+    );
+    // success variant → 200 wrapped in the App wire DTO.  `DeclaredType` is
+    // load-bearing, not decoration: the DTO is `[JsonPolymorphic]`, and STJ only
+    // writes the `"type"` discriminator when serializing through the BASE type.
+    // `Ok(object)` left DeclaredType null, so the tag vanished from the wire.
     expect(c).toMatch(/case \S+\.OrderOrNotFound_Order v:/);
     expect(c).toMatch(
-      /return Ok\(\(\S+\.OrderOrNotFound\)new \S+\.OrderOrNotFound_Order\(v\.Id, v\.Code, v\.Version\)\);/,
+      /return new ObjectResult\(\(\S+\.OrderOrNotFound\)new \S+\.OrderOrNotFound_Order\(v\.Id, v\.Code, v\.Version\)\) \{ StatusCode = 200, DeclaredType = typeof\(\S+\.OrderOrNotFound\) \};/,
     );
     expect(c).toMatch(/\[ProducesResponseType\(typeof\(\S+\.OrderOrNotFound\), 200\)\]/);
   });

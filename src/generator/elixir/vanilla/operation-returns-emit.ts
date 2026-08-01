@@ -12,7 +12,7 @@
 // backend emits these un-gated (`validateOperationReturnsUnimplemented`).
 // ---------------------------------------------------------------------------
 
-import { wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
+import { forApiRead, wireFieldsForAggregate } from "../../../ir/enrich/wire-projection.js";
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
@@ -37,7 +37,7 @@ import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
-import { denialTerm } from "./denial.js";
+import { denialTerm, disallowedTerm } from "./denial.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
@@ -64,9 +64,11 @@ export interface OpFragment {
 
 /** The wire field list a returning op's success branch serialises `record`
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
- *  success body matches what `GET /<plural>/:id` returns for the same aggregate. */
+ *  success body matches what `GET /<plural>/:id` returns for the same aggregate.
+ *  `forApiRead` drops `internal` / `secret` fields, exactly as the REST
+ *  serializer does (RS-25) — an op success body is the same read boundary. */
 function wireFieldsOf(agg: AggregateIR): string[] {
-  return wireFieldsForAggregate(agg).map((f) => snake(f.name));
+  return forApiRead(wireFieldsForAggregate(agg)).map((f) => snake(f.name));
 }
 
 /** The `Ecto.Changeset` put bodies that persist the columns an operation body
@@ -196,11 +198,12 @@ export function opHasWhenGate(op: OperationIR): boolean {
 /** The `when` state gate → a leading `:ok <- ensure(<pred>, :disallowed)`
  *  with-clause.  The predicate reads the loaded `record`'s own state (op params
  *  are out of scope by design); a false predicate short-circuits the `with` to
- *  `{:error, :disallowed}`, which the controller maps to 409 Conflict — parity
- *  with Hono/​.NET/​Java/​Python's `DisallowedError` → 409.  Rendered FIRST in the
- *  guard chain so the state gate precedes any `precondition`. */
-function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
-  return `:ok <- ensure(${renderExpr(op.when as ExprIR, rc)}, :disallowed)`;
+ *  `{:error, {:disallowed, msg}}`, which the controller maps to 409 Conflict —
+ *  parity with Hono/​.NET/​Java/​Python's `DisallowedError` → 409, message included
+ *  (RS-17).  Rendered FIRST in the guard chain so the state gate precedes any
+ *  `precondition`. */
+function renderWhenGateClause(aggName: string, op: OperationIR, rc: RenderCtx): string {
+  return `:ok <- ensure(${renderExpr(op.when as ExprIR, rc)}, ${disallowedTerm(aggName, op.name)})`;
 }
 
 /** All hoisted guard with-clauses for an op, in evaluation order: the `when`
@@ -208,9 +211,9 @@ function renderWhenGateClause(op: OperationIR, rc: RenderCtx): string {
  *  / 403) and `precondition` (→ `:precondition_failed` / 422) in body order.
  *  Byte-identical to the old requires/precondition-only list when the op has no
  *  `when`, so a guard-free / `when`-free op is unchanged. */
-export function collectOpGuardClauses(op: OperationIR, rc: RenderCtx): string[] {
+export function collectOpGuardClauses(aggName: string, op: OperationIR, rc: RenderCtx): string[] {
   const clauses: string[] = [];
-  if (op.when) clauses.push(renderWhenGateClause(op, rc));
+  if (op.when) clauses.push(renderWhenGateClause(aggName, op, rc));
   for (const s of op.statements) {
     if (s.kind === "requires" || s.kind === "precondition") {
       clauses.push(renderOpGuardClause(s, rc));
@@ -525,7 +528,7 @@ export function renderReturningOpFunction(
   // guard STATEMENTS from the in-body statements (they no longer render inline;
   // the `when` gate is a predicate field, not a statement, so it needs no
   // exclusion).
-  const guardClauses = collectOpGuardClauses(op, renderCtx);
+  const guardClauses = collectOpGuardClauses(agg.name, op, renderCtx);
   const bodyStmts = op.statements.filter((s, idx) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
     if (hoistEmits && s.kind === "emit") return false;
@@ -557,6 +560,17 @@ export function renderReturningOpFunction(
   // CRUD controller's `__ref_ids` analogue) so the wire carries ids, not the
   // loaded `many_to_many` structs — but only when the op mutated a ref coll,
   // which is exactly when that context helper is emitted.
+  // RS-21 NOTE — the AGGREGATE success variant of a union-returning op
+  // (`operation adjust(): Item or NotFound` falling through, or ending in
+  // `return this`) is deliberately left UNTAGGED here, unlike the scalar / none
+  // / record variants that `taggedSuccess` tags.  Not because the contract
+  // differs: `_payload/union-wire.ts` says every variant carries `type`.  It is
+  // because this shape has NO conforming oracle to match — node's domain method
+  // for it has no `return` at all (it falls off the end and the route
+  // `c.json`s `undefined`), and `return this` spreads a class instance's PRIVATE
+  // `_`-prefixed fields.  Tagging vanilla here would be a guess at a contract no
+  // shipped backend implements.  Tracked as its own gap; see
+  // docs/conformance-semantics.md RS-21.
   const wireMap = (recordVar: string, projectRefColls: boolean): string =>
     `%{${wireFieldsOf(agg)
       .map((f) =>
@@ -782,6 +796,40 @@ ${body}
   end`;
 }
 
+/** RS-21 — the TAGGED-WIRE shape a SUCCESS variant carries out of a union-
+ *  returning operation (`_payload/union-wire.ts`; docs/payloads.md).  Vanilla's
+ *  carrier is `{:ok, <value>}`, and the controller `json/2`s `<value>` straight
+ *  through — so if the value isn't tagged HERE, the tag never reaches the wire.
+ *  That is what diverged: node/.NET/Java/Python ship
+ *  `{"type":"string","value":"OR1"}` for `operation accept(): string or NotFound`
+ *  while vanilla shipped a bare `"OR1"`, so a client narrowing on `type` (the
+ *  whole point of the discriminated union) saw nothing to narrow on.
+ *
+ *  The three shapes come straight off the IR (`StmtIR.return.variantShape`),
+ *  which lowering already resolved:
+ *    - `scalar` → `%{type: "<tag>", value: <v>}`
+ *    - `none`   → `%{type: "none"}`
+ *    - `record` → the value's own map with `type` merged in
+ *  An UNTAGGED return (a plain non-union `: string` return) passes through
+ *  verbatim — there is no union to discriminate.
+ *
+ *  `record` is tagged only when the returned value is an OBJECT LITERAL
+ *  (`return Reserved { sku: sku }`), which renders to a plain Elixir map that
+ *  `Map.put/3` can extend.  A `return this` is left alone: its value is an Ecto
+ *  STRUCT, and there is no oracle to copy — node's `{ type, ...this }` spreads
+ *  the domain class's PRIVATE `_`-prefixed fields, so no shipped backend gets
+ *  that shape right (same gap as the aggregate fall-through; see the wireMap
+ *  note below and docs/conformance-semantics.md RS-21). */
+function taggedSuccess(value: string, s: Extract<StmtIR, { kind: "return" }>): string {
+  const { variantTag, variantShape: shape } = s;
+  if (!variantTag || !shape) return value;
+  const tag = JSON.stringify(variantTag);
+  if (shape === "none") return `%{type: ${tag}}`;
+  if (shape === "scalar") return `%{type: ${tag}, value: ${value}}`;
+  if (s.value.kind !== "object") return value;
+  return `Map.put(${value}, :type, ${tag})`;
+}
+
 /** A statement in a returning-op body.  `return` is the terminal tagged tuple;
  *  the guard/mutation/emit forms mirror what the other backends render for a
  *  returning op (exception-less.md "Two-regime split"):
@@ -835,7 +883,7 @@ export function renderReturningStmt(
         const data = s.value.kind === "object" ? value : `%{value: ${value}}`;
         return `    {:error, ${JSON.stringify(s.variantTag)}, ${data}}`;
       }
-      return `    {:ok, ${value}}`;
+      return `    {:ok, ${taggedSuccess(value, s)}}`;
     }
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
@@ -968,7 +1016,13 @@ function renderProvenancedAssign(
   return [
     `    ${inputsVar} = [${inputs}]`,
     `    record = %{record | ${field}: ${renderExpr(value, rc)}}`,
-    `    ${linVar} = %{snapshot_id: ${JSON.stringify(prov.snapshotId)}, target: ${targetLit}, inputs: ${inputsVar}, computed_value: record.${field}}`,
+    // RS-1 — the lineage map's OWN members are camelCase, because this map goes
+    // on the wire verbatim (RS-18) and every other backend's `ProvLineage`
+    // spells them `snapshotId` / `computedValue`.  Only the OUTER key
+    // (`<field>_provenance`) is the documented snake_case exception; the
+    // `provenance_records` COLUMNS stay snake_case, which is a SQL name, not a
+    // wire one.
+    `    ${linVar} = %{snapshotId: ${JSON.stringify(prov.snapshotId)}, target: ${targetLit}, inputs: ${inputsVar}, computedValue: record.${field}}`,
     `    record = %{record | ${provColumn(field)}: ${linVar}}`,
     `    _ = ${appModule}.Provenance.record(${linVar})`,
   ].join("\n");
@@ -1093,8 +1147,8 @@ export function renderReturningOpControllerAction(
     // never emits an unreachable clause).
     ...(opHasWhenGate(op)
       ? [
-          `  def ${resultFn}(conn, {:error, :disallowed}),
-    do: ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")`,
+          `  def ${resultFn}(conn, {:error, {:disallowed, detail}}),
+    do: ProblemDetails.problem_response(conn, 409, "Disallowed", detail)`,
         ]
       : []),
     ...(opHasGuards(op)

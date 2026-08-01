@@ -1627,11 +1627,15 @@ def install_error_handlers(app: FastAPI) -> None:
         record_domain_fault("forbidden")
         return problem(request, 403, "Forbidden", str(err))
 
+    # RS-17 - the 7807 title on the when-gate rung is the ERROR NAME
+    # (errorTitle humanises Disallowed), not the 409 reason phrase.  The
+    # sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) keep
+    # "Conflict"; this one does not.
     @app.exception_handler(DisallowedError)
     async def _disallowed(request: Request, err: DisallowedError) -> JSONResponse:
         log("warn", "disallowed", message=str(err), status=${disallowedStatus})
         record_domain_fault("disallowed")
-        return problem(request, ${disallowedStatus}, "Conflict", str(err))
+        return problem(request, ${disallowedStatus}, "Disallowed", str(err))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:

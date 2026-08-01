@@ -550,7 +550,7 @@ function docOpStructBody(
   const params = usedParams.map(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
-  const guardClauses = collectOpGuardClauses(op, rc);
+  const guardClauses = collectOpGuardClauses(agg.name, op, rc);
   const lastIdx = op.statements.length - 1;
   const bodyStmts = op.statements.filter(
     (s, i) =>

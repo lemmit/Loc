@@ -18,7 +18,7 @@ import {
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
-import { upperFirst } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { renderCsExpr } from "./render-expr.js";
 
@@ -526,7 +526,9 @@ export function responseParamsFromPayload(
   }
   // Provenance — identical trailing logic to `responseRecordParams`.
   for (const f of agg.fields.filter((pf) => pf.provenanced)) {
-    parts.push(`ProvLineage? ${upperFirst(f.name)}Provenance`);
+    parts.push(
+      `[property: JsonPropertyName(${JSON.stringify(`${snake(f.name)}_provenance`)})] ProvLineage? ${upperFirst(f.name)}Provenance`,
+    );
   }
   return parts.join(", ");
 }
@@ -591,7 +593,9 @@ function responseRecordParams(
   // as a trailing nullable `<Field>Provenance` response param (no `[Required]` —
   // a never-written field has null lineage).  Lockstep with `projectEntityArgs`.
   for (const f of ent.fields.filter((pf) => pf.provenanced)) {
-    parts.push(`ProvLineage? ${upperFirst(f.name)}Provenance`);
+    parts.push(
+      `[property: JsonPropertyName(${JSON.stringify(`${snake(f.name)}_provenance`)})] ProvLineage? ${upperFirst(f.name)}Provenance`,
+    );
   }
   return parts.join(", ");
 }

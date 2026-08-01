@@ -17,7 +17,7 @@ import type {
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst } from "../../../util/naming.js";
+import { snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
@@ -366,13 +366,24 @@ function wireRecord(
     }
   }
   // Co-located provenance (provenance.md): each provenanced field appends a
-  // trailing `<field>Provenance` component carrying the current lineage, so any
-  // GET surfaces it inline (the field's own value still emits above).  Parts
-  // carry no provenanced fields (write sites live on the root), so this is a
-  // no-op for them — keeping non-provenance responses byte-identical.
+  // trailing lineage component carrying the current lineage, so any GET
+  // surfaces it inline (the field's own value still emits above).  Parts carry
+  // no provenanced fields (write sites live on the root), so this is a no-op
+  // for them — keeping non-provenance responses byte-identical.
+  //
+  // The WIRE KEY is `<field>_provenance`, NOT the camelCase component name.
+  // That is the documented sibling key (provenance.md §"Scaffolded UI"), it is
+  // what the other four backends emit, and it is what the SCAFFOLDED FRONTEND
+  // reads (`data.total_provenance`, `_body-builders.ts`) — so a camelCase key
+  // here silently blanks the provenance disclosure on every generated UI
+  // pointed at a Java backend.  `@JsonProperty` renames the wire key without
+  // giving the record an un-Java-like component name.  (RS-18.)
   for (const f of entity.fields.filter((pf) => pf.provenanced)) {
     imports.add(`${basePkg}.domain.common.ProvLineage`);
-    components.push(`ProvLineage ${f.name}Provenance`);
+    imports.add("com.fasterxml.jackson.annotation.JsonProperty");
+    components.push(
+      `@JsonProperty(${JSON.stringify(`${snake(f.name)}_provenance`)}) ProvLineage ${f.name}Provenance`,
+    );
     args.push(`value.${f.name}Provenance()`);
   }
   // A `mask unless` field redacts fail-closed on a RESPONSE via a SECOND mapper,

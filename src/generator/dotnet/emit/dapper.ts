@@ -240,8 +240,15 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
           ? `${acc} is null ? null : System.Text.Json.JsonSerializer.Serialize(${acc})`
           : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
         stateProp: prop,
+        // An ABSENT collection hydrates to an EMPTY list, not null (RS-8): the
+        // wire contract for a collection is `[]`, never `null`, so a client can
+        // iterate without a guard.  The EF adapter gets this for free — an
+        // `OwnsMany` child table materializes an empty collection — but Dapper
+        // stores the column as jsonb and faithfully round-trips SQL NULL, which
+        // reached the wire as `null` on this adapter alone.  Coalescing on the
+        // READ (not the write) also repairs rows already written as NULL.
         hydrate: nullable
-          ? `r.${col} is null ? (${listCs}?)null : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`
+          ? `r.${col} is null ? new ${listCs}() : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`
           : `System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`,
       };
     }

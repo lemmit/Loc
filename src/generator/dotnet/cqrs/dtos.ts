@@ -89,13 +89,20 @@ export function emitResponseDtos(
   // A `File` field's DTO param is the shared `FileRef` record (M-T1.2), also in
   // Domain.Common — same import trigger as the provenance lineage.
   const needsCommon = exposesProvenance || aggregateHasFileField(agg);
+  // A provenanced field's DTO param carries `[JsonPropertyName("<field>_
+  // provenance")]` (RS-18 — the wire key is the snake_case sibling, not the
+  // camelCase property name), so the attribute's namespace must be in scope.
+  const extraUsings = [
+    ...(needsCommon ? [`${ns}.Domain.Common`] : []),
+    ...(exposesProvenance ? ["System.Text.Json.Serialization"] : []),
+  ];
   out.set(
     `Application/${aggFolder}/Responses/${agg.name}Responses.cs`,
     renderResponseDtos({
       ns,
       aggName: agg.name,
       records,
-      extraUsings: needsCommon ? [`${ns}.Domain.Common`] : undefined,
+      extraUsings: extraUsings.length > 0 ? extraUsings : undefined,
     }),
   );
 }

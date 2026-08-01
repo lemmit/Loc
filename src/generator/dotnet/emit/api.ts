@@ -175,16 +175,22 @@ function absentReturnLines(
   const detail = JSON.stringify(ua.title);
   if (!ua.resource) {
     return [
-      `            return Problem(statusCode: ${ua.status}, title: ${JSON.stringify(
+      "        {",
+      `            var problem = new ProblemDetails { Status = ${ua.status}, Title = ${JSON.stringify(
         ua.title,
-      )}, type: ${JSON.stringify(ua.typeUri)}, detail: ${detail});`,
+      )}, Type = ${JSON.stringify(ua.typeUri)}, Detail = ${detail}, Instance = HttpContext.Request.Path };`,
+      `            return new ObjectResult(problem) { StatusCode = ${ua.status}, ContentTypes = { "application/problem+json" } };`,
+      "        }",
     ];
   }
   return [
     "        {",
+    // `Instance` set explicitly — this arm builds the ProblemDetails by hand
+    // (rather than via ControllerBase.Problem/ProblemDetailsFactory), so nothing
+    // fills it in, and the other four backends all send the request path.
     `            var problem = new ProblemDetails { Status = ${ua.status}, Title = ${JSON.stringify(
       ua.title,
-    )}, Type = ${JSON.stringify(ua.typeUri)}, Detail = ${detail} };`,
+    )}, Type = ${JSON.stringify(ua.typeUri)}, Detail = ${detail}, Instance = HttpContext.Request.Path };`,
     `            problem.Extensions["resource"] = ${JSON.stringify(ua.resource)};`,
     `            return new ObjectResult(problem) { StatusCode = ${ua.status}, ContentTypes = { "application/problem+json" } };`,
     "        }",
@@ -512,16 +518,38 @@ export function renderOperationActionBlock(
         ...ru.arms.flatMap((a) => {
           const variant = `${ru.domainNs}.${ru.unionName}_${a.tag}`;
           if (a.isError) {
+            // Built explicitly rather than through ControllerBase.Problem(...),
+            // which routes via ProblemDetailsFactory and so (a) leaves
+            // `instance` null and (b) injects a `traceId` extension no other
+            // backend sends.  Both are wire divergences the golden catches; the
+            // app's OWN exception filter already builds the same shape by hand
+            // for exactly this reason.  The arm's DECLARED FIELDS ride as 7807
+            // extension members (RS-19) — discarding the variant with `_` shipped
+            // a 404 with the right shape and no payload.
+            const bindErr = a.errorFields.length > 0 ? "v" : "_";
             return [
-              `            case ${variant} _:`,
-              `                return Problem(statusCode: ${a.status}, title: ${JSON.stringify(a.title)}, type: ${JSON.stringify(a.typeUri)}, detail: ${JSON.stringify(a.title)});`,
+              `            case ${variant} ${bindErr}:`,
+              `            {`,
+              `                var problem = new Microsoft.AspNetCore.Mvc.ProblemDetails { Status = ${a.status}, Title = ${JSON.stringify(a.title)}, Type = ${JSON.stringify(a.typeUri)}, Detail = ${JSON.stringify(a.title)}, Instance = HttpContext.Request.Path };`,
+              ...a.errorFields.map(
+                (f) =>
+                  `                problem.Extensions[${JSON.stringify(f.json)}] = ${f.accessor};`,
+              ),
+              `                return new ObjectResult(problem) { StatusCode = ${a.status}, ContentTypes = { "application/problem+json" } };`,
+              `            }`,
             ];
           }
           const bind = a.ctorArgs.length > 0 ? "v" : "_";
           const ctor = `new ${ru.appNs}.${ru.unionName}_${a.tag}(${a.ctorArgs.join(", ")})`;
+          // `DeclaredType` is load-bearing: the union DTO is
+          // `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]`, and
+          // System.Text.Json only writes the discriminator when it serializes
+          // through the BASE type.  `Ok(object)` leaves DeclaredType null, so
+          // STJ used the runtime type and the `"type"` tag vanished from the
+          // wire — the cast alone does not survive the boxing.
           return [
             `            case ${variant} ${bind}:`,
-            `                return Ok((${ru.appNs}.${ru.unionName})${ctor});`,
+            `                return new ObjectResult((${ru.appNs}.${ru.unionName})${ctor}) { StatusCode = 200, DeclaredType = typeof(${ru.appNs}.${ru.unionName}) };`,
           ];
         }),
         "            default:",

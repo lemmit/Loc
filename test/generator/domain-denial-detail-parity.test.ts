@@ -47,6 +47,12 @@ system Denials {
           status := "cancelled"
         }
 
+        // The third rung: a when STATE GATE.  Rejected -> 409, and its detail
+        // must name the operation and aggregate (RS-17).
+        operation reopen() when status != "open" {
+          status := "open"
+        }
+
         // A precondition with an AUTHOR-WRITTEN message, on an OPERATION (the
         // HTTP-boundary path).  Every backend must prefer it over the derived
         // "Precondition failed: <source>" — a backend that ignores the clause
@@ -93,6 +99,10 @@ const FORBIDDEN_DETAIL = "Forbidden: currentUser.level > 2";
  *  That path still emits the derived form on purpose; closing it needs the
  *  typed-exception reshape tracked as **M-T6.20**, not a string swap. */
 const AUTHORED_DETAIL = "Repricing needs a positive amount";
+/** RS-17 — the 409 rung.  Elixir used to answer a fixed sentence with title
+ *  "Conflict"; the denial reason is now a tuple carrying this message, and the
+ *  title is the ERROR NAME (`errorTitle` humanises `Disallowed`) on all five. */
+const DISALLOWED_DETAIL = "operation 'reopen' is not allowed in the current state of Order.";
 
 async function emit(platform: string): Promise<string> {
   const files = await generateSystemFiles(SOURCE(platform));
@@ -115,6 +125,17 @@ describe("RS-15 — domain-floor denials are 422 with an occurrence-specific det
       expect(out, "derived detail emitted despite an authored message").not.toContain(
         "Precondition failed: to > 0",
       );
+    });
+
+    it(`${platform}: a refused when-gate names the operation it refused`, async () => {
+      const out = await emit(platform);
+      expect(out).toContain(DISALLOWED_DETAIL);
+      // …and the state-gate arm's 7807 title is the ERROR NAME, not the 409
+      // reason phrase.  Asserted POSITIVELY: "Conflict" is a legitimate title
+      // on the sibling 409 rungs (UniquenessConflict / ConcurrencyConflict), so
+      // a blanket `not.toContain('409, "Conflict"')` would fail on four correct
+      // backends — the mistake this assertion originally made.
+      expect(out, "the when-gate arm is not titled Disallowed").toContain('"Disallowed"');
     });
 
     it(`${platform}: the domain floor answers 422, and 400 is not its status`, async () => {

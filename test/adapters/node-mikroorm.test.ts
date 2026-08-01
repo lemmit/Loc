@@ -951,7 +951,11 @@ describe("mikroorm — collection-bearing contained parts", () => {
     );
     expect(repo).toContain("flags: (r.flags ?? []).map((x) => x as Tag)");
     expect(repo).toContain("related: (r.related ?? []).map((s: string) => Ids.ProductId(s))");
-    expect(repo).toContain("notes: (r.notes == null ? null : (r.notes ?? []).map((x) => x))");
+    // An OPTIONAL collection coalesces to `[]` like a required one — the null
+    // guard used to win first and put `null` on the wire (RS-23).  A collection
+    // is `[]`, never null, on every persistence adapter; only nullable SCALARS
+    // keep their null.
+    expect(repo).toContain("notes: (r.notes ?? []).map((x) => x)");
   });
 });
 

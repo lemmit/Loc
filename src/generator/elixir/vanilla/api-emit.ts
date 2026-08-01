@@ -347,8 +347,8 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
       const whenArm = opHasWhenGate(op)
         ? `
 
-      {:error, :disallowed} ->
-        ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")`
+      {:error, {:disallowed, detail}} ->
+        ProblemDetails.problem_response(conn, 409, "Disallowed", detail)`
         : "";
       const denialArms =
         whenArm +

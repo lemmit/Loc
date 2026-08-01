@@ -216,9 +216,11 @@ describe("elixir generator — numeric intrinsics batch (stdlib A3)", () => {
   it("renders round in-memory via Decimal.round/:half_up — with and without places", async () => {
     const files = await generateSystemFiles(A3_SRC);
     const ctrl = fileEndingWith(files, "/controllers/product_controller.ex");
-    expect(ctrl).toContain('"rateRounded" => Decimal.round(record.rate, 2, :half_up)');
+    expect(ctrl).toContain(
+      '"rateRounded" => __decimal_num(Decimal.round(record.rate, 2, :half_up))',
+    );
     // Omitted places defaults to 0 (whole-value commercial rounding).
-    expect(ctrl).toContain('"rateWhole" => Decimal.round(record.rate, 0, :half_up)');
+    expect(ctrl).toContain('"rateWhole" => __decimal_num(Decimal.round(record.rate, 0, :half_up))');
     // Never the invalid method-call fallthrough.
     expect(ctrl).not.toContain(".round()");
   });
@@ -247,8 +249,10 @@ describe("elixir generator — numeric intrinsics batch (stdlib A3)", () => {
     expect(ctrl).toContain(
       '"amountDown" => __money_round(Decimal.round(record.amount, 0, :floor))',
     );
-    // `rateUp` is a `decimal` derived — not money, so it is NOT scale-pinned.
-    expect(ctrl).toContain('"rateUp" => Decimal.round(record.rate, 0, :ceiling)');
+    // `rateUp` is a `decimal` derived — not money, so it is NOT scale-pinned;
+    // it IS number-coerced (RS-24), because Jason would otherwise ship the
+    // `%Decimal{}` as a JSON string where every other backend sends a number.
+    expect(ctrl).toContain('"rateUp" => __decimal_num(Decimal.round(record.rate, 0, :ceiling))');
   });
 
   it("renders queryable ops as SQL fragments in the find where-clause", async () => {

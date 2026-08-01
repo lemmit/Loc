@@ -1,0 +1,38 @@
+{
+  "case": "tenancy-filter",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/accounts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/accounts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/accounts/by_min_balance?min=0",
+      "status": 200,
+      "body": [
+        {
+          "balance": 100,
+          "id": "<volatile:key>",
+          "tenantId": "<volatile:key>",
+          "version": 1
+        }
+      ]
+    }
+  ]
+}

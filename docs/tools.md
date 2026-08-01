@@ -473,6 +473,47 @@ can generate a project (`node bin/cli.js generate system <f.ddd> -o out`)
 and compile it directly: Gradle/.NET on the host, or
 `docker run … hexpm/elixir … 'mix deps.get && mix compile'` for Phoenix.
 
+### Running `mix` on the HOST — for the suites that can't use a container
+
+The table above is about *compiling* an emitted project, where a
+throwaway container is fine.  Some suites can't work that way: the
+behavioural runner `test/behavioral/run-elixir.mjs` shells out to `mix`
+from **Node**, boots the Phoenix app as a long-lived child process, and
+HTTP-dispatches at it.  Wrapping that in `docker run` means mounting the
+repo, the host Node and a postgres route into the container just to reach
+the same `mix`.
+
+The simpler route is to lift the toolchain out of the image and run it
+natively.  The `hexpm/elixir` binaries are built for Debian bookworm and
+run unmodified on the Ubuntu 24.04 host (newer glibc, backward
+compatible):
+
+```bash
+IMG=hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim
+CID=$(docker create "$IMG")
+mkdir -p /opt/elixir-toolchain
+docker cp "$CID":/usr/local/lib/elixir  /opt/elixir-toolchain/elixir
+docker cp "$CID":/usr/local/lib/erlang  /opt/elixir-toolchain/erlang
+docker rm "$CID"
+
+export PATH=/opt/elixir-toolchain/erlang/bin:/opt/elixir-toolchain/elixir/bin:$PATH
+export ELIXIR_ERL_OPTIONS="+fnu"     # else the VM warns about latin1 name encoding
+elixir --version                     # Elixir 1.18.4 (compiled with Erlang/OTP 27)
+```
+
+`mix local.hex --force` and `mix deps.get` reach hex.pm directly from the
+**host's** Erlang, so `LOOM_HEX_MIRROR` is not needed on this path — the
+fingerprint problem below is specific to the container.  With a postgres
+sidecar (`docker run -d -e POSTGRES_PASSWORD=postgres -p 5432:5432
+postgres:16`, plus the `app`/`d`/`wc`/`pv`/`orx` databases the fixtures
+use), `node run-elixir.mjs [case…]` then runs locally at roughly a minute
+per case.
+
+This matters more than a convenience: the M-T9.11 wire-differential was
+run against four backends locally and elixir "by reasoning" for weeks, and
+the first real elixir boot found **four** divergences, two of them on
+rules already recorded as five-way conforming.
+
 ### `LOOM_HEX_MIRROR` — Elixir builds behind a fingerprinting proxy
 
 Some egress proxies allowlist by the **client's TLS fingerprint**: the

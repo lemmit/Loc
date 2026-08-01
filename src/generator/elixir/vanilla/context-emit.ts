@@ -681,7 +681,7 @@ function renderExternOpFunction(
   // (identical atoms + status mapping to the non-extern guard path — `:disallowed`
   // 409 / `:forbidden` 403 / `:precondition_failed` 422); the extern delegation is
   // the final with-clause, rebinding `record` to the mutated struct.
-  const guardClauses = collectOpGuardClauses(op, rc);
+  const guardClauses = collectOpGuardClauses(agg.name, op, rc);
   const withClauses = [...guardClauses, `{:ok, record} <- ${implMod}.${opSnake}(record, params)`];
   // Bind the params the preconditions reference (`score = Map.get(params,
   // "score")`) BEFORE the `with` — a precondition like `score >= 0` reads the op
@@ -813,7 +813,7 @@ function renderNamedOpFunction(
   // `{:error, :precondition_failed}` 422) BEFORE the mutation/persist runs, instead
   // of raising an ArgumentError (→ 500).  Exclude the guard STATEMENTS from the
   // in-body statements (the `when` gate is a predicate field, not a statement).
-  const guardClauses = collectOpGuardClauses(op, rc);
+  const guardClauses = collectOpGuardClauses(agg.name, op, rc);
   const bodyStmts = op.statements.filter((s) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
     if (emits && s.kind === "emit") return false;

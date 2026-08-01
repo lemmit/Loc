@@ -301,18 +301,173 @@
     },
     {
       "id": "RS-17",
-      "title": "A `when` state-gate rejection names the operation it refused — OPEN",
+      "title": "A `when` state-gate rejection names the operation it refused",
       "trigger": "an `operation … when <pred>` invoked in a state the predicate rejects — the 409 rung of the denial ladder",
-      "observable": "every backend answers 409, but the ENVELOPE splits four-vs-one. node/dotnet/java/python send title \"Disallowed\" with the occurrence-specific detail \"operation '<op>' is not allowed in the current state of <Agg>.\"; elixir sends title \"Conflict\" with the fixed sentence \"Operation not allowed in the current state\".",
+      "observable": "every backend answers 409 with title \"Disallowed\" and the occurrence-specific detail \"operation '<op>' is not allowed in the current state of <Agg>.\". The TITLE is the error NAME, not the status reason phrase — the sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) are the ones titled \"Conflict\".",
       "conforms": [
         "node",
         "dotnet",
         "java",
-        "python"
+        "python",
+        "elixir"
       ],
       "provenance": [
-        "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — reading the freshly-minted `state-gate` golden, before booting a second backend",
-        "predicted from the emitters and confirmed by grep, not by a failing run: the gate's coverage had not reached this case yet"
+        "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — by READING the freshly-minted `state-gate` golden, before booting a second backend",
+        "fixed (elixir): `{:disallowed, msg}` denial tuple + title Disallowed, via src/generator/elixir/vanilla/denial.ts",
+        "fixed (python): the DisallowedError handler titled the response Conflict"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-18",
+      "title": "A provenanced field's lineage rides the wire as `<field>_provenance`",
+      "trigger": "a GET on an aggregate carrying a `provenanced` field (provenance.md)",
+      "observable": "the response body carries the lineage under the co-located snake_case key `<field>_provenance` (e.g. `total_provenance`), NOT a camelCase `<field>Provenance`. This is the one key in the wire shape that is deliberately NOT camelCase — it mirrors the backing jsonb column name, it is what `docs/provenance.md` documents, and it is what the SCAFFOLDED FRONTEND reads.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-30 by READING the freshly-minted `provenance` golden during the M-T9.11 coverage expansion — one key out of camelCase in an otherwise camelCase body",
+        "confirmed by generating all five backends and diffing the emitted key, then by booting the Java project",
+        "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts",
+        "REOPENED 2026-08-01: the elixir leg's first real boot showed the key missing entirely — the earlier all-five close was inferred from a grep that matched the jsonb column, not the wire",
+        "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts appends the sidecar after the wire shape, as node does"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-19",
+      "title": "A declared `error` variant's fields ride the problem body",
+      "trigger": "an operation returning `T or <Error>` (payloads.md) whose error variant is selected — e.g. `operation reject(): string or NotFound { return NotFound { resource: code } }`",
+      "observable": "the RFC 7807 response carries the error payload's DECLARED FIELDS as extension members alongside type/title/status/detail — `NotFound { resource: string }` puts `\"resource\": \"OR1\"` on the body. The emitted OpenAPI for the union already declares them, so omitting them is a spec violation as well as a wire divergence.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `operation-returns` case (java leg): $.resource — golden \"OR1\" vs java null",
+        "fixed (java): the union error arm projects `a.member.fields` via setProperty, src/generator/java/emit/api.ts",
+        "fixed (dotnet, 2026-07-31): the same arm discarded the variant with `case <Union>_<Tag> _:` and so could project nothing — found only when the dotnet leg was actually run; the rule was briefly recorded as all-five conforming after the java fix alone"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-20",
+      "title": "`version` counts persisted mutations, not entity-graph dirtiness — OPEN (java)",
+      "trigger": "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), or whose create also writes a value-object collection",
+      "observable": "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14). Java diverges in BOTH directions: a `ship` op mutating a single containment reads back 1 where the canonical value is 2 (the bump is missed), and a create carrying a value-object collection reads back 2 where the canonical value is 1 (an extra bump).",
+      "conforms": [
+        "node",
+        "dotnet",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `single-containment` and `value-collections` cases (java leg)",
+        "single-containment #2 GET /api/orders/{id} $.version — golden 2 vs java 1",
+        "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-21",
+      "title": "A union response carries its `type` discriminator",
+      "trigger": "an operation returning `T or <Error>` (payloads.md) that selects a SUCCESS variant — `operation accept(): string or NotFound`",
+      "observable": "the 200 body is the tagged form `{\"type\":\"string\",\"value\":\"OR1\"}` — the discriminator named by `_payload/union-wire.ts`, the single source of truth for the tagged-wire shape. A typed client narrows on `type`; without it the union is unreadable.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` (dotnet leg): $.type — golden \"string\" vs dotnet null",
+        "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts",
+        "VIOLATED AGAIN 2026-08-01 on the elixir leg's first real boot: operation-returns #1 POST /api/orders/{id}/accept at $ — golden {type,value} vs a bare string",
+        "fixed (elixir): src/generator/elixir/vanilla/operation-returns-emit.ts tags the success value from StmtIR.return's variantTag/variantShape",
+        "aggregate-variant gap confirmed by generating that shape on node and reading the emitted method — no return statement at all"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-22",
+      "title": "The RFC 7807 envelope is exactly five members plus declared extensions",
+      "trigger": "any error response — a framework problem or a declared `error` payload",
+      "observable": "the body carries `type`, `title`, `status`, `detail` and `instance` (the request path) — and NOTHING a framework adds on its own. `instance` is never null, and no `traceId`/correlation member rides the body: trace correlation is an `x-request-id` HEADER, deliberately moved off the body so the envelope is byte-identical across backends. Only a declared error payload's own fields (RS-19) may extend it.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` + `union-find-absence` (dotnet leg): $.instance golden path vs dotnet null, and $.traceId golden absent vs dotnet present",
+        "fixed (dotnet): the union + find-absence arms build ProblemDetails by hand with Instance = HttpContext.Request.Path, src/generator/dotnet/emit/api.ts"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-23",
+      "title": "An absent collection is `[]` on every PERSISTENCE ADAPTER, not just the default",
+      "trigger": "an optional value-object collection (`surcharges: Money[]?`) never written, read back on a non-default persistence adapter — `persistence: dapper` (.NET) or `persistence: mikroorm` (node)",
+      "observable": "the collection reads back as `[]`. This is RS-8's absence shape, but the point of THIS rule is that it holds per ADAPTER: the wire contract for a collection is the empty array, never null, so a client can iterate without a guard.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-31 by the M-T9.11 golden gate once the expanded set reached the dapper + mikroorm legs: value-collections #1 $.surcharges — golden [] vs null on BOTH",
+        "fixed (dapper): src/generator/dotnet/emit/dapper.ts hydrates an absent jsonb collection to an empty list",
+        "fixed (mikroorm): src/generator/typescript/repository-document-builder.ts deserializeField delegates an optional ARRAY to the coalescing array arm"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-24",
+      "title": "A plain `decimal` is a JSON NUMBER on the wire; only `money` is a string",
+      "trigger": "a GET returning an aggregate (or nested value object) with a `decimal` field",
+      "observable": "the value is a JSON number (`9.99`, `5`). This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`\"19.5000\"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: value-collections #1 GET /api/invoices/{id} at $.lineItems[*].amount — golden 9.99 / 5 vs \"9.99\" / \"5\"",
+        "root-caused by running Jason.encode!(%{a: Decimal.new(\"9.99\")}) against the real library rather than reading the emitter",
+        "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts __decimal_num/1"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-25",
+      "title": "`internal` / `secret` fields never reach the read wire",
+      "trigger": "a GET on an aggregate carrying an `access: internal` field — e.g. the `tenantId` / `dataKey` the `tenantOwned` capability injects (docs/tenancy.md)",
+      "observable": "the response body OMITS the key entirely. `forApiRead` is the read-boundary projection every backend applies over `wireShape`; `internal` is domain-only state and `secret` is never disclosed anywhere.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: tenancy-owned #1 GET /api/invoices/by_number at $.tenantId — absent in the golden, present on elixir",
+        "fixed (elixir): forApiRead applied in src/generator/elixir/vanilla/wire-serialize.ts and operation-returns-emit.ts"
       ],
       "tier": "behavioral"
     }

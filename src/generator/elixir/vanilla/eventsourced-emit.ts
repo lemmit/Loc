@@ -41,7 +41,7 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { denialTerm } from "./denial.js";
+import { denialTerm, disallowedTerm } from "./denial.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
@@ -459,6 +459,7 @@ export function renderEsContextBlock(
     ? renderCommandRunner({
         kind: "create",
         op: create,
+        aggName: agg.name,
         aggSnake,
         aggModule,
         repoMod,
@@ -473,6 +474,7 @@ export function renderEsContextBlock(
       renderCommandRunner({
         kind: "operation",
         op,
+        aggName: agg.name,
         aggSnake,
         aggModule,
         repoMod,
@@ -575,8 +577,8 @@ export function renderEsController(
   // catch-all as dead code.
   const hasWhenGate = publicOps.some((op) => op.when !== undefined);
   const disallowedClause = hasWhenGate
-    ? `  defp command_error(conn, :disallowed) do
-    ProblemDetails.problem_response(conn, 409, "Conflict", "Operation not allowed in the current state")
+    ? `  defp command_error(conn, {:disallowed, detail}) do
+    ProblemDetails.problem_response(conn, 409, "Disallowed", detail)
   end
 
 `
@@ -664,6 +666,9 @@ end
 interface CommandCtx {
   kind: "create" | "operation";
   op: OperationIR;
+  /** The aggregate's DECLARED name — used verbatim in the `when`-gate denial
+   *  message so it reads identically to the other four backends (RS-17). */
+  aggName: string;
   aggSnake: string;
   aggModule: string;
   repoMod: string;
@@ -698,10 +703,13 @@ function renderCommandRunner(c: CommandCtx): string {
   const clauses: string[] = [];
   // The `when` canCommand state gate (criterion.md use site 2) evaluates against
   // the already-folded `state` BEFORE the command emits — a false predicate
-  // short-circuits the `with` to `{:error, :disallowed}` → 409 (`command_error`).
+  // short-circuits the `with` to `{:error, {:disallowed, msg}}` → 409
+  // (`command_error`), the message naming the op + aggregate (RS-17).
   // Only an operation carries `when` (a create has no prior state to gate on).
   if (c.kind === "operation" && c.op.when) {
-    clauses.push(`:ok <- ensure(${renderExpr(c.op.when, exprCtx)}, :disallowed)`);
+    clauses.push(
+      `:ok <- ensure(${renderExpr(c.op.when, exprCtx)}, ${disallowedTerm(c.aggName, c.op.name)})`,
+    );
   }
   const lets: string[] = [];
   const eventStructs: string[] = [];

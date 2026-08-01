@@ -332,34 +332,294 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   },
   {
     id: "RS-17",
-    title: "A `when` state-gate rejection names the operation it refused — OPEN",
+    title: "A `when` state-gate rejection names the operation it refused",
     trigger:
       "an `operation … when <pred>` invoked in a state the predicate rejects — the 409 rung of the denial ladder",
     observable:
-      'every backend answers 409, but the ENVELOPE splits four-vs-one. node/dotnet/java/python send title "Disallowed" with the occurrence-specific detail "operation \'<op>\' is not allowed in the current state of <Agg>."; elixir sends title "Conflict" with the fixed sentence "Operation not allowed in the current state".',
-    // OPEN — found, not yet fixed.  Sized and left out of #2300 deliberately:
-    // the fix is a third pass over the elixir denial protocol (the `:disallowed`
-    // atom has to become a `{:disallowed, msg}` tuple the same way
-    // `:precondition_failed` did in RS-15), and one of its three sites — the
-    // event-sourced `command_error/2` clause — is SHARED across every command of
-    // an aggregate, so it has no single `op` in scope to name.  That is a
-    // mechanism change, not a string swap.
+      'every backend answers 409 with title "Disallowed" and the occurrence-specific detail "operation \'<op>\' is not allowed in the current state of <Agg>.". The TITLE is the error NAME, not the status reason phrase — the sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) are the ones titled "Conflict".',
+    // Two independent divergences, and the split was NOT the one first recorded.
+    //   * `detail` — elixir alone sent a fixed sentence ("Operation not allowed
+    //     in the current state") because `:disallowed` was a bare atom carrying
+    //     no message.  Same shape and same fix as RS-15: the reason is now a
+    //     `{:disallowed, msg}` tuple built at the PRODUCER, which is why the
+    //     event-sourced `command_error/2` clause being SHARED across an
+    //     aggregate's commands never mattered — the consumer only binds it.
+    //   * `title` — elixir AND **python** sent "Conflict".  The first draft of
+    //     this rule recorded a 4-vs-1 split with python on the conforming side;
+    //     that was inferred from python's (correct) DETAIL and never checked
+    //     against its title.  It is 3-vs-2.  Recorded because it is the second
+    //     time on this rule that the cheap inference was wrong.
+    // Direction decided by Loom's own rule, not a vote: `errorTitle`
+    // (src/util/error-defaults.ts) derives a title by humanising the ERROR NAME,
+    // falling back to the status reason phrase only when there is no named
+    // error — and `Disallowed` is a blessed stdlib name in STDLIB_ERROR_STATUS.
     //
-    // WHICH SIDE IS RIGHT is not a vote here either — Loom's own rule decides
-    // it, twice over:
-    //   * `title` — `errorTitle` (src/util/error-defaults.ts) derives a title by
-    //     humanising the ERROR NAME, falling back to the status reason phrase
-    //     only when there is no named error.  `Disallowed` IS a blessed stdlib
-    //     error name, so "Disallowed" is correct and "Conflict" is the miss.
-    //   * `detail` — RFC 7807 wants it specific to the OCCURRENCE (the same
-    //     reasoning that settled RS-15), so naming the op + aggregate wins.
-    // Elixir moves on both.  Listing only the measured-conforming backends
-    // follows RS-12's precedent for a rule whose direction is decided but whose
-    // fix has not landed.
-    conforms: ["node", "dotnet", "java", "python"],
+    // NOT fixed here: elixir hardcodes the 409 literal where the other four
+    // resolve it through `resolveErrorStatus("Disallowed", …)`, so an
+    // `httpStatus Disallowed -> N` override moves four backends and not the
+    // fifth.  That is the ladder-routing gap — mission M-T5.20.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
-      "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — reading the freshly-minted `state-gate` golden, before booting a second backend",
-      "predicted from the emitters and confirmed by grep, not by a failing run: the gate's coverage had not reached this case yet",
+      "found 2026-07-30 while extending the M-T9.11 golden set to the corpus feature cases — by READING the freshly-minted `state-gate` golden, before booting a second backend",
+      "fixed (elixir): `{:disallowed, msg}` denial tuple + title Disallowed, via src/generator/elixir/vanilla/denial.ts",
+      "fixed (python): the DisallowedError handler titled the response Conflict",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-18",
+    title: "A provenanced field's lineage rides the wire as `<field>_provenance`",
+    trigger: "a GET on an aggregate carrying a `provenanced` field (provenance.md)",
+    observable:
+      "the response body carries the lineage under the co-located snake_case key `<field>_provenance` (e.g. `total_provenance`), NOT a camelCase `<field>Provenance`. This is the one key in the wire shape that is deliberately NOT camelCase — it mirrors the backing jsonb column name, it is what `docs/provenance.md` documents, and it is what the SCAFFOLDED FRONTEND reads.",
+    // Java emitted `totalProvenance` — its DTO record component name went
+    // straight onto the wire.  A 4-vs-1 split where, unusually, the MAJORITY was
+    // right: `<field>_provenance` is the documented key (provenance.md
+    // §"Scaffolded UI") and the generated React detail page reads
+    // `data.<field>_provenance` verbatim (scaffold/_body-builders.ts).  So the
+    // camelCase key did not merely differ — it SILENTLY BLANKED the provenance
+    // "?" disclosure on every generated UI pointed at a Java backend, with no
+    // error anywhere: the frontend reads a key the backend never sends.
+    //
+    // Fixed with `@JsonProperty("<field>_provenance")` so the record keeps an
+    // idiomatic Java component name while the wire key matches.  Verified on a
+    // REAL BOOT (gradle:9-jdk25 + postgres), not an emitted-string assertion —
+    // the whole failure mode here is a name that looks right in the source.
+    //
+    // Note this cuts AGAINST the general convention: every other wire key is
+    // camelCase (`unitPrice`, `amountDue`, `createdAt`).  A future
+    // "normalise the wire to camelCase" sweep must treat this key as a
+    // deliberate exception, or it will re-break the frontend.
+    //
+    // A SECOND, LATER FINDING on the same rule, and the more instructive half.
+    // This rule first shipped with elixir in `conforms` on the strength of a
+    // GENERATED-SOURCE GREP.  When the elixir leg was finally BOOTED (2026-08-01),
+    // it turned out vanilla never put the key on the wire AT ALL — its REST
+    // serializer projects `wireShape`, and the provenance sidecar is not a
+    // `wireShape` member on any backend (node appends it separately, after the
+    // shape).  The grep had matched the co-located jsonb COLUMN, not the wire
+    // key.  A generated-source grep is not a wire observation; only a boot is.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-30 by READING the freshly-minted `provenance` golden during the M-T9.11 coverage expansion — one key out of camelCase in an otherwise camelCase body",
+      "confirmed by generating all five backends and diffing the emitted key, then by booting the Java project",
+      "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts",
+      "REOPENED 2026-08-01: the elixir leg's first real boot showed the key missing entirely — the earlier all-five close was inferred from a grep that matched the jsonb column, not the wire",
+      "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts appends the sidecar after the wire shape, as node does",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-19",
+    title: "A declared `error` variant's fields ride the problem body",
+    trigger:
+      "an operation returning `T or <Error>` (payloads.md) whose error variant is selected — e.g. `operation reject(): string or NotFound { return NotFound { resource: code } }`",
+    observable:
+      'the RFC 7807 response carries the error payload\'s DECLARED FIELDS as extension members alongside type/title/status/detail — `NotFound { resource: string }` puts `"resource": "OR1"` on the body. The emitted OpenAPI for the union already declares them, so omitting them is a spec violation as well as a wire divergence.',
+    // Java emitted the arm's status, title, type and detail and then dropped the
+    // payload entirely: the client got a 404 with the right shape and NO DATA,
+    // and `body.resource` read null on java alone.  The failure is quiet in a way
+    // a status-only assertion cannot see — `toThrow(404)` passes on all five.
+    //
+    // Note java's sibling FIND-absence arm already set `resource` (hardcoded to
+    // the aggregate name), which is why `union-find-absence` passed while
+    // `operation-returns` did not — the two arms were written independently.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      'found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `operation-returns` case (java leg): $.resource — golden "OR1" vs java null',
+      "fixed (java): the union error arm projects `a.member.fields` via setProperty, src/generator/java/emit/api.ts",
+      "fixed (dotnet, 2026-07-31): the same arm discarded the variant with `case <Union>_<Tag> _:` and so could project nothing — found only when the dotnet leg was actually run; the rule was briefly recorded as all-five conforming after the java fix alone",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-20",
+    title: "`version` counts persisted mutations, not entity-graph dirtiness — OPEN (java)",
+    trigger:
+      "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), or whose create also writes a value-object collection",
+    observable:
+      "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14). Java diverges in BOTH directions: a `ship` op mutating a single containment reads back 1 where the canonical value is 2 (the bump is missed), and a create carrying a value-object collection reads back 2 where the canonical value is 1 (an extra bump).",
+    // Root cause is one mechanism, not two bugs: java maps `version` to JPA
+    // `@Version`, and Hibernate bumps it from the dirtiness of the ROOT entity's
+    // own state.  A change confined to a child/collection does not mark the root
+    // dirty (no bump); a second flush that writes the collection during create
+    // does (extra bump).  The other four backends set the counter explicitly at
+    // the persist site, so they count MUTATIONS the way the capability declares.
+    //
+    // This is RS-14's family — "the version increment is shape-dependent and
+    // inverted between backends" — in two shapes RS-14's fixture set never
+    // reached.  RS-14 lists java as conforming; that holds for the shapes it
+    // measured (document/embedded) and not for these.  Rather than edit RS-14's
+    // history, this rule names the shapes it missed.
+    //
+    // Left OPEN deliberately: the fix is Hibernate-semantics work (forcing an
+    // optimistic increment on child-only mutations without double-bumping the
+    // collection write), it needs a container build + boot per iteration, and it
+    // is a different unit from the golden-coverage expansion that found it.  The
+    // two divergences are WAIVED in test/_helpers/wire-waivers.ts, which
+    // ratchets: the waivers go stale and fail the moment java is fixed.
+    conforms: ["node", "dotnet", "python", "elixir"],
+    provenance: [
+      "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `single-containment` and `value-collections` cases (java leg)",
+      "single-containment #2 GET /api/orders/{id} $.version — golden 2 vs java 1",
+      "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-21",
+    title: "A union response carries its `type` discriminator",
+    trigger:
+      "an operation returning `T or <Error>` (payloads.md) that selects a SUCCESS variant — `operation accept(): string or NotFound`",
+    observable:
+      'the 200 body is the tagged form `{"type":"string","value":"OR1"}` — the discriminator named by `_payload/union-wire.ts`, the single source of truth for the tagged-wire shape. A typed client narrows on `type`; without it the union is unreadable.',
+    // dotnet dropped the tag.  Its DTO carried the right attribute all along —
+    // `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]` — but
+    // System.Text.Json only WRITES the discriminator when it serializes through
+    // the BASE type, and `Ok(object)` leaves `ObjectResult.DeclaredType` null,
+    // so STJ used the runtime type and the tag vanished.  The `(Union)` cast in
+    // the emitted source does not survive the boxing: the code reads correct and
+    // the wire is not, which is why only a booted round-trip found it.
+    // Fixed with an explicit `ObjectResult { DeclaredType = typeof(<Union>) }`.
+    //
+    // ELIXIR VIOLATED THE SAME RULE, found one leg later, for an unrelated
+    // reason — and the pairing is the point: the same guarantee broke once
+    // because a framework silently declined to write the tag (dotnet) and once
+    // because the emitter never produced it (elixir).  Vanilla carries a
+    // returning op's outcome as a TUPLE (`{:ok, value} | {:error, tag, data}`)
+    // and only the ERROR arm ever put its tag in the tuple; the controller
+    // `json/2`s the success value straight through, so no later seam could have
+    // added it.  Fixed at the producer (`renderReturningStmt`) from the tag +
+    // shape the IR already carries on the `return` statement (`variantTag` /
+    // `variantShape`) — the same two fields the TS backend reads.
+    //
+    // TWO SHAPES REMAIN UNIMPLEMENTED EVERYWHERE, and naming them is part of
+    // the rule.  The AGGREGATE success variant (`operation adjust(): Item or
+    // NotFound` falling through, or ending in `return this`) has NO CONFORMING
+    // ORACLE: node's emitted domain method for the fall-through has no `return`
+    // at all — the route `c.json`s `undefined` — and its `return this` renders
+    // `{ type, ...this }`, spreading the domain class's PRIVATE `_`-prefixed
+    // fields.  Vanilla is deliberately left untagged there rather than guessing
+    // at a contract no shipped backend implements.  `conforms` below is
+    // therefore scoped to the shapes with an oracle: SCALAR, RECORD LITERAL and
+    // `none`.  The aggregate variant is its own (unowned) gap.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      'found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` (dotnet leg): $.type — golden "string" vs dotnet null',
+      "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts",
+      "VIOLATED AGAIN 2026-08-01 on the elixir leg's first real boot: operation-returns #1 POST /api/orders/{id}/accept at $ — golden {type,value} vs a bare string",
+      "fixed (elixir): src/generator/elixir/vanilla/operation-returns-emit.ts tags the success value from StmtIR.return's variantTag/variantShape",
+      "aggregate-variant gap confirmed by generating that shape on node and reading the emitted method — no return statement at all",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-22",
+    title: "The RFC 7807 envelope is exactly five members plus declared extensions",
+    trigger: "any error response — a framework problem or a declared `error` payload",
+    observable:
+      "the body carries `type`, `title`, `status`, `detail` and `instance` (the request path) — and NOTHING a framework adds on its own. `instance` is never null, and no `traceId`/correlation member rides the body: trace correlation is an `x-request-id` HEADER, deliberately moved off the body so the envelope is byte-identical across backends. Only a declared error payload's own fields (RS-19) may extend it.",
+    // dotnet diverged both ways at once — `instance` null AND an extra
+    // `traceId` — because those arms called `ControllerBase.Problem(...)`, which
+    // routes through ProblemDetailsFactory: the factory fills neither `instance`
+    // nor the content type, and injects `traceId` from the ambient Activity.
+    // The app's OWN exception filter already hand-builds the envelope for
+    // exactly this reason; the union arms and the find-absence arm were the
+    // sites that had not been converted.
+    //
+    // Worth stating as a rule rather than a fix note: "the framework helper adds
+    // a member nobody else sends" is invisible to every static gate — the
+    // emitted source names none of it.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` + `union-find-absence` (dotnet leg): $.instance golden path vs dotnet null, and $.traceId golden absent vs dotnet present",
+      "fixed (dotnet): the union + find-absence arms build ProblemDetails by hand with Instance = HttpContext.Request.Path, src/generator/dotnet/emit/api.ts",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-23",
+    title: "An absent collection is `[]` on every PERSISTENCE ADAPTER, not just the default",
+    trigger:
+      "an optional value-object collection (`surcharges: Money[]?`) never written, read back on a non-default persistence adapter — `persistence: dapper` (.NET) or `persistence: mikroorm` (node)",
+    observable:
+      "the collection reads back as `[]`. This is RS-8's absence shape, but the point of THIS rule is that it holds per ADAPTER: the wire contract for a collection is the empty array, never null, so a client can iterate without a guard.",
+    // RS-8 was only ever proven on the DEFAULT adapters, and they get it for
+    // free by accident of storage topology: EF Core maps the collection to an
+    // `OwnsMany` CHILD TABLE and Drizzle to a join, and an empty child set
+    // materializes as an empty list.  Both alternative adapters store it as ONE
+    // NULLABLE JSONB COLUMN instead, and faithfully round-trip SQL NULL — so the
+    // same `.ddd`, same backend, different `persistence:` clause put `null` on
+    // the wire.  Two adapters, one class:
+    //   * dapper   — the row->domain hydrate emitted `is null ? (List<T>?)null`
+    //   * mikroorm — the shared `deserializeField` optional arm short-circuited
+    //     on null BEFORE the array arm's `?? []` could apply
+    // Fixed on the READ in both, not the write, so rows already stored as NULL
+    // are repaired rather than only new ones.
+    //
+    // The generalisable lesson: a persistence adapter is a WIRE-VISIBLE choice,
+    // not an internal one.  Any rule proven only on the default adapter is
+    // proven on one storage topology — which is why the dapper/mikroorm legs
+    // carry the goldens too.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-31 by the M-T9.11 golden gate once the expanded set reached the dapper + mikroorm legs: value-collections #1 $.surcharges — golden [] vs null on BOTH",
+      "fixed (dapper): src/generator/dotnet/emit/dapper.ts hydrates an absent jsonb collection to an empty list",
+      "fixed (mikroorm): src/generator/typescript/repository-document-builder.ts deserializeField delegates an optional ARRAY to the coalescing array arm",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-24",
+    title: "A plain `decimal` is a JSON NUMBER on the wire; only `money` is a string",
+    trigger: "a GET returning an aggregate (or nested value object) with a `decimal` field",
+    observable:
+      'the value is a JSON number (`9.99`, `5`). This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`"19.5000"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.',
+    // 4-vs-1 again, and a textbook FRAMEWORK-MEDIATED shape: nothing in the
+    // vanilla emitter chose a string.  Jason's `Decimal` encoder emits a JSON
+    // string, so every `%Decimal{}` that reached the serializer un-transformed
+    // shipped quoted.  That is exactly right for money (RS-12 wants the string,
+    // and `__money_round/1` leaves it a Decimal) and exactly wrong for a plain
+    // decimal — the same accident produced the correct answer for one type and
+    // the wrong one for the other, which is why reading the emitter would never
+    // have found it.
+    //
+    // Fixed with a `__decimal_num/1` helper (`Decimal.to_float/1`) applied to
+    // plain-decimal wire entries — property, DERIVED, and `decimal[]` element
+    // alike.  `to_float` reproduces the ORACLE exactly rather than merely
+    // narrowing the gap: node's value is a float64 to begin with.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      'found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: value-collections #1 GET /api/invoices/{id} at $.lineItems[*].amount — golden 9.99 / 5 vs "9.99" / "5"',
+      'root-caused by running Jason.encode!(%{a: Decimal.new("9.99")}) against the real library rather than reading the emitter',
+      "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts __decimal_num/1",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-25",
+    title: "`internal` / `secret` fields never reach the read wire",
+    trigger:
+      "a GET on an aggregate carrying an `access: internal` field — e.g. the `tenantId` / `dataKey` the `tenantOwned` capability injects (docs/tenancy.md)",
+    observable:
+      "the response body OMITS the key entirely. `forApiRead` is the read-boundary projection every backend applies over `wireShape`; `internal` is domain-only state and `secret` is never disclosed anywhere.",
+    // 4-vs-1.  The vanilla REST serializer projected the RAW `wireShape` and
+    // never applied `forApiRead`, so a multi-tenant aggregate shipped its tenant
+    // key to every client on every GET, and a `secret` field would have leaked
+    // the same way.  What makes this more than a stray field: the SAME BACKEND's
+    // OpenAPI emitter *did* apply `forApiRead`, so the served spec promised a
+    // body the running server did not send.  Spec and runtime disagreed inside
+    // one deployable — a divergence no spec-diff gate can see, which is the
+    // premise of the whole runtime-differential tier.
+    //
+    // Fixed at both vanilla read-boundary projections (the REST serializer and
+    // the returning-op success body).  Deliberately NOT applied to
+    // `eventsourced-emit.ts`'s `structFields`, which names the in-memory struct's
+    // fields — the domain needs its internal state.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: tenancy-owned #1 GET /api/invoices/by_number at $.tenantId — absent in the golden, present on elixir",
+      "fixed (elixir): forApiRead applied in src/generator/elixir/vanilla/wire-serialize.ts and operation-returns-emit.ts",
     ],
     tier: "behavioral",
   },

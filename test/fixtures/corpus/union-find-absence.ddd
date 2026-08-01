@@ -26,4 +26,13 @@ system UF {
     let read = api.orders.byCode({ code: "C1" })
     expect(read.code).toBe("C1")
   }
+
+  // The ABSENCE half the case above is named for but never exercised.  This is
+  // the 404 rung of the denial ladder — the last one the wire golden did not
+  // reach (403 `requires`, 409 `when`, 422 `precondition` are all pinned), and
+  // the only rung whose 7807 `type` is a DECLARED error URI (`/errors/not-
+  // found`, RS-16) rather than `about:blank`.
+  test e2e "a union find 404s when the row is absent" against d {
+    expect(api.orders.byCode({ code: "NOPE" })).toThrow(404)
+  }
 }

@@ -68,8 +68,10 @@ describe("dotnet generator — discriminated-union finds (P4c)", () => {
     // The error payload declares `resource`, so the absent arm builds an
     // explicit ProblemDetails (the bare `Problem(...)` helper has no slot for
     // extension members) and serializes the aggregate name at the body root.
+    // `Instance` set explicitly — nothing fills it in on a hand-built
+    // ProblemDetails, and the other four backends all send the request path.
     expect(ctrl).toContain(
-      'var problem = new ProblemDetails { Status = 404, Title = "Not Found", Type = "/errors/not-found", Detail = "Not Found" };',
+      'var problem = new ProblemDetails { Status = 404, Title = "Not Found", Type = "/errors/not-found", Detail = "Not Found", Instance = HttpContext.Request.Path };',
     );
     expect(ctrl).toContain('problem.Extensions["resource"] = "Order";');
     expect(ctrl).toContain(
