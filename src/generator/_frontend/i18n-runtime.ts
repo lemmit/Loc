@@ -27,7 +27,9 @@
 import type { UiIR } from "../../ir/types/loom-ir.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 
-/** Build the flat, key-sorted `{ key: message }` catalog for one UI. */
+/** Build the flat, key-sorted `{ key: message }` catalog for one UI.  Pack-chrome
+ *  strings (`chrome.<name>`) ride in through `collectUiMessages` used-only, so a
+ *  UI that renders a `Loader()` carries `chrome.loading` for translators. */
 function buildUiCatalog(ui: UiIR): Record<string, string> {
   const byKey = new Map<string, string>();
   // Same key ⇒ same content hash ⇒ same message; collapses repeats.

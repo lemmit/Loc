@@ -54,7 +54,10 @@ describe("Loader role=status — raw-element packs", () => {
       const files = await generateSystemFiles(system(pack, platform));
       const all = [...files.values()].join("\n");
       expect(all).toContain('role="status"');
-      expect(all).toContain('aria-label="Loading"');
+      // The accessible name is "Loading" — a raw `aria-label="Loading"` when the
+      // app has no i18n, or a `chrome.loading`-keyed `t()` binding when it does
+      // (this scaffold has authored strings, so i18n is on).  M-T1.11.
+      expect(all).toMatch(/aria-label[^>]*Loading/);
     });
   }
 });

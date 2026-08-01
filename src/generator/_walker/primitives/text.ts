@@ -4,7 +4,7 @@
 // value child via the shared `walk`.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedText } from "../i18n-emit.js";
+import { localizedChromeAria, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   boolNamed,
@@ -116,6 +116,9 @@ export function emitLoader(
   return renderPrimitive(ctx, "primitive-loader", {
     size,
     hasSize: size !== undefined,
+    // Pack-chrome: the spinner's `aria-label="Loading"` translates through the
+    // shared `chrome.loading` catalog under i18n (M-T1.11), else byte-identical.
+    loadingAria: localizedChromeAria(ctx, "loading", "Loading"),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });
