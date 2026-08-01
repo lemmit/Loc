@@ -374,7 +374,7 @@ export function buildRoutesFile(
             base:
               plainBool && d !== undefined && !serverSourced
                 ? "z.coerce.boolean()"
-                : zodFor(f.type),
+                : zodFor(f.type, "create-body"),
             default: d && !serverSourced ? wireDefaultLiteral(f.type, d) : undefined,
             optional: serverSourced || undefined,
           };
@@ -1796,19 +1796,34 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
   File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
 };
 
-export function zodFor(t: TypeIR, context: "body" | "query" = "body"): string {
+export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "body"): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) return `${zodFor(peelNullable(t), context)}.nullish()`;
   if (info.isCollection) return `z.array(${zodFor(peelCollection(t), context)})`;
   switch (info.refKind) {
     case "primitive":
-      // A non-nullable bool in a request *body* defaults to `false` when
-      // omitted — matching .NET model-binding and Phoenix, which both treat
-      // an absent request bool as false and drop it from `required`.  Without
-      // this Hono alone marks the bool required, tripping the cross-backend
-      // parity required-set (`required-only-honoApi=[<bool>]`).  Query params
-      // keep the plain coercion (Phoenix doesn't special-case query bools).
-      if (info.primitive === "bool" && context === "body") {
+      // A non-nullable bool in a CREATE body defaults to `false` when omitted —
+      // matching .NET model-binding and Phoenix, which both treat an absent
+      // create bool as false and drop it from `required`.  Without this Hono
+      // alone marks the bool required, tripping the cross-backend parity
+      // required-set (`required-only-honoApi=[<bool>]`).
+      //
+      // Scoped to `create-body` deliberately.  The rule is a CREATE-INPUT rule
+      // — `hasImplicitDefault` in `wire-projection.ts` defines it as "an
+      // omitted create input is well-defined without an explicit `= default`"
+      // — and applying it to every request body silently corrupted the others:
+      // an operation (`update` included) whose bool param the client omits had
+      // it set to FALSE rather than rejected, so a PUT that left out
+      // `active: bool = true` flipped a stored `true` to `false`, using a value
+      // that is not even the declared default.  That is the proto3 lesson
+      // (a wire-level default makes "absent" indistinguishable from "the
+      // default value", which breaks partial and full-replacement updates
+      // alike).  An operation parameter has no default to fall back on, so an
+      // omitted one is a client error, not a `false`.
+      //
+      // Query params keep the plain coercion (Phoenix doesn't special-case
+      // query bools).
+      if (info.primitive === "bool" && context === "create-body") {
         return "z.coerce.boolean().default(false)";
       }
       return REQUEST_PRIMITIVE[info.primitive!];
