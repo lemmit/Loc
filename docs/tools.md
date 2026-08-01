@@ -559,6 +559,30 @@ run against four backends locally and elixir "by reasoning" for weeks, and
 the first real elixir boot found **four** divergences, two of them on
 rules already recorded as five-way conforming.
 
+**Java has the same shape of problem, and the container recipe does NOT
+solve it.** `run-java.mjs` shells out to **host** `gradle`/`java` — it has
+no container path at all, so "build it in `gradle:9-jdk25`" applies to
+hand-compiling a deployable and *not* to the behavioural runner.  A host
+with Gradle 8.x + JDK 21 fails it outright:
+
+```
+Cannot find a Java installation … {languageVersion=25}
+```
+
+Install both to the host and point the run at them:
+
+```bash
+# Temurin JDK 25 -> /opt/jdk25, Gradle 9.6.1 -> /opt/gradle-9.6.1
+JAVA_HOME=/opt/jdk25 PATH=/opt/gradle-9.6.1/bin:$PATH node run-java.mjs [case…]
+```
+
+**Port collision when running adapter legs side by side.** `run-java.mjs`,
+`run-dapper.mjs` and `run-mikroorm.mjs` all default to **8125**
+(`LOOM_BH_DAPPER_PORT` / `LOOM_BH_MIKRO_PORT`).  Harmless in CI, where each
+is its own workflow, but two of them on one host produce spurious 404/401
+failures that look like wire divergences.  Override the port when running
+them concurrently.
+
 ### `LOOM_HEX_MIRROR` — Elixir builds behind a fingerprinting proxy
 
 Some egress proxies allowlist by the **client's TLS fingerprint**: the

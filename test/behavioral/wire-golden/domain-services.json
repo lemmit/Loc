@@ -1,0 +1,30 @@
+{
+  "case": "domain-services",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/accounts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/accounts/by_holder?holder=alice",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 100,
+          "currency": "USD"
+        },
+        "holder": "alice",
+        "id": "<volatile:key>",
+        "version": 1
+      }
+    }
+  ]
+}
