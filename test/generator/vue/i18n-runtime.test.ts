@@ -170,4 +170,38 @@ describe("Vue i18n runtime", () => {
     ) as Record<string, string>;
     expect(Object.values(catalog)).toContain("Heads up");
   });
+
+  it("translates the Divider label named slot (dividerLabel) at the text position", async () => {
+    // The Vuetify pack renders the Divider label in TEXT-children position
+    // (`<v-divider>…</v-divider>`) — the `label:` named slot emits a
+    // `{{ t(key, def) }}` interpolation under i18n (M-T1.11), keyed to the
+    // `dividerLabel` catalog slot.
+    const files = await generateSystemFiles(SYSTEM(`Divider { label: "Section break" }`));
+    const home = await homeOf(files);
+    expect(home).toMatch(/\{\{ t\("page\.Home\.dividerLabel\.\w+", "Section break"\) \}\}/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Section break");
+  });
+
+  it("translates the Modal title named slot (modalTitle) as a Vue attr binding", async () => {
+    // The Vuetify pack renders the controlled-Modal title in ATTRIBUTE position
+    // (`<v-card title=… >`) — the `title:` named slot binds through `t()` as
+    // ` :title="t(key, def)"` (single-quoted, the `t()` call contains double
+    // quotes) under i18n (M-T1.11), keyed to the `modalTitle` catalog slot.
+    const src = SYSTEM(
+      `Modal { Text { "Confirm archive?" }, open: archiveOpen, title: "Archive" }`,
+    ).replace(
+      'page Home { route: "/"',
+      'page Home { route: "/" state { archiveOpen: bool = false }',
+    );
+    const files = await generateSystemFiles(src);
+    const home = await homeOf(files);
+    expect(home).toMatch(/:title='t\("page\.Home\.modalTitle\.\w+", "Archive"\)'/);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(Object.values(catalog)).toContain("Archive");
+  });
 });

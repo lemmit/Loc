@@ -133,7 +133,11 @@ describe("Stat / Badge / Divider in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/home.tsx")!;
-    expect(content).toMatch(/<Divider label="Section break" labelPosition="center" \/>/);
+    // The `label:` named slot is user-visible text — under i18n it binds through
+    // `t()` (keyed to the `dividerLabel` catalog slot), M-T1.11.
+    expect(content).toMatch(
+      /<Divider label=\{t\("page\.Home\.dividerLabel\.\w+", "Section break"\)\} labelPosition="center" \/>/,
+    );
   });
 
   it("Stack composes Stat / Badge / Divider together cleanly", async () => {
