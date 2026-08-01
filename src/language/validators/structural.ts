@@ -428,7 +428,7 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
       accept(
         "error",
         `Aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
-          `Appliers fold events into state; add 'persistedAs(eventLog)' to the aggregate header, or remove the applier.`,
+          `Appliers fold events into state; add 'persistedAs: eventLog' to the aggregate header, or remove the applier.`,
         { node: ap, code: "loom.applier-on-non-event-sourced" },
       );
     }
@@ -443,7 +443,7 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
     for (const c of creates.slice(1)) {
       accept(
         "error",
-        `Aggregate '${agg.name}' is persistedAs(eventLog) and declares multiple 'create' actions. ` +
+        `Aggregate '${agg.name}' is persistedAs: eventLog and declares multiple 'create' actions. ` +
           `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
         { node: c, code: "loom.event-sourced-multiple-creates" },
       );

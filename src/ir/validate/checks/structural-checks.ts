@@ -809,8 +809,8 @@ export function validateEventSourcedDiscipline(
         code: "loom.applier-on-non-event-sourced",
         message:
           `aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
-          `Appliers fold events into state; they only apply to a 'persistedAs(eventLog)' aggregate. ` +
-          `Add 'persistedAs(eventLog)' to the aggregate header, or remove the applier.`,
+          `Appliers fold events into state; they only apply to a 'persistedAs: eventLog' aggregate. ` +
+          `Add 'persistedAs: eventLog' to the aggregate header, or remove the applier.`,
         source: `${ctx.name}/${agg.name}`,
       });
     }
@@ -829,7 +829,7 @@ export function validateEventSourcedDiscipline(
         severity: "error",
         code: "loom.event-sourced-multiple-creates",
         message:
-          `aggregate '${agg.name}' is persistedAs(eventLog) and declares ${creates.length} 'create' actions. ` +
+          `aggregate '${agg.name}' is persistedAs: eventLog and declares ${creates.length} 'create' actions. ` +
           `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
         source: `${ctx.name}/${agg.name}`,
       });
@@ -877,7 +877,7 @@ export function validateEventSourcedDiscipline(
             code: "loom.event-sourced-direct-mutation",
             message:
               `aggregate '${agg.name}' ${cmd.label} mutates 'this' directly, but the aggregate is event-sourced. ` +
-              `Command bodies on a 'persistedAs(eventLog)' aggregate decide and 'emit'; the state change belongs in an apply(...) block. ` +
+              `Command bodies on a 'persistedAs: eventLog' aggregate decide and 'emit'; the state change belongs in an apply(...) block. ` +
               `Replace the assignment with an 'emit', and fold it in an applier.`,
             source: `${ctx.name}/${agg.name}`,
           });

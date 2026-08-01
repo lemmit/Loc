@@ -99,12 +99,12 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       const baseLayout = base.inheritanceUsing ?? DEFAULT_LAYOUT;
       const forcesOwn = agg.persistedAs === "eventLog" || agg.shape === "document";
       if (baseLayout === "sharedTable" && forcesOwn && agg.inheritanceUsing !== "ownTable") {
-        const why = agg.persistedAs === "eventLog" ? "persistedAs(eventLog)" : "shape(document)";
+        const why = agg.persistedAs === "eventLog" ? "persistedAs: eventLog" : "shape: document";
         accept(
           "error",
           `'${agg.name}' is ${why} but extends the sharedTable (TPH) base '${base.name}'. ` +
             `An event-sourced / document concrete cannot share the base table — declare ` +
-            `'inheritanceUsing(ownTable)' on '${agg.name}' (D-ES-TPH).`,
+            `'inheritanceUsing: ownTable' on '${agg.name}' (D-ES-TPH).`,
           {
             node: agg,
             property: agg.inheritanceUsing ? "inheritanceUsing" : "name",
@@ -133,7 +133,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       if (baseLayout === "sharedTable" && agg.inheritanceUsing === "ownTable" && !forcesOwn) {
         accept(
           "error",
-          `'${agg.name}' declares inheritanceUsing(ownTable) under the sharedTable (TPH) base ` +
+          `'${agg.name}' declares inheritanceUsing: ownTable under the sharedTable (TPH) base ` +
             `'${base.name}' — a per-concrete storage override (mixed strategy) is not supported ` +
             `yet. The override concrete would live in its own table, outside the shared one, so ` +
             `'find all ${base.name}' and polymorphic '${base.name} id' references can't see it. ` +
@@ -235,10 +235,10 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       accept(
         "error",
         `'${base.name} id' references the abstract base '${base.name}', which uses ` +
-          `inheritanceUsing(ownTable) (TPC) — there is no single table to key against, so the ` +
+          `inheritanceUsing: ownTable (TPC) — there is no single table to key against, so the ` +
           `foreign-key target is ambiguous across the per-concrete tables. Reference a concrete ` +
           `subtype's id (e.g. 'Customer id'), or change '${base.name}' to ` +
-          `inheritanceUsing(sharedTable) (TPH) to allow polymorphic references.`,
+          `inheritanceUsing: sharedTable (TPH) to allow polymorphic references.`,
         { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
       );
       continue;
@@ -255,7 +255,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       accept(
         "error",
         `'${base.name} id' references the abstract base '${base.name}', but its hierarchy mixes ` +
-          `storage strategies: ${names} override(s) to inheritanceUsing(ownTable) and live in a ` +
+          `storage strategies: ${names} override(s) to inheritanceUsing: ownTable and live in a ` +
           `separate table, so a polymorphic '${base.name} id' would silently miss them. Reference ` +
           `a concrete subtype's id instead, or make every concrete sharedTable (TPH) so the ` +
           `whole hierarchy shares one table.`,

@@ -1520,7 +1520,7 @@ export function renderDapperDocumentRepository(
 
   return (
     lines(
-      "// Auto-generated.  Dapper document persistence (persistence: dapper, shape(document)).",
+      "// Auto-generated.  Dapper document persistence (persistence: dapper, shape: document).",
       "using System;",
       "using System.Collections.Generic;",
       "using System.Linq;",
@@ -1646,7 +1646,7 @@ export function renderDapperEventSourcedRepository(
   });
   return (
     lines(
-      "// Auto-generated.  Dapper event-store (persistence: dapper, persistedAs(eventLog)).",
+      "// Auto-generated.  Dapper event-store (persistence: dapper, persistedAs: eventLog).",
       "using System;",
       "using System.Collections.Generic;",
       "using System.Linq;",

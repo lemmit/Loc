@@ -212,7 +212,7 @@ export function buildPyDocumentRepositoryFile(
   const domainNames = [agg.name, ...parts.map((p) => p.name)].filter(refersTo);
 
   return lines(
-    `"""${agg.name} document repository (shape(document)).  Auto-generated."""`,
+    `"""${agg.name} document repository (shape: document).  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
     // In-app filters render domain expressions (A5 temporal included), so

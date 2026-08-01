@@ -71,7 +71,7 @@ export function renderDocumentPoco(agg: EnrichedAggregateIR, ns: string): string
       `namespace ${ns}.Infrastructure.Persistence.Documents;`,
       "",
       "/// <summary>Document-shaped persistence record — the whole aggregate",
-      `/// read model serialised into one JSONB column (shape(document)).</summary>`,
+      `/// read model serialised into one JSONB column (shape: document).</summary>`,
       `public sealed class ${agg.name}Document`,
       "{",
       `    public ${idType} Id { get; set; }${idInit}`,

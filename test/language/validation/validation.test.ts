@@ -2688,7 +2688,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       warnings.some(
         (d) =>
           /lists resource 'cLog' \(kind: eventLog\)/.test(d.message) &&
-          /no aggregate is persistedAs\(eventLog\)/.test(d.message),
+          /no aggregate is persistedAs: eventLog/.test(d.message),
       ),
       JSON.stringify(warnings),
     ).toBe(true);
@@ -2714,7 +2714,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       warnings.some(
         (d) =>
           /lists resource 'cState' \(kind: state\)/.test(d.message) &&
-          /every aggregate is persistedAs\(eventLog\)/.test(d.message),
+          /every aggregate is persistedAs: eventLog/.test(d.message),
       ),
       JSON.stringify(warnings),
     ).toBe(true);
@@ -2738,7 +2738,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       warnings.some(
         (d) =>
           /lists resource 'cSnap' \(kind: snapshot\)/.test(d.message) &&
-          /no aggregate is persistedAs\(eventLog\)/.test(d.message),
+          /no aggregate is persistedAs: eventLog/.test(d.message),
       ),
       JSON.stringify(warnings),
     ).toBe(true);

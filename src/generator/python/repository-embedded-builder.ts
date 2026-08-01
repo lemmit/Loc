@@ -162,7 +162,7 @@ export function buildPyEmbeddedRepositoryFile(
   ];
 
   return lines(
-    `"""${agg.name} embedded repository (shape(embedded)).  Auto-generated."""`,
+    `"""${agg.name} embedded repository (shape: embedded).  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
     dtNames.length > 0 ? `from datetime import ${dtNames.join(", ")}` : null,
