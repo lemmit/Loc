@@ -473,7 +473,15 @@ the conforming backends, and the fix that established it.
   **EF column mapping**, not the wire DTO; only booting dotnet (2026-07-31)
   showed it sending `totalProvenance` too. A generated-source grep is not a wire
   observation — that is the standing lesson, and it is why the loop's boot step
-  is not optional. Tier: **behavioral**.
+  is not optional.
+
+  **The same grep misled twice.** Elixir stayed in `conforms` on that same
+  evidence until its first real boot (2026-08-01), which showed vanilla omitting
+  the key **entirely** — its REST serializer projects `wireShape`, and the
+  provenance sidecar is not a `wireShape` member on *any* backend (node appends
+  it separately, after the shape). So the rule was 3-of-5 twice over, cleared
+  twice by the same non-observation. Fixed by appending the sidecar in
+  `wire-serialize.ts` exactly as node does. Tier: **behavioral**.
 
 ### RS-19 · A declared `error` variant's fields ride the problem body
 - **Guarantee.** An operation returning `T or <Error>` that selects the error
@@ -551,9 +559,30 @@ the conforming backends, and the fix that established it.
   emitted source does not survive the boxing. **The code reads correct and the
   wire is not** — no static gate can see this; only a booted round-trip can.
 - **Fix.** An explicit `ObjectResult { DeclaredType = typeof(<Union>) }`.
-- **Conforms.** node, dotnet, java, python, elixir.
+- **Then elixir broke the same rule, for the opposite reason.** One leg later
+  (2026-08-01) the vanilla Phoenix backend shipped a bare `"OR1"`. The pairing is
+  the interesting part: the *same* guarantee failed once because a framework
+  silently declined to write the tag and once because the emitter never produced
+  it. Vanilla carries a returning op's outcome as a **tuple** —
+  `{:ok, value} | {:error, tag, data}` — and only the *error* arm ever put its
+  tag in the tuple; the controller `json/2`s the success value straight through,
+  so there was no later seam that *could* have added it. Fixed at the producer,
+  from the `variantTag` / `variantShape` the IR already carries on the `return`
+  statement (the same two fields the TS backend reads).
+- **Two shapes remain unimplemented everywhere.** The **aggregate** success
+  variant — `operation adjust(): Item or NotFound` falling through, or ending in
+  `return this` — has **no conforming oracle**. Node's emitted domain method for
+  the fall-through has no `return` at all (the route `c.json`s `undefined`), and
+  its `return this` renders `{ type, ...this }`, which spreads the domain
+  class's *private* `_`-prefixed fields. Vanilla is deliberately left untagged
+  there rather than guessing at a contract no shipped backend implements. The
+  `Conforms` line below is therefore scoped to the shapes that have an oracle:
+  scalar, record literal, and `none`.
+- **Conforms.** node, dotnet, java, python, elixir — for the scalar / record /
+  `none` variants. The aggregate variant is an open gap on all five.
 - **Provenance.** Found 2026-07-31 by the M-T9.11 gate on `operation-returns`
-  (dotnet leg). Tier: **behavioral**.
+  (dotnet leg); violated again 2026-08-01 on the elixir leg's first real boot.
+  Tier: **behavioral**.
 
 ### RS-22 · The RFC 7807 envelope is exactly five members plus declared extensions
 - **Guarantee.** An error body carries `type`, `title`, `status`, `detail` and
@@ -605,6 +634,61 @@ the conforming backends, and the fix that established it.
 - **Conforms.** node, dotnet, java, python, elixir (all adapters).
 - **Provenance.** Found 2026-07-31 by the M-T9.11 gate once the expanded golden
   set reached the dapper + mikroorm legs. Tier: **behavioral**.
+
+### RS-24 · A plain `decimal` is a JSON **number**; only `money` is a string
+- **Guarantee.** A `decimal` field serializes as a JSON number (`9.99`, `5`).
+  This is the deliberate counterpart to [RS-12](#rs-12--money-wire-scale-is-consistent-across-backends),
+  where `money` is a fixed-scale **string** (`"19.5000"`) so no float rounding can
+  touch a monetary amount. The two types differ on the wire, and a backend must
+  not collapse them into one.
+- **Trigger.** Any GET returning an aggregate — or a nested value object — with
+  a `decimal` field.
+- **Why it hid.** Nothing in the vanilla emitter ever *chose* a string. Jason's
+  `Decimal` encoder emits a JSON string, so every `%Decimal{}` that reached the
+  serializer un-transformed shipped quoted. That is exactly right for money
+  (RS-12 wants the string, and `__money_round/1` leaves the value a `Decimal`)
+  and exactly wrong for a plain decimal. **The same accident produced the correct
+  answer for one type and the wrong one for the other** — which is why reading
+  the emitter, where both types look equally untouched, would never have found
+  it. It was root-caused by running `Jason.encode!/1` against the real library.
+- **The fix.** A `__decimal_num/1` helper (`Decimal.to_float/1`) applied to
+  plain-decimal wire entries — property, *derived*, and `decimal[]` element
+  alike. `to_float` reproduces the **oracle** exactly rather than merely
+  narrowing the gap: node's value is a float64 to begin with.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-08-01 by the M-T9.11 gate on the elixir leg
+  (`value-collections` `$.lineItems[*].amount`). Tier: **behavioral**.
+
+### RS-25 · `internal` / `secret` fields never reach the read wire
+- **Guarantee.** A field declared `internal` (domain-only state) or `secret`
+  (never disclosed) is **absent from the response body** — not null, absent.
+  `forApiRead` is the read-boundary projection over `wireShape`, and every read
+  surface applies it.
+- **Trigger.** A GET on an aggregate carrying an `internal` field — for example
+  the `tenantId` / `dataKey` that the `tenantOwned` capability injects
+  ([`tenancy.md`](tenancy.md)).
+- **Why it mattered.** The vanilla REST serializer projected the **raw**
+  `wireShape` and never applied `forApiRead`, so a multi-tenant aggregate shipped
+  its tenant key to every client on every GET, and a `secret` field would have
+  leaked the same way.
+- **Why it is more than a stray field.** The *same backend's* OpenAPI emitter
+  **did** apply `forApiRead` — so the served spec promised a body the running
+  server did not send. Spec and runtime disagreed **inside one deployable**, and
+  a spec-diff gate compares specs: it can only ever see the half that was
+  already right. That gap is the premise of this whole tier.
+- **The fix.** `forApiRead` at both vanilla read boundaries — the REST
+  serializer and the returning-op success body. Deliberately **not** applied to
+  `eventsourced-emit.ts`'s `structFields`, which names the *in-memory struct's*
+  fields: the domain needs its internal state.
+- **Relation to [RS-3](#rs-3--no-persistence-internal-columns-leak-to-the-wire).**
+  RS-3 is about *framework* bookkeeping leaking (`inserted_at`, soft-delete
+  flags). This one is about *declared* fields whose access modifier says they
+  stay behind the boundary. Same symptom, different mechanism — and RS-3's
+  "the response key-set equals `wireShape`" should be read as
+  `forApiRead(wireShape)`.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-08-01 by the M-T9.11 gate on the elixir leg
+  (`tenancy-owned` `$.tenantId`). Tier: **behavioral**.
 
 ---
 

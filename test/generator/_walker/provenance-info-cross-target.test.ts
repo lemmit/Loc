@@ -199,15 +199,16 @@ describe("ProvenanceInfo — HEEx renders a native `<details>` off the Ecto stru
   it("renders the disclosure on the scaffolded LiveView detail page", async () => {
     // The Phoenix LiveView renders server-side straight from the struct, so the
     // co-located `<field>_provenance` jsonb column is read via string-keyed
-    // bracket access (snake_case — the shape the backend STORES, not the
-    // frontends' camelCase JSON wire).
+    // bracket access — with the SAME camelCase members the JSON wire carries
+    // (RS-1/RS-18).  These were snake_case until the elixir wire-golden leg
+    // showed the lineage members diverging; the reader moved with the writer.
     const out = allFiles(await generateSystemFiles(provScaffoldHeex));
     expect(out).toContain('data-testid="orders-detail-total-prov"');
     // Null-guarded EEx `if` over the struct field, then rule id + value.
     expect(out).toMatch(/<%= if [\w.@]+\.total_provenance do %>/);
     expect(out).toContain('<details class="loom-provenance"');
-    expect(out).toContain('.total_provenance["snapshot_id"]');
-    expect(out).toContain('.total_provenance["computed_value"]');
+    expect(out).toContain('.total_provenance["snapshotId"]');
+    expect(out).toContain('.total_provenance["computedValue"]');
     // Inputs fan out via a `for`-comprehension (LiveView's list idiom), keyed
     // on the same string-keyed `path`/`value`.
     expect(out).toMatch(/<%= for inp <- [\w.@]+\.total_provenance\["inputs"\] \|\| \[\] do %>/);

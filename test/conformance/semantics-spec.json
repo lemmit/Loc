@@ -333,7 +333,9 @@
       "provenance": [
         "found 2026-07-30 by READING the freshly-minted `provenance` golden during the M-T9.11 coverage expansion — one key out of camelCase in an otherwise camelCase body",
         "confirmed by generating all five backends and diffing the emitted key, then by booting the Java project",
-        "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts"
+        "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts",
+        "REOPENED 2026-08-01: the elixir leg's first real boot showed the key missing entirely — the earlier all-five close was inferred from a grep that matched the jsonb column, not the wire",
+        "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts appends the sidecar after the wire shape, as node does"
       ],
       "tier": "behavioral"
     },
@@ -388,7 +390,10 @@
       ],
       "provenance": [
         "found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` (dotnet leg): $.type — golden \"string\" vs dotnet null",
-        "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts"
+        "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts",
+        "VIOLATED AGAIN 2026-08-01 on the elixir leg's first real boot: operation-returns #1 POST /api/orders/{id}/accept at $ — golden {type,value} vs a bare string",
+        "fixed (elixir): src/generator/elixir/vanilla/operation-returns-emit.ts tags the success value from StmtIR.return's variantTag/variantShape",
+        "aggregate-variant gap confirmed by generating that shape on node and reading the emitted method — no return statement at all"
       ],
       "tier": "behavioral"
     },
@@ -426,6 +431,43 @@
         "found 2026-07-31 by the M-T9.11 golden gate once the expanded set reached the dapper + mikroorm legs: value-collections #1 $.surcharges — golden [] vs null on BOTH",
         "fixed (dapper): src/generator/dotnet/emit/dapper.ts hydrates an absent jsonb collection to an empty list",
         "fixed (mikroorm): src/generator/typescript/repository-document-builder.ts deserializeField delegates an optional ARRAY to the coalescing array arm"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-24",
+      "title": "A plain `decimal` is a JSON NUMBER on the wire; only `money` is a string",
+      "trigger": "a GET returning an aggregate (or nested value object) with a `decimal` field",
+      "observable": "the value is a JSON number (`9.99`, `5`). This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`\"19.5000\"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: value-collections #1 GET /api/invoices/{id} at $.lineItems[*].amount — golden 9.99 / 5 vs \"9.99\" / \"5\"",
+        "root-caused by running Jason.encode!(%{a: Decimal.new(\"9.99\")}) against the real library rather than reading the emitter",
+        "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts __decimal_num/1"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-25",
+      "title": "`internal` / `secret` fields never reach the read wire",
+      "trigger": "a GET on an aggregate carrying an `access: internal` field — e.g. the `tenantId` / `dataKey` the `tenantOwned` capability injects (docs/tenancy.md)",
+      "observable": "the response body OMITS the key entirely. `forApiRead` is the read-boundary projection every backend applies over `wireShape`; `internal` is domain-only state and `secret` is never disclosed anywhere.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: tenancy-owned #1 GET /api/invoices/by_number at $.tenantId — absent in the golden, present on elixir",
+        "fixed (elixir): forApiRead applied in src/generator/elixir/vanilla/wire-serialize.ts and operation-returns-emit.ts"
       ],
       "tier": "behavioral"
     }

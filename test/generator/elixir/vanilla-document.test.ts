@@ -748,7 +748,8 @@ describe("vanilla shape: document op guards deny 403/422 (not raise → 500)", (
     const fn = ctx.slice(ctx.indexOf("def summary_note(%"));
     const body = fn.slice(0, fn.indexOf("\n  end"));
     expect(body).toContain('with :ok <- ensure(record.title != "", {:forbidden, ');
-    expect(body).toContain("{:ok, record.title}");
+    // The scalar success variant carries the RS-21 tagged wire.
+    expect(body).toContain('{:ok, %{type: "string", value: record.title}}');
     expect(body).not.toContain("raise(ArgumentError");
   });
 

@@ -53,7 +53,8 @@ describe("vanilla mask unless — read redaction", () => {
     );
     // the unmasked map carries the real value (audit projects through it).
     expect(ctrl).toContain("defp serialize_unmasked(record) do");
-    expect(ctrl).toContain('"salary" => record.salary');
+    // (`salary` is a `decimal`, so it carries the RS-24 number coercion.)
+    expect(ctrl).toContain('"salary" => __decimal_num(record.salary)');
   });
 
   it("the Auth plug stashes the principal in the process dictionary", async () => {

@@ -99,7 +99,11 @@ describe("vanilla provenance runtime (DEBT-06)", () => {
     expect(ctx).toContain('%{path: "discount", value: record.discount}');
     // The lineage map (snapshot id + target + inputs + computed value).
     expect(ctx).toContain('target: %{type: "Order", field: "total"}');
-    expect(ctx).toContain("computed_value: record.total");
+    // camelCase members — the lineage map goes on the wire verbatim (RS-18), so
+    // its own keys follow RS-1 like every other wire member.  Only the OUTER
+    // `<field>_provenance` key is the snake_case exception.
+    expect(ctx).toContain("computedValue: record.total");
+    expect(ctx).toContain("snapshotId: ");
     // Routed to both sinks: the co-located column + the trace buffer.
     expect(ctx).toContain("record = %{record | total_provenance:");
     expect(ctx).toContain("Api.Provenance.record(");

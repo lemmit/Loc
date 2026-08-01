@@ -202,7 +202,10 @@ describe("vanilla — S12 returning-op mutations persist", () => {
     const body = fn(get(await files(), "lib/api/stock.ex"), "reserve_item");
     const persistAt = body.indexOf("persist_change(changeset)");
     const rebindAt = body.indexOf("record = saved");
-    const returnAt = body.indexOf("{:ok, %{sku: record.sku}}");
+    // RS-21: the `Reserved` variant rides the wire TAGGED — `Map.put/3` adds the
+    // `type` discriminator beside the record's own fields, the shape
+    // node/.NET/Java/Python spread into.
+    const returnAt = body.indexOf('{:ok, Map.put(%{sku: record.sku}, :type, "Reserved")}');
     expect(persistAt).toBeGreaterThan(-1);
     // The mutation persists, THEN the return is rendered over the saved struct.
     expect(persistAt).toBeLessThan(rebindAt);

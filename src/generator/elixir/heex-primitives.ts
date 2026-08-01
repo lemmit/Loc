@@ -985,9 +985,11 @@ function namedArg(expr: Extract<ExprIR, { kind: "call" }>, name: string): ExprIR
  *  renders SERVER-SIDE straight from the Ecto struct.  The co-located jsonb
  *  column (`schema-emit.ts`, `<field>_provenance` via the pass-through
  *  `Provenance.Json` type) loads as a STRING-keyed map, so the lineage reads via
- *  bracket access: `snapshot_id` (rule), `computed_value`, and the `inputs` list
- *  (each `path` = `value`) — the snake_case shape `renderProvenancedAssign`
- *  stores, not the frontends' `snapshotId`/`computedValue`.  Null-guarded with
+ *  bracket access: `snapshotId` (rule), `computedValue`, and the `inputs` list
+ *  (each `path` = `value`) — the SAME camelCase member names
+ *  `renderProvenancedAssign` stores and the JSON wire carries (RS-1/RS-18; the
+ *  members were snake_case here until the elixir wire-golden leg showed the
+ *  divergence, and this reader had to move with them).  Null-guarded with
  *  `<%= if … %>`: an un-provenanced row (column `nil`) renders nothing, so the
  *  value still shows on its own.  The `inputs` fan-out is a `for`-comprehension
  *  (LiveView's list idiom) rather than the JS `.map` — the topology divergence
@@ -1010,8 +1012,8 @@ export function renderProvenanceInfo(
     `  <details class="loom-provenance"${testid}>`,
     `    <summary aria-label="How this value was computed">?</summary>`,
     `    <dl class="loom-provenance-tree">`,
-    `      <div><dt>Rule</dt><dd><code><%= ${lineage}["snapshot_id"] %></code></dd></div>`,
-    `      <div><dt>Value</dt><dd><%= ${lineage}["computed_value"] %></dd></div>`,
+    `      <div><dt>Rule</dt><dd><code><%= ${lineage}["snapshotId"] %></code></dd></div>`,
+    `      <div><dt>Value</dt><dd><%= ${lineage}["computedValue"] %></dd></div>`,
     `      <%= for inp <- ${lineage}["inputs"] || [] do %>`,
     `        <div><dt><%= inp["path"] %></dt><dd><%= inp["value"] %></dd></div>`,
     `      <% end %>`,

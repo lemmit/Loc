@@ -29,6 +29,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  forApiRead,
   wireFieldsForAggregate,
   wireFieldsForPart,
   wireFieldsForValueObject,
@@ -39,12 +40,14 @@ import type {
   DerivedIR,
   EnrichedAggregateIR,
   ExprIR,
+  FieldIR,
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { provColumn } from "./provenance-emit.js";
 
 /** A derived wire field is projected only when its expression evaluates cleanly
  *  off the LOADED `record` struct (+ its already-serialized containments) — the
@@ -189,10 +192,20 @@ export function renderWireSerialize(
 ): WireSerializeResult {
   const headVar = opts.headVar ?? "record";
   const idExpr = opts.idExpr ?? "record.id";
-  const wireShape = wireFieldsForAggregate(agg);
-  const parts = new Map<string, WireField[]>(agg.parts.map((p) => [p.name, wireFieldsForPart(p)]));
+  // RS-25 — the API-read projection, NOT the raw wire shape.  `forApiRead`
+  // drops `access: internal` / `access: secret` fields; every other backend
+  // applies it on the read boundary (and vanilla's own OpenAPI emitter already
+  // did), so skipping it here leaked exactly the fields the modifier exists to
+  // hide.  `tenantOwned`'s `tenantId`/`dataKey` are `internal`, so a
+  // multi-tenant aggregate shipped its tenant key to the client on every GET —
+  // and the SERVED SPEC said it wouldn't.  A `secret` field (password hash,
+  // API key) leaked the same way.
+  const wireShape = forApiRead(wireFieldsForAggregate(agg));
+  const parts = new Map<string, WireField[]>(
+    agg.parts.map((p) => [p.name, forApiRead(wireFieldsForPart(p))]),
+  );
   const vos = new Map<string, WireField[]>(
-    ctx.valueObjects.map((v) => [v.name, wireFieldsForValueObject(v)]),
+    ctx.valueObjects.map((v) => [v.name, forApiRead(wireFieldsForValueObject(v))]),
   );
 
   // Derived wire fields are COMPUTED (not stored columns) — every other backend
@@ -218,6 +231,12 @@ export function renderWireSerialize(
   // Set when any money field is projected — gates the `__money_round/1` helper
   // that pins money to the FIXED wire scale (RS-12).
   let usedMoney = false;
+  // Set when any plain-`decimal` field is projected — gates `__decimal_num/1`
+  // (RS-24).  Jason encodes a bare `%Decimal{}` as a JSON *string*, which is
+  // exactly what money wants (RS-12's fixed-scale `"19.5000"`) and exactly what
+  // a plain `decimal` must NOT be: node/.NET/Java/Python all ship it as a JSON
+  // number.
+  let usedDecimal = false;
 
   // Value expression for one wire field over the `record` var.  `source: "id"`
   // and `source: "derived"` are handled by the caller (id → `record.id`,
@@ -255,12 +274,20 @@ export function renderWireSerialize(
           ensurePartHelper(el.name);
           return `Enum.map(${col} || [], &serialize_${snake(el.name)}/1)`;
         }
-        // Array of primitive / enum — Jason encodes the list of scalars.
+        // Array of primitive / enum — Jason encodes the list of scalars, except
+        // a `decimal[]`, whose elements need the same number coercion a scalar
+        // decimal does (RS-24).
+        if (el.kind === "primitive" && el.name === "decimal") {
+          usedDecimal = true;
+          return `Enum.map(${col} || [], &__decimal_num/1)`;
+        }
         return col;
       }
       default:
         // primitive / enum / id / guid / datetime / decimal / money / bool /
-        // int / string / json — Jason handles DateTime/Decimal natively.
+        // int / string / json — Jason handles DateTime natively; the scalar
+        // money / decimal coercions are applied by `renderMap` (so a DERIVED
+        // decimal, which never reaches this function, gets them too).
         return col;
     }
   }
@@ -279,6 +306,9 @@ export function renderWireSerialize(
     isVo: boolean,
     derived: Map<string, DerivedIR>,
     idExprLocal = "record.id",
+    /** The entity's `provenanced` fields, whose co-located lineage rides the
+     *  wire after the shape (RS-18).  Empty for value objects. */
+    provFields: readonly FieldIR[] = [],
   ): string {
     const entries: string[] = [];
     for (const wf of shape) {
@@ -309,8 +339,20 @@ export function renderWireSerialize(
       if (innerMoney.kind === "primitive" && innerMoney.name === "money") {
         usedMoney = true;
         ve = `__money_round(${ve})`;
+      } else if (innerMoney.kind === "primitive" && innerMoney.name === "decimal") {
+        // RS-24 — a plain `decimal` is a JSON NUMBER on every other backend.
+        usedDecimal = true;
+        ve = `__decimal_num(${ve})`;
       }
       entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
+    }
+    // RS-18 — co-located provenance rides the wire so any GET surfaces the
+    // current lineage inline, under the snake_case `<field>_provenance` key the
+    // other four backends use (and the scaffolded frontend reads).  It is NOT a
+    // `wireShape` member on any backend: node appends it the same way, after the
+    // shape.
+    for (const f of provFields) {
+      entries.push(`${baseIndent}  "${f.name}_provenance" => record.${provColumn(f.name)}`);
     }
     if (entries.length === 0) return `${baseIndent}%{}`;
     return `${baseIndent}%{\n${entries.join(",\n")}\n${baseIndent}}`;
@@ -321,11 +363,12 @@ export function renderWireSerialize(
     shape: WireField[],
     isVo: boolean,
     derived: Map<string, DerivedIR>,
+    provFields: readonly FieldIR[] = [],
   ): void {
     const hname = `serialize_${snake(name)}`;
     if (helpers.has(hname) || building.has(hname)) return;
     building.add(hname);
-    const body = renderMap(shape, "    ", isVo, derived);
+    const body = renderMap(shape, "    ", isVo, derived, "record.id", provFields);
     helpers.set(
       hname,
       `  defp ${hname}(nil), do: nil\n\n  defp ${hname}(record) do\n${body}\n  end`,
@@ -335,7 +378,15 @@ export function renderWireSerialize(
 
   function ensurePartHelper(name: string): void {
     const shape = parts.get(name);
-    if (shape) buildHelper(name, shape, /* isVo */ false, partDerived.get(name) ?? emptyDerived);
+    if (!shape) return;
+    const part = agg.parts.find((p) => p.name === name);
+    buildHelper(
+      name,
+      shape,
+      /* isVo */ false,
+      partDerived.get(name) ?? emptyDerived,
+      (part?.fields ?? []).filter((f) => f.provenanced),
+    );
   }
 
   function ensureVoHelper(name: string): void {
@@ -343,7 +394,14 @@ export function renderWireSerialize(
     if (shape) buildHelper(name, shape, /* isVo */ true, emptyDerived);
   }
 
-  const body = renderMap(wireShape, "    ", /* isVo */ false, aggDerived, idExpr);
+  const body = renderMap(
+    wireShape,
+    "    ",
+    /* isVo */ false,
+    aggDerived,
+    idExpr,
+    agg.fields.filter((f) => f.provenanced),
+  );
   const preludeBind = opts.bind ? `${opts.bind}\n` : "";
 
   // RS-12 money-scale helper — emitted once when the wire shape carries money.
@@ -355,6 +413,22 @@ export function renderWireSerialize(
       "__money_round",
       `  defp __money_round(nil), do: nil\n\n` +
         `  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`,
+    );
+  }
+
+  // RS-24 plain-decimal helper.  Jason's `Decimal` encoder emits a JSON STRING;
+  // node/.NET/Java/Python all put a plain `decimal` on the wire as a NUMBER.
+  // `Decimal.to_float/1` reproduces the ORACLE exactly — node's value is a
+  // float64 to begin with — so this is the coercion that closes the gap rather
+  // than merely narrowing it.  Nil-safe (an optional decimal), and passes a
+  // non-Decimal through untouched (a jsonb-sourced value may already be a
+  // float/integer).
+  if (usedDecimal) {
+    helpers.set(
+      "__decimal_num",
+      `  defp __decimal_num(nil), do: nil\n\n` +
+        `  defp __decimal_num(%Decimal{} = dec), do: Decimal.to_float(dec)\n\n` +
+        `  defp __decimal_num(other), do: other`,
     );
   }
 

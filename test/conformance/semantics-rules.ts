@@ -390,11 +390,22 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // camelCase (`unitPrice`, `amountDue`, `createdAt`).  A future
     // "normalise the wire to camelCase" sweep must treat this key as a
     // deliberate exception, or it will re-break the frontend.
+    //
+    // A SECOND, LATER FINDING on the same rule, and the more instructive half.
+    // This rule first shipped with elixir in `conforms` on the strength of a
+    // GENERATED-SOURCE GREP.  When the elixir leg was finally BOOTED (2026-08-01),
+    // it turned out vanilla never put the key on the wire AT ALL — its REST
+    // serializer projects `wireShape`, and the provenance sidecar is not a
+    // `wireShape` member on any backend (node appends it separately, after the
+    // shape).  The grep had matched the co-located jsonb COLUMN, not the wire
+    // key.  A generated-source grep is not a wire observation; only a boot is.
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "found 2026-07-30 by READING the freshly-minted `provenance` golden during the M-T9.11 coverage expansion — one key out of camelCase in an otherwise camelCase body",
       "confirmed by generating all five backends and diffing the emitted key, then by booting the Java project",
       "fixed (java): @JsonProperty on the DTO record component, src/generator/java/emit/dto.ts",
+      "REOPENED 2026-08-01: the elixir leg's first real boot showed the key missing entirely — the earlier all-five close was inferred from a grep that matched the jsonb column, not the wire",
+      "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts appends the sidecar after the wire shape, as node does",
     ],
     tier: "behavioral",
   },
@@ -470,10 +481,35 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // the emitted source does not survive the boxing: the code reads correct and
     // the wire is not, which is why only a booted round-trip found it.
     // Fixed with an explicit `ObjectResult { DeclaredType = typeof(<Union>) }`.
+    //
+    // ELIXIR VIOLATED THE SAME RULE, found one leg later, for an unrelated
+    // reason — and the pairing is the point: the same guarantee broke once
+    // because a framework silently declined to write the tag (dotnet) and once
+    // because the emitter never produced it (elixir).  Vanilla carries a
+    // returning op's outcome as a TUPLE (`{:ok, value} | {:error, tag, data}`)
+    // and only the ERROR arm ever put its tag in the tuple; the controller
+    // `json/2`s the success value straight through, so no later seam could have
+    // added it.  Fixed at the producer (`renderReturningStmt`) from the tag +
+    // shape the IR already carries on the `return` statement (`variantTag` /
+    // `variantShape`) — the same two fields the TS backend reads.
+    //
+    // TWO SHAPES REMAIN UNIMPLEMENTED EVERYWHERE, and naming them is part of
+    // the rule.  The AGGREGATE success variant (`operation adjust(): Item or
+    // NotFound` falling through, or ending in `return this`) has NO CONFORMING
+    // ORACLE: node's emitted domain method for the fall-through has no `return`
+    // at all — the route `c.json`s `undefined` — and its `return this` renders
+    // `{ type, ...this }`, spreading the domain class's PRIVATE `_`-prefixed
+    // fields.  Vanilla is deliberately left untagged there rather than guessing
+    // at a contract no shipped backend implements.  `conforms` below is
+    // therefore scoped to the shapes with an oracle: SCALAR, RECORD LITERAL and
+    // `none`.  The aggregate variant is its own (unowned) gap.
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       'found 2026-07-31 by the M-T9.11 golden gate on `operation-returns` (dotnet leg): $.type — golden "string" vs dotnet null',
       "fixed (dotnet): ObjectResult.DeclaredType on the union success arm, src/generator/dotnet/emit/api.ts",
+      "VIOLATED AGAIN 2026-08-01 on the elixir leg's first real boot: operation-returns #1 POST /api/orders/{id}/accept at $ — golden {type,value} vs a bare string",
+      "fixed (elixir): src/generator/elixir/vanilla/operation-returns-emit.ts tags the success value from StmtIR.return's variantTag/variantShape",
+      "aggregate-variant gap confirmed by generating that shape on node and reading the emitted method — no return statement at all",
     ],
     tier: "behavioral",
   },
@@ -530,6 +566,60 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "found 2026-07-31 by the M-T9.11 golden gate once the expanded set reached the dapper + mikroorm legs: value-collections #1 $.surcharges — golden [] vs null on BOTH",
       "fixed (dapper): src/generator/dotnet/emit/dapper.ts hydrates an absent jsonb collection to an empty list",
       "fixed (mikroorm): src/generator/typescript/repository-document-builder.ts deserializeField delegates an optional ARRAY to the coalescing array arm",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-24",
+    title: "A plain `decimal` is a JSON NUMBER on the wire; only `money` is a string",
+    trigger: "a GET returning an aggregate (or nested value object) with a `decimal` field",
+    observable:
+      'the value is a JSON number (`9.99`, `5`). This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`"19.5000"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.',
+    // 4-vs-1 again, and a textbook FRAMEWORK-MEDIATED shape: nothing in the
+    // vanilla emitter chose a string.  Jason's `Decimal` encoder emits a JSON
+    // string, so every `%Decimal{}` that reached the serializer un-transformed
+    // shipped quoted.  That is exactly right for money (RS-12 wants the string,
+    // and `__money_round/1` leaves it a Decimal) and exactly wrong for a plain
+    // decimal — the same accident produced the correct answer for one type and
+    // the wrong one for the other, which is why reading the emitter would never
+    // have found it.
+    //
+    // Fixed with a `__decimal_num/1` helper (`Decimal.to_float/1`) applied to
+    // plain-decimal wire entries — property, DERIVED, and `decimal[]` element
+    // alike.  `to_float` reproduces the ORACLE exactly rather than merely
+    // narrowing the gap: node's value is a float64 to begin with.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      'found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: value-collections #1 GET /api/invoices/{id} at $.lineItems[*].amount — golden 9.99 / 5 vs "9.99" / "5"',
+      'root-caused by running Jason.encode!(%{a: Decimal.new("9.99")}) against the real library rather than reading the emitter',
+      "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts __decimal_num/1",
+    ],
+    tier: "behavioral",
+  },
+  {
+    id: "RS-25",
+    title: "`internal` / `secret` fields never reach the read wire",
+    trigger:
+      "a GET on an aggregate carrying an `access: internal` field — e.g. the `tenantId` / `dataKey` the `tenantOwned` capability injects (docs/tenancy.md)",
+    observable:
+      "the response body OMITS the key entirely. `forApiRead` is the read-boundary projection every backend applies over `wireShape`; `internal` is domain-only state and `secret` is never disclosed anywhere.",
+    // 4-vs-1.  The vanilla REST serializer projected the RAW `wireShape` and
+    // never applied `forApiRead`, so a multi-tenant aggregate shipped its tenant
+    // key to every client on every GET, and a `secret` field would have leaked
+    // the same way.  What makes this more than a stray field: the SAME BACKEND's
+    // OpenAPI emitter *did* apply `forApiRead`, so the served spec promised a
+    // body the running server did not send.  Spec and runtime disagreed inside
+    // one deployable — a divergence no spec-diff gate can see, which is the
+    // premise of the whole runtime-differential tier.
+    //
+    // Fixed at both vanilla read-boundary projections (the REST serializer and
+    // the returning-op success body).  Deliberately NOT applied to
+    // `eventsourced-emit.ts`'s `structFields`, which names the in-memory struct's
+    // fields — the domain needs its internal state.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: tenancy-owned #1 GET /api/invoices/by_number at $.tenantId — absent in the golden, present on elixir",
+      "fixed (elixir): forApiRead applied in src/generator/elixir/vanilla/wire-serialize.ts and operation-returns-emit.ts",
     ],
     tier: "behavioral",
   },
