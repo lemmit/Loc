@@ -3279,3 +3279,82 @@ rather than against memory of it: the G2 follow-up reproduced on `origin/main`
 `applyDefaultVersioning`'s early return and the explicit `with versioned` path
 walks past it. **Corollary worth keeping: when a guard is added to a CALLER,
 check every other entry point into the callee it was guarding.**
+
+## 59. The written assurance is why the bug survives — five instances in one feature (2026-07-31)
+
+M-T4.8 (typed in-system api calls, #2291 → #2314 → #2318 → #2326) turned up 22
+defects, none visible to the vitest tier. The interesting number is not 22 — it
+is that **five of them survived specifically because something written down said
+they were safe**. Not absent documentation: *confident, wrong* documentation.
+Every reader who checked found a sentence telling them the thing was fine.
+
+- **A source comment asserting the premise the code violates.** The Phoenix
+  workflow-param destructure snake_cased the wire key, breaking *every* Phoenix
+  workflow with a multi-word parameter — and the comment above it explained the
+  mapping as intended. Six tests pinned it, one literally named *"maps a
+  camelCase param name to a snake_case map key."* The wrong contract was written
+  down, so every reader confirmed it.
+- **Same shape, different file.** `preLowerBoundApiOperations` said "the
+  derivation … does not read enrichment output, so an un-enriched context is
+  enough." It does read it (`deriveContextOperations` looks for the `all` find),
+  so the resolver's op set was one smaller than the emitters', and every backend
+  shipped an `allOrder` client method no `.ddd` could call.
+- **A claim repeated across five files and a PR body.** "Paths from
+  `deriveContextOperations` — the derivation the callee's own route builder
+  answers to." Nothing enforces that: it has five consumers, **all client
+  emitters**, and no callee route builder reads it. It is a PARALLEL
+  re-derivation that happened to agree until it didn't — then `create`/`findAll`
+  carried a trailing slash the callee 404s, on all five backends at once.
+- **A test blind BY CONSTRUCTION** — the worst of the set, because it was the
+  thing everyone pointed at. `api-surface.test.ts` claimed to pin the derivation
+  against the routes Hono emits, and normalized with
+  `p.replace("/api/orders", "") || "/"`. That `|| "/"` maps **both**
+  `/api/orders/` and `/api/orders` to `"/"`. The single difference that decides
+  whether the request 404s was erased *before* the comparison. The test could
+  never have failed on it.
+- **A verification claim true by construction.** "The caller persists a value
+  only the callee could supply" was real — but every runtime assertion exercised
+  **reads**. The clients' `createOrder`/`updateOrder`/`destroyOrder` were emitted
+  and never driven, so "the typed call writes to the other service" was asserted
+  and unobserved. It was false: the write 404'd on all five backends.
+
+**Lessons, in order of how much they cost:**
+
+- **A gate you have never seen fail is not evidence.** Before trusting a gate you
+  just wrote or just fixed, **mutate the code and watch it go red.** Doing this
+  caught a second-order slip immediately: the first mutation attempt reported
+  "6 passed", and it was the *patch* that hadn't applied (biome had reformatted
+  the target string), not the gate that was working.
+- **Normalization is where assertions go to die.** Any `||`, `?? ""`, trim, sort
+  or case-fold between the two sides of a comparison can erase exactly the
+  difference that matters on the wire. Compare the bytes that actually ship.
+- **"Derived from X" is a claim about the CODE, not about intent.** Before
+  writing it, grep X's consumers. If the authority you name doesn't import it,
+  you have two derivations that agree by luck, and prose asserting otherwise
+  makes the drift *harder* to find.
+- **Test the direction you didn't think of.** Read-path coverage says nothing
+  about the write path even when both go through the same generated module.
+- **A comment stating a safety property should say how it is ENFORCED** — name
+  the test, or say plainly that nothing enforces it. `§15`'s derive-don't-stamp
+  rule is the same lesson about data; this is the lesson about prose.
+
+Two CI-shaped traps from the same feature, both invisible locally *or* remotely:
+
+- **A harness assumption a fixture finally violated.** All five corpus compile
+  tiers hardcoded one project dir (`d`); the two-deployable `api-call` fixture
+  failed each of them on a missing directory *before compiling a line* — five
+  identical `expected false to be true` failures naming nothing. Fix was the
+  declared `deployables` field plus a per-PR cross-check against the dirs
+  actually emitted, which caught a wrong guess in the same commit (emitted dirs
+  are snake_cased: `ordersSvc` → `orders_svc`).
+- **`docker run --rm` discards the package cache**, so a second project in one
+  cell re-downloads the whole closure — behind the loopback hex mirror the second
+  `deps.get` dies with `Request failed (:timeout)` on a tarball the first run
+  already pulled. One project hid it; two did not. Mount a shared host cache
+  (`/root/.hex`, `/root/.nuget`) — the NuGet mount in `api-call-e2e.test.ts`
+  exists for the identical reason.
+
+And one local-environment tell worth recognising: after a session resume the
+docker daemon is gone, and an opt-in e2e then reports **"5 skipped"**, not a
+failure. Skipped is not passed — re-read the count before recording a runtime
+verification.

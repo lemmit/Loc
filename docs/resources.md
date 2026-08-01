@@ -309,7 +309,7 @@ is a compile error in your `.ddd`, not a runtime `undefined`.
 | hono | `resources/api-clients.ts` | `zod.parse` |
 | python | `app/resources/api_clients.py` | pydantic `model_validate` |
 | .NET | `Resources/ApiClients.cs` | `JsonSerializer` + null guard |
-| java | `ApiClients.java` | Jackson `readValue` |
+| java | `ApiClients.java` | Jackson 3 `readValue` |
 | phoenix | `<App>.Resources.ApiClients` | atom-key projection of the wire shape |
 
 The .NET and Phoenix checks are **weaker than their siblings**, and the
@@ -318,9 +318,42 @@ System.Text.Json binds it to a default, and the Elixir projection lands it as
 `nil`. All five reject a non-2xx status.
 
 All five are gated at runtime, not just at compile: `api-call-e2e` boots the
-generated caller and callee as separate processes with separate databases and
-asserts the caller persists a value only the callee could have supplied
-(`npm run test:api-call`, `LOOM_API_CALL_CALLER=<backend>`).
+generated caller and callee as separate processes **with separate databases** —
+the isolation is what makes the assertions mean anything — and covers both
+directions of the call (`npm run test:api-call`,
+`LOOM_API_CALL_CALLER=<backend>`):
+
+- a **read** round-trip: the caller persists a value only the callee could have
+  supplied;
+- a **write**: the caller creates a row through the client, verified by querying
+  the *callee*, whose database the caller cannot otherwise reach;
+- a **collection** read, and a `404` both raising (plain `getById`) and binding
+  as a value (absence union).
+
+### What each operation returns
+
+The client's return type is derived from what the callee **actually sends**, which
+is not always the aggregate — three of these differ from the obvious guess, and
+all three were shipped wrong before a gate pinned them:
+
+| callee operation | wire | client returns |
+|---|---|---|
+| `create` | `201 { id }` | the id envelope — **not** the whole entity |
+| `getById`, or an operation declaring `: T` | `200` entity | the entity |
+| a find declaring `T option` / `T or NotFound` | `200` entity, absence on `404` | the entity or `null`/`None`/`nil` |
+| the auto `findAll`, or a `paged` find | `200 { items, page, pageSize, total, totalPages }` | the paged envelope |
+| a find declaring `T[]` | `200` bare array | an array of the record |
+| `destroy`, or an operation declaring **no** `: T` | `204`, no body | nothing (`void` / `None` / `:ok`) |
+
+The last row is the one that bites: an operation without a declared return answers
+`204` with an empty body, so its client returns nothing. Typing it as the
+aggregate — the intuitive default — makes the client parse a schema against an
+empty body and throw at runtime while compiling perfectly on both sides.
+
+These are held by `test/ir/api-surface.test.ts`, which scrapes the emitted Hono
+routes and compares, per operation, both the absolute method+path and the *shape*
+of the success body against what the client parses. It is checked against the
+generated source rather than against this table, so the two cannot drift.
 
 ### Rules
 

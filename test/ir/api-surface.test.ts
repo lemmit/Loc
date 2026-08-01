@@ -70,6 +70,56 @@ function scrapeHonoRoutes(src: string): { method: string; path: string }[] {
   return out;
 }
 
+/** Per `operationId`, the SUCCESS response the Hono route declares: the 2xx
+ *  status and the zod schema constant it names (`undefined` = no body). */
+function scrapeHonoSuccessBodies(src: string): Map<string, string | undefined> {
+  const out = new Map<string, string | undefined>();
+  // Each `createRoute({...})` block, sliced on `operationId:` boundaries.
+  const blocks = src.split(/operationId:\s*"/).slice(1);
+  for (const raw of blocks) {
+    const id = raw.slice(0, raw.indexOf('"'));
+    const head = raw.slice(0, raw.indexOf("}),"));
+    // The first 2xx arm wins; a `204` with no `content:` has no body.
+    const m = head.match(/\n\s*(2\d\d):\s*\{([\s\S]*?)\n\s*(?:\d{3}:|\},)/);
+    if (!m) {
+      out.set(id, undefined);
+      continue;
+    }
+    const schema = m[2]!.match(/schema:\s*([A-Za-z_][A-Za-z0-9_]*)/);
+    out.set(id, schema?.[1]);
+  }
+  return out;
+}
+
+/** Collapse a scraped schema constant to the SHAPE a client has to parse.
+ *  Resolved from the emitted source so a renamed constant doesn't silently
+ *  pass — the shape is what the wire carries. */
+function shapeOfSchema(src: string, name: string | undefined): string {
+  if (!name) return "none";
+  const decl = src.match(
+    new RegExp(`const ${name} = z\\.object\\(([\\s\\S]*?)\\)\\s*(?:\\.openapi|;)`),
+  );
+  const body = decl?.[1] ?? "";
+  if (/\bitems:\s*z\.array/.test(body)) return "paged";
+  // An id-only envelope is the create route's `201 { id }`.
+  const keys = [...body.matchAll(/(\w+):\s*z\./g)].map((m) => m[1]!);
+  if (keys.length === 1 && keys[0] === "id") return "idEnvelope";
+  return "entity";
+}
+
+/** The shape the CLIENT emitters parse for an operation — the mirror of the
+ *  `createName` / `pagedName` / `absentAgg` ladder they all share. */
+function clientExpectedShape(op: { kind: string; responseType?: unknown }): string {
+  if (op.kind === "create") return "idEnvelope";
+  const t = op.responseType as { kind?: string; ctor?: string } | undefined;
+  if (!t) return "none";
+  if (t.kind === "genericInstance" && t.ctor === "paged") return "paged";
+  // `optional` and `union` are both the absence shape: the success body is the
+  // entity DIRECTLY at 200, with absence riding its own status.
+  if (t.kind === "entity" || t.kind === "union" || t.kind === "optional") return "entity";
+  return "none";
+}
+
 describe("api-surface lift", () => {
   it("derives the same method+path set the Hono backend emits", async () => {
     const model = await buildLoomModel(SOURCE);
@@ -106,6 +156,38 @@ describe("api-surface lift", () => {
     const lifted = derived.map((o) => `${o.method} ${o.path}`).sort();
 
     expect(lifted).toEqual(emitted);
+  });
+
+  it("declares the same SUCCESS BODY SHAPE the Hono backend sends", async () => {
+    // The companion to the method+path check above.  Paths agreeing is not the
+    // whole contract: a client that reaches the right URL and then parses the
+    // wrong shape fails at RUNTIME while compiling perfectly on both sides.
+    //
+    // Two drifts of exactly this kind shipped before this test existed —
+    // `create` answers `201 { id }` (not the whole entity its declared
+    // responseType names), and a domain operation with no declared return
+    // answers `204` with NO body while the derivation types it as the entity.
+    // Both were invisible to every compile gate.
+    const model = await buildLoomModel(SOURCE);
+    const ctx = ordersContext(model);
+    expect(ctx, "Orders context lowered").toBeDefined();
+
+    const files = await generateSystemFiles(SOURCE);
+    const routesFile = [...files.entries()].find(([p]) => p.endsWith("order.routes.ts"));
+    expect(routesFile, "hono emitted an order.routes.ts").toBeDefined();
+    const src = routesFile![1];
+
+    const emitted = scrapeHonoSuccessBodies(src);
+    const mismatches: string[] = [];
+    for (const op of deriveContextOperations(ctx!)) {
+      if (!emitted.has(op.id)) continue; // not a lifted route — covered elsewhere
+      const callee = shapeOfSchema(src, emitted.get(op.id));
+      const client = clientExpectedShape(op);
+      if (callee !== client) {
+        mismatches.push(`${op.id}: callee sends ${callee}, client parses ${client}`);
+      }
+    }
+    expect(mismatches, mismatches.join("\n")).toEqual([]);
   });
 
   it("orders static find paths before the /{id} param route", async () => {

@@ -296,7 +296,14 @@ export function deriveAggregateOperations(
       "post",
       `${base}/{id}/${slug}`,
       [idParam(), ...operationBodyParams(op)],
-      op.returnType ?? entityType(agg.name),
+      // NO entity fallback.  A domain operation that declares no `: T` answers
+      // `204` with NO BODY — that is what the Hono route emits, and what every
+      // other backend mirrors.  Typing it as the aggregate made each client
+      // declare `Promise<Order>` and run `OrderResponse.parse(await res.json())`
+      // against an empty body: a RUNTIME throw on all five backends, from code
+      // that compiles perfectly on both sides.  Caught by the success-body-shape
+      // gate in `api-surface.test.ts`; `updateOrder` was live when it landed.
+      op.returnType,
       [400, 403, 404, 409],
     );
     // The `GET /{id}/can_<op>` companion exists ONLY for a `when`-gated
