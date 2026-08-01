@@ -136,6 +136,28 @@ export default defineConfig({
         // deploy because the vendor chunks stay cached.
         manualChunks(id) {
           if (!id.includes("/node_modules/")) return undefined;
+          // The two service overrides monaco-languageclient reaches ONLY
+          // through `await import(...)`, for `viewsConfig.$type` values the
+          // playground never uses (`ViewsService` / `WorkbenchService`; we
+          // run `EditorService` — see editor/loom-services.ts).  They must
+          // stay OUT of the eagerly-loaded `monaco` chunk below: a chunk
+          // executes every module body it contains, and
+          // `monaco-vscode-workbench-service-override/index.js` registers
+          // top-level `onLayout` / `onRenderWorkbench` listeners that call
+          // `IWorkbenchLayoutService.startup()` and reach the views service.
+          // With neither override actually installed those land on
+          // monaco-vscode-api's `unsupported` stubs and reject — which is
+          // exactly what put a pair of unhandledrejections ("…startup is not
+          // a function", "…getViewContainersByLocation is not supported")
+          // into the crash ring on EVERY page load, crowding out the real
+          // crashes the ring exists to capture.  Their own chunk is simply
+          // never fetched, which is what `$type: "EditorService"` means.
+          if (
+            id.includes("/node_modules/@codingame/monaco-vscode-workbench-service-override/") ||
+            id.includes("/node_modules/@codingame/monaco-vscode-views-service-override/")
+          ) {
+            return "monaco-views-optional";
+          }
           if (
             id.includes("/node_modules/monaco-editor/") ||
             id.includes("/node_modules/@codingame/monaco-vscode-") ||

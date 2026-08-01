@@ -264,6 +264,21 @@ export function makeVfsNpmPlugin(
             loader: "js",
           };
         }
+        // process — `require("process")` must be the SAME object as the
+        // global one the bundle prefix installs (see
+        // `npm/postprocess.ts`), not a fresh `{}`.  prom-client's
+        // `processOpenFileDescriptors` does exactly this require and then
+        // reads `process.platform`; an empty stub silently re-opens the
+        // hole the global shim just closed.
+        if (name === "process") {
+          return {
+            // Assign the live object, don't copy or decorate it — the smoke
+            // script runs this same bundler in Node, where `globalThis.process`
+            // is the REAL process and must not grow stray properties.
+            contents: "module.exports = globalThis.process;",
+            loader: "js",
+          };
+        }
         return { contents: "module.exports = {};", loader: "js" };
       });
 

@@ -3358,3 +3358,69 @@ And one local-environment tell worth recognising: after a session resume the
 docker daemon is gone, and an opt-in e2e then reports **"5 skipped"**, not a
 failure. Skipped is not passed — re-read the count before recording a runtime
 verification.
+
+## 60. `manualChunks` executes what a dynamic import meant to defer (2026-08-01)
+
+The playground logged a pair of `unhandledrejection`s on **every single page
+load** on the deployed build — `IWorkbenchLayoutService.startup is not a
+function` and `getViewContainersByLocation is not supported. You are using a
+feature without registering the corresponding service override.` Neither is a
+feature we use: `editor/loom-services.ts` starts monaco-vscode-api with
+`viewsConfig: { $type: "EditorService" }`, and monaco-languageclient only
+reaches the workbench/views service overrides through `await import(...)` on
+the *other* `$type` values.
+
+The bridge was our own bundling. `vite.config.ts`'s `manualChunks` matched
+`/node_modules/@codingame/monaco-vscode-` and swept those two conditionally-
+imported packages into the eagerly-loaded `monaco` chunk — **and a chunk runs
+every module body it contains.** `monaco-vscode-workbench-service-override`
+registers top-level `onLayout` / `onRenderWorkbench` listeners, so
+monaco-vscode-api's own `startup()` fired them against the `unsupported`
+fallback services that `$type: "EditorService"` deliberately leaves in place.
+
+The lesson generalises past monaco: **`manualChunks` can undo a lazy boundary.**
+A dynamic `import()` only defers a module if the module ends up in a chunk
+nothing eagerly loads; a coarse pattern that names a chunk for a whole package
+scope silently promotes side-effectful opt-in modules to startup code. When a
+package is reached *only* by dynamic import, give it its own chunk name so
+Rollup can't merge it — and verify by grepping the built asset for a
+`from"./chunk.js"` (static, eager) versus an `import("./chunk.js")` (dynamic,
+lazy) edge. Chunk-size output alone won't tell you.
+
+Second-order cost worth naming: the app's crash ring is 12 entries. Two
+guaranteed rejections per load meant a *real* crash was evicted within a few
+reloads — the diagnostic instrument was being flooded by a defect that was
+itself harmless to the UI. A recurring benign error in an error channel is not
+noise you can leave; it destroys the channel.
+
+## 61. A browser `process` shim is sized by module-EVALUATION reads, not by usage (2026-08-01)
+
+Booting a generated backend in the playground failed with `Bundle import
+failed: process.uptime is not a function`. The bundle prefix
+(`web/src/engine/npm/postprocess.ts`) had shimmed exactly
+`{ env: {}, browser: true, versions: {} }` — enough for the
+`process.env.LOG_LEVEL` reads it was written for.
+
+`prom-client` is what broke it, and *how* is the point. Its
+`lib/metrics/processStartTime.js` runs `process.uptime()` as a **top-level
+statement**, and `lib/metrics/version.js` runs `process.version.slice(1)` the
+same way. So merely `import`ing the package threw. The generated
+`obs/metrics.ts` already wrapped `collectDefaultMetrics()` in a `try`/`catch`
+with a comment explaining that browser runtimes stub the process internals —
+a guard that could never fire, because the crash happened at the `import`
+line above it. **A `try` around the call site cannot protect against a throw
+in the callee's module body.**
+
+So the rule for sizing a shim like this: enumerate what the dependency tree
+reads *while its modules evaluate*, not what it reads when called. And the
+verification has to run in a `process`-free context — the Node-side smoke has
+a real `process`, so it is structurally blind to this entire bug class. A
+`vm.createContext` whose only `process` is the shim, loading the real package
+tree, proved the fix in seconds (and immediately turned up the next one:
+`setImmediate` is a Node global with no browser equivalent, called from
+prom-client's event-loop-lag `collect()` hook on the `GET /metrics` path).
+
+Also: the old guard was `if (typeof process === 'undefined')`, which bails the
+moment *anything* else installs a partial `process` — leaving exactly the
+holes the shim exists to fill. Gate on `typeof process.versions?.node ===
+'string'` (real Node opts out) and fill missing members otherwise.

@@ -134,8 +134,23 @@ export function FilesPane({ ctx }: Props): JSX.Element {
               <Text size="sm" c="dimmed">
                 {generateResult?.ok === false
                   ? "Generation failed — see Problems."
-                  : "Click Generate to emit a project from the source."}
+                  : // Name the control that actually exists on this surface.
+                    // Mobile's button is "Run", not "Generate" (HeaderBar),
+                    // and mobile deliberately skips the unprompted
+                    // auto-generate on load (see `scheduleAutoGenerate`) — so
+                    // an empty Files pane is expected there, not a failure,
+                    // and the copy has to say which tap fills it.
+                    isDesktop
+                    ? "Click Generate to emit a project from the source."
+                    : "Tap Run to generate a project from the source."}
               </Text>
+              {!isDesktop && generateResult?.ok !== false && (
+                <Text size="xs" c="dimmed" mt="xs">
+                  Generating on load is skipped on mobile to keep the first
+                  paint light; it resumes automatically once you edit the
+                  source.
+                </Text>
+              )}
             </Box>
           )}
         </Box>
