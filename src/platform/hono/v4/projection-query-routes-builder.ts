@@ -14,6 +14,7 @@ import {
   isQueryTimeProjection,
   queryProjectionUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   type AggregateSelect,
   aggregateCoercion,
@@ -24,6 +25,7 @@ import {
   groupKeyOf,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -209,14 +211,31 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // M-T5.20 — the projection router is hono's FOURTH `app.onError`, and it was
+  // the one the first conversion pass missed: the aggregate, workflow and
+  // extern-handler routers all resolved while this one still answered the
+  // hardcoded 403/422.  That is worse than a cross-backend split — it is one
+  // BACKEND disagreeing with itself, so `httpStatus DomainError -> N` moved a
+  // system's operation routes and silently not its projection routes.
+  //
+  // Found by censusing the emitted statuses per backend and noticing node still
+  // had literals after the sweep; no test caught it because the override
+  // fixtures carry no projection.  `denial-ladder-override-parity` now does.
+  const projDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  const projForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  const projProblemUnion = [
+    ...new Set<number>([400, projForbiddenStatus, 404, 422, projDomainStatus, 500]),
+  ]
+    .sort((a, b) => a - b)
+    .join(" | ");
   lines.push(
-    `    const problem = (status: 400 | 403 | 404 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: ${projProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   lines.push(
-    `    if (err instanceof ForbiddenError) return problem(403, "Forbidden", err.message);`,
+    `    if (err instanceof ForbiddenError) return problem(${projForbiddenStatus}, ${JSON.stringify(problemTitle(projForbiddenStatus))}, err.message);`,
   );
   lines.push(
-    `    if (err instanceof DomainError) return problem(422, "Unprocessable Entity", err.message);`,
+    `    if (err instanceof DomainError) return problem(${projDomainStatus}, ${JSON.stringify(problemTitle(projDomainStatus))}, err.message);`,
   );
   lines.push(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,

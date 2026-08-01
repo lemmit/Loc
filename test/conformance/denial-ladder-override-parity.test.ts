@@ -27,7 +27,17 @@ import { generateSystemFiles } from "../_helpers/generate.js";
 /** One aggregate carrying both ladder rungs an override can currently reach — a
  *  `precondition` (the domain floor) and a `requires` (Forbidden).  No `unique`,
  *  no `when`, no destroy, so no structural-conflict rung can contribute a status
- *  and muddy the assertion. */
+ *  and muddy the assertion.
+ *
+ *  It also declares a QUERY-TIME PROJECTION, which on node carries its own
+ *  router with its own error handler — a FOURTH `app.onError` that the first
+ *  M-T5.20 pass converted three of.  Including one is what lets this suite see
+ *  an INTRA-backend split (one router resolving, another not), which is
+ *  strictly worse than a cross-backend one: `httpStatus DomainError -> N` moved
+ *  a system's operation routes and silently not its projection routes.  The
+ *  per-backend suites cannot see it — their fixtures have no projection.
+ *  Backends that gate query-time projections emit nothing for it and are
+ *  unaffected. */
 const SOURCE = (platform: string, apiBody: string) => `
 system Denials {
   user { id: string, level: int }
@@ -43,6 +53,11 @@ system Denials {
         }
       }
       repository Orders for Order { }
+      projection OrderTotals {
+        rowCount: int
+        from Order as o
+        select rowCount = count()
+      }
     }
   }
   api SalesApi from Sales ${apiBody}
@@ -64,6 +79,23 @@ const PLATFORMS = ["node", "dotnet", "java", "python", "elixir"] as const;
 async function emit(platform: string, apiBody: string): Promise<string> {
   const files = await generateSystemFiles(SOURCE(platform, apiBody));
   return [...files.values()].join("\n");
+}
+
+/** The content of the ONE emitted file whose path ends with `suffix`.
+ *
+ *  Needed because a whole-output `toContain` cannot see an INTRA-backend split:
+ *  if any one router resolves the override, the status string is present in the
+ *  joined text and the assertion passes while a sibling router is still
+ *  hardcoded.  That is not hypothetical — it is exactly the state node was in,
+ *  and the first version of this suite went green against the unfixed code. */
+async function emitFile(
+  platform: string,
+  apiBody: string,
+  suffix: string,
+): Promise<string | undefined> {
+  const files = await generateSystemFiles(SOURCE(platform, apiBody));
+  const key = [...files.keys()].find((k) => k.endsWith(suffix));
+  return key ? files.get(key) : undefined;
 }
 
 describe("M-T5.20 — one `httpStatus` override moves the ladder on all five backends", () => {
@@ -88,6 +120,29 @@ describe("M-T5.20 — one `httpStatus` override moves the ladder on all five bac
       expect(out, "the Forbidden rung is still hardcoded on this backend").toContain("418");
     });
   }
+
+  it("node: EVERY router honours the override, not just the aggregate one", async () => {
+    // The intra-backend assertion.  node emits four independent `app.onError`
+    // handlers — aggregate routes, workflows, extern handlers, and query-time
+    // projections — each with its own copy of the ladder.  The projection one
+    // was missed by the first conversion pass, so an override moved three
+    // routers and silently not the fourth.  Asserted on the projection FILE, in
+    // isolation, because the joined-output form of this check passes on the
+    // broken code.
+    const proj = await emitFile(
+      "node",
+      "{ httpStatus DomainError -> 418 }",
+      "http/query-projections.ts",
+    );
+    expect(
+      proj,
+      "no projections router was emitted — the fixture no longer covers this",
+    ).toBeDefined();
+    expect(proj, "the projection router still hardcodes the domain floor").toContain("418");
+    expect(proj, "the projection router kept the pre-override literal").not.toContain(
+      'problem(422, "Unprocessable Entity"',
+    );
+  });
 
   it("all five agree: the SAME override is honoured by every backend", async () => {
     // The claim the per-leg suites structurally cannot make.  A backend that
