@@ -117,6 +117,28 @@ function consumedEntries(log: string): { type: string; key: string }[] {
   return out;
 }
 
+/** Count catalog events in a .NET backend log.
+ *
+ *  Counts LINES carrying the quoted event name, not substring occurrences.
+ *  The generated .NET app configures `AddJsonConsole` (Program.cs), and the
+ *  JSON console writes the event name TWICE per entry — once in the rendered
+ *  `Message`, once in the structured `State`:
+ *
+ *    {"LogLevel":"Information","Message":"channel_consumed addr T 1",
+ *     "State":{"Event":"channel_consumed",...,"{OriginalFormat}":"..."}}
+ *
+ *  so `log.match(/channel_consumed/g).length` reports exactly 2x the real
+ *  event count.  That is what made this leg red: 6 consumed events read as 12
+ *  (and 12 publishes as 24 on the kafka sibling) — an apparent
+ *  duplicate-delivery bug in a backend that was behaving correctly.  The
+ *  shipment-count assertions just above pass, which is the tell: each message
+ *  WAS processed exactly once.
+ *
+ *  The node/python/java legs use a plain single-line logger, so the naive
+ *  count happens to be right there — which is why only the .NET legs failed. */
+const countEvents = (log: string, event: string): number =>
+  log.split("\n").filter((l) => l.includes(`"${event}"`)).length;
+
 describe.skipIf(!ENABLED)("kafka log semantics — dotnet leg (M-T4.4 slice 8b)", () => {
   let dir: string;
   const apps: ChildProcess[] = [];
@@ -327,7 +349,7 @@ describe.skipIf(!ENABLED)("kafka log semantics — dotnet leg (M-T4.4 slice 8b)"
     }
     // The producer relay announced every publish (design §5: all durable).
     const salesLog = readFileSync(join(dir, `sales_api-${SALES_PORT}.log`), "utf8");
-    expect((salesLog.match(/channel_published/g) ?? []).length).toBe(ORDERS * 2);
+    expect(countEvents(salesLog, "channel_published")).toBe(ORDERS * 2);
   }, 120_000);
 
   it("parks a poisoned record on <address>.dlq instead of stalling the partition", async () => {
