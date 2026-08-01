@@ -134,8 +134,11 @@ function consumedEntries(log: string): { type: string; key: string }[] {
  *  shipment-count assertions just above pass, which is the tell: each message
  *  WAS processed exactly once.
  *
- *  The node/python/java legs use a plain single-line logger, so the naive
- *  count happens to be right there — which is why only the .NET legs failed. */
+ *  Phoenix's `LogFormatter` has the identical shape (rendered `message` +
+ *  merged metadata), so its legs need this too.  node/python/java log the
+ *  event only as a structured field (`{ event: "channel_consumed", ... }`) —
+ *  one occurrence per entry — which is why the naive count happens to work
+ *  there.  The axis is the LOG FORMAT, not the backend. */
 const countEvents = (log: string, event: string): number =>
   log.split("\n").filter((l) => l.includes(`"${event}"`)).length;
 
