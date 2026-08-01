@@ -108,3 +108,29 @@ Eleven items had closed in the eleven days since the hunt — **four of them sil
 **Sibling registers with open rows** (drain alongside, same discipline): [`repo-code-review-2026-07-19.md`](../audits/repo-code-review-2026-07-19.md) — ~~F2~~ (**fixed 2026-07-30**; note its scope was UNDER-CALLED — 9 templates across 7 packs, and on React a duplicate `style` prop is TS17001, a *build-break* rather than the wrong-value the register claimed), F1 (Angular/Feliz silently drop non-`extern` user components), A1 (= the 07-18 audit's L1), I1–I4 (CI gate weaknesses); and [`repo-code-review-2026-07.md`](../audits/repo-code-review-2026-07.md)'s **L1–L4 member-lookup consolidation** (`extends`-chain walking in 1 of ~6 enumeration sites, optional-unwrapping in 2 of 4 lookup paths — one shared chain-aware helper, which is also how A1 closes). Its G4 (deployable `serviceSlug` collision) is **done**.
 
 Sources: [`fleet-bug-hunt-2026-07-19.md`](../audits/fleet-bug-hunt-2026-07-19.md) (per-bug file:line + repro), [`repo-code-review-2026-07-19.md`](../audits/repo-code-review-2026-07-19.md), [`repo-code-review-2026-07.md`](../audits/repo-code-review-2026-07.md). Related: M-T9.8 (hollow-work), M-T9.11 (differential gate), M-T5.16 (compiler-internal fragility), M-T9.4 (review remediation residue).
+
+## M-T9.25 — Intra-backend consistency gates — `open` · **M** · P1 ⭐ the seam every existing gate is blind to
+**Found 2026-08-01 by a 30-second probe, having already shipped.** Every runtime gate this repo owns compares one backend to *something else*:
+
+| Gate | Compares |
+|---|---|
+| `conformance-parity` | backend ↔ backend (OpenAPI shape) |
+| M-T9.11 wire golden | backend ↔ node oracle (runtime values) |
+| RS-rules | backend ↔ a named contract |
+
+**Nothing compares a backend's own emitters to each other.** So when a backend disagrees with *itself* — one router resolving a status while a sibling router hardcodes it — every gate stays green, because all five backends are wrong in the same direction and the oracle is wrong too.
+
+That is not a hypothetical. Landing M-T5.20 produced exactly it, twice over:
+1. hono emits **four** independent `app.onError` handlers (aggregate routes, workflows, extern handlers, query-time projections), each with its own copy of the denial ladder. Three were converted to `resolveErrorStatus`; the fourth was missed, so `httpStatus DomainError -> N` moved three routers and silently not the projection one.
+2. The reason converting it didn't help was worse: **`mergeContexts` never carried `structuralErrorStatuses` / `errorStatusOverrides`**, so *every* emitter fed a merged context read `undefined` and every override no-opped on that path — with no type error, because the fields are optional and `undefined` reads exactly like "nothing declared".
+
+Both were invisible until someone censused the emitted statuses per backend and noticed node still had literals after the sweep.
+
+**The work — three probes, cheapest first.** All are source-level and need no boot, which is the point: they are per-PR affordable.
+1. **Repeated-concept census.** For each backend, enumerate every site emitting the same wire concept (7807 arms, wire-key casing, absence shape, money/decimal coercion) and assert they agree. The 7807 surface alone is **61 sites** across five backends — node 25, java 11, elixir 10, dotnet 8, python 7 — and that asymmetry is itself unexplained signal worth reading.
+2. **Field-carry ratchets at every merge/projection boundary.** `test/ir/merge-contexts-completeness.test.ts` is the first, written from this bug: it fails when a `BoundedContextIR` field is neither carried nor named in a reviewed drop-list, *and* when a drop-list entry goes stale. The same shape applies anywhere IR is rebuilt field-by-field rather than spread — grep for object literals reconstructing an IR type.
+3. **One-override-moves-everything.** `test/conformance/denial-ladder-override-parity.test.ts` is the template: assert a single declaration reaches *every* emission site, per backend and across backends. Its first version was worthless — a whole-output `toContain` passes as soon as one router resolves, and it went green against the broken code — so the assertion has to be **per-file**, and must be verified to fail without the fix.
+
+**Why P1.** The two other discovery seams (cross-backend divergence, golden re-read) are largely drained: 26 RS-rules, 25 of them now five-way conforming. This one has **no coverage at all** and produced a shipped bug on first inspection. Expected yield is the highest of the three.
+
+Sources: found while landing M-T5.20 / M-T6.24 (#2340). Relates to M-T9.11 (whose oracle model structurally cannot see this class) and M-T9.8 (the "is a green gate telling the truth" question, asked of the gates' *domain* rather than their assertions).
