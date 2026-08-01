@@ -165,3 +165,26 @@ describe("DataGrid on Vue — computed cells", () => {
     expect(sfc).toContain(`<FlexRender v-else :render="c.column.columnDef.cell"`);
   });
 });
+
+describe("DataGrid on Vue — what the hoisted SFC has to import", () => {
+  it("carries the computed cells' imports and the format helpers", async () => {
+    // Both halves land in the SFC because the CELL MARKUP does.  The walk parks
+    // a cell's pack imports on the PAGE, and the format helpers are imported by
+    // the page shell unconditionally with no registration channel at all — so a
+    // `DateDisplay` column called `formatDateTime(...)` against nothing here.
+    const files = await gen(
+      `QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+        Column("Name", o => Badge(o.name)),
+        Column("Joined", o => DateDisplay { o.joinedAt }),
+        rows: rows, testid: "cellimp-grid") }`,
+      "",
+      ", design: shadcnVue",
+    );
+    const child = files.get("web/src/components/CellimpGrid.vue")!;
+    expect(child).toContain(`from "../lib/format";`);
+    expect(child).toContain("formatDateTime");
+    // shadcnVue's components are real imports (unlike Vuetify's globals), which
+    // is what makes the cell-import half observable here.
+    expect(child).toMatch(/import \{[^}]*Badge[^}]*\} from "@\/components\/ui";/);
+  });
+});

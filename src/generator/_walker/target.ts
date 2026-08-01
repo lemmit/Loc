@@ -269,6 +269,22 @@ export interface DataGridSpec {
   /** The pack's declared `imports["primitive-data-grid"]` entries, for the
    *  target to place wherever the rendered body lands. */
   packImports: readonly { from: string; named: readonly string[] }[];
+  /** Imports the COMPUTED-CELL walks registered — everything
+   *  `Column("Tier", o => EnumBadge { o.tier })` needed to render: the pack
+   *  component (`Badge` from `flowbite-svelte`) and any `lib/format` helper
+   *  (`formatDateTime`) its markup calls.
+   *
+   *  Separate from `packImports` because these are discovered by WALKING, not
+   *  declared by the manifest, and because they follow the cell markup rather
+   *  than the grid chrome.  On a target that hoists the child into its own FILE
+   *  (Vue / Svelte / Angular) the cell markup leaves the page, so the imports
+   *  the walk parked on the page's import map are in the wrong file — the
+   *  component references `Badge` and `formatDateTime` that nothing imported,
+   *  which is a runtime `ReferenceError` (Svelte) or a compile failure, and is
+   *  invisible to every structural test because the page still looks correct.
+   *  React and Feliz ignore this: their cell markup stays in the page's own
+   *  module, where the walk already put the imports. */
+  cellImports: readonly { from: string; named: readonly string[] }[];
 }
 
 /** What a target returns for a `DataGrid` — where the child component lives,

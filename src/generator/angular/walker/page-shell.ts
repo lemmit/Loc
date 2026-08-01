@@ -12,6 +12,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
+import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { unwrapOpt } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -249,14 +250,7 @@ function indentTemplate(markup: string): string {
  *  component instance, so any helper the walked markup references has to be
  *  re-exposed as a component member — detected here by a `<helper>(` call in
  *  the rendered template. */
-const FORMAT_HELPERS = [
-  "formatMoney",
-  "formatDateTime",
-  "formatNumber",
-  "formatBool",
-  "formatPlain",
-  "shortId",
-] as const;
+const FORMAT_HELPERS: readonly string[] = FORMAT_CALL_HELPERS;
 
 export function renderAngularPage(input: AngularPageShellInput): string {
   const { page, result, nameCtx } = input;
@@ -530,6 +524,17 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // as a member so `Math.ceil(…)` binds to the component (same lift pattern).
   if (result.tsx.includes("Math.")) {
     members.push(`  protected readonly Math = Math;`);
+  }
+
+  // `String(…)` needs the same lift, for the same reason: Angular templates
+  // resolve identifiers against the component instance, never the JS global.
+  // The walker emits it wherever a non-string expression reaches a string
+  // position — an interpolated `{count}` / `{items.length}`, or a `convert`.
+  // The hoisted `DataGrid` child has always re-exposed it; the PAGE had not,
+  // so a page interpolating any numeric value failed `ng build` with
+  // "Property 'String' does not exist".
+  if (result.tsx.includes("String(")) {
+    members.push(`  protected readonly String = String;`);
   }
 
   // Extern frontend functions the walked body / action bodies call — import

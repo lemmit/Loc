@@ -37,6 +37,7 @@
 // 8.21 + Svelte 5.56: `svelte-check` 0 errors / 0 warnings, `vite build` green.
 
 import { lines } from "../../../util/code-builder.js";
+import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
 
@@ -105,8 +106,15 @@ function renderComponent(spec: DataGridSpec): string {
       ]
     : [];
 
-  const packImportLines = spec.packImports.map(
-    (i) => `  import { ${[...i.named].sort().join(", ")} } from "${i.from}";`,
+  // The grid chrome's own pack imports, PLUS everything the computed cells
+  // pulled in.  Without the second group the component references symbols
+  // nothing imported — `<Badge>` from the pack, `formatDateTime` from
+  // `$lib/format` — which the page's import block received instead, because
+  // that is where the walk parks them.  On Svelte that is a runtime
+  // `ReferenceError`, not a build failure.  Merged per source so one
+  // `flowbite-svelte` line carries both the chrome's and the cells' names.
+  const packImportLines = mergedImports([...spec.packImports, ...spec.cellImports]).map(
+    (i) => `  import { ${i.named.join(", ")} } from "${i.from}";`,
   );
 
   const props = selection

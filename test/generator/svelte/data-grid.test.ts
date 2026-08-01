@@ -189,4 +189,30 @@ describe("DataGrid on Svelte — computed cells", () => {
     // …and the simple column falls back to the plain cell value.
     expect(child).toContain(`{String(c.getValue() ?? "")}`);
   });
+
+  it("imports what the computed cells need INTO the child, not onto the page", async () => {
+    // The walk parks a cell's imports on the PAGE's import map, but the cell
+    // markup is hoisted into this file — so the component referenced `Badge`
+    // and `formatDateTime` that nothing here imported.  That is a runtime
+    // `ReferenceError` on Svelte: the page still looks correct, the build is
+    // green, and the grid renders nothing.
+    const files = await gen(
+      `QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+        Column("Name", o => Badge(o.name)),
+        Column("Joined", o => DateDisplay { o.joinedAt }),
+        rows: rows, testid: "cellimp-grid") }`,
+      "",
+      // flowbite pins the case sharply: its `Badge` and its grid chrome come
+      // from the SAME module, so this also proves the two lists merge.
+      " design: flowbite",
+    );
+    const child = files.get(grid("CellimpGrid"))!;
+    // The pack component the `Badge` cell renders…
+    expect(child).toMatch(/import \{[^}]*Badge[^}]*\} from "flowbite-svelte";/);
+    // …and the format helper the `DateDisplay` cell calls.
+    expect(child).toContain(`import { formatDateTime } from "$lib/format";`);
+    // Merged per source: the grid chrome imports from `flowbite-svelte` too, and
+    // two import lines for one module is a duplicate-declaration parse error.
+    expect(child.match(/from "flowbite-svelte";/g)?.length).toBe(1);
+  });
 });

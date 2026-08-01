@@ -30,6 +30,8 @@
 // shared `applyUpdater` helper.
 
 import { lines } from "../../../util/code-builder.js";
+import { FORMAT_MODULE_EXPORTS } from "../../_frontend/format-helpers.js";
+import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
 
@@ -110,9 +112,26 @@ function renderSfc(spec: DataGridSpec): string {
   // The pack's own components (its table chrome) are imported HERE, not on the
   // page: the body they belong to lives in this file, and a page importing them
   // unused would fail `vue-tsc` under `noUnusedLocals`.
-  const packImportLines = spec.packImports.map(
-    (i) => `import { ${[...i.named].sort().join(", ")} } from "${i.from}";`,
+  //
+  // `cellImports` joins them for the mirror-image reason: a COMPUTED cell's
+  // markup also lives in this file, but the walk parked its imports on the
+  // PAGE — so `formatDateTime(...)` in a `DateDisplay` cell, or a non-global
+  // pack component in an `EnumBadge` one, resolved to nothing here.  (Vuetify
+  // hid this: its components are globally registered, so only the format
+  // helper was missing.)  Merged per source — the chrome and the cells often
+  // import from the same module, and two import lines for it would collide.
+  const packImportLines = mergedImports([...spec.packImports, ...spec.cellImports]).map(
+    (i) => `import { ${i.named.join(", ")} } from "${i.from}";`,
   );
+
+  // Format helpers, on the same terms the page shell imports them: a Vue pack
+  // template may call `formatDateTime(...)` / `formatMoney(...)` from its
+  // markup with no import-registration channel, so the whole set comes in
+  // unconditionally and the generated tsconfig keeps `noUnusedLocals` off.
+  // The child needs its OWN copy because a computed cell's markup lands here,
+  // not on the page — a `DateDisplay` column rendered `formatDateTime(...)`
+  // against nothing at all before this line existed.
+  const formatImport = `import { ${FORMAT_MODULE_EXPORTS.join(", ")} } from "../lib/format";`;
 
   return `${lines(
     `<!-- Auto-generated.  Do not edit by hand. -->`,
@@ -121,6 +140,7 @@ function renderSfc(spec: DataGridSpec): string {
     `import {`,
     ...[...valueImports, ...typeImports].map((n) => `  ${n},`),
     `} from "@tanstack/vue-table";`,
+    formatImport,
     ...packImportLines,
     ``,
     `const props = defineProps<{ rows: readonly T[] }>();`,
