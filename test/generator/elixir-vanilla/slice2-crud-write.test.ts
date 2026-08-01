@@ -111,6 +111,20 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     // Status codes:
     expect(ctl).toContain("put_status(201)");
     expect(ctl).toContain("send_resp(conn, 204");
+    // `update` answers 204 with NO BODY, like the other four backends and like
+    // this backend's own OpenAPI (`204 => No Content`).  It used to answer
+    // `200` + the serialized aggregate; that is a body no typed client reads,
+    // because `update` is an ordinary void `operation` and the derivation types
+    // it void.  Pinned negatively too — `serialize/1` is still emitted (show /
+    // index / the finds use it), so only its absence from the update arm says
+    // the contract holds.  The region is cut to the update action first: a
+    // `[\s\S]*?` from `def update` would run on into `show` / the find actions,
+    // which legitimately DO serialize, and the negative would then pass or fail
+    // on where the emitter happens to order its functions.
+    const updateAction = ctl.match(/\n {2}def update\(conn[\s\S]*?\n {2}end\n/)?.[0] ?? "";
+    expect(updateAction, "update action found").not.toBe("");
+    expect(updateAction).toContain('send_resp(conn, 204, "")');
+    expect(updateAction).not.toContain("json(conn, serialize(");
     // Slice 4: validation errors delegate to shared
     // <App>Web.ProblemDetails (422 emitted by the helper, with the
     // RFC 7807 envelope byte-aligned with Ash / Hono / .NET).

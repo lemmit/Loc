@@ -32,7 +32,11 @@
 
 import { describe, expect, it } from "vitest";
 import type { BoundedContextIR, LoomModel } from "../../src/ir/types/loom-ir.js";
-import { deriveContextOperations } from "../../src/ir/util/api-surface.js";
+import {
+  type ApiOperationIR,
+  collectionSuccess,
+  deriveContextOperations,
+} from "../../src/ir/util/api-surface.js";
 import { generateSystemFiles } from "../_helpers/generate.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 
@@ -136,11 +140,200 @@ function scrapeElixir(files: Map<string, string>): Route[] {
   return out;
 }
 
-const BACKENDS: Record<string, { platform: string; scrape(f: Map<string, string>): Route[] }> = {
-  "Python/FastAPI": { platform: "python", scrape: scrapePython },
-  "Java/Spring": { platform: "java", scrape: scrapeJava },
-  ".NET": { platform: "dotnet", scrape: scrapeDotnet },
-  "Elixir/Phoenix": { platform: "elixir", scrape: scrapeElixir },
+// ---------------------------------------------------------------------------
+// Success-body shape.
+//
+// Path parity is only half the contract: a client that reaches the right URL
+// and parses the wrong body still throws.  #2341 found THREE such drifts in
+// Hono alone (create sends `201 {id}` not the entity; findAll sends a paged
+// envelope; a void operation sends `204` with no body at all) and gated Hono
+// against them.  This is the same gate for the other four.
+//
+// Shapes are resolved STRUCTURALLY, from the emitted DTO's field names — never
+// from the type NAME, which differs per backend on purpose (the callee calls
+// it `CreateOrderResponse`, the client calls it `OrderCreated`).  A name
+// comparison would be brittle exactly where a shape comparison is exact.
+// ---------------------------------------------------------------------------
+
+type Shape = "none" | "paged" | "array" | "idEnvelope" | "entity";
+
+/** `undefined` = the backend's source does not state the type at this route.
+ *  Kept distinct from a shape so it can't be mistaken for agreement — the
+ *  unresolved set is pinned below and ratchets. */
+type MaybeShape = Shape | undefined;
+
+/** A body's field names → its shape.  The three carriers are recognised by the
+ *  fields that define them, so any backend spelling them differently is a
+ *  drift rather than a rename this test has to learn. */
+function shapeOfFields(fields: readonly string[]): Shape {
+  const set = new Set(fields.map((f) => f.toLowerCase()));
+  if (set.has("items") && set.has("totalpages")) return "paged";
+  if (set.size === 1 && set.has("id")) return "idEnvelope";
+  return "entity";
+}
+
+/** What the derivation says the caller receives — the same reading every
+ *  client emitter does, so a mismatch here IS a broken generated client. */
+function expectedShape(op: ApiOperationIR): Shape {
+  if (op.kind === "create") return "idEnvelope";
+  if (!op.responseType) return "none";
+  const coll = collectionSuccess(op.responseType);
+  if (coll) return coll.carrier === "paged" ? "paged" : "array";
+  return "entity";
+}
+
+/** FastAPI — `response_model=X` on the decorator, X resolved to its pydantic
+ *  field list.  No `response_model` + `status_code=204` is a bodiless answer. */
+function shapesPython(files: Map<string, string>): Map<string, MaybeShape> {
+  const src = [...files].find(([p]) => p.endsWith("order_routes.py"))?.[1] ?? "";
+  const main = [...files].find(([p]) => p.endsWith("app/main.py"))?.[1] ?? "";
+  const mount = main.match(/include_router\(\s*order_router[^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? "";
+  const prefix = `${mount}${src.match(/APIRouter\([^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? ""}`;
+
+  const model = (name: string): MaybeShape => {
+    const root = src.match(new RegExp(`class ${name}\\(RootModel\\[list\\[`));
+    if (root) return "array";
+    const body = src.match(new RegExp(`class ${name}\\(BaseModel\\):\\n((?: +.*\\n|\\n)*)`))?.[1];
+    if (body === undefined) return undefined;
+    return shapeOfFields([...body.matchAll(/^ {4}(\w+): /gm)].map((m) => m[1]!));
+  };
+
+  const out = new Map<string, MaybeShape>();
+  for (const m of src.matchAll(/@router\.(get|post|put|patch|delete)\("([^"]*)"([^\n]*)\)/g)) {
+    const k = key({ method: m[1]!, path: normalisePath(`${prefix}${m[2]}`) });
+    const decorator = m[3]!;
+    const named = decorator.match(/response_model=(\w+)/)?.[1];
+    out.set(k, named ? model(named) : "none");
+  }
+  return out;
+}
+
+/** Spring — the handler's declared return type, resolved through the emitted
+ *  `record` for that type.  `void` (with `@ResponseStatus(NO_CONTENT)`) is a
+ *  bodiless answer; `ResponseEntity<?>` states nothing and stays unresolved. */
+function shapesJava(files: Map<string, string>): Map<string, MaybeShape> {
+  const src =
+    [...files].find(
+      ([p, c]) => p.endsWith(".java") && /@RequestMapping\("\/api\/orders"\)/.test(c),
+    )?.[1] ?? "";
+  const base = src.match(/@RequestMapping\("([^"]*)"\)/)?.[1] ?? "";
+
+  const record = (name: string): MaybeShape => {
+    for (const [p, c] of files) {
+      if (!p.endsWith(`${name}.java`)) continue;
+      const params = c.match(new RegExp(`record ${name}\\(([^)]*)\\)`))?.[1] ?? "";
+      // `List<OrderResponse> items, int page, …` → the trailing identifier of
+      // each parameter, generics and annotations discarded.
+      const fields = params
+        .split(/,(?![^<]*>)/)
+        .map((s) => s.trim().split(/\s+/).pop() ?? "")
+        .filter(Boolean);
+      return shapeOfFields(fields);
+    }
+    return undefined;
+  };
+
+  const out = new Map<string, MaybeShape>();
+  const re =
+    /@(Get|Post|Put|Patch|Delete)Mapping(?:\("([^"]*)"\))?([\s\S]*?)public\s+([\w.<>?, ]+?)\s+\w+\(/g;
+  for (const m of src.matchAll(re)) {
+    const k = key({ method: m[1]!, path: normalisePath(`${base}${m[2] ?? ""}`) });
+    const ret = m[4]!.trim();
+    if (ret === "void") out.set(k, "none");
+    else {
+      const inner = ret.match(/^ResponseEntity<(.+)>$/)?.[1] ?? ret;
+      out.set(k, inner === "?" ? undefined : record(inner.replace(/<.*/, "")));
+    }
+  }
+  return out;
+}
+
+/** ASP.NET — the 2xx `[ProducesResponseType]`, resolved through the emitted
+ *  `record`.  A bare `[ProducesResponseType(204)]` names no type: bodiless. */
+function shapesDotnet(files: Map<string, string>): Map<string, MaybeShape> {
+  const src =
+    [...files].find(([p, c]) => p.endsWith(".cs") && /\[Route\("api\/orders"\)\]/.test(c))?.[1] ??
+    "";
+  const base = src.match(/\[Route\("([^"]*)"\)\]/)?.[1] ?? "";
+  const all = [...files.values()].join("\n");
+
+  const record = (name: string): MaybeShape => {
+    if (/^Paged</.test(name)) return "paged"; // the shared generic carrier
+    const params = all.match(new RegExp(`record ${name}\\(([^)]*)\\)`))?.[1];
+    if (params === undefined) return undefined;
+    const fields = params
+      .split(",")
+      .map((s) => s.replace(/\[[^\]]*\]/g, "").trim())
+      .map((s) => s.split(/\s+/).pop() ?? "")
+      .filter(Boolean);
+    return shapeOfFields(fields);
+  };
+
+  const out = new Map<string, MaybeShape>();
+  const re = /\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?\]([\s\S]*?)public\s/g;
+  for (const m of src.matchAll(re)) {
+    const seg = m[2] ? `/${m[2]}` : "";
+    const k = key({ method: m[1]!, path: normalisePath(`/${base}${seg}`) });
+    const success = [
+      ...m[3]!.matchAll(/\[ProducesResponseType\((?:typeof\((.+?)\), )?(2\d\d)\)\]/g),
+    ];
+    out.set(k, success.length === 0 ? undefined : success[0]![1] ? record(success[0]![1]) : "none");
+  }
+  return out;
+}
+
+/** Phoenix — no DTOs to resolve, so the shape is read off the action's own
+ *  success return: `send_resp(conn, 204, "")`, a literal `%{"id" => …}`, the
+ *  shared `serialize/1`, or the paged struct update. */
+function shapesElixir(files: Map<string, string>): Map<string, MaybeShape> {
+  const router = [...files].find(([p]) => p.endsWith("router.ex"))?.[1] ?? "";
+  const ctl = [...files].find(([p]) => p.endsWith("order_controller.ex"))?.[1] ?? "";
+  const scope = router.match(/scope "\/api",[\s\S]*?\n {2}end/)?.[0] ?? "";
+
+  const action = (name: string): MaybeShape => {
+    const body = ctl.match(new RegExp(`\\n  def ${name}\\(conn[\\s\\S]*?\\n  end\\n`))?.[0];
+    if (body === undefined) return undefined;
+    if (/send_resp\(conn, 204, ""\)/.test(body)) return "none";
+    // `json(conn, …)` and the piped `conn |> put_status(201) |> json(…)` are
+    // both live forms — create uses the second.
+    if (/json\((?:conn, )?%\{"id" =>/.test(body)) return "idEnvelope";
+    if (/json\(conn, %\{result \| items:/.test(body)) return "paged";
+    if (/json\(conn, serialize\(/.test(body)) return "entity";
+    return undefined;
+  };
+
+  const out = new Map<string, MaybeShape>();
+  for (const m of scope.matchAll(/^\s*(get|post|put|patch|delete) "([^"]*)", \w+, :(\w+)/gm)) {
+    out.set(key({ method: m[1]!, path: normalisePath(`/api${m[2]}`) }), action(m[3]!));
+  }
+  return out;
+}
+
+/** Routes whose body type the backend's own source does not state, so this
+ *  gate cannot read it.  Each needs a reason and an exit — the set is asserted
+ *  exactly, so a backend that goes quiet on one MORE route fails here. */
+const UNRESOLVED: Record<string, readonly string[]> = {
+  // `byCodeOrder` returns `ResponseEntity<?>` because the 404 arm builds a
+  // `ResponseEntity<Void>` that cannot unify with the success type.  Widening
+  // it to a declared type is a Java-emitter change, not a test change.
+  "Java/Spring": ["get /api/orders/by_code"],
+  "Python/FastAPI": [],
+  ".NET": [],
+  "Elixir/Phoenix": [],
+};
+
+const BACKENDS: Record<
+  string,
+  {
+    platform: string;
+    scrape(f: Map<string, string>): Route[];
+    shapes(f: Map<string, string>): Map<string, MaybeShape>;
+  }
+> = {
+  "Python/FastAPI": { platform: "python", scrape: scrapePython, shapes: shapesPython },
+  "Java/Spring": { platform: "java", scrape: scrapeJava, shapes: shapesJava },
+  ".NET": { platform: "dotnet", scrape: scrapeDotnet, shapes: shapesDotnet },
+  "Elixir/Phoenix": { platform: "elixir", scrape: scrapeElixir, shapes: shapesElixir },
 };
 
 function ordersContext(model: LoomModel): BoundedContextIR | undefined {
@@ -180,6 +373,32 @@ describe("api-surface parity — the derivation vs four independent backends", (
         missing,
         `${label} does not mount:\n  ${missing.join("\n  ")}\nmounted:\n  ${[...mounted].sort().join("\n  ")}`,
       ).toEqual([]);
+    });
+
+    it(`${label} answers each derived operation with the derived body shape`, async () => {
+      const source = SOURCE(backend.platform);
+      const model = await buildLoomModel(source);
+      const derived = deriveContextOperations(ordersContext(model)!);
+      const shapes = backend.shapes(await generateSystemFiles(source));
+
+      expect(shapes.size, `${label}: scraped no bodies — the scraper is stale`).toBeGreaterThan(0);
+
+      const unresolved: string[] = [];
+      const wrong: string[] = [];
+      for (const op of derived) {
+        const k = key({ method: op.method, path: op.path });
+        if (!shapes.has(k)) continue; // path drift — the sibling test owns it
+        const actual = shapes.get(k);
+        if (actual === undefined) unresolved.push(k);
+        else if (actual !== expectedShape(op)) {
+          wrong.push(`${k}: derived ${expectedShape(op)}, ${label} sends ${actual}`);
+        }
+      }
+
+      expect(wrong, `${label} answers the wrong body:\n  ${wrong.join("\n  ")}`).toEqual([]);
+      // Not `toContain` — an exact match, so a route quietly becoming
+      // unreadable is a failure rather than a silently widened blind spot.
+      expect(unresolved.sort()).toEqual([...UNRESOLVED[label]!].sort());
     });
   }
 });

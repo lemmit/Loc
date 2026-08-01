@@ -629,14 +629,26 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
   // `Map.drop(params, ["id"])` → `update_<agg>`; it does not dispatch to the
   // op body — the op's own member endpoint does.)  (`hasUpdateOp` is computed
   // above, alongside the optimistic-concurrency gate.)
+  //
+  // The action answers `204` with NO BODY, not `200` + the serialized
+  // aggregate.  `update` is an ordinary void `operation` (crudish synthesizes
+  // it with no `: T`), so `deriveContextOperations` types it void and every
+  // typed client — Loom's own in-system client included — declares
+  // `Promise<void>` and never reads the body.  The other four backends all
+  // answer 204 here, and this backend's own OpenAPI declares `204 => No
+  // Content` for the operation path.  Returning a body was this backend
+  // disagreeing with its own published contract for the SECOND time on the
+  // same route (the first was the PATCH-vs-POST path above), and the same
+  // reason applies for why nothing caught it: `conformance-parity` diffs the
+  // emitted specs, which agreed.
   const updateAction = !hasUpdateOp
     ? ""
     : `  def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
 ${cuBind}${updateCuBind}${versionBind}
     with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
-         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}${versionCallArg}) do
-      json(conn, serialize(updated))
+         {:ok, _updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}${versionCallArg}) do
+      send_resp(conn, 204, "")
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)${conflictClause}
