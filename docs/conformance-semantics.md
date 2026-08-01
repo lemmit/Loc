@@ -873,6 +873,39 @@ the conforming backends, and the fix that established it.
   byte-for-byte on `core-domain`.
   Tier: **behavioral** — the wire golden now holds `"Order {id} not found"`, so
   every behavioral leg gates it per-PR.
+### RS-27 · The wire-validation rung is `Validation failed`, distinct from the domain floor
+- **Guarantee.** A 422 raised by **wire validation** — a malformed body, a
+  missing required field, a boundary-expressible `invariant` — carries title
+  **`"Validation failed"`**, detail **`"One or more fields are invalid."`**, and
+  the `errors[]` pointer array.
+- **Why the title is deliberately *not* the reason phrase.** The **domain floor**
+  also answers 422 ([RS-15](#rs-15--the-domain-floor-is-422-not-400)), and its
+  title *is* `"Unprocessable Entity"`. Both rungs are 422, so status alone cannot
+  separate them: `title` plus `errors[]` is the only thing telling a client
+  *"your JSON is malformed"* from *"your request was understood and refused"*.
+  A backend that titles the validation rung with the status reason phrase
+  **collapses the two rungs into one**.
+- **Trigger.** Any `POST` with a body the wire schema rejects.
+- **The split.** 4-vs-1, python the outlier — `"Unprocessable Entity"` /
+  `"Request validation failed."` against the other four's `"Validation failed"` /
+  `"One or more fields are invalid."`. **Both halves of the body differed.**
+- **Where it sat is the point.** Wire validation is the **highest-traffic error
+  path in any API** — every malformed request hits it — and it was invisible to
+  every gate. The M-T9.11 golden cannot see it because **not one of the 31
+  goldens records a 4xx body**; `conformance-parity` compares declared response
+  *shapes*, not the values inside them.
+- **How it was found.** The M-T9.25 census probe, on its **first run**:
+  enumerate every 7807 arm each backend emits, then diff them. That probe exists
+  because the two bugs before it were both *intra*-backend — a router that
+  ignored an override, and `mergeContexts` dropping the override maps — a backend
+  disagreeing with **itself**, which no compare-to-another-backend gate can see.
+  This one turned out to be cross-backend, surfaced by the same sweep.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-08-01; confirmed by **generating all five and
+  reading the emitted arm**, not by grepping the emitter. Pinned by
+  `test/conformance/problem-arm-census.test.ts`, verified to fail on all three
+  assertions with the fix reverted. Tier: **static** — promote to behavioral the
+  moment a golden records a 4xx.
 
 ---
 
