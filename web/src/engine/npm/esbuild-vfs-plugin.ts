@@ -94,6 +94,11 @@ const REACT_RUNTIME_RE = /^(react|react-dom)(\/|$)/;
 // where the iframe's `@tailwindcss/browser` compiles it at runtime.
 const TAILWIND_CSS_RE = /^tailwindcss($|\/)|^tw-animate-css$/;
 
+// `data:` / `http:` / `https:` / `blob:` / … — anything carrying a URL
+// scheme.  An npm package name can never contain `:`, so this can't
+// shadow a real specifier.  See the onResolve arm for why it's needed.
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+
 export function makeVfsNpmPlugin(
   files: Map<string, string | Uint8Array>,
   nmRoot = "/node_modules",
@@ -136,6 +141,19 @@ export function makeVfsNpmPlugin(
         }
         if (isNodeBuiltin(spec)) {
           return { path: spec, namespace: EMPTY };
+        }
+        // A URL is not a module specifier — pass it through verbatim.
+        // esbuild routes CSS `url()` tokens through onResolve, so an
+        // inlined icon (`url("data:image/svg+xml,…")`) or a remote asset
+        // (`url("https://…")`) in any bundled stylesheet reaches this
+        // catch-all; without this it falls all the way to bare-package
+        // resolution and fails with `vfs: bare "data:image/svg+xml,…" not
+        // in installed node_modules`.  `external` keeps the original token
+        // in the emitted CSS, which is what a data URI wants (it is already
+        // self-contained) and the only thing a remote URL can do.
+        // Ordered AFTER the builtin check so `node:fs` still stubs out.
+        if (URL_SCHEME_RE.test(spec) || spec.startsWith("//")) {
+          return { path: spec, external: true };
         }
         if (spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../")) {
           const fromDir =
