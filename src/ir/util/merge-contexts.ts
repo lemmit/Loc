@@ -51,5 +51,28 @@ export function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBou
     // Scrutor scan) sees every hosted context's commandHandler / queryHandler.
     commandHandlers: contexts.flatMap((c) => c.commandHandlers ?? []),
     queryHandlers: contexts.flatMap((c) => c.queryHandlers ?? []),
+    // The two error-status maps enrichment attaches.  They were MISSING from
+    // this merge, and the consequence was silent: an emitter handed the merged
+    // context read `undefined` for both, so `resolveErrorStatus(name, undefined)`
+    // fell to the stdlib default and every `httpStatus <Error> -> <Code>`
+    // override no-opped on that path — while the SAME override moved the
+    // per-context emitters in the same generated app.  One backend disagreeing
+    // with itself, which is worse than a cross-backend split and which no
+    // cross-backend gate can see.
+    //
+    // `structuralErrorStatuses` is app-wide (folded once across every api), so
+    // any context's copy is the same object — first defined wins.
+    // `errorStatusOverrides` is per-SUBDOMAIN, and `mergeContexts` is only ever
+    // called on contexts of one deployable; where a deployable spans subdomains
+    // the maps are merged in declaration order, first-declared winning on a
+    // conflicting name, mirroring how the app-wide fold resolves the same clash.
+    structuralErrorStatuses: contexts.find((c) => c.structuralErrorStatuses !== undefined)
+      ?.structuralErrorStatuses,
+    errorStatusOverrides: contexts.some((c) => c.errorStatusOverrides !== undefined)
+      ? contexts.reduceRight<Record<string, number>>(
+          (acc, c) => ({ ...acc, ...(c.errorStatusOverrides ?? {}) }),
+          {},
+        )
+      : undefined,
   };
 }
