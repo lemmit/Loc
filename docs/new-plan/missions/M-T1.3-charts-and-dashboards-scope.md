@@ -224,12 +224,42 @@ instead of by the browser over one page of rows.
 So Defect A drops from P1 to a **cheap honesty gate** (§3.6). The critical path
 becomes C → D → the macro.
 
-### 3.1 Phase 0 — make a server-computed number real (Defect C) · **LANDED on node**
+### 3.1 Phase 0 — make a server-computed number real (Defect C) · **LANDED on all five backends**
 
-Backend-only. No UI, no macro, no chart. Shipped following the established
-honest-gap pattern: **node/Hono emits it; python/java/dotnet/elixir gate**
-(`PROJECTION_AGG_SUPPORTED` in `system-checks.ts`, mirroring
-`validateQueryTimeProjectionBackend`).
+Backend-only. No UI, no macro, no chart. Node/Hono first behind the established
+honest-gap pattern (`PROJECTION_AGG_SUPPORTED` in `system-checks.ts`), then the
+four ports — so `PROJECTION_AGG_SUPPORTED` is now the full set. It is kept, not
+deleted: it is the seam a *new* backend gates on until it ports.
+
+| Backend | Push-down | Verified with |
+|---|---|---|
+| node | drizzle `count()`/`sum(col)` in one `db.select` | `tsc --noEmit` + `tsup` |
+| python | `select(func.count(), func.sum(Row.col)).select_from(Row)` | `ruff` + `mypy --strict` |
+| dotnet | EF `GroupBy(_ => 1).Select(g => new { … })` — one query, not one per operator | `dotnet build /warnaserror` |
+| java | JPQL through the `EntityManager` | `gradle testClasses bootJar` |
+| elixir | Ecto `select: %{…count/sum…}` + `Repo.one()` | `mix compile --warnings-as-errors` |
+
+**One detector, five dialects.** `wholeTableAggregates` / `aggregateCoercion`
+live in `src/ir/util/projection-aggregate.ts`; each backend supplies only its
+SQL spelling and its coercion syntax. Which selects are an aggregation, and
+what type each result must land on, are IR facts — five copies would drift.
+
+**Java goes through the `EntityManager`, not a Spring Data method**, because a
+multi-aggregate select has no derived-query spelling and a `@Query` on the
+aggregate's repository would make the read model edit the aggregate's own port
+for a projection it knows nothing about.
+
+**Two bugs the real compilers caught, one per backend family:**
+- **.NET** — LINQ `Average` over an `int` returns `double`, so a row field
+  declared `decimal` is `CS1503`. The coercion now casts to the DECLARED wire
+  type; LINQ picks the aggregate's own result type, which need not be the row's.
+- **Python** — a file of only aggregations imported `RootModel` and the source
+  repository, both unused (`F401`), because the list-response and repository
+  paths were unconditional.
+
+**Elixir needed the money/decimal split**: Jason encodes a bare `%Decimal{}` as
+a JSON *string*, which is exactly what `money` wants and exactly what a plain
+`decimal` must not be — the other four ship it as a number (RS-24).
 
 ```ddd
 projection SalesTotals {

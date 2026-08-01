@@ -11,6 +11,11 @@ import {
   isQueryTimeProjection,
   queryProjectionUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import {
+  type AggregateSelect,
+  aggregateCoercion,
+  wholeTableAggregates,
+} from "../../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -271,7 +276,7 @@ function emitQueryProjectionRoute(
       };`,
     );
     const projectedFields = aggregates
-      .map((s) => `      ${s.field}: ${coerceAggregate(s.aggregate, s.type, `row?.${s.field}`)},`)
+      .map((s) => `      ${s.field}: ${coerceAggregate(s, `row?.${s.field}`)},`)
       .join("\n");
     out.push(`    const projected = {`);
     out.push(...projectedFields.split("\n"));
@@ -343,34 +348,6 @@ function emitQueryProjectionRoute(
   return out;
 }
 
-/** The projection's `select`s when EVERY one is a whole-table aggregation —
- *  the singleton read model — else `null`.
- *
- *  All-or-nothing on purpose: a MIX of aggregate and per-row selects is a
- *  GROUP BY (one row per group), a different query and a different response
- *  shape.  That combination is reserved (`loom.projection-groupby-unsupported`),
- *  so it never reaches here; returning `null` for it would silently emit the
- *  per-row path with an unresolved aggregation in it. */
-function wholeTableAggregates(
-  p: ProjectionIR,
-): Array<{ field: string; type: TypeIR; aggregate: ProjectionAggregateIR }> | null {
-  const selects = p.query?.selects ?? [];
-  if (selects.length === 0) return null;
-  const out: Array<{ field: string; type: TypeIR; aggregate: ProjectionAggregateIR }> = [];
-  for (const s of selects) {
-    if (!s.aggregate) return null;
-    // Coerce to the DECLARED row type, not the select's inferred one.  The
-    // response schema is built from `wireShape`, so a coercion that followed
-    // the inferred type could disagree with it — emitting `Number(...)` into a
-    // field the schema declares `z.string()` (money), which `.parse` then
-    // rejects at runtime.  The declared field IS the contract; fall back to the
-    // inferred type only when no row field matches.
-    const declared = p.wireShape?.find((f) => f.name === s.field)?.type;
-    out.push({ field: s.field, type: declared ?? s.type, aggregate: s.aggregate });
-  }
-  return out;
-}
-
 /** The Drizzle aggregate call for one `select`.  `count` counts ROWS (no
  *  column); the rest take the aggregated column, which is source-row-rooted so
  *  it renders as the plain `schema.<table>.<field>` ref every other predicate
@@ -401,14 +378,11 @@ function aggregateColumn(arg: ExprIR, sourceTable: string): string {
  *  not absent.  `sum` over no rows is `NULL` in SQL; Loom's row type decides
  *  whether that surfaces as a zero or as `null`, and a non-optional declared
  *  field means zero. */
-function coerceAggregate(agg: ProjectionAggregateIR, type: TypeIR, expr: string): string {
-  const optional = type.kind === "optional";
-  const inner = optional ? type.inner : type;
-  const isMoneyString =
-    inner.kind === "primitive" && (inner.name === "money" || inner.name === "guid");
-  if (agg.op === "count") return `Number(${expr} ?? 0)`;
-  if (optional) return `${expr} == null ? null : ${isMoneyString ? "String" : "Number"}(${expr})`;
-  return isMoneyString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
+function coerceAggregate(sel: AggregateSelect, expr: string): string {
+  const c = aggregateCoercion(sel);
+  if (c.isCount) return `Number(${expr} ?? 0)`;
+  if (c.optional) return `${expr} == null ? null : ${c.asString ? "String" : "Number"}(${expr})`;
+  return c.asString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
 }
 
 /** Render a `select` expression against the source row `r` and the join alias

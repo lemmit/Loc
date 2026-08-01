@@ -119,15 +119,12 @@ describe("lowering normalises a whole-table aggregation", () => {
 });
 
 describe("loom.projection-whole-table-aggregation-unsupported (per-backend)", () => {
-  it("is silent on node — the Hono emitter has ported the SQL push-down", async () => {
-    expect(await codes(hostedOn("node", TOTALS))).not.toContain(
-      "loom.projection-whole-table-aggregation-unsupported",
-    );
-  });
-
-  for (const platform of ["python", "java", "dotnet", "elixir"]) {
-    it(`gates ${platform} honestly until its emitter ports`, async () => {
-      expect(await codes(hostedOn(platform, TOTALS))).toContain(
+  // All five backends have now ported the SQL push-down, so the gate is silent
+  // everywhere.  The check stays — it is the seam a NEW backend gates on until
+  // it ports, and the assertion is what would catch a port being lost.
+  for (const platform of ["node", "python", "java", "dotnet", "elixir"]) {
+    it(`is silent on ${platform} — its emitter pushes the aggregation down to SQL`, async () => {
+      expect(await codes(hostedOn(platform, TOTALS))).not.toContain(
         "loom.projection-whole-table-aggregation-unsupported",
       );
     });

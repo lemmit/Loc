@@ -3,10 +3,16 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
+  ProjectionAggregateIR,
   ProjectionIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
+import {
+  type AggregateSelect,
+  aggregateCoercion,
+  wholeTableAggregates,
+} from "../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
@@ -85,11 +91,16 @@ public sealed record ${upperFirst(proj.name)}Row(${fields});
 }
 
 function renderQuery(proj: ProjectionIR, ns: string): string {
+  // A whole-table aggregation yields ONE row, so the query returns the row
+  // itself — not a list of one.
+  const result = wholeTableAggregates(proj)
+    ? `${upperFirst(proj.name)}Row`
+    : `IReadOnlyList<${upperFirst(proj.name)}Row>`;
   return `// Auto-generated.
 using Mediator;
 namespace ${ns}.Application.Projections;
 
-public sealed record ${upperFirst(proj.name)}QpQuery() : IQuery<IReadOnlyList<${upperFirst(proj.name)}Row>>;
+public sealed record ${upperFirst(proj.name)}QpQuery() : IQuery<${result}>;
 `;
 }
 
@@ -104,6 +115,12 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
   // persisted saga-state DbSet (workflows have no aggregate repository), applies
   // the `where` filter, and projects instance fields via `select`.  Validation
   // guarantees a non-event-sourced observable workflow with no `join`/`ignoring`.
+  // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) takes precedence over every other
+  // shape: it queries the table directly through the DbContext, never through a
+  // repository, because the point of the shape is to materialise no rows.
+  if (wholeTableAggregates(proj)) {
+    return renderAggregateHandler(proj, ctx, ns);
+  }
   if (proj.query!.sourceKind === "workflow") {
     return renderWorkflowHandler(proj, ctx, ns);
   }
@@ -248,6 +265,147 @@ ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Se
     }
 }
 `;
+}
+
+/** Render the handler for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0).
+ *
+ *  ONE SQL query, no rows materialised — the shape exists precisely to avoid
+ *  the naive read (a `SELECT *` over the whole table with every row rehydrated
+ *  into a domain object to produce one integer, the scaling failure M-T2.6
+ *  removed from `findAll`).  `GroupBy(_ => 1)` is the EF Core idiom for a
+ *  whole-table aggregate in a SINGLE round trip: separate `CountAsync` /
+ *  `SumAsync` calls would each be their own query over the same table.
+ *
+ *  Over an EMPTY table the grouped query yields no row at all, so the result is
+ *  null and every field falls back to its zero — `count` of no rows is 0, and a
+ *  SQL `SUM` of no rows is NULL, which a non-optional declared field means as
+ *  zero. */
+function renderAggregateHandler(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const aggregates = wholeTableAggregates(proj)!;
+  const rowName = `${upperFirst(proj.name)}Row`;
+  const queryName = `${upperFirst(proj.name)}QpQuery`;
+  const handlerName = `${upperFirst(proj.name)}QpHandler`;
+  const source = proj.query!.source!;
+  const dbSet = plural(upperFirst(source));
+
+  const usings = new Set<string>();
+  const filter = proj.query!.filter;
+  const where = filter ? renderCsExpr(filter, { thisName: "o", efQuery: true }) : undefined;
+  if (filter) collectCsExprUsings(filter, usings);
+
+  const requires = proj.query!.requires;
+  const gateUsesUser = exprUsesCurrentUser(requires);
+  if (requires) {
+    collectCsExprUsings(requires, usings);
+    usings.add(`${ns}.Domain.Common`); // ForbiddenException
+    if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+  }
+
+  const fields: string[] = [`    private readonly AppDbContext _db;`];
+  const ctorParams: string[] = [`AppDbContext db`];
+  const ctorAssigns: string[] = [`_db = db`];
+  if (requires && gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  }
+  const ctor =
+    ctorParams.length === 1
+      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
+
+  let gate = "";
+  if (requires) {
+    if (gateUsesUser) gate += `        var currentUser = _currentUser.User;\n`;
+    gate += `        if (!(${renderCsExpr(requires)})) throw new ForbiddenException(${JSON.stringify(
+      `Forbidden: projection ${proj.name}`,
+    )});\n`;
+  }
+
+  // The anonymous projection the grouped query selects; each member is named
+  // after its wire field so the row construction below reads plainly.
+  const members = aggregates
+    .map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`)
+    .join(", ");
+  const args = aggregates.map((s) => csCoerce(s, `agg`, ctx)).join(", ");
+  const anyMoney = aggregates.some((s) => aggregateCoercion(s).asString);
+  if (anyMoney) usings.add("System.Globalization");
+
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  return `// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Domain.${plural(source)};
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Application.Projections;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, ${rowName}>
+{
+${fields.join("\n")}
+${ctor}
+
+    public async ValueTask<${rowName}> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+${gate}        var agg = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}
+            .GroupBy(_ => 1)
+            .Select(g => new { ${members} })
+            .FirstOrDefaultAsync(cancellationToken);
+        return new ${rowName}(${args});
+    }
+}
+`;
+}
+
+/** The LINQ aggregate call for one `select`, inside the grouped projection.
+ *  `count` counts ROWS (no column); the rest take the aggregated column, which
+ *  is source-row-rooted so it names the entity's property. */
+function csAggregate(agg: ProjectionAggregateIR): string {
+  if (agg.op === "count" || !agg.arg) return "g.Count()";
+  const arg = agg.arg;
+  if (arg.kind !== "member") {
+    throw new Error(
+      "internal: a whole-table aggregation argument must be a source column reference",
+    );
+  }
+  const col = `o.${upperFirst(arg.member)}`;
+  // LINQ spells the extremes `Max`/`Min` and the rest `Sum`/`Average`.
+  const fn = agg.op === "avg" ? "Average" : upperFirst(agg.op);
+  return `g.${fn}(o => ${col})`;
+}
+
+/** Coerce one aggregate result to the row's declared wire type, null-safe over
+ *  an empty table.  `money` rides the .NET wire as a STRING (see the aggregate
+ *  Response records), so a decimal sum is formatted with InvariantCulture — a
+ *  locale's comma-vs-dot would otherwise change the wire value. */
+function csCoerce(s: AggregateSelect, aggVar: string, ctx: EnrichedBoundedContextIR): string {
+  const c = aggregateCoercion(s);
+  const read = `${aggVar}?.${upperFirst(s.field)}`;
+  if (c.isCount) return `${read} ?? 0`;
+  if (c.asString) {
+    return c.optional
+      ? `${read} is null ? null : ${read}!.Value.ToString(CultureInfo.InvariantCulture)`
+      : `(${read} ?? 0m).ToString(CultureInfo.InvariantCulture)`;
+  }
+  // LINQ picks the aggregate's OWN result type, which need not be the row's:
+  // `Average` over an `int` column returns `double`, and a row field declared
+  // `decimal` then fails to compile (`CS1503: cannot convert from 'double' to
+  // 'decimal'`).  Cast to the DECLARED wire type — the row is the contract.
+  const target = wireType(s.type, ctx, "response");
+  return c.optional ? `(${target})${read}` : `(${target})(${read} ?? 0)`;
 }
 
 /** Render the handler for a workflow-sourced query-time projection.  Reads the
@@ -532,7 +690,11 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const blocks = projections.map(
     (proj) =>
       `    [HttpGet("${snake(proj.name)}")]\n` +
-      `    public async Task<ActionResult<IReadOnlyList<${upperFirst(proj.name)}Row>>> ${upperFirst(proj.name)}()\n` +
+      `    public async Task<ActionResult<${
+        wholeTableAggregates(proj)
+          ? `${upperFirst(proj.name)}Row`
+          : `IReadOnlyList<${upperFirst(proj.name)}Row>`
+      }>> ${upperFirst(proj.name)}()\n` +
       `    {\n` +
       `        var result = await _mediator.Send(new ${upperFirst(proj.name)}QpQuery());\n` +
       `        return Ok(result);\n` +

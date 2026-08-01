@@ -1,0 +1,78 @@
+// Whole-table aggregation: a SINGLETON query-time projection whose `select` is
+// `count()` / `sum()` / `avg()` / `min()` / `max()` over the source table —
+// read-path-architecture.md rev. 8's singleton read model, whose motivating use
+// is a dashboard total / running count (M-T1.3 Phase 0).
+//
+// The point of the shape is that the aggregation happens IN SQL.  `.all` is
+// paged by default (M-T2.6), so counting rows in the client counts one page;
+// and the naive server-side read is a `SELECT *` over the whole table with
+// every row rehydrated into a domain object to produce one integer — the exact
+// scaling failure M-T2.6 removed from `findAll`.  Each backend emits one query
+// (`COUNT(*)`/`SUM(...)`) that materialises no rows.
+//
+// Exercises, on every backend: all five operators; a criterion `where` lowered
+// into the SAME query rather than applied after; the ONE-row response shape (a
+// singleton returns the row, not an array of one); and the per-backend
+// coercions, which are load-bearing — Postgres returns numeric aggregates as
+// strings/Decimals through most drivers and NULL over an empty table, and the
+// declared row type (money → string, decimal → number) is the contract the
+// response schema is built from.
+//
+// This is also the first compile coverage of the `select` clause anywhere in
+// the corpus; the whole query-time projection surface shipped on five backends
+// without it, which is how the aggregation came to emit the operator name as an
+// undeclared identifier.
+system ProjectionAggregationSys {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft Confirmed Cancelled }
+
+      aggregate Order with crudish {
+        code: string
+        total: money
+        lineCount: int
+        status: OrderStatus
+        derived display: string = code
+      }
+
+      repository Orders for Order { }
+
+      criterion Confirmed of Order as o = o.status == OrderStatus.Confirmed
+
+      // Filtered — every operator, `where` pushed into the same query.
+      projection SalesTotals {
+        orders: int
+        revenue: money
+        avgLines: decimal
+        biggest: money
+        smallest: money
+        from Order as o
+        where Confirmed
+        select orders = count(),
+               revenue = sum(o.total),
+               avgLines = avg(o.lineCount),
+               biggest = max(o.total),
+               smallest = min(o.total)
+      }
+
+      // Unfiltered — the bare whole-table count, the smallest useful KPI.
+      projection OrderVolume {
+        total: int
+        from Order as o
+        select total = count()
+      }
+    }
+  }
+
+  api OrdersApi from Sales
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

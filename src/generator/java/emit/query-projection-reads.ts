@@ -3,14 +3,21 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionAggregateIR,
   ProjectionIR,
   TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
+import {
+  type AggregateSelect,
+  aggregateCoercion,
+  wholeTableAggregates,
+} from "../../../ir/util/projection-aggregate.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
+import { renderJpqlWhere } from "../render-jpql.js";
 import { projectionRepoField } from "./projection-reads.js";
 import { projectionRowClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
@@ -114,6 +121,7 @@ export function renderJavaQueryProjections(
   // `CurrentUserAccessor` before evaluating.  Exact twin of the repository find
   // gate in `api.ts`.
   const controllerGateImports = new Set<string>();
+  let usesEntityManager = false;
   let anyGate = false;
   let anyGateUsesUser = false;
 
@@ -148,6 +156,47 @@ export function renderJavaQueryProjections(
 
     const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
 
+    const aggregates = wholeTableAggregates(proj);
+    if (aggregates) {
+      // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE JPQL query with
+      // `count`/`sum`/`avg`/`min`/`max`, no rows materialised.  The shape exists
+      // precisely to avoid the naive read: a `findAll()` stream over the whole
+      // table with every row hydrated into an entity to produce one integer.
+      //
+      // Through the `EntityManager` rather than a Spring Data repository method:
+      // a multi-aggregate select has no derived-query spelling, and adding a
+      // `@Query` to the aggregate's repository would make the READ MODEL edit
+      // the aggregate's own port for a projection it knows nothing about.
+      usesEntityManager = true;
+      imports.add("jakarta.persistence.EntityManager");
+      imports.add("jakarta.persistence.PersistenceContext");
+      const cols = aggregates.map((a) => jpqlAggregate(a.aggregate)).join(", ");
+      const filter = proj.query!.filter;
+      const where = filter
+        ? ` where ${renderJpqlWhere(filter, { alias: "e", enumsPkg: `${qpctx.basePkg}.domain.enums` })}`
+        : "";
+      if (filter) collectJavaExprImports(filter, imports);
+      const jpql = `select ${cols} from ${source} e${where}`;
+      const args = aggregates.map((a, i) => {
+        if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
+        return jpqlCoerce(a, `r[${i}]`);
+      });
+      methods.push(
+        `    public ${rowName} ${findName}() {`,
+        `        Object[] r = (Object[]) entityManager.createQuery(${JSON.stringify(jpql)}).getSingleResult();`,
+        `        return new ${rowName}(${args.join(", ")});`,
+        `    }`,
+        ``,
+      );
+      routes.push(
+        `    @GetMapping("/${snake(proj.name)}")`,
+        `    public ${rowName} ${findName}() {`,
+        `        return queryProjections.${findName}();`,
+        `    }`,
+        ``,
+      );
+      continue;
+    }
     if (proj.query!.sourceKind === "workflow") {
       // `from <Workflow>` — read the persisted saga-state through the
       // `<Wf>StateRepository` (workflows have no aggregate repository), apply the
@@ -331,6 +380,10 @@ export function renderJavaQueryProjections(
     if (qpctx.stateRepoPkg !== qpctx.pkg)
       explicitImports.add(`${qpctx.stateRepoPkg}.${projectionRowClass(p)}Repository`);
   }
+  // A whole-table aggregation runs raw JPQL, so the service holds an
+  // `EntityManager`.  Field-injected via `@PersistenceContext` rather than
+  // constructor-injected: that is the JPA-idiomatic form and it keeps the
+  // constructor identical for every service that has no aggregation.
   const injected: { type: string; field: string }[] = [
     ...repoFields.map((a) => ({ type: `${a}Repository`, field: repoField(a) })),
     ...stateWfList.map((wf) => ({
@@ -362,6 +415,9 @@ export function renderJavaQueryProjections(
       `@Transactional(readOnly = true)`,
       `public class ${serviceName} {`,
       ...injected.map((d) => `    private final ${d.type} ${d.field};`),
+      ...(usesEntityManager
+        ? [`    @PersistenceContext`, `    private EntityManager entityManager;`]
+        : []),
       ``,
       `    public ${serviceName}(${injected.map((d) => `${d.type} ${d.field}`).join(", ")}) {`,
       ...injected.map((d) => `        this.${d.field} = ${d.field};`),
@@ -413,6 +469,58 @@ export function renderJavaQueryProjections(
  *  maps.  A member read on a join alias (`c.name`) rewrites to
  *  `<mapVar>.get(<key>).name()` — the loaded-by-id aggregate for this row.
  *  Source-candidate reads (`o.id`, bare `lineCount`) render off `a`. */
+/** The JPQL aggregate call for one `select`.  `count` counts ROWS (no column);
+ *  the rest take the aggregated column off the entity alias `e`. */
+function jpqlAggregate(agg: ProjectionAggregateIR): string {
+  if (agg.op === "count" || !agg.arg) return "count(e)";
+  const arg = agg.arg;
+  if (arg.kind !== "member") {
+    throw new Error(
+      "internal: a whole-table aggregation argument must be a source column reference",
+    );
+  }
+  return `${agg.op}(e.${arg.member})`;
+}
+
+/** Whether coercing this aggregate needs `java.math.BigDecimal` imported. */
+function jpqlNeedsBigDecimal(s: AggregateSelect): boolean {
+  const c = aggregateCoercion(s);
+  const inner = s.type.kind === "optional" ? s.type.inner : s.type;
+  return !c.isCount && !c.asString && inner.kind === "primitive" && inner.name === "decimal";
+}
+
+/** Coerce one JPQL aggregate result to the row's declared wire type.
+ *
+ *  JPQL hands back `Object`s whose runtime types are provider-chosen (`Long`
+ *  for a count, `Double` for an average, `BigDecimal` for a sum over a numeric
+ *  column) — so every read goes through `Number`/`toString` rather than a cast
+ *  that would `ClassCastException` on a different provider.  `money` rides the
+ *  Java wire as a STRING (see `wireJavaType`).
+ *
+ *  A `sum` over no rows is SQL `NULL`; a non-optional declared field means that
+ *  as zero.  `count` of no rows is 0 and never null. */
+function jpqlCoerce(s: AggregateSelect, read: string): string {
+  const c = aggregateCoercion(s);
+  const inner = s.type.kind === "optional" ? s.type.inner : s.type;
+  if (c.isCount) {
+    const asLong = inner.kind === "primitive" && inner.name === "long";
+    return `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
+  }
+  if (c.asString) {
+    return c.optional
+      ? `${read} == null ? null : ${read}.toString()`
+      : `${read} == null ? "0" : ${read}.toString()`;
+  }
+  if (inner.kind === "primitive" && inner.name === "decimal") {
+    return c.optional
+      ? `${read} == null ? null : new BigDecimal(${read}.toString())`
+      : `${read} == null ? BigDecimal.ZERO : new BigDecimal(${read}.toString())`;
+  }
+  const asLong = inner.kind === "primitive" && inner.name === "long";
+  const num = `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
+  return c.optional ? `${read} == null ? null : ${num}` : `${read} == null ? 0 : ${num}`;
+}
+
 function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
     const alias = aliasMap.get(expr.receiver.name);

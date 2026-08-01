@@ -123,7 +123,10 @@ const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "do
 // Backends in `PROJECTION_AGG_SUPPORTED` have ported it; the rest gate HONESTLY
 // rather than emit the operator name as a free identifier.  Same reviewed-gap
 // discipline as `validateQueryTimeProjectionBackend` above; node is first.
-const PROJECTION_AGG_SUPPORTED = new Set(["node"]);
+// All five backends now emit the SQL push-down (node #1, then python / dotnet /
+// java / elixir).  The set is kept — not deleted — because it is the seam a new
+// backend gates on until it ports, and the diagnostic below is its message.
+const PROJECTION_AGG_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
 
 export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
