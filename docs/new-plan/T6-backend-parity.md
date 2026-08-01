@@ -123,7 +123,10 @@ Sources: found 2026-07-30 auditing the archived proposal corpus for unmapped wor
 
 ## M-T6.22 — Drain the M-T9.11 differential findings (RS-11/RS-12) — `done` (2026-07-28) · **M** · P2
 
-## M-T6.24 — Elixir: the two remaining untyped denial edges — `open` · **S** · P3 ⭐ one is an info leak
+## M-T6.24 — Elixir: the two remaining untyped denial edges — `done` · **S** · P3 ⭐ one is an info leak
+**DONE (2026-08-01).** Both residues closed. (1) the untyped `{:error, reason}` tail now answers a sanitized **500 + `"internal"`** instead of 400 + `inspect(reason)`, via a shared `respondErrorTail` in `denial.ts`; `_reason` is bound underscore-prefixed because a plain `reason` is an unused variable under `--warnings-as-errors`. (2) `dispatch-emit.ts`'s `requires` no longer throws a bare `:forbidden` atom — **the catch site was checked first and there isn't one** (the throw propagates out of the reactor's `handle/1`, which the Dispatcher calls untrapped), so neither the atom nor its `precondition` sibling's bare string was ever matched on, and both could be unified onto `denialTerm`. Minted as **RS-26**, gated by `test/conformance/internal-fault-parity.test.ts` on all five. Verified by `mix compile --warnings-as-errors` on ten fixtures.
+
+A **second, larger divergence** surfaced while writing that gate — filed as M-T6.25 below.
 Two small, independent residues left after #2300 centralised the vanilla Phoenix denial protocol in `src/generator/elixir/vanilla/denial.ts`. Both are cases the tuple reshape did **not** reach, found by grepping the protocol's edges rather than by a failing test — so nothing currently gates either.
 
 **(1) The untyped `{:error, reason}` fallback answers 400 and `inspect/1`s the term.** The generated `respond/2` renderers (`explicit-handlers-emit.ts`, `workflow-execution-emit.ts`) end with
@@ -277,3 +280,27 @@ projection-sourced shapes first, so their port has a gate. `dotnet build
 
 **Sources:** #2394 (the gate that found it), `corpus-dotnet-dapper-build.test.ts`,
 `dapper-projection-emission.test.ts` (the folded-read precedent this follows).
+Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
+explicitly, with a comment pointing here — deliberately NOT worked around in the
+compiler.
+
+## M-T6.25 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
+Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
+
+The four non-elixir backends install an **app-global** unhandled-exception handler — `app.onError` (hono), `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so *any* unmodelled fault, on any route, in any system, answers the RFC 7807 envelope.
+
+Vanilla Phoenix's sanitized arm exists **only** in the `respond/2` dispatchers that `workflow-execution-emit` / `explicit-handlers-emit` render. **A plain CRUD system emits none at all**, and an unhandled exception falls through to Phoenix's stock `ErrorJSON`:
+
+```elixir
+%{errors: %{detail: Phoenix.Controller.status_message_from_template(template)}}
+```
+
+That is a **different SHAPE, not a different detail**: `{"errors":{"detail":"Internal Server Error"}}` against the other four's `{"type","title","status","detail","instance"}`. A client that parses 7807 gets nothing it can read — so this is a contract break, not a cosmetic one, and it applies to the *most common* system shape (CRUD with no workflow).
+
+**Why no gate sees it.** The M-T9.11 wire golden can't: no shared fixture reaches an unmodelled fault (every error they produce is modelled). `conformance-parity` can't: the spec-diff compares *declared* responses, and this is a runtime fallback nobody declares. RS-26's static gate deliberately shapes its fixture *around* the gap (it carries a workflow) rather than failing on it, with the reason written at the bottom of `test/conformance/internal-fault-parity.test.ts`.
+
+**The work:** give the generated Phoenix app a 7807-shaped error view + `application/problem+json` content-type at the shell level (`src/generator/elixir/vanilla/shell-emit.ts`, `renderVanillaErrorJson`), so the app-global fallback matches the four. Check the `404`/`400` templates at the same time — `ErrorJSON` handles every un-rescued status, not just 500, so the same shape divergence likely applies to a bare unmatched route.
+
+**Verification:** extend `internal-fault-parity.test.ts` to the plain-CRUD fixture (drop the workflow) once closed — the test is written so that is a one-line change. A booted check is better still: hit a route that raises on the generated Phoenix app and read the body.
+
+Sources: found while landing M-T6.24 / RS-26. Relates to RS-22 (the 7807 envelope's exact membership) and M-T9.11 (which is blind here).

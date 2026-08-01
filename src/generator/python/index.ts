@@ -21,6 +21,7 @@ import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
+import { problemTitle } from "../../ir/util/openapi-errors.js";
 import {
   effectiveSavingShape,
   resolveContextSchema,
@@ -1460,6 +1461,16 @@ function renderProblemPy(
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralErrorStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
   const disallowedStatus = resolveErrorStatus("Disallowed", structuralErrorStatuses);
+  // M-T5.20 — the rest of the denial ladder resolves the same way: the domain
+  // floor (`DomainError`) and the `requires` denial (`Forbidden`) were literals
+  // with a hardcoded RFC 7807 title beside them, so remapping either was an
+  // N-place edit and `httpStatus DomainError -> 400` was inexpressible. The
+  // title now derives from the RESOLVED status's IANA reason phrase, so the two
+  // cannot disagree. Defaults: 422 "Unprocessable Entity" / 403 "Forbidden" —
+  // byte-identical. (The 404 arm stays literal — see the NotFound note in
+  // `src/ir/util/openapi-errors.ts`.)
+  const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
   // JSON literals are valid Python for the value kinds used here (strings,
   // arrays, objects — no booleans/nulls cross).
   const responsesDict = JSON.stringify(Object.fromEntries(opUnions.map((u) => [u.path, u.name])));
@@ -1634,9 +1645,9 @@ def _pointer(loc: tuple[object, ...]) -> str:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ForbiddenError)
     async def _forbidden(request: Request, err: ForbiddenError) -> JSONResponse:
-        log("warn", "forbidden", message=str(err), status=403)
+        log("warn", "forbidden", message=str(err), status=${forbiddenStatus})
         record_domain_fault("forbidden")
-        return problem(request, 403, "Forbidden", str(err))
+        return problem(request, ${forbiddenStatus}, "${problemTitle(forbiddenStatus)}", str(err))
 
     # RS-17 - the 7807 title on the when-gate rung is the ERROR NAME
     # (errorTitle humanises Disallowed), not the 409 reason phrase.  The
@@ -1650,9 +1661,9 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
-        log("warn", "domain_error", message=str(err), status=422)
+        log("warn", "domain_error", message=str(err), status=${domainStatus})
         record_domain_fault("domain_error")
-        return problem(request, 422, "Unprocessable Entity", str(err))
+        return problem(request, ${domainStatus}, "${problemTitle(domainStatus)}", str(err))
 
 ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
@@ -1684,8 +1695,14 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # sanitized 500 so the real message stays in the log stream, not on the
         # wire.  The specific handlers above still win via the exception MRO
         # (Starlette looks each exception's type up most-specific-first).
+        #
+        # The detail is the literal "internal" (RS-26), not a prose sentence:
+        # this arm's body must be byte-identical to the other four backends'
+        # for the M-T9.11 wire golden, and python was the one sending its own
+        # wording.  Nothing about the fault may reach the wire, so the string
+        # carries no information and there is no cost to matching.
         log("error", "internal_error", error=str(err), status=500)
-        return problem(request, 500, "Internal Server Error", "An unexpected error occurred.")
+        return problem(request, 500, "Internal Server Error", "internal")
 `;
 }
 
