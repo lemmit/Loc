@@ -243,5 +243,4 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
       consumer.indexOf(":brod.start_link_group_subscriber_v2"),
     );
   });
-
 });
