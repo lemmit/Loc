@@ -149,8 +149,9 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
     expect(consumer).toContain("{:ok, :commit, state}");
     // Consumed log carries the partition key for the ordering e2e probe.
     expect(consumer).toContain('key: Map.get(envelope, "loomkey")');
-    // Dead-letter v1: park onto <address>.dlq; the first park can race the
-    // dlq topic's creation + metadata propagation, so ensure + bounded retry.
+    // Dead-letter v1: park onto <address>.dlq.  The create+retry fallback
+    // survives a topic deleted under a running consumer — but it is NOT what
+    // makes the first park work; see the startup-ensure test below.
     expect(consumer).toContain(
       ':brod.produce_sync(client, address <> ".dlq", :hash, key || "", raw)',
     );
@@ -210,4 +211,37 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
     expect(dockerfile).toContain("build-essential git ca-certificates");
     expect(dockerfile).not.toContain("cmake");
   });
+
+  it("ensures the DLQ topic at STARTUP, not on the first park", async () => {
+    // Regression: `channels-e2e-kafka (elixir)` failed its DLQ assertion on
+    // every run the workflow ever had.  Reproduced against a fresh broker:
+    //
+    //   dlq park failed: :unknown_topic_or_partition   (mfa: retry_park/5)
+    //
+    // brod's client caches a topic it could not resolve as UNKNOWN, and that
+    // negative entry outlives the 5x1s retry ladder.  So when the first park
+    // is also what creates `<address>.dlq`, its produce_sync misses, poisons
+    // the cache, and every later park misses too — the ladder can never win.
+    // Confirmed both directions on a real broker: with the topic absent at
+    // client start the park never lands, with it present it lands first try.
+    //
+    // The fix is ordering: ensure the dlq topic alongside the address topic
+    // BEFORE the client is ever asked to produce to it.
+    const files = await generateSystemFiles(FIXTURE);
+    const consumer = files.get("ship_api/lib/ship_api/kafka_consumer.ex") ?? "";
+
+    const startBody = consumer.slice(
+      consumer.indexOf("def start(env_var, client, address, group) do"),
+      consumer.indexOf(":brod.start_link_group_subscriber_v2"),
+    );
+    expect(startBody).not.toBe("");
+    // Both topics ensured in the startup call, before any produce.
+    expect(startBody).toContain("%{name: address,");
+    expect(startBody).toContain('name: address <> ".dlq"');
+    // And the ensure precedes the subscriber actually joining.
+    expect(consumer.indexOf('name: address <> ".dlq"')).toBeLessThan(
+      consumer.indexOf(":brod.start_link_group_subscriber_v2"),
+    );
+  });
+
 });
