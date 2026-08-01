@@ -117,11 +117,21 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     expect(ctl).toContain("ProblemDetails.validation_error_response(conn, changeset)");
   });
 
-  it("router has POST/PATCH/DELETE routes spliced into /api", async () => {
+  it("router has POST/DELETE routes spliced into /api, matching its own spec", async () => {
     const files = await generateSystemFiles(VANILLA_SOURCE);
     const router = files.get([...files.keys()].find((k) => k.endsWith("/router.ex"))!)!;
     expect(router).toMatch(/scope "\/api"[\s\S]*post "\/tasks", TaskController, :create/);
-    expect(router).toMatch(/scope "\/api"[\s\S]*patch "\/tasks\/:id", TaskController, :update/);
+    // `POST /tasks/:id/update`, not the generic `PATCH /tasks/:id` this used to
+    // assert.  The old expectation pinned a route the backend's OWN emitted
+    // OpenAPI never advertised — the `/tasks/{id}` PathItem carries only `get`
+    // + `delete`, while `/tasks/{id}/update` is published with `post` and
+    // `operationId: updateTask`.  So the spec promised an endpoint the router
+    // did not serve, every client built from that contract 404'd, and this test
+    // held the mismatch in place by asserting the router half of it.
+    expect(router).toMatch(
+      /scope "\/api"[\s\S]*post "\/tasks\/:id\/update", TaskController, :update/,
+    );
+    expect(router).not.toMatch(/patch "\/tasks\/:id"/);
     expect(router).toMatch(/scope "\/api"[\s\S]*delete "\/tasks\/:id", TaskController, :delete/);
   });
 

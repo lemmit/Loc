@@ -171,9 +171,24 @@ export function emitVanillaApiControllers(
     // generic PATCH is now gated on an EXPLICIT `update` operation (symmetric
     // with create/destroy), not merely on the aggregate having some operation.
     if (!es && agg.operations.some((o) => o.name === "update")) {
+      // `POST /<plural>/:id/update`, NOT `PATCH /<plural>/:id`.
+      //
+      // This backend used to mount the explicit `update` operation as a generic
+      // PATCH on the collection member.  Its own emitted OpenAPI never said so:
+      // the `/orders/{id}` PathItem carries only `get` + `delete`, while
+      // `/orders/{id}/update` is advertised with `post` and `operationId:
+      // updateOrder`.  So the spec promised an endpoint the router did not
+      // serve, and any client built from that contract — including Loom's own
+      // typed in-system client, which derives its paths from exactly this
+      // operation set — got a 404.
+      //
+      // `conformance-parity` could not see it: it diffs the emitted SPECS, and
+      // this backend's spec agrees with the other four.  The router was the
+      // outlier (`experience_gathered.md` §57 RS-13 is the same class — a
+      // backend disagreeing with its own published contract).
       routes.push({
-        method: "patch",
-        path: `/${aggsPath}/:id`,
+        method: "post",
+        path: `/${aggsPath}/:id/update`,
         controller: controllerName,
         action: ":update",
       });
