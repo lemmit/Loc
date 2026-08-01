@@ -12,8 +12,8 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
-import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { unwrapOpt } from "../../_frontend/form-helpers.js";
+import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import {

@@ -647,6 +647,15 @@ export interface Sink {
    *  module-level preamble + package dependency (Feliz).  Optional for the same
    *  reason as the two above: only that path writes it. */
   usesDataGrid?: boolean;
+  /** A `QueryView`'s LIST `data:` lambda param → the aggregate its rows are.
+   *
+   *  Page bodies carry no `receiverType`, so `o.amount` inside a row lambda
+   *  types as `string` and a primitive cannot tell a `money` column from a text
+   *  one.  The enclosing query knows, so it records the binding here.  (The
+   *  `single:` case already does the analogous thing through `paramTypes`; a
+   *  separate map keeps LIST bindings from being mistaken for record ones by
+   *  the `OperationForm`/`Action` resolution that reads `paramTypes`.) */
+  listRowAggregates?: ReadonlyMap<string, string>;
   /** Set by `emitTabs` to the first `Tabs`' default value — drives the shell's
    *  controlled tab-state declaration (Vue). Optional; only the tabs path writes it. */
   tabsDefault?: string;

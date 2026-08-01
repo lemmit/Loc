@@ -30,9 +30,9 @@
 // page, so its TEMPLATE is type-checked and not merely tree-shaken.
 
 import { lines } from "../../../util/code-builder.js";
+import { snake } from "../../../util/naming.js";
 import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { mergedImports } from "../../_walker/shared/imports.js";
-import { snake } from "../../../util/naming.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
 import { angularSink } from "./sink.js";
@@ -98,6 +98,7 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
   ];
   const tableTypeImports = [
     "type ColumnDef",
+    ...(columns.some((c) => c.numericSort) ? ["type Row"] : []),
     ...(anyFilterable ? ["type ColumnFiltersState"] : []),
     "type PaginationState",
     ...(selection ? ["type RowSelectionState"] : []),
@@ -194,6 +195,22 @@ ${lines(
   ``,
   `/** TanStack hands each \`onXChange\` either the next value or a function of the`,
   ` *  previous one; the adapter leaves that union to the caller. */`,
+  ...(columns.some((c) => c.numericSort)
+    ? [
+        "/** Comparator for a money / decimal column.  Those reach the row as a Decimal",
+        " *  OBJECT whose valueOf() returns a string, so TanStack's default a < b orders",
+        " *  them lexicographically — an ascending sort comes out [10, 100, 9].  Number()",
+        " *  goes through that same valueOf, which is what makes it a correct numeric",
+        " *  read, and (unlike TanStack's alphanumeric fallback) it stays correct for",
+        " *  negative amounts. */",
+        "function compareDecimal(a: Row<CellRow>, b: Row<CellRow>, id: string): number {",
+        "  const x = Number(a.getValue(id) ?? 0);",
+        "  const y = Number(b.getValue(id) ?? 0);",
+        "  return x < y ? -1 : x > y ? 1 : 0;",
+        "}",
+        "",
+      ]
+    : []),
   `function applyUpdater<S>(updater: Updater<S>, current: S): S {`,
   `  return typeof updater === "function" ? (updater as (old: S) => S)(current) : updater;`,
   `}`,
@@ -277,6 +294,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
     parts.push(`header: ${JSON.stringify(c.header)}`);
     parts.push(`enableSorting: ${c.sortable}`);
     parts.push(`enableColumnFilter: ${c.filterable}`);
+    // A money/decimal column needs an explicit numeric comparator — see
+    // `DataGridColumn.numericSort`.
+    if (c.numericSort) parts.push("sortingFn: compareDecimal");
     out.push(`    { ${parts.join(", ")} },`);
   }
   return out;

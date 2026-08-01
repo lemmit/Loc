@@ -49,9 +49,11 @@
 // semantics the other four already have.  Normalising to a JS number here would
 // FORK the behaviour (different sort order AND a different default sort
 // direction, since `getAutoSortDir` branches on `typeof value === "string"`) —
-// the opposite of the point.  The money-sort weakness is real and shared; it is
-// a cross-target defect to fix once, not to fix unilaterally on the fifth
-// frontend.
+// the opposite of the point.  The money-sort weakness that leaves is real and
+// SHARED, so it was fixed once across all five: a money column carries an
+// explicit numeric `sortingFn` (`loomCompareDecimal` here, `compareDecimal` on
+// the JSX targets), which is the only place the raw value is not what TanStack
+// should compare.
 
 import { lines } from "../../util/code-builder.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../_walker/target.js";
@@ -128,6 +130,14 @@ export const FELIZ_GRID_PRELUDE: string = lines(
   "/// toggle reads `shiftKey` off it to decide multi-sort).",
   '[<Fable.Core.Emit("$0($1)")>]',
   "let private loomHandle (handler: obj) (ev: obj) : unit = jsNative",
+  "",
+  "/// Comparator for a money / decimal column.  Fable maps those to a Decimal",
+  "/// OBJECT whose valueOf() returns a string, so TanStack's default a < b orders",
+  "/// them lexicographically — an ascending sort comes out [10, 100, 9].  The JSX",
+  "/// frontends parse money into a decimal.js Decimal with the same valueOf and",
+  "/// get the same wrong order, so this is a SHARED fix, applied identically.",
+  '[<Fable.Core.Emit("((a,b,id) => { const x = Number(a.getValue(id) ?? 0), y = Number(b.getValue(id) ?? 0); return x < y ? -1 : x > y ? 1 : 0; })")>]',
+  "let private loomCompareDecimal () : obj = jsNative",
   "",
   "/// Invoke a zero-argument TanStack method captured as a value.",
   '[<Fable.Core.Emit("$0()")>]',
@@ -290,6 +300,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
     parts.push(`"header" ==> "${escapeFs(c.header)}"`);
     parts.push(`"enableSorting" ==> ${c.sortable}`);
     parts.push(`"enableColumnFilter" ==> ${c.filterable}`);
+    // A money/decimal column needs an explicit numeric comparator — see
+    // `DataGridColumn.numericSort`.
+    if (c.numericSort) parts.push(`"sortingFn" ==> loomCompareDecimal ()`);
     out.push(def(parts));
   }
   return out;

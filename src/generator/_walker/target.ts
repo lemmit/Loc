@@ -225,6 +225,19 @@ export interface DataGridColumn {
   cell?: string;
   sortable: boolean;
   filterable: boolean;
+  /** True when this column's runtime value is a DECIMAL-LIKE OBJECT rather than
+   *  a JS primitive — a `money` or `decimal` field.
+   *
+   *  Every frontend parses those into an object wrapper (the JSX DTOs into
+   *  `decimal.js`'s `Decimal`, Feliz into Fable's), and both wrappers'
+   *  `valueOf()` returns a STRING.  TanStack's default comparator is `a < b`,
+   *  so a money column sorted ascending comes out `[10, 100, 9]` — lexicographic
+   *  order over the decimal string, on all five frontends alike.  A column
+   *  flagged here gets an explicit numeric `sortingFn` instead.
+   *
+   *  Set only for a SORTABLE `accessorKey` column: a computed cell has no value
+   *  to compare, and an unsortable column never reaches a comparator. */
+  numericSort?: boolean;
 }
 
 /** Everything a target needs to build a `DataGrid`'s child component

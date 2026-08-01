@@ -87,9 +87,12 @@ export function emitDataGrid(
   // .cellImports`.  A name a sibling already registered is in the snapshot and
   // is therefore NOT attributed to the cells.
   const importsBefore = snapshotImports(ctx);
+  // The aggregate the bound rows are, when the enclosing `QueryView` recorded
+  // one — the only source of FIELD TYPES for the columns (see `isDecimalLike`).
+  const rowAgg = rowsArg?.kind === "ref" ? ctx.listRowAggregates?.get(rowsArg.name) : undefined;
   const columns = positionalArgs(call)
     .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
-    .map((c, i) => resolveColumn(c, ctx, i, depth));
+    .map((c, i) => resolveColumn(c, ctx, i, depth, rowAgg));
   const cellImports = importsAddedSince(ctx, importsBefore);
 
   // Any column asking to be filtered turns the per-column filter row on; the
@@ -197,6 +200,7 @@ function resolveColumn(
   ctx: WalkContext,
   index: number,
   depth: number,
+  rowAggregate: string | undefined,
 ): DataGridColumn {
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
@@ -209,6 +213,7 @@ function resolveColumn(
   const explicitField = stringNamed(call, "field");
   const inferred = simpleAccessorField(accessorArg);
   const accessorKey = explicitField ?? inferred;
+  const sortable = boolNamed(call, "sortable") && accessorKey !== undefined;
 
   let cell: string | undefined;
   if (!accessorKey && accessorArg?.kind === "lambda" && accessorArg.body) {
@@ -231,9 +236,36 @@ function resolveColumn(
     cell,
     // A column with no resolvable field can't be sorted or filtered BY VALUE,
     // so those flags are forced off rather than emitted and silently ignored.
-    sortable: boolNamed(call, "sortable") && accessorKey !== undefined,
+    sortable,
     filterable: boolNamed(call, "filterable") && accessorKey !== undefined,
+    // `money`/`decimal` reach the row as an object wrapper whose `valueOf()` is
+    // a string, so the default `a < b` comparator orders them lexicographically
+    // — see `DataGridColumn.numericSort`.
+    numericSort: sortable && isDecimalLike(accessorKey, rowAggregate, ctx) ? true : undefined,
   };
+}
+
+/** True when a column reads a `money`/`decimal` field — the two primitives every
+ *  frontend represents as a decimal OBJECT at runtime.
+ *
+ *  Resolved from the ROW AGGREGATE rather than the accessor's `memberType`,
+ *  because a page body carries no `receiverType`: `o.amount` inside a
+ *  `data: rows => …` lambda types as `string` for every field, money included.
+ *  The enclosing `QueryView` records which aggregate the rows are
+ *  (`ctx.listRowAggregates`), and its declared fields carry the real types.
+ *  Unresolvable (no recorded aggregate, an unknown field) → false, which keeps
+ *  TanStack's default comparator, i.e. the pre-existing behaviour. */
+function isDecimalLike(
+  field: string | undefined,
+  rowAggregate: string | undefined,
+  ctx: WalkContext,
+): boolean {
+  if (!field || !rowAggregate) return false;
+  const agg = ctx.aggregatesByName.get(rowAggregate);
+  const f = agg?.fields.find((x) => x.name === field);
+  const t = f?.type;
+  const base = t?.kind === "optional" ? t.inner : t;
+  return base?.kind === "primitive" && (base.name === "money" || base.name === "decimal");
 }
 
 /** `o => o.sku` → `"sku"`.  Undefined for anything more complex. */

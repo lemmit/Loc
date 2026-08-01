@@ -71,8 +71,10 @@ function renderSfc(spec: DataGridSpec): string {
     cellBody: cellBody(columns, selection),
   });
 
+  const needsDecimalSort = columns.some((c) => c.numericSort);
   const typeImports = [
     "type ColumnDef",
+    ...(needsDecimalSort ? ["type Row"] : []),
     "type SortingState",
     "type Updater",
     ...(anyFilterable ? ["type ColumnFiltersState"] : []),
@@ -151,6 +153,22 @@ function renderSfc(spec: DataGridSpec): string {
     ``,
     `/** TanStack hands each \`onXChange\` either the next value or a function of`,
     ` *  the previous one; Vue's adapter leaves that union to the caller. */`,
+    ...(columns.some((c) => c.numericSort)
+      ? [
+          "/** Comparator for a money / decimal column.  Those reach the row as a Decimal",
+          " *  OBJECT whose valueOf() returns a string, so TanStack's default a < b orders",
+          " *  them lexicographically — an ascending sort comes out [10, 100, 9].  Number()",
+          " *  goes through that same valueOf, which is what makes it a correct numeric",
+          " *  read, and (unlike TanStack's alphanumeric fallback) it stays correct for",
+          " *  negative amounts. */",
+          "function compareDecimal(a: Row<T>, b: Row<T>, id: string): number {",
+          "  const x = Number(a.getValue(id) ?? 0);",
+          "  const y = Number(b.getValue(id) ?? 0);",
+          "  return x < y ? -1 : x > y ? 1 : 0;",
+          "}",
+          "",
+        ]
+      : []),
     `function applyUpdater<S>(updater: Updater<S>, current: S): S {`,
     `  return typeof updater === "function" ? (updater as (old: S) => S)(current) : updater;`,
     `}`,
@@ -253,6 +271,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
     parts.push(`header: ${JSON.stringify(c.header)}`);
     parts.push(`enableSorting: ${c.sortable}`);
     parts.push(`enableColumnFilter: ${c.filterable}`);
+    // A money/decimal column needs an explicit numeric comparator — see
+    // `DataGridColumn.numericSort`.
+    if (c.numericSort) parts.push("sortingFn: compareDecimal");
     out.push(`  { ${parts.join(", ")} },`);
   }
   return out;

@@ -16,11 +16,29 @@ export function sortRows<T>(rows: readonly T[] | undefined, key: string, dir: st
     return [...rows];
   }
   return [...rows].sort((a, b) => {
-    const av = (a as Record<string, unknown>)[key];
-    const bv = (b as Record<string, unknown>)[key];
+    const av = sortValue((a as Record<string, unknown>)[key]);
+    const bv = sortValue((b as Record<string, unknown>)[key]);
     const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1;
     return dir === "desc" ? -c : c;
   });
+}
+
+/** Unwrap a decimal-like cell value to a number before comparing.
+ *
+ * A \`money\` / \`decimal\` field arrives as a Decimal OBJECT (decimal.js), and its
+ * \`valueOf()\` returns a STRING — so a bare \`<\` compares the decimal text and
+ * sorts [10, 100, 9].  \`Number()\` goes through that same \`valueOf\`, which is
+ * what makes it the correct numeric read.  Anything that is not an object, or
+ * whose numeric form is NaN, is returned untouched so string and boolean
+ * columns keep their existing ordering.  Arrays are excluded explicitly:
+ * \`Number([])\` is 0, which would silently reorder them.
+ */
+function sortValue(v: unknown): unknown {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) {
+    return v;
+  }
+  const n = Number(v);
+  return Number.isNaN(n) ? v : n;
 }
 
 // Client-side row filter for interactive tables (generated — M-T1.1).
