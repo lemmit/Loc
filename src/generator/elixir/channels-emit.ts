@@ -1165,10 +1165,29 @@ defmodule ${appModule}.KafkaConsumer do
 
     # Idempotent topic ensure — joining a group on a not-yet-produced topic
     # stalls; tolerant of :topic_already_exists.
+    #
+    # The DLQ topic is ensured HERE, before the client is ever asked to
+    # produce to it, and that ordering is load-bearing.  brod's client
+    # caches a topic it could not resolve as unknown, and that negative
+    # entry outlives any short retry ladder — so if the FIRST park is what
+    # creates \`<address>.dlq\`, its \`produce_sync\` fails with
+    # :unknown_topic_or_partition, poisons the cache, and every subsequent
+    # park fails too.  Creating it up front means the first park never
+    # misses.  (park/4 keeps its create+retry fallback for a topic deleted
+    # out from under a running consumer.)
     _ =
       :brod.create_topics(
         endpoints,
-        [%{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []}],
+        [
+          %{name: address, num_partitions: 3, replication_factor: 1, assignments: [], configs: []},
+          %{
+            name: address <> ".dlq",
+            num_partitions: 3,
+            replication_factor: 1,
+            assignments: [],
+            configs: []
+          }
+        ],
         %{timeout: 15_000},
         conn_config
       )

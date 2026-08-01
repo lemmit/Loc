@@ -337,7 +337,14 @@ describe.skipIf(!ENABLED)("kafka log semantics (M-T4.4 slice 4)", () => {
         );
         return out.includes("not-json{{");
       },
-      30_000,
+      // 90s, not 30s: each poll shells a console-consumer JVM into the
+      // container with --timeout-ms 5000, so a 30s budget bought only ~3
+      // attempts and flaked under a contended runner (run 42 took node +
+      // java red here; a plain re-run took both green).  This cannot mask a
+      // broken park: a working park lands in well under a second — verified
+      // against a real broker — so the extra budget only forgives a slow
+      // PROBE, never a consumer that is failing to park.
+      90_000,
       "poisoned record parked on the dlq topic",
     );
     // The parking was announced on the consumer side.  Polled: piped stdout
