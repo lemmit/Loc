@@ -570,7 +570,7 @@ function opRequestModel(
       ? op.params.map((p) =>
           withFieldConstraint(
             p.name,
-            requestFieldDecl(p.type, false, ctx),
+            requestFieldDecl(p.type, false, ctx, undefined, "operation"),
             constraints.get(p.name),
           ),
         )
@@ -601,12 +601,21 @@ function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
  *
  *  `defaultExpr` (the field's lowered `= <expr>` default) must win over the
  *  implicit bool `= False` — else `active: bool = true` omitted on create would
- *  arrive `False` (RS-6; surfaced by the python behavioral tier). */
+ *  arrive `False` (RS-6; surfaced by the python behavioral tier).
+ *
+ *  `slot` scopes the implicit bool rule to CREATE input, which is the only
+ *  place it is defined (`hasImplicitDefault` in wire-projection.ts: "an omitted
+ *  create input is well-defined without an explicit `= default`").  On an
+ *  OPERATION body — `update` included — there is nothing to construct, so an
+ *  omitted field is a missing required one, not a `False`: emitting `= False`
+ *  there let a PUT that left out `active: bool = true` silently overwrite a
+ *  stored `true` (RS-26, the inverse of RS-6). */
 export function requestFieldDecl(
   t: TypeIR,
   optional: boolean,
   ctx: BoundedContextIR,
   defaultExpr?: ExprIR,
+  slot: "create" | "operation" = "create",
 ): string {
   const base = requestPyType(t, ctx);
   // A SERVER-SOURCED default (`now()` / `currentUser.*`) must NOT be a Pydantic
@@ -622,7 +631,7 @@ export function requestFieldDecl(
   if (defaultExpr) return `${base} = ${renderPyExpr(defaultExpr)}`;
   const isOpt = optional || t.kind === "optional";
   if (isOpt) return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
-  if (t.kind === "primitive" && t.name === "bool") return `${base} = False`;
+  if (slot === "create" && t.kind === "primitive" && t.name === "bool") return `${base} = False`;
   return base;
 }
 

@@ -858,10 +858,14 @@ function openApiType(t: TypeIR, schemasModule: string): string {
  *  model-binding) treats an omitted request bool as `false`, so neither
  *  backend marks request bools required — matching keeps the parity gate
  *  green. */
+/** Which wire slot a schema describes.  Only `create` gets the implicit-bool
+ *  optionality (RS-6); `operation` bodies require every declared field (RS-26). */
+type SchemaSlot = "response" | "create" | "operation";
+
 function renderProperties(
   fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }>,
   schemasModule: string,
-  isRequest = false,
+  slot: SchemaSlot = "response",
 ): {
   propsLines: string[];
   requiredAtoms: string[];
@@ -880,9 +884,19 @@ function renderProperties(
     const key = f.name;
     const schema = openApiType(f.type, schemasModule);
     propsLines.push(`      ${key}: ${schema}`);
-    const info = wireTypeInfo(f.type, isRequest ? "request" : "response");
+    const info = wireTypeInfo(f.type, slot === "response" ? "response" : "request");
+    // RS-26: scoped to CREATE.  An omitted create bool is well-defined
+    // (`hasImplicitDefault`), but on an OPERATION body — `update` included —
+    // there is nothing to construct, so an omitted field is a missing required
+    // one.  Marking it optional here made the SPEC disagree with this
+    // backend's own runtime: `@update_required` in the emitted changeset
+    // already lists every bool, so a client trusting the spec and omitting
+    // `active` gets a 422 the spec said would not happen.
     const optionalBoolRequest =
-      isRequest && !info.isNullable && info.refKind === "primitive" && info.primitive === "bool";
+      slot === "create" &&
+      !info.isNullable &&
+      info.refKind === "primitive" &&
+      info.primitive === "bool";
     // An explicitly-defaulted request field is optional input (Ash applies
     // the default on omission), so it drops from the required set too.
     if (!f.optional && !optionalBoolRequest && !f.wireDefault) requiredAtoms.push(`:${key}`);
@@ -903,9 +917,9 @@ function renderSchemaModule(
   schemaTitle: string,
   fields: Array<{ name: string; type: TypeIR; optional: boolean; wireDefault?: boolean }>,
   schemasModule: string,
-  isRequest = false,
+  slot: SchemaSlot = "response",
 ): string {
-  const { propsLines, requiredAtoms } = renderProperties(fields, schemasModule, isRequest);
+  const { propsLines, requiredAtoms } = renderProperties(fields, schemasModule, slot);
   const propsBlock = propsLines.length > 0 ? propsLines.join(",\n") : "      # no properties";
   const requiredBlock = requiredAtoms.length > 0 ? `[${requiredAtoms.join(", ")}]` : "[]";
 
@@ -1218,7 +1232,7 @@ function renderCreateRequestSchema(agg: AggregateIR, webModule: string): string 
     `Create${agg.name}Request`,
     fields,
     `${webModule}.Api.Schemas`,
-    true,
+    "create",
   );
 }
 
@@ -1242,7 +1256,13 @@ function renderOperationRequestSchema(
       optional: wireTypeInfo(p.type, "request").isNullable,
     }),
   );
-  return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
+  return renderSchemaModule(
+    moduleName,
+    schemaName,
+    fields,
+    `${webModule}.Api.Schemas`,
+    "operation",
+  );
 }
 
 function renderWorkflowRequestSchema(
@@ -1258,7 +1278,13 @@ function renderWorkflowRequestSchema(
       optional: false,
     }),
   );
-  return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
+  return renderSchemaModule(
+    moduleName,
+    schemaName,
+    fields,
+    `${webModule}.Api.Schemas`,
+    "operation",
+  );
 }
 
 /** Operation-return union DTO — the tagged wire union an exception-less

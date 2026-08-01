@@ -651,11 +651,14 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // `create-input-default-parity.test.ts` — each asserts its backend STILL
     // fails, so a backend that starts conforming reddens the gate until its
     // waiver comes out.
-    conforms: ["node"],
-    targets: ["dotnet", "java", "python", "elixir"],
+    conforms: ["node", "python", "java", "elixir"],
+    targets: ["dotnet"],
     provenance: [
       "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
       "fixed (node): zodFor gained a `create-body` context so the implicit-bool rule fires only on create — src/platform/hono/v4/routes-builder.ts",
+      "fixed (python): requestFieldDecl gained a `slot` so the implicit bool `= False` fires only on create — src/generator/python/routes-builder.ts",
+      "fixed (elixir): SPEC-only divergence — `@update_required` already listed every bool at runtime while the OpenApiSpex schema did not; renderProperties gained a slot — src/generator/elixir/vanilla/openapi-emit.ts",
+      "fixed (java): BOTH halves were wrong — the record used primitives (`int qty`, `boolean active`), so Jackson silently supplied 0/false for an omitted key while RequiredSet claimed qty required; operation components are now boxed + @NotNull (emit/dto.ts) and requiredParams no longer drops bare bools (emit/openapi-customizer.ts)",
     ],
     // Static: assertable against each backend's emitted update-request contract
     // (zod schema / Pydantic model / record attributes / RequiredSet /

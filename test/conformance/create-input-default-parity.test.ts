@@ -134,19 +134,33 @@ describe("create-input defaults reach every backend's create surface", () => {
 // semantics.md) — the exact inverse of RS-6, which says an omitted CREATE bool
 // materializes its declared default.
 //
-// Node conforms.  The other four still default an omitted update bool, each by
-// its own mechanism, and they are WAIVED rather than skipped: 1-vs-4 with the
-// MINORITY correct (node's `.default(false)` was added to match .NET
-// model-binding and Phoenix, so four backends agreed and the agreement was
-// wrong).  Each waiver dies when its backend lands the rule; the list only
-// shrinks.
+// It began 1-vs-4 with the MINORITY correct — node's `.default(false)` had been
+// added to match .NET model-binding and Phoenix, so four backends agreed and the
+// agreement was wrong.  Four now conform, each having needed a different fix:
+//
+//   node     zodFor gained a `create-body` context
+//   python   requestFieldDecl gained a `slot`
+//   elixir   SPEC-ONLY divergence — `@update_required` already listed every bool
+//            at runtime while the OpenApiSpex schema did not
+//   java     BOTH halves wrong — primitive components meant Jackson supplied
+//            0/false for an omitted key while RequiredSet claimed required;
+//            now boxed + @NotNull
+//
+// Each waiver dies when its backend lands the rule; the list only shrinks.
 // ---------------------------------------------------------------------------
 
 const UPDATE_BOOL_WAIVED: Partial<Record<Backend, string>> = {
-  python: "emits `active: bool = False` on the Pydantic update model",
-  java: 'omits both bools from RequiredSet("UpdateItemRequest", …)',
-  dotnet: "emits `bool Active` with no [Required]; model binding supplies false",
-  vanilla: "omits both bools from the OpenApiSpex `required:` list",
+  // .NET is the one still open, and its fix is not the same shape as the other
+  // three.  It already emits `[Required]` on the non-bool components — but on a
+  // NON-NULLABLE VALUE TYPE that annotation cannot reject absence: model binding
+  // always produces a value (`false`/`0`), so validation sees a non-null and
+  // passes.  Closing it means making the component nullable (`bool?`) so there
+  // is an absence to detect, then unwrapping at the domain call — the same
+  // boxing Java needed.  Left waived rather than guessed at: unlike the other
+  // three, the emitted-source shape alone does not prove the runtime rejects,
+  // so this one wants a booted check before the waiver comes out.
+  dotnet:
+    "emits `bool Active`; [Required] on a non-nullable value type cannot reject an omitted key",
 };
 
 /** Is `field` REQUIRED (no default, no optionality) in the update request? */
@@ -174,10 +188,22 @@ function updateRequiresField(files: Map<string, string>, backend: Backend, field
       return new RegExp(`"${field}"`).test(block);
     }
     case "vanilla": {
-      const block = sliceBlock(all, "required: [", "]");
-      return new RegExp(`:${field}\\b`).test(block);
+      // Scoped to the update-request MODULE, not the joined blob: every
+      // OpenApiSpex schema carries a `required:` list, so a blob-wide
+      // `indexOf("required: [")` matches whichever comes first (the shared
+      // `File` schema, as it happens) and the check silently answers about the
+      // wrong module.
+      const mod = fileNamed(files, /update_item_request\.ex$/);
+      return new RegExp(`required: \\[[^\\]]*:${field}\\b`).test(mod);
     }
   }
+}
+
+/** The one emitted file whose path matches — "" when absent, so a missing file
+ *  fails the assertion rather than passing it vacuously. */
+function fileNamed(files: Map<string, string>, pattern: RegExp): string {
+  for (const [path, content] of files) if (pattern.test(path)) return content;
+  return "";
 }
 
 function sliceBlock(source: string, from: string, to: string): string {
