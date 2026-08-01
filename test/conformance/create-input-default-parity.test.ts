@@ -113,3 +113,104 @@ describe("create-input defaults reach every backend's create surface", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// UPDATE-side: an omitted bool must be REJECTED, never silently defaulted.
+//
+// The sibling half of the rule above, and the one that eats data.  A create
+// default is a construction rule; on UPDATE there is nothing to construct, so
+// "absent" cannot mean "the default" — it can only mean "the client did not
+// send a required field".  Loom's update contract is full-replacement (PUT
+// carries every field), so every updatable field is required input.
+//
+// Applying a wire default there silently rewrote stored state: for
+// `active: bool = true`, a PUT omitting `active` set it to FALSE — not even the
+// declared default, because the value came from a hardcoded implicit-bool rule
+// rather than the model.  This is the proto3 lesson: a wire-level default makes
+// "absent" indistinguishable from "the default value", which is why proto3
+// dropped custom field defaults and had to re-add explicit field presence.
+//
+// Node is fixed.  The other four still default an omitted update bool, each by
+// its own mechanism, and they are WAIVED rather than skipped — the split is a
+// cross-backend published-contract question (the RS-15 shape, except here the
+// minority backend is the correct one), so it wants a recorded decision, not
+// four quiet per-backend patches.  Each waiver dies when its backend lands the
+// rule; the list only shrinks.
+// ---------------------------------------------------------------------------
+
+const UPDATE_BOOL_WAIVED: Partial<Record<Backend, string>> = {
+  python: "emits `active: bool = False` on the Pydantic update model",
+  java: 'omits both bools from RequiredSet("UpdateItemRequest", …)',
+  dotnet: "emits `bool Active` with no [Required]; model binding supplies false",
+  vanilla: "omits both bools from the OpenApiSpex `required:` list",
+};
+
+/** Is `field` REQUIRED (no default, no optionality) in the update request? */
+function updateRequiresField(files: Map<string, string>, backend: Backend, field: string): boolean {
+  const all = [...files.values()].join("\n");
+  const pascal = field.charAt(0).toUpperCase() + field.slice(1);
+  switch (backend) {
+    case "node": {
+      const block = sliceBlock(all, "const UpdateItemRequest = z.object({", "})");
+      return (
+        new RegExp(`\\b${field}:`).test(block) &&
+        !new RegExp(`\\b${field}:[^,\\n]*\\.default\\(`).test(block)
+      );
+    }
+    case "python": {
+      const block = sliceBlock(all, "class UpdateItemRequest(BaseModel):", "\n\n");
+      return new RegExp(`^\\s*${field}:\\s*[^=\\n]+$`, "m").test(block);
+    }
+    case "dotnet": {
+      const block = sliceBlock(all, "public sealed record UpdateItemRequest(", ");");
+      return new RegExp(`\\[Required[^\\]]*\\]\\s*bool\\s+${pascal}\\b`).test(block);
+    }
+    case "java": {
+      const block = sliceBlock(all, 'new RequiredSet("UpdateItemRequest"', ")");
+      return new RegExp(`"${field}"`).test(block);
+    }
+    case "vanilla": {
+      const block = sliceBlock(all, "required: [", "]");
+      return new RegExp(`:${field}\\b`).test(block);
+    }
+  }
+}
+
+function sliceBlock(source: string, from: string, to: string): string {
+  const at = source.indexOf(from);
+  if (at < 0) return "";
+  const end = source.indexOf(to, at + from.length);
+  return source.slice(at, end < 0 ? undefined : end + to.length);
+}
+
+describe("an omitted UPDATE bool is rejected, not silently defaulted", () => {
+  // Both fixture bools are declared with an explicit `= default`, so a wire
+  // default on the update side can only come from the implicit-bool rule.
+  const BOOLS = ["active", "archived"];
+
+  for (const backend of BACKENDS) {
+    const waiver = UPDATE_BOOL_WAIVED[backend];
+    it(`${BACKEND_LABEL[backend]}${waiver ? " (waived)" : ""}`, async () => {
+      const files = await generateCorpusCase(FEATURE, backend);
+      const required = BOOLS.filter((f) => updateRequiresField(files, backend, f));
+
+      if (waiver) {
+        // Ratchet: the waiver must still be EARNED.  If a backend starts
+        // requiring its update bools, this fails and the waiver comes out —
+        // a stale waiver is how a fixed gap silently stops being tracked.
+        expect(
+          required,
+          `${BACKEND_LABEL[backend]} now requires ${required.join(", ")} on update — ` +
+            `drop its UPDATE_BOOL_WAIVED entry (${waiver})`,
+        ).toHaveLength(0);
+        return;
+      }
+
+      expect(
+        required,
+        `${BACKEND_LABEL[backend]} does not require ${BOOLS.filter((f) => !required.includes(f)).join(", ")} ` +
+          `on update — a PUT omitting the field will silently overwrite stored state`,
+      ).toEqual(BOOLS);
+    });
+  }
+});
