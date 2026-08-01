@@ -1620,11 +1620,28 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // codegen — so the placeholder is defence-in-depth for an unvalidated
       // IR, not a silent generator gap.
       const recv = emitExpr(expr.receiver, ctx);
-      const argsRendered = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+      const argsList = expr.args.map((a) => emitExpr(a, ctx));
+      const argsRendered = argsList.join(", ");
       if (recv.includes("/* unresolved:")) {
         const receiverDesc = describeReceiver(expr.receiver);
         return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding */ undefined`;
       }
+      // A SCALAR INTRINSIC (`src/util/intrinsics.ts`) — Loom's spelling is its
+      // own and must be translated, exactly as every backend translates it
+      // through a snippet table.  Without this the fallthrough below emitted
+      // the Loom spelling verbatim: a compile error where the host language
+      // spells the op differently (`toUpper` → `toUpperCase`), and SILENTLY
+      // WRONG where it spells it the same but means something else
+      // (`replace` = first-only vs Loom's replace-all; `substring` = start+end
+      // vs Loom's start+length).  A target with no table declines and keeps
+      // the verbatim behaviour.
+      const intrinsic = ctx.target.renderIntrinsic?.(
+        expr.receiverType,
+        expr.member,
+        recv,
+        argsList,
+      );
+      if (intrinsic !== undefined) return intrinsic;
       return `${recv}.${expr.member}(${argsRendered})`;
     }
     case "id": {

@@ -88,6 +88,18 @@ export function renderStdlibMarkdown(): string {
     "non-queryable one in that position is rejected with `loom.intrinsic-not-queryable`",
     "rather than silently degrading.",
     "",
+    "These are Loom's OWN spellings, translated per target — `s.toUpper()` is",
+    "`toUpperCase()` in JavaScript, `.ToUpper()` in C#, `String.upcase/1` in",
+    "Elixir.  Two carry semantics the host language spells the same but defines",
+    "differently, so read the contract, not the name: **`replace` replaces every",
+    "occurrence** (not just the first), and **`substring(start, len)` takes a",
+    "LENGTH** (not an end index).",
+    "",
+    "Available in aggregate/operation bodies on all five backends, and in page /",
+    "component expressions on the four JS frontends (React / Vue / Svelte /",
+    "Angular), which share the TypeScript backend's snippet table.  Feliz and",
+    "Flutter page bodies do not translate them yet.",
+    "",
   );
   for (const { receiver } of RECEIVER_ORDER) {
     const table = intrinsicTable(receiver);
