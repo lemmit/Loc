@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { errorTitle } from "../../../util/error-defaults.js";
 import { renderPhoenixDomainFault, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 export function renderVanillaProblemDetailsModule(
@@ -24,6 +25,12 @@ export function renderVanillaProblemDetailsModule(
    *  override-free app stays byte-identical. */
   uniquenessStatus = 409,
   concurrencyStatus = 409,
+  /** Resolved HTTP status for the `NotFound` rung — 404 by default, or the api's
+   *  `httpStatus NotFound -> <Code>` override (M-T5.20).  `not_found_response/3`
+   *  is the SHARED 404 responder every controller delegates to, so resolving it
+   *  here is what stops a remap from moving the per-controller arms while this
+   *  one stayed a literal. */
+  notFoundStatus = 404,
 ): string {
   // Optimistic-concurrency 409 (`versioned` capability, D-VERSIONED).  A stale
   // write raises `Ecto.StaleEntryError`, which the repository rescues into
@@ -182,7 +189,7 @@ ${responseFns}
   Send a 404 ProblemDetails response for a missing record.
   """
   def not_found_response(conn, kind, id) do
-    problem_response(conn, 404, "Not Found", "#{kind} #{id} not found")
+    problem_response(conn, ${notFoundStatus}, ${JSON.stringify(errorTitle("NotFound"))}, "#{kind} #{id} not found")
   end
 
   @doc """

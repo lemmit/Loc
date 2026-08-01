@@ -41,7 +41,13 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { denialTerm, disallowedTerm } from "./denial.js";
+import {
+  denialOverrides,
+  denialResponse,
+  denialTerm,
+  disallowedResponse,
+  disallowedTerm,
+} from "./denial.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
@@ -576,9 +582,10 @@ export function renderEsController(
   // emit the clause when some command carries a `when`, so it never shadows the
   // catch-all as dead code.
   const hasWhenGate = publicOps.some((op) => op.when !== undefined);
+  const denialStatuses = denialOverrides(ctx);
   const disallowedClause = hasWhenGate
     ? `  defp command_error(conn, {:disallowed, detail}) do
-    ProblemDetails.problem_response(conn, 409, "Disallowed", detail)
+    ${disallowedResponse("detail", denialStatuses)}
   end
 
 `
@@ -586,14 +593,14 @@ export function renderEsController(
   const commandError = hasCommands
     ? `
 ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
-    ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
+    ${denialResponse("forbidden", "detail", denialStatuses)}
   end
 
   # RS-15 — a tripped precondition names the predicate that failed, matching
   # node/dotnet/java/python byte-for-byte.  The catch-all below stays for an
   # untagged reason (a raise the domain core didn't type).
   defp command_error(conn, {:precondition_failed, detail}) do
-    ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)
+    ${denialResponse("precondition", "detail", denialStatuses)}
   end
 
   # A concurrent append lost the (stream_id, version) race — the append-only PK
@@ -605,7 +612,7 @@ ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
   end
 
   defp command_error(conn, _reason) do
-    ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")
+    ${denialResponse("precondition", '"A precondition failed"', denialStatuses)}
   end
 `
     : "";

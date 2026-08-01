@@ -758,6 +758,53 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "runtime-verified on node (PGlite), python (uvicorn + postgres) and java (gradle:9-jdk25 boot + postgres): all three match the golden byte-for-byte on core-domain, 0 divergences",
     ],
     tier: "behavioral",
+    tier: "static",
+  },
+  {
+    id: "RS-28",
+    title: "An unrecognised error term is a sanitized 500, never a 400 that echoes it",
+    trigger:
+      "an `{:error, <term>}` / thrown fault that no declared error variant, wire-validation failure, or denial rung matches — e.g. a hand-written `extern` handler returning an unmodelled error, or an unexpected fault escaping a workflow's run",
+    observable:
+      'the response is 500 "Internal Server Error" and its RFC 7807 `detail` is the fixed string "internal". TWO claims, both wire-visible. STATUS: an error the server did not model is a SERVER fault, so 4xx is wrong on its face — 400 tells the caller to fix a request that was never the problem. DETAIL: the term is never rendered into the body; a serialized internal value leaks struct names, module paths and sometimes the failing value itself to an unauthenticated caller. MODELLED faults are unaffected — a declared `error` payload, a wire-validation failure, and each denial rung keep their own status and occurrence-specific `detail`; this rule governs only the arm none of them matched.',
+    // Elixir answered 400 and `inspect/1`d the term into `detail`:
+    //
+    //   def respond(conn, {:error, reason}),
+    //     do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
+    //
+    // It survived RS-15's 400 → 422 sweep precisely because it is NOT the
+    // domain floor: RS-15 moved the rejections the domain MAKES, and this is
+    // the rejection nobody made.  Fixed via the shared `respondErrorTail` in
+    // `denial.ts`; `_reason` is bound underscore-prefixed so nothing reads it.
+    //
+    // PYTHON IS A SEPARATE, SMALLER DIVERGENCE ON THE SAME ARM, and the way it
+    // was found is the point.  The fix's own report proposed this rule as
+    // all-five-conforming.  That list was INFERRED — checking it showed
+    // node/.NET/java emit the literal `"internal"` while python emits
+    // `"An unexpected error occurred."`.  Python has no leak (its string is
+    // fixed and reflects nothing), so it is not the defect this rule was minted
+    // for; it simply is not byte-identical, and byte-identity is the whole
+    // premise of the M-T9.11 golden.  Listed as a `target` until python moves.
+    //
+    // This is the THIRD time in this rule family that an all-five `conforms`
+    // was asserted from reading rather than checking (RS-18 twice, RS-19 once).
+    // The habit the registry needs is: enumerate the other backends' emitted
+    // literal before writing the list, every time.
+    //
+    // Not caught by the M-T9.11 wire golden: no system in the shared corpus
+    // reaches this arm, so all five legs were green with the divergence in
+    // place — which is exactly why it needs a NAME.
+    conforms: ["node", "dotnet", "java", "elixir"],
+    targets: ["python"],
+    provenance: [
+      "found 2026-07-29 while landing RS-15 (#2300) by grepping the vanilla Phoenix denial protocol's edges; tracked as M-T6.24 (1)",
+      'fixed (elixir): the shared respondErrorTail in src/generator/elixir/vanilla/denial.ts emits problem_response(conn, 500, "Internal Server Error", "internal")',
+      "python divergence found 2026-08-01 by verifying the proposed conforms list instead of accepting it — src/generator/python/index.ts sends a different fixed string",
+    ],
+    // STATIC: assertable against the emitted handler source on all five without
+    // a boot.  Promote to `behavioral` when a corpus fixture reaches the arm —
+    // an `extern` stub returning an unmodelled error would do it in one case.
+    tier: "static",
   },
 ];
 

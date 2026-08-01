@@ -24,6 +24,7 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { renderExpr } from "../render-expr.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
+import { denialOverrides, denialResponse } from "./denial.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 
 /** Non-`all` custom finds an aggregate's repository declares — the ones that
@@ -162,9 +163,12 @@ ${cuLine}${innerBody}
       return `
   def ${findSnake}(conn, ${paramArg}) do
 ${cuLine}    if not (${gate}) do
-      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
-        `Forbidden: find ${f.name}`,
-      )})
+      ${denialResponse(
+        "forbidden",
+        JSON.stringify(`Forbidden: find ${f.name}`),
+        denialOverrides(ctx),
+        `${webModule}.ProblemDetails`,
+      )}
     else
 ${innerBody}
     end
@@ -213,7 +217,7 @@ ${absentArm}
       if (f.returnType.kind === "optional") {
         return wrap(`    case ${call} do
       {:ok, nil} ->
-        ProblemDetails.problem_response(conn, 404, "Not Found", "${aggPascal} not found")
+        ${denialResponse("notFound", `"${aggPascal} not found"`, denialOverrides(ctx))}
 
       {:ok, record} ->
         json(conn, serialize(record))

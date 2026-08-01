@@ -23,6 +23,7 @@ import { lineCount, type SourceMapRecorder } from "../_trace/sourcemap.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
 import type { ElixirChannelsCfg } from "./channels-emit.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { denialTerm } from "./vanilla/denial.js";
 import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
 import { lookupOp, opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 
@@ -993,18 +994,23 @@ function renderStmt(
         },
       ];
     }
-    case "precondition": {
-      const expr = renderExpr(st.expr, renderCtx);
-      return [
-        {
-          kind: "guard",
-          text: `unless ${expr}, do: throw({:error, ${JSON.stringify(`Precondition failed: ${st.source}`)}})`,
-        },
-      ];
-    }
+    // Both guard rungs of a reactor / starter body short-circuit through the
+    // SHARED denial protocol (`denialTerm`), so the thrown reason is the same
+    // tagged 2-tuple every other producer emits — `{:forbidden, "Forbidden: …"}`
+    // / `{:precondition_failed, "Precondition failed: …"}`.  `requires` used to
+    // throw a bare `:forbidden` atom, which carried the status but no `detail`,
+    // while its `precondition` sibling threw a bare message string: two shapes,
+    // neither matching the controllers' denial clauses (M-T6.24).
+    //
+    // Nothing PATTERN-MATCHES this throw today — a reactor `handle/1` is invoked
+    // straight from the context `Dispatcher` with no `try`/`catch`, so an
+    // uncaught throw crashes the calling process either way.  Unifying the shape
+    // is therefore safe now and correct the moment a catch site is added: the
+    // term already matches the `respond/2` / `command_error/2` denial clauses.
+    case "precondition":
     case "requires": {
       const expr = renderExpr(st.expr, renderCtx);
-      return [{ kind: "guard", text: `unless ${expr}, do: throw({:error, :forbidden})` }];
+      return [{ kind: "guard", text: `unless ${expr}, do: throw({:error, ${denialTerm(st)}})` }];
     }
     default:
       // for-each / repo-run / resource-call don't appear in validated

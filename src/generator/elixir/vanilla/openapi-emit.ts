@@ -57,6 +57,7 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 import { emitsRestCreate, servesHistory } from "./api-emit.js";
+import { denialOverrides, denialStatus, type ErrorStatusMap } from "./denial.js";
 
 // ---------------------------------------------------------------------------
 // OpenApiSpex emission for Phoenix LiveView / Ash.
@@ -354,8 +355,43 @@ function errorResponseEntries(
    *  409 (`ReferencedInUse`) through the `httpStatus` mapper so the OpenAPI
    *  declaration moves with the runtime arm.  Omitted ⇒ literal 409. */
   resolve?: (name: string) => number,
+  /** The api's `httpStatus` map — routes the DENIAL-LADDER rungs the shared
+   *  matrix still spells as literals (M-T5.20). */
+  overrides?: ErrorStatusMap,
 ): string {
-  return statusResponseEntries(errorStatuses(kind, guarded, resolve), schemasModule);
+  return statusResponseEntries(
+    resolveLadderStatuses(errorStatuses(kind, guarded, resolve), overrides),
+    schemasModule,
+  );
+}
+
+/** Route the DENIAL-LADDER rungs of a matrix status list through the api's
+ *  `httpStatus` map, so the DECLARED response set moves with the runtime arm
+ *  (the whole point of the override mechanism — a declaration that stays 403
+ *  while the handler answers 401 is a spec lie).
+ *
+ *  `errorStatuses` in `src/ir/util/openapi-errors.ts` is CROSS-BACKEND and still
+ *  hands back the ladder as bare literals; only its `ReferencedInUse` 409 is
+ *  resolved.  This maps the remaining rungs at the elixir boundary, keyed on
+ *  those default literals — which makes it a no-op (and byte-identical) once the
+ *  shared matrix learns to resolve them itself.
+ *
+ *  The 422 slot is the one that can EXPAND: an operation route declares 422 for
+ *  BOTH the wire-validation failure (`ValidationError`) and the domain floor
+ *  (`DomainError`).  They coincide at 422 by default, so it stays one entry; if
+ *  an author remaps only one, both statuses are declared. */
+function resolveLadderStatuses(statuses: readonly number[], overrides?: ErrorStatusMap): number[] {
+  const mapped = statuses.flatMap((s) => {
+    if (s === 403) return [denialStatus("forbidden", overrides)];
+    if (s === 404) return [denialStatus("notFound", overrides)];
+    if (s === 422)
+      return [
+        resolveErrorStatus("ValidationError", overrides),
+        denialStatus("precondition", overrides),
+      ];
+    return [s];
+  });
+  return [...new Set(mapped)].sort((a, b) => a - b);
 }
 
 /** The same ProblemDetails response-map entries for an explicit status list —
@@ -394,7 +430,8 @@ function renderApiSpec(
   // spec declares for a structural conflict (destroy FK-restrict, `when` gate,
   // versioned stale-write) resolves through this so the declaration moves in
   // lockstep with the runtime arm.  Absent ⇒ 409 default ⇒ byte-identical.
-  const structuralStatuses = allAggregates[0]?.ctx.structuralErrorStatuses;
+  const firstCtx = allAggregates[0]?.ctx;
+  const structuralStatuses = firstCtx ? denialOverrides(firstCtx) : undefined;
   const resolveConflict = (name: string): number => resolveErrorStatus(name, structuralStatuses);
 
   // Build paths map entries
@@ -419,7 +456,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf))}
+            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf), undefined, structuralStatuses)}
           }
         }
       }`);
@@ -462,7 +499,7 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.${T}InstanceResponse}}
-            }${errorResponseEntries("getById", schemasModule)}
+            }${errorResponseEntries("getById", schemasModule, false, undefined, structuralStatuses)}
           }
         }
       }`);
@@ -517,7 +554,7 @@ function renderApiSpec(
             201 => %OpenApiSpex.Response{
               description: "Created",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${createRespMod}}}
-            }${errorResponseEntries("create", schemasModule)}
+            }${errorResponseEntries("create", schemasModule, false, undefined, structuralStatuses)}
           }
         }`
       : "";
@@ -560,7 +597,7 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            }${errorResponseEntries("getById", schemasModule)}
+            }${errorResponseEntries("getById", schemasModule, false, undefined, structuralStatuses)}
           }
         }${
           // Canonical destroy → DELETE /<aggs>/{id}.  Gated on the IR
@@ -577,7 +614,7 @@ ${pagingQueryParams()}
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule, false, resolveConflict)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule, false, resolveConflict, structuralStatuses)}
           }
         }`
             : ""
@@ -658,7 +695,7 @@ ${pagingQueryParams()}
               }}}
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
-            }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
+            }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op), undefined, structuralStatuses)}${
               // A `when` state gate (`Disallowed`) OR a versioned aggregate's
               // `update` (stale `If-Match` → `ConcurrencyConflict`) declares a
               // conflict status, mirroring the Hono / .NET contract.  Each
@@ -697,7 +734,7 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.CanResponse}}
-            }${errorResponseEntries("getById", schemasModule)}
+            }${errorResponseEntries("getById", schemasModule, false, undefined, structuralStatuses)}
           }
         }
       }`,
@@ -773,7 +810,15 @@ ${pagingQueryParams()}
             }${
               unionAbsentStatus !== undefined
                 ? statusResponseEntries([unionAbsentStatus], schemasModule)
-                : errorResponseEntries(findKind, schemasModule, find.requires !== undefined)
+                : // Both sides of the merge: main's guarded-find 403 (`guarded`)
+                  // and M-T5.20's denial-ladder override map (`overrides`).
+                  errorResponseEntries(
+                    findKind,
+                    schemasModule,
+                    find.requires !== undefined,
+                    undefined,
+                    structuralStatuses,
+                  )
             }
           }
         }

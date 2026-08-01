@@ -49,13 +49,14 @@ import {
 } from "./audit-history-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
+import { denialOverrides, denialResponse, disallowedResponse } from "./denial.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   aggregateHasReturningOpError,
-  GUARD_RESCUE,
+  guardRescue,
   isReturningOperation,
   opHasGuards,
   opHasWhenGate,
@@ -409,11 +410,12 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
       // ArgumentError, …)` (→ 500).  Emit each `else` arm only when the op has the
       // matching guard (else it'd be an unreachable clause — `--warnings-as-
       // errors`).  Same status + ProblemDetails body as the ES-command controller.
+      const statuses = denialOverrides(ctx);
       const whenArm = opHasWhenGate(op)
         ? `
 
       {:error, {:disallowed, detail}} ->
-        ProblemDetails.problem_response(conn, 409, "Disallowed", detail)`
+        ${disallowedResponse("detail", statuses)}`
         : "";
       const denialArms =
         whenArm +
@@ -421,10 +423,10 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
           ? `
 
       {:error, {:forbidden, detail}} ->
-        ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
+        ${denialResponse("forbidden", "detail", statuses)}
 
       {:error, {:precondition_failed, detail}} ->
-        ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)`
+        ${denialResponse("precondition", "detail", statuses)}`
           : "");
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
@@ -446,7 +448,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)${denialArms}
     end
-${GUARD_RESCUE}
+${guardRescue(denialOverrides(ctx))}
   end`;
     })
     .join("\n");

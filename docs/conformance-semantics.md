@@ -761,6 +761,45 @@ the conforming backends, and the fix that established it.
   Tier: **static** — `create-input-default-parity.test.ts` asserts the rule on
   all five, and keeps an empty `UPDATE_BOOL_WAIVED` map as the ratchet so a
   regression is recorded rather than the assertion relaxed.
+### RS-26 · An unrecognised error term is a sanitized **500**, never a 400 that echoes it
+- **Guarantee.** A fault that matches no declared `error` variant, no
+  wire-validation failure and no denial rung answers **500 "Internal Server
+  Error"** with `detail` = the fixed string `"internal"`. Two claims, both
+  wire-visible:
+  - **Status.** An error the server did not model is a *server* fault. 4xx tells
+    the caller to fix a request that was never the problem.
+  - **Detail.** The term is **never** rendered into the body. A serialized
+    internal value leaks struct names, module paths, and sometimes the failing
+    value itself, to an unauthenticated caller.
+- **Modelled faults are unaffected.** A declared `error` payload, a
+  wire-validation failure, and each denial rung (403 / 409 / 422) keep their own
+  status and their occurrence-specific `detail`. This rule governs only the arm
+  none of them matched.
+- **Trigger.** A hand-written `extern` handler returning an unmodelled error, or
+  an unexpected fault escaping a workflow's `run`.
+- **Why it hid.** Elixir answered `400` and `inspect/1`'d the term straight into
+  `detail`. It survived RS-15's 400 → 422 sweep *precisely because it is not the
+  domain floor*: RS-15 moved the rejections the domain **makes**, and this is the
+  rejection **nobody made**. And no system in the shared behavioural corpus
+  reaches this arm — every error those fixtures produce is modelled — so all five
+  M-T9.11 legs were green with the divergence in place. An arm no fixture reaches
+  is exactly the arm that needs a *name*.
+- **A second, smaller divergence on the same arm — and how it was found.** The
+  fix's own report proposed this rule as all-five-conforming. That list was
+  **inferred**. Checking it showed node/.NET/java emit the literal `"internal"`
+  while **python** emits `"An unexpected error occurred."`. Python has no *leak*
+  — its string is fixed and reflects nothing — so it isn't the defect the rule
+  was minted for; it simply isn't byte-identical, and byte-identity is the entire
+  premise of the M-T9.11 golden. Listed as a **target** until python moves.
+- **The habit this rule family keeps failing at.** This is the **third** time an
+  all-five `conforms` was asserted from reading rather than checking (RS-18
+  twice, RS-19 once). Enumerate the other backends' emitted literal *before*
+  writing the list, every time.
+- **Conforms.** node, dotnet, java, elixir. **Targets:** python.
+- **Provenance.** Found 2026-07-29 by grepping the vanilla Phoenix denial
+  protocol's edges after #2300 centralised it (M-T6.24). Python divergence found
+  2026-08-01 by verifying the proposed `conforms` list instead of accepting it.
+  Tier: **static** — promote to behavioral once a fixture reaches the arm.
 
 ### RS-27 · A 404-**by-id** carries the sentence `"<Aggregate> <id> not found"`
 - **Guarantee.** When a read addressed **by id** finds nothing, the RFC 9457

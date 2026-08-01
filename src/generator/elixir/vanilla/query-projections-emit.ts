@@ -56,6 +56,7 @@ import type { ApiRoute } from "../api-emit.js";
 import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { ECTO_INTRINSIC_FRAGMENTS, type RenderCtx, renderExpr } from "../render-expr.js";
 import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
+import { denialOverrides, denialResponse } from "./denial.js";
 import { hasRefColls, preloadSuffix } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
@@ -567,9 +568,12 @@ function renderQueryProjectionAction(
     current_user = Map.get(conn.assigns, :current_user)
 
     if not (${gate}) do
-      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
-        `Forbidden: projection ${proj.name}`,
-      )})
+      ${denialResponse(
+        "forbidden",
+        JSON.stringify(`Forbidden: projection ${proj.name}`),
+        denialOverrides(ctx),
+        `${webModule}.ProblemDetails`,
+      )}
     else
       data = ${projModule}.run(current_user)
       json(conn, data)
