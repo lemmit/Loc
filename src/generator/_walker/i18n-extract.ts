@@ -31,6 +31,7 @@ import type { ExprIR, UiIR } from "../../ir/types/loom-ir.js";
 import { walkExprDeep } from "../../ir/util/walk.js";
 import { contentHash } from "../../util/content-hash.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
+import { CHROME_BY_PRIMITIVE } from "./i18n-chrome.js";
 import { namedArgValue, positionalArgs } from "./shared/args.js";
 
 /** One source-language catalog entry: a stable key and its English text. */
@@ -175,6 +176,12 @@ export function icuFromConcat(expr: ExprIR | undefined): IcuMessage | undefined 
 function collectBody(body: ExprIR | undefined, prefix: string, out: MessageEntry[]): void {
   walkExprDeep(body, (e) => {
     if (e.kind !== "call") return;
+    // Pack-chrome: a primitive that renders design-pack-baked user-visible text
+    // (a `Loader()`'s `aria-label="Loading"`) contributes its stable
+    // `chrome.<name>` catalog entries wherever it appears — used-only, keyed
+    // IDENTICALLY to what `localizedChromeAria` emits (M-T1.11).
+    const chrome = CHROME_BY_PRIMITIVE[e.name];
+    if (chrome) out.push(...chrome);
     const slots = USER_VISIBLE_SLOTS[e.name];
     if (!slots) return;
     const positionals = positionalArgs(e);

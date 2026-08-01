@@ -33,6 +33,7 @@
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { ariaLabelAttr, escapeHtmlAttr } from "./a11y-emit.js";
+import { chromeKey } from "./i18n-chrome.js";
 import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
 import { addImport } from "./render-primitive.js";
 import { namedArgValue, positionalArgs, unwrapTextLiteral } from "./shared/args.js";
@@ -203,6 +204,34 @@ export function localizedAriaLabelAttr(
     );
   }
   return ariaLabelAttr(literal ?? defaultLabel);
+}
+
+/** An ` aria-label="…"` fragment for a PACK-CHROME string a design-pack
+ *  template bakes in (a spinner's `aria-label="Loading"`) — the chrome twin of
+ *  {@link localizedAriaLabelAttr}.  Unlike the named-slot helper the key is the
+ *  STABLE, curated `chrome.<name>` (`i18n-chrome.ts`), not a content hash: chrome
+ *  is one shared vocabulary across every pack + page.
+ *
+ *   - `ctx.i18nPrefix` set → a BOUND attribute `renderAttrBinding`-emitted per
+ *     frontend (` aria-label={t("chrome.loading","Loading")}` React/Svelte,
+ *     ` :aria-label="t(…)"` Vue, ` [attr.aria-label]="t(…)"` Angular via
+ *     `ariaAttrPrefix`), keyed to the merged chrome catalog;
+ *   - no prefix (every non-JS frontend, a string-less app) → the static
+ *     ` aria-label="<english>"` fragment — BYTE-IDENTICAL to the pre-i18n pack
+ *     template.
+ *
+ *  `english` MUST equal `CHROME_MESSAGES[chromeKey(name)]` so the emitted default
+ *  lines up with the catalog entry. */
+export function localizedChromeAria(ctx: WalkContext, name: string, english: string): string {
+  if (ctx.i18nPrefix) {
+    addImport(ctx, I18N_MODULE, "t");
+    const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
+    return ctx.target.renderAttrBinding(
+      attrName,
+      `t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})`,
+    );
+  }
+  return ` aria-label="${escapeHtmlAttr(english)}"`;
 }
 
 /** {@link localizedRaw} unwrapped for a JSX-children text position — the
