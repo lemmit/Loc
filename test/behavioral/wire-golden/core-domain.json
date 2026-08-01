@@ -48,6 +48,37 @@
         },
         "version": 3
       }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "CD2",
+        "id": "<volatile:key>",
+        "isDraft": false,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "qty": 2,
+            "sku": "S1"
+          }
+        ],
+        "status": "Placed",
+        "total": {
+          "amount": 12,
+          "currency": "USD"
+        },
+        "version": 4
+      }
     }
   ]
 }

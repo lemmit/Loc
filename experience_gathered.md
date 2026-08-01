@@ -3424,3 +3424,64 @@ Also: the old guard was `if (typeof process === 'undefined')`, which bails the
 moment *anything* else installs a partial `process` — leaving exactly the
 holes the shim exists to fill. Gate on `typeof process.versions?.node ===
 'string'` (real Node opts out) and fill missing members otherwise.
+## 62. The scan that proved nothing, and the gate that fired everywhere (2026-08-01)
+
+Continuation of §59, same feature, three more instances of *the assurance was
+the reason the bug survived* — plus one new shape: **a verification tool that
+silently checks less than its name says.**
+
+**`ddd parse` says "parse + validate" and discards every IR-level error.**
+`runParse` calls `validateLoomModel(...)` — and then filters the result to
+`d.code === "loom.index-suggestion"`, printing those as suggestions and
+throwing the rest away, followed by `OK: <file>`. So a model that
+`generate system` rejects with six errors reports `0 error(s)` and exits 0.
+
+That matters here because I used it as a measuring instrument. Having added a
+new IR check, I scanned 106 `.ddd` files with `ddd parse` to size the blast
+radius, got zero hits, and was one commit from calling the gate clean. The scan
+was structurally incapable of finding anything — the same "true by
+construction" failure as §59's `p.replace(...) || "/"`, one layer up: not a
+blind assertion this time, but a blind *tool*. Re-running the scan through
+`generate system` — the path that actually runs phase ⑦ — is what made it
+evidence. **Before a scan's clean result means anything, check that the tool
+you scanned with runs the check you are scanning for.**
+
+(The `ddd parse` behaviour is left as-is here, deliberately: making it surface
+IR errors turns at least `web/src/examples/acme.ddd` red
+(`loom.persistence-mode-unsupported` ×4), which is its own investigation. It is
+a real defect in the CLI's documented contract, not a design choice.)
+
+**Static scanning cannot see synthesized inputs.** Even the corrected scan
+missed the case that mattered. The new check bound only the test's *classified*
+magic id, and a test's kind is derived from the target deployable's platform —
+so an api-shaped body aimed at a UI-mounting deployable classifies as `ui`
+while correctly spelling `api`, and every such test was rejected. No `.ddd` in
+the repo shows this: the behavioral Elixir runner *rewrites* the platform per
+run, and the failing sources live in `.work-elixir/*/system.ddd`, generated at
+run time. What found it was **running the leg** — 31 cases, every one failing at
+generate. A repo-wide grep over checked-in fixtures is not coverage when a
+harness synthesizes its own inputs.
+
+**Two more "backend disagrees with its own spec" instances, same route.**
+Vanilla Phoenix served `PATCH /orders/:id` while advertising
+`POST /orders/{id}/update`, and answered that route `200` + the serialized
+aggregate where its own spec said `204`. `conformance-parity` is blind to both
+by construction — it diffs *specs*, and this backend's spec agreed with the
+other four. The gate for the class is `test/ir/api-surface-parity.test.ts`:
+compare the derivation against what each backend's **router/controller source
+declares**, not against a document describing it.
+
+The runtime hole underneath was total: **no test in the repository called the
+canonical `update` route on any backend** — `grep -rn '\.update(' *.ddd`
+returned nothing. Two contract bugs lived on the one route nothing exercised,
+which is §59's "the untested direction is where the bug lives", now with the
+corollary that *nobody had looked at whether the direction was tested at all*.
+One line in a corpus fixture's `test e2e` block closes it across all five
+backends, because the wire golden turns it into five independent per-PR gates.
+
+**Rebaselining a golden rebaselines more than you asked.**
+`LOOM_WIRE_UPDATE=1 node run.mjs` wrote the one golden I intended *and created
+nine new ones* for cases that had never had a golden — untracked, so easy to
+`git add -A` into the commit without noticing. Read `git status` after a
+rebaseline and clean what you did not intend; a golden is a reviewed answer key,
+and nine unreviewed ones are nine unreviewed decisions.
