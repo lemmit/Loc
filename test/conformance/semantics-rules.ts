@@ -820,8 +820,10 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // WHERE IT SAT is what makes it worth naming: wire validation is the
     // highest-traffic error path in any API — every malformed request hits it —
     // and it was invisible to every gate.  The M-T9.11 golden cannot see it
-    // because NOT ONE of the 31 goldens records a 4xx body; conformance-parity
-    // compares declared response SHAPES, not the values in them.
+    // because only FOUR of the 31 goldens record an error body at all, and the
+    // one 422 among them (`wire-contract`) is the DOMAIN FLOOR, not this rung.
+    // conformance-parity is no help either: it compares declared response
+    // SHAPES, not the values inside them.
     //
     // Found by the M-T9.25 census probe on its first run: enumerate every 7807
     // arm each backend emits and diff them.  That probe exists because the two

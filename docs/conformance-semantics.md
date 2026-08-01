@@ -891,8 +891,10 @@ the conforming backends, and the fix that established it.
   `"One or more fields are invalid."`. **Both halves of the body differed.**
 - **Where it sat is the point.** Wire validation is the **highest-traffic error
   path in any API** — every malformed request hits it — and it was invisible to
-  every gate. The M-T9.11 golden cannot see it because **not one of the 31
-  goldens records a 4xx body**; `conformance-parity` compares declared response
+  every gate. The M-T9.11 golden cannot see it because only **4 of the 31
+  goldens record an error body at all** — and the single 422 among them
+  (`wire-contract`) is the **domain floor**, i.e. the *other* rung.
+  `conformance-parity` is no help either: it compares declared response
   *shapes*, not the values inside them.
 - **How it was found.** The M-T9.25 census probe, on its **first run**:
   enumerate every 7807 arm each backend emits, then diff them. That probe exists

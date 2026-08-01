@@ -9,8 +9,9 @@
 //
 // This is the cheap structural answer for the richest such concept: the 7807
 // error arm.  Five of the twenty-six RS-rules (RS-16, 17, 19, 21, 22) were found
-// on an error response, and no golden records a 4xx at all, so this surface has
-// the worst coverage-to-yield ratio in the toolchain.
+// on an error response, while only FOUR of the 31 wire goldens record an error
+// body at all (404 x2, 409, 422) — so this surface has the worst
+// coverage-to-yield ratio in the toolchain.
 //
 // Two claims, and they are different in kind:
 //
@@ -98,7 +99,8 @@ describe("M-T9.25 — the 7807 arm census", () => {
     // RS-27.  Python answered `"Unprocessable Entity"` / `"Request validation
     // failed."` where the other four say `"Validation failed"` / `"One or more
     // fields are invalid."` — the highest-traffic error path in any API, and
-    // invisible to every gate because no golden records a 4xx.
+    // invisible to every gate: the only 422 any golden records is
+    // `wire-contract`'s DOMAIN FLOOR, which is the other rung.
     const arms = await Promise.all(
       PLATFORMS.map(async (p) => {
         const m = VALIDATION_ARM[p]!.exec(await joined(p));
