@@ -37,6 +37,7 @@
 // 8.21 + Svelte 5.56: `svelte-check` 0 errors / 0 warnings, `vite build` green.
 
 import { lines } from "../../../util/code-builder.js";
+import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
 
@@ -72,13 +73,19 @@ function renderComponent(spec: DataGridSpec): string {
     cellBody: cellBody(columns, selection),
   });
 
+  const needsDecimalSort = columns.some((c) => c.numericSort);
   const typeImports = [
     "type ColumnDef",
+    ...(needsDecimalSort ? ["type Row"] : []),
     ...(anyFilterable ? ["type ColumnFiltersState"] : []),
     "type PaginationState",
     ...(selection ? ["type RowSelectionState"] : []),
     "type SortingState",
-    "type Table",
+    // Aliased: several Svelte packs import a COMPONENT called `Table`
+    // (flowbite-svelte does), and `import { type Table, … }` plus
+    // `import { Table } from "flowbite-svelte"` is a duplicate declaration —
+    // a hard parse error in the Svelte preprocessor, not a type-only clash.
+    "type Table as TanstackTable",
     "type TableOptionsResolved",
     "type Updater",
     ...(columnVisibility ? ["type VisibilityState"] : []),
@@ -101,8 +108,15 @@ function renderComponent(spec: DataGridSpec): string {
       ]
     : [];
 
-  const packImportLines = spec.packImports.map(
-    (i) => `  import { ${[...i.named].sort().join(", ")} } from "${i.from}";`,
+  // The grid chrome's own pack imports, PLUS everything the computed cells
+  // pulled in.  Without the second group the component references symbols
+  // nothing imported — `<Badge>` from the pack, `formatDateTime` from
+  // `$lib/format` — which the page's import block received instead, because
+  // that is where the walk parks them.  On Svelte that is a runtime
+  // `ReferenceError`, not a build failure.  Merged per source so one
+  // `flowbite-svelte` line carries both the chrome's and the cells' names.
+  const packImportLines = mergedImports([...spec.packImports, ...spec.cellImports]).map(
+    (i) => `  import { ${i.named.join(", ")} } from "${i.from}";`,
   );
 
   const props = selection
@@ -129,6 +143,22 @@ function renderComponent(spec: DataGridSpec): string {
     ``,
     `  /** TanStack hands each \`onXChange\` either the next value or a function`,
     `   *  of the previous one; \`table-core\` leaves that union to the caller. */`,
+    ...(columns.some((c) => c.numericSort)
+      ? [
+          "  /** Comparator for a money / decimal column.  Those reach the row as a Decimal",
+          "   *  OBJECT whose valueOf() returns a string, so TanStack's default a < b orders",
+          "   *  them lexicographically — an ascending sort comes out [10, 100, 9].  Number()",
+          "   *  goes through that same valueOf, which is what makes it a correct numeric",
+          "   *  read, and (unlike TanStack's alphanumeric fallback) it stays correct for",
+          "   *  negative amounts. */",
+          "  function compareDecimal(a: Row<T>, b: Row<T>, id: string): number {",
+          "    const x = Number(a.getValue(id) ?? 0);",
+          "    const y = Number(b.getValue(id) ?? 0);",
+          "    return x < y ? -1 : x > y ? 1 : 0;",
+          "  }",
+          "",
+        ]
+      : []),
     `  function applyUpdater<S>(updater: Updater<S>, current: S): S {`,
     `    return typeof updater === "function" ? (updater as (old: S) => S)(current) : updater;`,
     `  }`,
@@ -137,16 +167,32 @@ function renderComponent(spec: DataGridSpec): string {
     ...columnDefs(columns, selection),
     `  ];`,
     ``,
+    `  // \`table-core\`'s \`getState()\` returns the RAW \`state\` option — unlike the`,
+    `  // framework adapters, it does NOT merge its own defaults in.  A \`state\``,
+    `  // carrying only the slices we control therefore throws inside`,
+    `  // \`getHeaderGroups()\` (it reads \`columnPinning.left\`) and the grid renders`,
+    `  // NOTHING — a runtime-only failure \`svelte-check\` and \`vite build\` are both`,
+    `  // blind to.  The adapters spread \`table.initialState\` in; with no adapter we`,
+    `  // source it once from a throwaway instance (the defaults are constant).`,
+    `  const defaultState = createTable({`,
+    `    data: [],`,
+    `    columns,`,
+    `    state: {},`,
+    `    onStateChange: () => {},`,
+    `    renderFallbackValue: null,`,
+    `    getCoreRowModel: getCoreRowModel(),`,
+    `  } as TableOptionsResolved<T>).initialState;`,
+    ``,
     `  // Rebuilding on each change is correct because EVERY state slice above is`,
     `  // controlled — nothing uncontrolled is left to lose — and reading those`,
     `  // runes here is the dependency edge the markup needs (table-core mutates`,
     `  // its own internals, which Svelte cannot observe).`,
-    `  const table: Table<T> = $derived.by(() => {`,
+    `  const table: TanstackTable<T> = $derived.by(() => {`,
     `    const options: TableOptionsResolved<T> = {`,
     `      // \`rows\` binds as \`readonly T[]\`; TanStack's \`data\` is mutable.`,
     `      data: (rows ?? []) as T[],`,
     `      columns,`,
-    `      state: { ${stateSliceNames(spec).join(", ")} },`,
+    `      state: { ...defaultState, ${stateSliceNames(spec).join(", ")} },`,
     ...changeHandlers(spec),
     `      // Every slice has its own handler above, so the aggregate hook is a`,
     `      // no-op; \`table-core\` requires it to be present.`,
@@ -238,6 +284,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
     parts.push(`header: ${JSON.stringify(c.header)}`);
     parts.push(`enableSorting: ${c.sortable}`);
     parts.push(`enableColumnFilter: ${c.filterable}`);
+    // A money/decimal column needs an explicit numeric comparator — see
+    // `DataGridColumn.numericSort`.
+    if (c.numericSort) parts.push("sortingFn: compareDecimal");
     out.push(`    { ${parts.join(", ")} },`);
   }
   return out;

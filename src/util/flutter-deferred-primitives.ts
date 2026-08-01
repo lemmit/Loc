@@ -42,12 +42,30 @@
  *
  *    - the walker-SEAM-rendered form family + Modal, which WORK — just not via
  *      a pack template;
- *    - `primitive-data-grid`, which does NOT work on Flutter and is not meant
- *      to.  `DataGrid` is a TanStack row model and TanStack has no Dart
- *      adapter; hand-rolling multi-column sort + per-column filters + a row
- *      model in Flutter would fork the grid's BEHAVIOUR from the four JS
- *      frontends, which is what the shared `renderDataGridChild` seam exists to
- *      prevent.  It is NOT in {@link FLUTTER_UNRENDERED_PRIMITIVES} because it
+ *    - `primitive-data-grid`, which does NOT work on Flutter and — this is a
+ *      settled DECISION, not a backlog item (M-T1.1, 2026-07-31) — is not going
+ *      to.  `DataGrid` is a TanStack row model, so a target can host it only if
+ *      it can host TANSTACK; there is no Dart adapter and no Dart port.
+ *      Hand-rolling multi-column sort + per-column filters + a row model in
+ *      Flutter would fork the grid's BEHAVIOUR from every other frontend, which
+ *      is exactly what the shared `renderDataGridChild` seam exists to prevent.
+ *      Flutter's `PaginatedDataTable`/`DataTable` make this tempting and are the
+ *      trap: they give you *a* grid, not *the same* grid.
+ *
+ *      The contrast with Feliz is what makes this principled rather than
+ *      arbitrary.  Feliz DID get a real DataGrid (slice 10e) precisely because
+ *      Fable compiles F# to JavaScript, so it binds `@tanstack/table-core` — the
+ *      genuine row model — through ordinary interop.  Flutter has no such route:
+ *      `dart:js_interop` exists on Flutter WEB only, while the shipping target
+ *      (and `generated-flutter-build.yml`) builds a native APK with no JS
+ *      runtime at all.  A web-only primitive that compiles on one Flutter target
+ *      and not the other is worse than an honest gap.
+ *
+ *      `Table` remains the portable answer on Flutter — it carries column sort,
+ *      pagination and filtering on every frontend — and that is what
+ *      `loom.datagrid-unsupported-target` points authors at.
+ *
+ *      It is NOT in {@link FLUTTER_UNRENDERED_PRIMITIVES} because it
  *      already has a dedicated, better-worded gate —
  *      `loom.datagrid-unsupported-target` names `Table` as the portable
  *      alternative — and two gates for one condition is one too many. */

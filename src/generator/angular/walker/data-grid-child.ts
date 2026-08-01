@@ -31,6 +31,8 @@
 
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
+import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
+import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
 import { angularSink } from "./sink.js";
@@ -96,6 +98,7 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
   ];
   const tableTypeImports = [
     "type ColumnDef",
+    ...(columns.some((c) => c.numericSort) ? ["type Row"] : []),
     ...(anyFilterable ? ["type ColumnFiltersState"] : []),
     "type PaginationState",
     ...(selection ? ["type RowSelectionState"] : []),
@@ -105,11 +108,29 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
   ];
 
   // The pack's own directives/modules go in this component's `imports: []`, not
-  // the page's — the markup they serve lives here.
-  const packModules = spec.packImports.flatMap((i) => [...i.named]).sort();
-  const packImportLines = spec.packImports.map(
-    (i) => `import { ${[...i.named].sort().join(", ")} } from "${i.from}";`,
+  // the page's — the markup they serve lives here.  `cellImports` joins them:
+  // a COMPUTED cell's markup also lives here, but the walk parked its imports
+  // on the PAGE, so anything an `EnumBadge` / `Money` cell needed resolved to
+  // nothing in this file.  Merged per source — the chrome and the cells often
+  // name the same module, and Angular would see a duplicate import.
+  const allImports = mergedImports([...spec.packImports, ...spec.cellImports]);
+  const packModules = allImports.flatMap((i) => i.named).sort();
+  const packImportLines = allImports.map(
+    (i) => `import { ${i.named.join(", ")} } from "${i.from}";`,
   );
+
+  // Format helpers the CELL markup calls.  Angular templates evaluate against
+  // the component instance, so a bare `formatDateTime(...)` in a `DateDisplay`
+  // cell resolves to nothing — the page shell re-exposes these as members for
+  // exactly this reason, and the hoisted child needs its own copy.  Detected
+  // from the rendered body so only what is used is emitted (Angular's template
+  // compiler is happy either way, but an unused member is noise).
+  const usedFormatHelpers = FORMAT_CALL_HELPERS.filter((h) => body.includes(`${h}(`));
+
+  const formatImportLine =
+    usedFormatHelpers.length > 0
+      ? [`import { ${usedFormatHelpers.join(", ")} } from "../../lib/format";`]
+      : [];
 
   return `${lines(
     `// Auto-generated.  Do not edit by hand.`,
@@ -117,6 +138,7 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
     `import {`,
     ...[...tableValueImports, ...tableTypeImports].map((n) => `  ${n},`),
     `} from "@tanstack/angular-table";`,
+    ...formatImportLine,
     ...packImportLines,
     ``,
     `// biome-ignore lint/suspicious/noExplicitAny: cell markup reads declared row fields; the grid is not generic over the row type (see the file header), so the row is carried as an index-signature record.`,
@@ -139,6 +161,7 @@ ${lines(
   `  // calls have to be re-exposed as members.`,
   `  protected readonly String = String;`,
   `  protected readonly Math = Math;`,
+  ...usedFormatHelpers.map((h) => `  protected readonly ${h} = ${h};`),
   ...(columns.some((c) => c.cell?.includes(ROW_VAR))
     ? [
         `  /** Identity at runtime — the cast is the point (see \`CellRow\`). */`,
@@ -172,6 +195,22 @@ ${lines(
   ``,
   `/** TanStack hands each \`onXChange\` either the next value or a function of the`,
   ` *  previous one; the adapter leaves that union to the caller. */`,
+  ...(columns.some((c) => c.numericSort)
+    ? [
+        "/** Comparator for a money / decimal column.  Those reach the row as a Decimal",
+        " *  OBJECT whose valueOf() returns a string, so TanStack's default a < b orders",
+        " *  them lexicographically — an ascending sort comes out [10, 100, 9].  Number()",
+        " *  goes through that same valueOf, which is what makes it a correct numeric",
+        " *  read, and (unlike TanStack's alphanumeric fallback) it stays correct for",
+        " *  negative amounts. */",
+        "function compareDecimal(a: Row<CellRow>, b: Row<CellRow>, id: string): number {",
+        "  const x = Number(a.getValue(id) ?? 0);",
+        "  const y = Number(b.getValue(id) ?? 0);",
+        "  return x < y ? -1 : x > y ? 1 : 0;",
+        "}",
+        "",
+      ]
+    : []),
   `function applyUpdater<S>(updater: Updater<S>, current: S): S {`,
   `  return typeof updater === "function" ? (updater as (old: S) => S)(current) : updater;`,
   `}`,
@@ -255,6 +294,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
     parts.push(`header: ${JSON.stringify(c.header)}`);
     parts.push(`enableSorting: ${c.sortable}`);
     parts.push(`enableColumnFilter: ${c.filterable}`);
+    // A money/decimal column needs an explicit numeric comparator — see
+    // `DataGridColumn.numericSort`.
+    if (c.numericSort) parts.push("sortingFn: compareDecimal");
     out.push(`    { ${parts.join(", ")} },`);
   }
   return out;

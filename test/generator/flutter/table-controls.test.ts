@@ -1,0 +1,112 @@
+// Flutter `Table` — SERVER-DRIVEN sort + pagination (M-T1.1).
+//
+// Before this, `sortable:` / `page:` on a Flutter Table were silently dropped:
+// the target implemented neither `renderSortableHeader` nor `renderPager`, and
+// `primitives/table.ts` degrades to a plain header when the seam is absent.  So
+// `loom.datagrid-unsupported-target`'s advice — "use Table, it sorts and pages
+// on every frontend" — was untrue on the one target it is shown to most.
+//
+// These pin the emitted SHAPE.  Whether the controls actually move the state a
+// server-paged read is keyed by is proven at runtime by
+// `scripts/flutter-table-controls-test.dart`, run against a real generated
+// scaffold by `generated-flutter-build.yml` — Flutter web renders to canvas, so
+// a DOM smoke is not available and `flutter test` is where behaviour is
+// provable.
+
+import { describe, expect, it } from "vitest";
+import { generateSystemFiles } from "../../_helpers/index.js";
+
+const SYS = (body: string, state: string) => `
+system Shop {
+  subdomain Sales { context Orders {
+    aggregate Product { name: string  price: money }
+    repository Products for Product { } } }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  ui App {
+    api Shop: ShopApi
+    page List { route: "/products"  ${state}  body: ${body} }
+  }
+  deployable api { platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 }
+  deployable app { platform: flutter targets: api ui: App { Shop: api } port: 3006 }
+}`;
+
+const TABLE = `QueryView { of: Shop.Product.all,
+  loading: Text { "…" }, error: Text { "e" }, empty: Text { "none" },
+  data: rows => Table(
+    Column("Name", p => p.name, sortable: true),
+    rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 3,
+    testid: "product-table") }`;
+const STATE = `state { sortKey: string = ""  sortDir: string = "asc"  pageNum: int = 1 }`;
+
+const page = async (body = TABLE, state = STATE): Promise<string> =>
+  (await generateSystemFiles(SYS(body, state))).get("app/lib/pages/list_page.dart")!;
+
+describe("flutter Table controls — server-driven (M-T1.1)", () => {
+  it("renders a tappable sort header that toggles direction on the active column", async () => {
+    const dart = await page();
+    // Re-tapping the ACTIVE column flips direction; a new one resets to asc.
+    expect(dart).toContain("if (state.sortKey == 'name')");
+    expect(dart).toContain("notifier.setSortDir(state.sortDir == 'asc' ? 'desc' : 'asc')");
+    expect(dart).toContain("notifier.setSortKey('name'); notifier.setSortDir('asc')");
+    // The header is a WIDGET, so the pack must not stringify it.
+    expect(dart).toContain("DataColumn(label: InkWell(");
+    expect(dart).not.toContain("DataColumn(label: Text('InkWell");
+  });
+
+  it("renders a pager whose ends disable", async () => {
+    const dart = await page();
+    expect(dart).toContain(
+      "state.pageNum <= 1 ? null : () => notifier.setPageNum(state.pageNum - 1)",
+    );
+    expect(dart).toContain("child: const Text('Next')");
+    expect(dart).toContain("Page ${state.pageNum} of ");
+  });
+
+  it("emits Dart for the client page window — never JavaScript", async () => {
+    const dart = await page();
+    // The shared default is literal JS (`.slice`, `Math.max`, `Math.ceil`).
+    // Emitting it into a `.dart` file does not compile.
+    expect(dart).not.toContain("Math.max");
+    expect(dart).not.toContain("Math.ceil");
+    expect(dart).not.toContain(".slice(");
+    expect(dart).toContain(".skip((state.pageNum - 1) * 3).take(3).toList()");
+  });
+
+  it("sorts by a typed switch, not a runtime row index", async () => {
+    // Dart has no `row[key]`, so the comparator switches on the key with one
+    // arm per sortable column — this is why `SortedRowsSpec` carries `columns`.
+    const dart = await page();
+    expect(dart).toContain("switch (state.sortKey)");
+    expect(dart).toContain("'name' => (a.name as Comparable).compareTo(b.name as Comparable)");
+    expect(dart).toContain("state.sortDir == 'desc' ? -c : c");
+  });
+
+  it("wraps the table and pager in one Column — Dart has no fragment", async () => {
+    const dart = await page();
+    // Adjacent widgets with no separator are a PARSE error, not a layout quirk.
+    expect(dart).toContain(
+      "Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[",
+    );
+  });
+
+  it("binds the notifier for a body that only writes state through controls", async () => {
+    // The controls are neither an action nor a bound input, so the two sets the
+    // page shell used to consult were both empty and `notifier` went unbound.
+    const dart = await page();
+    expect(dart).toMatch(/final notifier = ref\.read\(\w+Provider\.notifier\);/);
+  });
+
+  it("leaves a control-free Table byte-identical (no pager, no sort wiring)", async () => {
+    const dart = await page(
+      `QueryView { of: Shop.Product.all, loading: Text { "…" }, error: Text { "e" },
+        empty: Text { "none" },
+        data: rows => Table(Column("Name", p => p.name), rows: rows, testid: "t") }`,
+      "",
+    );
+    expect(dart).not.toContain("InkWell(onTap:");
+    expect(dart).not.toContain("Text('Prev')");
+    expect(dart).not.toContain("notifier.");
+  });
+});

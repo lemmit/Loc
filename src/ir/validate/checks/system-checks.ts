@@ -48,6 +48,7 @@ import {
   durableEventTypes,
   realtimeEventTypes,
 } from "../../util/channels.js";
+import { bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -223,13 +224,19 @@ export function validateProjectionSourceProjectionBackend(
 
 /** Frontends whose walker emits the `DataGrid` primitive.
  *
- *  DataGrid is TanStack-Table-backed and emits a hook-bearing child component,
- *  so it is not a markup mapping another target picks up for free — each
- *  framework needs its own port.  Until those land, using it elsewhere is a
- *  COMPILE ERROR rather than a silently missing grid: the page would otherwise
- *  render an empty slot (or a "not supported" comment on HEEx) and the author
- *  would only find out by looking at the running app. */
-const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular"]);
+ *  The membership rule is D-DATAGRID-TARGETS: a frontend ships `DataGrid` iff
+ *  it can run **TanStack Table** itself — not iff it emits JSX, and not iff its
+ *  UI kit happens to have a grid widget.  `DataGrid` IS a TanStack row model
+ *  behind the `renderDataGridChild` seam, so any other way of satisfying it
+ *  forks the behaviour the seam exists to share.  Feliz qualifies because Fable
+ *  compiles F# to JavaScript (it binds `@tanstack/table-core` directly, as the
+ *  Svelte target does); Flutter never will, because its shipping target is a
+ *  native build with no JS runtime.
+ *
+ *  Using it elsewhere is a COMPILE ERROR rather than a silently missing grid:
+ *  the page would otherwise render an empty slot (or a "not supported" comment
+ *  on HEEx) and the author would only find out by looking at the running app. */
+const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular", "feliz"]);
 
 /** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */
 export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -240,28 +247,21 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
     const ui = sys.uis.find((u) => u.name === d.uiName);
     if (!ui) continue;
     for (const page of ui.pages) {
-      if (!usesDataGrid(page.body)) continue;
+      if (!bodyUsesDataGrid(page.body)) continue;
       diags.push({
         severity: "error",
         code: "loom.datagrid-unsupported-target",
         message:
           `page '${page.name}' uses 'DataGrid', which deployable '${d.name}' can't render ` +
-          `(frontend '${fw || "unknown"}'). DataGrid ships on every JS frontend (react, vue, svelte, angular). Use 'Table' — it supports ` +
-          `column sort and pagination on every frontend, server-driven on Phoenix — or host this page ` +
-          `on one of those frontends.`,
+          `(frontend '${fw || "unknown"}'). DataGrid is a TanStack row model, so it ships wherever ` +
+          `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
+          `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
+          `analogue). Use 'Table' — it supports column sort and pagination on every frontend, ` +
+          `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
         source: `${ui.name}/${page.name}`,
       });
     }
   }
-}
-
-/** True when a page body contains a `DataGrid(...)` primitive call anywhere. */
-function usesDataGrid(body: ExprIR | undefined): boolean {
-  let found = false;
-  walkExprDeep(body, (e) => {
-    if (e.kind === "call" && e.name === "DataGrid") found = true;
-  });
-  return found;
 }
 
 export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {

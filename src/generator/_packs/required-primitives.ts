@@ -199,13 +199,16 @@ const TSX_FORM: readonly string[] = [
 // (`flutter-pack-groundwork.test.ts` / `feliz-pack-groundwork.test.ts`): every
 // `core` name must have a real renderer, not the missing-renderer sentinel.
 // `DataGrid` — the TanStack-Table-backed interactive grid.  Deliberately NOT in
-// `TSX_ONLY_PRIMITIVES`: that list is spread into the `flutter` and `feliz`
-// cores too (they reuse the JSX-family display set), and neither has — or is
-// getting — a TanStack adapter.  Spread into exactly the four formats that ship
-// a `renderDataGridChild` seam instead.  HEEx is out for a different reason: a
+// `TSX_ONLY_PRIMITIVES`: that list is spread into the `flutter` core too, and
+// Flutter has no TanStack adapter and is not getting one (its native target has
+// no JS runtime at all — see `src/util/flutter-deferred-primitives.ts`).  Spread
+// into exactly the formats that ship a `renderDataGridChild` seam: the four JSX
+// ones plus `feliz`, whose procedural pack renders the same TanStack instance —
+// Fable compiles F# to JavaScript, so it binds `@tanstack/table-core` directly
+// instead of re-implementing a row model.  HEEx is out for a third reason: a
 // CLIENT row model has no LiveView analogue, so `Table` is server-driven there.
-// All three stay honest gaps, rejected by `loom.datagrid-unsupported-target`
-// rather than rendering a blank page region.
+// Flutter and HEEx stay honest gaps, rejected by
+// `loom.datagrid-unsupported-target` rather than rendering a blank page region.
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 
 export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {
@@ -308,7 +311,11 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // the Feliz project shell (main / package.json / vite / fable config) is
   // emitted by `feliz/index.ts` directly, not by the pack.
   feliz: {
-    core: [...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"), ...TSX_ONLY_PRIMITIVES],
+    core: [
+      ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),
+      ...TSX_ONLY_PRIMITIVES,
+      ...DATA_GRID_PRIMITIVES,
+    ],
     shell: [],
   },
 };

@@ -124,10 +124,22 @@ export const tsxTarget: WalkerTarget = {
     // information this target already has at runtime.
     const k = sortKey.name;
     const d = sortDir.name;
+    // `sv` unwraps a decimal-like value before comparing: a `money`/`decimal`
+    // cell is a decimal.js Decimal OBJECT whose `valueOf()` returns a STRING, so
+    // a bare `<` compares the decimal text and sorts [10, 100, 9].  `Number()`
+    // goes through that same `valueOf`, which is what makes it the correct
+    // numeric read.  Non-objects, arrays and NaN pass through untouched, so
+    // string and boolean columns keep their existing ordering.  Same rule as the
+    // shared `sortRows` helper the strict-template frontends call.
+    const sv =
+      `const sv = (v: unknown) => ` +
+      `(v === null || typeof v !== "object" || Array.isArray(v)) ? v : ` +
+      `(Number.isNaN(Number(v)) ? v : Number(v)); `;
     return (
       `[...(${rowsExpr})].sort((a, b) => { if (!${k}) { return 0; } ` +
-      `const av = (a as Record<string, unknown>)[${k}]; ` +
-      `const bv = (b as Record<string, unknown>)[${k}]; ` +
+      sv +
+      `const av = sv((a as Record<string, unknown>)[${k}]); ` +
+      `const bv = sv((b as Record<string, unknown>)[${k}]); ` +
       `const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; ` +
       `return ${d} === "desc" ? -c : c; })`
     );

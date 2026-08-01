@@ -255,6 +255,83 @@ function primitiveTable(c: Ctx): string {
   return `(Html.div [ ${tidPart}prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [ ${table} ] ])`;
 }
 
+/** DataGrid — daisyUI chrome around a TanStack `table-core` instance
+ *  (M-T1.1 slice 10e).
+ *
+ *  The `table` binding, the column defs and every state slice come from the
+ *  walker-emitted `[<ReactComponent>]` child that wraps this markup
+ *  (`src/generator/feliz/data-grid-child.ts`); a pack only decides how the grid
+ *  LOOKS, never how the row model works — the same contract the `.hbs` packs
+ *  honour on React/Vue/Svelte/Angular.
+ *
+ *  `headerBody` / `cellBody` are the walker's header + cell CONTENT, spliced
+ *  where `h` (a header), `c` (a cell) and `table` are bound.  Feliz needs that
+ *  split for the same reason Vue and Svelte do: a TanStack `cell` function must
+ *  return framework nodes, and the walker produces markup. */
+function primitiveDataGrid(c: Ctx): string {
+  const headerBody = String(c.headerBody ?? "Html.none");
+  const cellBody = String(c.cellBody ?? "Html.none");
+  const tid = testidProp(c);
+  const tidPart = tid ? `${tid}; ` : "";
+
+  // Column-visibility toggles.  A column whose header is blank (the selection
+  // column) falls back to its id so the checkbox still has a label.
+  const visibility = c.hasColumnVisibility
+    ? `\n      Html.div [ prop.className "flex flex-wrap gap-3"; prop.children [\n` +
+      `        yield! unbox<obj array> (table?getAllLeafColumns()) |> Array.map (fun col ->\n` +
+      `          Html.label [ prop.className "flex items-center gap-1 text-sm"; prop.children [\n` +
+      `            Html.input [ prop.type' "checkbox"; prop.isChecked (unbox<bool> (col?getIsVisible())); prop.onChange (fun (_: bool) -> loomInvoke (col?toggleVisibility)) ]\n` +
+      `            Html.text (let __h = loomText (col?columnDef?header) in if __h = "" then unbox<string> (col?id) else __h) ] ])\n` +
+      `      ] ]`
+    : "";
+
+  // Per-column filter input, under the header content — only for columns whose
+  // `filterable:` survived resolution (`getCanFilter()` is TanStack's answer).
+  const filterInput = c.hasFilters
+    ? `\n                  if unbox<bool> (h?column?getCanFilter()) then\n` +
+      `                    Html.input [ prop.type' "search"; prop.className "input input-xs input-bordered mt-1 w-full"; prop.placeholder "Filter"; prop.ariaLabel ("Filter by " + loomText (h?column?columnDef?header)); prop.value (loomText (h?column?getFilterValue())); prop.onChange (fun (v: string) -> loomHandle (h?column?setFilterValue) (box v)) ]`
+    : "";
+
+  // `aria-sort` on the header cell is the a11y contract the JSX packs already
+  // ship (M-T1.1 slice 5); a sortable header without it is a WCAG gap.
+  const head =
+    `Html.thead [ prop.children [\n` +
+    `        yield! unbox<obj array> (table?getHeaderGroups()) |> Array.map (fun hg ->\n` +
+    `          Html.tr [ prop.children [\n` +
+    `            yield! unbox<obj array> (hg?headers) |> Array.map (fun h ->\n` +
+    `              Html.th [ prop.custom("aria-sort", (match loomText (h?column?getIsSorted()) with | "asc" -> "ascending" | "desc" -> "descending" | _ -> "none")); prop.children [\n` +
+    `                  ${headerBody}${filterInput}\n` +
+    `                ] ]) ] ])\n` +
+    `      ] ]`;
+
+  const body =
+    `Html.tbody [ prop.children [\n` +
+    `        yield! unbox<obj array> (table?getRowModel()?rows) |> Array.map (fun r ->\n` +
+    `          Html.tr [ prop.children [\n` +
+    `            yield! unbox<obj array> (r?getVisibleCells()) |> Array.map (fun c ->\n` +
+    `              Html.td [ prop.children [ ${cellBody} ] ]) ] ])\n` +
+    `      ] ]`;
+
+  // `Math.max(pageCount, 1)` on the JSX packs — an empty grid still reads
+  // "Page 1 of 1" rather than "of 0".
+  const pager =
+    `\n      Html.div [ prop.className "flex items-center justify-between"; prop.children [\n` +
+    `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanPreviousPage()))); prop.onClick (fun _ -> loomInvoke (table?previousPage)); prop.text "Previous" ]\n` +
+    `        Html.span [ prop.className "text-sm"; prop.custom("aria-live", "polite"); prop.text ("Page " + string (unbox<int> (table?getState()?pagination?pageIndex) + 1) + " of " + string (max (unbox<int> (table?getPageCount())) 1)) ]\n` +
+    `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanNextPage()))); prop.onClick (fun _ -> loomInvoke (table?nextPage)); prop.text "Next" ]\n` +
+    `      ] ]`;
+
+  const table =
+    `\n      Html.div [ prop.className "overflow-x-auto rounded-box border border-base-300"; prop.children [\n` +
+    `        Html.table [ prop.className "table table-zebra w-full"; prop.children [ ${head}; ${body} ] ]\n` +
+    `      ] ]`;
+
+  return (
+    `(Html.div [ ${tidPart}prop.className "flex flex-col gap-2"; prop.children [` +
+    `${visibility}${table}${pager}\n    ] ])`
+  );
+}
+
 /** IdLink — a table-cell link from a row id to its detail page.  Hrefs the
  *  History-API PATH (`/products/<id>`), matching the path-mode router; the id is
  *  the visible label. */
@@ -707,6 +784,7 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-key-value-row": primitiveKeyValueRow,
   "primitive-anchor": primitiveAnchor,
   "primitive-table": primitiveTable,
+  "primitive-data-grid": primitiveDataGrid,
   "primitive-id-link": primitiveIdLink,
   "primitive-modal": primitiveModal,
   // Prose / text-decoration.

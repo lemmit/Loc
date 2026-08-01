@@ -462,7 +462,7 @@ Split the problem by where the rule lives:
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
-| `DataGrid` | **Every JS frontend** (React, Vue, Svelte, Angular). Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on a frontend without a port is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend. |
+| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts, pages and filters on every frontend. |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
 
@@ -498,7 +498,7 @@ exactly the rows above.
 
 Users freely define their own `component`s, which compose these builtins.
 
-### 9.1 `DataGrid` — the interactive grid (React)
+### 9.1 `DataGrid` — the interactive grid
 
 `Table` is deliberately simple and portable: it renders markup around a rows
 expression the walker has already sorted/sliced, so all six frontends (plus the
@@ -576,21 +576,40 @@ reason: React's column defs carry `cell: ({ row }) => <JSX/>`, while the other
 three would have to return framework-specific render output, so a computed
 column renders in the markup selected by column id.
 
-The three remaining targets are honest gaps, not silent ones —
-`loom.datagrid-unsupported-target` rejects a `DataGrid` on **HEEx** (LiveView has
-no client row model; `Table` is server-driven there instead), **Feliz** and
-**Flutter** (F# and Dart, through their own toolchains, with no TanStack
-adapter).
+**Feliz hosts the real row model too, through Fable interop.** It has no
+per-component *file*, so the child is a `[<ReactComponent>]` declaration spliced
+into `App.fs` ahead of the page views (F# is order-sensitive). Because the
+walker resolves no DTO type name and F# has no structural typing to stand in for
+that generic, the **call site** projects each row into a plain JS object — one
+key per `accessorKey` column, plus a lazy `unit -> ReactElement` thunk per
+computed column, closing over the typed row. `selection:` cannot be a direct
+write on Feliz (Elmish state lives in `update`), so the grid dispatches a
+`SetSelectedIds` Msg like any other bound input.
 
-**Svelte drives `@tanstack/table-core` directly rather than the Svelte adapter.**
+The two remaining targets are honest gaps, not silent ones, and for different
+reasons. `loom.datagrid-unsupported-target` rejects a `DataGrid` on **HEEx**
+(LiveView has no client row model; `Table` is server-driven there instead) and
+on **Flutter** — permanently. `DataGrid` is a TanStack row model, so a target
+can host it only if it can host TanStack; there is no Dart adapter or port, and
+while Flutter *web* has `dart:js_interop`, the shipping target is a native build
+with no JS runtime. Flutter's own `DataTable`/`PaginatedDataTable` are the trap
+that decision exists to avoid: they give you *a* grid, not *the same* grid.
+
+**Svelte and Feliz drive `@tanstack/table-core` directly rather than an adapter.**
 The official `@tanstack/svelte-table` peers on Svelte 3/4 — it predates runes —
 and Svelte 5 support exists only in a `9.0.0-beta` whose API differs enough to
 make the Svelte grid behave differently from the others. `table-core` is the
 framework-agnostic package every adapter wraps, on the same v8 API, with no
-framework peer; runes supply the reactivity the adapter would have. One
-consequence is visible in the emitted code: *every* state slice is controlled,
-including `pagination`, because the table is rebuilt inside `$derived.by` and an
-uncontrolled `pageIndex` would reset to 0 on every sort click.
+framework peer; runes supply the reactivity the adapter would have. Feliz uses
+the same package for the simpler reason that no F# adapter exists at all.
+
+Two consequences are visible in the emitted code for both. *Every* state slice
+is controlled, including `pagination`, because the table is rebuilt on each
+render and an uncontrolled `pageIndex` would reset to 0 on every sort click. And
+because `table-core`'s `getState()` returns the raw `state` option — it does not
+merge its own defaults the way the framework adapters do — both targets spread
+`table.initialState` in first. Without that, `getHeaderGroups()` throws and the
+grid renders nothing, with the compiler and the bundler both reporting success.
 
 ---
 

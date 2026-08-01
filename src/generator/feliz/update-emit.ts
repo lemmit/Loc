@@ -68,7 +68,11 @@ function decimalLit(rendered: string, type: StateFieldIR["type"]): string {
  *  state (`Field`/`NumberField`/`SelectField`/…) carries the raw input `string`
  *  and the update arm converts it to the field's type. */
 function boundSetMsg(b: FelizBoundState): string {
-  const payload = typeToFs(b.type) === "bool" ? "bool" : "string";
+  const fs = typeToFs(b.type);
+  // An ARRAY-typed binding is not a text input — it is `DataGrid(selection:)`,
+  // which reports a whole `string list`.  Carrying it as a raw `string` would
+  // not typecheck against the Model field.
+  const payload = b.type.kind === "array" ? fs : fs === "bool" ? "bool" : "string";
   return `  | Set${upperFirst(b.name)} of ${payload}`;
 }
 
@@ -84,7 +88,7 @@ function boundSetArm(b: FelizBoundState, refetch?: FelizRead): string {
   const field = upperFirst(b.name);
   const fs = typeToFs(b.type);
   const conv =
-    fs === "bool"
+    b.type.kind === "array" || fs === "bool"
       ? "v"
       : fs === "int"
         ? "(match System.Int32.TryParse v with | true, n -> n | _ -> 0)"

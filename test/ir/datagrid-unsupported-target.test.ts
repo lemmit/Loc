@@ -1,11 +1,17 @@
 // `loom.datagrid-unsupported-target` — DataGrid on a frontend that can't
 // render it is a COMPILE ERROR, not a silently missing grid.
 //
-// This is the honest-gap discipline: DataGrid emits a hook-bearing TanStack
+// This is the honest-gap discipline: DataGrid emits a TanStack row model in a
 // child component, so it is not a markup mapping the other frontends pick up
-// for free.  Without this gate a Vue/Svelte/Angular/Feliz/Flutter page would
-// render an empty slot (or a "not supported" comment on HEEx) and the author
-// would only discover it in the running app.
+// for free.  Without this gate a Flutter page would render an empty slot (or a
+// "not supported" comment on HEEx) and the author would only discover it in the
+// running app.
+//
+// The allowlist tracks one question — can this target host TANSTACK? — not
+// "does it emit JSX".  Feliz can (Fable compiles F# to JavaScript, so it binds
+// `@tanstack/table-core` directly), so it is accepted.  Flutter cannot: its
+// shipping target is a native APK with no JS runtime, and that is a settled
+// decision rather than a pending port.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -46,10 +52,11 @@ system S {
 `;
 
 describe("loom.datagrid-unsupported-target", () => {
-  // The frameworks with no `renderDataGridChild` seam.  Feliz emits F#/Elmish
-  // and Flutter emits Dart — neither has a TanStack adapter, and neither rides
-  // the shared `walkBody` markup engine the four JS targets share.
-  for (const fw of ["feliz", "flutter"]) {
+  // The frameworks with no `renderDataGridChild` seam.  Flutter emits Dart and
+  // its native build has no JS runtime, so TanStack cannot run there at all —
+  // a PERMANENT gap, deliberately, rather than an unported one (the rationale
+  // lives in `src/util/flutter-deferred-primitives.ts`).
+  for (const fw of ["flutter"]) {
     it(`rejects DataGrid on a ${fw} frontend`, async () => {
       const diags = await validateSource(sys(fw));
       const hit = diags.find((d) => d.code === "loom.datagrid-unsupported-target");
@@ -62,7 +69,7 @@ describe("loom.datagrid-unsupported-target", () => {
 
   // Ported frameworks.  Each entry here is a `renderDataGridChild` seam that
   // exists; the gate's whole job is to keep the two sets in step.
-  for (const fw of ["react", "vue", "svelte", "angular"]) {
+  for (const fw of ["react", "vue", "svelte", "angular", "feliz"]) {
     it(`accepts DataGrid on ${fw}`, async () => {
       const diags = await validateSource(sys(fw));
       expect(diags.find((d) => d.code === "loom.datagrid-unsupported-target")).toBeUndefined();

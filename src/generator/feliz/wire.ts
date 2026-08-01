@@ -1277,6 +1277,11 @@ const BOUND_INPUT_PRIMITIVES: ReadonlyMap<string, readonly string[]> = new Map([
   ["Toggle", ["bind"]],
   ["Modal", ["open"]],
   ["Table", ["sortKey", "sortDir", "page", "filter"]],
+  // `DataGrid(selection: <string[] state>)` — the ONE piece of grid view-state
+  // the page can read.  The grid's own state (sort / filters / visibility /
+  // pagination) stays inside the `[<ReactComponent>]` child; only the selected
+  // ids reach the Model, so a sibling ("Delete selected (3)") can read them.
+  ["DataGrid", ["selection"]],
 ]);
 
 /** Collect the page `state` fields a controlled input primitive two-way-binds —

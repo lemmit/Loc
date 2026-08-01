@@ -162,6 +162,12 @@ export interface WalkResult {
    *  "../lib/table-sort"` when set — React inlines the filter and leaves
    *  it false. */
   usesTableFilter: boolean;
+  /** True when a `DataGrid` emitted through the `renderDataGridChild` seam
+   *  (M-T1.1).  Only the targets whose grid needs a MODULE-LEVEL preamble read
+   *  it: Feliz emits its `@tanstack/table-core` interop bindings once per
+   *  `App.fs` and adds the package to the emitted `package.json`.  The JSX
+   *  targets import per-component and leave it unread. */
+  usesDataGrid: boolean;
   /** The default tab value of the first `Tabs` on the body, when any — the
    *  shell declares the controlled tab state (`const __loomTab = ref(<default>)`)
    *  for targets that v-model the tab group (Vue/Vuetify). Undefined when the
@@ -439,6 +445,7 @@ export function walkBody(
     usesNavigate: false,
     usesTableSort: false,
     usesTableFilter: false,
+    usesDataGrid: false,
     stateNames,
     derivedNames,
     usesState: false,
@@ -489,6 +496,7 @@ export function walkBody(
     usesNavigate: ctx.usesNavigate,
     usesTableSort: ctx.usesTableSort ?? false,
     usesTableFilter: ctx.usesTableFilter ?? false,
+    usesDataGrid: ctx.usesDataGrid ?? false,
     tabsDefault: ctx.tabsDefault,
     usesState: ctx.usesState,
     usesCurrentUser: ctx.usesCurrentUser,
@@ -635,6 +643,19 @@ export interface Sink {
    *  shared `filterRows` helper.  Optional so the many `Sink` construction sites
    *  needn't all initialise it; only the interactive-table path writes it. */
   usesTableFilter?: boolean;
+  /** M-T1.1 — set by a target's `renderDataGridChild` when the grid needs a
+   *  module-level preamble + package dependency (Feliz).  Optional for the same
+   *  reason as the two above: only that path writes it. */
+  usesDataGrid?: boolean;
+  /** A `QueryView`'s LIST `data:` lambda param → the aggregate its rows are.
+   *
+   *  Page bodies carry no `receiverType`, so `o.amount` inside a row lambda
+   *  types as `string` and a primitive cannot tell a `money` column from a text
+   *  one.  The enclosing query knows, so it records the binding here.  (The
+   *  `single:` case already does the analogous thing through `paramTypes`; a
+   *  separate map keeps LIST bindings from being mistaken for record ones by
+   *  the `OperationForm`/`Action` resolution that reads `paramTypes`.) */
+  listRowAggregates?: ReadonlyMap<string, string>;
   /** Set by `emitTabs` to the first `Tabs`' default value — drives the shell's
    *  controlled tab-state declaration (Vue). Optional; only the tabs path writes it. */
   tabsDefault?: string;
@@ -856,21 +877,37 @@ function adjustFindHookArgs(
   // (paged-by-default, M-T2.6), which takes the same object-shaped query arg a
   // user find does (`useAll<Plural>({ page, pageSize, sort, dir })`).
   if (STANDARD_AGG_OPS.has(detected.operation) && !isPaged) return hookUse;
-  if (!find || hookUse.argsRendered.length === 0) return hookUse;
-  const pairs = find.params.map((p, i) => `${p.name}: ${hookUse.argsRendered[i] ?? "undefined"}`);
+  // A PAGED read still needs its query bag when the call site passed nothing
+  // (a hand-written `QueryView { of: Shop.Product.all }` — the scaffold threads
+  // its page state, but this shape does not), because a target whose provider
+  // is KEYED by that bag has no zero-arg form to fall back on: Flutter's
+  // `.family` provider would be referenced bare and fail to compile.  Gated on
+  // the target declaring `renderQueryArgsBag`, so the JSX frontends — whose
+  // hooks do have a zero-arg form — stay byte-identical.
+  const needsExplicitBag = isPaged && !!ctx.target.renderQueryArgsBag;
+  if (!find || (hookUse.argsRendered.length === 0 && !needsExplicitBag)) return hookUse;
+  const pairs = find.params.map((p, i) => ({
+    name: p.name,
+    value: hookUse.argsRendered[i] ?? "undefined",
+  }));
   if (isPaged) {
     // The paged controls follow the user params in the call's args (the scaffold
     // list threads its `pageNum`/`sortKey`/`sortDir` state here); any omitted →
     // the shared 1-based / default-order defaults.
     const extra = hookUse.argsRendered.slice(find.params.length);
     pairs.push(
-      `page: ${extra[0] ?? "1"}`,
-      `pageSize: ${extra[1] ?? "20"}`,
-      `sort: ${extra[2] ?? '"id"'}`,
-      `dir: ${extra[3] ?? '"asc"'}`,
+      { name: "page", value: extra[0] ?? "1" },
+      { name: "pageSize", value: extra[1] ?? "20" },
+      { name: "sort", value: extra[2] ?? '"id"' },
+      { name: "dir", value: extra[3] ?? '"asc"' },
     );
   }
-  return { ...hookUse, argsRendered: [`{ ${pairs.join(", ")} }`], reactiveQuery: true };
+  // The BAG's spelling is the target's — a JS object literal for the JSX
+  // frontends, a Dart named record for Flutter (see `renderQueryArgsBag`).
+  const bag =
+    ctx.target.renderQueryArgsBag?.(pairs) ??
+    `{ ${pairs.map((p) => `${p.name}: ${p.value}`).join(", ")} }`;
+  return { ...hookUse, argsRendered: [bag], reactiveQuery: true };
 }
 
 const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
@@ -1088,6 +1125,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   if (child.usesRouteId) parent.usesRouteId = true;
   if (child.usesTableSort) parent.usesTableSort = true;
   if (child.usesTableFilter) parent.usesTableFilter = true;
+  if (child.usesDataGrid) parent.usesDataGrid = true;
   if (child.tabsDefault !== undefined && parent.tabsDefault === undefined) {
     parent.tabsDefault = child.tabsDefault;
   }
@@ -1515,7 +1553,16 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // emit on the receiver — if it was a hook-eligible chain
       //, tryDetectApiHook at the top has already
       // returned the hook var; we just append `.<member>`.
-      return `${emitExpr(expr.receiver, ctx)}.${expr.member}`;
+      const recv = emitExpr(expr.receiver, ctx);
+      // A target whose embedded language is not JavaScript spells some members
+      // differently (F#'s `.Length`); returning undefined keeps the JS form.
+      const spelled = ctx.target.renderMemberRead?.({
+        receiver: recv,
+        member: expr.member,
+        receiverType: expr.receiverType,
+        memberType: expr.memberType,
+      });
+      return spelled ?? `${recv}.${expr.member}`;
     }
     case "lambda": {
       // Lambda in EXPRESSION position — the callback of a higher-order

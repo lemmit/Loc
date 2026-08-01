@@ -2164,3 +2164,55 @@ IS the applied-history record" property M-T2.1 pinned for renames.
 **Affects.** `../migrations.md` § Data migrations;
 `../new-plan/missions/M-T2.3-data-migration-surface-design.md` (canonical);
 `src/system/migrations-builder.ts`.
+
+## D-DATAGRID-TARGETS — a target hosts `DataGrid` only if it can host TanStack
+
+**Status:** PINNED.
+
+**Problem.** `DataGrid` (M-T1.1 slice 10) is not a markup mapping. It is a
+TanStack Table row model — multi-column sort, per-column filters, column
+visibility, pagination, row selection — that each target wires to its own
+reactivity through the `renderDataGridChild` seam. The seam exists precisely so
+those semantics are shared rather than re-derived. That makes "should target X
+get a DataGrid?" a different question from every other primitive's, and the
+tempting answer is the wrong one: most UI toolkits ship *a* data grid, and
+adopting it would satisfy the emitter while quietly forking behaviour.
+
+**Decision.** A frontend ships `DataGrid` **iff it can run TanStack Table
+itself**. Not "iff it emits JSX", and not "iff its UI kit has a grid widget".
+
+- **React / Vue / Svelte / Angular / Feliz — yes.** The first four via their
+  official adapters or (Svelte) `@tanstack/table-core` directly. **Feliz too:**
+  Fable compiles F# to JavaScript, so it binds `table-core` through ordinary
+  interop and executes the same row model. No adapter is required, and none
+  exists — that was never the test.
+- **Flutter — no, permanently.** There is no Dart adapter and no Dart port.
+  `dart:js_interop` exists on Flutter *web* only, while the shipping target
+  (what `generated-flutter-build.yml` builds) is a native APK with no JS
+  runtime. A primitive that compiles on one Flutter target and not the other is
+  worse than an honest gap.
+- **HEEx — no,** for an unrelated reason already recorded: a CLIENT row model
+  has no LiveView analogue; `Table` is server-driven there instead.
+
+`Table` is the portable answer on both, and it carries column sort, pagination
+and filtering on every frontend. `loom.datagrid-unsupported-target` says so, per
+target, rather than "not supported yet".
+
+**Rationale.**
+
+- Flutter ships `DataTable`/`PaginatedDataTable`, which is exactly the trap.
+  They would give an author *a* grid whose sort stability, filter composition,
+  multi-sort semantics and pagination edges differ from the other five — the
+  divergence class the shared seam was built to prevent, reintroduced under a
+  primitive with one name.
+- The alternative — hand-rolling a row model in Dart — is the same fork with
+  more code, and it is unbounded work: parity is measured against a library
+  that keeps moving.
+- Stating the rule as "can it host TanStack" makes both answers fall out
+  mechanically and keeps the next target's decision cheap.
+
+**Affects.** `DATA_GRID_FRAMEWORKS` (`ir/validate/checks/system-checks.ts`);
+`DATA_GRID_PRIMITIVES` (`generator/_packs/required-primitives.ts`);
+`util/flutter-deferred-primitives.ts`; `generator/feliz/data-grid-child.ts`;
+[`page-metamodel.md` §9.1](page-metamodel.md); `new-plan/T1-ui-frontend.md`
+M-T1.1.

@@ -62,7 +62,7 @@ describe("scalar-return operations — 200-with-value across all five backends (
     const routes = fileEndingWith(files, "http/order_routes.py");
     expect(routes).toContain('response_model=str, operation_id="describeOrder"');
     // The describe handler returns the value, not `Response(status_code=204)`.
-    expect(routes).toMatch(/async def describe_order[\s\S]*?\n    return result\n/);
+    expect(routes).toMatch(/async def describe_order[\s\S]*?\n {4}return result\n/);
   });
 
   it("Java returns a typed ResponseEntity body (not 204 No Content)", async () => {

@@ -49,6 +49,7 @@ export function renderReactDataGridChild(spec: DataGridSpec, ctx: WalkContext): 
     "@tanstack/react-table",
     "type ColumnDef",
     "type SortingState",
+    ...(spec.columns.some((c) => c.numericSort) ? ["type Row"] : []),
     ...(anyFilterable ? ["type ColumnFiltersState"] : []),
     ...(columnVisibility ? ["type VisibilityState"] : []),
     ...(selection ? ["type RowSelectionState"] : []),
@@ -136,6 +137,9 @@ function renderGridComponent(spec: DataGridSpec): string {
       }
       parts.push(`enableSorting: ${c.sortable}`);
       parts.push(`enableColumnFilter: ${c.filterable}`);
+      // A money/decimal column needs an explicit numeric comparator — see
+      // `DataGridColumn.numericSort`.
+      if (c.numericSort) parts.push("sortingFn: compareDecimal");
       return `        { ${parts.join(", ")} },`;
     })
     .join("\n");
@@ -215,7 +219,29 @@ function renderGridComponent(spec: DataGridSpec): string {
     ? `  // biome-ignore lint/suspicious/noExplicitAny: cell markup reads declared row fields; the grid child is generic over the row type, so property access needs one cast at the boundary.\n  type CellRow = Record<string, any>;\n`
     : "";
 
-  return `function ${componentName}<T extends object>(${props}) {
+  // Emitted at module scope, ahead of the component, when any column needs it.
+  // `Row<any>` (not `Row<T>`): the helper sits OUTSIDE the generic component and
+  // only ever reads a value through `getValue`, so the row's shape is irrelevant
+  // to it — parameterising it would force the type through every call site.
+  const decimalCmp = columns.some((c) => c.numericSort)
+    ? [
+        "// Comparator for a money / decimal column.  Those reach the row as a Decimal",
+        "// OBJECT whose valueOf() returns a string, so TanStack's default a < b orders",
+        "// them lexicographically — an ascending sort comes out [10, 100, 9].  Number()",
+        "// goes through that same valueOf, which is what makes it a correct numeric",
+        "// read, and (unlike TanStack's alphanumeric fallback) it stays correct for",
+        "// negative amounts.",
+        "// biome-ignore lint/suspicious/noExplicitAny: the comparator reads through getValue and never touches the row shape.",
+        "function compareDecimal(a: Row<any>, b: Row<any>, id: string): number {",
+        "  const x = Number(a.getValue(id) ?? 0);",
+        "  const y = Number(b.getValue(id) ?? 0);",
+        "  return x < y ? -1 : x > y ? 1 : 0;",
+        "}",
+        "",
+      ].join("\n")
+    : "";
+
+  return `${decimalCmp}function ${componentName}<T extends object>(${props}) {
 ${cellRowType}${stateDecls}
   const columns = useMemo<ColumnDef<T>[]>(
     () => [

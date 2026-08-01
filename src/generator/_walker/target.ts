@@ -225,6 +225,19 @@ export interface DataGridColumn {
   cell?: string;
   sortable: boolean;
   filterable: boolean;
+  /** True when this column's runtime value is a DECIMAL-LIKE OBJECT rather than
+   *  a JS primitive — a `money` or `decimal` field.
+   *
+   *  Every frontend parses those into an object wrapper (the JSX DTOs into
+   *  `decimal.js`'s `Decimal`, Feliz into Fable's), and both wrappers'
+   *  `valueOf()` returns a STRING.  TanStack's default comparator is `a < b`,
+   *  so a money column sorted ascending comes out `[10, 100, 9]` — lexicographic
+   *  order over the decimal string, on all five frontends alike.  A column
+   *  flagged here gets an explicit numeric `sortingFn` instead.
+   *
+   *  Set only for a SORTABLE `accessorKey` column: a computed cell has no value
+   *  to compare, and an unsortable column never reaches a comparator. */
+  numericSort?: boolean;
 }
 
 /** Everything a target needs to build a `DataGrid`'s child component
@@ -269,6 +282,22 @@ export interface DataGridSpec {
   /** The pack's declared `imports["primitive-data-grid"]` entries, for the
    *  target to place wherever the rendered body lands. */
   packImports: readonly { from: string; named: readonly string[] }[];
+  /** Imports the COMPUTED-CELL walks registered — everything
+   *  `Column("Tier", o => EnumBadge { o.tier })` needed to render: the pack
+   *  component (`Badge` from `flowbite-svelte`) and any `lib/format` helper
+   *  (`formatDateTime`) its markup calls.
+   *
+   *  Separate from `packImports` because these are discovered by WALKING, not
+   *  declared by the manifest, and because they follow the cell markup rather
+   *  than the grid chrome.  On a target that hoists the child into its own FILE
+   *  (Vue / Svelte / Angular) the cell markup leaves the page, so the imports
+   *  the walk parked on the page's import map are in the wrong file — the
+   *  component references `Badge` and `formatDateTime` that nothing imported,
+   *  which is a runtime `ReferenceError` (Svelte) or a compile failure, and is
+   *  invisible to every structural test because the page still looks correct.
+   *  React and Feliz ignore this: their cell markup stays in the page's own
+   *  module, where the walk already put the imports. */
+  cellImports: readonly { from: string; named: readonly string[] }[];
 }
 
 /** What a target returns for a `DataGrid` — where the child component lives,
@@ -748,6 +777,38 @@ export interface WalkerTarget {
    *  Returning `undefined` for an unrecognised member falls through to the
    *  plain `<recv>.<member>` emit. */
   renderPagedEnvelopeMember?(spec: PagedEnvelopeMemberSpec): string | undefined;
+
+  /** OPTIONAL — spell the QUERY-ARGS bag a paged / user find takes.
+   *
+   *  `adjustFindHookArgs` collapses a find's positional args into one named bag
+   *  (`useAllProducts({ page, pageSize, sort, dir })`).  That literal is
+   *  JavaScript, which is right for the four JSX targets and wrong everywhere
+   *  else: Flutter emitted it verbatim into Dart, where bare `page:` keys are
+   *  not identifiers and the whole page failed to compile.  A target returning
+   *  its own spelling (Dart's named record, `(page: 1, …)`) gets valid source;
+   *  omitting the seam keeps the JS object, so the JSX targets are
+   *  byte-identical. */
+  renderQueryArgsBag?(pairs: ReadonlyArray<{ name: string; value: string }>): string;
+
+  /** OPTIONAL — spell a plain member READ in the target's own language.
+   *
+   *  The default emit is `<recv>.<member>`, which is right for every frontend
+   *  whose embedded language is JavaScript.  Feliz's is F#, where the same IR
+   *  member has a different name: `xs.length` is `xs.Length` on an F# list, and
+   *  a body that reads a `string[]` page-state field's length (the sibling that
+   *  makes `DataGrid(selection:)` worth having) otherwise emits code Fable
+   *  rejects.  Returning `undefined` — or omitting the seam — falls through to
+   *  the verbatim access, so the JSX targets are byte-identical.
+   *
+   *  Reads only.  Member CALLS (`xs.contains(y)`) already route through
+   *  `emitMethodCall`, and Feliz maps those in `fs-expr.ts`. */
+  renderMemberRead?(spec: {
+    /** The already-rendered receiver. */
+    receiver: string;
+    member: string;
+    receiverType: TypeIR | undefined;
+    memberType: TypeIR | undefined;
+  }): string | undefined;
 
   /** OPTIONAL — the in-scope accessor for the magic route `id` identifier
    *  (`{ kind: "id" }`, e.g. `Order.byId(id)` on a `/orders/:id` page).  The

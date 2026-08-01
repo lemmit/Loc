@@ -449,11 +449,25 @@ export function emitQueryView(
       paged && ctx.target.renderPagedEnvelopeMember
         ? new Map([...(ctx.pagedListBindings ?? []), [data.param, queryExpr] as const])
         : ctx.pagedListBindings;
+    // A LIST query records its row aggregate on a separate channel — see
+    // `WalkContext.listRowAggregates`.  `DataGrid` reads it to type its columns,
+    // which is the only way to know a `money` column from a text one (page
+    // bodies carry no `receiverType`, so the accessor's `memberType` is
+    // `string` for every field).
+    // Resolved through `tryDetectApiHook`, NOT `singleAggregateOfQuery`: the
+    // latter unwraps a METHOD-CALL receiver (`Sales.Invoice.byId(id)`), while a
+    // list query is a bare member chain (`Sales.Invoice.all`) whose own
+    // `.member` is the operation name, not the aggregate.
+    const listDetected = single ? undefined : tryDetectApiHook(ofArg, ctx);
+    const listAgg = listDetected?.kind === "aggregate" ? listDetected.aggregateName : undefined;
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, data.param, dataAccess),
       paramTypes: childParamTypes,
       pagedListBindings: childPagedListBindings,
+      listRowAggregates: listAgg
+        ? new Map([...(ctx.listRowAggregates ?? []), [data.param, listAgg]])
+        : ctx.listRowAggregates,
     };
     dataJsx = data.body ? walk(data.body, childCtx, depth + 2) : "null";
     propagateChildFlags(ctx, childCtx);

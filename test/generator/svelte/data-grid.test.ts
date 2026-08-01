@@ -93,12 +93,20 @@ describe("DataGrid on Svelte — table-core, not the Svelte 3/4 adapter", () => 
     );
     // No `selection:` on this grid, so `rowSelection` is absent — the slice
     // list is exactly what the grid asked for, plus pagination.
-    expect(child).toContain("state: { sorting, columnFilters, columnVisibility, pagination },");
+    // `defaultState` is spread in FIRST: `table-core` returns the raw `state`
+    // option from `getState()` and does not merge its own defaults, so a state
+    // carrying only our slices throws inside `getHeaderGroups()`.
+    expect(child).toContain(
+      "state: { ...defaultState, sorting, columnFilters, columnVisibility, pagination },",
+    );
     expect(child).toContain(
       "onPaginationChange: (u) => { pagination = applyUpdater(u, pagination); },",
     );
-    // …and there is no `initialState`, which would be the uncontrolled route.
-    expect(child).not.toContain("initialState");
+    // …and no slice is seeded through the `initialState` OPTION, which would be
+    // the uncontrolled route.  Reading `.initialState` off a throwaway instance
+    // for the defaults above is the opposite thing and must not be confused
+    // with it — hence matching the option key, not the bare identifier.
+    expect(child).not.toContain("initialState:");
   });
 
   it("supplies the resolved-options fields table-core requires", async () => {
@@ -106,7 +114,10 @@ describe("DataGrid on Svelte — table-core, not the Svelte 3/4 adapter", () => 
     // `TableOptionsResolved` demands both; the adapters normally fill them in.
     expect(child).toContain("onStateChange: () => {},");
     expect(child).toContain("renderFallbackValue: null,");
-    expect(child).toContain("const table: Table<T> = $derived.by(() => {");
+    // `Table` is ALIASED — several Svelte packs import a component of that name
+    // (flowbite-svelte does), and the two declarations collide in the Svelte
+    // preprocessor.
+    expect(child).toContain("const table: TanstackTable<T> = $derived.by(() => {");
     expect(child).toContain("enableMultiSort: true,");
   });
 
@@ -177,5 +188,31 @@ describe("DataGrid on Svelte — computed cells", () => {
     expect(child).toContain("asRow(c.row.original).name");
     // …and the simple column falls back to the plain cell value.
     expect(child).toContain(`{String(c.getValue() ?? "")}`);
+  });
+
+  it("imports what the computed cells need INTO the child, not onto the page", async () => {
+    // The walk parks a cell's imports on the PAGE's import map, but the cell
+    // markup is hoisted into this file — so the component referenced `Badge`
+    // and `formatDateTime` that nothing here imported.  That is a runtime
+    // `ReferenceError` on Svelte: the page still looks correct, the build is
+    // green, and the grid renders nothing.
+    const files = await gen(
+      `QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+        Column("Name", o => Badge(o.name)),
+        Column("Joined", o => DateDisplay { o.joinedAt }),
+        rows: rows, testid: "cellimp-grid") }`,
+      "",
+      // flowbite pins the case sharply: its `Badge` and its grid chrome come
+      // from the SAME module, so this also proves the two lists merge.
+      " design: flowbite",
+    );
+    const child = files.get(grid("CellimpGrid"))!;
+    // The pack component the `Badge` cell renders…
+    expect(child).toMatch(/import \{[^}]*Badge[^}]*\} from "flowbite-svelte";/);
+    // …and the format helper the `DateDisplay` cell calls.
+    expect(child).toContain(`import { formatDateTime } from "$lib/format";`);
+    // Merged per source: the grid chrome imports from `flowbite-svelte` too, and
+    // two import lines for one module is a duplicate-declaration parse error.
+    expect(child.match(/from "flowbite-svelte";/g)?.length).toBe(1);
   });
 });

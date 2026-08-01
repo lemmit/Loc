@@ -204,8 +204,13 @@ describe("flutterTarget — markup seams", () => {
     expect(flutterTarget.renderInterpolation("name", prim("string"))).toBe("Text(name)");
   });
 
-  it("renderComment is a Dart block comment; renderStyleAttr is empty", () => {
-    expect(flutterTarget.renderComment("todo")).toBe("/* todo */");
+  it("renderComment is a valid Dart EXPRESSION carrying the note", () => {
+    // Not a bare `/* … */`: every place the walker emits a diagnostic is a
+    // child slot, and Flutter's children are comma-separated list elements, so
+    // `<Widget>[ /* … */, ]` is a parse error.  A sentinel that stops the file
+    // compiling cannot be read, which defeats its purpose — a scaffolded detail
+    // page hit exactly this.
+    expect(flutterTarget.renderComment("todo")).toBe("const SizedBox.shrink() /* todo */");
     expect(flutterTarget.renderStyleAttr([])).toBe("");
   });
 

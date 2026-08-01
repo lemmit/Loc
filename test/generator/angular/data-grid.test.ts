@@ -180,3 +180,22 @@ describe("DataGrid on Angular — computed cells", () => {
     expect(child).toContain("{{ String(c.getValue() ?? '') }}");
   });
 });
+
+describe("DataGrid on Angular — what the hoisted component has to reach", () => {
+  it("imports the cells' pack modules and re-exposes their format helpers", async () => {
+    // Angular templates evaluate against the component INSTANCE, so a helper
+    // the cell markup calls has to be both imported and re-exposed as a member
+    // — the page shell does exactly that, and the hoisted child needs its own
+    // copy because the cell markup lives here, not on the page.
+    const files = await gen(
+      `QueryView { of: Sales.Customer.all, data: rows => DataGrid(
+        Column("Joined", o => DateDisplay { o.joinedAt }),
+        rows: rows, testid: "cellimp-grid") }`,
+    );
+    const child = files.get("web/src/app/components/cellimp-grid.component.ts")!;
+    // `../../lib/format` — the child sits at the same depth as a page
+    // (`src/app/components/` vs `src/app/pages/`), not one level up.
+    expect(child).toContain(`import { formatDateTime } from "../../lib/format";`);
+    expect(child).toContain("protected readonly formatDateTime = formatDateTime;");
+  });
+});

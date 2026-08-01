@@ -2290,6 +2290,15 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   if (t.kind === "array") {
     switch (name) {
       case "count":
+      // `<array>.length` is an int, exactly as the language type-system already
+      // reports it (`type-system.ts`).  Without this arm it fell through to the
+      // `string` default below, and a member whose IR type LIES about being a
+      // string is not merely cosmetic: a `{xs.length}` interpolation then
+      // skipped the `convert` the lowerer inserts for non-string parts, which on
+      // a statically-typed frontend (Feliz/F#) emits `"Selected: " + xs.Length`
+      // — a type error Fable rejects.  The JS frontends coerced it silently, so
+      // the wrong type went unnoticed until a non-JS frontend consumed it.
+      case "length":
         return { kind: "primitive", name: "int" };
       case "sum":
         // Sum preserves the element type for money arrays so the

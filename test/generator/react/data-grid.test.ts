@@ -20,6 +20,9 @@ const DOMAIN = `
     context Orders {
       aggregate Customer { name: string  tier: int }
       repository Customers for Customer { }
+      // amount is the money column the numeric-comparator tests need.
+      aggregate Invoice { ref: string  amount: money  qty: int }
+      repository Invoices for Invoice { }
     }
   }
   api SalesApi from Sales
@@ -266,5 +269,39 @@ describe("DataGrid — Table is untouched", () => {
     );
     expect(page).not.toContain("useReactTable");
     expect(page).not.toContain("@tanstack/react-table");
+  });
+});
+
+describe("DataGrid — money columns get a numeric comparator", () => {
+  it("emits sortingFn on a money column and nowhere else", async () => {
+    // `money`/`decimal` reach the row as a decimal.js Decimal OBJECT whose
+    // `valueOf()` returns a STRING, so TanStack's default `a < b` compares the
+    // decimal TEXT: an ascending sort comes out [10, 100, 9].  Verified against
+    // real table-core + decimal.js before the fix.
+    const page = await genPage(
+      `QueryView { of: Sales.Invoice.all, data: rows => DataGrid(
+        Column("Ref", o => o.ref, sortable: true),
+        Column("Amount", o => o.amount, sortable: true),
+        Column("Qty", o => o.qty, sortable: true),
+        rows: rows, testid: "invoice-grid") }`,
+    );
+    // Only the money column — a string and an int compare correctly already,
+    // and overriding them would FORK TanStack's `text`/`alphanumeric` choice.
+    expect(page).toContain(
+      '{ id: "amount", accessorKey: "amount", header: "Amount", enableSorting: true, enableColumnFilter: false, sortingFn: compareDecimal }',
+    );
+    expect(page).not.toMatch(/id: "ref"[^}]*sortingFn/);
+    expect(page).not.toMatch(/id: "qty"[^}]*sortingFn/);
+    expect(page).toContain("function compareDecimal(");
+  });
+
+  it("omits the helper entirely when no column needs it", async () => {
+    const page = await genPage(
+      `QueryView { of: Sales.Invoice.all, data: rows => DataGrid(
+        Column("Ref", o => o.ref, sortable: true),
+        rows: rows, testid: "plain-grid") }`,
+    );
+    expect(page).not.toContain("compareDecimal");
+    expect(page).not.toContain("type Row");
   });
 });

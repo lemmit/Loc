@@ -94,12 +94,17 @@ describe("flutter read-provider projector", () => {
     const ui = enriched.systems[0]!.uis[0]!;
     const src = renderReadProviders(collectFlutterReads(ui, allContexts(enriched)));
 
-    // A list read → FutureProvider<List<T>> over http.get, unwrapping the paged
-    // envelope's `items` and mapping each element through `Product.fromJson`.
-    expect(src).toContain("final productAllProvider = FutureProvider<List<Product>>((ref) async {");
-    expect(src).toContain("await http.get(apiUri('/products'))");
-    expect(src).toContain("body['items'] as List<dynamic>");
-    expect(src).toContain("Product.fromJson(e as Map<String, dynamic>)");
+    // A SERVER-PAGED list read → a `.family` keyed by the query record, so a
+    // sort or page tap re-keys the provider and Riverpod refetches.  That is
+    // what makes `Table`'s controls server-driven on Flutter; a bare
+    // `FutureProvider<List<T>>` has no key to move and no page count to show.
+    expect(src).toContain(
+      "typedef LoomQuery = ({int page, int pageSize, String sort, String dir});",
+    );
+    expect(src).toContain("FutureProvider.family<LoomPage<Product>, LoomQuery>((ref, q) async {");
+    expect(src).toContain("await http.get(apiUri('/products').replace(queryParameters: {");
+    expect(src).toContain("'sort': q.sort,");
+    expect(src).toContain("LoomPage.fromJson(res.body, Product.fromJson)");
 
     // A byId read → a `.family<T?, String>` provider keyed on the route id.
     expect(src).toContain(
@@ -129,12 +134,16 @@ describe("flutter QueryView data-bound pages (generate system)", () => {
     const listSrc = files.get(list!)!;
     expect(listSrc).toContain("class ProductListPage extends ConsumerWidget");
     expect(listSrc).toContain("import '../reads.dart';");
-    expect(listSrc).toContain("final productAll = ref.watch(productAllProvider);");
+    // The paged provider is a family, so the watch always carries a query —
+    // defaulted here because this hand-written page threads no page state.
+    expect(listSrc).toContain(
+      'final productAll = ref.watch(productAllProvider((page: 1, pageSize: 20, sort: "id", dir: "asc")));',
+    );
     expect(listSrc).toContain("productAll.when(loading: () =>");
-    expect(listSrc).toContain("data: (productAll) => productAll.isEmpty ?");
+    expect(listSrc).toContain("data: (productAll) => productAll.items.isEmpty ?");
     // The `For` row binding types against the model — `.map((p) => …p.name…)`,
     // with NO unused index local.
-    expect(listSrc).toContain("...productAll.map((p) =>");
+    expect(listSrc).toContain("...productAll.items.map((p) =>");
     expect(listSrc).not.toContain("entry.key");
 
     // Detail page: a byId read binds the route id, watches the `.family`
@@ -143,7 +152,8 @@ describe("flutter QueryView data-bound pages (generate system)", () => {
     expect(detail, `no product_detail_page in: ${keys.join(", ")}`).toBeDefined();
     const detailSrc = files.get(detail!)!;
     expect(detailSrc).toContain("class ProductDetailPage extends ConsumerWidget");
-    expect(detailSrc).toContain("final id = (ModalRoute.of(context)?.settings.arguments");
+    expect(detailSrc).toContain("final routeArgs = ModalRoute.of(context)?.settings.arguments;");
+    expect(detailSrc).toContain("final id = routeArgs is Map ?");
     expect(detailSrc).toContain("final productById = ref.watch(productByIdProvider(id));");
     expect(detailSrc).toContain("data: (productById) => productById == null ?");
   });

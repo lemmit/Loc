@@ -296,14 +296,53 @@ function renderPage(
     ? renderConsumerPage(
         page,
         className,
-        { usesState, usedActions, usedApiHooks, usesRouteId, stateful, hostsForm, usesComponent },
+        {
+          usesState,
+          usedActions,
+          usedApiHooks,
+          usesRouteId,
+          routeParams: [...paramNames],
+          stateful,
+          hostsForm,
+          usesComponent,
+        },
         bodyWidget,
         contexts,
         apiParamNames,
       )
-    : renderStatelessPage(page, className, bodyWidget, { usesRouteId, hostsForm, usesComponent });
+    : renderStatelessPage(page, className, bodyWidget, {
+        usesRouteId,
+        routeParams: [...paramNames],
+        hostsForm,
+        usesComponent,
+      });
 
   return { fileBase, className, routePath, source, usedComponents };
+}
+
+/** Bindings for a page's ROUTE arguments.
+ *
+ *  Two sources, one shape.  The magic route `id` (`Order.byId(id)`) sets
+ *  `usesRouteId`; a page that DECLARES route params (`page Detail { route:
+ *  "/products/:id" }`) resolves those names as ordinary param refs during the
+ *  walk, and the walker emits them verbatim — so a scaffolded detail page
+ *  referenced `id` with nothing declaring it (`Undefined name 'id'`, and the
+ *  page did not compile).  Both now bind here.
+ *
+ *  A single argument arrives as the bare `String` today; a Map is read
+ *  by-name so a future multi-param route needs no new shape.  Deduped, since
+ *  `usesRouteId` and a declared `id` param name the same local. */
+function routeArgBindings(paramNames: readonly string[], needsId: boolean): string[] {
+  const names = [...new Set([...(needsId ? ["id"] : []), ...paramNames])];
+  if (names.length === 0) return [];
+  const out = ["    final routeArgs = ModalRoute.of(context)?.settings.arguments;"];
+  for (const n of names) {
+    out.push(
+      `    final ${n} = routeArgs is Map ? (routeArgs['${n}'] as String? ?? '') ` +
+        `: (routeArgs as String? ?? '');`,
+    );
+  }
+  return out;
 }
 
 /** What a `ConsumerWidget` page's `build` binds — reactive state/actions (Track
@@ -313,6 +352,9 @@ interface ConsumerBindings {
   usedActions: ReadonlySet<string>;
   usedApiHooks: ReadonlyMap<string, ApiHookUse>;
   usesRouteId: boolean;
+  /** Route params the page DECLARES (`route: "/products/:id"`), bound from the
+   *  route arguments alongside the magic `id`. */
+  routeParams: readonly string[];
   stateful: boolean;
   /** Page hosts a form widget → imports `../forms.dart`. */
   hostsForm: boolean;
@@ -332,7 +374,12 @@ function renderStatelessPage(
   page: PageIR,
   className: string,
   bodyWidget: string,
-  opts: { usesRouteId: boolean; hostsForm: boolean; usesComponent: boolean },
+  opts: {
+    usesRouteId: boolean;
+    routeParams: readonly string[];
+    hostsForm: boolean;
+    usesComponent: boolean;
+  },
 ): string {
   const imports = ["import 'package:flutter/material.dart';"];
   if (opts.hostsForm) imports.push("import '../forms.dart';");
@@ -343,9 +390,7 @@ function renderStatelessPage(
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
   if (usesIntl(bodyWidget)) imports.push("import 'package:intl/intl.dart';");
-  const idBinding = opts.usesRouteId
-    ? ["    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';"]
-    : [];
+  const idBinding = routeArgBindings(opts.routeParams, opts.usesRouteId);
   return `${lines(
     ...imports,
     "",
@@ -399,10 +444,16 @@ function renderConsumerPage(
   const needsId = b.usesRouteId || usesAsyncEffect;
 
   const bindings: string[] = [];
-  // Route `id` first — a byId read's `ref.watch(<var>Provider(id))` and an
-  // async-effect closure both read it.
-  if (needsId) {
-    bindings.push("    final id = (ModalRoute.of(context)?.settings.arguments as String?) ?? '';");
+  // Route args first — a byId read's `ref.watch(<var>Provider(id))`, an
+  // async-effect closure and any declared route param all read them.
+  bindings.push(...routeArgBindings(b.routeParams, needsId));
+  // Page STATE before the read hoists — a server-paged read watches a family
+  // keyed by `state.pageNum` / `state.sortKey`, so the binding it reads has to
+  // exist first.  Dart is not hoisted: the reverse order is a hard
+  // `referenced_before_declaration`, which is exactly how every scaffolded
+  // Flutter list page failed to compile.
+  if (b.stateful && b.usesState) {
+    bindings.push(`    final state = ref.watch(${providerName});`);
   }
   // QueryView read hoists (`final <var> = ref.watch(<var>Provider…);`).
   if (b.usedApiHooks.size > 0) {
@@ -418,13 +469,18 @@ function renderConsumerPage(
     bindings.push(...flutterTarget.renderApiHoisting(uses));
   }
   if (b.stateful) {
-    if (b.usesState) bindings.push(`    final state = ref.watch(${providerName});`);
     // Controlled-input setter tear-offs — each bound input dispatches a bare
     // `set<Field>(v)` (or `set<Field>Text(v)` for NumberField), which resolves
     // to one of these page-shell locals.  Only the bound setters (an unused
     // `final` tear-off is a `flutter analyze` warning → CI red).
     const boundSetters = collectBoundInputFields(page.body, new Set(page.state.map((s) => s.name)));
-    if (b.usedActions.size > 0 || boundSetters.length > 0) {
+    // A `Table`'s sort header / pager writes state directly through the
+    // Notifier without being an action or a bound input, so neither set above
+    // sees it — detect the reference in the rendered body, the same way the
+    // `apiUri(` / `Intl` imports are decided.  Without this the controls emit
+    // `notifier.setSortKey(…)` against nothing (`Undefined name 'notifier'`).
+    const bodyWritesState = bodyWidget.includes("notifier.");
+    if (b.usedActions.size > 0 || boundSetters.length > 0 || bodyWritesState) {
       bindings.push(`    final notifier = ref.read(${providerName}.notifier);`);
       for (const a of [...b.usedActions].sort()) {
         // An async-effect action's method takes the route id; bind it as an
