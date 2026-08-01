@@ -3,6 +3,7 @@ import { Routes, Route, Link as RouterLink, useLocation, Outlet } from "react-ro
 import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
+import { t } from "./i18n";
 import Home from "./pages/home";
 import ProductList from "./pages/products/list";
 import ProductNew from "./pages/products/new";
@@ -62,7 +63,7 @@ class AppErrorBoundary extends React.Component<
 function NotFound() {
   return (
     <Stack data-testid="not-found" p="md">
-      <Title order={2}>Not found</Title>
+      <Title order={2}>{t("chrome.notFound", "Not found")}</Title>
       <Anchor component={RouterLink} to="/">← Back to home</Anchor>
     </Stack>
   );
@@ -105,7 +106,7 @@ function AppShellLayout() {
     <>
       {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
           visually hidden until focused, jumps to the <main> landmark. */}
-      <a href="#main-content" className="loom-skip-link">Skip to content</a>
+      <a href="#main-content" className="loom-skip-link">{t("chrome.skipToContent", "Skip to content")}</a>
       <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
     <AppShell
       header={{ height: 56 }}

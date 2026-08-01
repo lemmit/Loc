@@ -13,6 +13,7 @@
 import { emitsRestCreate } from "../../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
+import { APP_SHELL_CHROME, chromeKey } from "../../../_walker/i18n-chrome.js";
 import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
 
 function upperFirst(s: string): string {
@@ -102,9 +103,17 @@ export function prepareAppShellVM(
    *  `requires`, so they never carry `requiresJs` and stay ungated; only the
    *  `sidebarOverride` (menu-derived) entries can be gated. */
   authUi: boolean = false,
+  /** Whether this UI is i18n-enabled (has authored translatable strings).  When
+   *  true the shell's baked-in chrome (404 text, skip link) binds through `t()`
+   *  keyed to `APP_SHELL_CHROME`, and the `{ t }` import is added to App.tsx;
+   *  when false every chrome token is the raw source string — byte-identical to
+   *  the pre-i18n shell (M-T1.11, pack-chrome). */
+  i18nEnabled: boolean = false,
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
+  // App.tsx sits at `src/App.tsx`, so the runtime shim is one hop away.
+  if (i18nEnabled) imports.push({ specifier: "{ t }", from: "./i18n" });
 
   // Home page — generator-synthesised landing, mounted at "/".
   // Skipped when an explicit `page` already claims route "/" (the
@@ -290,5 +299,21 @@ export function prepareAppShellVM(
     navSections: finalNavSections,
     authUi,
     navUsesSession,
+    // Pack-chrome: raw source string when i18n is off (byte-identical), else a
+    // React text-position `{t("chrome.<name>", "<default>")}` interpolation
+    // keyed to `APP_SHELL_CHROME` (M-T1.11).
+    notFoundText: shellChromeText("notFound", i18nEnabled),
+    skipToContentText: shellChromeText("skipToContent", i18nEnabled),
   };
+}
+
+/** A React text-position token for an app-shell chrome string: the raw source
+ *  default when `i18nEnabled` is false (byte-identical), else a
+ *  `{t("chrome.<name>", "<default>")}` JSX interpolation keyed to the merged
+ *  `APP_SHELL_CHROME` catalog. */
+function shellChromeText(name: string, i18nEnabled: boolean): string {
+  const english = APP_SHELL_CHROME[chromeKey(name)]!;
+  return i18nEnabled
+    ? `{t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
+    : english;
 }

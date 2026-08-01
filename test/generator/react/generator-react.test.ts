@@ -282,9 +282,11 @@ describe("react generator", () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
-      // Skip link is present and points at the main-content anchor.
+      // Skip link is present and points at the main-content anchor.  The label
+      // is pack-chrome: bound through `t("chrome.skipToContent", …)` under i18n
+      // (acme has authored strings, so i18n is on), M-T1.11.
       expect(app).toMatch(
-        /<a href="#main-content" className="loom-skip-link">Skip to content<\/a>/,
+        /<a href="#main-content" className="loom-skip-link">\{t\("chrome\.skipToContent", "Skip to content"\)\}<\/a>/,
       );
       // The <main> region carries the matching id (AppShell.Main renders <main>).
       expect(app).toMatch(/<AppShell\.Main id="main-content">/);

@@ -91,6 +91,9 @@ export function renderAppShell(
    *  `{requiresJs}` wrap are emitted only when true, so non-auth output stays
    *  byte-identical. */
   authUi = false,
+  /** Whether this UI is i18n-enabled — threads to the shell chrome tokens +
+   *  the `{ t }` import (M-T1.11, pack-chrome). */
+  i18nEnabled = false,
 ): string {
   return pack.render("app-shell", {
     hasRealtimeHandlers,
@@ -107,6 +110,7 @@ export function renderAppShell(
       observableWorkflows,
       hasWorkflowsIndex,
       authUi,
+      i18nEnabled,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

@@ -43,7 +43,12 @@ const i18n = (inner: ExprIR, format: string): ExprIR =>
 
 async function catalogOf(source: string): Promise<Record<string, string>> {
   const { model } = await parseString(source, { validate: false });
-  return buildMessageCatalog(enrichLoomModel(lowerModel(model)).systems[0]!);
+  const full = buildMessageCatalog(enrichLoomModel(lowerModel(model)).systems[0]!);
+  // These tests assert PAGE/component/menu string extraction + keying.  An
+  // i18n-enabled system also merges the always-rendered app-shell chrome
+  // (`chrome.*`, M-T1.11) — filtered here so the page-keying assertions below
+  // stay focused; shell chrome is covered in pack-chrome-i18n.test.ts.
+  return Object.fromEntries(Object.entries(full).filter(([k]) => !k.startsWith("chrome.")));
 }
 
 const wrap = (uiBody: string) => `

@@ -1,4 +1,6 @@
 {
+  "chrome.notFound": "Not found",
+  "chrome.skipToContent": "Skip to content",
   "page.Detail.alert.1s47jw": "No product matches that id.",
   "page.Detail.alert.4exfgx": "Couldn't load order",
   "page.Detail.alert.5gt0mm": "Couldn't load product",

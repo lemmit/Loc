@@ -54,6 +54,35 @@ function catalogOf(files: Map<string, string>): Record<string, string> {
   return JSON.parse(entry[1]) as Record<string, string>;
 }
 
+/** App.tsx (the React shell) — where the shell chrome lives. */
+function appOf(files: Map<string, string>): string {
+  const entry = [...files].find(([p]) => p.endsWith("src/App.tsx"));
+  if (!entry) throw new Error("no App.tsx emitted");
+  return entry[1];
+}
+
+describe("pack-chrome i18n — React app-shell chrome", () => {
+  it("binds the 404 + skip-link text through t() and imports t into App.tsx", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
+    const app = appOf(files);
+    expect(app).toContain(`import { t } from "./i18n"`);
+    expect(app).toContain(`{t("chrome.notFound", "Not found")}`);
+    expect(app).toContain(`{t("chrome.skipToContent", "Skip to content")}`);
+    const catalog = catalogOf(files);
+    expect(catalog["chrome.notFound"]).toBe("Not found");
+    expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+  });
+
+  it("stays byte-identical (raw shell text, no t import) for a string-less app", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", `Text { status }`));
+    const app = appOf(files);
+    expect(app).toContain(">Not found<");
+    expect(app).toContain(">Skip to content<");
+    expect(app).not.toContain("import { t }");
+    expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
+  });
+});
+
 describe("pack-chrome i18n — loader aria-label", () => {
   it("React (shadcn): binds the spinner aria through t() keyed to chrome.loading", async () => {
     const files = await generateSystemFiles(

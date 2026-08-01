@@ -53,7 +53,7 @@ class AppErrorBoundary extends React.Component<
 function NotFound() {
   return (
     <Stack data-testid="not-found" p={2} gap={1}>
-      <Typography variant="h5">Not found</Typography>
+      <Typography variant="h5">{{{notFoundText}}}</Typography>
       <RouterLink to="/">← Back to home</RouterLink>
     </Stack>
   );
@@ -114,7 +114,7 @@ function AppShellLayout() {
     <Box sx=\{{ display: "flex" }}>
       {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
           off-screen until focused, jumps to the <main> landmark. */}
-      <a href="#main-content" className="loom-skip-link">Skip to content</a>
+      <a href="#main-content" className="loom-skip-link">{{{skipToContentText}}}</a>
       <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:2000;padding:8px 16px;background:Canvas;color:CanvasText;border:1px solid;border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
       <CssBaseline />
       <AppBar position="fixed" sx=\{{ zIndex: (t) => t.zIndex.drawer + 1 }}>
