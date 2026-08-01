@@ -411,7 +411,7 @@ function operationConflictStatuses(
 /** `resolveErrorStatus` bound to a context's `httpStatus` override map — the
  *  structural-conflict status resolver every route in the file threads
  *  (M-T3.4a). With no override every conflict resolves to 409 (byte-identical). */
-function conflictResolver(ctx: EnrichedBoundedContextIR): (name: string) => number {
+export function conflictResolver(ctx: EnrichedBoundedContextIR): (name: string) => number {
   return (name) => resolveErrorStatus(name, ctx.structuralErrorStatuses);
 }
 
@@ -750,7 +750,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", false, [], conflictResolver(ctx))})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
       `    created = ${agg.name}.create(${args})`,
       auditCreate ? "    repo = _repo(session)" : null,
@@ -793,7 +793,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     "session: SessionDep",
   ].join(", ");
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", false, [], conflictResolver(ctx))})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
     stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
     `    created = ${agg.name}.create(${args})`,

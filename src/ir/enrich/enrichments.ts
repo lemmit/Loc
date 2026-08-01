@@ -172,8 +172,19 @@ function enrichSystem(
   // code, mirroring urlStyle / errorStatuses), defaulting to 409. Consumed
   // uniformly by every backend at both the runtime arm and the OpenAPI
   // declaration so the two can no longer drift.
+  //
+  // M-T5.20 widened the fold beyond the four structural conflicts: the rest of
+  // the denial ladder (`DomainError` domain floor, `Forbidden`, `NotFound`)
+  // surfaces in the SAME app-global handlers, so its status has to resolve the
+  // same app-wide way. Rather than enumerate a second name list here, fold
+  // EVERY name any api maps — a name nobody overrides simply isn't in the map
+  // and `resolveErrorStatus` falls back to its stdlib default, so output is
+  // byte-identical unless an `httpStatus` line actually asked for a move.
   const structuralErrorStatuses: Record<string, number> = {};
-  for (const name of STRUCTURAL_CONFLICT_ERRORS) {
+  const appWideErrorNames = new Set<string>(STRUCTURAL_CONFLICT_ERRORS);
+  for (const a of sys.apis)
+    for (const name of Object.keys(a.errorStatuses)) appWideErrorNames.add(name);
+  for (const name of appWideErrorNames) {
     let code = defaultErrorStatus(name);
     for (const a of sys.apis) {
       if (name in a.errorStatuses) {

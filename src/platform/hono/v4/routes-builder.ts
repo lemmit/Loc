@@ -67,6 +67,7 @@ import {
   wireTypeInfo,
 } from "../../../ir/types/wire-types.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opCreate,
@@ -252,6 +253,18 @@ export function buildRoutesFile(
   // drizzle default keeps `usingMikro = false`, so its output is byte-identical.
   usingMikro = false,
 ): string {
+  // M-T5.20 — the denial-ladder rungs the router's `onError` answers with, and
+  // that its OpenAPI blocks declare, resolved ONCE here through the api's
+  // `httpStatus` map. The domain floor and the `requires` denial were hardcoded
+  // literals with a hardcoded 7807 title beside them (so remapping a rung was an
+  // N-place edit, and `httpStatus DomainError -> 400` was inexpressible even
+  // though the identical clause worked for `Disallowed`). The title now derives
+  // from the RESOLVED status's reason phrase — a status and a title read off the
+  // same number cannot disagree. Defaults resolve to 422 / 403, byte-identical
+  // to the literals they replace. (The 404 rung stays literal — see the NotFound
+  // note in `src/ir/util/openapi-errors.ts`.)
+  const domainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
   // An audited public command action instruments its route handler with an
   // `audit_records` insert; the schema table is only emitted when some
   // action is audited, so the imports are gated on the same presence to keep
@@ -692,15 +705,25 @@ export function buildRoutesFile(
     lines.push(`          description: "Created",`);
     lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
     lines.push(`        },`);
-    // create → 400 (DomainError) + 422 (validation, ProblemDetails with
-    // §3.2 `errors[]` extension emitted by the shared defaultHook), per
-    // the openapi-errors matrix.  See docs/old/proposals/validation-error-extension.md.
+    // create → 400 (malformed body) + 422 (validation, ProblemDetails with
+    // §3.2 `errors[]` extension emitted by the shared defaultHook) + the DOMAIN
+    // FLOOR, per the openapi-errors matrix.  See
+    // docs/old/proposals/validation-error-extension.md.  The floor resolves
+    // through the `httpStatus` mapper (M-T5.20) and defaults to 422, so with no
+    // override it collapses into the validation line above (byte-identical);
+    // `httpStatus DomainError -> <code>` adds its own declaration, matching the
+    // status the router's onError arm now answers with.
     lines.push(
       `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
     lines.push(
       `        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
+    if (domainStatus !== 400 && domainStatus !== 422) {
+      lines.push(
+        `        ${domainStatus}: { description: ${JSON.stringify(httpStatusText(domainStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      );
+    }
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
@@ -1068,7 +1091,13 @@ export function buildRoutesFile(
   // 400 at all, so the literal must not be in the union either: an unused
   // member would let a future `problem(400, …)` typecheck against a status the
   // route never declares.
-  const emittedProblemStatuses = new Set<number>([403, 404, 422, 500, disallowedStatus]);
+  const emittedProblemStatuses = new Set<number>([
+    forbiddenStatus,
+    404,
+    domainStatus,
+    500,
+    disallowedStatus,
+  ]);
   if ((agg.uniqueKeys?.length ?? 0) > 0) emittedProblemStatuses.add(uniquenessStatus);
   if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg))
     emittedProblemStatuses.add(concurrencyStatus);
@@ -1105,10 +1134,12 @@ export function buildRoutesFile(
   );
   lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
-    `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
+    `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: ${forbiddenStatus}`)}`,
   );
   lines.push(`      recordDomainFault("forbidden");`);
-  lines.push(`      return problem(403, "Forbidden", err.message);`);
+  lines.push(
+    `      return problem(${forbiddenStatus}, ${JSON.stringify(httpStatusText(forbiddenStatus))}, err.message);`,
+  );
   lines.push(`    }`);
   lines.push(`    if (err instanceof DisallowedError) {`);
   lines.push(
@@ -1119,10 +1150,12 @@ export function buildRoutesFile(
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
-    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 422`)}`,
+    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: ${domainStatus}`)}`,
   );
   lines.push(`      recordDomainFault("domain_error");`);
-  lines.push(`      return problem(422, "Unprocessable Entity", err.message);`);
+  lines.push(
+    `      return problem(${domainStatus}, ${JSON.stringify(httpStatusText(domainStatus))}, err.message);`,
+  );
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
@@ -1318,16 +1351,26 @@ function emitOperationRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
-  // operation → 400 (domain) + 404 (aggregate not found) + 422
+  // operation → 400 (malformed body) + 404 (aggregate not found) + 422
   // (validation, ProblemDetails with §3.2 `errors[]` extension emitted by
-  // the shared defaultHook), per the openapi-errors matrix.  Phase D of
-  // docs/old/proposals/validation-error-extension.md.
+  // the shared defaultHook) + the DOMAIN FLOOR, per the openapi-errors matrix.
+  // Phase D of docs/old/proposals/validation-error-extension.md.
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(
     `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // M-T5.20 — the domain floor's DECLARED status is the same resolved value the
+  // router's onError arm answers with. Defaults to 422 ⇒ collapses into the
+  // line above (byte-identical); `httpStatus DomainError -> <code>` moves both.
+  const opDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  const opForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  if (opDomainStatus !== 400 && opDomainStatus !== 422 && opDomainStatus !== 404) {
+    out.push(
+      `      ${opDomainStatus}: { description: ${JSON.stringify(httpStatusText(opDomainStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   // A `when` state gate denies with 409 (DisallowedError → onError); a
   // versioned `update` can also 409 on a stale `If-Match` (ConcurrencyError →
   // onError).  Each status resolves through the `httpStatus` mapper (M-T3.4a):
@@ -1347,7 +1390,7 @@ function emitOperationRoute(
   // it so the published contract documents the authorization outcome.
   if (operationIsGuarded(op)) {
     out.push(
-      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `      ${opForbiddenStatus}: { description: ${JSON.stringify(httpStatusText(opForbiddenStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
   out.push(
@@ -1521,23 +1564,11 @@ function isErrorVariant(v: TypeIR, ctx: BoundedContextIR): boolean {
 /** RFC reason phrase for the HTTP statuses an exception-less route can emit —
  *  used for the OpenAPI response `description`. */
 function httpStatusText(status: number): string {
-  const TEXT: Readonly<Record<number, string>> = {
-    400: "Bad Request",
-    402: "Payment Required",
-    403: "Forbidden",
-    404: "Not Found",
-    409: "Conflict",
-    422: "Unprocessable Entity",
-    // Codes a `httpStatus <StructuralConflict> -> <Code>` override may retarget a
-    // conflict to (M-T3.4a) — so the OpenAPI `description` stays a real reason
-    // phrase, not a generic fallback.
-    423: "Locked",
-    428: "Precondition Required",
-    429: "Too Many Requests",
-    500: "Internal Server Error",
-    502: "Bad Gateway",
-  };
-  return TEXT[status] ?? "Error";
+  // Single source of truth with the other four backends (M-T5.20): the shared
+  // `problemTitle` table carries the same reason phrases, including the codes a
+  // `httpStatus <Error> -> <Code>` override may retarget a rung to.  Kept as a
+  // named local so the ~dozen call sites below read the same.
+  return problemTitle(status);
 }
 
 /** The exception-less operation route (`operation foo(): X or NotFound`).  Calls
@@ -1574,8 +1605,16 @@ function emitReturningOperationRoute(
   // (422 for the wire-validation tier AND the domain floor — RS-15; 400 for a
   // malformed/unparseable body; 404 aggregate-not-found from getById), 403 if
   // guarded, plus each error variant's mapped status.
-  const problemStatuses = new Set<number>([400, 422, 404]);
-  if (operationIsGuarded(op)) problemStatuses.add(403);
+  // M-T5.20 — the domain floor and the `requires` denial resolve through the
+  // api's `httpStatus` map (defaults 422 / 403 ⇒ the set is unchanged).
+  const problemStatuses = new Set<number>([
+    400,
+    422,
+    404,
+    resolveErrorStatus("DomainError", ctx.structuralErrorStatuses),
+  ]);
+  if (operationIsGuarded(op))
+    problemStatuses.add(resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses));
   if (op.when) problemStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
   for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];

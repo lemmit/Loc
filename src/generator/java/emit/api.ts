@@ -5,6 +5,7 @@ import type {
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import {
@@ -529,6 +530,15 @@ export function renderApiExceptionAdvice(
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralErrorStatuses);
   const referencedInUseStatus = resolveErrorStatus("ReferencedInUse", structuralErrorStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
+  // M-T5.20 — the rest of the denial ladder resolves the same way.  The domain
+  // floor and the `requires` denial were hardcoded literals with hardcoded RFC
+  // 7807 titles beside them; the title now derives from the RESOLVED status's
+  // IANA reason phrase, so status and title cannot disagree.  Defaults are
+  // 422 / 403 with "Unprocessable Entity" / "Forbidden" — byte-identical.
+  // (The 404 arm stays literal — see the NotFound note in
+  // `src/ir/util/openapi-errors.ts`.)
+  const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
   return lines(
     `package ${basePkg}.api;`,
     ``,
@@ -591,9 +601,9 @@ export function renderApiExceptionAdvice(
     ``,
     `    @ExceptionHandler(ForbiddenException.class)`,
     `    public ResponseEntity<ProblemDetail> onForbidden(ForbiddenException e, WebRequest request) {`,
-    `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", 403);`,
+    `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", ${forbiddenStatus});`,
     `        httpMetrics.recordDomainFault("forbidden");`,
-    `        return respond(problem(403, "Forbidden", e.getMessage(), request), 403);`,
+    `        return respond(problem(${forbiddenStatus}, ${JSON.stringify(problemTitle(forbiddenStatus))}, e.getMessage(), request), ${forbiddenStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(DomainException.class)`,
@@ -604,9 +614,9 @@ export function renderApiExceptionAdvice(
     // 9110 reserves 422 for.  400 stays for a malformed/unparseable request.
     // 422 was already a declared response here (MethodArgumentNotValid), so the
     // published contract does not move.
-    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 422);`,
+    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", ${domainStatus});`,
     `        httpMetrics.recordDomainFault("domain_error");`,
-    `        return respond(problem(422, "Unprocessable Entity", e.getMessage(), request), 422);`,
+    `        return respond(problem(${domainStatus}, ${JSON.stringify(problemTitle(domainStatus))}, e.getMessage(), request), ${domainStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,

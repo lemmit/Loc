@@ -777,14 +777,14 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // the rejection nobody made.  Fixed via the shared `respondErrorTail` in
     // `denial.ts`; `_reason` is bound underscore-prefixed so nothing reads it.
     //
-    // PYTHON IS A SEPARATE, SMALLER DIVERGENCE ON THE SAME ARM, and the way it
-    // was found is the point.  The fix's own report proposed this rule as
+    // PYTHON WAS A SECOND, SMALLER DIVERGENCE ON THE SAME ARM, and the way it
+    // was found is the point.  The elixir fix's own report proposed this rule as
     // all-five-conforming.  That list was INFERRED — checking it showed
-    // node/.NET/java emit the literal `"internal"` while python emits
-    // `"An unexpected error occurred."`.  Python has no leak (its string is
-    // fixed and reflects nothing), so it is not the defect this rule was minted
-    // for; it simply is not byte-identical, and byte-identity is the whole
-    // premise of the M-T9.11 golden.  Listed as a `target` until python moves.
+    // node/.NET/java emit the literal `"internal"` while python emitted
+    // `"An unexpected error occurred."`.  Python had no leak (its string was
+    // fixed and reflected nothing), so it was not the defect this rule was
+    // minted for; it simply was not byte-identical, and byte-identity is the
+    // whole premise of the M-T9.11 golden.  Fixed in the same change.
     //
     // This is the THIRD time in this rule family that an all-five `conforms`
     // was asserted from reading rather than checking (RS-18 twice, RS-19 once).
@@ -794,12 +794,12 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // Not caught by the M-T9.11 wire golden: no system in the shared corpus
     // reaches this arm, so all five legs were green with the divergence in
     // place — which is exactly why it needs a NAME.
-    conforms: ["node", "dotnet", "java", "elixir"],
-    targets: ["python"],
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "found 2026-07-29 while landing RS-15 (#2300) by grepping the vanilla Phoenix denial protocol's edges; tracked as M-T6.24 (1)",
       'fixed (elixir): the shared respondErrorTail in src/generator/elixir/vanilla/denial.ts emits problem_response(conn, 500, "Internal Server Error", "internal")',
-      "python divergence found 2026-08-01 by verifying the proposed conforms list instead of accepting it — src/generator/python/index.ts sends a different fixed string",
+      'python divergence found 2026-08-01 by verifying the proposed conforms list instead of accepting it; fixed the same day — src/generator/python/index.ts now sends the literal "internal"',
+      "pinned by test/conformance/internal-fault-parity.test.ts, which asserts the arm on all five",
     ],
     // STATIC: assertable against the emitted handler source on all five without
     // a boot.  Promote to `behavioral` when a corpus fixture reaches the arm —

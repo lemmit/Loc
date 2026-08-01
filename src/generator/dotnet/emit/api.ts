@@ -1,6 +1,6 @@
 import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
-import { errorStatuses, type OpErrorKind } from "../../../ir/util/openapi-errors.js";
+import { errorStatuses, type OpErrorKind, problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   type OpIdTokens,
@@ -364,7 +364,7 @@ export function renderController(
         ? [
             "    [HttpPost]",
             `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
-            ...producesProblem("create"),
+            ...producesProblem("create", false, "    ", resolveStruct),
             `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
             "    {",
             // VO-invariant → 422: validate the wire request (safe DTO) BEFORE
@@ -393,7 +393,7 @@ export function renderController(
         : []),
       '    [HttpGet("{id}")]',
       `    [ProducesResponseType(typeof(${agg.name}Response), 200)]`,
-      ...producesProblem("getById"),
+      ...producesProblem("getById", false, "    ", resolveStruct),
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${idClass}(id)));`,
@@ -523,7 +523,12 @@ export function renderOperationActionBlock(
   // DTO (cast to the polymorphic base so it serializes with the `type` tag).
   const ru = op.returnUnion;
   const rs = op.returnScalar;
-  const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
+  // M-T5.20 — the denial-ladder rungs this action DECLARES resolve through the
+  // same `httpStatus` map the runtime exception filter reads, so a remapped
+  // `DomainError` / `Forbidden` / `NotFound` moves both together.
+  const resolveOpStatus = (name: string): number =>
+    resolveErrorStatus(name, shape.structuralStatuses);
+  const STD = new Set<number>(errorStatuses("operation", op.guarded, resolveOpStatus));
   // A `when` state gate declares 409 (Disallowed); a versioned `update` can also
   // 409 on a stale `If-Match` (ConcurrencyConflict). Each status resolves
   // through the `httpStatus` mapper (M-T3.4a) — deduped, so with no override
@@ -539,7 +544,7 @@ export function renderOperationActionBlock(
   const responseDecls = ru
     ? [
         `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
-        ...producesProblem("operation", op.guarded),
+        ...producesProblem("operation", op.guarded, "    ", resolveOpStatus),
         ...when409,
         ...ru.errorStatuses
           .filter((s) => !STD.has(s))
@@ -548,12 +553,12 @@ export function renderOperationActionBlock(
     : rs
       ? [
           `    [ProducesResponseType(typeof(${rs.wireType}), 200)]`,
-          ...producesProblem("operation", op.guarded),
+          ...producesProblem("operation", op.guarded, "    ", resolveOpStatus),
           ...when409,
         ]
       : [
           "    [ProducesResponseType(204)]",
-          ...producesProblem("operation", op.guarded),
+          ...producesProblem("operation", op.guarded, "    ", resolveOpStatus),
           ...when409,
         ];
   const dispatchTail = ru
@@ -684,6 +689,18 @@ export function renderExceptionFilter(
   const disallowedStatus = resolveErrorStatus("Disallowed", options?.structuralStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", options?.structuralStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", options?.structuralStatuses);
+  // M-T5.20 — the REST of the denial ladder, resolved the same way.  Each was a
+  // hardcoded literal with a hardcoded RFC 7807 title beside it, so remapping a
+  // rung was an N-place edit and `httpStatus DomainError -> 400` was
+  // inexpressible even though the identical clause worked for `Disallowed`.
+  // The title now comes from the RESOLVED status's IANA reason phrase
+  // (`problemTitle`): a title and a status read off the same number cannot
+  // disagree.  With no override these resolve to 422 / 403 / 404 with the
+  // titles "Unprocessable Entity" / "Forbidden" — byte-identical to the
+  // literals they replace.  The 404 arm below stays literal on purpose: see the
+  // NotFound note in `src/ir/util/openapi-errors.ts`.
+  const domainStatus = resolveErrorStatus("DomainError", options?.structuralStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", options?.structuralStatuses);
   // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
   // without uniqueness is byte-identical to before the feature (the proposal's
   // strict-additivity guarantee — only a `unique` index can raise 23505).
@@ -855,10 +872,10 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             ${renderDotnetLogCall("forbidden", [
               { name: "message", valueExpr: "fe.Message" },
-              { name: "status", valueExpr: "403" },
+              { name: "status", valueExpr: `${forbiddenStatus}` },
             ])}
             global::${ns}.Observability.HttpMetrics.RecordDomainFault("forbidden");
-            context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
+            context.Result = Problem(context, ${forbiddenStatus}, "${problemTitle(forbiddenStatus)}", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -880,10 +897,10 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             ${renderDotnetLogCall("domainError", [
               { name: "message", valueExpr: "de.Message" },
-              { name: "status", valueExpr: "422" },
+              { name: "status", valueExpr: `${domainStatus}` },
             ])}
             global::${ns}.Observability.HttpMetrics.RecordDomainFault("domain_error");
-            context.Result = Problem(context, 422, "Unprocessable Entity", de.Message, trace_id);
+            context.Result = Problem(context, ${domainStatus}, "${problemTitle(domainStatus)}", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
