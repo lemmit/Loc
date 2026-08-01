@@ -130,12 +130,16 @@ describe("create-input defaults reach every backend's create surface", () => {
 // "absent" indistinguishable from "the default value", which is why proto3
 // dropped custom field defaults and had to re-add explicit field presence.
 //
-// Node is fixed.  The other four still default an omitted update bool, each by
-// its own mechanism, and they are WAIVED rather than skipped — the split is a
-// cross-backend published-contract question (the RS-15 shape, except here the
-// minority backend is the correct one), so it wants a recorded decision, not
-// four quiet per-backend patches.  Each waiver dies when its backend lands the
-// rule; the list only shrinks.
+// This is RS-26 (`test/conformance/semantics-rules.ts`, docs/conformance-
+// semantics.md) — the exact inverse of RS-6, which says an omitted CREATE bool
+// materializes its declared default.
+//
+// Node conforms.  The other four still default an omitted update bool, each by
+// its own mechanism, and they are WAIVED rather than skipped: 1-vs-4 with the
+// MINORITY correct (node's `.default(false)` was added to match .NET
+// model-binding and Phoenix, so four backends agreed and the agreement was
+// wrong).  Each waiver dies when its backend lands the rule; the list only
+// shrinks.
 // ---------------------------------------------------------------------------
 
 const UPDATE_BOOL_WAIVED: Partial<Record<Backend, string>> = {

@@ -623,6 +623,45 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-26",
+    title: "An omitted UPDATE field is a client error, never a silent default",
+    trigger: "`active: bool = true`; a PUT body omitting `active`",
+    observable:
+      'PUT without "active" is REJECTED (the field is required input) — it does NOT set active=false, and does not re-apply the create default either',
+    // The exact inverse of RS-6, and the half that eats data.  RS-6 says an
+    // omitted CREATE bool materializes its declared default; a default is a
+    // CONSTRUCTION rule, so on update — where there is nothing to construct —
+    // "absent" cannot mean "the default".  Loom's update contract is
+    // full-replacement (PUT carries every field), so an omitted field is simply
+    // a missing required one.
+    //
+    // Applying a wire default there silently rewrote stored state: for
+    // `active: bool = true` a PUT omitting `active` set it to FALSE — not even
+    // the declared default, because the value came from a hardcoded
+    // implicit-bool rule rather than the model.  This is the proto3 lesson: a
+    // wire-level default makes "absent" indistinguishable from "the default
+    // value", which is why proto3 dropped custom field defaults and had to
+    // re-add explicit field presence in 3.15.
+    //
+    // 1-vs-4, with the MINORITY correct.  Node's `.default(false)` was added
+    // deliberately to match .NET model-binding and Phoenix, so four backends
+    // agreed and the agreement was wrong (the RS-15 shape inverted).  Node is
+    // fixed; the other four are ratcheting waivers in
+    // `create-input-default-parity.test.ts` — each asserts its backend STILL
+    // fails, so a backend that starts conforming reddens the gate until its
+    // waiver comes out.
+    conforms: ["node"],
+    targets: ["dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
+      "fixed (node): zodFor gained a `create-body` context so the implicit-bool rule fires only on create — src/platform/hono/v4/routes-builder.ts",
+    ],
+    // Static: assertable against each backend's emitted update-request contract
+    // (zod schema / Pydantic model / record attributes / RequiredSet /
+    // OpenApiSpex `required:`) with no boot.
+    tier: "static",
+  },
 ];
 
 // ---------------------------------------------------------------------------

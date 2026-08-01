@@ -470,6 +470,26 @@
         "fixed (elixir): forApiRead applied in src/generator/elixir/vanilla/wire-serialize.ts and operation-returns-emit.ts"
       ],
       "tier": "behavioral"
+    },
+    {
+      "id": "RS-26",
+      "title": "An omitted UPDATE field is a client error, never a silent default",
+      "trigger": "`active: bool = true`; a PUT body omitting `active`",
+      "observable": "PUT without \"active\" is REJECTED (the field is required input) — it does NOT set active=false, and does not re-apply the create default either",
+      "conforms": [
+        "node"
+      ],
+      "targets": [
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
+        "fixed (node): zodFor gained a `create-body` context so the implicit-bool rule fires only on create — src/platform/hono/v4/routes-builder.ts"
+      ],
+      "tier": "static"
     }
   ]
 }
