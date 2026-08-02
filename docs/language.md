@@ -931,6 +931,16 @@ The projection verbs read a folded `projection`'s read model (see
 assert the state an operation's events fold into (drive an operation,
 then `byKey` the row and `expect` its columns).
 
+An e2e body speaks **wire, not domain**: it sends JSON and reads JSON
+back, and it resolves no context-scoped names (one body may drive several
+contexts, so there is no single scope to resolve against).  The only
+names it binds are its own `let` bindings and the magic receivers
+`api`/`ui`.  So an enum value goes in as the string the backend
+serializes — `{ status: "Placed" }`, not `{ status: Placed }`.  The bare
+form is rejected with `loom.e2e-unresolved-ref`; before that check
+existed it lowered to an unresolved reference and emitted an undefined
+identifier into the generated test.
+
 When an argument is a previously bound `let` name (typically the result
 of a `create` call), `.id` is appended automatically — `api.x.getById(p)`
 becomes `GET /x/{p.id}`.

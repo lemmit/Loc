@@ -50,11 +50,14 @@ system CoreShop {
     port: 4000
   }
 
-  test e2e "core domain: create, add line, place, read" against d {
+  test e2e "core domain: create, add line, place, read, update" against d {
     let o = api.orders.create({ code: "CD1", status: "Draft", total: { amount: 10.00, currency: "USD" } })
     api.orders.addLine(o, { sku: "S1", qty: 2 })
     api.orders.place(o)
     let read = api.orders.getById(o)
     expect(read.status).toBe("Placed")
+    api.orders.update(o, { code: "CD2", status: "Placed", total: { amount: 12.00, currency: "USD" } })
+    let updated = api.orders.getById(o)
+    expect(updated.code).toBe("CD2")
   }
 }

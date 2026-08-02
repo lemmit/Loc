@@ -142,6 +142,25 @@ export function validateE2ETest(
   const contexts = collectContexts(target, modulesByName);
   const source = `${sys.name}/${test.name}`;
   const magicId = test.kind === "ui" ? "ui" : "api";
+
+  // Every name an e2e body may legitimately spell: the magic receivers and its
+  // own `let` bindings.  Collected up front (not as the walk progresses) so a
+  // forward reference reports as its own problem rather than as an unknown
+  // name.
+  //
+  // BOTH magic ids are bound, not just this test's `magicId`.  A test's kind is
+  // derived from the TARGET DEPLOYABLE's platform, not from what the body
+  // spells — so an api-shaped body (`api.orders.create(…)`) aimed at a
+  // UI-mounting deployable classifies as `ui` while still, correctly, spelling
+  // `api`.  Binding only `magicId` rejected every such test: the whole
+  // behavioral Phoenix leg failed to generate.
+  const bound = new Set<string>(["api", "ui"]);
+  for (const stmt of test.statements) if (stmt.kind === "let") bound.add(stmt.name);
+
+  for (const stmt of test.statements) {
+    walkStmt(stmt, (e) => checkUnresolvedRef(e, bound, test.name, source, diags));
+  }
+
   for (const stmt of test.statements) {
     const badKind = unsupportedE2EStmtKind(stmt);
     if (badKind) {
@@ -162,6 +181,44 @@ export function validateE2ETest(
     }
     walkStmt(stmt, (e) => checkMagicCall(e, magicId, contexts, source, diags));
   }
+}
+
+/**
+ * A bare name in an e2e body that binds to nothing.
+ *
+ * `lower-expr.ts` deliberately does NOT resolve enum values (or any
+ * context-scoped name) inside an e2e test — there is no single enclosing
+ * context to resolve against, since one body may drive several — so bare names
+ * lower to `refKind: "unknown"` and the e2e renderer emits them VERBATIM.
+ * That is exactly right for a `let` local, and silently wrong for everything
+ * else: `api.orders.update(o, { status: Placed })` lowered to an unknown ref
+ * and emitted `status: Placed`, an undefined identifier.  Valid `.ddd` in,
+ * uncompilable TypeScript out, with no diagnostic anywhere in between — the
+ * silent-codegen class this repo keeps finding by compiling its own output.
+ *
+ * An e2e test speaks WIRE, not domain: it POSTs JSON and reads JSON back.  So
+ * the fix for the enum case is to write the serialized string (`"Placed"`),
+ * which is what the backend actually sends and receives, and the message says
+ * so.
+ */
+function checkUnresolvedRef(
+  e: ExprIR,
+  bound: ReadonlySet<string>,
+  testName: string,
+  source: string,
+  diags: LoomDiagnostic[],
+): void {
+  if (e.kind !== "ref" || e.refKind !== "unknown" || bound.has(e.name)) return;
+  diags.push({
+    severity: "error",
+    code: "loom.e2e-unresolved-ref",
+    message:
+      `e2e test '${testName}': '${e.name}' is not a 'let' binding or a magic receiver ('api'/'ui'). ` +
+      `An e2e body drives the deployable over HTTP, so it resolves no domain names — ` +
+      `an enum value belongs there as its wire string (e.g. "${e.name}"). ` +
+      `Emitting it verbatim would ship an undefined identifier in the generated test.`,
+    source,
+  });
 }
 
 /** Statement kinds an e2e test body cannot lower (domain mutations and

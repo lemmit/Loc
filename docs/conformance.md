@@ -302,6 +302,26 @@ actual runtime behaviour. Things that slip through:
   contract: `<outdir>/.loom/wire-spec.json` from
   `src/system/wire-spec.ts`, diffed by the existing wire-spec tests.
 
+- **A backend that does not implement its own published spec.** The
+  same blind spot, one level up: if every backend's spec agrees, the
+  diff is clean *even when a router serves something else entirely*.
+  This is not hypothetical — vanilla Phoenix advertised
+  `POST /orders/{id}/update` while its router served
+  `PATCH /orders/:id`, and answered that route with `200` + the
+  serialized aggregate where its own spec (and the other four backends)
+  said `204 No Content`. Both were invisible here, and to every
+  spec-derived client.
+
+  Caught instead by **`test/ir/api-surface-parity.test.ts`**, which
+  compares `deriveContextOperations` against what each backend's
+  **router / controller source actually declares** — the bytes a
+  request is matched against, plus the success body resolved
+  structurally from the emitted DTO — for Python, Java, .NET and
+  Elixir. (Hono is pinned the same way by `api-surface.test.ts`.) It is
+  a per-PR vitest gate, so it costs no boot. Anything that needs a real
+  request/response pair still belongs to the behavioral wire-golden
+  differential.
+
 - **Header / query parameter drift.** The current `pathParamSignatures`
   helper filters to `in: "path"` parameters. Query / header parameters
   ARE part of the contract but currently invisible. A future dimension
