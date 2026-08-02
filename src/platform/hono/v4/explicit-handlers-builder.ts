@@ -615,7 +615,11 @@ export function buildExplicitRoutesFile(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
+    // RS-26: the extern arm sanitizes like every other 500.  `err.message`
+    // interpolates the INNER exception the user handler threw — driver text,
+    // URLs, connection strings — into a public body.  op + aggregate already
+    // reach the operator via the `extern_handler_threw` catalog event.
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
   body.push(`    console.error(err);`);
   body.push(`    return problem(500, "Internal Server Error", "internal");`);
