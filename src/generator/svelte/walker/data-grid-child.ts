@@ -128,9 +128,7 @@ function renderComponent(spec: DataGridSpec): string {
   // the depth-agnostic specifier the walker's `../i18n` seam import rewrites to
   // (`svelteImportPath`); the runtime lives at `src/lib/i18n.ts`.  Gated on the
   // RENDERED body so a pack that bakes in no chrome gets no import.
-  const i18nImportLine = body.includes(CHROME_T_CALL)
-    ? [`  import { t } from "$lib/i18n";`]
-    : [];
+  const i18nImportLine = body.includes(CHROME_T_CALL) ? [`  import { t } from "$lib/i18n";`] : [];
 
   const props = selection
     ? lines(
