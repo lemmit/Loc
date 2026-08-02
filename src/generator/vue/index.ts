@@ -40,6 +40,7 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral pieces that live react-side today (same sharing
@@ -534,12 +535,26 @@ export function generateVueForContexts(
   const navUsesSession = navSections.some((s) =>
     s.entries.some((e) => "requiresJs" in e && !!e.requiresJs),
   );
+  // Pack-chrome i18n (M-T1.11): the shell's baked-in "Skip to content" link
+  // binds through `t()` when the UI has authored strings, else stays the raw
+  // source string (byte-identical to the pre-i18n shell).  The Vue form is a
+  // text-interpolation `{{ t("chrome.skipToContent", "Skip to content") }}`,
+  // and the `t` import is gated on `i18nEnabled` with a per-render-site
+  // relative path (App.vue → `./i18n`; the one-level-deeper DefaultLayout.vue →
+  // `../i18n`).
+  const skipToContentText = i18nEnabled
+    ? `{{ t(${JSON.stringify(chromeKey("skipToContent"))}, ${JSON.stringify(
+        APP_SHELL_CHROME[chromeKey("skipToContent")],
+      )}) }}`
+    : APP_SHELL_CHROME[chromeKey("skipToContent")]!;
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
     navSections,
     navUsesSession,
     hasRealtimeHandlers,
     hasToastHost,
+    i18nEnabled,
+    skipToContentText,
   };
   if (useLayouts) {
     // The chrome (and its toast/realtime hosts) move OUT of App.vue into
@@ -554,11 +569,16 @@ export function generateVueForContexts(
         ...chromeVM,
         hasRealtimeHandlers: false,
         hasToastHost: false,
+        // DefaultLayout.vue sits one directory deeper than `src/`.
+        i18nImportPath: "../i18n",
       }),
     );
     out.set("src/App.vue", renderShell(pack, "app-root", { hasRealtimeHandlers }));
   } else {
-    out.set("src/App.vue", renderShell(pack, "app-shell", chromeVM));
+    out.set(
+      "src/App.vue",
+      renderShell(pack, "app-shell", { ...chromeVM, i18nImportPath: "./i18n" }),
+    );
   }
 
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
