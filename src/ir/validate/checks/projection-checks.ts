@@ -376,19 +376,20 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
   const q = proj.query;
   if (!q?.groupBy || q.groupBy.length === 0) return;
   const at = `${ctx.name}/${proj.name}`;
-  const err = (code: string, message: string) =>
-    diags.push({ severity: "error", code, message, source: at });
 
   if (!q.source || q.sourceKind === "workflow" || q.sourceKind === "projection") {
     const why = q.source
       ? `its 'from ${q.source}' source is a ${q.sourceKind}`
       : "it has no 'from' source";
-    err(
-      "loom.projection-groupby-source-unsupported",
-      `projection '${proj.name}' declares 'group by', but ${why}. A grouped ` +
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-source-unsupported",
+      message:
+        `projection '${proj.name}' declares 'group by', but ${why}. A grouped ` +
         `projection reads (and groups) an AGGREGATE source's table in SQL — ` +
         `add 'from <Aggregate>'.`,
-    );
+      source: at,
+    });
     return;
   }
   if (proj.handlers.length > 0) {
@@ -397,30 +398,39 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
     return;
   }
   if (proj.correlationField !== undefined) {
-    err(
-      "loom.projection-groupby-keyed-unsupported",
-      `projection '${proj.name}' declares both 'keyed by ${proj.correlationField}' and ` +
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-keyed-unsupported",
+      message:
+        `projection '${proj.name}' declares both 'keyed by ${proj.correlationField}' and ` +
         `'group by'. A grouped projection's rows ARE the groups (one per distinct ` +
         `key combination), not id-keyed entities — drop the 'keyed by'.`,
-    );
+      source: at,
+    });
   }
   if (q.joins.length > 0) {
-    err(
-      "loom.projection-groupby-join-unsupported",
-      `projection '${proj.name}': 'join' and 'group by' don't compose — a join is a ` +
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-join-unsupported",
+      message:
+        `projection '${proj.name}': 'join' and 'group by' don't compose — a join is a ` +
         `by-id bulk load AFTER the query, so its columns can't participate in the SQL ` +
         `GROUP BY. Group by source columns only, or drop the 'group by'.`,
-    );
+      source: at,
+    });
   }
   const selects = q.selects ?? [];
   if (!selects.some((s) => s.aggregate)) {
-    err(
-      "loom.projection-groupby-no-aggregate",
-      `projection '${proj.name}' declares 'group by' but no aggregate 'select' ` +
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-no-aggregate",
+      message:
+        `projection '${proj.name}' declares 'group by' but no aggregate 'select' ` +
         `(count/sum/avg/min/max) to compute per group — that is just DISTINCT. Add an ` +
         `aggregate select (e.g. 'orders = count()'), or drop the 'group by' for the ` +
         `per-row read.`,
-    );
+      source: at,
+    });
   }
   // Grouping columns must be bare source columns, so every backend can render
   // them into the SQL GROUP BY (and the deterministic ORDER BY) directly.
@@ -428,12 +438,15 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
   for (const g of q.groupBy) {
     const col = groupKeyColumn(g);
     if (col === null) {
-      err(
-        "loom.projection-groupby-key-not-columnar",
-        `projection '${proj.name}': a 'group by' column must be a plain field of the ` +
+      diags.push({
+        severity: "error",
+        code: "loom.projection-groupby-key-not-columnar",
+        message:
+          `projection '${proj.name}': a 'group by' column must be a plain field of the ` +
           `'${q.source}' source (e.g. '<alias>.<field>') so it can be grouped in SQL — ` +
           `a computed grouping key is not supported yet.`,
-      );
+        source: at,
+      });
     } else {
       keyColumns.add(col);
     }
@@ -444,12 +457,15 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
     if (s.aggregate) continue;
     const col = groupKeyColumn(s.expr);
     if (col === null || !keyColumns.has(col)) {
-      err(
-        "loom.projection-groupby-select-not-grouped",
-        `projection '${proj.name}': 'select ${s.field} = …' is per-row but not one of the ` +
+      diags.push({
+        severity: "error",
+        code: "loom.projection-groupby-select-not-grouped",
+        message:
+          `projection '${proj.name}': 'select ${s.field} = …' is per-row but not one of the ` +
           `'group by' columns, so it has no single value per group. Select a grouping ` +
           `column directly, aggregate it (sum/min/max/…), or add it to the 'group by'.`,
-      );
+        source: at,
+      });
     }
   }
 }

@@ -309,6 +309,14 @@
   "global": [
     "paramName"
   ],
+  "group": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "guid": [],
   "handle": [
     "fieldName",
