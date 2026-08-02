@@ -33,6 +33,7 @@ import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { buildSvelteApiModule } from "./api-builder.js";
 import {
@@ -308,6 +309,12 @@ export function generateSvelteForContexts(
       navSections,
       hasNav: navSections.length > 0,
       navUsesSession,
+      // Pack-chrome (M-T1.11): raw source string when i18n is off (byte-identical
+      // to the pre-i18n shell), else a Svelte `{t("chrome.skipToContent", "…")}`
+      // interpolation keyed to `APP_SHELL_CHROME`; the gated `t` import rides the
+      // `i18nEnabled` flag through the template's `<script>` block.
+      i18nEnabled,
+      skipToContentText: shellChromeText("skipToContent", i18nEnabled),
     }),
   );
   out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers, authUi }));
@@ -337,6 +344,17 @@ export function generateSvelteForContexts(
     prefixed.set(`${pathPrefix}${path}`, content);
   }
   return prefixed;
+}
+
+/** A Svelte text-position token for an app-shell chrome string: the raw source
+ *  default when `i18nEnabled` is false (byte-identical), else a
+ *  `{t("chrome.<name>", "<default>")}` interpolation keyed to the merged
+ *  `APP_SHELL_CHROME` catalog (mirrors the React `shellChromeText`). */
+function shellChromeText(name: string, i18nEnabled: boolean): string {
+  const english = APP_SHELL_CHROME[chromeKey(name)]!;
+  return i18nEnabled
+    ? `{t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
+    : english;
 }
 
 /** Theme tokens for the pack's `theme` template (CSS custom props).

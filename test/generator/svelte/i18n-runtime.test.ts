@@ -46,6 +46,13 @@ async function homeOf(files: Map<string, string>): Promise<string> {
   return entry[1];
 }
 
+/** The app-shell component — the chrome group's SvelteKit layout. */
+function shellOf(files: Map<string, string>): string {
+  const entry = [...files].find(([p]) => p.endsWith("(app)/+layout.svelte"));
+  if (!entry) throw new Error("app-shell +layout.svelte not emitted");
+  return entry[1];
+}
+
 describe("Svelte i18n runtime", () => {
   it("wraps a literal heading in a t() call keyed to the catalog", async () => {
     const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
@@ -91,6 +98,32 @@ describe("Svelte i18n runtime", () => {
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
     const home = await homeOf(files);
     expect(home).not.toContain("import { t }");
+  });
+
+  it("translates the app-shell 'Skip to content' chrome under i18n", async () => {
+    // The shell is ALWAYS rendered, so its baked-in chrome translates only when
+    // the app is already i18n-enabled by an authored string (M-T1.11, pack-chrome).
+    const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
+    const shell = shellOf(files);
+    expect(shell).toContain(`{t("chrome.skipToContent", "Skip to content")}`);
+    expect(shell).toContain(`import { t } from "$lib/i18n"`);
+    // The merged catalog carries the shell chrome key.
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+  });
+
+  it("keeps the app-shell skip link byte-identical (raw, no t import) for a string-less app", async () => {
+    // Only a dynamic ref → no extractable strings → i18n off → the shell chrome
+    // stays the raw source string and emits NO `t` import (pre-i18n shape).
+    const files = await generateSystemFiles(SYSTEM(`Text { status }`));
+    const shell = shellOf(files);
+    expect(shell).toContain(`>Skip to content</a>`);
+    expect(shell).not.toContain("import { t }");
+    expect(shell).not.toContain("chrome.skipToContent");
+    // No locale catalog for a string-less app.
+    expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
   });
 
   it("emits an interpolated template as a 3-arg ICU t() call + catalog entry", async () => {
