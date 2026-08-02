@@ -1,18 +1,27 @@
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionAggregateIR,
   ProjectionIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
 import { isQueryTimeProjection, queryProjectionUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
+import {
+  type AggregateSelect,
+  aggregateCoercion,
+  wholeTableAggregates,
+} from "../../ir/util/projection-aggregate.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
 import {
   lowerProjectionFilterToSqlAlchemy,
+  lowerToSqlAlchemy,
   lowerWorkflowFilterToSqlAlchemy,
   type PyPredicate,
 } from "./find-predicate.js";
+import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -72,10 +81,25 @@ export function buildPyQueryProjectionsFile(
   }
 
   const models = projections.map((p) => projectionRowModels(p, ctx)).join("");
+  // WHOLE-TABLE AGGREGATION takes precedence over every other shape: it queries
+  // the table directly, never through a repository, because the point of the
+  // shape is to materialise no rows at all.  Its `where` lowers here so a
+  // filtered aggregation keeps its filter (mirrors `rowLowered` above).
+  const aggLowered = new Map<string, PyPredicate | null>();
+  for (const p of projections) {
+    if (!wholeTableAggregates(p) || !p.query?.source) continue;
+    const agg = ctx.aggregates.find((a) => a.name === p.query!.source);
+    aggLowered.set(
+      p.name,
+      agg && p.query.filter ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null,
+    );
+  }
   const routeBlocks = projections.map((p) =>
-    isWorkflowSourced(p) || isProjectionSourced(p)
-      ? rowSourcedProjectionRoute(p, `${p.query!.source!}Row`, rowLowered.get(p.name) ?? null)
-      : projectionRoute(p, dispatcherExpr, ctx),
+    wholeTableAggregates(p)
+      ? aggregateProjectionRoute(p, ctx, aggLowered.get(p.name) ?? null)
+      : isWorkflowSourced(p) || isProjectionSourced(p)
+        ? rowSourcedProjectionRoute(p, `${p.query!.source!}Row`, rowLowered.get(p.name) ?? null)
+        : projectionRoute(p, dispatcherExpr, ctx),
   );
   const body = `${models}router = APIRouter(prefix="/projections", tags=["projections"])\n\n\n${routeBlocks.join("\n\n\n")}`;
 
@@ -88,7 +112,12 @@ export function buildPyQueryProjectionsFile(
   const repoAggs = [
     ...new Set(
       projections.flatMap((p) => [
-        ...(p.query?.source && !isWorkflowSourced(p) && !isProjectionSourced(p)
+        // An AGGREGATION queries the table directly — no repository — so it
+        // must not drag in a repo import ruff would flag as unused (F401).
+        ...(p.query?.source &&
+        !isWorkflowSourced(p) &&
+        !isProjectionSourced(p) &&
+        !wholeTableAggregates(p)
           ? [p.query.source]
           : []),
         ...(p.query?.auxiliaries ?? []).map((a) => a.aggName),
@@ -102,11 +131,24 @@ export function buildPyQueryProjectionsFile(
   const rowSourcedProjections = projections.filter(
     (p) => isWorkflowSourced(p) || isProjectionSourced(p),
   );
-  const schemaRows = [...new Set(rowSourcedProjections.map((p) => `${p.query!.source!}Row`))]
+  const aggregatingProjections = projections.filter((p) => wholeTableAggregates(p) !== null);
+  const schemaRows = [
+    ...new Set([
+      ...rowSourcedProjections.map((p) => `${p.query!.source!}Row`),
+      // An aggregation names the SOURCE aggregate's ORM row class as a value
+      // (`select(func.count()).select_from(OrderRow)`), so it needs the same
+      // `app.db.schema` import a raw-table source does.
+      ...aggregatingProjections.map((p) => rowClassName(p.query!.source!)),
+    ]),
+  ]
     .filter(refersTo)
     .sort();
-  const saOps = new Set<string>(rowSourcedProjections.length > 0 ? ["select"] : []);
+  const saOps = new Set<string>(
+    rowSourcedProjections.length + aggregatingProjections.length > 0 ? ["select"] : [],
+  );
+  if (aggregatingProjections.length > 0) saOps.add("func");
   for (const pred of rowLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
+  for (const pred of aggLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
   const saNames = [...saOps].filter(refersTo).sort();
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
@@ -116,7 +158,11 @@ export function buildPyQueryProjectionsFile(
     `"""Query-time projection routes.  Auto-generated."""`,
     "",
     `from fastapi import ${["APIRouter", "Depends", refersTo("Request") ? "Request" : null].filter(Boolean).join(", ")}`,
-    "from pydantic import BaseModel, RootModel",
+    // `RootModel` wraps a LIST response; a singleton aggregation's response is
+    // the row itself, so a file of only aggregations must not import it (F401).
+    projections.some((p) => wholeTableAggregates(p) === null)
+      ? "from pydantic import BaseModel, RootModel"
+      : "from pydantic import BaseModel",
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
@@ -154,12 +200,18 @@ function projectionRowModels(proj: ProjectionIR, ctx: EnrichedBoundedContextIR):
     const suffix = optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
     return `    ${f.name}: ${t}${suffix}`;
   });
+  // A whole-table aggregation yields ONE row, so its response is the row
+  // itself — not a list of one.  (The list wrapper on a singleton was the shape
+  // that made `select orders = count()` look like a list of counts.)
+  const singleton = wholeTableAggregates(proj) !== null;
   return lines(
     `class ${proj.name}Row(BaseModel):`,
     fieldLines.length > 0 ? fieldLines : ["    pass"],
     "",
     "",
-    `class ${proj.name}Response(RootModel[list[${proj.name}Row]]):`,
+    singleton
+      ? `class ${proj.name}Response(${proj.name}Row):`
+      : `class ${proj.name}Response(RootModel[list[${proj.name}Row]]):`,
     "    pass",
     "",
     "",
@@ -247,6 +299,72 @@ function projectionRoute(
   out.push("        for r in rows");
   out.push("    ]");
   return out.join("\n");
+}
+
+/** `GET /projections/<name>` for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0):
+ *  one SQL query with `COUNT(*)`/`SUM(...)` over the source table, no rows
+ *  materialised.  The shape exists precisely to avoid the naive read — a
+ *  `SELECT *` over the whole table with every row rehydrated into a domain
+ *  object to produce one integer, which is the scaling failure M-T2.6 removed
+ *  from `findAll`.  One row out, so the response is the row itself. */
+function aggregateProjectionRoute(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  pred: PyPredicate | null,
+): string {
+  const aggregates = wholeTableAggregates(proj)!;
+  const source = proj.query!.source!;
+  const agg = ctx.aggregates.find((a) => a.name === source);
+  // TPH concretes query the base's shared table — the same owner rule the
+  // filter lowering uses, so the `where` and the `select_from` can't disagree.
+  const row = rowClassName(agg ? tableOwnerName(agg, ctx.aggregates) : source);
+  const fn = snake(proj.name);
+  const gate = proj.query!.requires;
+  const needsUser = queryProjectionUsesCurrentUser(proj) || !!gate;
+  const sig = [...(needsUser ? ["request: Request"] : []), "session: SessionDep"].join(", ");
+  const cols = aggregates.map((s) => pyAggregate(s.aggregate, row)).join(", ");
+  const where = pred ? `.where(${pred.expr})` : "";
+  const out: string[] = [
+    `@router.get("/${fn}", response_model=${proj.name}Response, operation_id="projection${proj.name}")`,
+    `async def ${fn}_projection(${sig}) -> dict[str, object]:`,
+    needsUser ? "    current_user: User = request.state.current_user" : null,
+    ...(gate
+      ? [
+          `    if ${renderPyNegatedGuard(gate)}:`,
+          `        raise ForbiddenError(${JSON.stringify(`Forbidden: projection ${proj.name}`)})`,
+        ]
+      : []),
+    `    row = (await session.execute(select(${cols}).select_from(${row})${where})).one()`,
+    "    return {",
+    ...aggregates.map((s, i) => `        "${s.field}": ${pyCoerce(s, `row[${i}]`)},`),
+    "    }",
+  ].filter((l): l is string => l != null);
+  return out.join("\n");
+}
+
+/** The SQLAlchemy aggregate call for one `select`.  `count` counts ROWS (no
+ *  column — `COUNT(*)`); the rest take the aggregated column, which is
+ *  source-row-rooted so it names the ORM row class's attribute. */
+function pyAggregate(agg: ProjectionAggregateIR, row: string): string {
+  if (agg.op === "count" || !agg.arg) return "func.count()";
+  const arg = agg.arg;
+  if (arg.kind !== "member") {
+    throw new Error(
+      "internal: a whole-table aggregation argument must be a source column reference",
+    );
+  }
+  return `func.${agg.op}(${row}.${snake(arg.member)})`;
+}
+
+/** Coerce one aggregate result to the projection row's declared wire type.
+ *  Postgres returns `numeric` aggregates as `Decimal`/`None` through asyncpg,
+ *  so this is load-bearing: an uncoerced `sum` would fail the response model
+ *  over an empty table, or ship a Decimal where the row declares a string. */
+function pyCoerce(s: AggregateSelect, expr: string): string {
+  const c = aggregateCoercion(s);
+  if (c.isCount) return `int(${expr} or 0)`;
+  if (c.optional) return `None if ${expr} is None else ${c.asString ? "str" : "float"}(${expr})`;
+  return c.asString ? `str(${expr} or "0")` : `float(${expr} or 0)`;
 }
 
 /** `GET /projections/<name>` for a `from <Workflow>` / `from <Projection>`

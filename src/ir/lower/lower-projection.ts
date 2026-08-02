@@ -23,12 +23,16 @@
 import type { Projection, ProjectionOn } from "../../language/generated/ast.js";
 import { isAggregate, isProjection, isProperty, isWorkflow } from "../../language/generated/ast.js";
 import type {
+  ExprIR,
   FieldIR,
+  ProjectionAggregateIR,
+  ProjectionAggregateOp,
   ProjectionIR,
   ProjectionJoinIR,
   ProjectionOnIR,
   ProjectionQueryIR,
   StmtIR,
+  TypeIR,
 } from "../types/loom-ir.js";
 import { joinRefPath, mapVarForPath } from "./id-follow.js";
 import { resolveBypass } from "./lower-capabilities.js";
@@ -133,11 +137,20 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
     scope = withLocal(scope, j.alias, "let", { kind: "entity", name: aggName });
   }
 
-  const selects = p.selects.map((s) => ({
-    field: s.field,
-    expr: lowerExpr(s.expr, scope),
-    type: inferExprType(s.expr, scope),
-  }));
+  const selects = p.selects.map((s) => {
+    const expr = lowerExpr(s.expr, scope);
+    const aggregate = wholeTableAggregation(expr);
+    return {
+      field: s.field,
+      expr,
+      // An aggregation's own type comes from the OPERATOR, not from the
+      // unresolved expression `inferExprType` sees (a bare `count` infers as
+      // `string`, which is simply wrong).  Non-aggregation selects keep the
+      // inferred type unchanged.
+      type: aggregate ? aggregateResultType(aggregate, scope) : inferExprType(s.expr, scope),
+      ...(aggregate ? { aggregate } : {}),
+    };
+  });
 
   const query: ProjectionQueryIR = { joins, auxiliaries, ...resolveBypass(p) };
   if (sourceIsWorkflow) query.sourceKind = "workflow";
@@ -157,6 +170,65 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
   }
   if (selects.length > 0) query.selects = selects;
   return query;
+}
+
+/** The five whole-table aggregation operators, by the name the author writes.
+ *  Shared with `docs/stdlib.md`'s collection ops on purpose — same vocabulary,
+ *  the difference being only that a `select` position has no collection
+ *  receiver, so the source table itself is the receiver. */
+const AGGREGATE_OPS = new Set<string>(["count", "sum", "avg", "min", "max"]);
+
+/** Recognise a WHOLE-TABLE aggregation in a `select` position, or `undefined`
+ *  for an ordinary per-row projection.
+ *
+ *  The two shapes come straight from how the surface lowers, and BOTH must be
+ *  covered or half the vocabulary leaks through as an undeclared identifier:
+ *
+ *    `select orders  = count`         → a bare ref, `refKind: "unknown"`
+ *                                       (nothing binds `count`, so name
+ *                                       resolution leaves it alone)
+ *    `select revenue = sum(o.total)`  → `callKind: "free"`, which the CallKind
+ *                                       union documents as an unresolved free
+ *                                       call
+ *
+ *  A per-row collection op (`o.lines.count`) is a MEMBER access with a real
+ *  receiver, so it never reaches here — which is the distinction that keeps a
+ *  keyed projection's per-row `select` working exactly as before. */
+function wholeTableAggregation(expr: ExprIR): ProjectionAggregateIR | undefined {
+  if (expr.kind === "ref" && expr.refKind === "unknown" && AGGREGATE_OPS.has(expr.name)) {
+    // Only `count` is meaningful with no argument — it counts ROWS.  A bare
+    // `sum` / `avg` / `min` / `max` names no column, so it stays unrecognised
+    // and the `loom.projection-select-unresolved` gate reports it.
+    return expr.name === "count" ? { op: "count" } : undefined;
+  }
+  if (expr.kind === "call" && expr.callKind === "free" && AGGREGATE_OPS.has(expr.name)) {
+    const arg = expr.args[0];
+    // `count` takes no column; the others need exactly one.
+    if (expr.name === "count") return expr.args.length === 0 ? { op: "count" } : undefined;
+    if (!arg || expr.args.length !== 1) return undefined;
+    return { op: expr.name as ProjectionAggregateOp, arg };
+  }
+  return undefined;
+}
+
+/** Result type of an aggregation, taken from the OPERATOR rather than from the
+ *  unresolved expression.  `count` is a row count; `avg` is a mean, so it
+ *  widens to decimal even over integers; `sum`/`min`/`max` preserve the
+ *  aggregated column's own type (money stays money). */
+function aggregateResultType(agg: ProjectionAggregateIR, scope: Env): TypeIR {
+  void scope;
+  if (agg.op === "count") return { kind: "primitive", name: "int" };
+  if (agg.op === "avg") return { kind: "primitive", name: "decimal" };
+  return columnType(agg.arg) ?? { kind: "primitive", name: "decimal" };
+}
+
+/** The type an already-lowered column expression carries, when it carries one.
+ *  A `member` access is the shape every aggregated column takes (`this.total`
+ *  after `o.total` lowers), and it records its own `memberType`. */
+function columnType(e: ExprIR | undefined): TypeIR | undefined {
+  if (!e) return undefined;
+  if (e.kind === "member") return e.memberType;
+  return undefined;
 }
 
 /** A pure fold over one foreign event.  Binds the event param as a

@@ -18,13 +18,46 @@
 // check here.
 // -------------------------------------------------------------------------
 
-import type { BoundedContextIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
+import type { BoundedContextIR, ExprIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
 import {
   isMaterializedProjection,
   isQueryTimeProjection,
   isShorthandProjection,
 } from "../../types/loom-ir.js";
+import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+
+/** The whole-table (keyless) aggregation vocabulary a singleton projection's
+ *  `select` reaches for (read-path-architecture.md rev. 8).  Spelled bare
+ *  (`select orders = count`) it lowers to an unknown ref, since there is no
+ *  collection receiver to bind it to — which is exactly how it slips into the
+ *  generated source as a free identifier.  Kept as a set so the diagnostic can
+ *  say "this is the unimplemented aggregation" rather than "typo". */
+const WHOLE_TABLE_AGGREGATIONS: ReadonlySet<string> = new Set([
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+]);
+
+/** First unresolved NAME anywhere in a `select` expression, or `null` when
+ *  every name resolves.  Two shapes, because the aggregation vocabulary lowers
+ *  to both: a bare `count` becomes `refKind: "unknown"`, while `sum(o.total)`
+ *  becomes `callKind: "free"` — which the CallKind union documents as
+ *  *"unresolved free call"*.  Either one is the precise condition that makes an
+ *  emitter write an undeclared identifier, since every backend's query-time
+ *  projection emitter renders the `select` expr verbatim into its row mapper
+ *  with no further name resolution. */
+function firstUnresolvedRefName(e: ExprIR): string | null {
+  let found: string | null = null;
+  walkExprDeep(e, (node) => {
+    if (found) return;
+    if (node.kind === "ref" && node.refKind === "unknown") found = node.name;
+    else if (node.kind === "call" && node.callKind === "free") found = node.name;
+  });
+  return found;
+}
 
 export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const proj of ctx.projections) {
@@ -251,6 +284,58 @@ function validateQueryComprehension(
         source: `${ctx.name}/${proj.name}`,
       });
     }
+  }
+  // A `select` expression must RESOLVE.  Every backend's query-time emitter
+  // renders each `select` expr straight into the per-row projection mapper, so
+  // an unresolved name reaches the generated source as a FREE IDENTIFIER —
+  // `{ orders: count }` — which is a hard compile error on the typed backends
+  // and `undefined` on the untyped ones, from a model that otherwise validates
+  // clean.
+  //
+  // A recognised WHOLE-TABLE AGGREGATION is exempt here: lowering normalises it
+  // into `select.aggregate` (a disciplined shape a ported emitter consumes), so
+  // it is a real feature rather than a bad name.  Whether the HOSTING backend
+  // has ported that emit is a deployable-level fact, so it is gated in
+  // `validateWholeTableAggregationBackend` (system-checks.ts) instead — this
+  // check has no platform in scope.  What is left here is the genuine typo.
+  // MIXING an aggregation with a per-row `select` is a GROUP BY — one row per
+  // distinct value of the per-row column, not one row for the table.  That is a
+  // different query, a different response shape, and a clause the surface does
+  // not have yet (`group by`), so it is reserved rather than guessed at.
+  // read-path-architecture.md rev. 8 reserves exactly this combination.
+  const selects = q.selects ?? [];
+  const aggregating = selects.filter((s) => s.aggregate);
+  if (aggregating.length > 0 && aggregating.length < selects.length) {
+    const perRow = selects.filter((s) => !s.aggregate).map((s) => s.field);
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-unsupported",
+      message:
+        `projection '${proj.name}' mixes whole-table aggregation ` +
+        `(${aggregating.map((s) => s.field).join(", ")}) with per-row select(s) ` +
+        `(${perRow.join(", ")}). That is a GROUP BY — one row per distinct ` +
+        `${perRow.join("/")} — which has no surface yet. Aggregate ALL fields (a ` +
+        `single-row total), or select all of them per-row.`,
+      source: `${ctx.name}/${proj.name}`,
+    });
+  }
+  for (const s of selects) {
+    if (s.aggregate) continue;
+    const unresolved = firstUnresolvedRefName(s.expr);
+    if (!unresolved) continue;
+    const hint = WHOLE_TABLE_AGGREGATIONS.has(unresolved)
+      ? ` (a whole-table '${unresolved}' needs the aggregated column — write ` +
+        `'${unresolved}(<alias>.<field>)', or bare 'count' to count rows)`
+      : "";
+    diags.push({
+      severity: "error",
+      code: "loom.projection-select-unresolved",
+      message:
+        `projection '${proj.name}': 'select ${s.field} = …' references '${unresolved}', which ` +
+        `resolves to nothing — not a field of the '${q.source}' source, not a 'join' alias, ` +
+        `not a parameter${hint}. It would be emitted as an undeclared identifier.`,
+      source: `${ctx.name}/${proj.name}`,
+    });
   }
   // The HONEST "not yet emitted on this backend" gate
   // (`loom.projection-query-time-unsupported`) is a SYSTEM-level check

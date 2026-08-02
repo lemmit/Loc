@@ -78,8 +78,10 @@ import {
   validateResourceConfig,
   validateSavingShapeSupport,
   validateSystem,
+  validateUiProjectionReadFramework,
   validateUiRealtimeSupport,
   validateVanillaDocumentScope,
+  validateWholeTableAggregationBackend,
   validateWorkflowSourceProjectionBackend,
 } from "./checks/system-checks.js";
 import { validateTenancy } from "./checks/tenancy-checks.js";
@@ -173,6 +175,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuthUiFramework(sys, diags);
     validateDataGridFramework(sys, diags);
     validateUiRealtimeSupport(sys, diags);
+    validateUiProjectionReadFramework(sys, diags);
     // Flutter defers the interactive input / form primitive family; a page
     // using one on a `platform: flutter` target compiles to a silent
     // `// flutter pack: no renderer` comment.  Fail fast instead.
@@ -180,6 +183,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateRelayTargetNotSubscribed(sys, diags);
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
+    validateWholeTableAggregationBackend(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

@@ -1483,8 +1483,20 @@ export interface ProjectionQueryIR {
   joins: ProjectionJoinIR[];
   /** `select <field> = <expr>, …` — fills the declared row fields from the
    *  source (`this`/alias) and join aliases.  Undefined ⇒ the projection
-   *  exposes the source's own shape (shorthand, deferred). */
-  selects?: { field: string; expr: ExprIR; type: TypeIR }[];
+   *  exposes the source's own shape (shorthand, deferred).
+   *
+   *  `aggregate` marks a WHOLE-TABLE aggregation (`select orders = count`,
+   *  `select revenue = sum(o.total)`) — the singleton read model of
+   *  read-path-architecture.md rev. 8.  It is the NORMALIZED reading of `expr`,
+   *  resolved once in lowering so emitters consume a disciplined shape instead
+   *  of each re-detecting the aggregation from the raw expression (the
+   *  proposal's own rule: "lowering normalises to a validated shape ...
+   *  emitters read a disciplined IR").  `expr` is left as lowered — for an
+   *  aggregation it is an unresolved ref / free call, which is exactly why an
+   *  emitter that ignores `aggregate` would write an undeclared identifier.
+   *  That is gated per-backend (`loom.projection-whole-table-aggregation-
+   *  unsupported`), so only a ported emitter ever reaches these selects. */
+  selects?: { field: string; expr: ExprIR; type: TypeIR; aggregate?: ProjectionAggregateIR }[];
   /** Bulk-load plan derived from the `join` clauses — the `auxiliaries` shape
    *  built for by-id follows, populated by reading the
    *  DECLARED `join`s. */
@@ -1510,6 +1522,23 @@ export interface ProjectionQueryIR {
 }
 
 /** One `join <Aggregate> as <alias> on <idRef>` follow. */
+/** The whole-table (keyless) aggregation operators a singleton projection's
+ *  `select` may use (read-path-architecture.md rev. 8).  Deliberately the same
+ *  five names as the collection-op vocabulary in `docs/stdlib.md` — the author
+ *  writes `count` / `sum(o.total)` in both places; the difference is only that
+ *  here there is no collection receiver, so the whole source table is the
+ *  receiver and the operator pushes down to SQL. */
+export type ProjectionAggregateOp = "count" | "sum" | "avg" | "min" | "max";
+
+/** A normalized whole-table aggregation in a projection `select` position. */
+export interface ProjectionAggregateIR {
+  op: ProjectionAggregateOp;
+  /** The aggregated column expression, source-row-rooted (`this.total` for
+   *  `sum(o.total)`).  Absent for `count`, which counts rows, not a column —
+   *  the `COUNT(*)` / `count()` shape. */
+  arg?: ExprIR;
+}
+
 export interface ProjectionJoinIR {
   /** The joined aggregate, by name. */
   aggregate: string;

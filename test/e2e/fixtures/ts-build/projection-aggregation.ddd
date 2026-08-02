@@ -1,0 +1,45 @@
+// M-T1.3 Phase 0 — WHOLE-TABLE AGGREGATION in a query-time projection's
+// `select` (read-path-architecture.md rev. 8's singleton read model).
+//
+// Why this fixture exists: NO other `.ddd` in the repo uses a `select` clause
+// at all, so the entire query-time projection surface — shipped on five
+// backends — had no compile coverage.  That is how `select orders = count`
+// came to emit a free identifier (`{ orders: count }`, TS2304) on top of a
+// `SELECT *` over the whole table, from a model that validated clean.
+//
+// Compiled here so the SQL push-down keeps type-checking: all five operators,
+// a criterion filter lowered into the same query, and the coercions Postgres
+// forces (numeric aggregates come back as strings; an empty table returns NULL).
+system Shop {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft, Confirmed, Cancelled }
+      aggregate Order {
+        code: string
+        total: money
+        lineCount: int
+        status: OrderStatus
+        derived display: string = code
+      }
+      repository Orders for Order { }
+      criterion Confirmed of Order as o = o.status == OrderStatus.Confirmed
+
+      projection SalesTotals {
+        orders: int
+        revenue: money
+        avgLines: decimal
+        biggest: money
+        smallest: money
+        from Order as o
+        where Confirmed
+        select orders = count, revenue = sum(o.total), avgLines = avg(o.lineCount), biggest = max(o.total), smallest = min(o.total)
+      }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primarySql { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primarySql }
+
+  deployable api { platform: node contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 }
+}

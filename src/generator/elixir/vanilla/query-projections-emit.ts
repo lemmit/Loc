@@ -33,6 +33,7 @@ import type {
   AggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionAggregateIR,
   ProjectionIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -40,6 +41,11 @@ import {
   aggregateUsesPrincipalContextFilter,
   isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
+import {
+  type AggregateSelect,
+  aggregateCoercion,
+  wholeTableAggregates,
+} from "../../../ir/util/projection-aggregate.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -173,6 +179,48 @@ function renderQueryProjectionModule(
 
   const lines: string[] = [];
   lines.push(principal ? "" : "    _ = current_user");
+
+  // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE Ecto query with
+  // `count`/`sum`/`avg`/`min`/`max` in the `select`, no rows loaded.  The shape
+  // exists precisely to avoid the naive read: `Repo.all/1` over the whole table
+  // with every row hydrated into a struct to produce one integer.
+  const aggregates = wholeTableAggregates(proj);
+  if (aggregates) {
+    const cols = aggregates.map((a) => `${a.field}: ${ectoAggregate(a.aggregate)}`).join(", ");
+    lines.push("    row =");
+    lines.push(
+      where
+        ? `      from(record in ${sourceMod}, where: ${where}, select: %{${cols}})`
+        : `      from(record in ${sourceMod}, select: %{${cols}})`,
+    );
+    lines.push(`      |> Repo.one()`);
+    lines.push("    %{");
+    aggregates.forEach((a, i) => {
+      const tail = i === aggregates.length - 1 ? "" : ",";
+      lines.push(`      ${a.field}: ${ectoCoerce(a, `row.${a.field}`)}${tail}`);
+    });
+    lines.push("    }");
+    return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  Query-time projection: ${upperFirst(proj.name)}
+  Source aggregate: ${upperFirst(source)}
+  Form: query-time WHOLE-TABLE AGGREGATION (one row, computed in SQL).
+  Foundation: vanilla (plain Ecto).
+  """
+
+  import Ecto.Query
+  alias ${appModule}.Repo
+
+  @doc "Execute the whole-table aggregation and return the single projected row."
+  @spec run(any()) :: map()
+  def run(current_user \\\\ nil) do
+${lines.filter((l) => l !== "").join("\n")}
+  end
+end
+`;
+  }
+
   lines.push("    rows =");
   if (where) {
     lines.push(`      from(record in ${sourceMod}, where: ${where})`);
@@ -253,6 +301,46 @@ ${lines.filter((l) => l !== "").join("\n")}
   end${projectionHelpers}
 end
 `;
+}
+
+/** The Ecto aggregate call for one `select`.  `count` counts ROWS (Ecto needs a
+ *  column, so it counts the primary key — equivalent to `COUNT(*)` for a table
+ *  whose id is non-null); the rest take the aggregated column off `record`. */
+function ectoAggregate(agg: ProjectionAggregateIR): string {
+  if (agg.op === "count" || !agg.arg) return "count(record.id)";
+  const arg = agg.arg;
+  if (arg.kind !== "member") {
+    throw new Error(
+      "internal: a whole-table aggregation argument must be a source column reference",
+    );
+  }
+  return `${agg.op}(record.${snake(arg.member)})`;
+}
+
+/** Coerce one aggregate result to the row's declared wire type.
+ *
+ *  Ecto returns a numeric aggregate over a `:decimal` column as a `%Decimal{}`
+ *  and `nil` over an empty table.  `money` rides the Elixir wire as a STRING
+ *  (Jason encodes a bare `%Decimal{}` as one, which is exactly what money
+ *  wants); a plain `decimal` must ship as a NUMBER (RS-24), so it goes through
+ *  `Decimal.to_float/1` — the same split `wire-serialize.ts` makes, and getting
+ *  it wrong would put a string where the other four backends put a number. */
+function ectoCoerce(s: AggregateSelect, read: string): string {
+  const c = aggregateCoercion(s);
+  const inner = s.type.kind === "optional" ? s.type.inner : s.type;
+  if (c.isCount) return `${read} || 0`;
+  if (c.asString) {
+    return c.optional
+      ? `if(is_nil(${read}), do: nil, else: to_string(${read}))`
+      : `to_string(${read} || 0)`;
+  }
+  if (inner.kind === "primitive" && inner.name === "decimal") {
+    const num = `Decimal.to_float(Decimal.new(to_string(${read})))`;
+    return c.optional
+      ? `if(is_nil(${read}), do: nil, else: ${num})`
+      : `if(is_nil(${read}), do: 0.0, else: ${num})`;
+  }
+  return c.optional ? read : `${read} || 0`;
 }
 
 /** Render one `select` expression against the source `record` and the join

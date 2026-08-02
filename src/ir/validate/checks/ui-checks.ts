@@ -36,6 +36,7 @@ import type {
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
+import { readableProjectionNames } from "../../util/projection-read.js";
 import { typeLabel } from "../../util/type-label.js";
 import { walkExprChildren, walkExprDeep, walkStmtChildren } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -67,10 +68,16 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
   // acceptance so F2 only flags receivers the walker truly can't resolve.
   const aggNames = new Set<string>();
   const workflowNames = new Set<string>();
+  // Projection names drive F3 (`loom.ui-projection-read-unsupported`).  BOTH
+  // flavours are unreadable from a ui — query-time and folded alike — since the
+  // missing piece is the frontend client, not the backend read.
+  const projectionNames = new Set<string>();
   for (const c of allContexts(loom)) {
     for (const a of c.aggregates) aggNames.add(a.name);
     for (const w of c.workflows) workflowNames.add(w.name);
+    for (const p of c.projections) projectionNames.add(p.name);
   }
+  const readableProjections = readableProjectionNames(allContexts(loom));
 
   for (const sys of loom.systems) {
     for (const ui of sys.uis) {
@@ -100,6 +107,8 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
+          projectionNames,
+          readableProjections,
           handles,
           functionNames,
           componentActionParams,
@@ -128,6 +137,8 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
+          projectionNames,
+          readableProjections,
           handles,
           functionNames,
           componentActionParams,
@@ -537,6 +548,13 @@ function typeFamily(t: TypeIR): "numeric" | "string" | "bool" | undefined {
 /** A short type label for an arg-mismatch message (`string`, `int`, `Money?`). */
 interface BodyCheckCtx {
   aggByName: Map<string, AggregateIR>;
+  /** Every declared `projection` name in the model — F3's lookup set. */
+  projectionNames: ReadonlySet<string>;
+  /** The subset a frontend can actually read (`isFrontendReadableProjection`).
+   *  F3 rejects a read of a projection OUTSIDE this set on every target; a read
+   *  INSIDE it is a per-framework question (only some frontends have the
+   *  client), decided by `validateUiProjectionReadFramework` in system-checks. */
+  readableProjections: ReadonlySet<string>;
   /** Receiver-root names the walker resolves to an api / workflow-
    *  instance hook (`tryDetectApiHook`) or a declared handle — a valid
    *  method-call receiver root even though it lowers to an `unknown` ref. */
@@ -714,6 +732,8 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
       return;
     }
     case "member":
+      // F3 — a ui read of a `projection` has no frontend path yet.
+      checkProjectionRead(e, ctx, diags);
       checkBody(e.receiver, ctx, diags);
       return;
     case "binary":
@@ -1073,6 +1093,50 @@ function checkMethodCallReceiver(
       `unresolved receiver '${root.name}'. A method-call receiver must resolve to a page/component ` +
       `parameter, state / derived value, lambda binding, or a declared api handle ` +
       `(\`api <Handle>: <Api>\`). Declare the handle, or fix the reference.`,
+    source: ctx.where,
+  });
+}
+
+/** F3 — `loom.ui-projection-read-unsupported`, the FLAVOUR half.
+ *
+ *  A page/component reading a `projection` (`QueryView { of:
+ *  <ApiHandle>.<Projection> }`) used to validate clean and emit
+ *  `/* unresolved: <Handle> *␣/ undefined.<Projection>` — a runtime `TypeError`
+ *  AND a build break, from a model with no diagnostic.  The hole was
+ *  structural: F2 above exempts an api-handle receiver root, correct for an
+ *  aggregate (`Sales.Customer`) but it let a PROJECTION member through, and
+ *  nothing downstream resolved it.
+ *
+ *  M-T1.3 Phase 1 shipped the read path for the SINGLETON QUERY-TIME flavour
+ *  (one object out — the dashboard KPI shape).  What stays rejected here is
+ *  every other flavour, on every target: a KEYED projection returns an array
+ *  and wants `Table`-shaped binding, and a FOLDED one is read by key off its
+ *  materialized row table.  Whether a *readable* projection's frontend has the
+ *  client is a per-framework question with no platform in scope here — that is
+ *  `validateUiProjectionReadFramework` (system-checks.ts). */
+function checkProjectionRead(
+  e: Extract<ExprIR, { kind: "member" }>,
+  ctx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  if (!ctx.projectionNames.has(e.member)) return;
+  // A readable projection is handled by the per-framework gate, not here.
+  if (ctx.readableProjections.has(e.member)) return;
+  // Only flag the read shape: the member names a projection AND the receiver is
+  // a handle-rooted chain the walker will fail to resolve.  A same-named field
+  // on a resolved receiver (`row.SalesTotals`) is not a projection read.
+  const root = rootRef(e.receiver);
+  if (root?.refKind !== "unknown") return;
+  if (!ctx.handles.has(root.name)) return;
+  diags.push({
+    severity: "error",
+    code: "loom.ui-projection-read-unsupported",
+    message:
+      `${ctx.where}: reads projection '${e.member}' (\`${root.name}.${e.member}\`), which a ui ` +
+      `cannot consume. Only a SINGLETON QUERY-TIME projection (no 'keyed by', a 'from … select' ` +
+      `comprehension) is readable from a page today — it returns one row, which is what a page ` +
+      `binds. A keyed projection returns a list and a folded one is read by key; neither has a ` +
+      `frontend client yet, so this would emit an unresolved receiver.`,
     source: ctx.where,
   });
 }

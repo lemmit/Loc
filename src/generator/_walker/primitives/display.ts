@@ -4,6 +4,7 @@
 // recurse via the shared `positionalChildren`).
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { isWalkerPrimitive } from "../../../util/walker-primitive-names.js";
 import {
   localizedNamedAttr,
   localizedNamedText,
@@ -11,9 +12,15 @@ import {
   localizedText,
 } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
-import { numericNamed, stringNamed, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
+import {
+  numericNamed,
+  positionalArgs,
+  stringNamed,
+  unwrapAsAttr,
+  unwrapTextLiteral,
+} from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
-import { positionalChildren, styleAttr, testidAttr } from "../walker-core.js";
+import { positionalChildren, styleAttr, testidAttr, walk } from "../walker-core.js";
 
 export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Stat(label, value) — small headline-stat card.  No dedicated
@@ -21,12 +28,26 @@ export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // elements (dimmed label + bold value).
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
+  // The VALUE slot may be a nested display primitive rather than a plain
+  // expression — `Stat { "Revenue", Money { t.revenue } }`.  That matters
+  // because some types cannot be rendered as a bare React child at all: a
+  // `money` deserialises client-side to a decimal.js `Decimal`, which is a
+  // `TS2322: Type 'Decimal' is not assignable to type 'ReactNode'` and would
+  // crash at runtime — exactly why the scaffold's table-cell accessor wraps a
+  // money column in `Money { … }`.  Before this, the text path coerced the
+  // nested call to nothing and the slot rendered EMPTY: a silent drop, and the
+  // only way to put a currency figure on a KPI card.
+  const valueArg = positionalArgs(call)[1];
+  const nestedValue =
+    valueArg?.kind === "call" && isWalkerPrimitive(valueArg.name)
+      ? walk(valueArg, ctx, depth + 1)
+      : undefined;
   return renderPrimitive(ctx, "primitive-stat", {
     // `statLabel`/`statValue` are user-visible text slots — a plain literal is
     // translated through `t()` when the body opted into i18n, keyed to the
     // catalog; a dynamic slot / non-i18n target stays byte-identical.
     label: localizedText(call, ctx, "statLabel", '""', 0),
-    value: localizedText(call, ctx, "statValue", '""', 1),
+    value: nestedValue ?? localizedText(call, ctx, "statValue", '""', 1),
     indent,
     closeIndent,
     testidAttr: testidAttr(call, ctx),

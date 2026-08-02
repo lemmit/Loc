@@ -62,6 +62,8 @@ import type {
   PayloadDecl,
   PostfixChain,
   PrimitiveType,
+  Projection,
+  ProjectionSelect,
   Property,
   QueryHandler,
   ReturnStmt,
@@ -193,6 +195,14 @@ export function mkCommandHandler(shape: AstLiteral<CommandHandler>): CommandHand
 
 export function mkPayloadDecl(shape: AstLiteral<PayloadDecl>): PayloadDecl {
   return mkAst<PayloadDecl>(shape);
+}
+
+export function mkProjection(shape: AstLiteral<Projection>): Projection {
+  return mkAst<Projection>(shape);
+}
+
+export function mkProjectionSelect(shape: AstLiteral<ProjectionSelect>): ProjectionSelect {
+  return mkAst<ProjectionSelect>(shape);
 }
 
 export function mkQueryHandler(shape: AstLiteral<QueryHandler>): QueryHandler {

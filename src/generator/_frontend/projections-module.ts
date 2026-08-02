@@ -1,0 +1,81 @@
+// ---------------------------------------------------------------------------
+// Frontend API module for QUERY-TIME PROJECTIONS — one file at
+// `src/api/projections.ts` aggregating every readable projection in the
+// deployable.  The frontend twin of the backend's `http/query-projections.ts`.
+//
+// Why this exists (M-T1.3 Phase 1): projections were BACKEND-ONLY read models.
+// Each owned an HTTP route that no generated frontend ever called, and a page
+// that tried (`QueryView { of: Sales.SalesTotals }`) validated clean and emitted
+// `/* unresolved: Sales */ undefined.SalesTotals` — a runtime TypeError and a
+// build break.  There was no lowering arm and no client; this is the client.
+//
+// Scope: the SINGLETON (unkeyed) query-time projection — a whole-table read
+// model whose response is one object, which is the shape a dashboard KPI reads.
+// A keyed/collection projection returns an array and wants `Table`-shaped
+// binding; it is gated (`loom.ui-projection-read-unsupported`) until that lands.
+// ---------------------------------------------------------------------------
+
+import type { BoundedContextIR, ProjectionIR } from "../../ir/types/loom-ir.js";
+import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
+import { snake, upperFirst } from "../../util/naming.js";
+import { zodForResponse } from "./api-module.js";
+
+/** Every readable projection across the served contexts, in declaration order. */
+export function readableProjections(
+  contexts: readonly BoundedContextIR[],
+): Array<{ proj: ProjectionIR; ctx: BoundedContextIR }> {
+  const out: Array<{ proj: ProjectionIR; ctx: BoundedContextIR }> = [];
+  for (const ctx of contexts) {
+    for (const proj of ctx.projections ?? []) {
+      if (isFrontendReadableProjection(proj)) out.push({ proj, ctx });
+    }
+  }
+  return out;
+}
+
+export function buildProjectionsApiModule(
+  contexts: BoundedContextIR[],
+  options: { queryPackage?: string } = {},
+): string {
+  const queryPackage = options.queryPackage ?? "@tanstack/react-query";
+  const projections = readableProjections(contexts);
+
+  const lines: string[] = [];
+  lines.push("// Auto-generated.  Do not edit by hand.");
+  lines.push(`import { z } from "zod";`);
+  lines.push(`import { useQuery } from "${queryPackage}";`);
+  lines.push(`import { api } from "./client";`);
+  if (contexts.some(contextUsesMoney)) {
+    lines.push(`import { moneySchema } from "../lib/schemas";`);
+  }
+  lines.push("");
+
+  for (const { proj } of projections) {
+    const T = upperFirst(proj.name);
+    const slug = snake(proj.name);
+    // The row schema mirrors the backend's `<Proj>Row` field-for-field — same
+    // `wireShape`, so the two can't drift.
+    lines.push(`export const ${T}Response = z.object({`);
+    for (const f of proj.wireShape ?? []) {
+      lines.push(`  ${f.name}: ${zodForResponse(f.type, !!f.optional)},`);
+    }
+    lines.push(`});`);
+    lines.push(`export type ${T}Response = z.infer<typeof ${T}Response>;`);
+    lines.push("");
+    // A singleton read takes no arguments and no id: the projection IS the row.
+    // `.parse` is a real boundary check, matching every other read hook.
+    lines.push(`export function use${T}() {`);
+    lines.push(`  return useQuery({`);
+    lines.push(`    queryKey: ["projections", "${slug}"],`);
+    lines.push(`    queryFn: async () => {`);
+    lines.push(`      const r = await api.get(\`/projections/${slug}\`);`);
+    lines.push(`      return ${T}Response.parse(r);`);
+    lines.push(`    },`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}

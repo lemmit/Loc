@@ -1,0 +1,133 @@
+// Dashboard — a KPI page whose numbers are computed by the DATABASE.
+//
+// The point of this example (M-T1.3): a dashboard tile must not be a
+// client-side fold over a fetched page of rows.  `.all` is paged by default
+// (M-T2.6), so counting rows in the browser counts ONE PAGE — and the
+// collection ops don't survive the JSX walker anyway.  Instead:
+//
+//   1. a SINGLETON query-time `projection` aggregates in SQL
+//      (`select orders = count, revenue = sum(o.total)` → one `SELECT`
+//      with `COUNT(*)`/`SUM(...)`, no rows materialised);
+//   2. the page reads that projection through its api handle
+//      (`QueryView { of: Sales.SalesTotals }`), which is single-record by
+//      construction — one object out, so no `.length` checks;
+//   3. `Stat` renders each field, with the money figure wrapped in `Money`
+//      (a `money` is a decimal.js `Decimal` client-side, not a React child).
+//
+// Both routes to a dashboard are shown side by side:
+//
+//   * HAND-WRITTEN — the `page Dashboard` below declares its own projections
+//     and binds each tile explicitly.
+//   * SCAFFOLDED — `context Orders with scaffoldDashboard` emits one singleton
+//     projection per aggregate (`OrderTotals`, `CustomerTotals`), and the ui
+//     scaffold grows the `Home` page a matching row of KPI tiles.  Both halves
+//     derive the projection name the same way, so a tile can never bind a
+//     projection the other half didn't emit.
+
+system DashboardShop {
+    subdomain Sales {
+        context Orders with scaffoldDashboard {
+            enum OrderStatus { Draft, Confirmed, Cancelled }
+
+            aggregate Customer {
+                name: string
+                email: string
+                invariant name.length > 0
+                derived display: string = name
+            }
+
+            aggregate Order {
+                code: string
+                total: money
+                lineCount: int
+                status: OrderStatus
+                customerId: Customer id
+                placedAt: datetime
+                derived display: string = code
+                operation confirm() {
+                    precondition status == OrderStatus.Draft
+                    status := OrderStatus.Confirmed
+                }
+            }
+
+            repository Customers for Customer { }
+            repository Orders for Order { }
+
+            criterion Confirmed of Order as o = o.status == OrderStatus.Confirmed
+
+            // Filtered aggregation — the headline revenue tile.
+            projection SalesTotals {
+                orders: int
+                revenue: money
+                biggest: money
+                from Order as o
+                where Confirmed
+                select orders = count, revenue = sum(o.total), biggest = max(o.total)
+            }
+
+            // Unfiltered aggregation — every operator, no `where`.
+            projection OrderVolume {
+                total: int
+                avgLines: decimal
+                smallest: money
+                from Order as o
+                select total = count, avgLines = avg(o.lineCount), smallest = min(o.total)
+            }
+        }
+    }
+
+    api SalesApi from Sales
+
+    storage primarySql { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primarySql }
+
+    ui WebApp with scaffold(subdomains: [Sales]) {
+        api Sales: SalesApi
+
+        page Dashboard {
+            route: "/dashboard"
+            title: "Sales dashboard"
+            body: Stack {
+                Heading { "Sales dashboard", level: 1 },
+                QueryView {
+                    of: Sales.SalesTotals,
+                    loading: Skeleton { count: 3 },
+                    error: Alert { "Couldn't load sales totals" },
+                    empty: Empty { "No confirmed orders yet." },
+                    data: t => Group {
+                        Stat { "Confirmed orders", t.orders },
+                        Stat { "Revenue", Money { t.revenue } },
+                        Stat { "Largest order", Money { t.biggest } },
+                        testid: "sales-totals"
+                    }
+                },
+                Divider { },
+                QueryView {
+                    of: Sales.OrderVolume,
+                    data: v => Group {
+                        Stat { "All orders", v.total },
+                        Stat { "Avg lines", v.avgLines },
+                        Stat { "Smallest order", Money { v.smallest } },
+                        testid: "order-volume"
+                    }
+                },
+                testid: "dashboard"
+            }
+        }
+    }
+
+    deployable api {
+        platform: node
+        contexts: [Orders]
+        dataSources: [ordersState]
+        serves: SalesApi
+        port: 8080
+    }
+
+    deployable web_app {
+        platform: react
+        targets: api
+        ui: WebApp { Sales: api }
+        port: 3000
+    }
+}

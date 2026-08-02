@@ -19,6 +19,7 @@ import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
+import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import {
@@ -236,6 +237,14 @@ export function generateReactForContexts(
   // `emitPageObjectsForUi`.
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
+  }
+
+  // Query-time projection clients (M-T1.3 Phase 1) — one shared module, 1:1
+  // with the frontend-readable projection inventory.  Emitted only when the
+  // deployable actually serves one, so a projection-free app stays
+  // byte-identical.
+  if (readableProjections(contexts).length > 0) {
+    out.set("src/api/projections.ts", buildProjectionsApiModule(contexts));
   }
 
   out.set("e2e/smoke.spec.ts", smokeSpec(ui, pageCtx));

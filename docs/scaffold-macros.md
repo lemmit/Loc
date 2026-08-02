@@ -54,9 +54,52 @@ per-element composers, which fan out to leaf macros.
 | `scaffoldAggregate(of: Agg)` | `ui` | A List page, a New (create-form) page, and a Detail page for `Agg`. |
 | `scaffoldWorkflow(of: W)` | `ui` | A Form page for workflow `W`. |
 
+| `scaffoldDashboard` | `context` | One singleton query-time `projection` per aggregate — a row count plus a sum per numeric/money field, aggregated in SQL. |
+
 `scaffoldAggregate` and `scaffoldWorkflow` are the
 **leaves** — they don't invoke other macros.  Everything else is a
 composer that delegates via `invokeMacro`.
+
+### `scaffoldDashboard` — KPIs computed by the database
+
+```ddd
+context Orders with scaffoldDashboard {
+  aggregate Order { code: string  total: money  lineCount: int  … }
+}
+```
+```ddd
+// Orders gains
+projection OrderTotals {
+  rowCount: int   totalSum: money   lineCountSum: int
+  from Order as o
+  select rowCount = count(), totalSum = sum(o.total), lineCountSum = sum(o.lineCount)
+}
+```
+
+A `ui` carrying `scaffold(...)` over the same context then grows its `Home`
+page a row of `Stat` tiles bound to that projection — a money tile through
+`Money`, since a `money` is a decimal.js `Decimal` client-side.
+
+**Why a projection rather than a count in the page.** `.all` is paged by
+default, so counting rows in the browser counts *one page*; and the aggregation
+belongs in the database anyway — this emits one `SELECT` with
+`COUNT(*)`/`SUM(...)` and materialises no rows.
+
+**Why two macros.** A macro attaches to exactly one host, so the projection
+(`context`) and the page (`ui`) can't come from one — the same split as
+`scaffoldPaged` / `scaffoldPagedApi`. Both halves derive the projection name in
+`_dashboard-shared.ts`, so a tile can't bind a projection the other didn't emit.
+
+Notes:
+
+- **One projection per aggregate**, not per context: a query-time projection has
+  a single `from` source.
+- **A hand-written `<Agg>Totals` wins** — the macro skips a name the context
+  already declares, and the ui side binds whatever fields that projection
+  declares. So the dashboard works without the macro too.
+- **Nullable columns are excluded.** SQL `SUM` skips NULLs, so the tile would
+  describe a different row set than the `rowCount` beside it.
+- Additive: a system that doesn't opt in keeps its welcome page unchanged.
 
 ### Composability
 

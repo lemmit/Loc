@@ -400,7 +400,14 @@ export function emitQueryView(
   // loading completes; `data` branch fires when `data` is truthy.
   // Without the flag, the default collection semantics apply
   // (`data && data.length === 0` / `data && data.length > 0`).
-  const single = boolNamed(call, "single");
+  // A SINGLETON PROJECTION read is single-record by construction: the response
+  // is one object, not a list, so the collection semantics below (`.length ===
+  // 0` / `.length > 0`) would read `undefined` on it and render nothing.
+  // Derived rather than requiring the author to write `single: true`, exactly
+  // as `autoPaged` derives paged-ness from the query's return type — the shape
+  // is a property of the query, not a decision the page should have to repeat.
+  const singletonProjection = tryDetectApiHook(ofArg, ctx)?.kind === "projection";
+  const single = boolNamed(call, "single") || singletonProjection;
   // `paged: true` (scaffold, M-T2.6) flips QueryView to server-paged semantics:
   // the query's `.data` is the `Paged<T>` envelope `{items, page, pageSize,
   // total, totalPages}`, and the `data:` lambda binds to `.data` (the envelope)

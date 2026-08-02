@@ -42,6 +42,9 @@ import type {
   PayloadKind,
   PostfixChain,
   PrimitiveType,
+  Projection,
+  ProjectionMember,
+  ProjectionSource,
   Property,
   QueryHandler,
   ReturnStmt,
@@ -81,6 +84,8 @@ import {
   mkPayloadDecl,
   mkPostfixChain,
   mkPrimitiveType,
+  mkProjection,
+  mkProjectionSelect,
   mkProperty,
   mkQueryHandler,
   mkReturnStmt,
@@ -568,6 +573,54 @@ export function queryHandler(
   });
   setContainer(returnType, node, "returnType");
   return node as QueryHandler & ContextMember;
+}
+
+/** A SINGLETON query-time `projection <Name> { <fields> from <Source> as <alias>
+ *  [where <criterion>] select <f> = <expr>, … }` — the whole-table read model of
+ *  read-path-architecture.md rev. 8, whose motivating use is a dashboard total.
+ *
+ *  Singleton by construction: no `key`, so `isSingletonProjection` holds and the
+ *  read returns ONE row.  The caller supplies already-built `Property` members
+ *  (the declared row shape) and the `select` expressions; both are cross-checked
+ *  by the ordinary validator, so a macro can't emit a row field no `select`
+ *  fills (`loom.projection-fields-without-select`). */
+export function singletonProjection(
+  name: string,
+  source: string,
+  alias: string,
+  members: ProjectionMember[],
+  selects: Array<{ field: string; expr: Expression }>,
+  opts: { where?: Expression } = {},
+): Projection & ContextMember {
+  const origin = currentOrigin();
+  const selectNodes = selects.map((s) =>
+    tag(mkProjectionSelect({ $type: "ProjectionSelect", field: s.field, expr: s.expr }), origin),
+  );
+  const node: Projection = tag(
+    mkProjection({
+      $type: "Projection",
+      name,
+      params: [],
+      members,
+      joins: [],
+      selects: selectNodes,
+      bypass: [],
+      bypassAll: false,
+      source: makeRef<ProjectionSource>(source) as Projection["source"],
+      sourceAlias: alias,
+      ...(opts.where ? { filter: opts.where } : {}),
+    }),
+    origin,
+  );
+  members.forEach((m, i) => {
+    setContainer(m, node, "members", i);
+  });
+  selectNodes.forEach((sel, i) => {
+    setContainer(sel, node, "selects", i);
+    setContainer(sel.expr, sel, "expr");
+  });
+  if (opts.where) setContainer(opts.where, node, "filter");
+  return node as Projection & ContextMember;
 }
 
 // ---------------------------------------------------------------------------
