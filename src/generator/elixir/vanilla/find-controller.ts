@@ -42,10 +42,23 @@ export function httpFindsOf(ctx: BoundedContextIR, agg: AggregateIR): FindIR[] {
   return (repo?.finds ?? []).filter((f) => f.name !== "all" && !f.synthesized);
 }
 
-/** True when the aggregate has any union-returning find (→ the controller needs
- *  the shared `problem_variant/5` responder). */
-export function aggregateHasUnionFind(ctx: BoundedContextIR, agg: AggregateIR): boolean {
-  return httpFindsOf(ctx, agg).some((f) => f.returnType.kind === "union");
+/** True when the aggregate has a union-returning find whose absent variant is a
+ *  DECLARED ERROR (→ the controller emits a `problem_variant/5` *call*, so it
+ *  needs the shared responder).
+ *
+ *  Deliberately narrower than "has any union find". A `none`-absent union
+ *  (`Order option`) answers through `ProblemDetails.problem_response/4` instead
+ *  — RS-28, so its 404 detail names the resource rather than degrading to the
+ *  bare status phrase — and therefore does NOT call `problem_variant/5`. An
+ *  aggregate whose only union find is `T option`, with no error-returning
+ *  operation, would otherwise emit the private helper unused and trip
+ *  `mix compile --warnings-as-errors`.
+ *
+ *  This is exactly the reasoning `aggregateHasReturningOpError` documents for
+ *  the operation half; the find half had the looser predicate because, until
+ *  RS-28, every union find called the responder. */
+export function aggregateHasUnionFindError(ctx: BoundedContextIR, agg: AggregateIR): boolean {
+  return httpFindsOf(ctx, agg).some((f) => absentSpec(agg, f.returnType, ctx)?.kind === "error");
 }
 
 /** True when the find returns zero-or-one record (`Customer?` / `Customer`) or
