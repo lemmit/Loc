@@ -14,7 +14,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: string
         operation cancel() { status := "cancelled" }
@@ -311,7 +311,7 @@ describe("elixir — extern commandHandler / queryHandler", () => {
 });
 
 // paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
-// Repo.run(<Criterion>(args)); return r }`) → the api routes controller action
+// Repo.run(<Criterion>(args))  return r }`) → the api routes controller action
 // calls the aggregate context's synthesized paged FIND function directly
 // (`<find>_<agg>`), coercing page/pageSize with the shared `page_param/3`, and
 // renders the `{items,…}` envelope with items serialised.  No `run/1` handler

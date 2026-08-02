@@ -12,7 +12,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: string
         operation cancel() { status := "cancelled" }
@@ -108,8 +108,8 @@ const VO_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      valueobject Money { amount: int; currency: string }
-      aggregate Order ids guid {
+      valueobject Money { amount: int  currency: string }
+      aggregate Order {
         code: string
         total: Money
         operation applyDiscount(amount: Money, reason: string) { }
@@ -319,7 +319,7 @@ const DELETE_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         destroy { }
       }
