@@ -40,7 +40,7 @@ system Faults {
     context Ops {
       aggregate Job {
         label: string
-        create(label: string)
+        create(label: string) { }
         operation finish() { label := "done" }
       }
       repository Jobs for Job { }
@@ -152,13 +152,14 @@ system Ext {
     context Ops {
       aggregate Invoice {
         state: string
-        create(state: string)
-        operation settle() extern
       }
       repository Invoices for Invoice { }
+      extern commandHandler Settle(invoiceId: string): Invoice id;
     }
   }
-  api OpsApi from Ops
+  api OpsApi from Ops {
+    route POST "/invoices/settle" -> Ops.Settle
+  }
   storage primary { type: postgres }
   resource opsState { for: Ops, kind: state, use: primary }
   deployable api {
