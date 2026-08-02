@@ -49,8 +49,44 @@ import { synthDDL } from "../src/runtime/ddl.ts";
 import { install } from "../src/engine/npm/install.ts";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
 import { postProcessNpmBundle } from "../src/engine/npm/postprocess.ts";
+import {
+  absentNodeGlobals,
+  createWorkerRealm,
+  evaluateInWorkerRealm,
+} from "./worker-realm.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// `--realm-only` stops each case after the worker-realm evaluation, before
+// PGlite.  That half needs no jsdelivr WASM fetch and no database, which is
+// what makes it cheap and stable enough to gate every PR; the full run
+// (boot + dispatch) stays on the deploy lane.
+const REALM_ONLY = process.argv.includes("--realm-only");
+
+const EXPECTED_EXPORTS = [
+  "createApp",
+  "schema",
+  "drizzle",
+  "PGlite",
+  "is",
+  "Table",
+  "getTableConfig",
+];
+
+/** Report which Node globals the realm is actually withholding, so a
+ *  regression that quietly re-admits one shows up in the log instead of
+ *  being assumed.  A gate that stops enforcing anything must not look
+ *  identical to one that passes. */
+function absentNodeGlobalsIn() {
+  const absent = absentNodeGlobals(createWorkerRealm());
+  if (absent.length === 0) {
+    fail(
+      "worker realm withheld NOTHING — the realm is not browser-shaped and " +
+        "the gate proves nothing.  Check scripts/worker-globals.json.",
+    );
+  }
+  return absent.join("/");
+}
 
 function fail(msg) {
   console.error(`FAIL: ${msg}`);
@@ -158,10 +194,43 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
 
   console.log("# 3/5 post-processing + importing…");
   const patched = postProcessNpmBundle(code);
+
+  // WORKER-REALM GATE — run BEFORE the Node import below, because the Node
+  // import is exactly what cannot see this class of bug.  Node has a real
+  // `process` and a real `Buffer`; the browser worker that actually boots
+  // this bundle has neither, and a dependency reading one while its module
+  // body evaluates kills `await import(blobUrl)` outright ("Bundle import
+  // failed: …").  Two shipped that way — prom-client's `process.uptime()`
+  // and pg-protocol's `Buffer.allocUnsafe(0)`, both top-level statements.
+  // See worker-realm.mjs for what this does and does not prove.
+  const realm = await evaluateInWorkerRealm(patched, {
+    filename: `loom-bundle-${mode}.mjs`,
+  }).catch((err) => {
+    fail(
+      `bundle failed to evaluate in a worker-shaped realm: ${err.message}\n` +
+        `        This is what the browser reports as "Bundle import failed".\n` +
+        `        A Node global read at module-evaluation time is the usual cause —\n` +
+        `        shim it in web/src/engine/npm/postprocess.ts (globals the bundle\n` +
+        `        prefix installs) or web/src/runtime/runtime.worker.ts (globals the\n` +
+        `        worker itself must provide, e.g. Buffer).`,
+    );
+  });
+  for (const name of EXPECTED_EXPORTS) {
+    if (!(name in realm)) fail(`bundle missing export in worker realm: ${name}`);
+  }
+  console.log(
+    `# worker realm OK — evaluated with ${absentNodeGlobalsIn()} absent, ` +
+      `${EXPECTED_EXPORTS.length} exports present`,
+  );
+  if (REALM_ONLY) {
+    console.log(`# --realm-only: skipping PGlite boot + dispatch for "${label}"`);
+    return;
+  }
+
   const tmpFile = path.join(os.tmpdir(), `loom-bundle-${mode}-${process.pid}.mjs`);
   writeFileSync(tmpFile, patched);
   const mod = await import(pathToFileURL(tmpFile).href);
-  for (const name of ["createApp", "schema", "drizzle", "PGlite", "is", "Table", "getTableConfig"]) {
+  for (const name of EXPECTED_EXPORTS) {
     if (!(name in mod)) fail(`bundle missing export: ${name}`);
   }
 
