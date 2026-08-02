@@ -368,17 +368,38 @@ body: Stack {
 walker — the callback's parameter binds in scope exactly like a `For` item
 or a `Table` column accessor. Chains compose (`orders.filter(…).map(…)`).
 
-Two boundaries to know:
+Three boundaries to know:
 
 - **Single-param callbacks only** — the grammar's `Lambda` is `param=ID =>
-  …`, so a two-arg comparator (`sort((a, b) => …)`) isn't expressible. A
-  single-arg key-sort (`sortBy(o => o.key)`) has no native array method or
-  runtime helper yet on any frontend, so pre-shape ordering in a backend
-  `find` for now.
-- **All frontends.** React, Vue, Svelte, and Angular share the `emitExpr` engine; Feliz supplies its own F# leaves (`src/generator/feliz/fs-expr.ts`) through the same dispatcher;
-  Phoenix/HEEx runs a parallel engine that mirrors the same ops to Elixir
-  idioms (`filter`/`map` → `Enum.filter/2` / `Enum.map/2`), so inline
-  `filter`/`map` shaping works on every frontend.
+  …`, so a two-arg comparator (`sort((a, b) => …)`) isn't expressible.
+- **`filter` / `map` are the whole inline vocabulary.** The rest of the
+  stdlib **collection ops** (`docs/stdlib.md` — `count`, `sum`, `where`,
+  `any`, `all`, `first`, `sortBy`, `distinct`, `take`, `skip`, `join`,
+  `min`, `max`, `avg`, …) are a **backend** vocabulary: every backend
+  renders them through `src/generator/_expr/target.ts`, the frontend walker
+  has no arm for them and would emit them verbatim. Using one in a page /
+  component expression is an **error**,
+  `loom.frontend-collection-op-unsupported`:
+
+  ```ddd
+  // ✗ loom.frontend-collection-op-unsupported
+  body: QueryView { of: Orders.Order.all, data: rows => Stat("n", rows.count) }
+  ```
+
+  Compute the value where the data lives — a repository `find`, an
+  aggregate `derived`, or a `projection` read model — and bind the result
+  in the page. (The gate is target-agnostic: it fires on Phoenix too, where
+  the parallel HEEx engine happens to map `count`, so that a `.ddd` renders
+  on every frontend or fails on every frontend rather than silently
+  breaking on a `framework:` change.)
+- **Frontend coverage.** React, Vue, Svelte, and Angular share the
+  `emitExpr` engine and get `filter`/`map` from native `Array.prototype`;
+  Phoenix/HEEx runs a parallel engine that mirrors them to Elixir idioms
+  (`Enum.filter/2` / `Enum.map/2`). Feliz supplies its own F# leaves
+  (`src/generator/feliz/fs-expr.ts`) for the **action/update** path only —
+  in a page **body** its method-call rendering still goes through the shared
+  walker arm, so inline `filter`/`map` shaping there emits JS-shaped F#;
+  prefer pre-shaping in a backend `find` when targeting Feliz or Flutter.
 
 ### 8.2 Dependent / conditional form validation — use `state`
 
