@@ -18,21 +18,38 @@ name: Generated React TSX build
 #                                  loom-landing, banking, …) — caught
 #                                  one merge later by:
 #
-#   - `push: main` /            →  full Cartesian.  Heavy, but it's the
-#     `merge_group` /               regression safety net.  The keying is
-#     `workflow_dispatch`           "anything that is not a plain
-#                                   pull_request runs full", so the merge
-#                                   queue gets the full sweep on the
-#                                   rebased candidate — the pre-land half
-#                                   of the tiering in docs/ci-gating.md.
+#   - `push: main` /            →  full Cartesian, BATCHED PER EXAMPLE.
+#     `merge_group` /               Heavy, but it's the regression safety
+#     `workflow_dispatch`           net.  The keying is "anything that is
+#                                   not a plain pull_request runs full",
+#                                   so the merge queue gets the full sweep
+#                                   on the rebased candidate — the pre-land
+#                                   half of the tiering in docs/ci-gating.md.
 #                                   `workflow_dispatch` runs full too
 #                                   so a maintainer can force the
 #                                   sweep on a branch if a PR-time
 #                                   slim cell smelled suspicious.
 #
-# Each cell runs as its own runner via a job matrix.  Wall time per
-# cell is ~30s (npm install dominates); the full sweep completes in
-# parallel rather than ~5min sequential.
+# Sharding shape — why the full sweep is 18 jobs, not 144.  Every job
+# pays ~4min of fixed cost (checkout + `npm ci` + `npm run build`) before
+# it can run a ~60-90s cell.  One-runner-per-cell therefore spent ~85% of
+# 144 runners on setup, took ~72min of wall clock (the tail is queueing,
+# not work), and starved every other workflow of the org's runner pool —
+# which matters more now that a merge-queue candidate fans out to ~35
+# workflows (docs/ci-gating.md).
+#
+# So the full sweep batches by example: 18 jobs, each running all 8 packs
+# for its one example in a single process via
+# `LOOM_REACT_BUILD_CASE=<ddd>` (no `:pack` suffix = every pack; see
+# test/e2e/generated-react-build.test.ts).  The fixed cost is paid once
+# per 8 cells instead of once per cell, and the 2nd..8th generated-project
+# `npm install`s reuse the tarball cache the first cell warmed.
+# Expect ~4min setup + 8 × ~60-90s ≈ 12-16min per job, and a full sweep of
+# ~15-20min wall clock (18 jobs fit the runner pool in one wave) for the
+# same 144 cells of coverage.
+#
+# Coverage is UNCHANGED: same 18 examples × 8 packs, same assertions.
+# The PR path is untouched — still 2 one-cell jobs, still ~5min.
 
 on:
   push:
@@ -87,9 +104,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Pick the matrix shape based on the event.  Output is JSON consumed
-  # by the matrix job below via `fromJSON`.  Costs ~5 seconds of runner
-  # time — negligible against the 88 cells we skip on a typical PR.
+  # Pick the matrix shape based on the event.  Output is a JSON
+  # `{include: [{case, label}, …]}` consumed by the matrix job below via
+  # `fromJSON`; `case` is the `LOOM_REACT_BUILD_CASE` spec for that job
+  # and `label` is its display name.  Costs ~5 seconds of runner time —
+  # negligible against the 142 cells we skip on a typical PR.
   configure:
     runs-on: ubuntu-latest
     outputs:
@@ -98,7 +117,7 @@ jobs:
       - id: set
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Slim PR slice — 2 cells.  showcase.ddd (the
+            # Slim PR slice — 2 one-cell jobs.  showcase.ddd (the
             # feature-comprehensive cross-generator conformance fixture,
             # #401) × two representative packs: one Mantine (the React
             # baseline) and one shadcn (the Tailwind/Radix family).  This
@@ -108,20 +127,29 @@ jobs:
             # is one merge later — or force it with workflow_dispatch.
             EXAMPLES='["examples/showcase.ddd"]'
             PACKS='["mantine@v9","shadcn@v4"]'
+            MATRIX=$(jq -cn --argjson ex "$EXAMPLES" --argjson packs "$PACKS" \
+              '{include: [$ex[] as $e | $packs[] as $p | {case: "\($e):\($p)", label: "\($e) × \($p)"}]}')
           else
-            # Full pack Cartesian on push:main + merge_group + workflow_dispatch.
-            PACKS='["mantine@v7","mantine@v9","shadcn@v3","shadcn@v4","mui@v5","mui@v7","chakra@v2","chakra@v3"]'
-            # Full Cartesian — push:main, merge_group, workflow_dispatch.  This
-            # list MUST match the `examples` const in
-            # test/e2e/generated-react-build.test.ts (pinned by the
-            # "CI matrix ↔ examples list stay in sync" guard there).
+            # Full sweep — push:main, merge_group, workflow_dispatch: every
+            # example × every pack, BATCHED one job per example.  A bare
+            # `<ddd>` case (no `:pack` suffix) means "run all packs for this
+            # example" in the harness, so the pack set lives in exactly one
+            # place — `reactBuildPacks` in test/e2e/react-build-cases.ts —
+            # and cannot drift from a duplicate list here.
+            #
+            # This EXAMPLES list MUST match the `reactBuildExamples` const in
+            # test/e2e/react-build-cases.ts (pinned by the "CI matrix ↔
+            # examples list stay in sync" guard in
+            # test/e2e/react-build-matrix-sync.test.ts).
             # Single-file examples only: the harness copies one .ddd to
             # a temp dir, so multi-file examples with `import "./…"`
             # (erp/main.ddd, fulfillment-newest.ddd) can't be built here
             # — their coverage lives in playground-feature-examples.
             EXAMPLES='["examples/acme.ddd","examples/showcase.ddd","web/src/examples/banking-system.ddd","web/src/examples/inventory-system.ddd","web/src/examples/provenance-system.ddd","web/src/examples/sales-system.ddd","web/src/examples/storefront-system.ddd","web/src/examples/inheritance-system.ddd","web/src/examples/storybook-mantine.ddd","web/src/examples/storybook-shadcn.ddd","web/src/examples/storybook-components.ddd","web/src/examples/loom-landing.ddd","web/src/examples/action-showcase.ddd","web/src/examples/store-showcase.ddd","web/src/examples/dashboard-system.ddd","web/src/examples/subform-showcase.ddd","web/src/examples/data-grid-showcase.ddd","web/src/examples/file-upload-system.ddd","web/src/examples/file-scaffold-system.ddd"]'
+            MATRIX=$(jq -cn --argjson ex "$EXAMPLES" \
+              '{include: [$ex[] as $e | {case: $e, label: "\($e) × all packs"}]}')
           fi
-          echo "matrix={\"example\":$EXAMPLES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   matrix:
     needs: configure
@@ -129,14 +157,14 @@ jobs:
     strategy:
       # Surface every broken cell rather than aborting the matrix on
       # the first red shard — easier to triage cross-pack regressions
-      # when CI shows the full set.
+      # when CI shows the full set.  (Within a batched job the cells are
+      # separate `it`s, so a red pack doesn't hide the other seven either.)
       fail-fast: false
       matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
-    # Per-shard timeout: generate + npm install + tsc fit comfortably
-    # under 10min; the matrix gives every shard its own runner so the
-    # total wall time is min(shard times) ≈ one shard, not their sum.
-    timeout-minutes: 10
-    name: ${{ matrix.example }} × ${{ matrix.pack }}
+    # Sized for the batched full-sweep job: ~4min setup + 8 cells at
+    # ~60-90s each.  A slim PR job runs one cell and finishes in ~5min.
+    timeout-minutes: 45
+    name: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v6
 
@@ -156,7 +184,11 @@ jobs:
 
       - name: Run tsc-react shard
         env:
-          LOOM_REACT_BUILD_CASE: ${{ matrix.example }}:${{ matrix.pack }}
+          # `<ddd>:<pack>` = one cell (slim PR slice); a bare `<ddd>` = every
+          # pack for that example (full sweep).  A spec that matches nothing
+          # throws — a silently-skipping shard is how this workflow once went
+          # green while testing nothing.
+          LOOM_REACT_BUILD_CASE: ${{ matrix.case }}
         run: npx vitest run test/e2e/generated-react-build.test.ts
 
   # Extern-component escape-hatch gate (not part of the example × pack

@@ -4,7 +4,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { reactBuildExamples as examples } from "./react-build-cases.js";
+import {
+  reactBuildExamples as examples,
+  reactBuildPacks as PACKS,
+  type ReactPackSpec as PackSpec,
+  reactPackId as packId,
+} from "./react-build-cases.js";
 
 // ---------------------------------------------------------------------------
 // Generator regression test for the React frontend: for each example
@@ -15,7 +20,7 @@ import { reactBuildExamples as examples } from "./react-build-cases.js";
 // the kind of thing that's invisible to the IR-level tests but
 // blows up at user time.
 //
-// Matrix: 13 single-file examples × 8 packs.  Non-default-pack variants
+// Matrix: 18 single-file examples × 8 packs.  Non-default-pack variants
 // are produced by injecting `design: <pack>` into the deployable at
 // test-run time, so the canonical example sources stay pack-neutral.
 // Multi-file examples (those with `import "./…"`, e.g. erp/main.ddd,
@@ -23,15 +28,19 @@ import { reactBuildExamples as examples } from "./react-build-cases.js";
 // copies a single .ddd to a temp dir, which breaks relative imports.
 // Their parse/generate coverage lives in playground-feature-examples.
 //
-// Run modes:
-//   1. Full sweep — `LOOM_REACT_BUILD=1 npx vitest run …` runs every
-//      case sequentially in one Node process (~5min).  Used by
-//      developers locally.
-//   2. Single shard — `LOOM_REACT_BUILD_CASE=<ddd>:<pack>` filters to
-//      exactly one case (implies the suite is enabled even without
-//      LOOM_REACT_BUILD=1).  Used by CI to parallelise across a
-//      GitHub Actions job matrix — every shard runs one case in its
-//      own runner, wall time drops from ~5min to ~30s per case.
+// Run modes (all keyed off `LOOM_REACT_BUILD_CASE`, which also implies
+// the suite is enabled even without `LOOM_REACT_BUILD=1`):
+//   1. Full sweep — `LOOM_REACT_BUILD=1 npx vitest run …` (no CASE) runs
+//      every example × every pack sequentially in one Node process.
+//   2. Single cell — `LOOM_REACT_BUILD_CASE=<ddd>:<pack>` filters to
+//      exactly one case.  The slim per-PR CI slice and local
+//      pack-authoring loops use this form.
+//   3. Pack batch — `LOOM_REACT_BUILD_CASE=<ddd>` (no `:` suffix) runs
+//      EVERY pack for that one example; `<ddd>:<packA>,<packB>` runs a
+//      named subset.  This is the shape the full CI sweep uses: one job
+//      per example amortises the ~4min checkout + `npm ci` + toolchain
+//      build over 8 cells instead of paying it 8 times, and drops the
+//      full sweep from 144 runners to 18.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -109,31 +118,6 @@ function stubFrontendExterns(projectDir: string): void {
   }
 }
 
-interface PackSpec {
-  family: "mantine" | "shadcn" | "mui" | "chakra";
-  version: string;
-}
-
-/** The matrix of `family@version` shards the test sweeps.  Today it
- *  ships one version per family — the same set that existed before
- *  versioning, now explicitly pinned.  Later additions (mantine@v9,
- *  chakra@v3, …) append entries here; the matrix grows
- *  multiplicatively without other code edits. */
-const PACKS: readonly PackSpec[] = [
-  { family: "mantine", version: "v7" },
-  { family: "mantine", version: "v9" },
-  { family: "shadcn", version: "v3" },
-  { family: "shadcn", version: "v4" },
-  { family: "mui", version: "v5" },
-  { family: "mui", version: "v7" },
-  { family: "chakra", version: "v2" },
-  { family: "chakra", version: "v3" },
-];
-
-function packId(p: PackSpec): string {
-  return `${p.family}@${p.version}`;
-}
-
 interface Case {
   ddd: string;
   reactDir: string;
@@ -147,21 +131,46 @@ interface Case {
 
 const allCases: Case[] = examples.flatMap((e) => PACKS.map((pack) => ({ ...e, pack })));
 
-/** Filter to the case named by
- *  `LOOM_REACT_BUILD_CASE=<ddd>:<family>@<version>`, or return every
- *  case when no filter is set.  Throws on a malformed shard spec so
- *  the CI matrix surfaces typos loudly instead of silently skipping
- *  a case. */
+/** Resolve `LOOM_REACT_BUILD_CASE` to the cases to run:
+ *
+ *    `<ddd>:<family>@<version>`            → that one cell
+ *    `<ddd>:<packA>,<packB>`               → those cells, in that order
+ *    `<ddd>`  (or `<ddd>:*`)               → every pack for that example
+ *    unset                                 → every case
+ *
+ *  Throws on an unknown example or pack so the CI matrix surfaces typos
+ *  loudly instead of silently skipping a case (a shard that matched
+ *  nothing used to pass, which is how the whole workflow once went
+ *  quietly green while testing nothing). */
 function selectCases(): Case[] {
   if (SHARD === undefined) return allCases;
-  const [ddd, packStr] = SHARD.split(":");
-  const match = allCases.find((c) => c.ddd === ddd && packId(c.pack) === packStr);
-  if (!match) {
+  // `.ddd` paths never contain a colon, so the FIRST colon splits
+  // example from pack spec.
+  const colon = SHARD.indexOf(":");
+  const ddd = colon === -1 ? SHARD : SHARD.slice(0, colon);
+  const packSpec = colon === -1 ? "*" : SHARD.slice(colon + 1).trim();
+
+  const forExample = allCases.filter((c) => c.ddd === ddd);
+  if (forExample.length === 0) {
     throw new Error(
-      `LOOM_REACT_BUILD_CASE="${SHARD}" did not match any case.  Available: ${allCases.map((c) => `${c.ddd}:${packId(c.pack)}`).join(", ")}`,
+      `LOOM_REACT_BUILD_CASE="${SHARD}" names no known example.  Available: ${examples.map((e) => e.ddd).join(", ")}`,
     );
   }
-  return [match];
+  if (packSpec === "" || packSpec === "*") return forExample;
+
+  const wanted = packSpec
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return wanted.map((want) => {
+    const match = forExample.find((c) => packId(c.pack) === want);
+    if (!match) {
+      throw new Error(
+        `LOOM_REACT_BUILD_CASE="${SHARD}" names unknown pack "${want}".  Available: ${PACKS.map(packId).join(", ")}`,
+      );
+    }
+    return match;
+  });
 }
 
 const cases = ENABLED ? selectCases() : [];
@@ -201,6 +210,13 @@ describe.skipIf(!ENABLED)(
         // Frontend `function … extern from` impls are user-owned and never
         // generated; stub them so the generated-only tree type-checks.
         stubFrontendExterns(projectDir);
+        // Deliberately NOT `--prefer-offline`: the pack-batch mode does
+        // reinstall a near-identical project per cell, but that flag also
+        // serves stale cached *packuments*, so a floating range whose newest
+        // matching version was published after the cache entry (`jiti@^2.7.0`
+        // is a live example) dies with ETARGET.  npm already reuses the
+        // warmed tarball cache after a cheap etag revalidation — the batch
+        // gets the saving without the flake.
         execSync(`npm install --silent --no-audit --no-fund`, {
           cwd: projectDir,
           stdio: "inherit",
