@@ -233,6 +233,31 @@ describe("QueryView macro", () => {
     expect(tsx).not.toContain("orderById.data.total");
   });
 
+  // `single:` restated a fact the IR already knows — the read yields one
+  // record — so a byId query written WITHOUT the flag took the COLLECTION
+  // arms: `.length` of one record is `undefined`, so neither `=== 0` nor
+  // `> 0` fires and the page renders blank (on HEEx, `Enum.empty?/1` of a
+  // struct raises).  Derived now, with the flag as an opt-in on top.
+  it("a byId query takes single-record semantics without a `single:` flag", async () => {
+    const files = await buildAndGenerate(
+      ordersListBody(`QueryView {
+        of:      Sales.Order.byId(id),
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rec => Text { rec.status }
+      }`),
+    );
+    const tsx = files.get("web/src/pages/orders_list.tsx")!;
+    // Presence/absence of the record, never `.length` of it — `.length` of one
+    // record is `undefined`, so both collection guards would be false and the
+    // page would render blank.
+    expect(tsx).toContain("!orderById.data &&");
+    expect(tsx).toContain("{ orderById.data && (");
+    expect(tsx).not.toContain("orderById.data.length");
+    expect(tsx).toContain("{orderById.data.status}");
+  });
+
   it("missing 'of:' surfaces a visible TSX comment, no crash", async () => {
     const files = await buildAndGenerate(
       ordersListBody(`QueryView {

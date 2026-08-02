@@ -690,10 +690,23 @@ metadata deliberately, through the `renderPagedEnvelopeMember` seam:
 | **feliz** | the Elmish decoder splits it — rows into the read's `Remote<'T list>` field, metadata into a sibling `PageMeta` record — so `rows.total` resolves to `model.<Read>PageMeta.Total`. The list field stays a plain `'T list` because `View.idOptions` (FK selects) and the realtime refetch both read it |
 | **flutter** | the Riverpod provider yields `Paged<T>` rather than a bare `List<T>`, so `rows.total` is a field of the loaded value |
 
-Paged-ness itself is **derived from the find's return type**, once, in
-`_walker/paged-query.ts` — the walker and each frontend's read collector make
-the same call, so a hand-written paged read can't have a body that resolves
-`rows.total` against a field its own wire layer never decoded.
+### The flags are opt-ins; the shape is derived
+
+`paged:` and `single:` look like they *declare* what a read returns. They do
+not — both are properties of the find, resolved once in
+`_walker/paged-query.ts` (`queryShape`) and consumed by the JSX walker, the
+HEEx renderer, and the Feliz and Flutter read collectors alike:
+
+| Fact | Derived from | What the flag adds |
+|---|---|---|
+| **paged** | the find returns `paged<T>` | `paged: true` also binds the ENVELOPE instead of unwrapping to the rows — a binding-shape choice the fact can't make for you (the scaffold's list reads `rows.items` itself) |
+| **single** | the read is `byId`, or the find returns `T` / `T?` | nothing the fact doesn't already say; kept as an override |
+
+Writing neither flag is the normal case and now works: a hand-written
+`QueryView { of: X.all, data: rows => Table { rows: rows } }` iterates records,
+reports the true `rows.total`, and — on Phoenix — asks emptiness of the rows
+rather than of the envelope map. Taking these from the flags alone is what made
+the same page render blank on the JSX frontends and raise on LiveView.
 
 ---
 

@@ -175,6 +175,7 @@ export function emitLiveViewPages(args: {
       authEnabled,
       partContextModule,
       contextModuleByAggName,
+      contextByAggName,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
@@ -205,6 +206,7 @@ export function emitLiveViewPages(args: {
       appModule,
       ui,
       aggregatesByName,
+      bcByAggregate: contextByAggName,
       enumsByName,
       valueObjectsByName,
       contextModuleByAggName,
@@ -259,6 +261,7 @@ export function emitLiveViewPages(args: {
         ui,
         appModule,
         aggregatesByName,
+        bcByAggregate: contextByAggName,
         enumsByName,
         valueObjectsByName,
         partContextModule,
@@ -278,6 +281,9 @@ interface RenderArgs {
   appModule: string;
   ui: UiIR;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Aggregate PascalCase name → its owning bounded context, for the walker's
+   *  `queryShape` derivation (is this read paged / single?). */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workspace-wide enum registry — drives form select-input dispatch. */
   enumsByName: ReadonlyMap<string, EnumIR>;
   /** Workspace-wide VO registry — drives nested-form dispatch
@@ -458,6 +464,7 @@ function renderLiveView(a: RenderArgs): string {
     authEnabled,
     partContextModule,
     contextModuleByAggName,
+    a.bcByAggregate,
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
@@ -1141,6 +1148,9 @@ function renderUiComponents(args: {
   ui: UiIR;
   appModule: string;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Aggregate PascalCase name → its owning bounded context, for the walker's
+   *  `queryShape` derivation (is this read paged / single?). */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   enumsByName: ReadonlyMap<string, EnumIR>;
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
   /** Entity-part name → module-qualified context, so a component-body
@@ -1185,6 +1195,7 @@ function renderUiComponents(args: {
         authEnabled,
         partContextModule,
         contextModuleByAggName,
+        args.bcByAggregate,
       );
       const attrLines = c.params
         .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)

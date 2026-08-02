@@ -3513,6 +3513,37 @@ shape.
   array, so re-rooting `rows.items` would repair the author's own mistake into
   something that reads a different value and looks right.
 
+**The sweep is the deliverable, not the first fix.** Unifying paged-ness
+prompted a question worth generalising: *which other author-supplied flags
+restate a fact the IR already knows?* Enumerating them took one grep — of the
+11 boolean flags the walker reads, 8 are genuine presentation choices
+(`striped`, `sticky`, `sortable`, …) and exactly 3 restate a fact: `paged`,
+`single`, `serverPaged`. Two of those were live bugs on **Phoenix**, which runs
+a parallel walker and so never inherited the JSX engine's derivation: a
+hand-written list read asked `Enum.empty?/1` of the 5-key envelope MAP (never
+empty, so the empty arm was dead and `<.table>` iterated key/value pairs), and
+a `byId` read without `single:` asked it of a struct (`Protocol.UndefinedError`).
+Both raise at RENDER — no compile signal on any gate. **When you fix a
+same-fact-two-sources bug, the fix is cheap and the SWEEP is where the value
+is: the pattern recurs wherever the codebase lets an author restate something
+it can derive.**
+
+The third, `serverPaged`, is deliberately NOT unified — see the note below on
+when a flag is genuinely a second axis.
+
+**A flag is legitimate when it selects a BEHAVIOUR the fact can't determine.**
+`paged: true` survives as an opt-in, but it no longer answers "is this read
+paged?" — it answers "bind the envelope rather than unwrapping to the rows",
+which is a shape choice the return type cannot make. `single:` had no such
+second axis, so it degraded to a pure override. `serverPaged` on `Table` turned
+out to be a real design question rather than a derivation: deriving it would
+give a hand-written table a pager that renders but cannot navigate (it writes
+page state no request reads), while leaving it gives one that client-slices a
+server window and lies about the total. Neither is obviously right, so it stays
+an owner decision. **Sort the flags into "restates a fact" (unify), "selects a
+behaviour" (keep), and "the answer is genuinely contested" (escalate) — merging
+the third into the first is how you ship a confident wrong default.**
+
 **Two layers disagreeing about the same boolean is a design bug, not a gate.**
 The walker DERIVED paged-ness from the find's return type; both frontend read
 collectors keyed their wire decode on the EXPLICIT `paged: true` flag. Both

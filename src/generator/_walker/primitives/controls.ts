@@ -9,7 +9,7 @@ import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
 import { localizedAriaLabelAttr, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
-import { isPagedQuery } from "../paged-query.js";
+import { queryShape } from "../paged-query.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   actionHandlerName,
@@ -384,14 +384,16 @@ export function emitQueryView(
   // loading completes; `data` branch fires when `data` is truthy.
   // Without the flag, the default collection semantics apply
   // (`data && data.length === 0` / `data && data.length > 0`).
-  // A SINGLETON PROJECTION read is single-record by construction: the response
-  // is one object, not a list, so the collection semantics below (`.length ===
-  // 0` / `.length > 0`) would read `undefined` on it and render nothing.
-  // Derived rather than requiring the author to write `single: true`, exactly
-  // as `autoPaged` derives paged-ness from the query's return type — the shape
-  // is a property of the query, not a decision the page should have to repeat.
-  const singletonProjection = tryDetectApiHook(ofArg, ctx)?.kind === "projection";
-  const single = boolNamed(call, "single") || singletonProjection;
+  // DERIVED, with the flag as an opt-in on top.  `single: true` was originally
+  // the only source, which made a byId read written WITHOUT it emit the
+  // collection arms — `.length` of one record: `undefined`, so neither the
+  // empty branch nor the data branch fires and the page renders blank (a raise
+  // on HEEx, where `Enum.empty?` of a struct has no Enumerable).  The IR knows
+  // the read yields one record; asking the author to restate it only creates a
+  // way for the two to disagree.  Covers the singleton PROJECTION read too —
+  // its response is one object, not a list — so both read kinds get their
+  // answer from the same place (`_walker/paged-query.ts`).
+  const explicitSingle = boolNamed(call, "single");
   // `paged: true` (scaffold, M-T2.6) flips QueryView to server-paged semantics:
   // the query's `.data` is the `Paged<T>` envelope `{items, page, pageSize,
   // total, totalPages}`, and the `data:` lambda binds to `.data` (the envelope)
@@ -409,7 +411,9 @@ export function emitQueryView(
   // and each frontend's wire decode can't answer it differently — see
   // `_walker/paged-query.ts`.  Event-sourced `all` (an unpaged fold) and user
   // finds returning `T[]` are false, and keep bare-array semantics.
-  const autoPaged = !explicitPaged && !single && isPagedQuery(ofArg, ctx);
+  const shape = queryShape(ofArg, ctx);
+  const single = explicitSingle || shape.single;
+  const autoPaged = !explicitPaged && !single && shape.paged;
   const paged = explicitPaged || autoPaged;
 
   const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
