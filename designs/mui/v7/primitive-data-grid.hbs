@@ -37,7 +37,7 @@
                       <TextField
                         size="small"
                         variant="standard"
-                        placeholder="Filter"
+                        {{{filterPlaceholderAttr}}}
                         aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
                         value={String(h.column.getFilterValue() ?? "")}
                         onChange={(e) => h.column.setFilterValue(e.target.value)}
@@ -61,13 +61,13 @@
       </TableContainer>
       <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
         <Button size="small" variant="outlined" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
-          Previous
+          {{{prevLabel}}}
         </Button>
         <Typography variant="body2" aria-live="polite">
           Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
         </Typography>
         <Button size="small" variant="outlined" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
-          Next
+          {{{nextLabel}}}
         </Button>
       </Stack>
     </Stack>

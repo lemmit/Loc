@@ -23,7 +23,7 @@
                 v-if="h.column.getCanFilter()"
                 class="mt-1 h-7 text-xs"
                 type="search"
-                placeholder="Filter"
+                {{{filterPlaceholderAttr}}}
                 :aria-label="`Filter by ${String(h.column.columnDef.header ?? h.id)}`"
                 :model-value="String(h.column.getFilterValue() ?? '')"
                 @update:model-value="(v: string | number | undefined) => h.column.setFilterValue(String(v ?? ''))"
@@ -40,8 +40,8 @@
         </TableBody>
       </Table>
       <div class="flex items-center justify-between">
-        <Button size="sm" variant="outline" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">Previous</Button>
+        <Button size="sm" variant="outline" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">{{{prevLabel}}}</Button>
         <span class="text-sm" aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
-        <Button size="sm" variant="outline" :disabled="!table.getCanNextPage()" @click="table.nextPage()">Next</Button>
+        <Button size="sm" variant="outline" :disabled="!table.getCanNextPage()" @click="table.nextPage()">{{{nextLabel}}}</Button>
       </div>
     </div>

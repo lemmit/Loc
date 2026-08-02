@@ -32,7 +32,7 @@
                 density="compact"
                 hide-details
                 variant="outlined"
-                placeholder="Filter"
+                {{{filterPlaceholderAttr}}}
                 :aria-label="`Filter by ${String(h.column.columnDef.header ?? h.id)}`"
                 :model-value="String(h.column.getFilterValue() ?? '')"
                 @update:model-value="(v: string) => h.column.setFilterValue(v)"
@@ -49,8 +49,8 @@
         </tbody>
       </v-table>
       <div class="d-flex align-center justify-space-between mt-3">
-        <v-btn size="small" variant="tonal" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">Previous</v-btn>
+        <v-btn size="small" variant="tonal" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">{{{prevLabel}}}</v-btn>
         <span class="text-body-2" aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
-        <v-btn size="small" variant="tonal" :disabled="!table.getCanNextPage()" @click="table.nextPage()">Next</v-btn>
+        <v-btn size="small" variant="tonal" :disabled="!table.getCanNextPage()" @click="table.nextPage()">{{{nextLabel}}}</v-btn>
       </div>
     </div>

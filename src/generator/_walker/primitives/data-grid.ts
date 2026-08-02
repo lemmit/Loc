@@ -40,6 +40,7 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 
+import { localizedChromeAttr, localizedChromeText } from "../i18n-emit.js";
 import {
   boolNamed,
   namedArgValue,
@@ -50,6 +51,7 @@ import {
 import type { DataGridColumn } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, extendLambdaParams, propagateChildFlags, walk } from "../walker-core.js";
+import { columnAccessorKey, columnIsFilterable, gridColumns } from "./data-grid-shape.js";
 
 export function emitDataGrid(
   call: ExprIR & { kind: "call" },
@@ -90,9 +92,7 @@ export function emitDataGrid(
   // The aggregate the bound rows are, when the enclosing `QueryView` recorded
   // one — the only source of FIELD TYPES for the columns (see `isDecimalLike`).
   const rowAgg = rowsArg?.kind === "ref" ? ctx.listRowAggregates?.get(rowsArg.name) : undefined;
-  const columns = positionalArgs(call)
-    .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
-    .map((c, i) => resolveColumn(c, ctx, i, depth, rowAgg));
+  const columns = gridColumns(call).map((c, i) => resolveColumn(c, ctx, i, depth, rowAgg));
   const cellImports = importsAddedSince(ctx, importsBefore);
 
   // Any column asking to be filtered turns the per-column filter row on; the
@@ -129,6 +129,20 @@ export function emitDataGrid(
           hasFilters: anyFilterable,
           hasSelection: selection !== undefined,
           testidAttr,
+          // Pack-chrome (M-T1.11): the pager's "Previous"/"Next" and the
+          // per-column "Filter" placeholder translate through the shared
+          // `chrome.*` catalog under i18n, else render the raw English —
+          // byte-identical to the pre-i18n pack template.  Computed HERE, once,
+          // so all four JS frontends get the token in their own markup dialect
+          // (`ctx.target`) with no per-target repetition.
+          //
+          // The `t` these resolve against is NOT registered on the page's
+          // import map: this markup lands in the hoisted CHILD component, which
+          // on Vue/Svelte/Angular is a separate file.  Each target's
+          // `renderDataGridChild` wires its own `t` — see `localizedChromeText`.
+          prevLabel: localizedChromeText(ctx, "previous"),
+          nextLabel: localizedChromeText(ctx, "next"),
+          filterPlaceholderAttr: localizedChromeAttr(ctx, "placeholder", "filter"),
           // Every target-specific key a pack may reference is defaulted here,
           // not just supplied by the target that uses it.  `emitPageObjectsForUi`
           // drives the REACT tsx walker over whichever pack is active — Vue and
@@ -210,9 +224,10 @@ function resolveColumn(
       ? headerArg.value
       : `Column ${index + 1}`;
 
-  const explicitField = stringNamed(call, "field");
-  const inferred = simpleAccessorField(accessorArg);
-  const accessorKey = explicitField ?? inferred;
+  // Read through the shared shape leaf, which the i18n extractor also consults
+  // — `chrome.filter` must be in the catalog exactly when a filter input is
+  // emitted (`data-grid-shape.ts`).
+  const accessorKey = columnAccessorKey(call);
   const sortable = boolNamed(call, "sortable") && accessorKey !== undefined;
 
   let cell: string | undefined;
@@ -237,7 +252,7 @@ function resolveColumn(
     // A column with no resolvable field can't be sorted or filtered BY VALUE,
     // so those flags are forced off rather than emitted and silently ignored.
     sortable,
-    filterable: boolNamed(call, "filterable") && accessorKey !== undefined,
+    filterable: columnIsFilterable(call),
     // `money`/`decimal` reach the row as an object wrapper whose `valueOf()` is
     // a string, so the default `a < b` comparator orders them lexicographically
     // — see `DataGridColumn.numericSort`.
@@ -266,16 +281,6 @@ function isDecimalLike(
   const t = f?.type;
   const base = t?.kind === "optional" ? t.inner : t;
   return base?.kind === "primitive" && (base.name === "money" || base.name === "decimal");
-}
-
-/** `o => o.sku` → `"sku"`.  Undefined for anything more complex.  Shared with
- *  `Chart` (chart.ts), whose `x:`/`y:` lambdas unwrap to accessor field
- *  strings the same way a `Column` accessor does. */
-export function simpleAccessorField(accessor: ExprIR | undefined): string | undefined {
-  if (accessor?.kind !== "lambda") return undefined;
-  const body = accessor.body;
-  if (body?.kind === "member" && body.receiver.kind === "ref") return body.member;
-  return undefined;
 }
 
 /** A unique, stable component name for this grid within the emitted module.

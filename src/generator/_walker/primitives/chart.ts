@@ -38,7 +38,10 @@ import { addImport } from "../render-primitive.js";
 import { lambdaArg, namedArgValue, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, testidAttr } from "../walker-core.js";
-import { simpleAccessorField } from "./data-grid.js";
+// Shared ctx-free accessor-shape helper — `Chart`'s `x:`/`y:` lambdas unwrap to
+// a field string exactly the way a `DataGrid` `Column` accessor does, so both
+// read the one leaf rather than each re-deriving it.
+import { simpleAccessorField } from "./data-grid-shape.js";
 
 export function emitChart(
   call: ExprIR & { kind: "call" },

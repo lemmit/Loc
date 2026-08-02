@@ -2,8 +2,8 @@
 // Pack-chrome message catalog (M-T1.11, i18n.md — "pack-chrome catalogs").
 //
 // The design packs bake their own user-visible strings into `.hbs` templates —
-// a spinner's `aria-label="Loading"`, a grid pager's "Previous"/"Next", a
-// form's "Remove" button.  These are NOT authored in the `.ddd` source, so the
+// a spinner's `aria-label="Loading"`, a grid pager's "Previous"/"Next", its
+// per-column "Filter" placeholder, a form's "Remove" button.  These are NOT authored in the `.ddd` source, so the
 // content-hash extraction pass (`i18n-extract.ts`, which keys `page.<P>.<role>.
 // <hash>` off literals in the page body) never sees them and the per-app
 // `t()` runtime can't translate them.
@@ -26,7 +26,9 @@
 // entry per chrome string as the pack-chrome slices land.
 // ---------------------------------------------------------------------------
 
+import type { ExprIR } from "../../ir/types/loom-ir.js";
 import type { MessageEntry } from "./i18n-extract.js";
+import { gridHasFilterableColumn } from "./primitives/data-grid-shape.js";
 
 /** Stable key for a pack-chrome string: `chrome.<name>`. */
 export function chromeKey(name: string): string {
@@ -38,16 +40,61 @@ export function chromeKey(name: string): string {
  *  rides into `t(key, default)` and renders verbatim when no locale overrides. */
 export const CHROME_MESSAGES: Record<string, string> = {
   [chromeKey("loading")]: "Loading",
+  [chromeKey("previous")]: "Previous",
+  [chromeKey("next")]: "Next",
+  [chromeKey("filter")]: "Filter",
 };
+
+/** The source-language text for a chrome key, for an emitter building the
+ *  `t(key, default)` binding.  Throws on an unknown name rather than emitting a
+ *  `t(key, undefined)` the runtime would render as the literal string
+ *  "undefined" — the emitted default MUST equal the catalog entry, so the two
+ *  read the same table instead of repeating the English by hand. */
+export function chromeMessage(name: string): string {
+  const message = CHROME_MESSAGES[chromeKey(name)];
+  if (message === undefined) throw new Error(`i18n-chrome: unknown chrome string "${name}"`);
+  return message;
+}
+
+/** One catalog entry for a chrome name. */
+function entry(name: string): MessageEntry {
+  return { key: chromeKey(name), message: chromeMessage(name) };
+}
+
+/** The chrome a primitive contributes: a fixed list, or — when it depends on
+ *  HOW the primitive was called — a function of the call node.  A `DataGrid`
+ *  renders its per-column "Filter" placeholder only when a column asked to be
+ *  filtered, so its entries are computed rather than declared. */
+export type ChromeContribution =
+  | readonly MessageEntry[]
+  | ((call: ExprIR & { kind: "call" }) => readonly MessageEntry[]);
 
 /** Walker-primitive call name → the chrome catalog entries it renders.  The
  *  extraction pass consults this per call node so the catalog carries exactly
  *  the chrome a UI actually emits (used-only), and a chrome-only page still
  *  counts as translatable (turns the runtime on).  Keyed by the primitive's
- *  DSL call name (`Loader`, …), the same name `registry.ts` dispatches. */
-export const CHROME_BY_PRIMITIVE: Record<string, readonly MessageEntry[]> = {
-  Loader: [{ key: chromeKey("loading"), message: CHROME_MESSAGES[chromeKey("loading")]! }],
+ *  DSL call name (`Loader`, `DataGrid`, …), the same name `registry.ts`
+ *  dispatches. */
+export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
+  Loader: [entry("loading")],
+  // Every shipped pack's grid renders the pager unconditionally; the per-column
+  // filter input rides `hasFilters`, so the placeholder is contributed only when
+  // a column is actually filterable — the SAME predicate the emitter gates that
+  // input on (`data-grid-shape.ts`), so key and binding cannot drift.
+  DataGrid: (call) => [
+    entry("previous"),
+    entry("next"),
+    ...(gridHasFilterableColumn(call) ? [entry("filter")] : []),
+  ],
 };
+
+/** Resolve a primitive's chrome contribution against the call node that
+ *  produced it.  Undefined for a primitive that bakes in no chrome. */
+export function chromeEntriesFor(call: ExprIR & { kind: "call" }): readonly MessageEntry[] {
+  const contribution = CHROME_BY_PRIMITIVE[call.name];
+  if (contribution === undefined) return [];
+  return typeof contribution === "function" ? contribution(call) : contribution;
+}
 
 /** App-shell chrome — strings the design packs bake into the application shell
  *  (`app-shell.hbs`: the 404 route text, the skip-to-content link).  Unlike

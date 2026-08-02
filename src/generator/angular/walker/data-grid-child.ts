@@ -32,6 +32,7 @@
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
+import { CHROME_T_CALL } from "../../_walker/i18n-emit.js";
 import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
@@ -132,6 +133,19 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
       ? [`import { ${usedFormatHelpers.join(", ")} } from "../../lib/format";`]
       : [];
 
+  // Pack-chrome i18n (M-T1.11).  The pack's grid markup carries the pager's
+  // `{{ t("chrome.previous", …) }}` labels under i18n.  Angular needs BOTH
+  // halves: the module import (this component is its own file, so unlike
+  // React's child it inherits nothing from the page) AND a class MEMBER,
+  // because an Angular template resolves names against the component instance
+  // — the same reason `String`/`Math`/the format helpers are re-exposed above,
+  // and the same lift `app.component.ts` does for the shell's own chrome.
+  // Gated on the RENDERED body so a pack that bakes in no chrome gets neither.
+  const usesI18n = body.includes(CHROME_T_CALL);
+  // The runtime lives at `src/lib/i18n.ts`, two hops up from
+  // `src/app/components/` — the same lift the format import above makes.
+  const i18nImportLine = usesI18n ? [`import { t } from "../../lib/i18n";`] : [];
+
   return `${lines(
     `// Auto-generated.  Do not edit by hand.`,
     `import { ${coreSymbols.join(", ")} } from "@angular/core";`,
@@ -139,6 +153,7 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
     ...[...tableValueImports, ...tableTypeImports].map((n) => `  ${n},`),
     `} from "@tanstack/angular-table";`,
     ...formatImportLine,
+    ...i18nImportLine,
     ...packImportLines,
     ``,
     `// biome-ignore lint/suspicious/noExplicitAny: cell markup reads declared row fields; the grid is not generic over the row type (see the file header), so the row is carried as an index-signature record.`,
@@ -162,6 +177,7 @@ ${lines(
   `  protected readonly String = String;`,
   `  protected readonly Math = Math;`,
   ...usedFormatHelpers.map((h) => `  protected readonly ${h} = ${h};`),
+  ...(usesI18n ? [`  protected readonly t = t;`] : []),
   ...(columns.some((c) => c.cell?.includes(ROW_VAR))
     ? [
         `  /** Identity at runtime — the cast is the point (see \`CellRow\`). */`,
