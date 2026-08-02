@@ -87,7 +87,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     async (c) => {
       const params = c.req.valid("query");
       const result = await repo.byEmail(params.email);
-      if (result == null) throw new AggregateNotFoundError("not_found");
+      if (result == null) throw new AggregateNotFoundError("Customer not found");
       return c.json(repo.toWire(result) as z.infer<typeof CustomerResponse>, 200);
     },
   );
@@ -220,7 +220,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     }
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
-      return problem(500, "Internal Server Error", err.message);
+      return problem(500, "Internal Server Error", "internal");
     }
     (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
     return problem(500, "Internal Server Error", "internal");

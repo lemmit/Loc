@@ -786,10 +786,31 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // minted for; it simply was not byte-identical, and byte-identity is the
     // whole premise of the M-T9.11 golden.  Fixed in the same change.
     //
-    // This is the THIRD time in this rule family that an all-five `conforms`
+    // This was the THIRD time in this rule family that an all-five `conforms`
     // was asserted from reading rather than checking (RS-18 twice, RS-19 once).
     // The habit the registry needs is: enumerate the other backends' emitted
     // literal before writing the list, every time.
+    //
+    // AND IT HAPPENED AGAIN TO THIS VERY RULE — the fourth time, and the most
+    // instructive, because the `conforms` list was corrected once and was STILL
+    // wrong.  The 2026-08-01 pass checked the arm each backend falls through to
+    // and found python's string.  It did not check the arm named in this rule's
+    // own `trigger`: the hand-written `extern` handler.  Node and .NET wrap that
+    // throw in an ExternHandlerError/Exception whose `message` INTERPOLATES the
+    // inner exception, then send the whole thing as `detail`:
+    //
+    //   problem(500, "Internal Server Error", err.message)
+    //   → "Extern handler 'place' on 'Order' threw: <whatever user code threw>"
+    //
+    // In practice that inner message is a driver or HTTP-client exception
+    // carrying SQL text, URLs, host names or connection strings — the precise
+    // leak this rule's DETAIL claim forbids, on the precise trigger it names.
+    // Java, python and elixir emit no such arm and were already correct.
+    //
+    // The lesson is sharper than "check the list": a rule's `trigger` enumerates
+    // the paths that must be checked, and checking the DEFAULT fall-through arm
+    // is not checking the trigger.  Found by the M-T9.25 census sweep 3, which
+    // enumerated every 500 site per backend rather than one site per backend.
     //
     // Not caught by the M-T9.11 wire golden: no system in the shared corpus
     // reaches this arm, so all five legs were green with the divergence in
@@ -799,7 +820,8 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "found 2026-07-29 while landing RS-15 (#2300) by grepping the vanilla Phoenix denial protocol's edges; tracked as M-T6.24 (1)",
       'fixed (elixir): the shared respondErrorTail in src/generator/elixir/vanilla/denial.ts emits problem_response(conn, 500, "Internal Server Error", "internal")',
       'python divergence found 2026-08-01 by verifying the proposed conforms list instead of accepting it; fixed the same day — src/generator/python/index.ts now sends the literal "internal"',
-      "pinned by test/conformance/internal-fault-parity.test.ts, which asserts the arm on all five",
+      'node + dotnet EXTERN-HANDLER divergence found 2026-08-02 by the M-T9.25 census sweep 3 — the rule\'s own named trigger, missed by the 08-01 correction because that pass checked the fall-through arm rather than every 500 site. Fixed: hono routes-builder / explicit-handlers-builder / projection-query-routes-builder / workflow-builder and dotnet emit/api.ts now send "internal"; aggregate + op + the inner exception still reach the extern_handler_threw catalog event',
+      "pinned by test/conformance/internal-fault-parity.test.ts, which asserts the arm on all five, and by its extern-arm sibling assertion",
     ],
     // STATIC: assertable against the emitted handler source on all five without
     // a boot.  Promote to `behavioral` when a corpus fixture reaches the arm —

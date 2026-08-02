@@ -927,18 +927,23 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is ExternHandlerException xh)
         {
             // 500 — the user handler threw, which is an internal
-            // failure from the framework's POV — but the envelope
-            // names the offending op + aggregate so operators don't
-            // have to grep logs to find the cause.  The original
-            // exception (xh.InnerException) is logged in full
-            // server-side via the catalog's extern_handler_threw
-            // event — same shape the Hono onError arm emits.
+            // failure from the framework's POV, so the body is
+            // sanitized to "internal" like every other 500 arm (RS-26).
+            //
+            // This previously sent xh.Message, whose intent was to name
+            // the offending op + aggregate so operators didn't have to grep
+            // logs.  But that message interpolates the INNER exception the
+            // user handler threw — driver text, URLs, connection strings —
+            // into a public, potentially unauthenticated response.  The
+            // operator-facing half is unaffected: aggregate, op and the full
+            // inner exception all reach the catalog's extern_handler_threw
+            // event below.  Same shape the Hono onError arm emits.
             ${renderDotnetLogCallWithException("externHandlerThrew", "xh", [
               { name: "aggregate", valueExpr: "xh.AggName" },
               { name: "op", valueExpr: "xh.OpName" },
               { name: "error", valueExpr: "xh.Message" },
             ])}
-            context.Result = Problem(context, 500, "Internal Server Error", xh.Message, trace_id);
+            context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
             context.ExceptionHandled = true;
             return;
         }

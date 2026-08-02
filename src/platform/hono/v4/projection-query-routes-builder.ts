@@ -241,7 +241,8 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   lines.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
+    // RS-26 — sanitized; the inner exception reaches the log, not the wire.
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
   lines.push(`    console.error(err);`);
   lines.push(`    return problem(500, "Internal Server Error", "internal");`);

@@ -87,7 +87,10 @@ describe("Hono workflow instance routes", () => {
     expect(wf).toContain('path: "/order_fulfillment/instances/{id}",');
     expect(wf).toContain("request: { params: z.object({ id: z.string().uuid() }) },");
     expect(wf).toMatch(/eq\(schema\.orderFulfillments\.orderId, id\)/);
-    expect(wf).toContain('if (!row) throw new AggregateNotFoundError("not_found");');
+    // RS-28 — the 404 detail names the resource, not the machine token.
+    expect(wf).toContain(
+      "if (!row) throw new AggregateNotFoundError(`OrderFulfillment ${id} not found`);",
+    );
     // Both are GETs tagged under workflows.
     expect(wf).toContain('operationId: "allOrderFulfillmentInstances",');
     expect(wf).toContain('operationId: "getOrderFulfillmentInstanceById",');
@@ -126,7 +129,7 @@ describe("Hono event-sourced workflow instance routes", () => {
     expect(wf).toContain('operationId: "getTallyInstanceById",');
     expect(wf).toContain("const __stream = await loadTallyEvents(db, id);");
     expect(wf).toContain(
-      'if (__stream.length === 0) throw new AggregateNotFoundError("not_found");',
+      "if (__stream.length === 0) throw new AggregateNotFoundError(`Tally ${id} not found`);",
     );
     expect(wf).toContain("const row = foldTally(id, __stream);");
   });

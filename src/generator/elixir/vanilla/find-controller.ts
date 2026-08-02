@@ -259,6 +259,15 @@ ${innerBody}
       // emitted spec (`<Agg>Response`) and every other backend
       // (exception-less.md §4).  The error/absent variant is a status response,
       // never a tagged 200 body.
+      // RS-28 — the `none` absent case has no declared variant, so routing it
+      // through `problem_variant/5` (which sets `detail: title`) degraded the
+      // detail to the bare status phrase `"Not Found"`, where node and python
+      // send `"<Agg> not found"`.  `problem_response/4` is what this
+      // controller's own `T?` arm already uses for the same meaning, so this
+      // makes elixir agree with itself as well as with the other four.  The
+      // DECLARED-variant arm below keeps `problem_variant/5`: there
+      // `detail == title` is the decided cross-backend answer (node emits the
+      // same, and `union-find-absence.json` pins it).
       const absentArm =
         absent.kind === "none"
           ? // RS-22/RS-27 — the `T option` miss goes through the SHARED

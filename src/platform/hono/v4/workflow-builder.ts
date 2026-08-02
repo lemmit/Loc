@@ -269,7 +269,8 @@ export function buildWorkflowsFile(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
+    // RS-26 — sanitized; the inner exception reaches the log, not the wire.
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
   body.push(`    console.error(err);`);
   body.push(`    return problem(500, "Internal Server Error", "internal");`);

@@ -281,9 +281,9 @@ describe(".NET generator", () => {
         /Problem\(context, 422, "Unprocessable Entity", de\.Message, trace_id\)/,
       );
       expect(filter).toMatch(/Problem\(context, 404, "Not Found", nf\.Message, trace_id\)/);
-      expect(filter).toMatch(
-        /Problem\(context, 500, "Internal Server Error", xh\.Message, trace_id\)/,
-      );
+      // Both 500 arms — the extern wrapper and the catch-all — now send the
+      // same sanitized detail (RS-26), so this asserts the trace id threads
+      // onto it rather than onto a message.
       expect(filter).toMatch(
         /Problem\(context, 500, "Internal Server Error", "internal", trace_id\)/,
       );
@@ -456,15 +456,22 @@ describe(".NET generator", () => {
       );
     });
 
-    it("DomainExceptionFilter maps ExternHandlerException to a 500 with the descriptive envelope", async () => {
+    it("DomainExceptionFilter maps ExternHandlerException to a SANITIZED 500", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
       // ExternHandlerException arm exists and lands on a 500 ProblemDetails.
       expect(filter).toMatch(/context\.Exception is ExternHandlerException xh/);
+      // RS-26 — the body is the same sanitized "internal" every other 500 arm
+      // sends.  This previously pinned `xh.Message`, whose intent was to name
+      // the offending op + aggregate; but that message interpolates the INNER
+      // exception the user handler threw (driver text, URLs, connection
+      // strings) into a public response.  The operator-facing half is
+      // unaffected — the LogError below still carries all three.
       expect(filter).toMatch(
-        /Problem\(context, 500, "Internal Server Error", xh\.Message, trace_id\)/,
+        /Problem\(context, 500, "Internal Server Error", "internal", trace_id\)/,
       );
+      expect(filter).not.toMatch(/"Internal Server Error", xh\.Message/);
       // Logs the inner cause server-side via the neutral log-event
       // catalog (Phase 8 .NET).  Template uses `{Event}` head + per-field
       // `{Pascal}` placeholders so a Serilog/structured sink can filter

@@ -89,7 +89,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     async (c) => {
       const params = c.req.valid("query");
       const result = await repo.bySku(params.sku);
-      if (result == null) throw new AggregateNotFoundError("not_found");
+      if (result == null) throw new AggregateNotFoundError("Product not found");
       return c.json(repo.toWire(result) as z.infer<typeof ProductResponse>, 200);
     },
   );
@@ -222,7 +222,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     }
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
-      return problem(500, "Internal Server Error", err.message);
+      return problem(500, "Internal Server Error", "internal");
     }
     (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
     return problem(500, "Internal Server Error", "internal");

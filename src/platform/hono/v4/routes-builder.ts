@@ -1209,7 +1209,10 @@ export function buildRoutesFile(
   lines.push(
     `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
   );
-  lines.push(`      return problem(500, "Internal Server Error", err.message);`);
+  // RS-26 — sanitized.  The log call above already carries aggregate + op +
+  // the inner message for the operator; the wire gets the same "internal" every
+  // other 500 arm sends, on every backend.
+  lines.push(`      return problem(500, "Internal Server Error", "internal");`);
   lines.push(`    }`);
   lines.push(
     `    ${renderHonoLogCall("internalError", "error: err instanceof Error ? err.message : String(err), status: 500")}`,

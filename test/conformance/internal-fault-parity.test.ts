@@ -125,6 +125,63 @@ describe("RS-26 — an unmodelled fault is a sanitized 500 on every backend", ()
       elixir: "internal",
     });
   });
+
+  it("the EXTERN-handler 500 is sanitized too — RS-26's own named trigger", async () => {
+    // The assertion that was missing, and the reason RS-26's `conforms` list was
+    // wrong for a second time.
+    //
+    // The gate above checks the arm each backend FALLS THROUGH to. RS-26's
+    // `trigger` names a different path first: "a hand-written `extern` handler
+    // returning an unmodelled error". Node and .NET wrap that throw in an
+    // `ExternHandlerError` / `ExternHandlerException` whose `message`
+    // interpolates the INNER exception, and sent the whole thing as `detail`:
+    //
+    //   "Extern handler 'settle' on 'Invoice' threw: <whatever user code threw>"
+    //
+    // In practice that inner message is a driver or HTTP-client exception
+    // carrying SQL text, URLs, host names or connection strings — the exact leak
+    // RS-26's DETAIL claim forbids, on the exact trigger it names. Java, python
+    // and elixir emit no such arm and were always correct.
+    //
+    // The generalizable lesson: a rule's `trigger` enumerates the paths that
+    // must be checked. Checking the default fall-through arm is not checking the
+    // trigger.
+    const src = `
+system Ext {
+  subdomain Ops {
+    context Ops {
+      aggregate Invoice {
+        state: string
+        create(state: string)
+        operation settle() extern
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+  api OpsApi from Ops
+  storage primary { type: postgres }
+  resource opsState { for: Ops, kind: state, use: primary }
+  deployable api {
+    platform: __P__
+    contexts: [Ops]
+    dataSources: [opsState]
+    serves: OpsApi
+    port: 8080
+  }
+}
+`;
+    for (const p of PLATFORMS) {
+      const out = [...(await generateSystemFiles(src.replace("__P__", p))).values()].join("\n");
+      // Whether the backend WRAPS the extern throw is a per-backend choice and
+      // not what this pins. What it pins is that if a wrapper exists, its
+      // message never becomes the body.
+      expect(
+        out,
+        `${p}: the extern-handler 500 sends the wrapper's message — which carries ` +
+          "the inner exception the user handler threw — as a public RFC 7807 detail",
+      ).not.toMatch(/"Internal Server Error",\s*(err|e|xh)\.[Mm]essage/);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
