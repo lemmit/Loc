@@ -37,7 +37,7 @@ async function landingHeex(uiBody: string, extra = ""): Promise<string> {
       ui DemoUi {
         page Landing {
           route: "/"
-          state { count: int = 0  picked: string[] = [] }
+          state { count: int = 0  picked: string[] }
           ${extra}
           body: ${uiBody}
         }

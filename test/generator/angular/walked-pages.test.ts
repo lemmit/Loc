@@ -1111,12 +1111,8 @@ const WF_FORM_SOURCE = `
     subdomain Sales {
       context Orders {
         aggregate Order with crudish { customerId: string }
-        workflow Fulfill for Order {
-          actor staff
-          input { note: string }
-          state Packing
-          state Shipped
-          transition pack from Packing to Shipped by staff { }
+        workflow Fulfill {
+          create(note: string) { }
         }
       }
     }

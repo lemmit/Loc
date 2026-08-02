@@ -34,7 +34,7 @@ import { generateSystemFiles } from "../_helpers/generate.js";
  *  carries the `requires` (403) and the `precondition` (422) arm. */
 const SOURCE = (platform: string) => `
 system Denials {
-  user { id: string, level: int }
+  user { id: string  level: int }
   subdomain Sales {
     context Sales {
       aggregate Order with crudish {

@@ -136,7 +136,7 @@ describe("+= / -= in onClick mutations", () => {
         ui WebApp {
           page Tags {
             route: "/t"
-            state { tags: string[] = [] }
+            state { tags: string[] }
             body:  Button { "add", onClick: e => { tags += "new" } }
           }
         }
@@ -157,7 +157,7 @@ describe("+= / -= in onClick mutations", () => {
         ui WebApp {
           page Tags {
             route: "/t"
-            state { tags: string[] = [] }
+            state { tags: string[] }
             body:  Button { "drop", onClick: e => { tags -= "old" } }
           }
         }

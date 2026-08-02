@@ -13,10 +13,10 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order ids guid { code: string; status: string; operation cancel() { status := "cancelled" } }
+      aggregate Order { code: string  status: string  operation cancel() { status := "cancelled" } }
       repository Orders for Order { }
-      commandHandler CancelOrder(orderId: Order id): Order id { let o = Orders.getById(orderId); o.cancel(); return o.id }
-      queryHandler GetStatus(orderId: Order id): string { let o = Orders.getById(orderId); return o.status }
+      commandHandler CancelOrder(orderId: Order id): Order id { let o = Orders.getById(orderId)  o.cancel()  return o.id }
+      queryHandler GetStatus(orderId: Order id): string { let o = Orders.getById(orderId)  return o.status }
     }
   }
   api SalesApi from Sales {
@@ -108,9 +108,9 @@ const AGG_RETURN_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order { code: string; status: string; operation cancel() { status := "cancelled" } }
+      aggregate Order { code: string  status: string  operation cancel() { status := "cancelled" } }
       repository Orders for Order { }
-      queryHandler GetOrder(orderId: Order id): Order { let o = Orders.getById(orderId); return o }
+      queryHandler GetOrder(orderId: Order id): Order { let o = Orders.getById(orderId)  return o }
     }
   }
   api SalesApi from Sales {
@@ -150,10 +150,10 @@ const BODY_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      valueobject Money { amount: int; currency: string }
-      aggregate Order ids guid { code: string; status: string; operation discount(amount: Money, reason: string) { status := reason } }
+      valueobject Money { amount: int  currency: string }
+      aggregate Order { code: string  status: string  operation discount(amount: Money, reason: string) { status := reason } }
       repository Orders for Order { }
-      commandHandler Discount(orderId: Order id, amount: Money, reason: string): Order id { let o = Orders.getById(orderId); o.discount(amount, reason); return o.id }
+      commandHandler Discount(orderId: Order id, amount: Money, reason: string): Order id { let o = Orders.getById(orderId)  o.discount(amount, reason)  return o.id }
     }
   }
   api SalesApi from Sales {
@@ -205,7 +205,7 @@ const SCAFFOLD_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering with scaffoldHandlers {
-      valueobject Money { amount: decimal; currency: string }
+      valueobject Money { amount: decimal  currency: string }
       aggregate Order {
         code: string
         status: string
@@ -329,7 +329,7 @@ describe("python — extern commandHandler / queryHandler", () => {
 });
 
 // paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
-// Repo.run(<Criterion>(args)); return r }`) → a GET whose criterion params ride
+// Repo.run(<Criterion>(args))  return r }`) → a GET whose criterion params ride
 // the query string alongside page/pageSize/sort/dir; the handler module calls
 // the synthesized paged FIND repo method and returns the wire envelope.
 const PAGED_SRC = `

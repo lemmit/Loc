@@ -45,28 +45,26 @@ async function page(plat: string, state: string, handler: string): Promise<strin
 
 describe("collection state mutation — append / remove (DEBT-10)", () => {
   it("React: += appends immutably, -= removes by value", async () => {
-    expect(await page("static", `tags: string[] = []`, `tags += "x"`)).toContain(
+    expect(await page("static", `tags: string[]`, `tags += "x"`)).toContain(
       'setTags([...tags, "x"]);',
     );
-    expect(await page("static", `tags: string[] = []`, `tags -= "x"`)).toContain(
+    expect(await page("static", `tags: string[]`, `tags -= "x"`)).toContain(
       'setTags(tags.filter((__v) => __v !== "x"));',
     );
   });
 
   it("Vue: += / -= reassign the ref with the spread / filtered list", async () => {
-    expect(await page("vue", `tags: string[] = []`, `tags += "x"`)).toContain(
-      'tags = [...tags, "x"];',
-    );
-    expect(await page("vue", `tags: string[] = []`, `tags -= "x"`)).toContain(
+    expect(await page("vue", `tags: string[]`, `tags += "x"`)).toContain('tags = [...tags, "x"];');
+    expect(await page("vue", `tags: string[]`, `tags -= "x"`)).toContain(
       'tags = tags.filter((__v) => __v !== "x");',
     );
   });
 
   it("Svelte: += / -= reassign $state with the spread / filtered list", async () => {
-    expect(await page("svelte", `tags: string[] = []`, `tags += "x"`)).toContain(
+    expect(await page("svelte", `tags: string[]`, `tags += "x"`)).toContain(
       'tags = [...tags, "x"];',
     );
-    expect(await page("svelte", `tags: string[] = []`, `tags -= "x"`)).toContain(
+    expect(await page("svelte", `tags: string[]`, `tags -= "x"`)).toContain(
       'tags = tags.filter((__v) => __v !== "x");',
     );
   });

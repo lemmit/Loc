@@ -51,18 +51,18 @@ const BANK_THREE_BACKEND = `
     deployable dotnetApi { platform: dotnet, contexts: [Banking], port: 3001 }
     deployable elixirApi { platform: elixir, contexts: [Banking], port: 4000 }
     deployable marketingApi { platform: node, contexts: [Promo], port: 3010 }
-    ui WebUi { with scaffold(subdomains: [Accounts]) }
+    ui WebUi with scaffold(subdomains: [Accounts]) { }
     deployable webApp { platform: static, targets: honoApi, ui: WebUi, port: 8080 }
 
     test e2e "create an account" against honoApi {
-      let a = api.accounts.create({ balance: 0 });
-      let read = api.accounts.getById(a);
-      expect(read.balance).toBe(0);
+      let a = api.accounts.create({ balance: 0 })
+      let read = api.accounts.getById(a)
+      expect(read.balance).toBe(0)
     }
 
     test e2e "create a campaign" against marketingApi {
-      let c = api.campaigns.create({ name: "Spring" });
-      expect(c.name).toBe("Spring");
+      let c = api.campaigns.create({ name: "Spring" })
+      expect(c.name).toBe("Spring")
     }
   }
 `;

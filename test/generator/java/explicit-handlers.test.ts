@@ -13,7 +13,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: string
         operation cancel() { status := "cancelled" }
@@ -103,8 +103,8 @@ const BODY_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      valueobject Money { amount: int; currency: string }
-      aggregate Order ids guid {
+      valueobject Money { amount: int  currency: string }
+      aggregate Order {
         code: string
         status: string
         operation discount(amount: Money, reason: string) { status := "discounted" }
@@ -236,7 +236,7 @@ const SCAFFOLD_SRC = `
 system Shop {
   subdomain Sales {
     context Ordering with scaffoldHandlers {
-      valueobject Money { amount: decimal; currency: string }
+      valueobject Money { amount: decimal  currency: string }
       aggregate Order {
         code: string
         status: string
@@ -334,7 +334,7 @@ describe("java — extern commandHandler / queryHandler", () => {
 });
 
 // paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
-// Repo.run(<Criterion>(args)); return r }`) → a `@Service` bean over the
+// Repo.run(<Criterion>(args))  return r }`) → a `@Service` bean over the
 // synthesized paged FIND repo method + a GET action with page/pageSize/sort/dir
 // @RequestParams returning the wire-projected `Paged<Agg>Response` envelope.
 const PAGED_SRC = `

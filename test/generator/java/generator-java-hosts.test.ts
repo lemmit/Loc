@@ -119,7 +119,7 @@ describe("java generator — hosts: fullstack embed (M-T6.5)", () => {
   // Angular's `ng build` (@angular/build:application) nests the browser
   // bundle under `dist/browser/`, so the Dockerfile copy differs again.
   it("dispatches a hosted angular SPA (dist/browser) into ClientApp/", async () => {
-    const files = await generateSystemFiles(src("angular", "angularMaterial@v1"));
+    const files = await generateSystemFiles(src("angular", '"angularMaterial@v1"'));
     expect(files.has("jh_app/ClientApp/package.json")).toBe(true);
     expect(files.has("jh_app/ClientApp/angular.json")).toBe(true);
     expect(files.has(`${ROOT}/config/SpaWebConfig.java`)).toBe(true);

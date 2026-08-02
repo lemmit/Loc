@@ -38,7 +38,7 @@ system Shop {
           requires currentUser.permissions.length > 0
           status := confirmed
         }
-        destroy()
+        destroy() { }
       }
       repository Orders for Order {
         find byCode(code: string): Order? where this.code == code
@@ -55,7 +55,7 @@ system Shop {
   api OrdersApi from Sales
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
-  user { provider: oidc }
+  user { id: string  permissions: string[] }
   deployable shopApi {
     platform: java
     contexts: [Orders]

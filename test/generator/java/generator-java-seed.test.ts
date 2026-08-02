@@ -14,6 +14,30 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 const SRC = readFileSync("test/e2e/fixtures/java-build/seeding.ddd", "utf8");
 
+/** Remove every `seed <name> { … }` block, counting braces.  A `[^}]*` regex
+ *  stops at the FIRST inner `}` (seed rows are themselves brace-delimited:
+ *  `Widget { name: "Alpha" }`), leaving the rest of the block stranded and the
+ *  source syntactically broken — which the old strip did, so this test used to
+ *  assert "no seed runner" against a fixture the parser had given up on. */
+function stripSeedBlocks(src: string): string {
+  let out = "";
+  for (let i = 0; i < src.length; ) {
+    const m = /seed\s+(?:default|demo|wired raw)\s*\{/.exec(src.slice(i));
+    if (!m) {
+      out += src.slice(i);
+      break;
+    }
+    out += src.slice(i, i + m.index);
+    let j = i + m.index + m[0].length;
+    for (let depth = 1; j < src.length && depth > 0; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}") depth--;
+    }
+    i = j;
+  }
+  return out;
+}
+
 const ROOT = "seed_api/src/main/java/com/loom/seedapi";
 
 async function runner(): Promise<string> {
@@ -54,9 +78,7 @@ describe("java generator — seed runner", () => {
   });
 
   it("emits no runner when a context declares no seeds", async () => {
-    const files = await generateSystemFiles(
-      SRC.replace(/seed (default|demo|wired raw) \{[^}]*\}/g, ""),
-    );
+    const files = await generateSystemFiles(stripSeedBlocks(SRC));
     const paths = [...files.keys()].filter((k) => k.includes("SeedRunner"));
     expect(paths).toEqual([]);
   });

@@ -12,7 +12,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: string
         operation cancel() { status := "cancelled" }
@@ -105,7 +105,7 @@ system Shop {
         amount: int
         currency: string
       }
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         operation applyDiscount(amount: Money, reason: string) { status := "discounted" }
       }
@@ -341,7 +341,7 @@ describe("dotnet — scaffolded handlers consume command/query record params", (
 });
 
 // paged-run queryHandler (`queryHandler H(...): <Agg> paged { let r =
-// Repo.run(<Criterion>(args)); return r }`) → a dedicated Mediator Query +
+// Repo.run(<Criterion>(args))  return r }`) → a dedicated Mediator Query +
 // Handler over the synthesized paged FIND repo method (returning the
 // wire-projected `Paged<Agg>Response`), plus a GET controller action with
 // [FromQuery] page/pageSize/sort/dir + the criterion params.
