@@ -41,7 +41,7 @@ import { generateSystemFiles } from "../_helpers/generate.js";
  *  with both guard rungs. */
 const SOURCE = (platform: string) => `
 system Census {
-  user { id: string, level: int }
+  user { id: string  level: int }
   subdomain S {
     context S {
       aggregate Item with crudish {
