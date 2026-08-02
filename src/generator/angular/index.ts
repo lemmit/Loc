@@ -35,6 +35,7 @@ import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
@@ -390,7 +391,37 @@ export function generateAngularForContexts(
     }
   }
 
-  // The app shell (Material toolbar + sidenav).
+  // The app shell (Material toolbar + sidenav).  Pack-chrome (M-T1.11): the
+  // baked-in skip-to-content link binds through `t()` when the ui is
+  // i18n-enabled, else stays the raw source string (byte-identical).  When
+  // enabled, `app.component.ts` (at `src/app/`) also gets the `../lib/i18n`
+  // import + the `protected readonly t = t;` member so the Angular
+  // interpolation resolves against the component instance — the same lift the
+  // page shell applies (page-shell.ts), one hop shallower.
+  const skipToContentText = i18nEnabled
+    ? `{{ t(${JSON.stringify(chromeKey("skipToContent"))}, ${JSON.stringify(
+        APP_SHELL_CHROME[chromeKey("skipToContent")]!,
+      )}) }}`
+    : APP_SHELL_CHROME[chromeKey("skipToContent")]!;
+  // The `AppComponent` class body is rendered here rather than in the `.hbs`
+  // template because Handlebars can't lex a tag-close (`}}`) directly abutting
+  // the class's literal closing `}` (`{{/if}}}` reads as `CLOSE_UNESCAPED`).
+  // Members are gated: the verified-session accessors under `navUsesSession`,
+  // and the i18n `t` lift under `i18nEnabled` (so the shell's `t(...)` chrome
+  // interpolation resolves against the instance).  Empty (`{}`) — byte-identical
+  // to the pre-i18n shell — when neither applies.
+  const appClassMembers: string[] = [];
+  if (navUsesSession) {
+    appClassMembers.push("  readonly session = inject(SessionService);");
+    appClassMembers.push(
+      "  get currentUser(): Record<string, unknown> { return this.session.user() ?? {}; }",
+    );
+  }
+  if (i18nEnabled) appClassMembers.push("  protected readonly t = t;");
+  const appClass =
+    appClassMembers.length > 0
+      ? `export class AppComponent {\n${appClassMembers.join("\n")}\n}`
+      : "export class AppComponent {}";
   out.set(
     "src/app/app.component.ts",
     pack.render("app-shell", {
@@ -400,6 +431,9 @@ export function generateAngularForContexts(
       authUi,
       navUsesSession,
       hasRealtimeHandlers,
+      i18nEnabled,
+      skipToContentText,
+      appClass,
     }),
   );
   out.set("src/app/app.config.ts", pack.render("app-config", {}));

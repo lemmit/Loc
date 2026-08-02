@@ -8,6 +8,7 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{#if authUi}}import { AuthGateComponent } from "./auth/auth-gate.component";
 {{/if}}{{#if navUsesSession}}import { SessionService } from "./auth/session.service";
 {{/if}}{{#if hasRealtimeHandlers}}import { RealtimeHandlersComponent } from "./realtime-handlers.component";
+{{/if}}{{#if i18nEnabled}}import { t } from "../lib/i18n";
 {{/if}}
 @Component({
   selector: "app-root",
@@ -19,7 +20,7 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{/if}}{{#if hasRealtimeHandlers}}    RealtimeHandlersComponent,
 {{/if}}  ],
   template: `
-    <a href="#main-content" class="loom-skip-link">Skip to content</a>
+    <a href="#main-content" class="loom-skip-link">{{{skipToContentText}}}</a>
 {{#if hasRealtimeHandlers}}    <app-realtime-handlers />
 {{/if}}    <div class="loom-shell">
       <aside class="loom-sidebar" data-testid="nav-sidebar">
@@ -77,7 +78,4 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
   `,
   ],
 })
-{{#if navUsesSession}}export class AppComponent {
-  readonly session = inject(SessionService);
-  get currentUser(): Record<string, unknown> { return this.session.user() ?? {}; }
-}{{else}}export class AppComponent {}{{/if}}
+{{{appClass}}}
