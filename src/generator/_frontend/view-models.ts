@@ -144,6 +144,12 @@ export interface AppShellVM {
    *  other frontends' shells stay on their raw templates until ported. */
   notFoundText?: string;
   skipToContentText?: string;
+  /** `aria-label` attribute fragment (NO leading space — the template keeps the
+   *  surrounding whitespace) for the primary-navigation landmark — the raw
+   *  `aria-label="Primary navigation"` when i18n is off (byte-identical), else a
+   *  `t("chrome.primaryNav", …)` binding in the frontend's attribute form.
+   *  Rendered via `{{{primaryNavAria}}}`. */
+  primaryNavAria?: string;
 }
 
 /** A named-layout wrapper view-model.  Each slot's JSX is the

@@ -60,4 +60,5 @@ export const CHROME_BY_PRIMITIVE: Record<string, readonly MessageEntry[]> = {
 export const APP_SHELL_CHROME: Record<string, string> = {
   [chromeKey("notFound")]: "Not found",
   [chromeKey("skipToContent")]: "Skip to content",
+  [chromeKey("primaryNav")]: "Primary navigation",
 };

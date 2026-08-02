@@ -32,7 +32,7 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     </p-toolbar>
     <div class="loom-shell">
       <aside class="loom-sidebar" data-testid="nav-sidebar">
-        <nav class="loom-nav" aria-label="Primary navigation">
+        <nav class="loom-nav" {{{primaryNavAria}}}>
 {{#each navSections}}          <div class="loom-nav-section">{{label}}</div>
 {{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a> }
 {{else}}          <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a>

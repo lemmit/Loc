@@ -167,6 +167,8 @@ describe("Angular i18n runtime", () => {
     // Angular text-position interpolation (double-mustache), keyed to the merged
     // APP_SHELL_CHROME catalog.
     expect(app).toContain(`{{ t("chrome.skipToContent", "Skip to content") }}`);
+    // The primary-navigation landmark aria binds through Angular's `[attr.aria-label]`.
+    expect(app).toContain(`[attr.aria-label]='t("chrome.primaryNav", "Primary navigation")'`);
     // `t` is imported one hop shallower than a page (App sits at `src/app/`) and
     // lifted to a component member so the interpolation resolves against the
     // instance.
@@ -176,6 +178,7 @@ describe("Angular i18n runtime", () => {
     const locale = [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1];
     const catalog = JSON.parse(locale) as Record<string, string>;
     expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+    expect(catalog["chrome.primaryNav"]).toBe("Primary navigation");
   });
 
   it("keeps the app-shell skip link raw (byte-identical) for a string-less app", async () => {

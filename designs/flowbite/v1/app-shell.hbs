@@ -32,7 +32,7 @@
     <span class="text-base font-semibold" data-testid="app-title">{{systemNameHuman}}</span>
   </header>
   <div class="flex flex-1">
-    <nav aria-label="Primary navigation" class={"w-56 shrink-0 border-r bg-background p-3 " + (opened ? "block" : "hidden sm:block")}>
+    <nav {{{primaryNavAria}}} class={"w-56 shrink-0 border-r bg-background p-3 " + (opened ? "block" : "hidden sm:block")}>
       <div class="flex flex-col gap-1">
 {{#each navSections}}        <p class="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{{label}}</p>
 {{#each entries}}{{#if requiresJs}}        {#if ({{{requiresJs}}})}

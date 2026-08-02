@@ -304,6 +304,7 @@ export function prepareAppShellVM(
     // keyed to `APP_SHELL_CHROME` (M-T1.11).
     notFoundText: shellChromeText("notFound", i18nEnabled),
     skipToContentText: shellChromeText("skipToContent", i18nEnabled),
+    primaryNavAria: shellChromeAria("primaryNav", i18nEnabled),
   };
 }
 
@@ -316,4 +317,15 @@ function shellChromeText(name: string, i18nEnabled: boolean): string {
   return i18nEnabled
     ? `{t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
     : english;
+}
+
+/** An `aria-label` attribute fragment (NO leading space — the template keeps the
+ *  surrounding whitespace) for an app-shell chrome string in ATTRIBUTE position:
+ *  the static `aria-label="<default>"` when i18n is off (byte-identical), else a
+ *  bound `aria-label={t("chrome.<name>", "<default>")}` (React attr form). */
+function shellChromeAria(name: string, i18nEnabled: boolean): string {
+  const english = APP_SHELL_CHROME[chromeKey(name)]!;
+  return i18nEnabled
+    ? `aria-label={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
+    : `aria-label="${english}"`;
 }

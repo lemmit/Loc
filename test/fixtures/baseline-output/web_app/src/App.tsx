@@ -132,7 +132,7 @@ function AppShellLayout() {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="md" aria-label="Primary navigation">
+      <AppShell.Navbar p="md" aria-label={t("chrome.primaryNav", "Primary navigation")}>
         <Stack gap={4} data-testid="nav-sidebar">
           <Divider my="xs" label="Aggregates" labelPosition="left" />
           <NavLink component={RouterLink} to="/products" label="Products" active={isActive("/products")} data-testid="nav-products" />

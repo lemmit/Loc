@@ -40,7 +40,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
         <router-link to="/" style="color: inherit; text-decoration: none">{{systemNameHuman}}</router-link>
       </v-app-bar-title>
     </v-app-bar>
-    <v-navigation-drawer v-model="drawer" width="240" aria-label="Primary navigation">
+    <v-navigation-drawer v-model="drawer" width="240" {{{primaryNavAria}}}>
       <v-list density="compact" nav role="none" data-testid="nav-sidebar">
 {{#each navSections}}        <v-list-subheader>{{label}}</v-list-subheader>
 {{#each entries}}{{#if external}}        <v-list-item :href="'{{href}}'" target="_blank" rel="noreferrer" title="{{label}}" data-testid="{{testId}}" />
