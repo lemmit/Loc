@@ -1,0 +1,83 @@
+// GROUP BY: a GROUPED query-time projection (M-T4.2) — `group by <col>, …`
+// makes the aggregate/per-row `select` MIX legal.  One row per distinct value
+// of the grouping columns, aggregates computed per group IN SQL
+// (`SELECT status, COUNT(*), SUM(total) … GROUP BY status ORDER BY status`),
+// the LIST response shape (an array of the declared row — unlike the singleton
+// whole-table aggregation in projection-aggregation.ddd, which returns ONE
+// row and forbids the mix).
+//
+// Exercises, on every backend: a single-column grouping with a per-row key
+// select + count/sum/avg aggregates; a criterion `where` folded into the SAME
+// grouped query; a multi-column grouping (enum + cross-aggregate id); and the
+// deterministic ORDER BY over the grouping columns.  The per-backend
+// coercions from the singleton path carry over unchanged (money aggregates
+// ride the wire as strings, count zero-defaults), plus the new key-column
+// mapping (an enum key serialises as its wire string, an id key as a string).
+system ProjectionGroupBySys {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft Confirmed Cancelled }
+
+      aggregate Customer with crudish {
+        name: string
+      }
+
+      aggregate Order with crudish {
+        code: string
+        total: money
+        lineCount: int
+        status: OrderStatus
+        customerId: Customer id
+        derived display: string = code
+      }
+
+      repository Orders for Order { }
+      repository Customers for Customer { }
+
+      criterion Confirmed of Order as o = o.status == OrderStatus.Confirmed
+
+      // Filtered, single grouping column — the canonical grouped read model.
+      projection SalesByStatus {
+        status: OrderStatus
+        orders: int
+        revenue: money
+        avgLines: decimal
+        from Order as o
+        where Confirmed
+        group by o.status
+        select status = o.status,
+               orders = count(),
+               revenue = sum(o.total),
+               avgLines = avg(o.lineCount)
+      }
+
+      // Unfiltered, multi-column grouping (enum + id key), min/max operators.
+      projection VolumeByCustomerAndStatus {
+        customerId: Customer id
+        status: OrderStatus
+        orders: int
+        biggest: money
+        smallest: money
+        from Order as o
+        group by o.customerId, o.status
+        select customerId = o.customerId,
+               status = o.status,
+               orders = count(),
+               biggest = max(o.total),
+               smallest = min(o.total)
+      }
+    }
+  }
+
+  api OrdersApi from Sales
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

@@ -11,6 +11,8 @@ import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-
 import {
   type AggregateSelect,
   aggregateCoercion,
+  groupedAggregates,
+  groupKeyColumn,
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -92,7 +94,9 @@ public sealed record ${upperFirst(proj.name)}Row(${fields});
 
 function renderQuery(proj: ProjectionIR, ns: string): string {
   // A whole-table aggregation yields ONE row, so the query returns the row
-  // itself — not a list of one.
+  // itself — not a list of one.  A GROUPED aggregation (`group by`, M-T4.2)
+  // yields one row PER GROUP — `wholeTableAggregates` refuses it, so it takes
+  // the list branch with the per-row shapes.
   const result = wholeTableAggregates(proj)
     ? `${upperFirst(proj.name)}Row`
     : `IReadOnlyList<${upperFirst(proj.name)}Row>`;
@@ -115,6 +119,12 @@ function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: st
   // persisted saga-state DbSet (workflows have no aggregate repository), applies
   // the `where` filter, and projects instance fields via `select`.  Validation
   // guarantees a non-event-sourced observable workflow with no `join`/`ignoring`.
+  // GROUPED AGGREGATION (`group by`, M-T4.2) takes precedence over every other
+  // shape — a grouped projection mixes per-row key selects with aggregates, so
+  // letting it fall through would hand the per-row arm an unresolved aggregate.
+  if (groupedAggregates(proj)) {
+    return renderGroupedHandler(proj, ctx, ns);
+  }
   // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) takes precedence over every other
   // shape: it queries the table directly through the DbContext, never through a
   // repository, because the point of the shape is to materialise no rows.
@@ -365,6 +375,152 @@ ${gate}        var agg = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o =>
             .Select(g => new { ${members} })
             .FirstOrDefaultAsync(cancellationToken);
         return new ${rowName}(${args});
+    }
+}
+`;
+}
+
+/** Render the handler for a GROUPED aggregation (`group by`, M-T4.2).
+ *
+ *  ONE SQL query, one row per distinct grouping-key combination — `SELECT
+ *  <keys>, <aggs> … GROUP BY <keys> ORDER BY <keys>`, all computed server-side.
+ *  The ORDER BY over the grouping columns is REQUIRED: without it the group
+ *  order is engine-chosen, and the cross-backend wire differential would flake
+ *  on row order rather than values.
+ *
+ *  The EF chain groups on an anonymous key of the entity's own properties (so
+ *  the whole thing stays translatable), projects keys + aggregates into one
+ *  anonymous row, orders by the keys, and materialises — then maps each raw
+ *  group to the declared `<P>Row` in memory: key columns through the same
+ *  wire projection the per-row arm uses (`projectToResponse` — enum stays the
+ *  enum type, money formats InvariantCulture, an id unwraps to its Guid), and
+ *  aggregates through the singleton arm's `csCoerce` (its null-fallbacks are
+ *  vacuous here — an existing group always has a value — but keeping one
+ *  coercion path keeps the two arms from drifting). */
+function renderGroupedHandler(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const grouped = groupedAggregates(proj)!;
+  const rowName = `${upperFirst(proj.name)}Row`;
+  const queryName = `${upperFirst(proj.name)}QpQuery`;
+  const handlerName = `${upperFirst(proj.name)}QpHandler`;
+  const source = proj.query!.source!;
+  const dbSet = plural(upperFirst(source));
+
+  // The distinct grouping columns as entity property names, in `group by`
+  // order — the GroupBy key, the ORDER BY chain, and (via `g.Key`) the
+  // projected key members all derive from exactly these.  Validation pins
+  // every entry to a bare source column before emit.
+  const cols: string[] = [];
+  for (const e of grouped.groupBy) {
+    const col = groupKeyColumn(e);
+    if (!col) {
+      throw new Error(
+        `internal: projection ${proj.name}: a group-by column must be a bare source column`,
+      );
+    }
+    const pascal = upperFirst(col);
+    if (!cols.includes(pascal)) cols.push(pascal);
+  }
+
+  const usings = new Set<string>();
+  const filter = proj.query!.filter;
+  const where = filter ? renderCsExpr(filter, { thisName: "o", efQuery: true }) : undefined;
+  if (filter) collectCsExprUsings(filter, usings);
+
+  // Authorization gate (default-deny) — same shape as the singleton arm.
+  const requires = proj.query!.requires;
+  const gateUsesUser = exprUsesCurrentUser(requires);
+  if (requires) {
+    collectCsExprUsings(requires, usings);
+    usings.add(`${ns}.Domain.Common`); // ForbiddenException
+    if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+  }
+
+  const fields: string[] = [`    private readonly AppDbContext _db;`];
+  const ctorParams: string[] = [`AppDbContext db`];
+  const ctorAssigns: string[] = [`_db = db`];
+  if (requires && gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  }
+  const ctor =
+    ctorParams.length === 1
+      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
+
+  let gate = "";
+  if (requires) {
+    if (gateUsesUser) gate += `        var currentUser = _currentUser.User;\n`;
+    gate += `        if (!(${renderCsExpr(requires)})) throw new ForbiddenException(${JSON.stringify(
+      `Forbidden: projection ${proj.name}`,
+    )});\n`;
+  }
+
+  // The anonymous projection: every grouping column (whether selected or not,
+  // so the ORDER BY below can reach it), then one member per aggregate select
+  // named after its wire field.
+  const members = [
+    ...cols.map((c) => `g.Key.${c}`),
+    ...grouped.aggregates.map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`),
+  ].join(", ");
+  const orderBy = cols.map((c, i) => `.${i === 0 ? "OrderBy" : "ThenBy"}(x => x.${c})`).join("");
+
+  // Map each raw group to the declared row, in wire-shape order.
+  const keyByField = new Map(grouped.keys.map((k) => [k.field, k] as const));
+  const aggByField = new Map(grouped.aggregates.map((a) => [a.field, a] as const));
+  const args = (proj.wireShape ?? []).map((f) => {
+    const key = keyByField.get(f.name);
+    if (key) {
+      const col = groupKeyColumn(key.expr);
+      if (!col) {
+        throw new Error(
+          `internal: projection ${proj.name}: a grouping-key select must read a bare source column`,
+        );
+      }
+      return projectToResponse(`x.${upperFirst(col)}`, key.type, ctx);
+    }
+    const agg = aggByField.get(f.name);
+    if (agg) return csCoerce(agg, "x", ctx);
+    return "default!";
+  });
+  const anyMoney = grouped.aggregates.some((s) => aggregateCoercion(s).asString);
+  if (anyMoney) usings.add("System.Globalization");
+
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  return `// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Domain.${plural(source)};
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Application.Projections;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${rowName}>>
+{
+${fields.join("\n")}
+${ctor}
+
+    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+${gate}        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}
+            .GroupBy(o => new { ${cols.map((c) => `o.${c}`).join(", ")} })
+            .Select(g => new { ${members} })
+            ${orderBy}
+            .ToListAsync(cancellationToken);
+        return groups.Select(x => new ${rowName}(${args.join(", ")})).ToList();
     }
 }
 `;

@@ -14,6 +14,9 @@ import {
 import {
   type AggregateSelect,
   aggregateCoercion,
+  type GroupKeySelect,
+  groupedAggregates,
+  groupKeyColumn,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -79,21 +82,22 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
     }
     rawReads.set(p.name, { table: `schema.${tableBare}`, where });
   }
-  // Whole-table aggregation reads: the table is queried DIRECTLY (not through
-  // the repository — the point of the shape is to never materialise rows), so
-  // the projection's `where` lowers to SQL here exactly as a raw-table source's
-  // does.  Also collects the drizzle aggregate functions the routes will call,
-  // so the `drizzle-orm` import below lists them.
+  // Aggregation reads — whole-table singletons AND grouped (`group by`)
+  // projections: the table is queried DIRECTLY (not through the repository —
+  // the point of the shape is to never materialise rows), so the projection's
+  // `where` lowers to SQL here exactly as a raw-table source's does.  Also
+  // collects the drizzle aggregate functions the routes will call, so the
+  // `drizzle-orm` import below lists them.
   //
   // Deliberately covers EVERY source kind, including the raw-table ones.  The
-  // route emitter takes the aggregate branch before the raw-table branch, so
+  // route emitter takes the aggregate branches before the raw-table branch, so
   // skipping workflow/projection sources here would emit their aggregation with
   // the `where` silently dropped — a wrong answer rather than a broken build.
   // Both paths name the table identically (`lowerFirst(plural(source))`), so one
   // lowering serves both.
   const aggWheres = new Map<string, string | undefined>();
   for (const p of projections) {
-    const aggregates = wholeTableAggregates(p);
+    const aggregates = groupedAggregates(p)?.aggregates ?? wholeTableAggregates(p);
     if (!aggregates || !p.query?.source) continue;
     for (const s of aggregates) rawDrizzleOps.add(s.aggregate.op);
     if (!p.query.filter) {
@@ -165,7 +169,9 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
     lines.push(`}).openapi("${T}Row");`);
     // A whole-table aggregation yields ONE row, so its response is the row
     // itself — not an array of one.  (The array wrapper on a singleton was the
-    // shape that made `select orders = count` look like a list of counts.)
+    // shape that made `select orders = count` look like a list of counts.)  A
+    // GROUPED aggregation yields one row PER KEY, so it keeps the array —
+    // `wholeTableAggregates` already refuses it.
     lines.push(
       wholeTableAggregates(p)
         ? `const ${T}Response = ${T}Row.openapi("${T}Response");`
@@ -246,6 +252,7 @@ function emitQueryProjectionRoute(
   out.push(`    },`);
   out.push(`  }),`);
   const gate = p.query!.requires;
+  const grouped = groupedAggregates(p);
   const aggregates = wholeTableAggregates(p);
   out.push(`  async (httpCtx) => {`);
   // The `requires` gate (and any currentUser-scoped filter) needs the request
@@ -258,6 +265,37 @@ function emitQueryProjectionRoute(
   }
   if (gate) {
     out.push(`    if (!(${renderTsExpr(gate)})) throw new ForbiddenError("Forbidden");`);
+  }
+  // GROUPED AGGREGATION (`group by` — M-T4.2): one row per distinct
+  // grouping-key combination, aggregates computed per group.  Same SQL
+  // push-down rationale as the whole-table singleton below, but the response
+  // is the LIST shape (an array of the declared row), so the read GROUPs BY —
+  // and ORDERs BY, for a deterministic cross-backend read — exactly the
+  // grouping columns, in one query.
+  if (grouped) {
+    const sourceTable = `schema.${lowerFirst(plural(source))}`;
+    const groupCols = grouped.groupBy.map((e) => `${sourceTable}.${groupKeyCol(e)}`).join(", ");
+    const cols = [
+      ...grouped.keys.map((k) => `${k.field}: ${sourceTable}.${groupKeyCol(k.expr)}`),
+      ...grouped.aggregates.map((s) => `${s.field}: ${drizzleAggregate(s.aggregate, sourceTable)}`),
+    ].join(", ");
+    out.push(
+      `    const rows = await db.select({ ${cols} }).from(${sourceTable})${
+        aggregateWhere ? `.where(${aggregateWhere})` : ""
+      }.groupBy(${groupCols}).orderBy(${groupCols});`,
+    );
+    out.push(`    const projected = rows.map((r) => ({`);
+    for (const k of grouped.keys) {
+      out.push(`      ${k.field}: ${coerceGroupKey(k, `r.${k.field}`)},`);
+    }
+    for (const s of grouped.aggregates) {
+      out.push(`      ${s.field}: ${coerceAggregate(s, `r.${s.field}`)},`);
+    }
+    out.push(`    }));`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
   }
   // WHOLE-TABLE AGGREGATION (read-path-architecture.md rev. 8's singleton) —
   // the aggregation pushes DOWN to SQL rather than loading rows and folding
@@ -383,6 +421,55 @@ function coerceAggregate(sel: AggregateSelect, expr: string): string {
   if (c.isCount) return `Number(${expr} ?? 0)`;
   if (c.optional) return `${expr} == null ? null : ${c.asString ? "String" : "Number"}(${expr})`;
   return c.asString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
+}
+
+/** The Drizzle column ref for a validated grouping expression.  The validator
+ *  pins every `group by` column (and every key select) to a bare source column
+ *  (`loom.projection-groupby-key-not-columnar`) whose name IS the schema column
+ *  key, so — mirroring `aggregateColumn` — a miss here is an internal error,
+ *  not a fallback. */
+function groupKeyCol(e: ExprIR): string {
+  const col = groupKeyColumn(e);
+  if (col === null) {
+    throw new Error("internal: a group-by column must be a source column reference");
+  }
+  return col;
+}
+
+/** Coerce one grouping-key column value to the projection row's DECLARED wire
+ *  type — the key-side twin of `coerceAggregate`.  A key arrives as whatever
+ *  its Drizzle column returns: enum → the wire string already, integer →
+ *  number, uuid/text → string — those pass through untouched — but `numeric`
+ *  (money/decimal) is a STRING through the driver and `timestamp` a `Date`,
+ *  so the numeric family and datetime rewrap to match the row schema. */
+function coerceGroupKey(sel: GroupKeySelect, expr: string): string {
+  const optional = sel.type.kind === "optional";
+  const inner = sel.type.kind === "optional" ? sel.type.inner : sel.type;
+  const coerced = groupKeyWireExpr(inner, expr);
+  if (coerced === expr) return expr;
+  return optional ? `${expr} == null ? null : ${coerced}` : coerced;
+}
+
+/** The non-null coercion for one grouping key's declared inner type. */
+function groupKeyWireExpr(inner: TypeIR, expr: string): string {
+  if (inner.kind === "id") return `String(${expr})`;
+  if (inner.kind !== "primitive") return expr;
+  switch (inner.name) {
+    case "int":
+    case "long":
+    case "decimal":
+      // `numeric` (decimal) comes back as a string; int/long are already
+      // numbers, and `Number` keeps the three shapes on one rule.
+      return `Number(${expr})`;
+    case "money":
+      // Wire-carried as a string (`zodForRow`), exactly like the aggregate
+      // coercion's `asString` arm.
+      return `String(${expr})`;
+    case "datetime":
+      return `${expr}.toISOString()`;
+    default:
+      return expr;
+  }
 }
 
 /** Render a `select` expression against the source row `r` and the join alias
