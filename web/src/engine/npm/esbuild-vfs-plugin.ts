@@ -282,6 +282,21 @@ export function makeVfsNpmPlugin(
             loader: "js",
           };
         }
+        // buffer — the companion to the global installed by the runtime
+        // worker (buffer-polyfill.ts).  An explicit `import { Buffer } from
+        // "buffer"` (pg-protocol and friends do both) must resolve to that
+        // same implementation, or the empty stub hands back `undefined` and
+        // the module dies on `Buffer.allocUnsafe` exactly as if the global
+        // were missing.
+        if (name === "buffer") {
+          return {
+            contents: [
+              "const B = globalThis.Buffer;",
+              "module.exports = { Buffer: B, kMaxLength: 0x7fffffff, INSPECT_MAX_BYTES: 50, default: { Buffer: B } };",
+            ].join("\n"),
+            loader: "js",
+          };
+        }
         // process — `require("process")` must be the SAME object as the
         // global one the bundle prefix installs (see
         // `npm/postprocess.ts`), not a fresh `{}`.  prom-client's

@@ -1,4 +1,9 @@
 /// <reference lib="webworker" />
+// FIRST import, ahead of everything: a worker has its own global scope, so
+// the main thread's polyfill (main.tsx) does nothing here.  The generated
+// bundle imported below reads `Buffer` while pg-protocol's module bodies
+// evaluate — see buffer-polyfill.ts for the specific lines.
+import "../buffer-polyfill";
 import { synthDDL } from "./ddl";
 import { pgliteAssetUrl } from "../bundle/plugin.js";
 import { fnv1a32 } from "../util/hash.js";

@@ -21,20 +21,30 @@ type ResolveResult = {
   errors?: { text: string }[];
 };
 
+type LoadResult = { contents?: string; loader?: string };
+
 /** Register the plugin against a stub `build` and hand back the catch-all
- *  `onResolve` callback. */
-function resolverFor(files: Map<string, string> = new Map()) {
+ *  `onResolve` callback plus the node-builtin-stub `onLoad` callback. */
+function pluginFor(files: Map<string, string> = new Map()) {
   let onResolve: ((a: ResolveArgs) => ResolveResult) | undefined;
+  let onLoadEmpty: ((a: { path: string }) => LoadResult) | undefined;
   const build = {
     onResolve: (_opts: unknown, cb: (a: ResolveArgs) => ResolveResult) => {
       onResolve ??= cb; // the catch-all is registered first
     },
-    onLoad: () => {},
+    onLoad: (opts: { namespace?: string }, cb: (a: { path: string }) => LoadResult) => {
+      if (opts.namespace === "vfs-empty") onLoadEmpty ??= cb;
+    },
   };
   // biome-ignore lint/suspicious/noExplicitAny: stub stands in for esbuild's PluginBuild
   makeVfsNpmPlugin(files).setup(build as any);
   if (!onResolve) throw new Error("plugin registered no onResolve");
-  return onResolve;
+  if (!onLoadEmpty) throw new Error("plugin registered no vfs-empty onLoad");
+  return { resolve: onResolve, loadBuiltin: onLoadEmpty };
+}
+
+function resolverFor(files: Map<string, string> = new Map()) {
+  return pluginFor(files).resolve;
 }
 
 describe("vfs npm plugin — catch-all onResolve", () => {
@@ -79,5 +89,31 @@ describe("vfs npm plugin — catch-all onResolve", () => {
   it("still errors on a genuinely missing bare package", () => {
     const r = resolverFor()({ path: "not-installed", importer: "/app/src/x.ts" });
     expect(r.errors?.[0]?.text).toMatch(/bare "not-installed" not in installed node_modules/);
+  });
+});
+
+describe("vfs npm plugin — node-builtin stubs", () => {
+  // `buffer` and `process` must hand back the LIVE globals the runtime
+  // worker installs, not a fresh `{}`.  An empty stub makes an explicit
+  // `import { Buffer } from "buffer"` resolve to `undefined`, which kills
+  // the module on `Buffer.allocUnsafe` exactly as if the global were
+  // missing — silently re-opening the hole the polyfill just closed.
+  it("backs `buffer` with the live global rather than an empty object", () => {
+    const { loadBuiltin } = pluginFor();
+    const out = loadBuiltin({ path: "buffer" }).contents ?? "";
+    expect(out).toMatch(/globalThis\.Buffer/);
+    expect(out).not.toBe("module.exports = {};");
+  });
+
+  it("backs `process` with the live global rather than an empty object", () => {
+    const { loadBuiltin } = pluginFor();
+    const out = loadBuiltin({ path: "process" }).contents ?? "";
+    expect(out).toMatch(/globalThis\.process/);
+    expect(out).not.toBe("module.exports = {};");
+  });
+
+  it("leaves an unremarkable builtin as an empty stub", () => {
+    const { loadBuiltin } = pluginFor();
+    expect(loadBuiltin({ path: "tls" }).contents).toBe("module.exports = {};");
   });
 });
