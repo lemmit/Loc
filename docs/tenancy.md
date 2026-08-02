@@ -80,10 +80,15 @@ system Billder {
   stricter exclusion than `tenantId`'s (which stays in `wireShape`, just
   filtered out of API reads). No read-side filtering rides `dataKey` yet —
   that is the `policy { data {} }` ladder, P2.4.
-- **`crossTenant`** — an aggregate-header flag (like `abstract`), for shared
-  reference data (`Plan`, `Country`). A stance marker: attaches nothing,
-  generates nothing — it exists so "no tenant filter" is a declared decision,
-  never an accident.
+- **`crossTenant`** — an aggregate-header modifier, for shared reference data
+  (`Plan`, `Country`). A stance marker: attaches nothing, generates nothing — it
+  exists so "no tenant filter" is a declared decision, never an accident. It sits
+  in the header region **after** the aggregate name, alongside the realization
+  axes (`persistedAs:` / `shape:` / `inheritanceUsing:`) and order-independent
+  with them — `aggregate Plan crossTenant { … }`. It is deliberately *not* a
+  leading adjective like `abstract`: `abstract` says what the aggregate **is**,
+  while `crossTenant` declares how it **participates** in the `tenancy by`
+  facility. (M-T5.17 sort-by-meaning amendment.)
 - **The registry** gets no marker — it is self-keyed (its "tenant" IS its own
   id), so neither stance fits it. Since Phase 1b it DOES get generated read
   behavior: the **derived self-scope filter** (below). Who may read or edit

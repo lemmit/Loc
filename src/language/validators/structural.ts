@@ -534,6 +534,22 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
   // `validateEventSourcedDiscipline` (ir/validate), so the contract shows
   // live in the editor as you type, not only at `generate` time.
   checkEventSourcedDiscipline(agg, accept);
+  // `aggregate X audited` covers every PUBLIC command action.  With none, the
+  // trail is silently empty — and an empty audit trail is worse than an absent
+  // one, because a history view over it still reads as authoritative.  Warn so
+  // the mistake surfaces at authoring time rather than as a blank History tab.
+  if (agg.audited) {
+    const hasPublicCommand = agg.members.some(
+      (m) => (isOperation(m) && !m.private) || isCreate(m) || isDestroy(m),
+    );
+    if (!hasPublicCommand) {
+      accept(
+        "warning",
+        `'audited' on aggregate '${agg.name}' has no effect — it declares no public command action (operation, create, or destroy), so no audit record is ever produced.`,
+        { node: agg, property: "audited" },
+      );
+    }
+  }
   // Ensure unique part names within the aggregate
   const partNames = new Set<string>();
   let displayDerived: DerivedProp | undefined;

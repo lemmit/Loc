@@ -140,3 +140,29 @@ Two problems. **Status:** an *unrecognised* error term is by definition not a cl
 Neither is reachable from a shared behavioural system today, which is why the per-PR wire gate is green on both — they need a fixture to be gated, not just a fix.
 
 Sources: found 2026-07-29 while landing RS-15 (#2300). Related: M-T6.20 (the `raise`-path half of the same protocol), M-T5.20 (routing the ladder through `resolveErrorStatus`).
+
+## M-T6.x — `= default` fields are optional input on node, still required on elixir — `open` · **S** · P2
+
+Surfaced 2026-08-01 by the `audited` corpus fixture in the behavioral tier, not
+by anything audit-specific.
+
+A field declared with a default — `status: int = 0` — is treated as **optional
+create input** on node (`z.coerce.number().int().default(0)`, so `POST` without
+it succeeds) but the Elixir changeset still `validate_required`s it, so the same
+request 422s with `{"pointer":"/status","message":"can't be blank"}`.
+
+Same `.ddd`, same create call, different contract — a wire-level divergence the
+per-PR compile gates cannot see (both backends compile fine) and which the
+wire-golden differential misses because the request never reaches a comparable
+response. It took a behavioral run on the elixir leg to expose it.
+
+**Expected:** `= default` means "the client may omit this; the server supplies
+the value" on every backend. Fix is in the Elixir changeset emission — a
+defaulted field must be dropped from the required set.
+
+Check the other three backends (python/java/dotnet) before closing: only node
+and elixir were observed here, so the split may be wider than 1-vs-1.
+
+Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
+explicitly, with a comment pointing here — deliberately NOT worked around in the
+compiler.

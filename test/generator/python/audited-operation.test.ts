@@ -94,19 +94,20 @@ describe("python per-operation audit runtime", () => {
     expect(f).not.toContain("return __after");
   });
 
-  it("emits the feature-local audit migration that sorts after module ones", async () => {
+  // The DDL moved to the shared MigrationsIR (`auditTableShape`), so it is
+  // rendered by the ordinary module-migration emitter rather than a per-backend
+  // late migration.  `before`/`after` are NULLABLE by design: a create has no
+  // before and a destroy no after, and a NOT NULL there rolled the whole action
+  // transaction back.
+  it("creates audit_records through the shared migration emitter", async () => {
     const files = await build();
-    const key = [...files.keys()].find(
-      (k) => k.includes("29991231") && k.includes("audit") && k.endsWith(".sql"),
-    )!;
-    expect(key).toBeDefined();
-    const sql = files.get(key)!;
-    expect(sql).toContain("CREATE TABLE IF NOT EXISTS audit_records (");
-    expect(sql).toContain("before jsonb NOT NULL,");
-    expect(sql).toContain("after jsonb NOT NULL,");
-    expect(sql).toContain(
-      "CREATE INDEX IF NOT EXISTS audit_records_target_idx ON audit_records (target_type, target_id);",
+    const mig = [...files.entries()].find(
+      ([p, c]) => p.endsWith(".sql") && c.includes("audit_records"),
     );
-    expect(sql).toContain("--> statement-breakpoint");
+    expect(mig, "audit_records DDL must be emitted somewhere").toBeDefined();
+    const sql = mig![1];
+    expect(sql).toMatch(/audit_records_target_idx/);
+    expect(sql).not.toMatch(/before[^,\n]*NOT NULL/i);
+    expect(sql).not.toMatch(/after[^,\n]*NOT NULL/i);
   });
 });

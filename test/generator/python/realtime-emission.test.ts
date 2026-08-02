@@ -132,7 +132,7 @@ system TenantShop {
     context Fulfillment {
       aggregate Order with tenantOwned, crudish { status: string }
       repository Orders for Order { }
-      crossTenant aggregate Plan with crudish { title: string }
+      aggregate Plan crossTenant with crudish { title: string }
       repository Plans for Plan { }
       event OrderPlaced { order: Order id, at: datetime }
       event PlanPublished { plan: Plan id, at: datetime }

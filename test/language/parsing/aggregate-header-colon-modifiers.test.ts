@@ -46,9 +46,12 @@ describe("aggregate-header colon modifiers (M-T5.17 Phase 2)", () => {
     expect(agg?.shape).toBe("document");
   });
 
-  it("crossTenant leads, beside abstract", async () => {
+  // M-T5.17 amendment — header modifiers sort by MEANING, not value type:
+  // `abstract` (what it IS) stays prefix; `crossTenant` (how it PARTICIPATES)
+  // joins the enum axes in the order-independent header region.
+  it("crossTenant sits in the header region, with abstract still leading", async () => {
     const { errs, agg } = await parseAgg(`context C {
-      abstract crossTenant aggregate Base inheritanceUsing: ownTable {
+      abstract aggregate Base crossTenant inheritanceUsing: ownTable {
         name: string
       }
     }`);
@@ -56,6 +59,35 @@ describe("aggregate-header colon modifiers (M-T5.17 Phase 2)", () => {
     expect(agg?.isAbstract).toBe(true);
     expect(agg?.crossTenant).toBe(true);
     expect(agg?.inheritanceUsing).toBe("ownTable");
+  });
+
+  // The whole point of folding it into the `(…)*` group: no silent
+  // reorder-is-a-parse-error papercut, the same guarantee the enum axes got.
+  it("crossTenant is order-independent against the enum axes", async () => {
+    for (const header of [
+      "aggregate Base crossTenant persistedAs: eventLog shape: document",
+      "aggregate Base persistedAs: eventLog crossTenant shape: document",
+      "aggregate Base persistedAs: eventLog shape: document crossTenant",
+    ]) {
+      const { errs, agg } = await parseAgg(`context C {
+        ${header} {
+          name: string
+        }
+      }`);
+      expect(errs, `must parse (${header}):\n${errs}`).toBe("");
+      expect(agg?.crossTenant, header).toBe(true);
+      expect(agg?.persistedAs, header).toBe("eventLog");
+      expect(agg?.shape, header).toBe("document");
+    }
+  });
+
+  it("crossTenant no longer parses in the prefix slot", async () => {
+    const { errs } = await parseAgg(`context C {
+      crossTenant aggregate Plan {
+        code: string
+      }
+    }`);
+    expect(errs, "the pre-amendment prefix form must be rejected").not.toBe("");
   });
 
   it("the legacy paren form is REJECTED (Phase 2 cutover)", async () => {
@@ -67,12 +99,8 @@ describe("aggregate-header colon modifiers (M-T5.17 Phase 2)", () => {
     expect(errs, "paren form must no longer parse").not.toBe("");
   });
 
-  it("the legacy post-name crossTenant is REJECTED", async () => {
-    const { errs } = await parseAgg(`context C {
-      aggregate Old crossTenant {
-        name: string
-      }
-    }`);
-    expect(errs, "post-name crossTenant must no longer parse").not.toBe("");
-  });
+  // Was: "the legacy post-name crossTenant is REJECTED".  The M-T5.17
+  // sort-by-meaning amendment restores the post-name form as the canonical one
+  // (`crossTenant` is participation, not nature), so the rejection is now
+  // inverted — see "crossTenant no longer parses in the prefix slot" above.
 });

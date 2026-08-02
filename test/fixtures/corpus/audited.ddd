@@ -1,0 +1,95 @@
+// Command audit (docs/old/proposals/audit-and-logging.md): every successful
+// public command action writes an append-only `audit_records` row — who / what
+// / when plus before+after wire snapshots — inside the SAME transaction as the
+// aggregate save, so the row and the state change commit or roll back together.
+//
+// Covers BOTH surface forms in one system, because they lower to the same
+// per-command flag and every backend gate reads only that:
+//
+//   - `aggregate Order audited`  — the aggregate-wide form.  Every PUBLIC
+//     command (operation, create, destroy) is audited; the `private` operation
+//     is NOT, which is how an internal/high-churn command opts out (there is no
+//     negation keyword).
+//   - `aggregate Shipment`       — per-command `audited` on one operation only,
+//     with a second, unmarked operation proving the flag is not aggregate-wide
+//     by accident.
+//
+// The point of putting this in the corpus is the COMPILE tier: the audit
+// runtime (entity/row type, repository port, transactional insert) is
+// hand-written per backend, so it needs the real compilers — tsc, dotnet build
+// /warnaserror, gradle testClasses, mypy --strict, mix compile
+// --warnings-as-errors — not just an emitted-string assertion.
+system AuditingSystem {
+  subdomain Ordering {
+    context Ordering {
+      // Aggregate-wide: create, cancel and destroy all audited; `recalc` is
+      // private and therefore never audited.
+      aggregate Order audited {
+        reference: string
+        quantity: int
+        status: int
+        create(reference: string, quantity: int) {
+          reference := reference
+          quantity := quantity
+          status := 0
+        }
+        operation cancel(reason: int) {
+          precondition reason >= 0
+          status := reason
+        }
+        private operation recalc() {
+          quantity := quantity
+        }
+        destroy { }
+      }
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+
+      // Per-command form: only `dispatch` is audited.  `retag` is deliberately
+      // unmarked so the emitted output distinguishes the two on one aggregate.
+      aggregate Shipment with crudish {
+        code: string
+        dispatched: bool
+        operation dispatch() audited {
+          dispatched := true
+        }
+        operation retag(code: string) {
+          code := code
+        }
+      }
+      repository Shipments for Shipment {
+        find byCode(code: string): Shipment? where this.code == code
+      }
+    }
+  }
+  api OrderingApi from Ordering
+  storage primary { type: postgres }
+  resource orderingState { for: Ordering, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 4000
+  }
+
+  // Audit rows are never exposed on the operation response (the table has no
+  // read endpoint yet), so the runtime assertion here is that an audited
+  // command still behaves exactly like an unaudited one — the audit write must
+  // not change the response, and must not fail the request.
+  // NOTE — `status: int = 0` is passed EXPLICITLY below rather than relying on
+  // the default to make it optional input. A `= default` field is optional on
+  // node (`z.coerce.number().int().default(0)`) but the Elixir changeset still
+  // `validate_required`s it, so omitting it 422s there ("can't be blank") while
+  // passing everywhere else. That cross-backend divergence is a real parity gap
+  // in how `= default` is treated at the wire boundary — it is NOT specific to
+  // audit, and it is deliberately not worked around in the compiler here.
+  test e2e "an audited command behaves like any other" against d {
+    let o = api.orders.create({ reference: "R1", quantity: 2, status: 0 })
+    api.orders.cancel(o, { reason: 3 })
+    let read = api.orders.getById(o)
+    expect(read.reference).toBe("R1")
+    expect(read.status).toBe(3)
+  }
+}

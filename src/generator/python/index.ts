@@ -61,7 +61,6 @@ import { renderPyIds } from "./emit/ids.js";
 import { renderPyContextIntegrationTest } from "./emit/integration-tests.js";
 import { renderPythonMetricsFile } from "./emit/metrics.js";
 import {
-  emitPythonAuditMigration,
   emitPythonMigrations,
   emitPythonProvenanceMigration,
   MIGRATE_PY,
@@ -552,7 +551,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // byte-identical.  The per-op capture + the record_audit helper are wired by
   // routes-builder.ts / repository-builder.ts.
   emitPyAudit(args.contexts, out);
-  emitPythonAuditMigration(args.contexts, out);
   if (seedFile != null) out.set("app/db/seed.py", seedFile);
 
   // In-process event dispatch (channels.md): only when a channel routes
