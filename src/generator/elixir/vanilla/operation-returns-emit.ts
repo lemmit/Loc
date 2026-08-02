@@ -920,9 +920,32 @@ export function renderReturningStmt(
       }
       const value = renderExpr(s.value, rc);
       if (s.variantTag && isErrorTag(s.variantTag, ctx)) {
-        // Error variant → `{:error, "<tag>", <fields-map>}`.  A record value
-        // renders to an Elixir map already; wrap a non-map value defensively.
-        const data = s.value.kind === "object" ? value : `%{value: ${value}}`;
+        // Error variant → `{:error, "<tag>", <fields-map>}`, and that map is
+        // `Map.merge`d verbatim into the RFC 7807 body by `problem_variant/5`
+        // as §3.2 extension members.  So it is a WIRE surface, and its keys
+        // must be camelCase like every other wire key — but rendering the
+        // object through `renderExpr` runs the shared `object` leaf, which
+        // snakes names because every OTHER object literal in elixir is a
+        // domain-side Ecto map.  That produced `%{min_amount: …,
+        // offered_amount: …}` against node/python/dotnet/java's `minAmount` /
+        // `offeredAmount` — a cross-backend casing break at the one wire site
+        // that does not go through `wireShape`.
+        //
+        // Fixed by keying off the DECLARED field names and rendering only the
+        // VALUES through `renderExpr`, so the domain-side leaf still applies
+        // where it should.  It survived every gate because the only golden
+        // recording a declared-error body (`operation-returns.json`) uses
+        // `error NotFound { resource: string }` — a single-word field, where
+        // snake and camel coincide.
+        // ATOM keys, matching the base map `problem_variant/5` merges into.
+        // A string key would not collide with the base map's `:type` in the
+        // MAP, but both would encode to `"type"` in the JSON — so a field
+        // named `type` would emit a duplicate key. Atom keys let `Map.merge`
+        // resolve that the way it already does for every other member.
+        const data =
+          s.value.kind === "object"
+            ? `%{${s.value.fields.map((f) => `${f.name}: ${renderExpr(f.value, rc)}`).join(", ")}}`
+            : `%{value: ${value}}`;
         return `    {:error, ${JSON.stringify(s.variantTag)}, ${data}}`;
       }
       return `    {:ok, ${taggedSuccess(value, s)}}`;

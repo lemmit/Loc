@@ -1039,3 +1039,48 @@ When a cross-backend runtime bug is fixed:
   `UPDATE_SEMANTICS_SPEC=1 npx vitest run test/conformance/semantics-spec-sync.test.ts`
   and commit the result. Still open: wire each RS-rule to a live round-trip
   assertion in the harness.
+
+### RS-29 · A declared error's fields are camelCase extension members on the problem body
+- **Guarantee.** When an operation or find declared `T or SomeError` returns the
+  error variant, each field of `SomeError` reaches the RFC 7807 body as a §3.2
+  extension member spelled in **camelCase** — the same casing every other wire
+  key uses. snake_case there is a wire break: a client reading `minAmount` off
+  four backends gets `undefined` from the fifth.
+- **Trigger.** `error PriceTooLow { minAmount: int, … }` returned from an
+  exception-less operation. **Multi-word field names are the trigger** — with
+  one-word names the rule is untestable.
+- **The split.** 4-vs-1, elixir the outlier: `%{min_amount:, offered_amount:,
+  currency_code:}` against the other four's `minAmount` / `offeredAmount` /
+  `currencyCode`. Elixir built the extension map by rendering the error record
+  through the shared `object` expression leaf, which snakes names — *correctly*,
+  because every other object literal in elixir is a domain-side Ecto map. The
+  fix keys the map off the declared field names and renders only the **values**
+  through the leaf.
+- **The one casing divergence in the whole sweep.** At the six mainstream wire
+  sites — read DTO, create input, paged carrier, projection read,
+  workflow-instance read, nested parts and value objects — all five backends
+  agree, camelCase, in identical `wireShape` order. That is `wireShape` doing
+  exactly what it exists for. This site is the one that doesn't consult it.
+- **Why it was invisible, and the transferable half.** The only golden recording
+  a declared-error body (`operation-returns.json`) uses
+  `error NotFound { resource: string }` — a **single-word** field, where snake
+  and camel are the same string. **A fixture with one-word names cannot test a
+  casing rule**, however many backends it runs on. (Secondarily:
+  `conformance-parity` compares declared response *shapes*, and extension
+  members aren't in the declared `ProblemDetails` component.)
+- **It was also intra-backend**, which is the sharper half — elixir's own
+  emitted OpenApiSpex schema declares `minAmount`/`offeredAmount`/`currencyCode`,
+  so the spec the app published and the body it sent disagreed with each other
+  inside one generated project.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-08-02 by the M-T9.25 casing/absence census sweep;
+  confirmed by generating all five from a deliberately multi-word error record
+  and reading the emitted body. Fixed in
+  `src/generator/elixir/vanilla/operation-returns-emit.ts` (atom keys, matching
+  the base map `problem_variant/5` merges into, so a field named `type` cannot
+  duplicate in the JSON). Pinned by
+  `test/conformance/error-extension-casing.test.ts`, verified to fail two of its
+  three assertions with the fix reverted. Tier: **static** — widening
+  `union-find-absence.ddd`'s error payload to a multi-word field would promote
+  it at no new CI boot cost, and is the highest-yield single golden change
+  available.
