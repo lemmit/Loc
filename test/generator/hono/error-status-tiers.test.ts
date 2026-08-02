@@ -30,9 +30,8 @@ system S {
       aggregate Order with crudish {
         sku: string
         invariant sku.length > 0
-        operation cancel() {
+        operation cancel() when sku.length > 0 {
           requires currentUser.role == "admin"
-          when sku.length > 0
         }
       }
       repository Orders for Order { }

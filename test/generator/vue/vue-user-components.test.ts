@@ -161,7 +161,7 @@ describe("user-defined components — Vue", () => {
     // action is a callback prop.
     const files = await vueFiles(`
       system S {
-        subdomain M { context C { aggregate Order { id: string } } }
+        subdomain M { context C { aggregate Order { code: string } } }
         ui WebApp {
           component Panel(head: slot, onPick: action(Order)) {
             body: Stack { Slot { "head" }, Button { "Pick" } }

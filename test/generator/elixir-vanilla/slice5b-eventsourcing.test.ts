@@ -41,11 +41,11 @@ system L {
   }
   api A from Core
   storage pg { type: postgres }
-  resource log { for: Accounts, kind: eventLog, use: pg }
+  resource evtLog { for: Accounts, kind: eventLog, use: pg }
   deployable api {
     platform: elixir
     contexts: [Accounts]
-    dataSources: [log]
+    dataSources: [evtLog]
     serves: A
     port: 4000
   }
@@ -173,11 +173,11 @@ system L {
   }
   api A from Core
   storage pg { type: postgres }
-  resource log { for: Accounts, kind: eventLog, use: pg }
+  resource evtLog { for: Accounts, kind: eventLog, use: pg }
   deployable api {
     platform: elixir
     contexts: [Accounts]
-    dataSources: [log]
+    dataSources: [evtLog]
     serves: A
     port: 4000
   }

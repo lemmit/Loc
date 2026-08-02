@@ -111,7 +111,7 @@ describe("vanilla if-let branches — broader statement set", () => {
             o.confirm()
             emit Confirmed { order: o.id }
           } else {
-            let fresh = Order.create({ open: false, total: 0, tags: [] })
+            let fresh = Order.create({ open: false, total: 0, tags: ["t"] })
           }
         }
       }`);
