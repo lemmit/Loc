@@ -130,12 +130,18 @@ describe("paged envelope — page metadata off the QueryView binding", () => {
     }
   });
 
-  it("flutter's provider yields the carrier, not a bare list", async () => {
+  it("flutter's carrier decodes the metadata, not just the rows + page count", async () => {
     const files = await generateSystemFiles(sys("flutter", false));
     const reads = files.get("web/lib/reads.dart") ?? "";
-    expect(reads).toContain("class Paged<T>");
-    expect(reads).toContain("FutureProvider<Paged<Product>>");
-    expect(reads).toContain("total: body['total'] as int? ?? items.length");
+    // `LoomPage<T>` (the server-paged carrier the `.family` provider yields)
+    // shipped carrying `items` + `totalPages` — enough for the pager, but a
+    // member it doesn't decode is a member the DSL can't reach.
+    expect(reads).toContain("class LoomPage<T>");
+    expect(reads).toContain("FutureProvider.family<LoomPage<Product>, LoomQuery>");
+    for (const f of ["final int page;", "final int pageSize;", "final int total;"]) {
+      expect(reads, f).toContain(f);
+    }
+    expect(reads).toContain("total: (map['total'] as num?)?.toInt() ?? items.length");
     // The emptiness question is about the rows; the carrier is never empty.
     const page = await pageSource("flutter", false);
     expect(page).toContain("productAll.items.isEmpty");
@@ -171,6 +177,6 @@ system S {
 }
 `);
     const reads = files.get("web/lib/reads.dart") ?? "";
-    expect(reads).not.toContain("class Paged<T>");
+    expect(reads).not.toContain("class LoomPage<T>");
   });
 });
