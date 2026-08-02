@@ -12,10 +12,13 @@ import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/lo
 import {
   type AggregateSelect,
   aggregateCoercion,
+  groupedAggregates,
+  groupKeyColumn,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import { renderJpqlWhere } from "../render-jpql.js";
 import { projectionRepoField } from "./projection-reads.js";
@@ -156,8 +159,62 @@ export function renderJavaQueryProjections(
 
     const selectByField = new Map((proj.query!.selects ?? []).map((s) => [s.field, s] as const));
 
+    const grouped = groupedAggregates(proj);
     const aggregates = wholeTableAggregates(proj);
-    if (aggregates) {
+    if (grouped) {
+      // GROUPED AGGREGATION (M-T4.2) — ONE JPQL query, one row per distinct
+      // grouping-key combination: `select <keys>, <aggs> … group by <cols>
+      // order by <cols>`.  The ORDER BY over exactly the grouping columns is
+      // REQUIRED — it is what makes the list read deterministic across
+      // backends.  Same EntityManager rationale as the singleton arm above;
+      // the response is the LIST shape (`List<<P>Row>`), not the one-object
+      // read.
+      usesEntityManager = true;
+      imports.add("jakarta.persistence.EntityManager");
+      imports.add("jakarta.persistence.PersistenceContext");
+      const keyCol = (e: ExprIR): string => {
+        const col = groupKeyColumn(e);
+        if (!col) {
+          throw new Error(
+            "internal: a grouping column must be a bare source column — the IR validator should have rejected this projection",
+          );
+        }
+        return `e.${col}`;
+      };
+      const keyCols = grouped.keys.map((k) => keyCol(k.expr));
+      const groupCols = grouped.groupBy.map(keyCol);
+      const aggCols = grouped.aggregates.map((a) => jpqlAggregate(a.aggregate));
+      const filter = proj.query!.filter;
+      const where = filter
+        ? ` where ${renderJpqlWhere(filter, { alias: "e", enumsPkg: `${qpctx.basePkg}.domain.enums` })}`
+        : "";
+      if (filter) collectJavaExprImports(filter, imports);
+      const jpql =
+        `select ${[...keyCols, ...aggCols].join(", ")} from ${source} e${where}` +
+        ` group by ${groupCols.join(", ")} order by ${groupCols.join(", ")}`;
+      const args = [
+        ...grouped.keys.map((k, i) => groupKeyCoerce(k.type, `r[${i}]`, imports)),
+        ...grouped.aggregates.map((a, i) => {
+          if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
+          return jpqlCoerce(a, `r[${grouped.keys.length + i}]`);
+        }),
+      ];
+      // ≥2 select columns always (≥1 key + ≥1 aggregate, validator-guaranteed),
+      // so each result row is an Object[]; the raw `Query` list needs the one
+      // @SuppressWarnings the untyped JPA API forces.
+      methods.push(
+        `    public List<${rowName}> ${findName}() {`,
+        `        @SuppressWarnings("unchecked")`,
+        `        List<Object[]> rows = entityManager.createQuery(${JSON.stringify(jpql)}).getResultList();`,
+        `        return rows.stream()`,
+        `            .map(r -> new ${rowName}(${args.join(", ")}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+      );
+      // NO `continue` — fall through to the shared `requires`-gate + list-route
+      // block below, exactly like the per-row arms.
+    } else if (aggregates) {
       // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE JPQL query with
       // `count`/`sum`/`avg`/`min`/`max`, no rows materialised.  The shape exists
       // precisely to avoid the naive read: a `findAll()` stream over the whole
@@ -196,8 +253,7 @@ export function renderJavaQueryProjections(
         ``,
       );
       continue;
-    }
-    if (proj.query!.sourceKind === "workflow") {
+    } else if (proj.query!.sourceKind === "workflow") {
       // `from <Workflow>` — read the persisted saga-state through the
       // `<Wf>StateRepository` (workflows have no aggregate repository), apply the
       // `where` filter in-memory, and project the `select` off each state row
@@ -519,6 +575,57 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
   const asLong = inner.kind === "primitive" && inner.name === "long";
   const num = `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
   return c.optional ? `${read} == null ? null : ${num}` : `${read} == null ? 0 : ${num}`;
+}
+
+/** Coerce one GROUPING-KEY column value (an `Object` off the JPQL result row)
+ *  to the row's DECLARED wire type.
+ *
+ *  Unlike an aggregate result (provider-chosen numeric type, see `jpqlCoerce`),
+ *  a key column comes back as the entity's OWN mapped type — the enum instance
+ *  under `@Enumerated(STRING)`, the embedded `<X>Id` record for an `X id` FK,
+ *  `Instant` for datetime, `BigDecimal` for money/decimal — so the enum / id /
+ *  guid reads cast to that mapping while the numerics keep the same
+ *  `Number`/`toString` discipline as the aggregates.  A nullable key (optional
+ *  column ⇒ a NULL group) stays null. */
+function groupKeyCoerce(t: TypeIR, read: string, imports: Set<string>): string {
+  if (t.kind === "optional") {
+    return `${read} == null ? null : ${groupKeyCoerce(t.inner, read, imports)}`;
+  }
+  if (t.kind === "enum") return `(${t.name}) ${read}`;
+  if (t.kind === "id") {
+    // The wire carries the id's bare value (`wireJavaType` → uuid/int/long/
+    // string), so unwrap the embedded record exactly like `domainToWire`.
+    return `((${t.targetName}Id) ${read}).value()`;
+  }
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+        return `((Number) ${read}).intValue()`;
+      case "long":
+        return `((Number) ${read}).longValue()`;
+      case "decimal":
+        imports.add("java.math.BigDecimal");
+        return `new BigDecimal(${read}.toString())`;
+      case "money":
+        // money → wire STRING at the fixed money scale (RS-12), matching
+        // `domainToWire`.
+        imports.add("java.math.BigDecimal");
+        return `new BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+      case "datetime":
+        // Instant → ISO-8601 wire string.
+        return `${read}.toString()`;
+      case "string":
+        return `(String) ${read}`;
+      case "bool":
+        return `(Boolean) ${read}`;
+      case "guid":
+        imports.add("java.util.UUID");
+        return `(UUID) ${read}`;
+    }
+  }
+  throw new Error(
+    `internal: grouping key of type kind '${t.kind}' is not a bare source column type — the IR validator should have rejected this projection`,
+  );
 }
 
 function renderSelect(expr: ExprIR, aliasMap: Map<string, JoinMap>): string {
