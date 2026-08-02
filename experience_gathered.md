@@ -3989,6 +3989,7 @@ output the emitters had been rendering correctly all along.
   breakage — the defect lived one phase later, where those nodes meet a
   validator. That gap is how this reached `main`.
 ## 64. Three gates over one file, none of which ran the validator (2026-08-02)
+## 71. Three gates over one file, none of which ran the validator (2026-08-02)
 
 `web/src/examples/acme.ddd` — shipped in the playground picker as "Acme
 (multi-deployable system)" — declared three backend deployables and **no

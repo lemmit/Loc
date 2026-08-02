@@ -161,30 +161,78 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
   return { loom, diagnostics, errorCount, warningCount, sourceTexts };
 }
 
-function printDiagnostics(result: ParseResult) {
+/** The AST-diagnostic footer.  Structurally typed on the three fields it
+ *  reads, so it serves both the single-document `ParseResult` and the
+ *  multi-file `ProjectParseResult`. */
+function printDiagnostics(result: {
+  diagnostics: readonly string[];
+  errorCount: number;
+  warningCount: number;
+}) {
   for (const d of result.diagnostics) console.error(d);
   console.error(`${result.errorCount} error(s), ${result.warningCount} warning(s).`);
 }
 
+/**
+ * `ddd parse <file>` — "parse + validate, exit non-zero on errors".
+ *
+ * It used to be neither half of that, quietly:
+ *
+ *  - It ran the AST validator (phase ④) only.  `validateLoomModel` WAS called,
+ *    and then filtered to `loom.index-suggestion` — so every phase-⑦ error it
+ *    had just computed was thrown away and the command printed `OK`.  A model
+ *    `generate system` rejects with six errors parsed clean.  That is worse
+ *    than not checking: it is the checking tool ASSERTING the file is fine.
+ *    (It also made the command useless as a measuring instrument — a
+ *    106-file blast-radius scan run through it returned zero hits while being
+ *    structurally incapable of finding any; `experience_gathered.md` §62.)
+ *
+ *  - It used the SINGLE-document `parseFile`, so a multi-file entry reported
+ *    unresolved cross-file references that `generate system` — which walks the
+ *    import graph via `parseProject` — resolves fine.
+ *
+ * Both are the same root cause: `parse` was checking less of the pipeline than
+ * the command it is meant to pre-flight.  It now runs exactly what
+ * `generate system` runs, minus the emission.
+ *
+ * Blast radius measured before the change, over every `.ddd` in the repo (117
+ * files: examples, playground picker, journey, behavioral systems, corpus
+ * fixtures × node): ZERO new IR failures.  The only files that fail are
+ * fragments meant to be imported by an entry file, and they already failed on
+ * AST errors.  The one real casualty was `web/src/examples/acme.ddd`, fixed in
+ * the commit before this one.
+ */
 async function runParse(file: string) {
-  const result = await parseFile(file);
+  // The project loader, matching `generate system` — a multi-file entry
+  // resolves its import graph instead of reporting its siblings' declarations
+  // as unresolved.
+  const result = await parseProject(file);
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
-  // AST is clean → surface the advisory index-suggestion lint (uniqueness-and-
-  // indexes.md §11) in its own footer.  It rides the normal `validateLoomModel`
-  // channel — we just filter the WARNING-severity `loom.index-suggestion`
-  // diagnostics out of it here; they never fail the parse.  Defensive: a throw
-  // in lower/enrich/validate is swallowed (the AST result already printed).
+
+  // Phase ⑦ — the cross-aggregate IR checks.  A throw here is still swallowed
+  // (lowering can throw on shapes the AST validator doesn't gate, and the AST
+  // result has already printed), but a DIAGNOSTIC is no longer discarded.
+  let irDiagnostics: ReturnType<typeof validateLoomModel> = [];
   try {
-    const hints = validateLoomModel(enrichLoomModel(lowerModel(result.model))).filter(
-      (d) => d.code === "loom.index-suggestion",
-    );
-    if (hints.length > 0) {
-      console.error(`\nSuggestions (${hints.length}):`);
-      for (const d of hints) console.error(`  ${d.source}: ${d.message}`);
-    }
+    irDiagnostics = validateLoomModel(result.loom);
   } catch {
-    // IR lowering can throw on shapes the AST validator doesn't gate.
+    // Lowering/enrichment threw — nothing further to report at IR level.
+  }
+
+  const irErrors = irDiagnostics.filter((d) => d.severity === "error");
+  if (irErrors.length > 0) {
+    for (const d of irErrors) console.error(`${d.code} ${d.source}: ${d.message}`);
+    console.error(`${irErrors.length} error(s).`);
+    process.exit(1);
+  }
+
+  // Advisory only — the index-suggestion lint (uniqueness-and-indexes.md §11)
+  // keeps its own footer and never fails the parse.
+  const hints = irDiagnostics.filter((d) => d.code === "loom.index-suggestion");
+  if (hints.length > 0) {
+    console.error(`\nSuggestions (${hints.length}):`);
+    for (const d of hints) console.error(`  ${d.source}: ${d.message}`);
   }
   console.log(`OK: ${file}`);
 }
