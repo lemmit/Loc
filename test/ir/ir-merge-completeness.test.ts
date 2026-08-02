@@ -1,5 +1,17 @@
-// `mergeContexts` must account for EVERY field of `BoundedContextIR` — either
-// by carrying it, or by naming it in the deliberate-drop list below.
+// The IR has TWO merge boundaries, and both rebuild their result field by
+// field rather than spreading it. Each must account for EVERY field of the type
+// it returns — either by carrying it, or by naming it in that boundary's
+// deliberate-drop list.
+//
+//   `mergeContexts`    EnrichedBoundedContextIR — several source contexts fused
+//                      for one deployable
+//   `mergeLoomModels`  RawLoomModel — every `.ddd` file in an import graph fused
+//                      into one model
+//
+// (Every OTHER reconstruction site in the IR spreads: `enrichContext` returns
+// `{...ctx, …}`, `enrichAggregate` `{...resolved, …}`, `enrichPart` /
+// `enrichValueObject` likewise. A spread is structurally immune to this bug,
+// which is why only these two are ratcheted.)
 //
 // Why this gate exists, concretely.  `mergeContexts` builds its result
 // field-by-field, so a field added to `BoundedContextIR` later is simply ABSENT
@@ -110,5 +122,93 @@ describe("mergeContexts accounts for every BoundedContextIR field", () => {
     const carried = new Set(carriedFields());
     expect(carried.has("structuralErrorStatuses")).toBe(true);
     expect(carried.has("errorStatusOverrides")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The second boundary: the multi-file import-graph merge.
+// ---------------------------------------------------------------------------
+//
+// `mergeLoomModels` folds every `.ddd` file's lowered model into one, and it is
+// the SAME field-by-field rebuild — with one property that makes it a worse
+// trap than `mergeContexts`:
+//
+//     if (models.length === 1) return models[0]!;
+//
+// A single-file model never enters the rebuild. Nearly every test in this repo
+// is single-file, so a field dropped here stays green across the entire suite
+// and fails only on a real multi-file project — the shape users actually write
+// and the shape CI fixtures mostly don't.
+//
+// It is complete TODAY, and the one field it doesn't carry is correct not to:
+// `traceability` is populated by `enrichLoomModel`, which runs AFTER the merge,
+// so on a `RawLoomModel` it is absent by definition. That is exactly the kind of
+// reasoning that should be pinned rather than re-derived — the next field added
+// to `LoomModel` may well be populated during LOWERING, and then dropping it is
+// silent data loss on every multi-file project.
+
+/** Fields `mergeLoomModels` deliberately does NOT carry, each with the reason. */
+const MODEL_DELIBERATELY_DROPPED: Readonly<Record<string, string>> = {
+  // Derived by `enrichLoomModel` (phase ⑥), which runs after this merge (phase
+  // ⑤). Absent on every `RawLoomModel` by construction, so there is nothing to
+  // carry. If lowering ever populates it, carry it instead of extending this.
+  traceability: "derived in enrichment, after this merge runs — absent on RawLoomModel",
+};
+
+function modelDeclaredFields(): string[] {
+  const src = readFileSync(`${root}src/ir/types/loom-ir.ts`, "utf8");
+  const start = src.indexOf("export interface LoomModel {");
+  expect(start, "LoomModel was renamed — this gate needs updating").toBeGreaterThan(-1);
+  const body = src.slice(start, src.indexOf("\n}", start));
+  return [...body.matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9]*)\??:/gm)].map((m) => m[1]!);
+}
+
+function modelCarriedFields(): string[] {
+  const src = readFileSync(`${root}src/ir/lower/lower.ts`, "utf8");
+  const start = src.indexOf("export function mergeLoomModels");
+  expect(start, "mergeLoomModels was renamed — this gate needs updating").toBeGreaterThan(-1);
+  const body = src.slice(start, src.indexOf("\n}", start));
+  return [...body.matchAll(/^ {4}([a-zA-Z][a-zA-Z0-9]*):/gm)].map((m) => m[1]!);
+}
+
+describe("mergeLoomModels accounts for every LoomModel field", () => {
+  it("carries, or deliberately drops, every declared field", () => {
+    const declared = modelDeclaredFields();
+    const carried = new Set(modelCarriedFields());
+    expect(declared.length, "parsed no fields — the scan regex has drifted").toBeGreaterThan(10);
+
+    const unaccounted = declared.filter(
+      (f) => !carried.has(f) && !(f in MODEL_DELIBERATELY_DROPPED),
+    );
+    expect(
+      unaccounted,
+      "field(s) silently dropped by mergeLoomModels — a MULTI-FILE project loses " +
+        "these entirely, while every single-file test stays green because of the " +
+        "`models.length === 1` early return. Carry them, or add them to " +
+        "MODEL_DELIBERATELY_DROPPED with the reason.",
+    ).toEqual([]);
+  });
+
+  it("the deliberate-drop list has no stale entries", () => {
+    const declared = new Set(modelDeclaredFields());
+    const carried = new Set(modelCarriedFields());
+    const stale = Object.keys(MODEL_DELIBERATELY_DROPPED).filter(
+      (f) => !declared.has(f) || carried.has(f),
+    );
+    expect(stale, "MODEL_DELIBERATELY_DROPPED names a field that is gone or now carried").toEqual(
+      [],
+    );
+  });
+
+  it("the migration-intent lists are carried — the ones a multi-file project needs most", () => {
+    // `rename` / `backfill` / raw-SQL intents are declared next to the aggregate
+    // they evolve, which in a real project means a different file from the
+    // system block. Dropping them would produce a migration chain that silently
+    // omits the rename and then DESTROYS the column instead of renaming it —
+    // the exact failure `migration-evolution-e2e` exists to catch, but only on
+    // the multi-file shape it does not currently exercise.
+    const carried = new Set(modelCarriedFields());
+    for (const f of ["renameIntents", "tableRenameIntents", "backfillIntents", "sqlMigrationSteps"])
+      expect(carried.has(f), `mergeLoomModels drops ${f}`).toBe(true);
   });
 });

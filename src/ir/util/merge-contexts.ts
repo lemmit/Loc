@@ -66,7 +66,7 @@ export function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBou
     // called on contexts of one deployable; where a deployable spans subdomains
     // the maps are merged in declaration order, first-declared winning on a
     // conflicting name, mirroring how the app-wide fold resolves the same clash.
-    // Guarded by test/ir/merge-contexts-completeness.test.ts: every field of
+    // Guarded by test/ir/ir-merge-completeness.test.ts: every field of
     // BoundedContextIR must be carried here or named in that gate's
     // DELIBERATELY_DROPPED list with a reason.  A field added upstream and not
     // handled here reads `undefined` in every emitter fed a merged context,
