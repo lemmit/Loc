@@ -17936,24 +17936,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "value": "["
               },
               {
-                "$type": "Assignment",
-                "feature": "elements",
-                "operator": "+=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@200"
-                  },
-                  "arguments": []
-                }
-              },
-              {
                 "$type": "Group",
                 "elements": [
-                  {
-                    "$type": "Keyword",
-                    "value": ","
-                  },
                   {
                     "$type": "Assignment",
                     "feature": "elements",
@@ -17965,13 +17949,35 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       },
                       "arguments": []
                     }
+                  },
+                  {
+                    "$type": "Group",
+                    "elements": [
+                      {
+                        "$type": "Keyword",
+                        "value": ","
+                      },
+                      {
+                        "$type": "Assignment",
+                        "feature": "elements",
+                        "operator": "+=",
+                        "terminal": {
+                          "$type": "RuleCall",
+                          "rule": {
+                            "$ref": "#/rules@200"
+                          },
+                          "arguments": []
+                        }
+                      }
+                    ],
+                    "cardinality": "*"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
                   }
                 ],
-                "cardinality": "*"
-              },
-              {
-                "$type": "Keyword",
-                "value": ",",
                 "cardinality": "?"
               },
               {
