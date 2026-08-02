@@ -13,7 +13,11 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
-import { allContexts, isGroupedProjection, isSingletonProjection } from "../../src/ir/types/loom-ir.js";
+import {
+  allContexts,
+  isGroupedProjection,
+  isSingletonProjection,
+} from "../../src/ir/types/loom-ir.js";
 import { groupedAggregates, wholeTableAggregates } from "../../src/ir/util/projection-aggregate.js";
 import { isFrontendReadableProjection } from "../../src/ir/util/projection-read.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
@@ -121,7 +125,9 @@ describe("lowering the group by clause", () => {
 
 describe("group-by shape gates", () => {
   it("accepts the canonical grouped read model — no projection-groupby diagnostics", async () => {
-    const cs = (await codes(context(BY_STATUS))).filter((c) => c.startsWith("loom.projection-groupby"));
+    const cs = (await codes(context(BY_STATUS))).filter((c) =>
+      c.startsWith("loom.projection-groupby"),
+    );
     expect(cs).toEqual([]);
   });
 

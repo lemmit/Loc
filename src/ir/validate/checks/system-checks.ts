@@ -42,7 +42,11 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
-import { exprUsesCurrentUser, isGroupedProjection, isQueryTimeProjection } from "../../types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  isGroupedProjection,
+  isQueryTimeProjection,
+} from "../../types/loom-ir.js";
 import {
   backendServesRealtime,
   durableEventTypes,

@@ -372,11 +372,7 @@ function validateQueryComprehension(
  *   - `loom.projection-groupby-select-not-grouped` — a per-row `select` must
  *     name one of the grouping columns; anything else has no single value per
  *     group (the same rule SQL enforces). */
-function validateGroupBy(
-  ctx: BoundedContextIR,
-  proj: ProjectionIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagnostic[]): void {
   const q = proj.query;
   if (!q?.groupBy || q.groupBy.length === 0) return;
   const at = `${ctx.name}/${proj.name}`;

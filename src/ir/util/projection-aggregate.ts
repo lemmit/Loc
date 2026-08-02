@@ -118,12 +118,9 @@ function toAggregateSelect(
   p: ProjectionIR,
   s: { field: string; type: TypeIR; aggregate?: ProjectionAggregateIR },
 ): AggregateSelect {
-  return {
-    field: s.field,
-    type: declaredType(p, s.field) ?? s.type,
-    // biome-ignore lint/style/noNonNullAssertion: callers only pass aggregate-marked selects
-    aggregate: s.aggregate!,
-  };
+  if (!s.aggregate)
+    throw new Error("internal: toAggregateSelect takes aggregate-marked selects only");
+  return { field: s.field, type: declaredType(p, s.field) ?? s.type, aggregate: s.aggregate };
 }
 
 /** How an aggregate result must be coerced, independent of dialect.
