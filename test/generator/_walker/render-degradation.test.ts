@@ -58,6 +58,11 @@ const SENTINELS: ReadonlyArray<{ label: string; re: RegExp }> = [
   { label: "unresolved method-call", re: /TODO: method-call/g },
   { label: "unresolved ref", re: /\bref:\s*\w+\s*\*\//g },
   { label: "flutter: no renderer", re: /flutter pack: no renderer for "([^"]+)"/g },
+  // `walk()`'s two give-up comments — a name that resolves to no primitive /
+  // component, and a registered primitive with no renderer on this target.
+  { label: "unknown layout component", re: /unknown layout component:\s*(\w+)/g },
+  { label: "unknown page element", re: /unknown page element:\s*(\w+)/g },
+  { label: "primitive not supported", re: /not supported by the \w+ walker yet/g },
 ];
 
 /**
@@ -67,9 +72,19 @@ const SENTINELS: ReadonlyArray<{ label: string; re: RegExp }> = [
  * Keyed `<framework>:<sentinel label>`.
  */
 const KNOWN_DEGRADATIONS: ReadonlyMap<string, string> = new Map([
-  // (empty — the `paren` entries that lived here were retired by the arm added
-  // to `emitExpr` in this same change.  Keep this map empty unless a defect is
-  // genuinely queued behind a named slice.)
+  // USER COMPONENTS ARE NOT EMITTED ON ANGULAR OR FELIZ.  A declared
+  // `component TierBadge(…)` produces NO component file on either frontend
+  // (verified: react emits `src/components/TierBadge.tsx`, angular and feliz
+  // emit nothing), so `ctx.userComponents` never learns the name and the use
+  // site renders `{/* unknown layout component: TierBadge */}` — the
+  // declaration and its every use vanish together.
+  //
+  // This is a frontend-parity mission of its own (component emission for two
+  // frameworks), not an expression-layer defect, so it is queued rather than
+  // fixed here.  The companion "still real" test below fails if it silently
+  // starts working, so the entry cannot rot.
+  ["angular:unknown layout component", "user components not emitted on Angular"],
+  ["feliz:unknown layout component", "user components not emitted on Feliz"],
 ]);
 
 /**
