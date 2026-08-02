@@ -167,6 +167,44 @@ describe("loom.projection-groupby-missing", () => {
   });
 });
 
+describe("loom.projection-aggregate-arg-not-columnar", () => {
+  it("rejects a COMPUTED aggregation argument — it used to crash codegen", async () => {
+    // `sum(o.total + o.lineCount)` normalised into `select.aggregate` and then
+    // threw an internal error in every backend's emitter ("aggregation
+    // argument must be a source column reference") from a model that
+    // validated clean.  SQL aggregates a column, not a per-row computation.
+    expect(
+      await codes(
+        context(`projection SalesTotals { padded: money
+          from Order as o
+          select padded = sum(o.total + o.lineCount) }`),
+      ),
+    ).toContain("loom.projection-aggregate-arg-not-columnar");
+  });
+
+  it("rejects a bare unqualified argument, naming the qualified spelling", async () => {
+    // `sum(total)` lowers to a this-prop REF, which the emitters' column
+    // renderers don't handle — the gate's message says to write `o.total`.
+    expect(
+      await codes(
+        context(`projection SalesTotals { revenue: money
+          from Order as o
+          select revenue = sum(total) }`),
+      ),
+    ).toContain("loom.projection-aggregate-arg-not-columnar");
+  });
+
+  it("accepts the plain qualified column — and count() with no argument", async () => {
+    expect(
+      await codes(
+        context(`projection SalesTotals { orders: int  revenue: money
+          from Order as o
+          select orders = count(), revenue = sum(o.total) }`),
+      ),
+    ).not.toContain("loom.projection-aggregate-arg-not-columnar");
+  });
+});
+
 describe("loom.projection-select-unresolved", () => {
   it("rejects a select naming nothing at all", async () => {
     const reported = await codes(

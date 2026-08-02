@@ -245,14 +245,10 @@ export function renderJavaQueryProjections(
         `    }`,
         ``,
       );
-      routes.push(
-        `    @GetMapping("/${snake(proj.name)}")`,
-        `    public ${rowName} ${findName}() {`,
-        `        return queryProjections.${findName}();`,
-        `    }`,
-        ``,
-      );
-      continue;
+      // NO `continue` — fall through to the shared `requires`-gate + route
+      // block below (the singleton's ONE-row return shape is handled there).
+      // An early `continue` here once skipped the gate entirely, serving a
+      // `requires`-gated aggregation UNGATED on Java alone.
     } else if (proj.query!.sourceKind === "workflow") {
       // `from <Workflow>` — read the persisted saga-state through the
       // `<Wf>StateRepository` (workflows have no aggregate repository), apply the
@@ -400,9 +396,13 @@ export function renderJavaQueryProjections(
         )});`,
       );
     }
+    // Route return shape: the singleton whole-table aggregation returns ONE
+    // row; every other arm (per-row, grouped, workflow/projection-sourced)
+    // returns the list.
+    const routeType = aggregates ? rowName : `List<${rowName}>`;
     routes.push(
       `    @GetMapping("/${snake(proj.name)}")`,
-      `    public List<${rowName}> ${findName}() {`,
+      `    public ${routeType} ${findName}() {`,
       ...gateLines,
       `        return queryProjections.${findName}();`,
       `    }`,

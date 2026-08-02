@@ -325,7 +325,28 @@ function validateQueryComprehension(
   }
   if (grouped) validateGroupBy(ctx, proj, diags);
   for (const s of selects) {
-    if (s.aggregate) continue;
+    if (s.aggregate) {
+      // An aggregation ARGUMENT must be a plain source column (`sum(o.total)`)
+      // — every backend renders it as the bare column inside SQL's own
+      // aggregate (`SUM(total)` / `g.Sum(o => o.Total)` / `sum(e.total)`), so
+      // a computed expression (`sum(o.total + o.tax)`) or a bare unqualified
+      // name (`sum(total)`) has no rendering and used to CRASH codegen with an
+      // internal error from a model that validated clean.  Gate it honestly.
+      const arg = s.aggregate.arg;
+      if (arg && !(arg.kind === "member" && arg.receiver.kind === "this")) {
+        diags.push({
+          severity: "error",
+          code: "loom.projection-aggregate-arg-not-columnar",
+          message:
+            `projection '${proj.name}': 'select ${s.field} = ${s.aggregate.op}(…)' aggregates a ` +
+            `computed expression. An aggregation argument must be a plain column of the ` +
+            `'${q.source}' source, written '<alias>.<field>' (e.g. '${s.aggregate.op}(o.total)') — ` +
+            `SQL aggregates a column, not a per-row computation.`,
+          source: `${ctx.name}/${proj.name}`,
+        });
+      }
+      continue;
+    }
     const unresolved = firstUnresolvedRefName(s.expr);
     if (!unresolved) continue;
     const hint = WHOLE_TABLE_AGGREGATIONS.has(unresolved)

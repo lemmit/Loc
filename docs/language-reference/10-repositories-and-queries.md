@@ -413,4 +413,5 @@ The shape discipline (each its own diagnostic):
 - **At least one aggregate `select`** — a `group by` with only per-row selects is just DISTINCT (`loom.projection-groupby-no-aggregate`).
 - **Per-row selects must be grouping columns** — anything else has no single value per group, the same rule SQL enforces (`loom.projection-groupby-select-not-grouped`).
 - **Grouping columns are bare source columns** — `o.status`, not a computed key like `o.placedAt.date` (yet) (`loom.projection-groupby-key-not-columnar`).
+- **Aggregation arguments are bare source columns too** — `sum(o.total)`, never a computed expression (`sum(o.total + o.tax)`) or a bare unqualified name (`sum(total)`): SQL aggregates a column, not a per-row computation (`loom.projection-aggregate-arg-not-columnar`; applies to the singleton whole-table aggregation as well).
 - **No `join`, no `keyed by`** — a join is an app-level by-id load after the query (`loom.projection-groupby-join-unsupported`), and a grouped projection's rows are the groups, not id-keyed entities (`loom.projection-groupby-keyed-unsupported`).
