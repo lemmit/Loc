@@ -2328,7 +2328,10 @@ TemplateHole:
 // admitted at the grammar level; the type system / each consumer
 // validates element shape per use site.
 ListLit:
-    {infer ListLit} '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
+    // `[]` is a single KEYWORD token (the array marker in `string[]`), so the
+    // empty list can never lex as '[' + ']' — it must be spelled as that token.
+    {infer ListLit} '[]'
+  | {infer ListLit} '[' elements+=Expression (',' elements+=Expression)* ','? ']';
 
 // Universal construction form.  Replaces `new Part { ... }`
 // and the walker-call form (`Form(state: ..., body: ...)`).  The

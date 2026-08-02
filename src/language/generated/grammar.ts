@@ -17903,22 +17903,38 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "$type": "ParserRule",
       "name": "ListLit",
       "definition": {
-        "$type": "Group",
+        "$type": "Alternatives",
         "elements": [
           {
-            "$type": "Action",
-            "inferredType": {
-              "$type": "InferredType",
-              "name": "ListLit"
-            }
-          },
-          {
-            "$type": "Keyword",
-            "value": "["
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "ListLit"
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": "[]"
+              }
+            ]
           },
           {
             "$type": "Group",
             "elements": [
+              {
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "ListLit"
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": "["
+              },
               {
                 "$type": "Assignment",
                 "feature": "elements",
@@ -17957,13 +17973,12 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "$type": "Keyword",
                 "value": ",",
                 "cardinality": "?"
+              },
+              {
+                "$type": "Keyword",
+                "value": "]"
               }
-            ],
-            "cardinality": "?"
-          },
-          {
-            "$type": "Keyword",
-            "value": "]"
+            ]
           }
         ]
       },
