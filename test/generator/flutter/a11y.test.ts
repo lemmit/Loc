@@ -52,7 +52,11 @@ async function pageDart(body: string): Promise<string> {
 describe("flutter a11y — derived Semantics emission", () => {
   it("Heading emits Semantics(header: true) so screen-reader heading nav works", async () => {
     const dart = await pageDart(`Heading { "Products", level: 1 }`);
-    expect(dart).toContain("Semantics(header: true, child: Text('Products'");
+    // The heading text rides the translation runtime (M-T1.11); the Semantics
+    // wrapper is what this asserts.
+    expect(dart).toMatch(
+      /Semantics\(header: true, child: DefaultTextStyle\.merge\(style: .+?, child: Text\(t\('page\.Screen\.heading\.\w+', 'Products'\)\)\)/,
+    );
   });
 
   it("Alert is a liveRegion so an async status is announced", async () => {
@@ -74,7 +78,11 @@ describe("flutter a11y — derived Semantics emission", () => {
 
   it("Toolbar honours an explicit label: as its accessible name", async () => {
     const dart = await pageDart(`Toolbar { label: "Order actions", Button { "Go" } }`);
-    expect(dart).toContain("Semantics(container: true, label: 'Order actions', child: Row(");
+    // An authored name is a user-visible slot, so it rides the translation
+    // runtime (M-T1.11); the un-named default below stays a plain literal.
+    expect(dart).toMatch(
+      /Semantics\(container: true, label: t\('page\.Screen\.toolbarAria\.\w+', 'Order actions'\), child: Row\(/,
+    );
   });
 });
 
@@ -107,7 +115,9 @@ describe("flutter a11y — author-hint facts (Image / Avatar / Icon / Button)", 
 
   it("a Button label: becomes a Semantics accessible name", async () => {
     const dart = await pageDart(`Button { "Refresh", label: "Refresh products" }`);
-    expect(dart).toContain("Semantics(label: 'Refresh products', child: ElevatedButton(");
+    expect(dart).toMatch(
+      /Semantics\(label: t\('page\.Screen\.buttonAria\.\w+', 'Refresh products'\), child/,
+    );
   });
 });
 

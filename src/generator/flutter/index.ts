@@ -49,6 +49,7 @@ import {
   collectPageWorkflowForms,
   renderFormsFile,
 } from "./forms-emit.js";
+import { flutterI18nEnabled, renderFlutterI18nModule } from "./i18n.js";
 import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
 import { flutterPack, usesIntl } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
@@ -121,6 +122,17 @@ export function generateFlutterForContexts(
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
   }
+
+  // i18n (M-T1.11 Flutter runtime): when this ui has extractable user-visible
+  // strings, every literal text slot in a page/component body emits
+  // `t("<key>", "<default>")` (keyed identically to the catalog via the SHARED
+  // walker seam) and the app ships `lib/i18n.dart` — the Dart-language sibling
+  // of the JS frontends' `src/i18n.ts` shim.  Empty catalog → no file, the walks
+  // pass no prefix, and every emitted widget is byte-identical to pre-i18n.
+  const i18nEnabled = ui ? flutterI18nEnabled(ui) : false;
+  if (ui && i18nEnabled) {
+    out.set("lib/i18n.dart", renderFlutterI18nModule(ui));
+  }
   if (forms.length > 0) {
     out.set("lib/forms.dart", renderFormsFile(forms));
   }
@@ -135,6 +147,7 @@ export function generateFlutterForContexts(
     apiParams: ui?.apiParams ?? [],
     aggregatesByName,
     bcByAggregate,
+    i18nEnabled,
   };
   const componentParams: ReadonlyMap<string, readonly ParamIR[]> = ui
     ? emittableComponentParams(ui.components, componentCtx)
@@ -147,6 +160,7 @@ export function generateFlutterForContexts(
       workflowsByName,
       bcByWorkflow,
       componentParams,
+      i18nEnabled,
     });
     for (const name of r.usedComponents) usedComponents.add(name);
     return { page, ...r };
@@ -239,9 +253,13 @@ function renderPage(
     workflowsByName: ReadonlyMap<string, WorkflowIR>;
     bcByWorkflow: ReadonlyMap<string, EnrichedBoundedContextIR>;
     componentParams: ReadonlyMap<string, readonly ParamIR[]>;
+    /** True when the ui has extractable user-visible strings (M-T1.11) — the
+     *  walk then keys every literal text slot to the catalog and emits `t(…)`.
+     *  False → no prefix, and the page is byte-identical to pre-i18n. */
+    i18nEnabled: boolean;
   },
 ): Omit<RenderedPage, "page"> {
-  const { workflowsByName, bcByWorkflow, componentParams } = workflows;
+  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled } = workflows;
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
@@ -275,6 +293,15 @@ function renderPage(
       bcByAggregate, // form seams resolve enum / value-object types here
       workflowsByName, // WorkflowForm(runs:) resolves the workflow's params here
       bcByWorkflow, // …and its owning BC for enum / value-object resolution
+      new Map(), // paramTypes — Flutter resolves op instances through its own seams
+      new Map(), // pageRoutes
+      new Set(), // externFunctions
+      new Set(), // derivedNames
+      false, // authUi — the Flutter frontend has no `auth: ui` gate yet
+      // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
+      // role-scoped `page.name`, e.g. `List`, not the router emit name);
+      // undefined when the ui has no extractable strings (byte-identical).
+      i18nEnabled ? `page.${page.name}` : undefined,
     );
     bodyWidget = result.tsx.trim() || bodyWidget;
     usesState = result.usesState;
@@ -370,6 +397,15 @@ interface ConsumerBindings {
  *  `StatelessWidget` (each form is its own `StatefulWidget`) — it imports
  *  `../forms.dart` and, when a form carries the route id (op / destroy), binds
  *  `id` from the route arguments in `build`. */
+/** True when a rendered Dart fragment calls the generated translation runtime
+ *  (M-T1.11) — the walker emits a bare `t("<key>", "<default>")`, so the page
+ *  file needs `import '../i18n.dart';`.  The lookbehind keeps `Text(` /
+ *  `DefaultTextStyle.merge(` and any other identifier ending in `t` from
+ *  matching; only a standalone `t(` counts. */
+function usesI18n(dart: string): boolean {
+  return /(?<![A-Za-z0-9_$.])t\(/.test(dart);
+}
+
 function renderStatelessPage(
   page: PageIR,
   className: string,
@@ -390,6 +426,9 @@ function renderStatelessPage(
     imports.push("import 'package:http/http.dart' as http;", "import '../config.dart';");
   }
   if (usesIntl(bodyWidget)) imports.push("import 'package:intl/intl.dart';");
+  // The generated translation runtime (M-T1.11) — imported only when a text slot
+  // in this page actually resolved to a `t(…)` call.
+  if (usesI18n(bodyWidget)) imports.push("import '../i18n.dart';");
   const idBinding = routeArgBindings(opts.routeParams, opts.usesRouteId);
   return `${lines(
     ...imports,
@@ -524,6 +563,9 @@ function renderConsumerPage(
   }
   if (usesIntl(bodyWidget) || usesIntl(projSource)) {
     imports.push("import 'package:intl/intl.dart';");
+  }
+  if (usesI18n(bodyWidget) || usesI18n(projSource)) {
+    imports.push("import '../i18n.dart';");
   }
   // A FileUpload primitive picks a file via file_picker (the http / config /
   // models / dart:convert imports it also needs are added by the content scans
