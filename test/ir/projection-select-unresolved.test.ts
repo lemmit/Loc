@@ -295,11 +295,15 @@ describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
   deployable web { platform: ${framework} targets: api ui: WebApp { Sales: api } port: 3002 }
 }`;
 
-  it("is silent on react — the projection client ships there", async () => {
-    expect(await codes(onFrontend("react"))).not.toContain("loom.ui-projection-read-unsupported");
-  });
+  for (const framework of ["react", "vue"]) {
+    it(`is silent on ${framework} — the projection client ships there`, async () => {
+      expect(await codes(onFrontend(framework))).not.toContain(
+        "loom.ui-projection-read-unsupported",
+      );
+    });
+  }
 
-  for (const framework of ["vue", "svelte", "angular", "flutter"]) {
+  for (const framework of ["svelte", "angular", "flutter"]) {
     it(`gates ${framework} honestly until its client ports`, async () => {
       expect(await codes(onFrontend(framework))).toContain("loom.ui-projection-read-unsupported");
     });

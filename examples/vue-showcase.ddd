@@ -100,6 +100,11 @@ system AcmeVue {
                 customerId: string
                 status: OrderStatus
                 placedAt: datetime
+                // A `money` SCALAR (not the Catalog `Money` valueobject) — the
+                // aggregation source for the `RevenueSnapshot` projection below,
+                // and the only thing in the Vue build matrix that drives
+                // `moneySchema` through an emitted client module.
+                total: money?
                 contains lines: OrderLine[]
 
                 invariant lines.count > 0 when status == Confirmed
@@ -144,6 +149,20 @@ system AcmeVue {
             repository Orders for Order {
                 find byCustomer(customerId: string): Order[]
                     where this.customerId == customerId
+            }
+
+            criterion ConfirmedOrders of Order as o = o.status == OrderStatus.Confirmed
+
+            // A SINGLETON query-time projection — aggregated in SQL, one object
+            // out.  Read by the Dashboard page below through `Sales.RevenueSnapshot`
+            // (M-T1.3 Phase 1), which is what makes the Vue build gate compile
+            // `src/api/projections.ts` + the single-record `QueryView` binding.
+            projection RevenueSnapshot {
+                orders: int
+                revenue: money
+                from Order as o
+                where ConfirmedOrders
+                select orders = count, revenue = sum(o.total)
             }
 
             // Workflow surfacing — exercises the React generator's
@@ -359,7 +378,26 @@ system AcmeVue {
             route: "/dashboard"
             title: "Dashboard"
             layout: Marketing
-            body: Stack { StatusPill("Active"), StatusPill("Idle"), NewCustomerWidget() }
+            body: Stack {
+                StatusPill("Active"),
+                StatusPill("Idle"),
+                NewCustomerWidget(),
+                // Projection read (M-T1.3 Phase 1).  Single-record by
+                // construction — a singleton returns ONE object, so the walker
+                // must not apply collection semantics to it.  `Money { … }`
+                // wraps the decimal figure, which is a Decimal client-side.
+                QueryView {
+                    of: Sales.RevenueSnapshot,
+                    loading: Loader { },
+                    error: Alert { "Could not load revenue" },
+                    empty: Text { "No confirmed orders yet" },
+                    data: t => Group {
+                        Stat { "Confirmed orders", t.orders },
+                        Stat { "Revenue", Money { t.revenue } },
+                        testid: "revenue-snapshot"
+                    }
+                }
+            }
         }
     }
 
@@ -389,7 +427,7 @@ system AcmeVue {
 
     test e2e "create then confirm an order with one line" against api verifies TC-002 {
         let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
-        let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+        let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z", total: { amount: 15.00, currency: "USD" } })
         api.orders.addLine(ord, { productId: prod.id, qty: 3 })
         api.orders.confirm(ord)
         let read = api.orders.getById(ord)
@@ -398,7 +436,7 @@ system AcmeVue {
     }
 
     test e2e "by_customer query returns matching orders" against api {
-        let ord = api.orders.create({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" })
+        let ord = api.orders.create({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z", total: { amount: 20.00, currency: "USD" } })
         let list = api.orders.byCustomer({ customerId: "cust-002" })
         expect(list.length).toBeGreaterThanOrEqual(1)
     }

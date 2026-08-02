@@ -302,12 +302,12 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
 }
 
 // Frontends whose generated client can READ a query-time projection
-// (M-T1.3 Phase 1).  React ships `src/api/projections.ts` + the walker's
-// Pattern H; the other five have no client, so a page reading a projection
+// (M-T1.3 Phase 1).  React and Vue ship `src/api/projections.ts` + the walker's
+// Pattern H; the other four have no client, so a page reading a projection
 // there would emit an unresolved receiver — `undefined.<Projection>`, a runtime
 // TypeError and a build break.  Gate honestly until each ports, the same
 // reviewed-gap discipline as the backend-side projection gates.
-const PROJECTION_READ_FRAMEWORKS = new Set(["react"]);
+const PROJECTION_READ_FRAMEWORKS = new Set(["react", "vue"]);
 
 /** `loom.ui-projection-read-unsupported`, the FRAMEWORK half.  The FLAVOUR half
  *  (a keyed / folded projection, unreadable on every target) is F3 in

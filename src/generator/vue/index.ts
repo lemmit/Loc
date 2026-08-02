@@ -35,6 +35,7 @@ import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
+import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
@@ -437,6 +438,18 @@ export function generateVueForContexts(
     out.set(
       "src/api/workflows.ts",
       buildWorkflowsApiModule(contexts, { queryPackage: "@tanstack/vue-query" }),
+    );
+  }
+
+  // Query-time projection clients (M-T1.3 Phase 1) — same shared builder as
+  // React, differing only in the query-package import: `@tanstack/vue-query`'s
+  // `useQuery` is API-compatible with the React one, so the emitted module is
+  // otherwise identical.  Emitted only when the deployable actually serves a
+  // readable projection, so a projection-free app stays byte-identical.
+  if (readableProjections(contexts).length > 0) {
+    out.set(
+      "src/api/projections.ts",
+      buildProjectionsApiModule(contexts, { queryPackage: "@tanstack/vue-query" }),
     );
   }
 
