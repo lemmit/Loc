@@ -106,12 +106,15 @@ describe("Svelte i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
     const shell = shellOf(files);
     expect(shell).toContain(`{t("chrome.skipToContent", "Skip to content")}`);
+    // The primary-navigation landmark aria binds through t() (JSX-shaped attr).
+    expect(shell).toContain(`aria-label={t("chrome.primaryNav", "Primary navigation")}`);
     expect(shell).toContain(`import { t } from "$lib/i18n"`);
     // The merged catalog carries the shell chrome key.
     const catalog = JSON.parse(
       [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1],
     ) as Record<string, string>;
     expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+    expect(catalog["chrome.primaryNav"]).toBe("Primary navigation");
   });
 
   it("keeps the app-shell skip link byte-identical (raw, no t import) for a string-less app", async () => {

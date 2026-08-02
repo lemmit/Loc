@@ -192,11 +192,14 @@ describe("Vue i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
     const app = [...files].find(([p]) => p.endsWith("src/App.vue"))![1];
     expect(app).toContain(`{{ t("chrome.skipToContent", "Skip to content") }}`);
+    // The primary-navigation landmark aria binds through Vue's `:aria-label`.
+    expect(app).toContain(`:aria-label='t("chrome.primaryNav", "Primary navigation")'`);
     expect(app).toContain(`import { t } from "./i18n"`);
     const catalog = JSON.parse(
       [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
     ) as Record<string, string>;
     expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+    expect(catalog["chrome.primaryNav"]).toBe("Primary navigation");
   });
 
   it("leaves the app-shell skip link byte-identical for a string-less app", async () => {

@@ -40,8 +40,10 @@ function find(files: Map<string, string>, suffix: string): string {
 describe("vuetify pack — a11y backfill", () => {
   it("the nav v-list drops role=list (aria-required-children) and keeps the nav landmark", async () => {
     const shell = find(await generateSystemFiles(SYS), "/App.vue");
-    // The drawer stays a named navigation landmark…
-    expect(shell).toContain('aria-label="Primary navigation"');
+    // The drawer stays a named navigation landmark… (the label is pack-chrome:
+    // bound through `t("chrome.primaryNav", …)` under i18n — this scaffolded UI
+    // has authored strings, so i18n is on, M-T1.11).
+    expect(shell).toContain(`:aria-label='t("chrome.primaryNav", "Primary navigation")'`);
     // …but the inner list is presentational so its link children don't trip
     // aria-required-children (role=list requires role=listitem children).
     expect(shell).toContain('<v-list density="compact" nav role="none" data-testid="nav-sidebar">');

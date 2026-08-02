@@ -68,9 +68,12 @@ describe("pack-chrome i18n — React app-shell chrome", () => {
     expect(app).toContain(`import { t } from "./i18n"`);
     expect(app).toContain(`{t("chrome.notFound", "Not found")}`);
     expect(app).toContain(`{t("chrome.skipToContent", "Skip to content")}`);
+    // Primary-navigation landmark aria binds through t() too (attribute form).
+    expect(app).toContain(`aria-label={t("chrome.primaryNav", "Primary navigation")}`);
     const catalog = catalogOf(files);
     expect(catalog["chrome.notFound"]).toBe("Not found");
     expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+    expect(catalog["chrome.primaryNav"]).toBe("Primary navigation");
   });
 
   it("stays byte-identical (raw shell text, no t import) for a string-less app", async () => {
@@ -78,6 +81,7 @@ describe("pack-chrome i18n — React app-shell chrome", () => {
     const app = appOf(files);
     expect(app).toContain(">Not found<");
     expect(app).toContain(">Skip to content<");
+    expect(app).toContain(`aria-label="Primary navigation"`);
     expect(app).not.toContain("import { t }");
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
   });

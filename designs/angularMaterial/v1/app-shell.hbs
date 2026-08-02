@@ -32,7 +32,7 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
       <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
     </mat-toolbar>
     <mat-sidenav-container class="loom-shell">
-      <mat-sidenav mode="side" opened class="loom-sidenav" role="navigation" aria-label="Primary navigation">
+      <mat-sidenav mode="side" opened class="loom-sidenav" role="navigation" {{{primaryNavAria}}}>
         <mat-nav-list data-testid="nav-sidebar">
 {{#each navSections}}          <h3 matSubheader>{{label}}</h3>
 {{#each entries}}{{#if external}}          <a mat-list-item href="{{href}}" target="_blank" rel="noopener" data-testid="{{testId}}">{{label}}</a>

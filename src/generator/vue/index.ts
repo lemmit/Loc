@@ -547,6 +547,15 @@ export function generateVueForContexts(
         APP_SHELL_CHROME[chromeKey("skipToContent")],
       )}) }}`
     : APP_SHELL_CHROME[chromeKey("skipToContent")]!;
+  // The primary-navigation landmark's `aria-label` — an attribute fragment (NO
+  // leading space; the template keeps the surrounding whitespace): Vue's bound
+  // `:aria-label='t(…)'` (single-quoted, the `t()` call holds double quotes)
+  // under i18n, else the static `aria-label="…"`.
+  const primaryNavAria = i18nEnabled
+    ? `:aria-label='t(${JSON.stringify(chromeKey("primaryNav"))}, ${JSON.stringify(
+        APP_SHELL_CHROME[chromeKey("primaryNav")],
+      )})'`
+    : `aria-label="${APP_SHELL_CHROME[chromeKey("primaryNav")]}"`;
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
     navSections,
@@ -555,6 +564,7 @@ export function generateVueForContexts(
     hasToastHost,
     i18nEnabled,
     skipToContentText,
+    primaryNavAria,
   };
   if (useLayouts) {
     // The chrome (and its toast/realtime hosts) move OUT of App.vue into

@@ -271,8 +271,12 @@ describe("react generator", () => {
       expect(app).toMatch(/data-testid="nav-burger"/);
       // Sidebar Stack uses Mantine NavLinks (not bare Anchors); the
       // navbar carries an accessible name so the <nav> landmark is
-      // distinguishable (accessibility.md Phase 2).
-      expect(app).toMatch(/<AppShell\.Navbar p="md" aria-label="Primary navigation">/);
+      // distinguishable (accessibility.md Phase 2).  The label is pack-chrome:
+      // bound through `t("chrome.primaryNav", …)` under i18n (acme has authored
+      // strings, so i18n is on), M-T1.11.
+      expect(app).toMatch(
+        /<AppShell\.Navbar p="md" aria-label=\{t\("chrome\.primaryNav", "Primary navigation"\)\}>/,
+      );
       expect(app).toMatch(/data-testid="nav-sidebar"/);
       expect(app).toMatch(/from "@mantine\/core"[\s\S]*?NavLink/);
     });
