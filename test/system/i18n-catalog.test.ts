@@ -68,9 +68,15 @@ describe(".loom/messages.en.json catalog artifact", () => {
     expect(Object.values(catalog)).toContain("Storefront");
     // The scaffold synthesises List/New/Detail pages with humanised chrome.
     expect(Object.values(catalog)).toContain("Orders");
-    expect(Object.keys(catalog).every((k) => k.startsWith("page.") || k.startsWith("menu."))).toBe(
-      true,
-    );
+    // Keys are page/menu (authored) or chrome.* (the always-rendered app-shell
+    // chrome merged for an i18n-enabled system, M-T1.11).
+    expect(
+      Object.keys(catalog).every(
+        (k) => k.startsWith("page.") || k.startsWith("menu.") || k.startsWith("chrome."),
+      ),
+    ).toBe(true);
+    // The app-shell chrome rode in (404 + skip link).
+    expect(catalog["chrome.notFound"]).toBe("Not found");
   });
 
   it("is a flat, key-sorted JSON object with a trailing newline", async () => {

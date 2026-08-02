@@ -48,3 +48,16 @@ export const CHROME_MESSAGES: Record<string, string> = {
 export const CHROME_BY_PRIMITIVE: Record<string, readonly MessageEntry[]> = {
   Loader: [{ key: chromeKey("loading"), message: CHROME_MESSAGES[chromeKey("loading")]! }],
 };
+
+/** App-shell chrome — strings the design packs bake into the application shell
+ *  (`app-shell.hbs`: the 404 route text, the skip-to-content link).  Unlike
+ *  primitive chrome the shell is ALWAYS rendered, so these are NOT driven by an
+ *  authored call node: they translate only when the app is ALREADY i18n-enabled
+ *  by its authored strings (never flip i18n on for a string-less app), and the
+ *  catalog builders merge them under that same gate.  Shell emitters read
+ *  `APP_SHELL_CHROME[chromeKey(name)]` for the source default so the emitted
+ *  `t()` default lines up with the merged catalog entry. */
+export const APP_SHELL_CHROME: Record<string, string> = {
+  [chromeKey("notFound")]: "Not found",
+  [chromeKey("skipToContent")]: "Skip to content",
+};

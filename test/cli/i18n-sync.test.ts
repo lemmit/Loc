@@ -50,8 +50,12 @@ describe("ddd i18n — extract/init/sync", () => {
     const entries = Object.entries(catalog);
     expect(entries.length).toBeGreaterThan(0);
     expect(Object.values(catalog)).toContain("Welcome");
-    // keys are the D-I18N-KEY page-scoped content-hash shape.
-    expect(entries.every(([k]) => /^page\.Welcome\./.test(k))).toBe(true);
+    // Authored page text carries the D-I18N-KEY page-scoped content-hash shape;
+    // an i18n-enabled system also merges the app-shell chrome (`chrome.*`,
+    // M-T1.11).
+    const pageKeys = entries.filter(([k]) => !k.startsWith("chrome."));
+    expect(pageKeys.every(([k]) => /^page\.Welcome\./.test(k))).toBe(true);
+    expect(catalog["chrome.notFound"]).toBe("Not found");
   });
 
   it("init seeds a TODO locale file + a lock snapshot of the source", async () => {
@@ -82,11 +86,16 @@ describe("ddd i18n — extract/init/sync", () => {
     fs.writeFileSync(ddd, SOURCE);
     await runI18nInit(ddd, "fr", { dir });
     const frFile = path.join(dir, "fr.json");
-    const key = Object.keys(readJson(frFile))[0];
-    fs.writeFileSync(frFile, JSON.stringify({ [key]: "Bienvenue" }, null, 2));
+    // Provide a human translation for the page string; leave the other keys
+    // (the merged app-shell chrome, M-T1.11) as their seeded TODOs so the file
+    // is COMPLETE — an unchanged source must then be no new work.
+    const seeded = readJson(frFile);
+    const key = Object.keys(seeded).find((k) => !k.startsWith("chrome."))!;
+    seeded[key] = "Bienvenue";
+    fs.writeFileSync(frFile, JSON.stringify(seeded, null, 2));
 
     await runI18nSync(ddd, { dir });
-    expect(readJson(frFile)).toEqual({ [key]: "Bienvenue" });
+    expect(readJson(frFile)).toEqual(seeded);
   });
 
   it("sync adds a fresh TODO when the source grows a new string", async () => {

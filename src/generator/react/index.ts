@@ -398,6 +398,7 @@ export function generateReactForContexts(
       hasRealtimeHandlers,
       hasWorkflowsIndex,
       authUi,
+      i18nEnabled,
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

@@ -25,15 +25,22 @@
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
+import { APP_SHELL_CHROME } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 
 /** Build the flat, key-sorted `{ key: message }` catalog for one UI.  Pack-chrome
  *  strings (`chrome.<name>`) ride in through `collectUiMessages` used-only, so a
- *  UI that renders a `Loader()` carries `chrome.loading` for translators. */
+ *  UI that renders a `Loader()` carries `chrome.loading` for translators.  The
+ *  always-rendered app-shell chrome (`APP_SHELL_CHROME`) is merged only when the
+ *  UI is already i18n-enabled by its authored strings — the same gate the shell
+ *  emitters use — so a string-less app stays byte-identical (no runtime). */
 function buildUiCatalog(ui: UiIR): Record<string, string> {
   const byKey = new Map<string, string>();
   // Same key ⇒ same content hash ⇒ same message; collapses repeats.
   for (const { key, message } of collectUiMessages(ui)) byKey.set(key, message);
+  if (byKey.size > 0) {
+    for (const [key, message] of Object.entries(APP_SHELL_CHROME)) byKey.set(key, message);
+  }
   const out: Record<string, string> = {};
   for (const key of [...byKey.keys()].sort()) out[key] = byKey.get(key)!;
   return out;

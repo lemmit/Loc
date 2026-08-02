@@ -1,3 +1,4 @@
+import { APP_SHELL_CHROME } from "../generator/_walker/i18n-chrome.js";
 import { collectUiMessages } from "../generator/_walker/i18n-extract.js";
 import type { EnrichedSystemIR } from "../ir/types/loom-ir.js";
 
@@ -25,6 +26,12 @@ export function buildMessageCatalog(sys: EnrichedSystemIR): Record<string, strin
       // no-op that also collapses the same string used at many call sites.
       byKey.set(key, message);
     }
+  }
+  // Always-rendered app-shell chrome (404 text, skip link) — merged only when the
+  // system is already i18n-enabled by its authored strings (the shell emitters'
+  // gate), so a string-less system stays `{}`.
+  if (byKey.size > 0) {
+    for (const [key, message] of Object.entries(APP_SHELL_CHROME)) byKey.set(key, message);
   }
   const out: Record<string, string> = {};
   for (const key of [...byKey.keys()].sort()) out[key] = byKey.get(key)!;

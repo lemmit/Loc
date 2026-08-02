@@ -135,6 +135,15 @@ export interface AppShellVM {
    *  only when actually consumed — an unused binding would be a Biome error in
    *  the generated project.  False ⇒ byte-identical to non-auth output. */
   navUsesSession: boolean;
+  /** App-shell chrome text tokens (M-T1.11, pack-chrome).  Each is either the
+   *  raw source string (byte-identical, i18n off) or a `{t("chrome.<name>", …)}`
+   *  interpolation (i18n on) the shell template drops into its 404 / skip-link
+   *  text position.  The template renders them via `{{{notFoundText}}}` /
+   *  `{{{skipToContentText}}}` (raw triple-stache, so the `t()` call isn't
+   *  HTML-escaped).  Optional: only the React shell threads them today; the
+   *  other frontends' shells stay on their raw templates until ported. */
+  notFoundText?: string;
+  skipToContentText?: string;
 }
 
 /** A named-layout wrapper view-model.  Each slot's JSX is the
