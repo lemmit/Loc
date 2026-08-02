@@ -39,7 +39,7 @@ class AppErrorBoundary extends React.Component<
     if (this.state.error) {
       return (
         <Stack data-testid="app-error" p="md">
-          <Alert color="red" title="Something went wrong">
+          <Alert color="red" title={t("chrome.somethingWentWrong", "Something went wrong")}>
             {this.state.error.message}
           </Alert>
           <Group>

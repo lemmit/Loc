@@ -150,6 +150,19 @@ export interface AppShellVM {
    *  `t("chrome.primaryNav", …)` binding in the frontend's attribute form.
    *  Rendered via `{{{primaryNavAria}}}`. */
   primaryNavAria?: string;
+  /** The app-level error boundary's "Something went wrong" heading.  Two tokens
+   *  because the packs put the SAME string in different positions: a TEXT child
+   *  (`<AlertTitle>{{{errorTitleText}}}</AlertTitle>` — shadcn, shadcnVue) or a
+   *  `title=` ATTRIBUTE on the alert component (`{{{errorTitleAttr}}}` — mantine,
+   *  vuetify).  Both are the raw source string when i18n is off. */
+  errorTitleText?: string;
+  errorTitleAttr?: string;
+  /** `aria-label` attribute fragments (NO leading space) for the mobile nav
+   *  toggle.  Two keys, not one: chakra spells it "Open menu", the
+   *  shadcn/flowbite family "Toggle navigation" — a pack renders whichever token
+   *  matches the string it already carried, so i18n-off stays byte-identical. */
+  openMenuAria?: string;
+  toggleNavAria?: string;
 }
 
 /** A named-layout wrapper view-model.  Each slot's JSX is the
