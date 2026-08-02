@@ -67,6 +67,7 @@ import type {
 import { groupedProjectionNames, readableProjectionNames } from "../../ir/util/projection-read.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
+import { DURATION_UNIT_MS } from "../../util/temporal.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { escapeHtmlAttr } from "./a11y-emit.js";
@@ -1726,7 +1727,17 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // `/orders/:id` detail page.  Each frontend binds a local `id` from the
       // route param in its page-shell; the seam returns the in-scope accessor.
       ctx.usesRouteId = true;
-      return ctx.target.renderRouteId?.() ?? `/* unsupported expr: ${expr.kind} */ undefined`;
+      const routeId = ctx.target.renderRouteId?.();
+      if (routeId === undefined) {
+        // Was a `/* unsupported expr: id */ undefined` placeholder, which made
+        // a detail page silently request the empty id.  A target that hosts
+        // routed pages must bind the route param.
+        throw new Error(
+          `walker: frontend '${ctx.target.framework}' has no renderRouteId seam, but a page body ` +
+            "reads the route `id`.  Bind the route param in the page shell.",
+        );
+      }
+      return routeId;
     }
     case "i18nFormat":
       // Transparent i18n wrapper (M-T1.11).  When a body opts into i18n the
@@ -1736,8 +1747,68 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // wrapped operand so a formatted hole is byte-identical to a format-less
       // one, the format dropped.
       return emitExpr(expr.inner, ctx);
-    default:
-      return `/* unsupported expr: ${expr.kind} */ undefined`;
+    case "duration":
+      // `5 days` — the same fixed-width millisecond translation every backend
+      // uses (`src/util/temporal.ts`'s `DURATION_UNIT_MS`, mirroring the
+      // TypeScript backend's `duration` leaf), so a duration means the same
+      // number on both sides of the wire.
+      return `((${emitExpr(expr.amount, ctx)}) * ${DURATION_UNIT_MS[expr.unit]})`;
+    case "new":
+      // Part construction (`new Shipment { … }`).  A part is a plain record on
+      // the wire exactly as a value object is, so this renders the wire-shaped
+      // object literal — the same treatment the `call` arm gives a VO
+      // construction, whose lowering just happens to produce a `call` instead.
+      return `(${ctx.target.exprObject(
+        expr.fields.map((f) => ({ name: f.name, value: emitExpr(f.value, ctx) })),
+      )})`;
+    case "action-ref": {
+      // A bare handler reference in VALUE position (`onClick: myAction`).  The
+      // primitives that take a handler slot resolve this themselves; reaching
+      // here means it is being used as a value, so emit the bound local — the
+      // shell hoists one named function per action.
+      if (expr.storeName && ctx.target.renderStoreActionCall) {
+        recordStoreUse(ctx, expr.storeName, expr.actionName);
+        return storeLocalFor(ctx, expr.storeName, expr.actionName);
+      }
+      return expr.actionName;
+    }
+    case "this":
+      // No aggregate instance is in scope on a frontend: a page/component body
+      // binds its data through params, state, and api reads.  A `this` here
+      // means a backend-shaped expression reached a page body — an authoring
+      // error the walker cannot paper over.
+      throw new Error(
+        "walker: `this` has no meaning in a page/component body — there is no aggregate " +
+          "instance in scope on a frontend.  Bind the record through a param, `state`, or a " +
+          "QueryView `data:` lambda.",
+      );
+    case "authz-filter":
+      // A policy sentinel the READ path plants for the backends to expand into
+      // a row predicate.  It has no client-side meaning (and rendering one
+      // would leak the policy shape to the browser); the frontend evaluates
+      // gates through the closed `_frontend/gate-expr.ts` instead.
+      throw new Error(
+        `walker: authorization filter for '${expr.aggregate}' reached a page/component body. ` +
+          "Record-level policy is enforced server-side; a UI gate belongs in `requires`.",
+      );
+    default: {
+      // EXHAUSTIVENESS — the frontend twin of `_expr/target.ts`'s `never`
+      // check.  Every `ExprIR.kind` must have an arm above; a new kind is a
+      // COMPILE ERROR here, on every frontend at once, instead of silently
+      // degrading to a `/* unsupported expr: … */ undefined` placeholder that
+      // makes the generated project blank or NaN at that spot.
+      //
+      // That placeholder is what let `paren` emit `undefined * c` unnoticed
+      // for as long as it did.  It no longer exists: a kind that genuinely
+      // cannot render on a frontend gets an explicit arm that throws (or a
+      // `loom.*` validator gate), never a comment.
+      const never: never = expr;
+      throw new Error(
+        `walker: no emitExpr arm for ExprIR kind '${(never as ExprIR).kind}'. ` +
+          `Add one — a frontend that cannot render this kind must throw or be gated at ` +
+          `IR-validate, not emit a placeholder.`,
+      );
+    }
   }
 }
 
