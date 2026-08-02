@@ -1018,6 +1018,9 @@ function printProjection(node: import("../generated/ast.js").Projection): string
   for (const j of node.joins) {
     items.push(`join ${j.aggregate.$refText} as ${j.alias} on ${printExpr(j.idRef)}`);
   }
+  if (node.groupBys.length > 0) {
+    items.push(`group by ${node.groupBys.map(printExpr).join(", ")}`);
+  }
   if (node.selects.length > 0) {
     const sels = node.selects.map((s) => `${s.field} = ${printExpr(s.expr)}`).join(", ");
     items.push(`select ${sels}`);

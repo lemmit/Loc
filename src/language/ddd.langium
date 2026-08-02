@@ -1500,6 +1500,14 @@ ProjectionMember:
 // reserving the pervasive domain word `order` needs a wider soft-keyword sweep
 // than this surface-only slice warrants, and ordering is only observable once
 // the read is actually emitted (paged reads).
+//
+// `group by <col>, …` (M-T4.2) makes the projection a GROUPED read model: one
+// row per distinct value of the grouping columns, aggregate `select`s computed
+// per group in SQL, per-row `select`s restricted to the grouping columns
+// (`loom.projection-groupby-*` gates).  `group` stays a SOFT keyword
+// (CommonSoftKeywords) so a field / value named `group` keeps parsing; rows
+// come back ordered by the grouping columns so the read is deterministic
+// across backends.
 // A query-time projection's `from` source — an AGGREGATE (read through its
 // repository), a WORKFLOW (read through its persisted instance / saga-state
 // rows, `instanceWireShape`), or another materialized PROJECTION (read through
@@ -1514,6 +1522,7 @@ fragment ProjectionQueryClauses:
     ('where' filter=Expression)?
     IgnoringClause?
     (joins+=ProjectionJoin)*
+    ('group' 'by' groupBys+=Expression (',' groupBys+=Expression)*)?
     ('select' selects+=ProjectionSelect (',' selects+=ProjectionSelect)*)?;
 
 // A by-id follow: resolve `<idRef>` (types to `<Aggregate> id`) to a loaded
@@ -1860,7 +1869,7 @@ Parameter:
 CommonSoftKeywords returns string:
       'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
-      | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
+      | 'every' | 'favicon' | 'filter' | 'group' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
       | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'

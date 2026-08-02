@@ -131,17 +131,18 @@ describe("loom.projection-whole-table-aggregation-unsupported (per-backend)", ()
   }
 });
 
-describe("loom.projection-groupby-unsupported", () => {
-  it("rejects mixing an aggregation with a per-row select", async () => {
+describe("loom.projection-groupby-missing", () => {
+  it("rejects mixing an aggregation with a per-row select when no 'group by' declares the grouping", async () => {
     // One aggregate + one per-row column is a GROUP BY — one row per distinct
-    // `code`, not one row for the table.  Reserved, not guessed at.
+    // `code`, not one row for the table.  The clause exists now (M-T4.2), so
+    // the diagnostic names the fix instead of reserving the combination.
     expect(
       await codes(
         context(`projection Rows { code: string  orders: int
           from Order as o
           select code = o.code, orders = count }`),
       ),
-    ).toContain("loom.projection-groupby-unsupported");
+    ).toContain("loom.projection-groupby-missing");
   });
 
   it("accepts an ALL-aggregate select (the singleton)", async () => {
@@ -151,7 +152,18 @@ describe("loom.projection-groupby-unsupported", () => {
           from Order as o
           select orders = count, revenue = sum(o.total) }`),
       ),
-    ).not.toContain("loom.projection-groupby-unsupported");
+    ).not.toContain("loom.projection-groupby-missing");
+  });
+
+  it("accepts the mix once 'group by' declares the grouping columns", async () => {
+    expect(
+      await codes(
+        context(`projection Rows { code: string  orders: int
+          from Order as o
+          group by o.code
+          select code = o.code, orders = count }`),
+      ),
+    ).not.toContain("loom.projection-groupby-missing");
   });
 });
 
