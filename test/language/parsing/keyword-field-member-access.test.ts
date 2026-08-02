@@ -45,8 +45,34 @@ describe("keyword-named fields are readable via postfix `.` (BUG-004)", () => {
     expect(ok, err).toBe(true);
   });
 
+  // `page` was the last member of the `paged` wire envelope with NO spelling:
+  // `rows.page` did not parse, so a page body could read `rows.total` /
+  // `rows.pageSize` / `rows.totalPages` off a paged `QueryView` binding but not
+  // the page NUMBER the backend sent (M-T1.3 Defect B).  Same BUG-004 class —
+  // the framework filled a field domain code could never read — and the same
+  // fix: `page` in `MemberName`.  It only ever failed AFTER a `.`, which is why
+  // it survived: `page` was already an identifier in nameRef and paramName
+  // position, so nothing else about it looked reserved.
+  it("reads the paged envelope's `page` member (M-T1.3 Defect B)", async () => {
+    const { ok, err } = await parsesClean(`system S {
+      subdomain D { context C {
+        aggregate A { name: string }
+        repository As for A { }
+      } }
+      api Api from D
+      ui U {
+        api Q: Api
+        page P {
+          route: "/p"
+          body: QueryView { of: Q.A.all, data: rows => Text { rows.page } }
+        }
+      }
+    }`);
+    expect(ok, err).toBe(true);
+  });
+
   it("reads several keyword-named fields via `.` (the whole class)", async () => {
-    for (const kw of ["resource", "kind", "parent", "state", "query", "error"]) {
+    for (const kw of ["resource", "kind", "parent", "state", "query", "error", "page"]) {
       const { ok, err } = await parsesClean(`context C {
         aggregate A {
           name: string

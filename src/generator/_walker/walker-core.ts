@@ -51,7 +51,7 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
-import { pagedReturn } from "../../ir/stdlib/generics.js";
+import { PAGED_META_MEMBERS, pagedReturn } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   ActionIR,
@@ -587,6 +587,15 @@ export interface WalkEnv {
    *  `rows.items` / `rows.totalPages` have to be resolved against something
    *  else.  Absent on every JSX target (they keep the envelope verbatim). */
   pagedListBindings?: ReadonlyMap<string, string>;
+  /** Lambda params bound to an AUTO-paged query result — a hand-written
+   *  `QueryView { of: X.all }` whose body was written for an array, so the
+   *  binding is UNWRAPPED to the envelope's `items` — mapped to the enclosing
+   *  ENVELOPE expression (`<hook>.data`).  A page-metadata read off such a
+   *  binding (`rows.total`) belongs to the envelope, not to the row array it
+   *  was unwrapped to, so the member walk re-roots it here.  Empty under
+   *  explicit `paged: true` (the binding IS the envelope) and on any target
+   *  owning the resolution through `renderPagedEnvelopeMember`. */
+  pagedEnvelopeBindings?: ReadonlyMap<string, string>;
   /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
    *  `CreateForm(of:, onSubmit:)` lambda, `create` is the mutation hook
@@ -1545,11 +1554,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
       }
       // A member read off a PAGED query binding, on a target whose Model does
-      // not hold the envelope (Feliz decodes the rows and the page count into
-      // separate fields).  `rows.items` there is a plain list and `rows
-      // .totalPages` lives elsewhere entirely, so the target resolves both;
-      // returning undefined falls through to the verbatim access.  Every JSX
-      // target keeps the envelope and omits the seam.
+      // not hold the envelope (Feliz decodes the rows and the page counts into
+      // separate fields).  `rows.items` there is a plain list and `rows.total`
+      // / `rows.totalPages` live elsewhere entirely, so the target resolves
+      // them; returning undefined falls through to the verbatim access.  Every
+      // JSX target keeps the envelope and omits the seam.
       if (expr.receiver.kind === "ref" && ctx.target.renderPagedEnvelopeMember) {
         const handle = ctx.pagedListBindings?.get(expr.receiver.name);
         if (handle !== undefined) {
@@ -1560,6 +1569,21 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
           });
           if (resolved !== undefined) return resolved;
         }
+      }
+      // Page METADATA read off an AUTO-paged binding (`rows.total`).  The
+      // binding was unwrapped to the envelope's row array so the body's
+      // `Table { rows: rows }` still iterates records — which puts `total` and
+      // its siblings one level too deep (`<hook>.data.items.total`: undefined
+      // at runtime, a type error at build).  Re-root them on the envelope.
+      // `items` is deliberately NOT re-rooted: on an unwrapped binding `rows`
+      // IS the array, so `rows.items` is the author's own mistake, not ours.
+      if (
+        expr.receiver.kind === "ref" &&
+        ctx.pagedEnvelopeBindings &&
+        PAGED_META_MEMBERS.has(expr.member)
+      ) {
+        const envelope = ctx.pagedEnvelopeBindings.get(expr.receiver.name);
+        if (envelope !== undefined) return `${envelope}.${expr.member}`;
       }
       // Plain JS member access: `<recv>.<member>`.  Recursive
       // emit on the receiver — if it was a hook-eligible chain

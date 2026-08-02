@@ -82,9 +82,11 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       // `sortKey`/`sortDir` (string-init "", unsorted) drive column sort;
       // `pageNum` (1-based int) drives the client-side pager.  Consumed on the
       // JSX frontends; Feliz/HEEx ignore the Table's sort/page args (plain
-      // table).  Named `pageNum`, not `page`, because `page` is a reserved
-      // grammar keyword (`page X { … }`) — a `page` state field would break the
-      // `unfold`-to-source round-trip.
+      // table).  Named `pageNum` for readability beside `pageSize`, not out of
+      // necessity: `page` is a soft keyword in every identifier position now
+      // (M-T1.3 Defect B), so a `page` state field parses and round-trips
+      // through `unfold`.  Left as `pageNum` because renaming it is emitted-
+      // output churn across six frontends for no behavioural gain.
       state: [
         ...filterStateFields(filters).map((f) => f.name),
         "sortKey",

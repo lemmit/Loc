@@ -814,7 +814,10 @@ StateFieldName returns string:
     // StateFieldName-only extras (structural keywords not in the shared
     // value core; page/component `state {}` field name).  Composing CommonSoftKeywords here also closes the
     // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
-;
+    // `page` is admissible here but NOT in `CommonSoftKeywords`: a `state {}`
+    // body holds only field declarations, so it can't collide with the `page`
+    // declaration keyword the way a `ui` body member could.
+    | 'page';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -1702,7 +1705,7 @@ FieldAccess returns string:
 Property:
     name=(ID | CommonSoftKeywords
         // Property-only (soft here but not in every value position):
-        | 'await')
+        | 'await' | 'page')
     ':' type=TypeRef
     // `provenanced` / `sensitive(...)` / the access modifier are pure
     // flag-like keywords carrying no expression content, so they parse in
@@ -2104,7 +2107,7 @@ LValueIdent returns string:
     // value core; assignment / call statement target).  Composing CommonSoftKeywords here also closes the
     // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
     | 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules'
-    | 'permissions' | 'ui' | 'views' | 'workflows';
+    | 'page' | 'permissions' | 'ui' | 'views' | 'workflows';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -2265,7 +2268,7 @@ MemberName returns string:
     // value core; member access after `.`).  Composing CommonSoftKeywords here also closes the
     // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
     | 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id'
-    | 'ignoring' | 'modules' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows';
+    | 'ignoring' | 'modules' | 'page' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows';
 
 // Lambdas accept either a single expression body or a brace-wrapped block of
 // statements.  Block bodies are required for multi-statement event handlers in

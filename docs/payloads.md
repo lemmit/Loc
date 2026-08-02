@@ -87,6 +87,12 @@ type (EF, Ecto `limit`/`offset`, …) — each maps to this one DTO.
 | Python / FastAPI | `PagedResult[T]` |
 | Java / Spring | `Paged<T>` over Spring Data paging |
 
+The **frontend** side of that guarantee is `QueryView`'s `data:` binding: a page
+body reads the rows and the page metadata (`rows.total`, `rows.totalPages`) off
+one binding, whichever paging mode the query is in. See
+[page-metamodel.md §9.2](page-metamodel.md#92-queryview-over-a-paged-read--the-envelopes-page-metadata)
+for the two modes and the per-frontend support table.
+
 ---
 
 ## 3. Discriminated unions

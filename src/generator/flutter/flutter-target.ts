@@ -192,14 +192,14 @@ export const flutterTarget: WalkerTarget = {
   // `rows.totalPages` for its pager) keeps the whole page.
   renderQueryDataAccess: (handle: string, _single, _paged, autoPaged) =>
     autoPaged ? `${lowerFirst(handle)}.items` : lowerFirst(handle),
-  // The Flutter read provider decodes the paged `.all` envelope straight to a
-  // `List<T>` (pulls `items` out), so the binding IS the array and the
-  // scaffold's `rows.items` unwrap is a no-op.  `totalPages` has nowhere to
-  // come from here — Flutter keeps no page count — so it falls through to the
-  // verbatim access, which is what the (unrendered, `serverPagedControls`-less)
-  // pager would have read anyway.
-  renderPagedEnvelopeMember: ({ member, binding }) =>
-    member === "items" || member === "totalPages" ? `${binding}.${member}` : undefined,
+  // A paged read's provider yields `LoomPage<T>`, and the `.when(data: …)`
+  // callback always binds that carrier — so EVERY member of the envelope,
+  // `items` included, is a field of it.  Named off the read's HANDLE rather
+  // than off `binding`: an auto-paged body has already narrowed `binding` to
+  // `.items` (see `renderQueryDataAccess` above), and appending `.total` to the
+  // row list is exactly the bug this seam exists to avoid.  (The seam only
+  // fires on a paged read, so the handle always names the carrier here.)
+  renderPagedEnvelopeMember: ({ member, handle }) => `${lowerFirst(handle)}.${member}`,
 
   /** Dart NAMED RECORD for a find's query bag — `(page: 1, pageSize: 10, …)`.
    *  The shared default is a JavaScript object literal, whose bare `page:` keys

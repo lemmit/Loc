@@ -83,7 +83,7 @@ describe("feliz multi-page routing", () => {
     // Msg carries UrlChanged + the action + the read's Loaded.
     expect(app).toContain("| UrlChanged of string list");
     expect(app).toContain("| Inc");
-    expect(app).toContain("| AllProductsLoaded of Result<Product list, string>");
+    expect(app).toContain("| AllProductsLoaded of Result<Product list * PageMeta, string>");
     // init parses the URL; update re-parses on UrlChanged.
     expect(app).toContain("CurrentPage = parseUrl (Router.currentPath ())");
     expect(app).toContain(

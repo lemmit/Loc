@@ -3,13 +3,13 @@
 // detection (via emitExpr), navigation, lambda handlers, and aggregate
 // lookups, so they pull the core walk/expr/stmt helpers.
 
-import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
 import { localizedAriaLabelAttr, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
+import { isPagedQuery } from "../paged-query.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   actionHandlerName,
@@ -355,22 +355,6 @@ function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undef
   return name && ctx.aggregatesByName.has(name) ? name : undefined;
 }
 
-/** Does the `of:` query return the `Paged<T>` envelope (the paged-by-default
- *  auto-`findAll`, M-T2.6)?  Resolved from the owning context's repository the
- *  same way the hook-arg adjuster does — so a hand-written
- *  `QueryView { of: X.all, data: rows => Table { rows: rows } }` unwraps the
- *  envelope automatically instead of `.map`-ing over `{items, page, …}`.
- *  Event-sourced `all` (an unpaged fold) and user finds returning `T[]` return
- *  false, so they keep bare-array semantics. */
-function queryIsPaged(ofArg: ExprIR, ctx: WalkContext): boolean {
-  const detected = tryDetectApiHook(ofArg, ctx);
-  if (detected?.kind !== "aggregate") return false;
-  const bc = ctx.bcByAggregate.get(detected.aggregateName);
-  const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
-  const find = repo?.finds.find((f) => f.name === detected.operation);
-  return find ? !!pagedReturn(find.returnType) : false;
-}
-
 export function emitQueryView(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -420,7 +404,12 @@ export function emitQueryView(
   // no pager) — byte-identical to the pre-flip behaviour.  Either way the
   // empty/non-empty length checks read `.items` (`paged` drives the template).
   const explicitPaged = boolNamed(call, "paged");
-  const autoPaged = !explicitPaged && !single && queryIsPaged(ofArg, ctx);
+  // Does the `of:` query return the `Paged<T>` envelope (the paged-by-default
+  // auto-`findAll`, M-T2.6)?  Through the SHARED derivation, so the unwrap here
+  // and each frontend's wire decode can't answer it differently — see
+  // `_walker/paged-query.ts`.  Event-sourced `all` (an unpaged fold) and user
+  // finds returning `T[]` are false, and keep bare-array semantics.
+  const autoPaged = !explicitPaged && !single && isPagedQuery(ofArg, ctx);
   const paged = explicitPaged || autoPaged;
 
   const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
@@ -449,13 +438,40 @@ export function emitQueryView(
     const dataAccess =
       ctx.target.renderQueryDataAccess?.(queryExpr, single, paged, autoPaged) ??
       (autoPaged ? `${queryExpr}.data.items` : `${queryExpr}.data`);
+    // Both paged-binding maps below are keyed by the lambda's param NAME, so a
+    // nested QueryView that reuses the name (`rows`) must SHADOW the outer
+    // entry, not inherit it — otherwise an inner binding resolves its members
+    // against the outer query's handle.  Rebind unconditionally: set when this
+    // QueryView owns an entry for the param, delete when it doesn't.
+    const rebind = (
+      inherited: ReadonlyMap<string, string> | undefined,
+      own: string | undefined,
+    ): ReadonlyMap<string, string> | undefined => {
+      if (own === undefined && !inherited?.has(data.param)) return inherited;
+      const next = new Map(inherited ?? []);
+      if (own === undefined) next.delete(data.param);
+      else next.set(data.param, own);
+      return next;
+    };
     // On a target whose Model doesn't hold the envelope (Feliz), record which
     // query handle this paged binding came from, so the member walk can resolve
     // the scaffold's `rows.items` / `rows.totalPages` against it.
-    const childPagedListBindings =
-      paged && ctx.target.renderPagedEnvelopeMember
-        ? new Map([...(ctx.pagedListBindings ?? []), [data.param, queryExpr] as const])
-        : ctx.pagedListBindings;
+    const childPagedListBindings = rebind(
+      ctx.pagedListBindings,
+      paged && ctx.target.renderPagedEnvelopeMember ? queryExpr : undefined,
+    );
+    // AUTO-paged only: the binding above is the envelope's row ARRAY, so the
+    // envelope's page metadata (`rows.total`) has to be re-rooted one level up
+    // — same access with the unwrap declined.  Explicit `paged: true` needs no
+    // entry (the binding already IS the envelope), and a target owning the
+    // resolution through `renderPagedEnvelopeMember` needs none either.
+    const childPagedEnvelopeBindings = rebind(
+      ctx.pagedEnvelopeBindings,
+      autoPaged && !ctx.target.renderPagedEnvelopeMember
+        ? (ctx.target.renderQueryDataAccess?.(queryExpr, single, paged, false) ??
+            `${queryExpr}.data`)
+        : undefined,
+    );
     // A LIST query records its row aggregate on a separate channel — see
     // `WalkContext.listRowAggregates`.  `DataGrid` reads it to type its columns,
     // which is the only way to know a `money` column from a text one (page
@@ -475,6 +491,7 @@ export function emitQueryView(
       listRowAggregates: listAgg
         ? new Map([...(ctx.listRowAggregates ?? []), [data.param, listAgg]])
         : ctx.listRowAggregates,
+      pagedEnvelopeBindings: childPagedEnvelopeBindings,
     };
     dataJsx = data.body ? walk(data.body, childCtx, depth + 2) : "null";
     propagateChildFlags(ctx, childCtx);

@@ -547,8 +547,12 @@
   "overlap": [],
   "ownTable": [],
   "page": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "paged": [
     "fieldName",

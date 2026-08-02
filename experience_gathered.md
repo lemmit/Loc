@@ -3485,3 +3485,92 @@ nine new ones* for cases that had never had a golden — untracked, so easy to
 `git add -A` into the commit without noticing. Read `git status` after a
 rebaseline and clean what you did not intend; a golden is a reviewed answer key,
 and nine unreviewed ones are nine unreviewed decisions.
+
+## 63. An "unwrap for convenience" binding splits one value into two levels — and the second level goes missing (2026-08-01)
+
+M-T1.3 Defect B: `.all` is paged-by-default, so a `QueryView`'s `.data` is the
+envelope `{items, page, pageSize, total, totalPages}`. `rows.total` emitted
+`<hook>.data.items.total` — `undefined` at runtime, `TS2339` at build. The
+count that the backend had already computed, parsed and typed was unreachable
+from the DSL, and the mission that found it routed around it.
+
+**The cause was a convenience that is individually correct.** A hand-written
+`QueryView { of: X.all, data: rows => Table { rows: rows } }` was written for
+an array, so the binding UNWRAPS to `.items` and the body keeps iterating
+records without the author knowing the read went paged. That unwrap is right —
+and it silently redefines what every OTHER member read off that binding means,
+because the rows and the metadata live at different levels of the same object.
+The unwrap had exactly one consumer in mind and no story for the rest of the
+shape.
+
+- **When a binding is rewritten for one member's benefit, enumerate the other
+  members before shipping it.** The fix is not to undo the unwrap (that breaks
+  the iteration) but to re-root the members the unwrap moved. Deriving that set
+  from the carrier shape (`GENERIC_SHAPES.paged`) rather than re-spelling it
+  means widening the envelope reaches the frontends without a second edit.
+- **The exception proves it's a rewrite, not a projection:** `items` is
+  deliberately NOT re-rooted. On an unwrapped binding `rows` already IS the
+  array, so re-rooting `rows.items` would repair the author's own mistake into
+  something that reads a different value and looks right.
+
+**Two layers disagreeing about the same boolean is a design bug, not a gate.**
+The walker DERIVED paged-ness from the find's return type; both frontend read
+collectors keyed their wire decode on the EXPLICIT `paged: true` flag. Both
+readings are defensible, and apart they emit F# that references a Model field
+the decoder never produced. My first instinct was to name the disagreement with
+a `loom.*` diagnostic — which is the right move for a capability a target
+genuinely lacks, and the wrong move here, because nothing was missing: the two
+sites just had to ask the same question. One derivation
+(`_walker/paged-query.ts`) with three consumers makes the disagreement
+unrepresentable. **A derived flag and a declared flag sharing a name are two
+flags; before gating the gap between them, check whether they should have been
+one.**
+
+Unifying it immediately surfaced two latent bugs that the disagreement had been
+hiding: an api function whose declared return type didn't match its own decoder
+(unreachable while a control-less read was never paged), and a realtime
+`Refetch` Msg hop keyed on paged-ness when what it actually preserves is
+page/sort CONTROLS. **A stale condition doesn't just misbehave — it keeps the
+code paths behind it from ever being exercised.**
+
+**A member with no SPELLING is invisible to every test that reads code.**
+The envelope's `page` was unreachable for a different reason than `total`:
+`page` is a declaration keyword, so `rows.page` didn't parse at all. That is
+easy to file as "a grammar limit, out of scope" — I did, twice — because
+nothing in the feature's own code is wrong. But it is the same
+declarable-but-unreadable class as M-T5.18 Track C's BUG-004 (`e.resource`):
+the framework fills a field the language can't name. The repo already had the
+mechanism (`CommonSoftKeywords` + per-position extras) and already had the
+exhaustive guard (`keyword-identifier-coverage.snapshot.json`, which caught the
+one-line drift and told me the remaining positions). Total cost: four tokens.
+**Before writing "left as found" about a limitation, grep for whether the repo
+already has the machine that fixes it** — a caveat in a doc is a permanent tax
+on every future reader, and this one had a four-token price.
+
+The snapshot also showed the fix was half-done twice: after `MemberName`, `page`
+covered five of six positions, missing `lValue` — a state field you can declare
+and read but never assign. A per-position coverage table beats a "does it parse"
+test precisely because it makes the MISSING cells visible.
+
+**"Or gate it honestly" is a licence to stop, so check what stopping costs.**
+The brief offered "a per-target seam or an explicit gap," and a gap is cheap to
+write and genuinely honest — it fails loudly in the DSL's own terms instead of
+in generated source. That made it easy to ship three gated cases (Flutter
+entirely, auto-paged Feliz, Feliz `pageSize`) and call the feature landed. It
+wasn't: the mission was to make the value reachable, and a compile error is not
+a reachable value. Closing them cost one Dart class and one F# record. **An
+honest gap is the right answer when a target cannot do the thing; it is the
+wrong answer when it merely doesn't do it yet — and the difference is worth
+measuring before writing the diagnostic, not after.**
+
+**Prove the defect, not just the fix.** `tsc --noEmit` on the generated app was
+clean afterwards, which says nothing on its own — the same file hand-edited
+back to `.data.items.total` reproduces `TS2339`. Running the compiler on the
+BEFORE shape is what turns "my change compiles" into "my change closed this."
+
+**Grepping for the seam name in the task description found nothing, because it
+had been renamed.** The brief said the wrinkle lived in `pagedDataIsList`; on
+fresh `main` that boolean was already a richer `renderPagedEnvelopeMember`
+seam, and the only surviving mention was a stale comment (now fixed). A named
+symbol in a task description is a claim about the tree, and it ages like any
+other — grep it first and re-read what you actually find.
