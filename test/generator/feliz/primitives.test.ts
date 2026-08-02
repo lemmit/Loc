@@ -42,12 +42,16 @@ describe("feliz pack primitives", () => {
     const app = generateFelizForContexts([], sys, web).get("src/App.fs")!;
     // Card — a daisyUI card: a `card-title` heading + content in the `card-body`.
     expect(app).toContain('Html.div [ prop.className "card bg-base-100 shadow"');
-    expect(app).toContain(
-      'Html.h3 [ prop.className "card-title"; prop.children [ Html.text "Counter card" ] ]',
+    // Card title + Badge label are user-visible slots — translated through the
+    // generated `I18n` module (M-T1.11), keyed to the catalog.
+    expect(app).toMatch(
+      /Html\.h3 \[ prop\.className "card-title"; prop\.children \[ Html\.text \(\(I18n\.t "page\.\w+\.cardTitle\.\w+" "Counter card"\)\) \] \]/,
     );
     // Divider → daisyUI `divider`, Badge → a labelled daisyUI badge span.
     expect(app).toContain('Html.div [ prop.className "divider" ]');
-    expect(app).toContain('Html.span [ prop.className "badge badge-neutral"; prop.text "beta" ]');
+    expect(app).toMatch(
+      /Html\.span \[ prop\.className "badge badge-neutral"; prop\.children \[ Html\.text \(\(I18n\.t "page\.\w+\.badge\.\w+" "beta"\)\) \] \]/,
+    );
     // The nested Stack content still rides the walker (Card body → Stack).
     expect(app).toContain("prop.onClick (fun _ -> inc())");
   });

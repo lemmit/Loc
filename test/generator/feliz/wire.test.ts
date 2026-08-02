@@ -198,7 +198,10 @@ describe("feliz wire layer", () => {
     expect(app).toContain("let remoteList (r: Remote<'T list>)");
     // …and QueryView is a CALL to it (four branches inline, data as a lambda).
     expect(app).toContain("View.remoteList model.AllProducts");
-    expect(app).toContain('(Html.p [ Html.text "Loading…" ])');
+    // The branch labels are user-visible slots — translated (M-T1.11).
+    expect(app).toMatch(
+      /\(Html\.p \[ Html\.text \(\(I18n\.t "page\.\w+\.text\.\w+" "Loading…"\)\) \]\)/,
+    );
     expect(app).toContain("(fun allProducts ->");
     // The `For` iterates the bound rows via `yield! … List.map`.
     expect(app).toContain("yield! allProducts |> List.map (fun p ->");

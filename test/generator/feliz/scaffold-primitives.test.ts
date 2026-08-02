@@ -82,7 +82,9 @@ describe("feliz scaffold primitives", () => {
       /Html\.a \[ prop\.className "link"; prop\.href \("\/products\/" \+ \w+\.id\)/,
     );
     // Breadcrumb anchors fold a literal route into a static PATH href.
-    expect(app).toContain('Html.a [ prop.className "link"; prop.href "/"; prop.text "Home" ]');
+    expect(app).toMatch(
+      /Html\.a \[ prop\.className "link"; prop\.href "\/"; prop\.children \[ Html\.text \(\(I18n\.t "page\.\w+\.anchor\.\w+" "Home"\)\) \] \]/,
+    );
   });
 
   // Reachability — a scaffold system must PARSE + VALIDATE cleanly.

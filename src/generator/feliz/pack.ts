@@ -42,8 +42,26 @@ function oneLineEl(s: string | undefined): string {
  *  the former and the expression verbatim for the latter. */
 function asChild(text: string | undefined): string {
   const s = (text ?? "").trim();
-  if (s.startsWith("Html.") || s.startsWith("(")) return s;
+  if (isRenderedElement(s)) return s;
   return `Html.text "${s}"`;
+}
+
+/** True when a walker-produced text field came back as an already-rendered
+ *  ELEMENT rather than raw text — an interpolation (`Html.text (string …)`) or
+ *  a parenthesised expression.  Under i18n (M-T1.11) every user-visible literal
+ *  slot arrives in this form (`Html.text (I18n.t "<key>" "<default>")`), so a
+ *  slot that splices its value into an F# string literal must branch here or it
+ *  emits the whole call as visible text. */
+function isRenderedElement(s: string): boolean {
+  return s.startsWith("Html.") || s.startsWith("(");
+}
+
+/** A Feliz PROP for a text slot: `prop.text "…"` for raw text (byte-identical
+ *  to the pre-i18n emission), `prop.children [ … ]` for an already-rendered
+ *  element — `prop.text` takes a `string`, so an element cannot ride it. */
+function textOrChildren(text: string | undefined): string {
+  const s = (text ?? "").trim();
+  return isRenderedElement(s) ? `prop.children [ ${s} ]` : `prop.text "${s}"`;
 }
 
 /** Turn the walker's `testidAttr` context value into a Feliz `prop.custom(…)`
@@ -157,7 +175,11 @@ function alertVariant(color: string): string {
  *  (unwrapped, escaped) text; an optional bold title precedes it. */
 function primitiveAlert(c: Ctx): string {
   const kids: string[] = [];
-  if (c.hasTitle) kids.push(`Html.strong [ Html.text "${String(c.title ?? "")}" ]`);
+  // The title is a user-visible slot, so under i18n (M-T1.11) it arrives as an
+  // already-rendered `Html.text (…)` element rather than raw text — `asChild`
+  // takes either form (splicing the element into a string literal would emit
+  // the whole `I18n.t` call as text).
+  if (c.hasTitle) kids.push(`Html.strong [ ${asChild(String(c.title ?? ""))} ]`);
   kids.push(asChild(String(c.message ?? "")));
   const variant = alertVariant(String(c.color ?? "red"));
   return `Html.div [ prop.className "alert ${variant}"; prop.role "alert"; prop.children [ ${kids.join("; ")} ] ]`;
@@ -193,17 +215,22 @@ function primitiveKeyValueRow(c: Ctx): string {
  *  text span (breadcrumb leaf).  `to` is a JS expression (a quoted literal or a
  *  ref) — a literal folds into a static `"/path"`, a ref is used verbatim. */
 function primitiveAnchor(c: Ctx): string {
+  // The label is a user-visible slot — raw text normally, an already-rendered
+  // `Html.text (I18n.t …)` element under i18n (M-T1.11).  The no-`to` branch
+  // takes either through `asChild` (byte-identical for raw text); the linked
+  // branch needs the Badge/Button split, since `prop.text` takes a string.
   const label = String(c.label ?? "");
-  if (!c.hasTo) return `Html.span [ Html.text "${label}" ]`;
+  if (!c.hasTo) return `Html.span [ ${asChild(label)} ]`;
   const to = String(c.to ?? '"/"');
   const lit = to.match(/^"(.*)"$/);
   const href = lit ? `"${lit[1]}"` : `${to}`;
+  const inner = textOrChildren(label);
   // Plain daisyUI `link` (underlined, inherits `base-content`) — NOT
   // `link-primary`: several daisyUI themes' primary colour fails WCAG AA on
   // `base-100` (e.g. `corporate` #4d6eff → 4.2:1 < 4.5:1, an axe serious
   // color-contrast violation).  `base-content` is theme-guaranteed readable, and
   // the underline carries the link affordance without relying on colour (1.4.1).
-  return `Html.a [ prop.className "link"; prop.href ${href}; prop.text "${label}" ]`;
+  return `Html.a [ prop.className "link"; prop.href ${href}; ${inner} ]`;
 }
 
 /** Table(rows:, ...Column(header, accessor)) — the list-page data table.  Rows
@@ -390,11 +417,9 @@ function primitiveCard(c: Ctx): string {
 }
 
 function primitiveBadge(c: Ctx): string {
-  const label = String(c.label ?? "").trim();
-  const inner =
-    label.startsWith("Html.") || label.startsWith("(")
-      ? `prop.children [ ${label} ]`
-      : `prop.text "${label}"`;
+  // The label is a user-visible slot — raw text, or an already-rendered
+  // `Html.text (I18n.t …)` element under i18n (M-T1.11).
+  const inner = textOrChildren(String(c.label ?? ""));
   return `Html.span [ prop.className "badge badge-neutral"; ${inner} ]`;
 }
 
@@ -416,12 +441,9 @@ function primitiveButton(c: Ctx): string {
   // — emitted as prop.ariaLabel when the visible text is an unhelpful glyph.
   const ariaLabel = String(c.ariaLabel ?? "").trim();
   if (ariaLabel !== "") props.push(`prop.ariaLabel "${ariaLabel.replace(/"/g, '\\"')}"`);
-  const label = String(c.label ?? "").trim();
-  if (label.startsWith("Html.") || label.startsWith("(")) {
-    props.push(`prop.children [ ${label} ]`);
-  } else {
-    props.push(`prop.text "${label}"`);
-  }
+  // The label is a user-visible slot — raw text, or an already-rendered
+  // `Html.text (I18n.t …)` element under i18n (M-T1.11).
+  props.push(textOrChildren(String(c.label ?? "")));
   return `Html.button [ ${props.join("; ")} ]`;
 }
 
@@ -715,9 +737,13 @@ function primitiveModalControlled(c: Ctx): string {
   const model = `model.${field}`;
   const close = `Set${field}`;
   const kids: string[] = [];
+  // The title is a user-visible slot — raw text normally, an already-rendered
+  // `Html.text (I18n.t …)` element under i18n (M-T1.11).  `prop.text` takes a
+  // string, so the element form goes through `prop.children` instead (the same
+  // split `Badge`/`Button`/`Anchor` use); raw text stays byte-identical.
   if (c.hasTitle)
     kids.push(
-      `Html.h3 [ prop.className "text-lg font-bold"; prop.text "${String(c.title ?? "")}" ]`,
+      `Html.h3 [ prop.className "text-lg font-bold"; ${textOrChildren(String(c.title ?? ""))} ]`,
     );
   const body = asElement(String(c.childrenJsx ?? ""));
   const action = `Html.div [ prop.className "modal-action"; prop.children [ Html.button [ prop.className "btn"; prop.onClick (fun _ -> dispatch (${close} false)); prop.text "Close" ] ] ]`;

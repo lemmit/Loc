@@ -1,37 +1,41 @@
 // ---------------------------------------------------------------------------
-// i18n emission — the React translation-runtime seam (M-T1.11, i18n.md Phase 2).
+// i18n emission — the shared translation-runtime seam (M-T1.11, i18n.md Phase 2).
 //
 // `localizedText` is the drop-in replacement for the
 // `unwrapTextLiteral(firstPositionalContent(call, ctx), ctx.target.escapeText)`
 // idiom every user-visible text emitter uses. It has THREE behaviours:
 //
 //   1. A plain string literal in a body that opted into i18n (`ctx.i18nPrefix`
-//      set — only the React walk sets it) → a translation call
+//      set — the React / Vue / Svelte / Angular / Feliz walks set it) → a
+//      translation call
 //      `{t("<prefix>.<role>.<hash>", "<default>")}`, keyed identically to the
 //      `.loom/messages.en.json` catalog (via the SHARED `messageKey`). It also
 //      records the `t` import so the page shell emits `import { t } from
 //      "../i18n"` (depth-rewritten for nested pages by `renderImportLines`).
-//   2. A plain string literal with NO i18n (`ctx.i18nPrefix` absent — every
-//      non-React target, and React apps with no extractable strings) → the raw
+//   2. A plain string literal with NO i18n (`ctx.i18nPrefix` absent — a target
+//      with no runtime yet, and any app with no extractable strings) → the raw
 //      escaped literal. BYTE-IDENTICAL to the pre-i18n path.
 //   3. An interpolated slot — a lowered backtick template (`` `Order {o.id}` ``)
 //      re-detected as an ICU message via `icuFromConcat` → `{t("<key>", "Order
 //      {id}", { id: o.id })}`, keyed identically to the catalog. Only under
-//      i18n; every non-React target + a dynamic-but-untranslatable slot keep the
-//      raw path.
+//      i18n; a target with no runtime + a dynamic-but-untranslatable slot keep
+//      the raw path.
 //   4. A dynamic slot with no literal text (a bare `ref`/state, `count + 1`) →
 //      the existing `renderTextContent` interpolation. Never translated (no
 //      stable source string), unchanged on every target.
 //
-// The translation runtime is a tiny generated `src/i18n.ts` shim (see
-// `src/generator/_frontend/i18n-runtime.ts`): a `messages[key] ?? default`
-// lookup plus `intl-messageformat` for the ICU placeholders. A hole
-// may carry a `, format` suffix (M-T1.11) — the format text is spliced into the
-// message here (`icuFromConcat`), and the runtime locale-formats the raw value.
-// Plural/select (brace-bodied ICU) are a later slice; the extractor gates them.
+// The translation runtime is a tiny generated `src/i18n.ts` shim on the four JS
+// frontends (see `src/generator/_frontend/i18n-runtime.ts`): a
+// `messages[key] ?? default` lookup plus `intl-messageformat` for the ICU
+// placeholders. A frontend whose runtime is a different LANGUAGE re-expresses
+// the same two halves and overrides the `renderTranslate` seam to spell the call
+// (Feliz: an `I18n` F# module in `App.fs`, reaching the SAME
+// `intl-messageformat` through Fable interop). A hole may carry a `, format`
+// suffix (M-T1.11) — the format text is spliced into the message here
+// (`icuFromConcat`), and the runtime locale-formats the raw value.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { ariaLabelAttr, escapeHtmlAttr } from "./a11y-emit.js";
 import { chromeKey } from "./i18n-chrome.js";
 import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
@@ -43,6 +47,37 @@ import { emitExpr, renderTextContent, type WalkContext } from "./walker-core.js"
  *  default one-hop `../` shape; `renderImportLines` rewrites it to the page's
  *  real depth (`../../i18n` for a `src/pages/orders/list.tsx`). */
 const I18N_MODULE = "../i18n";
+
+/** `t()` always returns a `string`, so the interpolation seam is told so.  The
+ *  four JSX/markup targets ignore `exprType` (interpolation auto-coerces), which
+ *  keeps them byte-identical; Feliz and Flutter read it to drop the redundant
+ *  `string (…)` / `'${…}'` coercion around an already-textual value. */
+const TRANSLATED: TypeIR = { kind: "primitive", name: "string" };
+
+/** Spell one call into the generated translation runtime, and record the `t`
+ *  import the JS frontends need.
+ *
+ *  The four JS frontends share one `t(key, default, values?)` shim, so the
+ *  default spelling here is that JavaScript call — every existing call site is
+ *  byte-identical to before this indirection.  A frontend whose runtime is a
+ *  different LANGUAGE (Feliz's F#, Flutter's Dart) supplies `renderTranslate`
+ *  and spells the same call its own way; the key, the default message and the
+ *  ICU hole values are the shared part, so the catalog is unchanged.
+ *
+ *  The `t` import is added unconditionally: a target with no import map (Feliz
+ *  compiles one F# file) simply never reads `WalkResult.imports`. */
+function translateCall(
+  ctx: WalkContext,
+  key: string,
+  message: string,
+  values?: ReadonlyArray<{ name: string; expr: string }>,
+): string {
+  addImport(ctx, I18N_MODULE, "t");
+  if (ctx.target.renderTranslate) return ctx.target.renderTranslate({ key, message, values });
+  const args = [JSON.stringify(key), JSON.stringify(message)];
+  if (values) args.push(`{ ${values.map((v) => `${v.name}: ${v.expr}`).join(", ")} }`);
+  return `t(${args.join(", ")})`;
+}
 
 /** The raw text token for a user-visible slot, translating a plain literal
  *  through the generated `t()` helper when the body opted into i18n
@@ -79,8 +114,7 @@ function localizedRawOf(
   const literal = literalString(arg);
   if (literal !== undefined && ctx.i18nPrefix) {
     const key = messageKey(ctx.i18nPrefix, role, literal);
-    addImport(ctx, I18N_MODULE, "t");
-    return ctx.target.renderInterpolation(`t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`);
+    return ctx.target.renderInterpolation(translateCall(ctx, key, literal), TRANSLATED);
   }
   // Interpolated slot (a lowered backtick template) under i18n → an ICU `t()`
   // call: the default carries the named placeholders (`"Order {id}"`), the key
@@ -91,10 +125,10 @@ function localizedRawOf(
     const icu = icuFromConcat(arg);
     if (icu) {
       const key = messageKey(ctx.i18nPrefix, role, icu.positional);
-      addImport(ctx, I18N_MODULE, "t");
-      const values = icu.holes.map((h) => `${h.name}: ${emitExpr(h.expr, ctx)}`).join(", ");
+      const values = icu.holes.map((h) => ({ name: h.name, expr: emitExpr(h.expr, ctx) }));
       return ctx.target.renderInterpolation(
-        `t(${JSON.stringify(key)}, ${JSON.stringify(icu.display)}, { ${values} })`,
+        translateCall(ctx, key, icu.display, values),
+        TRANSLATED,
       );
     }
   }
@@ -161,11 +195,7 @@ export function localizedNamedAttr(
   if (literal === undefined) return "";
   if (ctx.i18nPrefix) {
     const key = messageKey(ctx.i18nPrefix, role, literal);
-    addImport(ctx, I18N_MODULE, "t");
-    return ctx.target.renderAttrBinding(
-      attrName,
-      `t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`,
-    );
+    return ctx.target.renderAttrBinding(attrName, translateCall(ctx, key, literal));
   }
   return ` ${attrName}="${escapeHtmlAttr(literal)}"`;
 }
@@ -196,12 +226,8 @@ export function localizedAriaLabelAttr(
   const literal = literalString(namedArgValue(call, name));
   if (literal !== undefined && ctx.i18nPrefix) {
     const key = messageKey(ctx.i18nPrefix, role, literal);
-    addImport(ctx, I18N_MODULE, "t");
     const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
-    return ctx.target.renderAttrBinding(
-      attrName,
-      `t(${JSON.stringify(key)}, ${JSON.stringify(literal)})`,
-    );
+    return ctx.target.renderAttrBinding(attrName, translateCall(ctx, key, literal));
   }
   return ariaLabelAttr(literal ?? defaultLabel);
 }
@@ -224,12 +250,8 @@ export function localizedAriaLabelAttr(
  *  lines up with the catalog entry. */
 export function localizedChromeAria(ctx: WalkContext, name: string, english: string): string {
   if (ctx.i18nPrefix) {
-    addImport(ctx, I18N_MODULE, "t");
     const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
-    return ctx.target.renderAttrBinding(
-      attrName,
-      `t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})`,
-    );
+    return ctx.target.renderAttrBinding(attrName, translateCall(ctx, chromeKey(name), english));
   }
   return ` aria-label="${escapeHtmlAttr(english)}"`;
 }

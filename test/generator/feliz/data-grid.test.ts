@@ -155,6 +155,11 @@ describe("feliz DataGrid (M-T1.1 slice 10e)", () => {
     // The sibling that makes `selection:` worth having.  `.length` is the JS
     // spelling and `"…" + int` is an F# type error — both would fail `dotnet
     // fable`, neither is visible to a DOM assertion.
-    expect(fs).toContain('("Selected: " + (string (model.SelectedIds.Length)))');
+    // Under i18n (M-T1.11) the interpolated template is an ICU message, so the
+    // `.Length` read lands in the values bag rather than a raw `+` concat — the
+    // JS spelling `.length` and an unstringified `int` are still both F# errors.
+    expect(fs).toContain(
+      '"Selected: {length}" [ "length", box ((string (model.SelectedIds.Length)))',
+    );
   });
 });

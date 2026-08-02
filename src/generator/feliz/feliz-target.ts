@@ -669,6 +669,19 @@ export const felizTarget: WalkerTarget = {
   renderInterpolation: (js: string, exprType?: TypeIR) =>
     isStringType(exprType) ? `Html.text (${js})` : `Html.text (string (${js}))`,
   renderAttrBinding: (name: string, js: string) => `prop.custom("${name}", ${js})`,
+
+  // A call into the generated F# translation runtime (M-T1.11).  The JS
+  // frontends' `t(key, default, values)` is not F#, so Feliz spells the same
+  // call its own way — the key, the source default and the ICU hole values are
+  // shared verbatim, so the catalog entry is identical.  Paren-wrapped: these
+  // land inside `Html.text (…)` / `prop.custom(…, …)` argument positions where a
+  // bare curried application would bind wrongly.
+  renderTranslate: ({ key, message, values }) =>
+    values && values.length > 0
+      ? `(I18n.tf ${fsString(key)} ${fsString(message)} [ ${values
+          .map((v) => `${fsString(v.name)}, box (${v.expr})`)
+          .join("; ")} ])`
+      : `(I18n.t ${fsString(key)} ${fsString(message)})`,
   renderStyleAttr: () => "",
   // Raw text for markup TEXT position — F# string-body escaping (the pack
   // wraps it in `Html.text "…"` or `prop.text "…"`).

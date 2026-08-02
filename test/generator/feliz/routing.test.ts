@@ -111,8 +111,10 @@ describe("feliz multi-page routing", () => {
     const app = await appFs(MULTI);
     // A persistent shell: the navbar sits above the route-swapping router.
     // The bar is a real <nav> landmark with an accessible name (a11y contract).
+    // The landmark's accessible name is pack-chrome — translated through the
+    // generated `I18n` module once the app has any extractable string (M-T1.11).
     expect(app).toContain(
-      'Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel "Primary navigation"',
+      'Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel (I18n.t "chrome.primaryNav" "Primary navigation")',
     );
     expect(app).toContain('Html.ul [ prop.className "menu menu-horizontal px-1"');
     // One menu item per top-level (static-route) page — the brand + both pages.
@@ -128,7 +130,9 @@ describe("feliz multi-page routing", () => {
     const app = await appFs(MULTI);
     // WCAG 2.4.1 Bypass Blocks — the skip link is the first focusable element,
     // visually hidden until focused, and jumps past the nav to the <main>.
-    expect(app).toContain('prop.href "#main-content"; prop.text "Skip to content"');
+    expect(app).toContain(
+      'prop.href "#main-content"; prop.text (I18n.t "chrome.skipToContent" "Skip to content")',
+    );
     // The route-swapping router lives inside the <main id="main-content">.
     expect(app).toContain('Html.main [ prop.id "main-content"; prop.children [');
   });
@@ -147,8 +151,10 @@ describe("feliz multi-page routing", () => {
       expect(line, `line with ${needle}`).toBeDefined();
       return line!.length - line!.trimStart().length;
     };
-    const skip = indent('prop.text "Skip to content"');
-    const nav = indent('prop.ariaLabel "Primary navigation"');
+    // Needles that occur ONLY in the shell — the i18n catalog also carries the
+    // two chrome KEYS, at its own (deeper) indentation.
+    const skip = indent('prop.href "#main-content"');
+    const nav = indent('Html.nav [ prop.className "navbar');
     const main = indent('Html.main [ prop.id "main-content"');
     expect(nav).toBe(skip);
     expect(main).toBe(skip);

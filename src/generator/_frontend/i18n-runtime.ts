@@ -34,7 +34,7 @@ import { collectUiMessages } from "../_walker/i18n-extract.js";
  *  always-rendered app-shell chrome (`APP_SHELL_CHROME`) is merged only when the
  *  UI is already i18n-enabled by its authored strings — the same gate the shell
  *  emitters use — so a string-less app stays byte-identical (no runtime). */
-function buildUiCatalog(ui: UiIR): Record<string, string> {
+export function buildUiCatalog(ui: UiIR): Record<string, string> {
   const byKey = new Map<string, string>();
   // Same key ⇒ same content hash ⇒ same message; collapses repeats.
   for (const { key, message } of collectUiMessages(ui)) byKey.set(key, message);

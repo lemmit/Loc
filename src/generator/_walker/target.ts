@@ -435,6 +435,18 @@ export interface TargetHookUse {
   reactiveQuery?: boolean;
 }
 
+/** One call into the generated translation runtime (M-T1.11), handed to the
+ *  optional `renderTranslate` seam.  `key` is the D-I18N-KEY content hash
+ *  (`page.<Page>.<role>.<hash>`), identical to the catalog entry; `message` is
+ *  the SOURCE-language default (the fallback when the active locale carries no
+ *  entry, and the string the ICU engine formats); `values` carries one entry per
+ *  interpolation hole, already rendered in the target's expression language. */
+export interface TranslateSpec {
+  key: string;
+  message: string;
+  values?: ReadonlyArray<{ name: string; expr: string }>;
+}
+
 /** Per-target lowering interface.  An implementation is selected by
  *  the deployable's framework: `tsxTarget` for `react`/`static`,
  *  `heexTarget` for `phoenixLiveView`. */
@@ -681,6 +693,18 @@ export interface WalkerTarget {
    *  never reach the aria-`t()` path), so it is an optional data field, not a
    *  method every target must implement. */
   ariaAttrPrefix?: string;
+
+  /** OPTIONAL — the SPELLING of a call into the generated translation runtime
+   *  (M-T1.11).  The four JS frontends share one `t(key, default, values?)`
+   *  shim, so an omitted seam yields exactly that JavaScript call and those
+   *  targets stay BYTE-IDENTICAL.  A frontend whose runtime is a different
+   *  LANGUAGE (Feliz's F#, Flutter's Dart) overrides it to spell the same call
+   *  in its own syntax — the key, the source-language default and the ICU hole
+   *  values are identical either way, so the catalog is shared verbatim.
+   *
+   *  `values` is present only for an interpolated (ICU) message; its `expr` is
+   *  already rendered in the target's own expression language. */
+  renderTranslate?(spec: TranslateSpec): string;
 
   /** Render a conditional CHILD — a ternary whose arms are markup
    *  (`body: cond ? Stack(…) : Empty(…)`).  `cond` is a rendered JS
