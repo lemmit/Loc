@@ -3988,3 +3988,48 @@ output the emitters had been rendering correctly all along.
   tests assert the nodes it builds, and they stayed green through the entire
   breakage — the defect lived one phase later, where those nodes meet a
   validator. That gap is how this reached `main`.
+## 64. Three gates over one file, none of which ran the validator (2026-08-02)
+
+`web/src/examples/acme.ddd` — shipped in the playground picker as "Acme
+(multi-deployable system)" — declared three backend deployables and **no
+`storage` or `resource` at all**. Opening it in the playground surfaced four
+`loom.persistence-mode-unsupported` errors. It had drifted at the
+D-STORAGE-SPLIT rename and nothing looked again.
+
+What makes it worth writing down is not the drift, it is **how much
+verification the file already had**:
+
+| looked at it | what it actually checked |
+|---|---|
+| `playground-remaining-examples.test.ts` | Langium AST diagnostics (phase ④) + "codegen didn't throw" |
+| `ddd parse` | computes every IR diagnostic, then filters to `loom.index-suggestion` and prints `OK` |
+| `generated-react-build.yml` | the TOP-LEVEL `examples/acme.ddd`, a different file that is correctly wired |
+
+Three things named after checking, and **phase ⑦ fell between all of them.**
+The generate assertion is the sharpest instance: `generateSystemsFromLoom`
+doesn't validate, so an invalid model generates a docker-compose perfectly
+happily, and asserting `files.has("docker-compose.yml")` reads like end-to-end
+coverage while proving almost nothing about the model.
+
+The fix is three lines of assertion in each of the three picker gates. The
+lesson is the recurring one, now at its fourth sighting this week:
+
+> **A check that never reaches the thing it names is indistinguishable from no
+> check.** §62's `ddd parse` (computes diagnostics, discards them), the
+> `errorResponses` conformance dimension (compares a rung its only fixture never
+> exercises), `api-surface.test.ts`'s old `|| "/"` (collapses the two path forms
+> before comparing), and now this. In every case the *name* of the check
+> described the coverage and the *body* did not, and in every case the reason it
+> stayed hidden is that nobody re-derived what the assertion could physically
+> observe.
+
+Practical follow-through, cheap and worth repeating: before trusting any gate,
+**run the scan that the gate claims to run, standalone, over the whole
+population.** Doing that here took one throwaway test over all 43 picker
+examples and gave the real blast radius (exactly one file) before a single fix
+— which is also what proved the other 42 were fine rather than merely unchecked.
+
+And a smaller one: a background-task wrapper reporting **"completed (exit code
+0)"** is reporting the WRAPPER's exit, not the command's. The suite underneath
+had exited **143** (SIGTERM — I had killed it after switching branches
+mid-run). Read the run's own tail before recording a green.
