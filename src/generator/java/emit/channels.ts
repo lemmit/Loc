@@ -1191,6 +1191,23 @@ export function renderJavaChannelFiles(
         opts.durableBroker ? `        }` : null,
         `    }`,
         ``,
+        // Subscribe BEFORE the web server accepts traffic.  SmartLifecycle
+        // beans start in ASCENDING phase order, and Spring Boot's
+        // `WebServerStartStopLifecycle` sits at `Integer.MAX_VALUE - 1`; the
+        // default phase for a SmartLifecycle that does not override this is
+        // `Integer.MAX_VALUE`, i.e. AFTER it.  At the default we opened the
+        // port — so `/ready` answered 200 — while this service had not yet
+        // subscribed, and an ephemeral pub/sub envelope published in that
+        // window is dropped by the broker and never redelivered.  Measured
+        // on the generated app: Tomcat up at T+0ms, subscriptions live at
+        // T+667ms, and a publish inside the gap NEVER arrives (vs ~1s when
+        // published after it).  That was `channels-e2e-redis (java)` failing
+        // intermittently with an ample 20s budget.
+        `    @Override`,
+        `    public int getPhase() {`,
+        `        return Integer.MAX_VALUE - 2048;`,
+        `    }`,
+        ``,
         `    @Override`,
         `    public void start() {`,
         `        for (var binding : ChannelBindings.ALL) {`,
