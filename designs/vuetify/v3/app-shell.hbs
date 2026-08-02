@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { onErrorCaptured, ref } from "vue";
 import { useRoute } from "vue-router";
-{{#if navUsesSession}}import { useSession } from "./auth/useSession";
+{{#if i18nEnabled}}import { t } from "{{i18nImportPath}}";
+{{/if}}{{#if navUsesSession}}import { useSession } from "./auth/useSession";
 {{/if}}{{#if hasRealtimeHandlers}}import RealtimeHandlers from "./components/RealtimeHandlers.vue";
 {{/if}}{{#if hasToastHost}}import { toastQueue } from "./lib/toast";
 {{/if}}
@@ -32,7 +33,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
 <template>
   <v-app>
     <!-- Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element. -->
-    <a href="#main-content" class="loom-skip-link">Skip to content</a>
+    <a href="#main-content" class="loom-skip-link">{{{skipToContentText}}}</a>
     <v-app-bar density="comfortable" flat border>
       <v-app-bar-nav-icon class="d-sm-none" data-testid="nav-burger" @click="drawer = !drawer" />
       <v-app-bar-title>

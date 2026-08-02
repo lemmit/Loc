@@ -4,7 +4,8 @@ import { onErrorCaptured, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Menu } from "lucide-vue-next";
 import { Alert, AlertDescription, AlertTitle, Button } from "@/components/ui";
-{{#if navUsesSession}}import { useSession } from "@/auth/useSession";
+{{#if i18nEnabled}}import { t } from "{{i18nImportPath}}";
+{{/if}}{{#if navUsesSession}}import { useSession } from "@/auth/useSession";
 {{/if}}{{#if hasRealtimeHandlers}}import RealtimeHandlers from "@/components/RealtimeHandlers.vue";
 {{/if}}{{#if hasToastHost}}import { toastQueue } from "@/lib/toast";
 {{/if}}
@@ -43,7 +44,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
 
 <template>
   <div class="flex min-h-screen flex-col">
-    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium">Skip to content</a>
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium">{{{skipToContentText}}}</a>
     <header class="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
       <Button variant="ghost" size="icon" class="sm:hidden" data-testid="nav-burger" aria-label="Toggle navigation" @click="opened = !opened">
         <Menu class="h-5 w-5" />

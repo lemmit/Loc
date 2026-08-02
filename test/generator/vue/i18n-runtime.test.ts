@@ -185,6 +185,30 @@ describe("Vue i18n runtime", () => {
     expect(Object.values(catalog)).toContain("Section break");
   });
 
+  it("translates the app-shell skip link through t() when the UI is i18n-enabled", async () => {
+    // Pack-chrome (M-T1.11): the shell's baked-in "Skip to content" link binds
+    // through `t()` keyed to the merged APP_SHELL_CHROME catalog, and App.vue
+    // imports `{ t }` from `./i18n` (the shell sits at `src/App.vue`).
+    const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
+    const app = [...files].find(([p]) => p.endsWith("src/App.vue"))![1];
+    expect(app).toContain(`{{ t("chrome.skipToContent", "Skip to content") }}`);
+    expect(app).toContain(`import { t } from "./i18n"`);
+    const catalog = JSON.parse(
+      [...files].find(([p]) => p.endsWith("src/locales/en.json"))![1],
+    ) as Record<string, string>;
+    expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+  });
+
+  it("leaves the app-shell skip link byte-identical for a string-less app", async () => {
+    // No authored strings ⇒ no translation runtime; the shell renders the raw
+    // "Skip to content" text and emits NO `t` import (pre-i18n byte-identical).
+    const files = await generateSystemFiles(SYSTEM(`Text { status }`));
+    const app = [...files].find(([p]) => p.endsWith("src/App.vue"))![1];
+    expect(app).toContain(`>Skip to content<`);
+    expect(app).not.toContain("import { t }");
+    expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
+  });
+
   it("translates the Modal title named slot (modalTitle) as a Vue attr binding", async () => {
     // The Vuetify pack renders the controlled-Modal title in ATTRIBUTE position
     // (`<v-card title=… >`) — the `title:` named slot binds through `t()` as
