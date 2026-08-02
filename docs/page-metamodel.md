@@ -401,6 +401,43 @@ Three boundaries to know:
   walker arm, so inline `filter`/`map` shaping there emits JS-shaped F#;
   prefer pre-shaping in a backend `find` when targeting Feliz or Flutter.
 
+### 8.1a Scalar intrinsics in a page body
+
+Unlike the collection ops, the **scalar intrinsics** ([`stdlib.md`](stdlib.md)
+Layer 0 — `toUpper`, `trim`, `substring`, `replace`, `abs`, `round`, …) *do*
+belong in a page body: they act on page-local `state` that may never reach the
+server, so "compute it server-side" is not an available answer.
+
+On the four JS frontends they render through the **same snippet table the
+TypeScript backend uses** (`src/generator/_expr/js-intrinsics.ts`), so an
+intrinsic means the same thing wherever you write it:
+
+```ddd
+state { code: string = "" }
+body: Text(code.toUpper())
+```
+
+```tsx
+<Text>{code.toUpperCase()}</Text>
+```
+
+That sharing is the point. Loom's spelling is its own, and two intrinsics have
+contracts JavaScript spells identically but defines differently — `replace`
+replaces **every** occurrence (JS `.replace` replaces the first) and
+`substring(start, len)` takes a **length** (JS `.substring` takes an end
+index). Before the table was shared, a page body emitted the raw JS spelling
+and those two were **silently wrong**: the same expression computed one thing
+in an aggregate `derived` and another in the page.
+
+Two limits:
+
+- **`money.min` / `money.max` / `money.round`** need `decimal.js`'s `Decimal`
+  constructor in scope, which the page emitters don't yet import — they still
+  emit verbatim. Every other intrinsic (including `money.abs` / `.floor()` /
+  `.ceil()`, which are methods on the value) renders.
+- **Feliz and Flutter** have no intrinsic table on the walker path yet, so a
+  page-body intrinsic still emits verbatim there.
+
 ### 8.2 Dependent / conditional form validation — use `state`
 
 There is **no dedicated "conditional field" or "dependent validation"
