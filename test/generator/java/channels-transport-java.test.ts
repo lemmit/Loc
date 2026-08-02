@@ -135,3 +135,38 @@ system Bare {
     expect(files.get("api/build.gradle.kts")).not.toContain("lettuce");
   });
 });
+
+// The consumer must be SUBSCRIBED before the web server accepts traffic.
+//
+// `ChannelConsumerService` is a `SmartLifecycle`, and those start in
+// ASCENDING phase order.  Spring Boot's `WebServerStartStopLifecycle` sits at
+// `Integer.MAX_VALUE - 1`, and the default phase for a SmartLifecycle that
+// does not override `getPhase()` is `Integer.MAX_VALUE` — i.e. AFTER it.  At
+// the default the port opened (so the DataSource-only `/ready` answered 200)
+// while the redis subscriptions were not yet live, and an ephemeral pub/sub
+// envelope published in that window is dropped by the broker and NEVER
+// redelivered.  Measured on the generated app: Tomcat up at T+0ms,
+// subscriptions live at T+667ms; a publish inside the gap never arrived,
+// while the same publish 8s later arrived in ~1s.  That was
+// `channels-e2e-redis (java)` failing intermittently on an ample 20s budget.
+describe("channel consumer starts before the web server (subscribe race)", () => {
+  it("overrides getPhase() below Spring Boot's web-server lifecycle phase", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const svc = [...files.entries()].find(([p]) => p.endsWith("ChannelConsumerService.java"))?.[1];
+    expect(svc, "ChannelConsumerService is emitted").toBeTruthy();
+
+    // Must override the phase at all — the default (Integer.MAX_VALUE) is the
+    // bug, and an unoverridden SmartLifecycle silently inherits it.
+    expect(svc, "consumer pins its lifecycle phase").toContain("public int getPhase()");
+
+    // And it must be strictly below the web server's Integer.MAX_VALUE - 1.
+    const phase = /public int getPhase\(\)\s*\{\s*return\s+Integer\.MAX_VALUE\s*-\s*(\d+);/.exec(
+      svc ?? "",
+    );
+    expect(phase, "phase is Integer.MAX_VALUE - <n>").toBeTruthy();
+    expect(
+      Number(phase?.[1]),
+      "phase must be below the web server's MAX_VALUE - 1, or the port opens first",
+    ).toBeGreaterThan(1);
+  });
+});
