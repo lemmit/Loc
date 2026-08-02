@@ -48,6 +48,13 @@ function homeOf(files: Map<string, string>): string {
   return entry[1];
 }
 
+/** The app-shell / App component. */
+function appOf(files: Map<string, string>): string {
+  const entry = [...files].find(([p]) => p.endsWith("src/app/app.component.ts"));
+  if (!entry) throw new Error("app.component.ts not emitted");
+  return entry[1];
+}
+
 describe("Angular i18n runtime", () => {
   it("wraps a literal heading in a t() interpolation keyed to the catalog", async () => {
     const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
@@ -150,6 +157,36 @@ describe("Angular i18n runtime", () => {
     expect(home).toMatch(
       /role="toolbar" \[attr\.aria-label\]='t\("page\.Home\.toolbarAria\.\w+", "Order actions"\)'/,
     );
+  });
+
+  it("translates the app-shell skip-to-content chrome link + lifts t on the App component", async () => {
+    // Pack-chrome (M-T1.11): an i18n-enabled ui makes the baked-in shell
+    // "Skip to content" link bind through `t()` keyed to `chrome.skipToContent`.
+    const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
+    const app = appOf(files);
+    // Angular text-position interpolation (double-mustache), keyed to the merged
+    // APP_SHELL_CHROME catalog.
+    expect(app).toContain(`{{ t("chrome.skipToContent", "Skip to content") }}`);
+    // `t` is imported one hop shallower than a page (App sits at `src/app/`) and
+    // lifted to a component member so the interpolation resolves against the
+    // instance.
+    expect(app).toContain(`import { t } from "../lib/i18n";`);
+    expect(app).toContain("protected readonly t = t;");
+    // The merged locale catalog carries the chrome default.
+    const locale = [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1];
+    const catalog = JSON.parse(locale) as Record<string, string>;
+    expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
+  });
+
+  it("keeps the app-shell skip link raw (byte-identical) for a string-less app", async () => {
+    // No authored strings → the shell renders the raw source string, with no
+    // `t` import or member — identical to the pre-i18n shell.
+    const files = await generateSystemFiles(SYSTEM(`Text { status }`));
+    const app = appOf(files);
+    expect(app).toContain(`<a href="#main-content" class="loom-skip-link">Skip to content</a>`);
+    expect(app).not.toContain("import { t }");
+    expect(app).not.toContain("protected readonly t = t;");
+    expect([...files].some(([p]) => p.endsWith("src/lib/locales/en.json"))).toBe(false);
   });
 
   it("translates the Alert title named slot (alertTitle) at the text position", async () => {
