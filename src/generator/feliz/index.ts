@@ -1145,9 +1145,13 @@ function renderAppFs(
     // A FileUpload mints its multipart FormData via the JS-interop escape
     // hatch; the realtime subscription uses `?`/`jsNative`/`Emit` too
     // (`jsNative` lives in `Fable.Core`, the `?` operator in `.JsInterop`).
-    (hasRealtime || used.usesDataGrid) && "open Fable.Core",
-    // The i18n runtime reaches `intl-messageformat` the same way (`import` +
-    // `jsNative`), and builds its ICU values bag with `createObj`.
+    // The i18n runtime reaches `intl-messageformat` the same way — `import` +
+    // `jsNative` — and builds its ICU values bag with `createObj`.  BOTH opens
+    // are required: `jsNative` resolves through `Fable.Core`, `import` /
+    // `createObj` through `.JsInterop`.  (Caught by `feliz-build` on the
+    // SCAFFOLD app, which carries neither a DataGrid nor realtime and so was the
+    // first app to emit the i18n module with only `.JsInterop` opened.)
+    (hasRealtime || used.usesDataGrid || i18nEnabled) && "open Fable.Core",
     (hasFileUploads || hasRealtime || used.usesDataGrid || i18nEnabled) &&
       "open Fable.Core.JsInterop",
     // Translation runtime (M-T1.11) — catalog + `t`/`tf`.  Ahead of everything
