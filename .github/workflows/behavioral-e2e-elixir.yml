@@ -71,21 +71,24 @@ concurrency:
 jobs:
   behavioral-elixir:
     runs-on: ubuntu-latest
-    # The Erlang/OTP setup + `mix deps.get` + compile + boot sequence already
-    # ran 15-20 min (see the concurrency note above); adding the OpenTelemetry
-    # hex deps (opentelemetry{,_api,_exporter} → grpcbox/chatterbox rebar3
-    # builds, M-T7.1) pushed a cold-cache run past the old 20-min cap. Bumped to
-    # give headroom for the extra deps.get + compile.
+    # 45 → 30. The old budget existed because this leg recompiled the ENTIRE hex
+    # dep tree (phoenix/ecto/postgrex/open_api_spex/opentelemetry → grpcbox +
+    # chatterbox rebar3 builds) once PER CASE — ~30 identical compiles a run,
+    # which is why it took 3-5x every other behavioral leg and had been silently
+    # CANCELLED at its ceiling more than once (a cancelled job reads as "not
+    # failed", which is exactly how a gate stops being read).
     #
-    # 30 → 45 (M-T9.11 coverage): this leg runs ONE FULL `mix compile` PER CASE,
-    # so its wall clock grows with the corpus — and it had already been silently
-    # CANCELLED at the 30-min ceiling on consecutive runs (a cancelled job reads
-    # as "not failed", which is exactly how a gate stops being read).  Adding the
-    # `wire-contract` shared system adds another compile, so the budget moves
-    # with it rather than leaving the leg chronically over.  Every other
-    # behavioral leg finishes in 3-10 min; this one is the outlier because of
-    # per-case BEAM compilation, not because it does more work.
-    timeout-minutes: 45
+    # run-elixir.mjs now primes that dep build ONCE per dep set and reuses it
+    # (MIX_DEPS_PATH + symlinked `_build/<env>/lib/<dep>`); the generated app
+    # still compiles from scratch every case, so nothing is masked. Measured
+    # locally (4-core, docker hexpm/elixir, real postgres): a case that spent
+    # ~57 s on dep+app compile now takes ~7 s, and the WHOLE 31-case corpus runs
+    # in 6m35s — ~4 min of which is the two cold dep-set primes (base +
+    # joken/OIDC) that the cache below removes on a restore.
+    # Budget: ~5 min setup (npm ci + tsc build + beam) + ~5 min worst-case cold
+    # primes on a slower 2-core runner + ~8 min for the corpus, so 30 leaves
+    # real headroom without letting a genuine hang burn 45 min of runner time.
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -106,6 +109,10 @@ jobs:
       # Ecto's DATABASE_URL (config/dev.exs honors it). Point at the postgres
       # sidecar above (POSTGRES_DB: app).
       DATABASE_URL: ecto://postgres:postgres@127.0.0.1:5432/app
+      # Pinned here (not inline on setup-beam) so the dep-build cache key can
+      # name the exact BEAM the warm artefacts were compiled by.
+      OTP_VERSION: '27.3'
+      ELIXIR_VERSION: '1.18.4'
 
     steps:
       - uses: actions/checkout@v6
@@ -119,20 +126,34 @@ jobs:
       # generated project's dep set resolves deterministically.
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: '27.3'
-          elixir-version: '1.18.4'
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
 
-      # Cache the hex dep tree + _build outputs across runs. The key tracks the
-      # vanilla shell-emit module that emits mix.exs so a dep change mints a
-      # fresh entry, but unrelated emitter tweaks reuse the warm cache.
-      - name: Cache hex deps + _build
+      # Cache the hex registry/archives AND the WARM DEPENDENCY BUILD the runner
+      # primes once per dep set (LOOM_ELIXIR_DEP_CACHE — see run-elixir.mjs).
+      # Without the warm tree this leg recompiled the identical phoenix/ecto/
+      # opentelemetry(+grpcbox/chatterbox rebar3) dep set once PER CASE; with it
+      # the tree is compiled once per run, and this cache carries it across runs
+      # so even the first case skips the cold dep compile.
+      #
+      # The key tracks the OTP/Elixir versions the BEAM artefacts were built by,
+      # the vanilla shell-emit module that emits mix.exs, and the corpus
+      # manifest + shared systems (a NEW case can introduce a NEW dep set — an
+      # `auth {}` fixture pulls joken — and only a key change re-saves the tree).
+      # Restoring a near-miss is safe regardless: the warm tree is
+      # content-addressed by a hash of the generated `defp deps` block + the
+      # Erlang/Elixir versions, so a tree that doesn't match is simply not used
+      # (the runner primes a fresh one next to it, and prunes the dead one).
+      - name: Cache hex + warm dependency build
         uses: actions/cache@v5
         with:
           path: |
             ~/.hex
             ~/.mix
-          key: hex-mix-behavioral-${{ hashFiles('src/generator/elixir/vanilla/shell-emit.ts') }}
+            test/behavioral/.work-elixir/dep-cache
+          key: hex-mix-behavioral-otp${{ env.OTP_VERSION }}-ex${{ env.ELIXIR_VERSION }}-${{ hashFiles('src/generator/elixir/vanilla/shell-emit.ts', 'test/fixtures/corpus/manifest.ts', 'test/behavioral/systems/*.ddd') }}
           restore-keys: |
+            hex-mix-behavioral-otp${{ env.OTP_VERSION }}-ex${{ env.ELIXIR_VERSION }}-
             hex-mix-behavioral-
 
       - name: Install Loom toolchain
