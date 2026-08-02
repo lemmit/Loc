@@ -18,8 +18,13 @@ name: Generated React TSX build
 #                                  loom-landing, banking, …) — caught
 #                                  one merge later by:
 #
-#   - `push: main` /            →  full 88-cell Cartesian.  Heavy, but
-#     `workflow_dispatch`           it's the regression safety net.
+#   - `push: main` /            →  full Cartesian.  Heavy, but it's the
+#     `merge_group` /               regression safety net.  The keying is
+#     `workflow_dispatch`           "anything that is not a plain
+#                                   pull_request runs full", so the merge
+#                                   queue gets the full sweep on the
+#                                   rebased candidate — the pre-land half
+#                                   of the tiering in docs/ci-gating.md.
 #                                   `workflow_dispatch` runs full too
 #                                   so a maintainer can force the
 #                                   sweep on a branch if a PR-time
@@ -75,6 +80,7 @@ on:
       - '!src/platform/hono/**'
       - '!src/platform/hono.ts'
   workflow_dispatch:
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -103,9 +109,9 @@ jobs:
             EXAMPLES='["examples/showcase.ddd"]'
             PACKS='["mantine@v9","shadcn@v4"]'
           else
-            # Full pack Cartesian on push:main + workflow_dispatch.
+            # Full pack Cartesian on push:main + merge_group + workflow_dispatch.
             PACKS='["mantine@v7","mantine@v9","shadcn@v3","shadcn@v4","mui@v5","mui@v7","chakra@v2","chakra@v3"]'
-            # Full Cartesian — push:main and workflow_dispatch.  This
+            # Full Cartesian — push:main, merge_group, workflow_dispatch.  This
             # list MUST match the `examples` const in
             # test/e2e/generated-react-build.test.ts (pinned by the
             # "CI matrix ↔ examples list stay in sync" guard there).
@@ -179,3 +185,19 @@ jobs:
 
       - name: Run extern-component build gate
         run: npm run test:tsc-react-extern
+
+  # ── Merge-queue / branch-protection rollup ────────────────────────────
+  # One stable check name for this workflow.  The jobs above are a matrix
+  # (or a fan-out), so their check names are dynamic and cannot be named as
+  # a required status check; this job can.  A skipped need counts as OK — a
+  # label-guarded or path-skipped job is a legitimate no-op.  Kept honest by
+  # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
+  generated-react-build-passed:
+    name: generated-react-build-passed
+    if: always()
+    needs: [configure, matrix, extern-component]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

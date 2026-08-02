@@ -65,6 +65,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/corpus-build.yml'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read
@@ -173,3 +174,19 @@ jobs:
         run: npm run build
       - name: uv sync + ruff + mypy against every corpus feature
         run: npm run test:python-corpus
+
+  # ── Merge-queue / branch-protection rollup ────────────────────────────
+  # One stable check name for this workflow.  The jobs above are a matrix
+  # (or a fan-out), so their check names are dynamic and cannot be named as
+  # a required status check; this job can.  A skipped need counts as OK — a
+  # label-guarded or path-skipped job is a legitimate no-op.  Kept honest by
+  # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
+  corpus-build-passed:
+    name: corpus-build-passed
+    if: always()
+    needs: [corpus-tsc, corpus-dotnet, corpus-java, corpus-python]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

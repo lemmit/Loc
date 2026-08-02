@@ -34,6 +34,7 @@ on:
   # the boot.
   pull_request:
     types: [labeled]
+  merge_group:
 
 permissions:
   contents: read

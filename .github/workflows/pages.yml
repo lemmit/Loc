@@ -23,11 +23,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Build the site + playground.  This is also the merge-queue GATE half: on a
+  # `merge_group` event this job runs end to end (typecheck, DDL unit, Node
+  # smoke, vite build) so a queue candidate that breaks the playground build is
+  # caught before it lands — while the `deploy` job below is skipped, so the
+  # candidate is never published.  The build/deploy split is required for that:
+  # the `github-pages` environment is branch-restricted to the Pages source, so
+  # a job carrying `environment:` would be rejected outright on a
+  # `gh-readonly-queue/**` ref, before any step ran.
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
 
@@ -99,5 +104,32 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/_site
+
+  # Publish half.  Never runs from the merge queue — the queue runs this
+  # workflow to gate the build, not to ship a candidate that may still be
+  # dequeued.
+  deploy:
+    if: github.event_name != 'merge_group'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+
+  # ── Merge-queue / branch-protection rollup ────────────────────────────
+  # One stable check name for this workflow.  `deploy` is deliberately skipped
+  # on `merge_group` (skipped counts as OK here), so the queue gates the build
+  # without publishing.  Kept honest by
+  # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
+  pages-passed:
+    name: pages-passed
+    if: always()
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

@@ -50,6 +50,7 @@ on:
       - 'test/_helpers/response-diff.ts'
       - '.github/workflows/behavioral-e2e-elixir.yml'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read

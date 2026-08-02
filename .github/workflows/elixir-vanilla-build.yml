@@ -62,6 +62,7 @@ on:
       - 'package.json'
       - '.github/workflows/elixir-vanilla-build.yml'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read
@@ -155,3 +156,19 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           echo 'See the "Run test:phoenix-vanilla" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics.' >> $GITHUB_STEP_SUMMARY
           echo 'This cell builds `test/e2e/fixtures/elixir-vanilla-build/${{ matrix.fixture }}.ddd` via its `it.each` iteration in `test/e2e/generated-elixir-vanilla-build.test.ts`.' >> $GITHUB_STEP_SUMMARY
+
+  # ── Merge-queue / branch-protection rollup ────────────────────────────
+  # One stable check name for this workflow.  The jobs above are a matrix
+  # (or a fan-out), so their check names are dynamic and cannot be named as
+  # a required status check; this job can.  A skipped need counts as OK — a
+  # label-guarded or path-skipped job is a legitimate no-op.  Kept honest by
+  # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
+  elixir-vanilla-build-passed:
+    name: elixir-vanilla-build-passed
+    if: always()
+    needs: [configure, build-generated-elixir-vanilla]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
