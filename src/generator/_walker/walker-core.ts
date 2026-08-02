@@ -1500,6 +1500,17 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // `convert` IR node around the non-string operand; the leaf emits the
       // per-language cast (`String(x)` on JS, `string x` on F#).
       return ctx.target.exprConvert(emitExpr(expr.value, ctx), expr.target, expr.from);
+    case "paren":
+      // Explicit grouping — `(a + b) * c`.  Every walker target embeds a
+      // language that groups with round brackets (JS, F#, Dart), so this needs
+      // no seam; HEEx runs its own engine and never reaches here.
+      //
+      // This arm was MISSING, which made `paren` fall to the `default:` below
+      // and emit `/* unsupported expr: paren */ undefined` — so `(a + b) * c`
+      // became `undefined * c`, i.e. NaN.  Silent wrongness in the most basic
+      // expression construct there is, on every frontend, and invisible
+      // because no `.ddd` in the repo had a parenthesised page expression.
+      return `(${emitExpr(expr.inner, ctx)})`;
     case "unary":
       return ctx.target.exprUnary(expr.op, emitExpr(expr.operand, ctx));
     case "call": {
@@ -1534,6 +1545,30 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
           },
           callArgs,
         );
+      }
+      // A VALUE-OBJECT construction (`Money(9.99, "USD")`).  Lowering gives it
+      // `callKind: "free"`, indistinguishable here from an extern function or
+      // a typo'd component name — so it used to emit a bare `Money(9.99,
+      // "USD")` call, which is TS2304 (no such JS binding exists; a VO has no
+      // emitted constructor on the client).
+      //
+      // On the wire a value object IS a plain record, so the correct frontend
+      // rendering is the wire-shaped object literal — the same shape the API
+      // client sends and receives.  Positional args bind to the VO's declared
+      // field order; named args bind by name.
+      const vo = declaredValueObject(expr.name, ctx);
+      if (vo) {
+        const fieldNames = vo.wireShape?.map((f) => f.name) ?? vo.fields.map((f) => f.name);
+        let positional = 0;
+        const fields = expr.args.map((a, i) => ({
+          name: expr.argNames?.[i] ?? fieldNames[positional++] ?? `arg${i}`,
+          value: emitExpr(a, ctx),
+        }));
+        // Parenthesised: the literal is frequently the receiver of a member
+        // read (`Money(…).currency`), and a bare `{ … }.currency` is at best
+        // fragile to parse (a leading `{` is a block in statement position) and
+        // at worst ambiguous inside a JSX interpolation.
+        return `(${ctx.target.exprObject(fields)})`;
       }
       if (ctx.externFunctions?.has(expr.name)) ctx.usedExternFunctions?.add(expr.name);
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
@@ -1698,6 +1733,27 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;
   }
+}
+
+/** The declared value object a free-call name refers to, or undefined.
+ *
+ *  Lowering cannot distinguish `Money(9.99, "USD")` (a VO construction) from
+ *  `MyWidget(…)` (a component) or `fee(…)` (an extern function) — all three
+ *  land as `callKind: "free"` — so the walker resolves it here against the
+ *  bounded contexts it already carries for api-hook detection.  `bcByAggregate`
+ *  is keyed per aggregate, so the same context appears under several keys;
+ *  dedupe is unnecessary since we stop at the first match. */
+function declaredValueObject(
+  name: string,
+  ctx: WalkContext,
+):
+  | { fields: ReadonlyArray<{ name: string }>; wireShape?: ReadonlyArray<{ name: string }> }
+  | undefined {
+  for (const bc of ctx.bcByAggregate.values()) {
+    const vo = bc.valueObjects?.find((v) => v.name === name);
+    if (vo) return vo as never;
+  }
+  return undefined;
 }
 
 /** Best-effort description of an unresolved method-call receiver

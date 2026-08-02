@@ -73,6 +73,12 @@ export const reactBuildExamples = [
   // `.url` (a string) rather than the raw object, which is not a ReactNode and
   // would tsc-error.  Guards the scaffold display path compiling.
   { ddd: "web/src/examples/file-scaffold-system.ddd", reactDir: "web_app" },
+  // The expression-vocabulary fixture.  Every OTHER example here exercises
+  // page PRIMITIVES; none of them uses a scalar intrinsic or a value-object
+  // construction in a body, which is exactly why the walker's missing
+  // expression arms compiled green for so long.  This cell is the compile-tier
+  // half of `test/generator/_walker/render-degradation.test.ts`.
+  { ddd: "web/src/examples/expression-showcase.ddd", reactDir: "web_app" },
 ] as const;
 
 export interface ReactPackSpec {

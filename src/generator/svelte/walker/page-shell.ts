@@ -34,6 +34,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { paramPropTsType } from "../../_frontend/component-prop-type.js";
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -1011,18 +1012,12 @@ function stateTypeAsTsString(type: TypeIR): string {
 }
 
 function typeRefAsTsString(p: ParamIR): string {
-  const t = p.type;
-  if (t.kind === "primitive") {
-    switch (t.name) {
-      case "int":
-      case "long":
-      case "decimal":
-        return "number";
-      case "bool":
-        return "boolean";
-      default:
-        return "string";
-    }
-  }
-  return "string";
+  // Delegates to the shared component-prop mapping (`_frontend/
+  // component-prop-type.ts`) — React, Vue and Svelte emit the same language,
+  // so they must agree on what `component Badge(level: int)` types as.  This
+  // was a partial copy (top-level primitives only); the shared version also
+  // handles `id` / `enum` / arrays / optionals.  Aggregate params never reach
+  // here (the caller resolves those to their wire DTO first), so an empty
+  // aggregate map and a throwaway import sink are correct.
+  return paramPropTsType(p, new Map(), new Map());
 }

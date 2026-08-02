@@ -19,6 +19,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
@@ -1061,7 +1062,13 @@ export function renderUserComponentFile(
       }
       return action.arg ? "(arg: string) => void" : "() => void";
     }
-    return typeRefAsTsString(p);
+    // Component props carry their DECLARED type.  This used to call
+    // `typeRefAsTsString`, whose `string` answer is right for a ROUTE param
+    // (React Router hands every `:id` over as a string) but wrong here: it
+    // typed `component Badge(level: int)` as `level: string`, making `level >
+    // 2` a TS2365 and `<Badge level={count} />` a TS2322.  Shared with Vue and
+    // Svelte — all three emit the same language.
+    return componentPropTsType(p.type, aggregatesByName, dtoImports);
   };
   const propLines = params.map((p) => {
     // `slot?` / `action?` → optional prop (`name?: ReactNode`) so the
@@ -1169,7 +1176,9 @@ export function renderExternComponentProps(
     if (action) {
       return action.arg ? `(arg: ${wireType(action.arg)}) => void` : "() => void";
     }
-    return typeRefAsTsString(p);
+    // Same declared-type rule as the generated-component props above — the
+    // hand-written widget must see `level: number`, not `level: string`.
+    return componentPropTsType(p.type, aggregatesByName, dtoImports);
   };
   const propLines = params.map((p) => {
     // `slot?` / `action?` → optional prop so the caller can omit it.
