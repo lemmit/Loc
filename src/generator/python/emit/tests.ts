@@ -274,10 +274,17 @@ export function renderCreateInput(
       if (value !== undefined) {
         return `${snake(f.name)}=${coerceCreateValue(value, f.type, ctx)}`;
       }
+      // An OPTIONAL field already carries `= None` on the factory signature, so
+      // an omitted one needs nothing — passing `description=None` explicitly is
+      // redundant noise the emitter used to (correctly) leave out.  Only a
+      // NON-optional param lacks a default, which is where an omission would
+      // otherwise be `mypy --strict: Missing named argument`.
+      if (f.optional) return null;
       const omission = createOmissionValue(f);
       if (omission.kind === "default") return `${snake(f.name)}=${renderPyExpr(omission.expr)}`;
       return `${snake(f.name)}=${omission.kind === "false" ? "False" : "None"}`;
     })
+    .filter((p): p is string => p !== null)
     .join(", ");
 }
 

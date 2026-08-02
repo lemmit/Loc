@@ -203,15 +203,21 @@ export function renderCreateInput(
   // defaulted field (`Item.create({ name: "N" })` against `qty: int = 1`) would
   // otherwise emit a literal missing that key and fail `tsc` in the generated
   // project — the Java emitter already fills omissions this way.
-  const parts = forCreateInput(agg.fields).map((f) => {
-    const value = written.get(f.name);
-    if (value !== undefined) return `${f.name}: ${coerceCreateValue(value, f.type, ctx)}`;
-    const omission = createOmissionValue(f);
-    // A language-defined default (`now()`, `newId()`, …) renders through the
-    // normal expression path; the other two arms are the literal stand-ins.
-    if (omission.kind === "default") return `${f.name}: ${renderTestExpr(omission.expr, ctx)}`;
-    return `${f.name}: ${omission.kind === "false" ? "false" : "null"}`;
-  });
+  const parts = forCreateInput(agg.fields)
+    .map((f) => {
+      const value = written.get(f.name);
+      if (value !== undefined) return `${f.name}: ${coerceCreateValue(value, f.type, ctx)}`;
+      // An OPTIONAL field is already `?` on the factory's input type, so an
+      // omitted one needs nothing.  Only a non-optional param is structurally
+      // required and would otherwise fail `tsc` as a missing property.
+      if (f.optional) return null;
+      const omission = createOmissionValue(f);
+      // A language-defined default (`now()`, `newId()`, …) renders through the
+      // normal expression path; the other two arms are the literal stand-ins.
+      if (omission.kind === "default") return `${f.name}: ${renderTestExpr(omission.expr, ctx)}`;
+      return `${f.name}: ${omission.kind === "false" ? "false" : "null"}`;
+    })
+    .filter((p): p is string => p !== null);
   return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
 }
 
