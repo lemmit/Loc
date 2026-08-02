@@ -24,8 +24,16 @@ void main() {
   testWidgets('sort header and pager drive the query state', (tester) async {
     final container = ProviderContainer(overrides: [
       productAllProvider.overrideWith(
+        // `LoomPage` carries the whole page-metadata half of the envelope, not
+        // just the count the pager needs — a member it doesn't decode is one the
+        // DSL can't reach (M-T1.3 Defect B).  All five are required for the same
+        // reason: a construction site that omits a count would report a wrong
+        // one silently.
         (ref, q) async => const LoomPage<Product>(
           items: <Product>[Product(id: 'p1', name: 'alpha', price: 1, version: 1)],
+          page: 1,
+          pageSize: 1,
+          total: 5,
           totalPages: 5,
         ),
       ),

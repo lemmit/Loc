@@ -44,7 +44,19 @@ try {
     r.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: rows }),
+      // The FULL paged envelope, which is what `GET /api/products` actually
+      // serves (`.all` is paged-by-default, M-T2.6) — this stub predated the
+      // flip and sent `items` alone, which the wire decoder now rejects along
+      // with the rest of the response.  The counts describe ONE server page
+      // holding every row; the pager under test is the CLIENT one, which
+      // computes its own window from `rows.length` and `pageSize: 3`.
+      body: JSON.stringify({
+        items: rows,
+        page: 1,
+        pageSize: rows.length,
+        total: rows.length,
+        totalPages: 1,
+      }),
     }),
   );
   await page.goto(`${URL}products/table`, { waitUntil: "networkidle" });
