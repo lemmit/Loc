@@ -32,13 +32,13 @@ import { generateSystemFiles } from "../_helpers/generate.js";
  *  come from a remapped rung, never from a structural conflict. */
 const SOURCE = (platform: string, apiBody: string) => `
 system Denials {
-  user { id: string, level: int }
+  user { id: string  level: int }
   subdomain Sales {
     context Sales {
       aggregate Order {
         total: int
 
-        create(total: int)
+        create(total: int) { }
 
         operation cancel() {
           requires currentUser.level > 2
