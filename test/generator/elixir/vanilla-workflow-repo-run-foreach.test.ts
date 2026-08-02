@@ -92,7 +92,7 @@ describe("vanilla — workflow body lowering (repo-run)", () => {
       system Tasks {
         subdomain Productivity {
           context Tracker {
-            aggregate Task with crudish { title: string, done: bool }
+            aggregate Task with crudish { title: string  done: bool }
             repository Tasks for Task { }
             retrieval Pending(d: bool) of Task { where: this.done == d }
             workflow pageless {
