@@ -773,7 +773,7 @@ ${pagingQueryParams()}
             }${
               unionAbsentStatus !== undefined
                 ? statusResponseEntries([unionAbsentStatus], schemasModule)
-                : errorResponseEntries(findKind, schemasModule)
+                : errorResponseEntries(findKind, schemasModule, find.requires !== undefined)
             }
           }
         }

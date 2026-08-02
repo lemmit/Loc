@@ -50,10 +50,23 @@ export type OpErrorKind =
   | "list";
 
 /** The HTTP error statuses a given operation kind declares, ascending.
- *  `guarded` (an op/workflow with a `requires` guard) inserts 403 — the
- *  authorization-denied outcome — for the `operation` and `workflow`
- *  kinds; it's inert for every other kind (no kind but those two carries a
- *  guard). */
+ *  `guarded` (a `requires` guard) inserts 403 — the authorization-denied
+ *  outcome — for every kind that can carry one.
+ *
+ *  READS carry a guard too.  `requires` is legal on a `find`, and the emitters
+ *  have always ENFORCED it — Hono throws `ForbiddenError` (→ 403 via its
+ *  `onError` filter), python raises the same, and the OIDC negative-authz gate
+ *  (M-T3.13) asserts a `requires`-gated find 403s an authenticated-but-
+ *  unauthorized caller against a booted backend.  Only the DECLARED set was
+ *  missing it: this arm branched on `guarded` for `operation`/`workflow` alone,
+ *  so all five backends published `[404]` for a gated find and answered 403 at
+ *  runtime.  Every generated client therefore had to treat its own callee's
+ *  authorization denial as an unexpected throw.
+ *
+ *  Fixing it HERE rather than per-backend is the point of the table: one arm
+ *  moves the five emitters and `deriveContextOperations` together, so the
+ *  conformance error-response dimension stays balanced instead of showing four
+ *  backends drifting from one. */
 export function errorStatuses(
   kind: OpErrorKind,
   guarded = false,
@@ -80,9 +93,11 @@ export function errorStatuses(
     case "workflow":
       return guarded ? [400, 403, 422] : [400, 422];
     case "findOptional":
-      return [404];
+      return guarded ? [403, 404] : [404];
     case "findList":
     case "findSingle":
+      return guarded ? [403] : [];
+    // `list` is the auto-`findAll`, which carries no `requires` of its own.
     case "list":
       return [];
   }

@@ -310,6 +310,7 @@ export function emitController(
             ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),
             ...(paged ? ["page", "pageSize", "sort", "dir"] : []),
           ].join(", "),
+          guarded: find.requires !== undefined,
           returnShape: (paged
             ? "paged"
             : isUnion

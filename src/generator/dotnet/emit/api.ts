@@ -109,6 +109,10 @@ export interface ControllerShape {
      * shape.  Must agree with the matching Hono Zod schema for the
      * cross-platform contract check to pass. */
     returnShape: "list" | "optional" | "single" | "paged" | "union";
+    /** Has a `requires` guard → declares 403, exactly like a guarded
+     *  operation.  The runtime always enforced it (`ForbiddenError` → 403);
+     *  only the DECLARED set was missing it. */
+    guarded: boolean;
     /** Explicit response type name, set only for `returnShape: "union"` — the
      *  success variant's `<Agg>Response` (exception-less.md §4).  Other shapes
      *  derive their type from the aggregate name. */
@@ -290,6 +294,7 @@ export function renderController(
               : f.returnShape === "list" || f.returnShape === "paged"
                 ? "findList"
                 : "findSingle",
+            f.guarded,
           );
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,

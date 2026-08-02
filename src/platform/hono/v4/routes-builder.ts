@@ -1705,6 +1705,18 @@ function emitFindRoute(
       : (ctx.errorStatusOverrides?.[unionSpec.absent.tag] ??
         defaultErrorStatus(unionSpec.absent.tag))
     : undefined;
+  // A `requires`-gated read declares 403 — the same rung as a guarded
+  // operation.  The gate below has always been ENFORCED here (the handler
+  // throws `ForbiddenError`, which this file's `onError` filter maps to a 403
+  // ProblemDetails); only the DECLARED set omitted it, on all five backends,
+  // so every generated client had to treat its callee's authorization denial as
+  // an unexpected throw.  Kept in lockstep with `errorStatuses(<find kind>,
+  // guarded)`, which the other four backends read.
+  if (find.requires) {
+    out.push(
+      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   if (find.returnType.kind === "optional" || unionAbsentStatus !== undefined) {
     const st = unionAbsentStatus ?? 404;
     out.push(
