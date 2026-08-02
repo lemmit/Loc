@@ -103,7 +103,15 @@ jobs:
   # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
   generated-svelte-build-passed:
     name: generated-svelte-build-passed
-    if: always()
+    # `!cancelled()`, not `always()`: when a newer push supersedes this run,
+    # cancel-in-progress cancels the needed jobs — always() would then wake
+    # this rollup later and convert the quiet supersession into a spurious
+    # FAILURE check on the stale SHA (webhook noise for anyone babysitting
+    # the PR). !cancelled() skips the rollup with the run; a LONE cancelled
+    # need on a live run (a job timeout) still fails via the step below —
+    # that is the "cancelled reads as not-failed" trap, kept closed. Same
+    # pattern as test.yml's tests-passed.
+    if: ${{ !cancelled() }}
     needs: [matrix]
     runs-on: ubuntu-latest
     steps:
