@@ -41,7 +41,19 @@ const PAGE_OF: Record<string, string> = {
 /** Generate a system whose page body renders `expr` over page state, and
  *  whose aggregate carries the SAME expression as a `derived` — so the two
  *  emissions can be compared directly. */
-async function genBoth(expr: string, framework = "react") {
+async function genBoth(expr: string, framework = "react", backendDerived = false) {
+  // The aggregate `derived` is the BACKEND half of the cross-surface pairs, and
+  // it is opt-in: only a STRING-valued expression can be bound to a
+  // `derived …: string`, and only the two cross-surface tests read it.
+  //
+  // It used to be emitted unconditionally as `convert(<expr>, string)` — which
+  // is NOT Loom syntax (the cast form is `string(v)`), so every fixture here
+  // carried a parser error.  Langium error-recovery produced a usable-looking
+  // AST, the assertions were all on the PAGE half, and the suite passed
+  // regardless; `generateSystemFiles` now rejects a fixture with syntax errors
+  // (#2354) rather than asserting against error-recovered garbage, which is
+  // what surfaced it.
+  const derived = backendDerived ? `derived probe: string = ${expr}` : "";
   const files = await generateSystemFiles(`
     system S {
       subdomain Sales {
@@ -50,7 +62,7 @@ async function genBoth(expr: string, framework = "react") {
             s: string
             n: int
             d: decimal
-            derived probe: string = convert(${expr}, string)
+            ${derived}
           }
           repository Customers for Customer { }
         }
@@ -127,7 +139,7 @@ describe("scalar intrinsics render on the JS frontends", () => {
 // ---------------------------------------------------------------------------
 describe("cross-surface agreement — page body vs aggregate derived", () => {
   it("`replace` is replace-ALL on both surfaces (was: first-only in the page)", async () => {
-    const { page, backend } = await genBoth('s.replace("a", "b")');
+    const { page, backend } = await genBoth('s.replace("a", "b")', "react", true);
     expect(backend).toContain('.replaceAll("a", "b")');
     expect(page).toContain('.replaceAll("a", "b")');
     // The JS `.replace(a, b)` that silently replaced only the FIRST match.
@@ -135,7 +147,7 @@ describe("cross-surface agreement — page body vs aggregate derived", () => {
   });
 
   it("`substring` is start+LENGTH on both surfaces (was: start+END in the page)", async () => {
-    const { page, backend } = await genBoth("s.substring(2, 3)");
+    const { page, backend } = await genBoth("s.substring(2, 3)", "react", true);
     expect(backend).toContain("(2) + (3)");
     expect(page).toContain("(2) + (3)");
     // The JS `.substring(2, 3)` that silently meant indices 2..3 (one char).
