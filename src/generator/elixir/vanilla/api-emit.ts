@@ -212,6 +212,20 @@ export function emitVanillaApiControllers(
         controller: controllerName,
         action: `:${snake(op.name)}`,
       });
+      // The side-effect-free `GET /<plural>/:id/can_<op>` companion of a
+      // `when`-gated op (criterion.md, use site 2).  It was DECLARED in this
+      // backend's own OpenAPI (`openapi-emit.ts` emits the PathItem for every
+      // `op.when`) and never mounted, so the published probe 404'd — the same
+      // spec-vs-router split as the `update` route, and invisible for the same
+      // reason: `conformance-parity` diffs specs, and the spec was right.
+      if (op.when) {
+        routes.push({
+          method: "get",
+          path: `/${aggsPath}/:id/can_${snake(op.routeSlug ?? op.name)}`,
+          controller: controllerName,
+          action: `:can_${snake(op.name)}`,
+        });
+      }
     }
   }
 
@@ -397,6 +411,27 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         ProblemDetails.validation_error_response(conn, changeset)${denialArms}
     end
 ${GUARD_RESCUE}
+  end`;
+    })
+    .join("\n");
+
+  // The `can_<op>` probe actions.  Each loads the aggregate and answers the
+  // SAME `when` predicate the guard chain enforces, via the context's
+  // `can_<op>_<agg>/1` — so the probe can never drift from the gate it probes.
+  // `{ allowed }` is the shared envelope every other backend sends.
+  const canActions = memberOps
+    .filter((op) => op.when)
+    .map((op) => {
+      const opSnake = snake(op.name);
+      return `
+  def can_${opSnake}(conn, %{"id" => id}) do
+${cuBind}    case ${ctxModule}.${cmdGet}(id${getActor}) do
+      {:ok, record} ->
+        json(conn, %{"allowed" => ${ctxModule}.can_${opSnake}_${aggSnake}(record)})
+
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+    end
   end`;
     })
     .join("\n");
@@ -683,6 +718,7 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
 ${writeActions}
 ${findActions}
 ${opActions}
+${canActions}
 ${problemVariant}${versionHelper}
 ${((): string => {
   // Route A: the document controller roots the SAME wireShape serializer at the

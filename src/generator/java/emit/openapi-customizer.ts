@@ -279,9 +279,28 @@ export function buildJavaOpenApiContract(
         if (op.visibility !== "public") continue;
         const opPath = `${route}/{id}/${snake(op.name)}`;
         const spec = ctx ? returnUnionSpec(op, ctx) : undefined;
-        // A versioned aggregate's `update` declares 409 (stale `If-Match` →
-        // optimistic-concurrency conflict), mirroring the Hono / .NET contract.
+        // The two per-operation CONFLICT statuses, both remappable via
+        // `httpStatus` (M-T3.4a) and deduped, so with no override they collapse
+        // to one declared 409:
+        //   - a `when` STATE GATE answers `Disallowed` — the `when` rung of the
+        //     denial ladder (RS-15: `when` -> 409, `requires` -> 403,
+        //     `precondition` -> 422);
+        //   - a versioned aggregate's `update` answers `ConcurrencyConflict` on
+        //     a stale `If-Match`.
+        //
+        // The `when` arm was missing.  This backend's runtime already answers
+        // the resolved `Disallowed` status (`emit/api.ts` renders exactly that
+        // arm), but the customizer declared only `{400, 404, 422}` — so a
+        // `when`-gated operation answered a status its own published contract
+        // did not list.  `op.when` was already read three lines below to emit
+        // the `can_<op>` companion, so the fact was in hand and unused.
         const versionedUpdate = op.name === "update" && aggregateIsVersioned(agg);
+        const conflictStatuses = (): number[] => {
+          const out: number[] = [];
+          if (op.when) out.push(resolveStructural("Disallowed"));
+          if (versionedUpdate) out.push(resolveStructural("ConcurrencyConflict"));
+          return out;
+        };
         if (spec && op.returnType?.kind === "union") {
           // Exception-less return union: 200 carries the tagged union DTO
           // (the controller returns `ResponseEntity<?>`, so springdoc infers
@@ -293,7 +312,7 @@ export function buildJavaOpenApiContract(
           unions.set(unionName, JSON.stringify(unionJsonSchema(op.returnType.variants, ctx)));
           const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
           for (const a of spec.arms) if (a.isError) statuses.add(a.status);
-          if (versionedUpdate) statuses.add(resolveStructural("ConcurrencyConflict"));
+          for (const s of conflictStatuses()) statuses.add(s);
           routes.push({
             method: "post",
             path: opPath,
@@ -302,7 +321,7 @@ export function buildJavaOpenApiContract(
           });
         } else {
           const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
-          if (versionedUpdate) statuses.add(resolveStructural("ConcurrencyConflict"));
+          for (const s of conflictStatuses()) statuses.add(s);
           routes.push({
             method: "post",
             path: opPath,

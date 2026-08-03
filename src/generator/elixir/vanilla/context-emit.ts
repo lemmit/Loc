@@ -20,6 +20,7 @@ import type {
   ChannelIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   OperationIR,
   StmtIR,
   SystemIR,
@@ -34,7 +35,7 @@ import type { ElixirChannelsCfg } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
-import type { RenderCtx } from "../render-expr.js";
+import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { aggregateHasResidualInvariants } from "./changeset-invariant-emit.js";
@@ -340,6 +341,40 @@ ${body}
     })
     .join("")}`
         : "";
+    // The `can_<op>` PREDICATE of each `when`-gated public operation — the
+    // side-effect-free probe behind `GET /<aggs>/{id}/can_<op>` (criterion.md,
+    // use site 2).
+    //
+    // This backend already DECLARED that endpoint in its own OpenAPI
+    // (`openapi-emit.ts` emits the PathItem for every `op.when`) while its
+    // router never mounted it, so the published probe 404'd — the same
+    // spec-vs-router split as the `update` route, found the moment a fixture
+    // carried a `when` gate at all.
+    //
+    // The predicate is the SAME `op.when` expression the guard chain renders
+    // into `ensure(...)`, against the same `thisName: "record"` context — so the
+    // probe and the gate it probes cannot disagree by construction.
+    const whenGatedOps = (agg.operations ?? []).filter(
+      (op) => op.visibility === "public" && op.when,
+    );
+    const canFacade =
+      whenGatedOps.length > 0
+        ? whenGatedOps
+            .map((op) => {
+              const rc: RenderCtx = {
+                thisName: "record",
+                contextModule: facadeMod,
+                foundation: "vanilla",
+                agg: agg as EnrichedAggregateIR,
+              };
+              return `\n
+  @doc "Whether the \`${op.name}\` state gate currently admits this ${aggPascal}."
+  def can_${snake(op.name)}_${aggSnake}(%${facadeMod}.${aggPascal}{} = record) do
+    ${renderExpr(op.when as ExprIR, rc)}
+  end`;
+            })
+            .join("")
+        : "";
     // Aggregate `function` members (§11b) — pure domain helpers callable from the
     // op / precondition / derived bodies emitted above.  Each renders as a
     // struct-guarded `def <fn>(%Agg{} = record, …)` so the lowered call site
@@ -363,7 +398,7 @@ ${body}
       : ""
   }
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
-  defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update${deleteDelegate}${changeFacade}${destroyFacade}${opBangFacade}
+  defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update${deleteDelegate}${changeFacade}${destroyFacade}${opBangFacade}${canFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });
 
