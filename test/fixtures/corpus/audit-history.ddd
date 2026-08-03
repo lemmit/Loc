@@ -64,6 +64,16 @@ system AuditHistorySystem {
     let o = api.orders.create({ reference: "R1", quantity: 5, status: 0 })
     api.orders.cancel(o, { reason: 7 })
     let trail = api.orders.history(o)
-    expect(trail.length).toBe(2)
+    expect(trail.count).toBe(2)
+    expect(trail.first().action).toBe("create")
+    let cancelled = trail.skip(1).first()
+    expect(cancelled.action).toBe("cancel")
+    // Only `status` moved.  `reference` and `quantity` were re-saved unchanged,
+    // and a field that did not move is not a change — the whole reason the diff
+    // is derived at read time from the two snapshots rather than stored.
+    expect(cancelled.changes.count).toBe(1)
+    expect(cancelled.changes.first().field).toBe("status")
+    expect(cancelled.changes.first().before).toBe(0)
+    expect(cancelled.changes.first().after).toBe(7)
   }
 }

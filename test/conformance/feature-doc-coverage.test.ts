@@ -41,6 +41,7 @@ const FEATURE_DOCS: readonly string[] = [
   // Covered today — each cited by >=1 corpus manifest row.  Listed here so
   // dropping a feature's last fixture (un-citing its doc) fails the gate rather
   // than silently regressing coverage.
+  "audit",
   "auth",
   "capabilities",
   "channels",

@@ -1,3 +1,4 @@
+import { isDescendingSort } from "../generator/typescript/render-expr.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -92,9 +93,13 @@ export function renderE2EFile(
   }
   lines.push(`};`);
   lines.push("");
-  lines.push(E2E_HELPERS.trim());
-  lines.push("");
-  lines.push(`describe(${JSON.stringify(`${sys.name} e2e`)}, () => {`);
+  // The tests render FIRST so the wire helpers can be emitted on demand: a
+  // suite that uses no ordering / arithmetic / property-style collection op
+  // should not carry a dead `__cmpKey`, which `test:biome-gen` would flag as an
+  // unused symbol in emitted code.  Same "the feature off pays nothing" rule
+  // the audit / provenance emission gates follow.
+  const testLines: string[] = [];
+  testLines.push(`describe(${JSON.stringify(`${sys.name} e2e`)}, () => {`);
   for (const t of apiTests) {
     const declared = sys.deployables.find((x) => x.name === t.deployableName);
     if (!declared) continue;
@@ -127,11 +132,21 @@ export function renderE2EFile(
       // backend by name (`my test against dotnetApi`).  Single-
       // backend systems still gain the suffix — small fixture
       // churn but consistent semantics.
-      lines.push(...renderTest(t, ctx, ` against ${serviceSlug(d.name)}`).map((l) => `  ${l}`));
-      lines.push("");
+      testLines.push(...renderTest(t, ctx, ` against ${serviceSlug(d.name)}`).map((l) => `  ${l}`));
+      testLines.push("");
     }
   }
-  lines.push(`});`);
+  testLines.push(`});`);
+
+  const body = testLines.join("\n");
+  for (const h of E2E_WIRE_HELPERS) {
+    if (!body.includes(`${h.name}(`)) continue;
+    lines.push(h.src);
+    lines.push("");
+  }
+  lines.push(E2E_HELPERS.trim());
+  lines.push("");
+  lines.push(body);
   return lines.join("\n") + "\n";
 }
 
@@ -393,11 +408,28 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       // alternative.
       if (e.body) return `(${e.param}) => ${renderE2EExpr(e.body, ctx)}`;
       return `(${e.param}) => { /* block-body lambdas not supported in e2e tests */ }`;
-    case "member":
-      return `${renderE2EExpr(e.receiver, ctx)}.${e.member}`;
+    case "member": {
+      const recv = renderE2EExpr(e.receiver, ctx);
+      // Property-style collection ops (`lines.count`, `lines.distinct`) lower to
+      // a MEMBER node, which carries no `isCollectionOp` marker — and inside a
+      // test body every expression is placeholder-typed, so `receiverType` is
+      // no help either.  `x.count` is therefore ambiguous between the op and a
+      // field named `count`, and only the runtime value can tell them apart:
+      // hence the `__count` / `__distinct` helpers rather than a guess here.
+      if (e.member === "count") return `__count(${recv})`;
+      if (e.member === "distinct") return `__distinct(${recv})`;
+      return `${recv}.${e.member}`;
+    }
     case "method-call": {
       const recv = renderE2EExpr(e.receiver, ctx);
       const args = e.args.map((a) => renderE2EExpr(a, ctx));
+      if (e.isCollectionOp) {
+        const op = E2E_COLLECTION_RENDERERS[e.member];
+        // Guarded rather than asserted: `isCollectionOp` is set by lowering
+        // against the same catalogue this table is pinned to, so a miss is a
+        // catalogue/table drift the completeness test catches at build time.
+        if (op) return op(`(${recv})`, args, e);
+      }
       return `${recv}.${e.member}(${args.join(", ")})`;
     }
     case "call":
@@ -423,8 +455,12 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
         return v;
       }
       if (e.target === "money") {
-        if (e.from === "money") return v;
-        return `new Decimal(${v})`;
+        // NOT `new Decimal(...)`: the emitted suite imports only vitest, so a
+        // decimal.js reference is a ReferenceError at run time rather than a
+        // wrong value.  Money crosses the wire as a JSON scalar, so a widening
+        // conversion into it is the identity here — the comparison ops numify
+        // through `__num`/`__cmpKey` where ordering or arithmetic needs it.
+        return v;
       }
       return v;
     }
@@ -474,6 +510,76 @@ function renderLiteral(lit: string, value: string): string {
   if (lit === "null") return "null";
   return value;
 }
+
+// ---------------------------------------------------------------------------
+// Collection ops over WIRE values
+//
+// A `test e2e` body operates on parsed JSON — the response the backend actually
+// returned — not on domain objects.  That is the whole difference between this
+// table and the domain one (`TS_COLLECTION_RENDERERS`), and it is why the two
+// cannot simply be shared:
+//
+//   - The domain represents `money` as a decimal.js `Decimal`, so its `sum`
+//     folds with `.plus` from a `new Decimal(0)` seed and its `sortBy` compares
+//     with `.lt`/`.gt`.  On the wire `money` is a fixed-scale STRING, and the
+//     emitted suite imports nothing but vitest — a `Decimal` reference here is
+//     a `ReferenceError`, not a wrong answer.
+//   - Wire numbers may arrive as strings, so the ordering and arithmetic ops go
+//     through `__cmpKey` / `__num` (see their definitions above).
+//
+// Everything else is a plain JS array operation and matches the domain table
+// arm-for-arm.  `test/system/e2e-collection-ops.test.ts` pins that every
+// catalogue op has an entry here, so adding an op to the catalogue forces a
+// wire-vs-domain decision rather than silently falling through to a verbatim
+// `.op()` call — which is what happened before: `trail.first()` emitted
+// `trail.first()`, and arrays have no `.first`, so the assertion died with a
+// TypeError at runtime instead of failing to compile.
+// ---------------------------------------------------------------------------
+
+type E2ECollectionRenderer = (
+  recv: string,
+  args: string[],
+  e?: Extract<ExprIR, { kind: "method-call" }>,
+) => string;
+
+export const E2E_COLLECTION_RENDERERS: Record<string, E2ECollectionRenderer> = {
+  count: (recv) => `${recv}.length`,
+  // Wire numbers can be strings (money/decimal); fold through `__num`.
+  sum: (recv, args) =>
+    args.length === 1
+      ? `${recv}.reduce((__acc, __x) => __acc + __num((${args[0]})(__x)), 0)`
+      : `${recv}.reduce((__acc, __x) => __acc + __num(__x), 0)`,
+  avg: (recv, args) =>
+    args.length === 1
+      ? `(${recv}.length ? ${recv}.reduce((__acc, __x) => __acc + __num((${args[0]})(__x)), 0) / ${recv}.length : null)`
+      : `(${recv}.length ? ${recv}.reduce((__acc, __x) => __acc + __num(__x), 0) / ${recv}.length : null)`,
+  all: (recv, args) => `${recv}.every(${args[0] ?? "() => true"})`,
+  any: (recv, args) => `${recv}.some(${args[0] ?? "() => true"})`,
+  // Value equality on the wire is plain `===`: a wire value is a JSON scalar,
+  // so there is no decimal.js reference-identity trap for money to dodge here.
+  contains: (recv, args) => `${recv}.includes(${args[0] ?? "undefined"})`,
+  where: (recv, args) => `${recv}.filter(${args[0] ?? "() => true"})`,
+  first: (recv) => `${recv}[0]`,
+  firstOrNull: (recv) => `(${recv}[0] ?? null)`,
+  map: (recv, args) => `${recv}.map(${args[0]})`,
+  sortBy: (recv, args, e) => {
+    const desc = e ? isDescendingSort(e) : false;
+    const cmp = desc ? "kb < ka ? -1 : kb > ka ? 1 : 0" : "ka < kb ? -1 : ka > kb ? 1 : 0";
+    return `[...${recv}].sort((__a, __b) => { const ka = __cmpKey((${args[0]})(__a)), kb = __cmpKey((${args[0]})(__b)); return ${cmp}; })`;
+  },
+  distinct: (recv) => `[...new Set(${recv})]`,
+  take: (recv, args) => `${recv}.slice(0, ${args[0]})`,
+  skip: (recv, args) => `${recv}.slice(${args[0]})`,
+  join: (recv, args) => `${recv}.join(${args[0]})`,
+  // min/max return the PROJECTED value, empty → null.  The reduce keeps the
+  // ORIGINAL projected value and compares through `__cmpKey`, so a money string
+  // orders numerically but the answer is still the wire value the caller asserts
+  // against.
+  min: (recv, args) =>
+    `(${recv}.length ? ${recv}.map(${args[0]}).reduce((__a, __b) => (__cmpKey(__b) < __cmpKey(__a) ? __b : __a)) : null)`,
+  max: (recv, args) =>
+    `(${recv}.length ? ${recv}.map(${args[0]}).reduce((__a, __b) => (__cmpKey(__b) > __cmpKey(__a) ? __b : __a)) : null)`,
+};
 
 // ---------------------------------------------------------------------------
 // API call resolution
@@ -659,6 +765,61 @@ function findRepoQuery(name: string, agg: AggregateIR, ctx: RenderCtx): FindIR |
 function serviceSlug(name: string): string {
   return name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
+
+/** Comparison key for a WIRE value.  Emitted into every e2e suite; consumed by
+ *  the ordering collection ops (`sortBy` / `min` / `max`).
+ *
+ *  The wire is JSON, so a value that is numeric in the domain may arrive as a
+ *  STRING: `money` serializes at a fixed scale (`"12.5000"`), and a `decimal`
+ *  can too.  Comparing those with `<` is lexicographic, which orders
+ *  `"10.0000"` before `"9.0000"` — silently wrong, and wrong in a way a passing
+ *  test hides.  Numifying them first fixes the ordering.
+ *
+ *  Non-numeric strings pass through unchanged, which is what ISO-8601 timestamps
+ *  need: they are lexicographically ordered by construction, so `<` is already
+ *  correct for them and coercing would produce NaN. */
+const E2E_WIRE_HELPERS: ReadonlyArray<{ name: string; src: string }> = [
+  {
+    name: "__cmpKey",
+    src: `// Ordering key for a wire value — see \`sortBy\`/\`min\`/\`max\` below.  Money and
+// decimal cross the wire as fixed-scale STRINGS, where \`<\` compares
+// lexicographically ("10.0000" < "9.0000"); numify those.  ISO timestamps and
+// plain strings are already correctly ordered by \`<\`, and Number() would make
+// them NaN, so they pass through.
+function __cmpKey(v: unknown): unknown {
+  if (typeof v !== "string" || v === "") return v;
+  const n = Number(v);
+  return Number.isNaN(n) ? v : n;
+}`,
+  },
+  {
+    name: "__num",
+    src: `// Numeric value of a wire number — same string-crossing concern as \`__cmpKey\`,
+// for the arithmetic folds (\`sum\`/\`avg\`).
+function __num(v: unknown): number {
+  return typeof v === "number" ? v : Number(v);
+}`,
+  },
+  {
+    name: "__count",
+    src: `// Property-style collection ops (\`items.count\`, \`items.distinct\`) are written
+// without parens, so they lower to a MEMBER node — which carries no
+// collection-op marker, and inside a test body the receiver is an untyped wire
+// value.  \`x.count\` is therefore genuinely ambiguous: the collection op, or a
+// field literally named \`count\`.  The type that disambiguates exists at RUN
+// time, so decide there rather than guessing at emit time.
+function __count(v: unknown): unknown {
+  return Array.isArray(v) ? v.length : (v as { count?: unknown })?.count;
+}`,
+  },
+  {
+    name: "__distinct",
+    src: `// Property-style \`distinct\` — same runtime dispatch as \`__count\`.
+function __distinct(v: unknown): unknown {
+  return Array.isArray(v) ? [...new Set(v)] : (v as { distinct?: unknown })?.distinct;
+}`,
+  },
+];
 
 const E2E_HELPERS = `
 // When the target system requires auth, every request must carry a principal
