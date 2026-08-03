@@ -37,8 +37,15 @@ system AuditingSystem {
           precondition reason >= 0
           status := reason
         }
-        private operation recalc() {
-          quantity := quantity
+        // A private operation exists here for exactly one reason: to prove it
+        // is NOT audited (`private` is the opt-out — there is no negation
+        // keyword).  Its BODY is incidental, but it must still be a real
+        // assignment: the body was `quantity := quantity`, and the .NET emitter
+        // renders that literally as `Quantity = Quantity;`, which trips the
+        // analyzer rule CA2245 (self-assignment) and — under the corpus gate's
+        // `/warnaserror` — failed `corpus × dotnet` for this fixture.
+        private operation recalc(delta: int) {
+          quantity := quantity + delta
         }
         destroy { }
       }
