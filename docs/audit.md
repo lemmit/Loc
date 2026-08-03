@@ -58,6 +58,34 @@ together. The table (`audit_records`, one per module, derived from
 Indexed on `(target_type, target_id)` — the per-entity history read — and on
 `correlation_id`, for tracing one command across aggregates.
 
+### How the snapshots are stored — one rule, all five backends
+
+`before` / `after` are **`jsonb`** everywhere. There is no per-backend DDL: the
+column comes from the single shared `auditTableShape` above (`{ kind: "json" }`),
+rendered once by `sql-pg.ts`.
+
+Every backend binds them as a **JSON object**, never as a serialized string. A
+porter indexes the snapshot directly; nobody parses.
+
+| Backend | CLR / runtime binding |
+|---|---|
+| node (drizzle, MikroORM) | `jsonb` column → plain object |
+| .NET (EF, Dapper) | `System.Text.Json.Nodes.JsonNode?` |
+| Python (SQLAlchemy) | `Mapped[object \| None]` (`JSONB`) |
+| Java (Hibernate) | `@JdbcTypeCode(SqlTypes.JSON) Object` (a `Map`) |
+| Elixir (Ecto) | `:map` |
+
+Two consequences worth stating outright:
+
+- **Both sides are genuinely nullable** — a `create` has no `before`, a
+  `destroy` has no `after` — and that absence is a real SQL `NULL`, never the
+  string `"null"`.
+- **Snapshots are not comparable byte-for-byte across backends.** Reading back
+  from `jsonb` yields Postgres-normalized values: keys sorted, whitespace
+  stripped, duplicate keys collapsed. The cross-backend contract is the
+  **derived `changes` output** (§3), pinned by
+  `test/behavioral/wire-golden/audit-history.json` — never the stored bytes.
+
 ### Only successful commands are recorded
 
 `status` is hardcoded `"ok"` and the insert rides the command's transaction. A

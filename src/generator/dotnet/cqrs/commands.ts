@@ -85,8 +85,8 @@ export function emitCreateCommandAndHandler(
       `            TargetType = ${JSON.stringify(agg.name)},\n` +
       `            TargetId = aggregate.Id.Value.ToString(),\n` +
       `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
-      `            Before = "null",\n` +
-      `            After = System.Text.Json.JsonSerializer.Serialize(${createAfterExpr}),\n` +
+      `            Before = null,\n` +
+      `            After = System.Text.Json.JsonSerializer.SerializeToNode(${createAfterExpr}),\n` +
       `            At = DateTime.UtcNow,\n` +
       `            Status = "ok",\n` +
       `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
@@ -190,8 +190,8 @@ export function emitDestroyCommandAndHandler(
       `            TargetType = ${JSON.stringify(agg.name)},\n` +
       `            TargetId = command.Id.Value.ToString(),\n` +
       `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
-      `            Before = System.Text.Json.JsonSerializer.Serialize(${destroyBeforeExpr}),\n` +
-      `            After = "null",\n` +
+      `            Before = System.Text.Json.JsonSerializer.SerializeToNode(${destroyBeforeExpr}),\n` +
+      `            After = null,\n` +
       `            At = DateTime.UtcNow,\n` +
       `            Status = "ok",\n` +
       `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
@@ -341,10 +341,10 @@ export function emitOperationCommandAndHandler(
       ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, ctx)
       : "";
     const auditBefore = audited
-      ? `        var __before = System.Text.Json.JsonSerializer.Serialize(${projectExpr});\n`
+      ? `        var __before = System.Text.Json.JsonSerializer.SerializeToNode(${projectExpr});\n`
       : "";
     const auditStage = audited
-      ? `        var __after = System.Text.Json.JsonSerializer.Serialize(${projectExpr});\n` +
+      ? `        var __after = System.Text.Json.JsonSerializer.SerializeToNode(${projectExpr});\n` +
         `        _audit.Stage(new AuditRecord\n` +
         `        {\n` +
         `            AuditId = Guid.NewGuid().ToString(),\n` +
