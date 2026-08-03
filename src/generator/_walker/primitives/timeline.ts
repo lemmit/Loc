@@ -140,11 +140,18 @@ function svelteTimeline(entries: string, testid: string): string {
 /** Angular — `@for` / `@if` control flow.
  *
  *  `actor` / `before` / `after` are `unknown` on the wire (an entry's snapshot
- *  values are arbitrary JSON), and Angular's template typechecker rejects an
- *  `unknown` in an interpolation — it has no `String(...)` to reach for, the
- *  way the JSX targets do.  `$any(...)` is the template-language escape hatch
- *  for exactly this, and the same one the `ProvenanceInfo` disclosure already
- *  uses for its `computedValue`. */
+ *  values are arbitrary JSON), and the template language has no `String(...)`
+ *  to reach for the way the JSX targets do.  `$any(...)` is the escape hatch,
+ *  and the same one the `ProvenanceInfo` disclosure uses for its
+ *  `computedValue` — so the two read alike.
+ *
+ *  Honest about what enforces it: MEASURED against the pinned Angular version
+ *  by the `history` cell of `test/e2e/generated-angular-build.test.ts`,
+ *  `strictTemplates` does NOT reject a bare `unknown` in an interpolation
+ *  (interpolations stringify, so any type is assignable).  The `$any(...)` is
+ *  therefore deliberate style, not a compiler requirement — dropping it does
+ *  not fail `ng build` today.  The thing that DOES fail there is one line
+ *  down: the double `?? []` guardedList() avoids (TS2869). */
 function angularTimeline(entries: string, testid: string): string {
   return [
     `<ol class="loom-timeline"${testid}>`,
