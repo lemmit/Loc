@@ -51,6 +51,7 @@ import {
 } from "./pages-emitter.js";
 import { buildRealtimeHandlers } from "./realtime-handlers-builder.js";
 import { renderZustandStoreModule } from "./store-builder.js";
+import { shellChromeText } from "./templating/preparers/app-shell.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
 
 // ---------------------------------------------------------------------------
@@ -293,7 +294,21 @@ export function generateReactForContexts(
   // logger.  Output flows through console.* so the playground App-log
   // stream and Playwright console capture pick it up.
   out.set("src/logger.ts", renderShellFile("logger", {}, pack));
-  out.set("src/ErrorBoundary.tsx", renderShellFile("error-boundary", {}, pack));
+  // The ROOT boundary sits OUTSIDE App.tsx, so it can't reuse the app-shell's
+  // chrome tokens — it takes its own `chrome.rootErrorTitle` (its raw string
+  // carries a full stop that the in-shell heading doesn't) and its own gated
+  // `t` import, since it is a separate module.
+  out.set(
+    "src/ErrorBoundary.tsx",
+    renderShellFile(
+      "error-boundary",
+      {
+        i18nEnabled,
+        errorTitleText: shellChromeText("rootErrorTitle", i18nEnabled),
+      },
+      pack,
+    ),
+  );
   out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
   // Frontend ACL shared utilities — pack-agnostic, emitted into every
   // React project.  `strict-field-map.ts` is type-only (zero runtime

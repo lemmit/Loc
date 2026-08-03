@@ -40,7 +40,7 @@ class AppErrorBoundary extends React.Component<
                 window.location.assign("/");
               }}
             >
-              Back to home
+              {{{backToHomeText}}}
             </Button>
           </Box>
         </Stack>
@@ -54,7 +54,7 @@ function NotFound() {
   return (
     <Stack data-testid="not-found" p={2} gap={1}>
       <Typography variant="h5">{{{notFoundText}}}</Typography>
-      <RouterLink to="/">← Back to home</RouterLink>
+      <RouterLink to="/">← {{{backToHomeText}}}</RouterLink>
     </Stack>
   );
 }

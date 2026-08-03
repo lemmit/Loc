@@ -577,6 +577,8 @@ export function generateVueForContexts(
     // The mobile nav toggle's aria — "Toggle navigation" (shadcnVue; vuetify's
     // drawer toggle carries no label, so it stays untouched).
     toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
+    // The error boundary's "Back to home" recovery button (both Vue packs).
+    backToHomeText: shellChromeText("backToHome", i18nEnabled),
   };
   if (useLayouts) {
     // The chrome (and its toast/realtime hosts) move OUT of App.vue into

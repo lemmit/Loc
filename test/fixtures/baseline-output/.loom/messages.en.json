@@ -1,7 +1,9 @@
 {
+  "chrome.backToHome": "Back to home",
   "chrome.notFound": "Not found",
   "chrome.openMenu": "Open menu",
   "chrome.primaryNav": "Primary navigation",
+  "chrome.rootErrorTitle": "Something went wrong.",
   "chrome.skipToContent": "Skip to content",
   "chrome.somethingWentWrong": "Something went wrong",
   "chrome.toggleNavigation": "Toggle navigation",

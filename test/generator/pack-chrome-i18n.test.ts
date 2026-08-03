@@ -273,3 +273,61 @@ describe("pack-chrome i18n — loader aria-label", () => {
     }
   });
 });
+
+// The recovery link + the ROOT error boundary — the last two app-shell chrome
+// strings, and the two that don't map one-key-one-site:
+//   * "Back to home" appears twice per React pack with DIFFERENT raw text — the
+//     error boundary's button (bare) and the 404's anchor ("← Back to home").
+//     ONE key serves both; the arrow stays literal in the template, so i18n-off
+//     still concatenates to the byte-identical "← Back to home".
+//   * `src/ErrorBoundary.tsx` is a SHARED shell file mounted by main.tsx outside
+//     App.tsx, so it can't reuse the app-shell tokens — and its raw string
+//     carries a full stop the in-shell heading doesn't, hence its own key.
+describe("pack-chrome i18n — back-to-home + root error boundary", () => {
+  it("React: one key drives BOTH sites, arrow kept outside the message", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
+    const app = appOf(files);
+    // The error boundary's button — bare.
+    expect(app).toContain(`{t("chrome.backToHome", "Back to home")}`);
+    // The 404's anchor — the "← " is decoration OUTSIDE the t() call, so
+    // translators get a clean phrase and RTL/CJK isn't stuck with the glyph.
+    expect(app).toContain(`← {t("chrome.backToHome", "Back to home")}</Anchor>`);
+    expect(catalogOf(files)["chrome.backToHome"]).toBe("Back to home");
+    // One catalog entry, not two.
+    expect(Object.keys(catalogOf(files)).filter((k) => k.startsWith("chrome.backToHome"))).toEqual([
+      "chrome.backToHome",
+    ]);
+  });
+
+  it("Vue: the error boundary's recovery button binds too", async () => {
+    for (const pack of ["vuetify", "shadcnVue"] as const) {
+      const files = await generateSystemFiles(SYSTEM("vue", pack, `Heading { "Welcome" }`));
+      expect(shellOf(files, "src/App.vue")).toContain(
+        `{{ t("chrome.backToHome", "Back to home") }}`,
+      );
+      expect(catalogOf(files)["chrome.backToHome"]).toBe("Back to home");
+    }
+  });
+
+  it("the ROOT ErrorBoundary binds its own key and imports t itself", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
+    const boundary = shellOf(files, "src/ErrorBoundary.tsx");
+    // Its own module ⇒ its own gated import (App.tsx's doesn't reach here).
+    expect(boundary).toContain(`import { t } from "./i18n";`);
+    expect(boundary).toContain(`{t("chrome.rootErrorTitle", "Something went wrong.")}`);
+    expect(catalogOf(files)["chrome.rootErrorTitle"]).toBe("Something went wrong.");
+    // Distinct from the IN-SHELL heading, which has no full stop.
+    expect(catalogOf(files)["chrome.somethingWentWrong"]).toBe("Something went wrong");
+  });
+
+  it("stays byte-identical (raw text, no t import) with i18n off", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", `Text { status }`));
+    const app = appOf(files);
+    // The button's label sits on its own line in the emitted JSX.
+    expect(app).toMatch(/>\s*\n\s*Back to home\n\s*<\/Button>/);
+    expect(app).toContain(`← Back to home</Anchor>`);
+    const boundary = shellOf(files, "src/ErrorBoundary.tsx");
+    expect(boundary).toContain(`<h2 style={msgStyle}>Something went wrong.</h2>`);
+    expect(boundary).not.toContain("import { t }");
+  });
+});

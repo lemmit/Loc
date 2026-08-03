@@ -52,7 +52,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
       <v-container fluid>
         <div v-if="appError" data-testid="app-error">
           <v-alert type="error" {{{errorTitleAttr}}} :text="appError.message" />
-          <v-btn class="mt-4" variant="outlined" @click="resetError">Back to home</v-btn>
+          <v-btn class="mt-4" variant="outlined" @click="resetError">{{{backToHomeText}}}</v-btn>
         </div>
         <router-view v-else />
       </v-container>

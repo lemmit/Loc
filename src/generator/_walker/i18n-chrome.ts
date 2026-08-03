@@ -62,10 +62,22 @@ export const APP_SHELL_CHROME: Record<string, string> = {
   [chromeKey("skipToContent")]: "Skip to content",
   [chromeKey("primaryNav")]: "Primary navigation",
   [chromeKey("somethingWentWrong")]: "Something went wrong",
+  // The ROOT error boundary (`src/ErrorBoundary.tsx`, mounted by every React
+  // pack's `main.tsx` outside the provider chain) spells the same idea WITH a
+  // full stop.  Its own key rather than a re-use, because the two raw strings
+  // differ and re-wording either would break the i18n-off byte-identical
+  // guarantee — and rather than hoisting the "." out of the message, because
+  // sentence-final punctuation is not universal (CJK uses 。).
+  [chromeKey("rootErrorTitle")]: "Something went wrong.",
   // The mobile nav toggle: two keys, not one, because the packs genuinely spell
   // it differently (chakra "Open menu" vs the shadcn/flowbite family "Toggle
   // navigation").  Collapsing them onto one canonical English would silently
   // re-word a pack and break the i18n-off byte-identical guarantee.
   [chromeKey("openMenu")]: "Open menu",
   [chromeKey("toggleNavigation")]: "Toggle navigation",
+  // The error boundary's / 404's recovery link.  ONE key for both, even though
+  // the 404 renders it as "← Back to home": the arrow is decoration the template
+  // keeps OUTSIDE the token, so i18n-off still concatenates to the byte-identical
+  // "← Back to home" while translators see one clean phrase.
+  [chromeKey("backToHome")]: "Back to home",
 };
