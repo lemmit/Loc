@@ -78,6 +78,12 @@ import {
   renderAuditWriterInterface,
   renderDapperAuditWriter,
 } from "./emit/audit.js";
+import {
+  renderAuditHistoryReaderInterface,
+  renderAuditHistoryTypes,
+  renderDapperAuditHistoryReader,
+  renderEfAuditHistoryReader,
+} from "./emit/audit-history.js";
 import { renderDotnetChannels } from "./emit/channels.js";
 import {
   renderDapperDocumentRepository,
@@ -700,6 +706,10 @@ function emitProjectFromContexts(
   // — `create(...) audited` / `destroy audited` with no audited operation —
   // still gets the audit_records table + IAuditWriter seam.
   const hasAudit = merged.aggregates.some(aggHasAuditedTarget);
+  // Entity history (docs/audit.md) — read off the enrichment-derived
+  // `historyFind` rather than re-deriving "which aggregates serve history";
+  // that derivation is `aggServesHistory` and enrichment already ran it.
+  const hasHistory = merged.repositories.some((r) => r.historyFind !== undefined);
   // Shape routing (shared by both persistence paths): document-shaped aggregates
   // persist as one JSONB blob table (Dapper) / DbSet<Document> (EF); embedded
   // ones fold each containment into a JSONB column (Dapper) / owned `.ToJson()`.
@@ -892,6 +902,20 @@ function emitProjectFromContexts(
       usingDapper ? renderDapperAuditWriter(ns) : renderAuditWriter(ns),
     );
   }
+  // Entity history shared files (docs/audit.md) — the READ side of the same
+  // trail: the `AuditEntry` wire shape + the persistence-neutral read port.
+  // Gated on the enrichment-derived `historyFind` rather than on `hasAudit`,
+  // because an aggregate can be audited and still serve NO history (every
+  // diffable field excluded — see `aggServesHistory`), and a project with no
+  // history read must stay byte-identical.
+  if (hasHistory) {
+    out.set("Application/Common/AuditHistory.cs", renderAuditHistoryTypes(ns));
+    out.set("Application/Common/IAuditHistoryReader.cs", renderAuditHistoryReaderInterface(ns));
+    out.set(
+      "Infrastructure/Persistence/AuditHistoryReader.cs",
+      usingDapper ? renderDapperAuditHistoryReader(ns) : renderEfAuditHistoryReader(ns),
+    );
+  }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
   // Program.cs registrations only when at least one aggregate
@@ -1035,6 +1059,7 @@ function emitProjectFromContexts(
     hasRealtime,
     realtimeRoomScoped,
     hasAudit,
+    hasHistory,
     hasProvenance,
     // Dapper persistence-port DI (M-T6.9): closed bindings keyed off the
     // pre-merge event-log context names — computed here (index has `contexts`)
@@ -1768,6 +1793,10 @@ function emitProject(
     /** Per-operation audit (audit-and-logging.md): registers the scoped
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
     hasAudit?: boolean;
+    /** Entity history (docs/audit.md): registers the scoped
+     *  `IAuditHistoryReader` → `AuditHistoryReader` the derived
+     *  `Get<Agg>HistoryQuery` handlers read the trail through. */
+    hasHistory?: boolean;
     /** Field-level provenance (provenance.md): the lineage history table +
      *  co-located columns.  Together with `hasAudit` it forces the ambient
      *  RequestContext to exist so audit/provenance rows can stamp the request
@@ -1836,6 +1865,7 @@ function emitProject(
       hasRealtime: !!options?.hasRealtime,
       realtimeRoomScoped: !!options?.realtimeRoomScoped,
       hasAudit: !!options?.hasAudit,
+      hasHistory: !!options?.hasHistory,
       fileUpload: options?.fileUpload,
       oidc: !!options?.oidc,
       orgPathResolver: !!options?.orgPathResolver,

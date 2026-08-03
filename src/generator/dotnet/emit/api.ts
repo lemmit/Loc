@@ -129,6 +129,11 @@ export interface ControllerShape {
           resource?: string;
         };
   }>;
+  /** Entity history (docs/audit.md) — the derived `GET /{id}/history` read over
+   *  `audit_records`, present when the aggregate's repository carries an
+   *  enrichment-derived `historyFind`.  `guarded` mirrors that find's inherited
+   *  `requires` gate, so the action declares the 403 it can actually answer. */
+  historyAction?: { guarded: boolean };
   /** Prefix prepended to the controller's `[Route(...)]` (e.g.
    *  `"api/"` for fullstack-dotnet — leaves `/orders/*` paths free
    *  for the SPA's client-side router and namespaces controllers
@@ -323,6 +328,10 @@ export function renderController(
         ? "using FluentValidation;"
         : null,
       hasCommands ? `using ${ns}.Application.${plural(agg.name)}.Commands;` : null,
+      // `Application.Common` holds the shared `AuditEntry` shape the history
+      // action returns — imported only when that action is emitted, so a
+      // history-free controller stays byte-identical.
+      shape.historyAction ? `using ${ns}.Application.Common;` : null,
       `using ${ns}.Application.${plural(agg.name)}.Queries;`,
       `using ${ns}.Application.${plural(agg.name)}.Requests;`,
       `using ${ns}.Application.${plural(agg.name)}.Responses;`,
@@ -386,6 +395,27 @@ export function renderController(
       "        return response is null ? NotFound() : Ok(response);",
       "    }",
       "",
+      // Entity history — GET /{id}/history (docs/audit.md).  Emitted off the
+      // enrichment-derived `historyFind`, so it sits beside the declared finds
+      // rather than inside their loop.  The three guards (inherited read gate →
+      // 403, entity reachability → 404, `mask unless` drop) all live in the
+      // query handler; the action is a plain dispatch, exactly like getById.
+      ...(shape.historyAction
+        ? [
+            '    [HttpGet("{id}/history")]',
+            "    [ProducesResponseType(typeof(IReadOnlyList<AuditEntry>), 200)]",
+            ...(shape.historyAction.guarded
+              ? ["    [ProducesResponseType(typeof(ProblemDetails), 403)]"]
+              : []),
+            ...producesProblem("getById"),
+            `    public async Task<ActionResult<IReadOnlyList<AuditEntry>>> ${actionName(opFind(agg.name, "history"))}([FromRoute] ${shape.idClrType} id)`,
+            "    {",
+            `        var entries = await _mediator.Send(new Get${agg.name}HistoryQuery(new ${idClass}(id)));`,
+            "        return Ok(entries);",
+            "    }",
+            "",
+          ]
+        : []),
       // Canonical destroy → DELETE /{id} (hard delete).  Gated; reuses the
       // getById error shape (404).  crudish's destroy is empty-bodied, so
       // the command carries only the id.
