@@ -11,11 +11,9 @@
 //      records.  Shape-only, so one copy serves every audited aggregate.
 //   2. `api/AuditHistory.java` — the two pure helpers (`snapshotValue` /
 //      `valueChanged`).  Both take `Object`, because the snapshot columns are
-//      `jsonb` mapped to a bare `Object` on the JPA row: Hibernate hands back
-//      whatever its JSON FormatMapper deserialized (a `Map` in practice, a raw
-//      JSON `CharSequence` or a Jackson node under other mappers), and the
-//      helper normalizes all of them through one Jackson round-trip so the
-//      comparison is by CONTENT, like every other backend's.
+//      `jsonb` bound to a bare `Object` on the JPA row, which Hibernate
+//      surfaces as a `Map` of plain JSON values — the same object binding every
+//      backend uses over the one shared `auditTableShape` column definition.
 //   3. A per-aggregate `<agg>AuditEntry(row)` mapper, emitted as a private
 //      static method on the application service — this is where `mask unless`
 //      composes in, because the mapper is the only place a CALLER enters the
@@ -121,13 +119,17 @@ export function renderJavaAuditEntry(basePkg: string): string {
 
 /** `AuditHistory` — the two pure helpers every per-aggregate mapper calls.
  *
- *  Both normalize through one Jackson round-trip.  The `audit_records`
- *  snapshot columns are `jsonb` mapped to a bare `Object` field on the JPA row,
- *  so what Hibernate hands back depends on its JSON FormatMapper: a `Map` for
- *  the emitted Jackson mapper, a raw JSON `CharSequence` or a Jackson node for
- *  others.  Normalizing here means the comparison is by CONTENT — which is what
- *  a reader expects of "changed", and what makes a value object or containment
- *  array compare the same way it does on the other four backends. */
+ *  The `audit_records` snapshot columns are `jsonb` (one shared definition,
+ *  `auditTableShape` in `src/system/migrations-builder.ts`) bound to a bare
+ *  `Object` on the JPA row, which Hibernate's JSON FormatMapper surfaces as a
+ *  `Map` of plain JSON values.  So both helpers work on that Map directly —
+ *  index it, and compare with `Objects.equals`, which on plain JSON values IS
+ *  content comparison (a value object or containment array compares by content
+ *  rather than by identity, which is what a reader expects of "changed").
+ *
+ *  An asymmetric lifecycle side is a REAL null, not the string `"null"`: a
+ *  `create` has no `before` object at all and a `destroy` no `after`, so every
+ *  key on that side reads as absent. */
 export function renderJavaAuditHistorySupport(basePkg: string): string {
   return lines(
     `package ${javaAuditApiPkg(basePkg)};`,
@@ -135,59 +137,26 @@ export function renderJavaAuditHistorySupport(basePkg: string): string {
     `import java.util.Map;`,
     `import java.util.Objects;`,
     ``,
-    `import tools.jackson.databind.ObjectMapper;`,
-    `import tools.jackson.databind.json.JsonMapper;`,
-    ``,
     `/** Read-time helpers over an audit row's two snapshots (docs/audit.md).`,
     ` *  The diff is derived here and never stored — a stored diff is a cache with`,
     ` *  no invalidation story, and the snapshots already contain everything it`,
     ` *  says. */`,
     `public final class AuditHistory {`,
-    `    private static final ObjectMapper MAPPER = JsonMapper.builder().findAndAddModules().build();`,
-    ``,
     `    private AuditHistory() {`,
     `    }`,
     ``,
-    `    /** Read one key out of a snapshot.  A missing key and an explicit null`,
+    `    /** Read one key out of a snapshot.  A missing key and an absent snapshot`,
     `     *  are the same thing here — a \`create\` row has no \`before\` object at`,
     `     *  all, and its fields must read as null rather than throw. */`,
     `    public static Object snapshotValue(Object snapshot, String key) {`,
-    `        Map<String, Object> map = asMap(snapshot);`,
-    `        return map == null ? null : map.get(key);`,
+    `        return snapshot instanceof Map<?, ?> map ? map.get(key) : null;`,
     `    }`,
     ``,
-    `    /** Did this key actually move between the two snapshots?  Compared on`,
-    `     *  the normalized (plain JSON) forms, so a value object or a containment`,
-    `     *  array compares by CONTENT rather than by identity. */`,
+    `    /** Did this key actually move between the two snapshots?  Both sides are`,
+    `     *  plain JSON values off the same jsonb binding, so equality here IS`,
+    `     *  content comparison. */`,
     `    public static boolean valueChanged(Object before, Object after) {`,
-    `        return !Objects.equals(normalize(before), normalize(after));`,
-    `    }`,
-    ``,
-    `    @SuppressWarnings("unchecked")`,
-    `    private static Map<String, Object> asMap(Object snapshot) {`,
-    `        Object value = normalize(snapshot);`,
-    `        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : null;`,
-    `    }`,
-    ``,
-    `    /** Collapse whatever the JPA row handed back to plain JSON values`,
-    `     *  (Map / List / String / Number / Boolean / null). */`,
-    `    private static Object normalize(Object value) {`,
-    `        if (value == null) {`,
-    `            return null;`,
-    `        }`,
-    `        if (value instanceof CharSequence text) {`,
-    `            String raw = text.toString().trim();`,
-    `            if (raw.isEmpty()) {`,
-    `                return null;`,
-    `            }`,
-    `            // A jsonb column read back as text; anything else is a genuine`,
-    `            // string VALUE and must compare as itself.`,
-    `            if (raw.startsWith("{") || raw.startsWith("[") || "null".equals(raw)) {`,
-    `                return MAPPER.readValue(raw, Object.class);`,
-    `            }`,
-    `            return raw;`,
-    `        }`,
-    `        return MAPPER.convertValue(value, Object.class);`,
+    `        return !Objects.equals(before, after);`,
     `    }`,
     `}`,
     ``,
