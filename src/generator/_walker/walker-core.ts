@@ -866,6 +866,16 @@ export interface OperationFormState extends FormStateBase {
    *  (shadcn/mui/chakra) render the trigger inside the self-
    *  contained `<Op>OpModal` component, so they need it here. */
   triggerLabel: string;
+  /** The dialog's TITLE, read from the enclosing `Modal`'s `title:` — the
+   *  `modalTitle` user-visible slot, so it is already extracted into the
+   *  catalog and already translated here (D-I18N-ATTR).  Two spellings,
+   *  because packs render the title in both positions: `modalTitle` for a
+   *  markup-text slot (`<DialogTitle>…</DialogTitle>`), `modalTitleExpr` for a
+   *  JS prop (Mantine's `modals.open({ title: … })`).  Undefined ⇒ no authored
+   *  title; the page-shell falls back to the humanized op name, which is what
+   *  every pack hardcoded before this slot was honoured at all. */
+  modalTitle?: string;
+  modalTitleExpr?: string;
   /** True when this is the aggregate's primary operation (first
    *  public op) — `false` for the rest.  Platform-neutral emphasis
    *  token; each pack's template maps it to its button vocabulary. */

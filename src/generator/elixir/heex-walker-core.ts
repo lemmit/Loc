@@ -1323,11 +1323,6 @@ export function renderPrimitive(
   // Contract-required static a11y attributes (e.g. Toolbar's role/name).
   if (spec.extraAttrs) namedAttrs.push(...spec.extraAttrs);
 
-  if (spec.tag === ".empty") {
-    const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
-    return `<.empty${attrs} />`;
-  }
-
   // Other primitives — render children (if any).  A POSITIONAL child may be a
   // user-visible text slot (`Text`/`Bold`/`Badge`/`Button`/… index 0), so it is
   // rendered with its catalog role; `childrenExprs` are nested markup and never

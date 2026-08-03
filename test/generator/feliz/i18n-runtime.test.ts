@@ -193,7 +193,7 @@ system Shop {
   // Feliz's markup is not HTML, so its pack cannot splice the walker's
   // ` aria-label="…"` fragment.  It used to read the RAW `label:` text instead,
   // which shipped the accessible name in English at every locale; it now takes
-  // the same name as a target-native VALUE (`localizedAriaLabelValue`), already
+  // the same name as a target-native VALUE (`localizedNamedValue`), already
   // translated.
 
   it("translates named aria-label slots (Button + Toolbar) as F# props", async () => {

@@ -672,7 +672,7 @@ export const felizTarget: WalkerTarget = {
     isStringType(exprType) ? `Html.text (${js})` : `Html.text (string (${js}))`,
   renderAttrBinding: (name: string, js: string) => `prop.custom("${name}", ${js})`,
   // An F# string literal — how a user-visible string reaching the pack as a
-  // VALUE (`localizedAriaLabelValue`, D-I18N-ATTR) is spelled with i18n off.
+  // VALUE (`localizedNamedValue`, D-I18N-ATTR) is spelled with i18n off.
   // Same escaping as `escapeText`; both land in an F# `"…"` body.
   renderStringLiteral: (text: string) => `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
 

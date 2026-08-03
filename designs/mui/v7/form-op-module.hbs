@@ -10,7 +10,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
     <>
       <Button variant="{{#if triggerPrimary}}contained{{else}}outlined{{/if}}" onClick={() => setOpen(true)} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{{humanOp}}</DialogTitle>
+        <DialogTitle>{{{modalTitle}}}</DialogTitle>
         <form
           data-testid="{{slug}}-op-{{opName}}-form"
           onSubmit={handleSubmit(async (vals) => {

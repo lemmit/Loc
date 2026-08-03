@@ -13,7 +13,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
       <Modal isOpen={isOpen} onClose={onClose}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{{humanOp}}</ModalHeader>
+          <ModalHeader>{{{modalTitle}}}</ModalHeader>
           <ModalCloseButton />
           <form
             data-testid="{{slug}}-op-{{opName}}-form"

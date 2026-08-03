@@ -251,9 +251,13 @@ export function localizedAriaLabelAttr(
   return ariaLabelAttr(literal ?? defaultLabel);
 }
 
-/** The accessible name of a NAMED user-visible slot as a TARGET-NATIVE
- *  EXPRESSION — the value-position twin of {@link localizedAriaLabelAttr}, and
- *  the seam for the two frontends whose markup is NOT HTML.
+/** A NAMED user-visible slot as a TARGET-NATIVE EXPRESSION — the value-position
+ *  twin of {@link localizedAriaLabelAttr}.
+ *
+ *  Two kinds of caller need a value rather than markup: the frontends whose
+ *  markup is NOT HTML (Feliz's F# props, Flutter's Dart args), and any pack slot
+ *  that is a plain JS EXPRESSION rather than an element (Mantine's
+ *  `modals.open({ title: … })`).
  *
  *  D-I18N-ATTR (M-T1.11): **the a11y helper emits an already-TRANSLATED value;
  *  a pack never resolves a key.**  One accessible name, two renderings, both
@@ -262,7 +266,7 @@ export function localizedAriaLabelAttr(
  *   - the HTML-ish attribute FRAGMENT (`localizedAriaLabelAttr`) — spliced
  *     verbatim by the four JSX/markup frontends, whose packs are `.hbs`
  *     templates that can only interpolate text;
- *   - this VALUE (`localizedAriaLabelValue`) — an expression in the target's own
+ *   - this VALUE (`localizedNamedValue`) — an expression in the target's own
  *     language, for the procedural packs that build props rather than markup
  *     (Feliz `prop.ariaLabel <expr>`, Flutter `Semantics(label: <expr>)`).
  *
@@ -277,7 +281,7 @@ export function localizedAriaLabelAttr(
  *  fragment `ariaLabelAttr` yields.  A DYNAMIC (non-literal) label is likewise
  *  `undefined`: it has no stable source string, exactly as in the attribute
  *  path. */
-export function localizedAriaLabelValue(
+export function localizedNamedValue(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
   role: string,

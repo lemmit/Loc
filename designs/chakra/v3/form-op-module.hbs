@@ -15,7 +15,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
           <Dialog.Positioner>
             <Dialog.Content>
               <Dialog.Header>
-                <Dialog.Title>{{humanOp}}</Dialog.Title>
+                <Dialog.Title>{{{modalTitle}}}</Dialog.Title>
               </Dialog.Header>
               <form
                 data-testid="{{slug}}-op-{{opName}}-form"

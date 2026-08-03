@@ -18,7 +18,7 @@ import {
 } from "../../_frontend/form-helpers.js";
 import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
-import { localizedNamedAttr, localizedNamedText } from "../i18n-emit.js";
+import { localizedNamedAttr, localizedNamedText, localizedNamedValue } from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
   addImport,
@@ -900,6 +900,13 @@ export function emitModal(
     if (st.kind === "operation" && st.op.name === opName) {
       st.triggerLabel = label;
       st.triggerPrimary = triggerPrimary;
+      // `title:` is the `modalTitle` user-visible slot — extracted into the
+      // catalog whether or not a pack renders it.  Every pack hardcoded the
+      // humanized op name instead, so an authored title was silently dropped
+      // AND its catalog entry was dead.  Both spellings are stashed here (the
+      // page-shell falls back to `humanOp` when there is no authored title).
+      st.modalTitle = localizedNamedText(call, ctx, "modalTitle", "title", "");
+      st.modalTitleExpr = localizedNamedValue(call, ctx, "modalTitle", "title");
       // When a this-relative default was seeded, the op state carries the
       // in-scope instance var the trigger must pass as the `record` prop.
       recordVar = st.recordVar;

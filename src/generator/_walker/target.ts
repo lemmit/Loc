@@ -697,7 +697,7 @@ export interface WalkerTarget {
   /** OPTIONAL — the SPELLING of a plain STRING LITERAL in the target's own
    *  expression language (M-T1.11).  Needed only where a user-visible string
    *  reaches a pack as a VALUE rather than as an HTML-ish attribute fragment —
-   *  the `localizedAriaLabelValue` seam, whose two consumers are the frontends
+   *  the `localizedNamedValue` seam, whose two consumers are the frontends
    *  whose markup is not HTML (Feliz's F# `"…"`, Flutter's Dart `'…'`).
    *
    *  The four JSX/markup frontends never call it (they splice the

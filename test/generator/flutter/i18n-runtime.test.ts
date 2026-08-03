@@ -179,7 +179,7 @@ describe("Flutter i18n runtime", () => {
   // --- ATTRIBUTE-position slots (D-I18N-ATTR) -------------------------------
   // Flutter's markup is not HTML, so its pack cannot splice the walker's
   // ` aria-label="…"` fragment; it consumes the same accessible name as a
-  // target-native VALUE (`localizedAriaLabelValue`), already translated.
+  // target-native VALUE (`localizedNamedValue`), already translated.
 
   it("translates named aria-label slots (Button + Toolbar) as Semantics labels", async () => {
     const src = SYSTEM(

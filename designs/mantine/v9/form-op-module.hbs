@@ -1,6 +1,6 @@
 function open{{opPascal}}Modal(mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>{{#if recordVar}}, record: {{recordType}}{{/if}}): void {
   modals.open({
-    title: "{{humanOp}}",
+    title: {{{modalTitleExpr}}},
     children: <{{opPascal}}Form mut={mut}{{#if recordVar}} record={record}{{/if}} onClose={() => modals.closeAll()} />,
   });
 }

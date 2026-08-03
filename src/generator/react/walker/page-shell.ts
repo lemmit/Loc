@@ -709,6 +709,13 @@ function renderFormOpWiring(
     opCamel: lowerFirst(op.name),
     idExpr,
     humanOp: humanize(op.name),
+    // The dialog title: the authored `Modal { title: … }` (already translated,
+    // the `modalTitle` catalog slot) when present, else the humanized op name —
+    // which is what every pack hardcoded before the slot was honoured.  Two
+    // spellings because packs render the title in both positions: markup text
+    // (`<DialogTitle>`) and a JS prop (Mantine's `modals.open({ title })`).
+    modalTitle: state.modalTitle || humanize(op.name),
+    modalTitleExpr: state.modalTitleExpr ?? JSON.stringify(humanize(op.name)),
     slug: snake(plural(agg.name)),
     srcImportPrefix,
     fieldArrays,

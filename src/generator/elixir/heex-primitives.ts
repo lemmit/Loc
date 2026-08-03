@@ -952,10 +952,17 @@ export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Wa
   return `<div class="skeleton" aria-hidden="true"${testidAttr}>\n${lines}\n</div>`;
 }
 
-/** `Alert("message")` → `<div class="alert">` */
+/** `Alert("message", title?)` → `<div class="alert">`.
+ *
+ *  `title:` is a USER-VISIBLE slot (`alertTitle` in `USER_VISIBLE_SLOTS`), so it
+ *  is extracted into the catalog whether or not it renders — dropping it here
+ *  handed a translator a string the app never showed (the class of defect
+ *  `user-visible-slot-coverage.test.ts` now gates).  Emitted as the same leading
+ *  bold line the JSX packs use, and translated through the shared role. */
 export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let color = "red";
   let message = "";
+  let title = "";
   let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   if (positionals[0]) message = renderInTemplate(positionals[0], ctx, "alert");
@@ -964,9 +971,11 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     const arg = expr.args[i]!;
     if (name === "color" && arg.kind === "literal") color = arg.value;
     else if (name === "testid" && arg.kind === "literal") testid = arg.value;
+    else if (name === "title") title = renderInTemplate(arg, ctx, "alertTitle");
   }
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
-  return `<div class="alert alert-${color}" role="alert"${testidAttr}>${message}</div>`;
+  const titleEl = title ? `<p class="font-medium">${title}</p>` : "";
+  return `<div class="alert alert-${color}" role="alert"${testidAttr}>${titleEl}${message}</div>`;
 }
 
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
@@ -1158,7 +1167,12 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
     extraAttrs: ['role="toolbar"', 'aria-label="Actions"'],
   },
   Group: { tag: "div", staticAttrs: ["class"], takesChildren: true },
-  Empty: { tag: ".empty", takesChildren: false },
+  // `Empty("No results yet")` carries the author's message in positional 0 (the
+  // `empty` user-visible slot).  It rendered as a childless `<.empty />`, so the
+  // message was discarded and every Phoenix app showed the core component's
+  // hardcoded English "No items." instead — a content defect, not just an i18n
+  // one.  `.empty` now takes an inner block (keeping that text as its fallback).
+  Empty: { tag: ".empty", takesChildren: true },
   Badge: { tag: ".badge", takesChildren: true },
   Button: { tag: ".button", takesChildren: true, labelAsAriaLabel: true },
   // --- inline-emphasis primitives — plain HTML inline elements, the
@@ -1226,17 +1240,31 @@ export function renderInlineCode(
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.InlineCode!, expr, ctx);
 }
 
-/** `Divider(label?)` → `<hr />`.  LiveView has no labelled-divider
- *  component; the optional `label:` is dropped (the same fallback the
- *  TSX packs that lack a labelled divider use). */
-export function renderDivider(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
+/** `Divider(label?)` → `<hr />`, or rule-text-rule when a `label:` is given.
+ *
+ *  LiveView has no labelled-divider component, but "no component" is not a
+ *  reason to DROP the label: it is a user-visible slot (`dividerLabel`), so it
+ *  reached `.loom/messages.en.json` while rendering nowhere — a translator
+ *  translating text the app never showed.  Every JSX pack composes the same
+ *  three-element form for exactly this reason (#2388), so HEEx does too. */
+export function renderDivider(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let testid = "";
+  let label = "";
   for (let i = 0; i < expr.args.length; i++) {
     const arg = expr.args[i]!;
-    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
+    const name = expr.argNames?.[i];
+    if (name === "testid" && arg.kind === "literal") testid = arg.value;
+    else if (name === "label") label = renderInTemplate(arg, ctx, "dividerLabel");
   }
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
-  return `<hr${testidAttr} />`;
+  if (!label) return `<hr${testidAttr} />`;
+  return (
+    `<div class="flex items-center gap-3 my-4"${testidAttr}>` +
+    `<hr class="flex-1" />` +
+    `<span class="text-sm opacity-70">${label}</span>` +
+    `<hr class="flex-1" />` +
+    `</div>`
+  );
 }
 
 /** `Image(src, alt)` → `<img src=… alt=… />`.  Literal attrs render as
