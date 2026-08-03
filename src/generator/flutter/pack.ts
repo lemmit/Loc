@@ -49,45 +49,23 @@ function dartStr(s: string): string {
   return s;
 }
 
-/** Escape a value that did NOT come through the walker's `escapeText` seam
- *  (e.g. a label parsed back out of the HTML-ish `a11yAttr` fragment) for a
- *  single-quoted Dart string literal.  Unlike `dartStr` (identity by contract),
- *  this must handle a raw apostrophe/backslash itself. */
-function dartLit(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
-
-/** Reverse the four HTML entities `a11y-emit.ts`'s `escapeHtmlAttr` introduces,
- *  so an accessible name pulled out of an `aria-label="…"` fragment reads back
- *  as plain text before it lands in a Dart string. */
-function unescapeHtmlEntities(s: string): string {
-  return s
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
-}
-
-/** The accessible name carried by a walker `a11yAttr` fragment, as a Dart
- *  EXPRESSION.  Flutter's markup is not HTML, so it can't splice the fragment;
- *  it parses the name back out (the same move `testidKey` makes for
- *  `testidAttr`) and re-expresses it as a `Semantics(label:)`.  Two shapes
- *  arrive, and both must be handled:
+/** The accessible name a primitive carries, as a Dart EXPRESSION ready for a
+ *  `Semantics(label:)` — or `""` when the primitive has no name at all.
  *
- *   - the static ` role="toolbar" aria-label="Actions"` fragment → a quoted
- *     Dart literal (byte-identical to the pre-i18n emission);
- *   - the BOUND ` ariaLabel: t('<key>', 'Actions')` form the walker produces
- *     under i18n (M-T1.11) via `renderAttrBinding` → the expression verbatim,
- *     so the accessible name is translated rather than silently lost to the
- *     fallback.
+ *  Flutter's markup is not HTML, so it cannot splice the walker's
+ *  ` aria-label="…"` fragment; the walker hands it the same name as a
+ *  target-native VALUE instead (`ariaLabelExpr`, D-I18N-ATTR in
+ *  `_walker/i18n-emit.ts`).  That value is ALREADY translated where the ui has
+ *  strings — `t('<key>', '<default>')`, keyed to `.loom/messages.en.json` — and a
+ *  plain Dart `'…'` literal otherwise, byte-identical to the pre-i18n emission.
+ *  (It replaces a regex that parsed the name back OUT of the HTML fragment: one
+ *  seam for both non-HTML packs, no HTML round-trip in Dart emission.)
  *
- *  Defaults to `fallback` ("Actions" for `Toolbar`) when no name is present. */
-function ariaLabelExpr(c: Ctx, fallback: string): string {
-  const raw = String(c.a11yAttr ?? "");
-  const bound = raw.match(/ariaLabel:\s*(.+)$/);
-  if (bound) return bound[1]!.trim();
-  const m = raw.match(/aria-label="([^"]*)"/);
-  return `'${dartLit(unescapeHtmlEntities(m ? m[1] : fallback))}'`;
+ *  `fallback` is the pack's own default for a primitive whose contract requires
+ *  a name (Toolbar's `'Actions'`); it is already a Dart literal. */
+function ariaLabelExpr(c: Ctx, fallback = ""): string {
+  const expr = String(c.ariaLabelExpr ?? "").trim();
+  return expr !== "" ? expr : fallback;
 }
 
 /** Apply a text style to a walked text value that may arrive EITHER as raw
@@ -219,7 +197,7 @@ function primitivePaper(c: Ctx): string {
 function primitiveToolbar(c: Ctx): string {
   if (!c.hasChildren) return "const SizedBox.shrink()";
   const row = `Row(${arg(testidKey(c))}mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.center, children: ${childrenList(c)})`;
-  return `Semantics(container: true, label: ${ariaLabelExpr(c, "Actions")}, child: ${row})`;
+  return `Semantics(container: true, label: ${ariaLabelExpr(c, "'Actions'")}, child: ${row})`;
 }
 
 /** Breadcrumbs — a nav trail (a horizontal `Wrap` of links/text). */
@@ -287,8 +265,20 @@ function primitiveBadge(c: Ctx): string {
   return `Chip(label: ${asText(label)}, visualDensity: VisualDensity.compact)`;
 }
 
-function primitiveDivider(_c: Ctx): string {
-  return "const Divider()";
+/** Divider — a Material rule.  An optional `label:` splits it into rule-text-rule
+ *  (Flutter has no labelled `Divider`, so the label sits between two `Expanded`
+ *  rules).  Without this the slot was extracted into `.loom/messages.en.json` but
+ *  rendered nowhere, handing a translator a string the app never shows.  The
+ *  label arrives raw with i18n off and as a `Text(t(…))` widget with it on —
+ *  `asText` takes either. */
+function primitiveDivider(c: Ctx): string {
+  if (!c.hasLabel) return "const Divider()";
+  const label = asText(String(c.label ?? ""));
+  return (
+    "Row(children: <Widget>[const Expanded(child: Divider()), " +
+    `Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: ${label}), ` +
+    "const Expanded(child: Divider())])"
+  );
 }
 
 /** A daisyUI-style `color:` → a Material colour for alert callouts. */
@@ -531,14 +521,12 @@ function primitiveButton(c: Ctx): string {
   const label = String(c.label ?? "").trim();
   const child = asWidget(label);
   const onPressed = c.hasOnClick ? String(c.onClick) : "null";
-  // The accessible name (`label:`) rides the walker's `a11yAttr` fragment, so it
-  // is translated under i18n (M-T1.11) and a plain quoted literal otherwise —
-  // byte-identical when i18n is off.  Empty fragment → no `Semantics` wrapper.
-  const ariaLabel = String(c.a11yAttr ?? "").trim() === "" ? "" : ariaLabelExpr(c, "");
+  // The accessible name (`label:`) rides the walker's `ariaLabelExpr` value, so
+  // it is translated under i18n (M-T1.11) and a plain quoted literal otherwise —
+  // byte-identical when i18n is off.  No name → no `Semantics` wrapper.
+  const ariaLabel = ariaLabelExpr(c);
   const btn = `ElevatedButton(${arg(testidKey(c))}onPressed: ${onPressed}, child: ${child})`;
-  return ariaLabel !== "" && ariaLabel !== "''"
-    ? `Semantics(label: ${ariaLabel}, child: ${btn})`
-    : btn;
+  return ariaLabel !== "" ? `Semantics(label: ${ariaLabel}, child: ${btn})` : btn;
 }
 
 // ---------------------------------------------------------------------------

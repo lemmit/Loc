@@ -114,7 +114,9 @@
       {
         "from": "@chakra-ui/react",
         "named": [
-          "Divider"
+          "Divider",
+          "HStack",
+          "Text"
         ]
       }
     ],
