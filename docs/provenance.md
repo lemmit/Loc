@@ -154,9 +154,15 @@ The .NET backend emits the same runtime shape, in EF Core / CQRS terms:
 - The current lineage is exposed on the wire as a trailing
   `<Field>Provenance` field on the aggregate's `<Agg>Response` DTO.
 
-The `provenance_records` table + the co-located columns ship as one
-extra EF migration (`Migrations/<late>_ProvenanceAudit.cs`) that sorts
-after every module's initial migration.
+The co-located columns ship as one extra EF migration
+(`Migrations/<late>_ProvenanceAudit.cs`) that sorts after every module's
+initial migration, because they ALTER tables the module migration owns.
+The `provenance_records` table itself is a shared **MigrationsIR companion
+table** (`provenanceTableShape` in `src/system/migrations-builder.ts`,
+alongside the outbox and `audit_records`), so every backend derives its DDL
+from one definition and it arrives in the ordinary module migration.  On the
+`persistence: dapper` path — which emits no migration files — the self-applied
+`DbSchema.cs` bootstrap renders that same shared shape.
 
 ## Governance stamps on each history row
 
@@ -197,10 +203,14 @@ in Elixir's immutable idiom:
   in **one `Repo.transaction`**, so the `provenance_records` rows commit
   atomically with the aggregate update.  Each row is stamped with the ambient
   `RequestContext` ids (correlation / scope / actor / parent).
-- The co-located columns + the `provenance_records` table ship as one extra
-  migration (`…_create_provenance.exs`, a high timestamp so it sorts after
-  every module's initial migration), schema-prefixed to match each aggregate's
-  table.
+- The co-located columns ship as one extra migration
+  (`…_create_provenance.exs`, a high timestamp so it sorts after every module's
+  initial migration), schema-prefixed to match each aggregate's table.  The
+  `provenance_records` table comes from the shared MigrationsIR
+  (`…_create_provenance_records.exs`) — and is one of the tables the Ecto
+  emitter deliberately does NOT bundle `timestamps()` into, since the flush
+  inserts plain maps via `insert_all` and a NOT NULL `inserted_at` would reject
+  every provenanced write (and roll back the aggregate save with it).
 
 Capture covers **named operations** (the persisting path); returning-op bodies
 on vanilla don't persist, so a provenanced write there is a no-op (the

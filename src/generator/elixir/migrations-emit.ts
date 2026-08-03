@@ -116,6 +116,13 @@ function timestampsMacro(table: TableShape): string | null {
   // `inserted_at` would reject every audited command — and because the insert
   // rides the action's transaction, it would roll back the state change too.
   if (table.name === "audit_records") return null;
+  // And for the provenance history: `provenance_records` is fixed machinery
+  // whose only time column is the explicit `at`.  The flush builds each row as
+  // a plain map and calls `Repo.insert_all/2` (which bypasses autogenerate), so
+  // a bundled NOT NULL `inserted_at` would reject every provenanced write — and
+  // because the flush rides the save transaction, it would roll the aggregate
+  // write back with it.
+  if (table.name === "provenance_records") return null;
   const hasUpdatedAt = table.columns.some((c) => c.name === "updated_at");
   return hasUpdatedAt ? null : "timestamps()";
 }
@@ -406,6 +413,16 @@ function renderInitialStateFile(
     });
   const ts = timestampsMacro(table);
   if (ts) colLines.push(`      ${ts}`);
+  // Indexes, same as the id-carrying `renderInitialFile` and the DELTA path's
+  // `renderCreateTableInline`.  This branch used to drop them silently, which
+  // was invisible while every id-less table (outbox, saga state, projection
+  // read model) declared none — until `audit_records` and `provenance_records`
+  // arrived through the shared MigrationsIR carrying two each.  A fresh Phoenix
+  // project then got the table with NO indexes while the same table added later
+  // as a delta got both, so fresh-create and migrate-chain schemas disagreed.
+  const indexLines = table.indexes.map(
+    (i) => `    create index(:${i.table}, [${ectoIndexColumns(i)}]${ectoIndexOpts(i, prefix)})`,
+  );
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
@@ -413,7 +430,7 @@ function renderInitialStateFile(
 ${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
 ${colLines.join("\n")}
     end
-  end
+${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
 end
 `;
 }

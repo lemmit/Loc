@@ -1,0 +1,11 @@
+{{!-- primitive-chart — @mantine/charts line/bar chart over a grouped
+  projection's LIST response (M-T1.3 Phase 4).
+
+  A chart is an image of data, so the wrapper carries `role="img"` plus the
+  walker-derived `aria-label` (mirrors the hand-authored aria-labels on
+  primitive-data-grid); the kind discriminator picks the component, and the
+  walker's import merge registers only the one that renders. --}}
+    <div role="img" aria-label="{{ariaLabel}}"{{{testidAttr}}}>
+{{#if isLine}}      <LineChart data={ {{{dataExpr}}} } dataKey="{{dataKey}}" series={[{ name: "{{seriesField}}" }]} h={300} withLegend />
+{{else}}      <BarChart data={ {{{dataExpr}}} } dataKey="{{dataKey}}" series={[{ name: "{{seriesField}}" }]} h={300} withLegend />
+{{/if}}    </div>

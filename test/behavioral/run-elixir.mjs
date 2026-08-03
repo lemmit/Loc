@@ -247,6 +247,69 @@ function waitForPort(port, timeoutMs = 180_000) {
   });
 }
 
+/** Resolve when TCP :PORT REFUSES a connection, i.e. nothing is listening any
+ *  more.  The mirror of `waitForPort`, and the reason it exists:
+ *
+ *  Every case boots its server on the SAME port, and each case's teardown used
+ *  to SIGTERM the process group without waiting for it to die.  The next case
+ *  then dropped every schema (`resetDatabase`) and called `waitForPort`, which
+ *  connected IMMEDIATELY — to the PREVIOUS case's server, still listening.
+ *  `/ready` answered 200 (its pool is healthy; readiness says nothing about
+ *  WHICH app is behind the port), so the suite ran the new case's requests
+ *  against the old case's app, whose schema had just been dropped underneath
+ *  it.  That surfaced as `relation "shop.orders" does not exist` → 500 on the
+ *  first write, on a DIFFERENT set of cases each run, since which cases lose
+ *  the race depends on how fast the runner shuts a BEAM down.
+ *
+ *  A liveness check cannot distinguish the two servers, so the fix has to be
+ *  on the teardown side: the port must be OBSERVED free before the next boot. */
+function waitForPortFree(port, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((res, rej) => {
+    const tick = () => {
+      const sock = net.connect(port, "127.0.0.1");
+      sock.once("connect", () => {
+        sock.destroy();
+        if (Date.now() > deadline) rej(new Error(`port ${port} still in use`));
+        else setTimeout(tick, 100);
+      });
+      sock.once("error", () => {
+        sock.destroy();
+        res();
+      });
+    };
+    tick();
+  });
+}
+
+/** SIGTERM the server's process group, then WAIT for it to actually exit,
+ *  escalating to SIGKILL if the BEAM does not go down in time.  Returns only
+ *  once the process is reaped — see `waitForPortFree` for why that matters. */
+function stopServer(server, graceMs = 15_000) {
+  if (!server?.pid || server.exitCode !== null) return Promise.resolve();
+  const signal = (sig) => {
+    try {
+      process.kill(-server.pid, sig); // whole process group
+    } catch {
+      try {
+        server.kill(sig);
+      } catch {
+        /* already gone */
+      }
+    }
+  };
+  return new Promise((res) => {
+    const done = () => {
+      clearTimeout(hard);
+      res();
+    };
+    server.once("exit", done);
+    server.once("close", done);
+    signal("SIGTERM");
+    const hard = setTimeout(() => signal("SIGKILL"), graceMs);
+  });
+}
+
 /** Poll GET /ready until it 200s (DB reachable + schema migrated), or give up
  *  after the deadline. Migrations are applied by `mix ecto.migrate` before the
  *  server boots, so a listening port already implies a migrated schema — this
@@ -436,6 +499,11 @@ async function runCase(c) {
       await resetDatabase(DATABASE_URL.replace("ecto://", "postgresql://"));
       execFileSync("mix", ["ecto.migrate"], { cwd: deplDir, stdio: "pipe", env: menv() });
 
+      // Nothing may still be listening on PORT: `waitForPort` below cannot tell
+      // this case's server from a previous case's leftover, and answering with
+      // the wrong app against a freshly-dropped schema is exactly the 500 this
+      // guards (see waitForPortFree).
+      await waitForPortFree(PORT);
       server = spawn("mix", ["phx.server"], {
         cwd: deplDir,
         stdio: "pipe",
@@ -461,14 +529,9 @@ async function runCase(c) {
     const api = await run();
     return { results: [...unitResults, ...api.results], wire: api.wire };
   } finally {
-    if (server?.pid && !server.killed) {
-      // Kill the whole process group.
-      try {
-        process.kill(-server.pid, "SIGTERM");
-      } catch {
-        server.kill("SIGTERM");
-      }
-    }
+    // AWAIT the exit — firing SIGTERM and moving on leaves the port occupied
+    // into the next case, which then talks to the wrong app (see stopServer).
+    await stopServer(server);
     rmSync(genDir, { recursive: true, force: true });
   }
 }

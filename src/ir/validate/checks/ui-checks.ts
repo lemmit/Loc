@@ -31,12 +31,13 @@ import type {
   EnrichedLoomModel,
   ExprIR,
   PageIR,
+  ProjectionIR,
   StateFieldIR,
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
-import { readableProjectionNames } from "../../util/projection-read.js";
+import { groupedProjectionNames, readableProjectionNames } from "../../util/projection-read.js";
 import { typeLabel } from "../../util/type-label.js";
 import { walkExprChildren, walkExprDeep, walkStmtChildren } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -68,9 +69,10 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
   // acceptance so F2 only flags receivers the walker truly can't resolve.
   const aggNames = new Set<string>();
   const workflowNames = new Set<string>();
-  // Projection names drive F3 (`loom.ui-projection-read-unsupported`).  BOTH
-  // flavours are unreadable from a ui — query-time and folded alike — since the
-  // missing piece is the frontend client, not the backend read.
+  // Projection names drive F3 (`loom.ui-projection-read-unsupported`): every
+  // declared projection is a candidate, and the READABLE subset (unkeyed
+  // query-time — singleton or grouped) is subtracted below, leaving the
+  // flavours with no frontend client (keyed, folded) to be rejected.
   const projectionNames = new Set<string>();
   for (const c of allContexts(loom)) {
     for (const a of c.aggregates) aggNames.add(a.name);
@@ -78,6 +80,13 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
     for (const p of c.projections) projectionNames.add(p.name);
   }
   const readableProjections = readableProjectionNames(allContexts(loom));
+  // The `Chart` arg gates need the GROUPED subset plus each projection's
+  // resolved row shape (`wireShape`) to validate the accessor lambdas against.
+  const groupedReadable = groupedProjectionNames(allContexts(loom));
+  const projectionsByIrName = new Map<string, ProjectionIR>();
+  for (const c of allContexts(loom)) {
+    for (const p of c.projections) projectionsByIrName.set(p.name, p);
+  }
 
   for (const sys of loom.systems) {
     for (const ui of sys.uis) {
@@ -124,6 +133,17 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
         checkFrontendCollectionOps(page, pageWhere(page), diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
+        // The `of:` receiver must be an API HANDLE — the walker's Pattern H
+        // (`<apiHandle>.<Projection>`) is the only shape that hoists the
+        // projection hook, so the gate accepts exactly what resolves.
+        checkChartArgs(
+          page.body,
+          apiParamNames,
+          groupedReadable,
+          projectionsByIrName,
+          pageWhere(page),
+          diags,
+        );
         checkAsyncEffectArgs(
           pageWhere(page),
           page.actions,
@@ -151,6 +171,14 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkActionBodies(comp.actions, ctx, diags);
         checkFrontendCollectionOps(comp, `component '${comp.name}'`, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
+        checkChartArgs(
+          comp.body,
+          apiParamNames,
+          groupedReadable,
+          projectionsByIrName,
+          `component '${comp.name}'`,
+          diags,
+        );
         checkAsyncEffectArgs(
           `component '${comp.name}'`,
           comp.actions,
@@ -656,6 +684,105 @@ function isStringArray(t: TypeIR): boolean {
   return t.kind === "array" && t.element.kind === "primitive" && t.element.name === "string";
 }
 
+// -------------------------------------------------------------------------
+// `loom.chart-of-not-grouped` / `loom.chart-kind-invalid` /
+// `loom.chart-accessor-not-field` — the `Chart` primitive's arg shapes
+// (M-T1.3 Phase 4).  The walker resolves each arg by NAME with no types in
+// scope, so a wrong shape would emit a chart keyed on an empty string or
+// bound to a one-object singleton read (`.data ?? []` of an object → `[]`, a
+// permanently empty chart with no diagnostic).  Gated here instead, where the
+// projection inventory and its `wireShape` are resolved and the diagnostic
+// can name the fix.  Whether the TARGET can render a chart at all is
+// `validateChartSupport` (system-checks.ts) — same flavour/framework split as
+// the projection-read gates above.
+// -------------------------------------------------------------------------
+
+function checkChartArgs(
+  body: ExprIR | undefined,
+  handles: ReadonlySet<string>,
+  groupedReadable: ReadonlySet<string>,
+  projections: ReadonlyMap<string, ProjectionIR>,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  walkExprDeep(body, (e) => {
+    if (e.kind !== "call" || e.name !== "Chart") return;
+    const kindArg = namedArg(e, "kind");
+    const kind =
+      kindArg?.kind === "literal" && kindArg.lit === "string" ? kindArg.value : undefined;
+    if (kind !== "line" && kind !== "bar") {
+      diags.push({
+        severity: "error",
+        code: "loom.chart-kind-invalid",
+        message:
+          `${where}: Chart 'kind:' must be the string literal "line" or "bar"` +
+          `${kind !== undefined ? ` — got "${kind}"` : ""}. v1 ships exactly those two kinds; ` +
+          `anything richer (pie, area, scatter) is an \`extern component\`.`,
+        source: where,
+      });
+    }
+    // `of:` must be `<ApiHandle>.<Projection>` naming a readable GROUPED
+    // projection — the LIST-shaped read the chart plots one point/bar per row
+    // of.  A singleton returns ONE object (nothing to plot); a keyed/folded
+    // projection has no frontend client at all (F3 above).
+    const of = namedArg(e, "of");
+    const projName =
+      of?.kind === "member" && of.receiver.kind === "ref" && handles.has(of.receiver.name)
+        ? of.member
+        : undefined;
+    const proj = projName !== undefined ? projections.get(projName) : undefined;
+    const grouped = projName !== undefined && groupedReadable.has(projName);
+    if (!grouped) {
+      const why =
+        proj !== undefined
+          ? `projection '${projName}' is not a grouped query-time projection — it has no ` +
+            `'group by', so its read is not the one-row-per-group list a chart plots. Add ` +
+            `\`group by <column>\` to '${projName}' (with the matching key in its 'select'), ` +
+            `or bind a singleton through \`QueryView\`/\`Stat\` instead`
+          : `'of:' must be \`<ApiHandle>.<Projection>\` naming a grouped (\`group by\`) ` +
+            `query-time projection declared in a served context`;
+      diags.push({
+        severity: "error",
+        code: "loom.chart-of-not-grouped",
+        message: `${where}: Chart 'of:' — ${why}.`,
+        source: where,
+      });
+    }
+    // `x:`/`y:` must be simple accessor lambdas (`r => r.status`) naming a
+    // declared row field — that is what unwraps to the chart's `dataKey` /
+    // series string.  A computed body has no field name to key on.
+    for (const slot of ["x", "y"] as const) {
+      const lam = namedArg(e, slot);
+      const field =
+        lam?.kind === "lambda" && lam.body?.kind === "member" && lam.body.receiver.kind === "ref"
+          ? lam.body.member
+          : undefined;
+      if (field === undefined) {
+        diags.push({
+          severity: "error",
+          code: "loom.chart-accessor-not-field",
+          message:
+            `${where}: Chart '${slot}:' must be a simple accessor lambda naming one row field ` +
+            `(\`r => r.<field>\`) — the chart keys its ${slot === "x" ? "category axis" : "series"} ` +
+            `on the field NAME, so a computed expression has nothing to key on.`,
+          source: where,
+        });
+      } else if (grouped && proj && !(proj.wireShape ?? []).some((f) => f.name === field)) {
+        diags.push({
+          severity: "error",
+          code: "loom.chart-accessor-not-field",
+          message:
+            `${where}: Chart '${slot}: r => r.${field}' — '${field}' is not a declared row field ` +
+            `of projection '${projName}' (declared: ${(proj.wireShape ?? [])
+              .map((f) => `'${f.name}'`)
+              .join(", ")}).`,
+          source: where,
+        });
+      }
+    }
+  });
+}
+
 /** Fix 4 — run the same IR body checks over every named action's body, with
  *  the action's params in scope.  Action bodies previously escaped the page's
  *  IR checks entirely (only `page.body/title/requires` were walked); this gives
@@ -1108,11 +1235,15 @@ function checkMethodCallReceiver(
  *  nothing downstream resolved it.
  *
  *  M-T1.3 Phase 1 shipped the read path for the SINGLETON QUERY-TIME flavour
- *  (one object out — the dashboard KPI shape).  What stays rejected here is
- *  every other flavour, on every target: a KEYED projection returns an array
- *  and wants `Table`-shaped binding, and a FOLDED one is read by key off its
- *  materialized row table.  Whether a *readable* projection's frontend has the
- *  client is a per-framework question with no platform in scope here — that is
+ *  (one object out — the dashboard KPI shape); Phase 4 added the GROUPED
+ *  (`group by`) flavour, whose LIST response list-binds through `QueryView`
+ *  exactly like a find-all (the query-shape derivation answers `single:
+ *  false`, so the collection arms read `.length` of a real array) or feeds a
+ *  `Chart`.  What stays rejected here is every other flavour, on every
+ *  target: a KEYED projection returns an array parameterised by key, and a
+ *  FOLDED one is read by key off its materialized row table.  Whether a
+ *  *readable* projection's frontend has the client is a per-framework
+ *  question with no platform in scope here — that is
  *  `validateUiProjectionReadFramework` (system-checks.ts). */
 function checkProjectionRead(
   e: Extract<ExprIR, { kind: "member" }>,
@@ -1133,10 +1264,11 @@ function checkProjectionRead(
     code: "loom.ui-projection-read-unsupported",
     message:
       `${ctx.where}: reads projection '${e.member}' (\`${root.name}.${e.member}\`), which a ui ` +
-      `cannot consume. Only a SINGLETON QUERY-TIME projection (no 'keyed by', a 'from … select' ` +
-      `comprehension) is readable from a page today — it returns one row, which is what a page ` +
-      `binds. A keyed projection returns a list and a folded one is read by key; neither has a ` +
-      `frontend client yet, so this would emit an unresolved receiver.`,
+      `cannot consume. Only an UNKEYED QUERY-TIME projection (no 'keyed by', a 'from … select' ` +
+      `comprehension — whole-table singleton or 'group by' list) is readable from a page today. ` +
+      `A keyed projection returns rows parameterised by key and a folded one is read by key off ` +
+      `its materialized table; neither has a frontend client yet, so this would emit an ` +
+      `unresolved receiver.`,
     source: ctx.where,
   });
 }

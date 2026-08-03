@@ -148,19 +148,22 @@ describe("java provenance runtime", () => {
     expect(resp).toContain("value.totalProvenance()");
   });
 
-  it("creates the provenance_records table + co-located column in a late migration", async () => {
+  it("adds the co-located column in a late migration and takes the history table from MigrationsIR", async () => {
     const f = await files();
     const key = [...f.keys()].find((k) => /db\/migration\/V\d+\.\d+__Provenance\.sql$/.test(k));
     expect(key).toBeDefined();
     const mig = f.get(key!)!;
-    expect(mig).toContain("CREATE TABLE IF NOT EXISTS provenance_records");
-    expect(mig).toMatch(
-      /provenance_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text,[\s\S]*?actor_id text,[\s\S]*?parent_id text/,
-    );
     // schema-qualified to the resolved dataSource schema (matching the JPA @Table).
     expect(mig).toContain(
       "ALTER TABLE ordering.orders ADD COLUMN IF NOT EXISTS total_provenance jsonb;",
     );
+    // The history table's DDL moved to the shared MigrationsIR
+    // (`provenanceTableShape`), so it is NOT hand-written here — it arrives in
+    // the ordinary module migration like the outbox and audit tables.
+    expect(mig).not.toContain("CREATE TABLE");
+    const initial = [...f.entries()].find(([k]) => /__Core_Initial\.sql$/.test(k))?.[1];
+    expect(initial).toContain('CREATE TABLE "provenance_records"');
+    expect(initial).toContain('CREATE INDEX "provenance_records_correlation_idx"');
   });
 });
 

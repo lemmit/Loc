@@ -557,7 +557,10 @@ stay quiet about IR-tier gates by design.
    dashboard ships here, with no chart dependency anywhere.**
 4. **Phase 3** — `group by` (with M-T4.2). ✅ landed (bare-column keys; the
    computed date-key refinement remains).
-5. **Phase 4** — `Chart` on mantine v9, gated, a11y in slice 1.
+5. **Phase 4** — `Chart` on mantine v9, gated, a11y in slice 1. ✅ landed
+   (`Chart { kind, of, x, y }` over grouped projections; react + mantine@v9,
+   `loom.chart-*` gates elsewhere; grouped projections became frontend-readable
+   with the LIST-shape client on the way).
 6. **Phase 5** — scaffolded chart; pack backfill; flip `REQUIRED_PRIMITIVES`.
 
 Steps 1–3 are the cheap 80% and carry no third-party charting dependency. Worth

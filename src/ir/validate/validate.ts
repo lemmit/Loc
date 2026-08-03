@@ -43,6 +43,7 @@ import {
   validateAuth,
   validateAuthUiFramework,
   validateChannelWiring,
+  validateChartSupport,
   validateComposeUniqueness,
   validateContextFilterSupport,
   validateDapperSupport,
@@ -175,6 +176,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
     validateDataGridFramework(sys, diags);
+    validateChartSupport(sys, diags);
     validateUiRealtimeSupport(sys, diags);
     validateUiProjectionReadFramework(sys, diags);
     // Flutter defers the interactive input / form primitive family; a page

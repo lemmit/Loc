@@ -456,11 +456,21 @@ module's *initial* migration shares `BASE_TIMESTAMP` + `"Initial"` — without t
 module, filenames and migration ids collide and only the last module's tables
 survive. Down migrations are no-ops everywhere (operators roll forward, not back).
 
-Some feature DDL is **not** part of the platform-neutral `MigrationsIR` — provenance
-(`<field>_provenance` jsonb columns + `provenance_records`) and per-operation audit
-(`audit_records`) are feature-local and hand-emitted by each backend as a *late*
-migration (a far-future version like `29991231235959`) that sorts after every
-module's initial migration so the tables already exist when the `ALTER`s run.
+The fixed **companion tables** — the transactional outbox (`__loom_outbox`), the
+command-audit log (`audit_records`) and the provenance history
+(`provenance_records`) — are ordinary `MigrationsIR` tables, derived once by
+`outboxTableShape` / `auditTableShape` / `provenanceTableShape` in
+`src/system/migrations-builder.ts` and gated on the module actually using the
+feature. They are machinery, not domain: cross-context (rows carry a
+`target_type`), so they take no context schema. Emitting them from one shape is
+deliberate — each was once hand-written per backend, and both consolidations
+turned up live defects the duplicated copies had been hiding.
+
+What *is* still feature-local and hand-emitted per backend is the
+**per-aggregate** half of provenance: the co-located `<field>_provenance` jsonb
+columns, which `ALTER` tables the module migration owns and so ship as a *late*
+migration (a far-future version like `29991231235959`) sorting after every
+module's initial migration.
 
 ## Migration-evolution gate — proving migrations evolve *on data* (M-T2.13)
 

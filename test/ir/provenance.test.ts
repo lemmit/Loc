@@ -247,15 +247,21 @@ describe("provenanced — TypeScript emission", () => {
   // an equivalent LATE migration (`docs/provenance.md`); this pins the same
   // shape for Hono/Drizzle.
   describe("provenanced — TypeScript migration (regression)", () => {
-    it("emits the LATE provenance migration (ADD column + CREATE history table)", async () => {
+    it("emits the LATE provenance migration (ADD column) + the shared history table", async () => {
       const { model } = await parseModel(SYSTEM(""));
       const files = generateSystems(model).files;
       const mig = files.get("api/db/migrations/29991231000000_provenance.sql")!;
       expect(mig).toBeDefined();
       expect(mig).toContain('ALTER TABLE "carts" ADD COLUMN "total_provenance" JSONB');
-      expect(mig).toContain('CREATE TABLE "provenance_records" (');
-      expect(mig).toContain('"snapshot_id" TEXT NOT NULL');
-      expect(mig).toContain("--> statement-breakpoint");
+      // The history table is a shared MigrationsIR companion table
+      // (`provenanceTableShape`) now, so it lands in the ordinary module
+      // migration rather than being hand-written into this late one.
+      expect(mig).not.toContain("CREATE TABLE");
+      const initial = [...files.entries()].find(([k]) =>
+        /db\/migrations\/\d+_.*_initial\.sql$/.test(k),
+      )?.[1];
+      expect(initial).toContain('CREATE TABLE "provenance_records" (');
+      expect(initial).toContain('"snapshot_id" TEXT NOT NULL');
     });
 
     it("registers the migration in the Drizzle journal (unregistered ⇒ never applied)", async () => {

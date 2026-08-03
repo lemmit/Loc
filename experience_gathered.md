@@ -3694,8 +3694,100 @@ toolchain you must rebuild the harness by hand. Three sharp edges:
   across container runs rather than re-installing per boot.
 - **Java 25 targets need `gradle:9-jdk25`**; the host's JDK 21 + Gradle 8.14
   cannot build them, and the failure surfaces late.
+## 65. A shared shape only pays off where the emitter handles the whole shape (2026-08-03)
 
-## 65. "Subscribed" is not one fact — it is two, and every broker client splits them differently (2026-08-03)
+`provenance_records` was the second companion table consolidated into the
+shared `MigrationsIR` (`audit_records` was the first, #2325).  As a dedupe it
+was uneventful — six hand-written `CREATE TABLE`s collapsed to one
+`provenanceTableShape`, one drift closed (the .NET EF migration created the
+`(target_type, field)` index and silently omitted the `correlation_id` one its
+four siblings emitted).  The interesting part is what the move surfaced about
+the FIRST consolidation.
+
+**The Ecto emitter drops indexes on the id-less branch — so the audit
+consolidation silently shipped `audit_records` with none.**
+`renderInitialStateFile` (the "no `id` column" branch, where every companion
+table lands) rendered columns and stopped; the id-carrying branch and the
+DELTA path both render `table.indexes`.  That was invisible for as long as
+every id-less table declared none — outbox, saga state, projection read model
+all carry `indexes: []` — and `audit_records` was the first to arrive with two.
+Nothing failed: the migration applies, the table works, the reads just scan.
+Worse, fresh-create and migrate-chain schemas now DISAGREE (the same table
+added later as a delta gets both indexes), which is exactly what
+`migration-evolution-e2e` exists to catch — and doesn't, because its fixture
+declares no audited command.
+
+- **Moving a hand-written thing into a shared pipeline moves it into a
+  pipeline's blind spots too.** The hand-written Ecto migration had both
+  indexes and had them right; the shared path was a strictly better definition
+  routed through a strictly worse renderer.  Consolidation is only complete
+  when the shared emitter handles every FIELD of the shared shape — enumerate
+  them (columns, PK, FKs, indexes, defaults) against the renderer, not against
+  the previous output, which is where I would have stopped.
+- **The check that found it was `\d provenance_records` on a booted database,
+  not the emitted file.** Reading the generated `.exs` I saw a correct table
+  and moved on; the psql dump is where "and two indexes" became conspicuous by
+  absence.  Assert on the SCHEMA THE DATABASE ENDED UP WITH — an emitted-file
+  read shows you what you wrote, not what is missing.
+- **A regression that only makes queries slower is invisible to every gate the
+  repo has.** Compile tiers compile, boot tiers boot, the wire differential
+  compares responses — an absent index changes none of them.  The only
+  instrument that would have caught it is fresh-create ≡ migrate-chain, which
+  is why that gate deserves a fixture per companion table rather than one
+  generic one.
+
+**The trap that did NOT bite, because it was written down.** Elixir bundles
+`timestamps()` into every state-table migration unless the table is named in
+`timestampsMacro`'s skip list, and the provenance flush inserts plain maps via
+`insert_all` — a NOT NULL `inserted_at` would reject every provenanced write and,
+because the flush rides the save transaction, roll the aggregate write back with
+it.  `__loom_outbox` and `audit_records` were already skipped, each with a
+comment saying *why*.  That is the counter-example to §59: prose that names the
+mechanism and the failure mode turned a two-hour runtime debug into a one-line
+edit made before the first boot.  The rule from §59 is not "distrust comments" —
+it is "a comment asserting a safety property must say how it is enforced."  These
+did.
+
+## 66. A liveness probe cannot tell you WHICH server answered (2026-08-03)
+
+`behavioral-elixir` went red on this branch with 11 failing cases one run and 13
+the next — overlapping but not equal sets, and the two runs' Elixir emission was
+byte-identical (the only commit between them touched `.NET` files). A failure
+set that moves while the input does not is not a codegen defect; it is a race.
+
+The mechanism. Every case boots its server on the SAME port (`8127`). Teardown
+fired `SIGTERM` at the process group and returned immediately, without waiting
+for the process to die. The next case then dropped every schema
+(`resetDatabase`) and called `waitForPort`, which connected — to the PREVIOUS
+case's server, still listening. `/ready` answered 200, because readiness reports
+that *a* pool is healthy, not *which application* is behind the socket. So the
+new case's requests ran against the old case's app, whose schema had just been
+dropped underneath it: `relation "shop.orders" does not exist` → 500 on the
+first write. Which cases lose the race depends on how fast the BEAM shuts down,
+which is why the set moved between runs.
+
+The rules this pays for:
+
+- **A readiness check is not an identity check.** `waitForPort` + `/ready`
+  answer "is something serving?", never "is it MINE?". Where a port is reused
+  across cases, the only sound guard is on the *teardown* side: observe the port
+  FREE before the next boot. No amount of polling the new server can distinguish
+  it from the old one.
+- **Fire-and-forget teardown is a shared-resource leak with a delay fuse.** The
+  contrast is measurable: the old teardown returned in 0 ms with the port still
+  listening; awaiting the exit returns only once it is free. A cleanup that does
+  not await is not cleanup, it is a request for cleanup.
+- **A moving failure set is evidence about the harness, not the code.** Before
+  hunting a generator bug, diff the generated tree between the suspect commit
+  and its base. Here that took minutes and was conclusive: for all 11 failing
+  cases the emitted Elixir was identical to `main`, which ruled the PR out
+  entirely and redirected the search to the runner.
+
+The same fire-and-forget pattern is still present in the dotnet / dapper /
+python / java / mikroorm runners. It has not surfaced there — those runtimes
+exit faster — but the fuse is the same length.
+
+## 67. "Subscribed" is not one fact — it is two, and every broker client splits them differently (2026-08-03)
 
 The §64 readiness defect turned out to have a second level underneath it, and
 finding the second level only became possible after fixing the first.

@@ -33,6 +33,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import type { TableShape } from "../../../ir/types/migrations-ir.js";
 import { aggHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import {
   isTphBase,
@@ -46,6 +47,7 @@ import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderCreateTableIfNotExists } from "../../sql-pg.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
 import {
   AMBIENT_CURRENT_USER,
@@ -1807,6 +1809,14 @@ export function renderDapperSchema(
    *  surface needs (the raw-Npgsql siblings of the EF-migration-owned tables).
    *  Appended after the aggregate / event-log / provenance tables. */
   extraTables: readonly string[] = [],
+  /** The shared `provenance_records` companion table, taken straight off the
+   *  MigrationsIR snapshot (`provenanceTableShape`) — the Dapper path emits no
+   *  migration files, so this bootstrap is the only thing that creates it, but
+   *  it renders the SHARED shape rather than a hand-written mirror.  Undefined
+   *  when the served module declares no provenanced field, or when another
+   *  deployable owns this module's migrations (that owner's migration creates
+   *  the table). */
+  provenanceHistoryTable?: TableShape,
 ): string {
   // Event-sourced aggregates own no per-aggregate table — their stream lives in
   // the shared per-context `<ctx>_events` log emitted after this map.  Document
@@ -1937,32 +1947,16 @@ export function renderDapperSchema(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
     ].join("\n");
   });
-  // The append-only provenance history table (provenance.md) — column-for-column
-  // the same shape the EF ProvenanceRecordConfiguration maps, plus its
-  // (target_type, field) + correlation_id indexes.  Emitted once when any served
-  // aggregate carries a provenanced field (the co-located `<field>_provenance`
-  // columns ride on each aggregate's CREATE TABLE via `columnsOf`).
-  const hasProvenance = aggs.some((agg) => agg.fields.some((f) => f.provenanced));
-  const provenanceTable = hasProvenance
-    ? [
-        [
-          "CREATE TABLE IF NOT EXISTS provenance_records (",
-          "    trace_id text primary key,",
-          "    snapshot_id text not null,",
-          "    target_type text not null,",
-          "    field text not null,",
-          "    inputs jsonb not null,",
-          "    computed_value jsonb,",
-          "    at timestamptz not null,",
-          "    correlation_id text,",
-          "    scope_id text,",
-          "    actor_id text,",
-          "    parent_id text",
-          ");",
-          "CREATE INDEX IF NOT EXISTS provenance_records_target_idx ON provenance_records (target_type, field);",
-          "CREATE INDEX IF NOT EXISTS provenance_records_correlation_idx ON provenance_records (correlation_id);",
-        ].join("\n"),
-      ]
+  // The append-only provenance history table (provenance.md).  This used to be
+  // a hand-written CREATE TABLE — the second of two .NET copies.  It now
+  // renders the SHARED MigrationsIR shape (`provenanceTableShape`), reaching
+  // this emitter as DATA off the snapshot rather than as an import (generator
+  // may not import system).  `IF NOT EXISTS` because DbSchema re-runs on every
+  // startup, where a migration would run once.  The co-located
+  // `<field>_provenance` columns ride on each aggregate's CREATE TABLE via
+  // `columnsOf` — that half is per-aggregate and stays here.
+  const provenanceTable = provenanceHistoryTable
+    ? [renderCreateTableIfNotExists(provenanceHistoryTable)]
     : [];
   // The append-only audit table (audit-and-logging.md) — the Dapper sibling of
   // the EF AuditRecordConfiguration, column-for-column the shape

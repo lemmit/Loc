@@ -1,0 +1,63 @@
+// Field defaults on the create-input contract.
+//
+// An `= <expr>` default moves a field from the REQUIRED to the OMITTABLE side
+// of the create request (`omittableCreateInputs` in `src/ir/enrich/
+// wire-projection.ts` is the single source every backend consults), and the
+// backend applies the declared value when the client omits it.  That contract
+// spans all five backends and had NO corpus fixture, which is why G1 (#2316 —
+// a default that reads `this`, emitted at module scope) had no site to be
+// caught in.
+//
+// Covers the three arms `wireCreateDefault` distinguishes:
+//   - a plain literal default (`qty`, `note`) — omittable, value applied;
+//   - `bool = true` — a REAL declared value that must reach the wire, not be
+//     swallowed by each backend's implicit `.default(false)` bool rule;
+//   - `bool = false` — deliberately indistinguishable from a bare bool, so it
+//     stays on the implicit rule and the emitted bytes do not change.
+// `name` is the control: no default, so it must stay required input.
+system Defaults {
+  subdomain Catalog {
+    context Items {
+      aggregate Item with crudish {
+        name: string
+        qty: int = 1
+        note: string = "none"
+        active: bool = true
+        archived: bool = false
+
+        test "an omitted default is applied at construction" {
+          let i = Item.create({ name: "N" })
+          expect(i.qty).toBe(1)
+          expect(i.note).toBe("none")
+          expect(i.active).toBe(true)
+          expect(i.archived).toBe(false)
+        }
+
+        test "an explicit value overrides the default" {
+          let i = Item.create({ name: "N", qty: 7, active: false })
+          expect(i.qty).toBe(7)
+          expect(i.active).toBe(false)
+        }
+      }
+      repository Items for Item { }
+    }
+  }
+  api ItemsApi from Catalog
+  storage primary { type: postgres }
+  resource itemsState { for: Items, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Items]
+    dataSources: [itemsState]
+    serves: ItemsApi
+    port: 4000
+  }
+
+  test e2e "create omitting every defaulted field applies the declared values" against d {
+    let i = api.items.create({ name: "Widget" })
+    let read = api.items.getById(i)
+    expect(read.qty).toBe(1)
+    expect(read.note).toBe("none")
+    expect(read.active).toBe(true)
+  }
+}

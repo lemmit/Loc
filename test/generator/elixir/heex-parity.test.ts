@@ -69,6 +69,13 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   // server-driven sort + pagination (M-T1.1 slice 8), and a `DataGrid` on a
   // non-React frontend is a compile error, not a blank space.
   DataGrid: "TanStack client row model has no LiveView analogue; use Table (server-driven on HEEx)",
+  // DEFERRED — Chart (M-T1.3 Phase 4) is react + mantine@v9 only for now,
+  // behind `loom.chart-unsupported-target`.  A LiveView chart is not a markup
+  // mapping: HEEx has no JS-free charting option, so the Phase 5+ design is a
+  // Chart.js client hook (a dedicated change with a `mix compile` validation
+  // cycle), not a `primitive-chart.heex.hbs`.
+  Chart:
+    "no JS-free LiveView charting; the Phase 5+ story is a Chart.js hook, not a markup mapping",
 };
 
 describe("HEEx walker parity (finding #5)", () => {

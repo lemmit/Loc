@@ -470,6 +470,29 @@
         "fixed (elixir): forApiRead applied in src/generator/elixir/vanilla/wire-serialize.ts and operation-returns-emit.ts"
       ],
       "tier": "behavioral"
+    },
+    {
+      "id": "RS-26",
+      "title": "An omitted UPDATE field is a client error, never a silent default",
+      "trigger": "`active: bool = true`; a PUT body omitting `active`",
+      "observable": "PUT without \"active\" is REJECTED (the field is required input) — it does NOT set active=false, and does not re-apply the create default either",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
+        "fixed (node): zodFor gained a `create-body` context so the implicit-bool rule fires only on create — src/platform/hono/v4/routes-builder.ts",
+        "fixed (node, round 2): dropping the `.default(false)` was not enough — `z.coerce.boolean()` is `Boolean(input)`, so a coerced bool still ACCEPTED an omitted key as `false` and zod-to-openapi (which reads `schema.isOptional()`) dropped it from the served `required[]`.  Body bools are now UNCOERCED `z.boolean()`; only query params keep the coercion — src/platform/hono/v4/routes-builder.ts",
+        "fixed (python): requestFieldDecl gained a `slot` so the implicit bool `= False` fires only on create — src/generator/python/routes-builder.ts",
+        "fixed (elixir): SPEC-only divergence — `@update_required` already listed every bool at runtime while the OpenApiSpex schema did not; renderProperties gained a slot — src/generator/elixir/vanilla/openapi-emit.ts",
+        "fixed (dotnet): `[Required]` on a non-nullable value type cannot reject absence (RequiredAttribute tests for null; an omitted int/bool binds to 0/false). Operation params gained `[property: JsonRequired]` ALONGSIDE `[Required]` — presence is a deserialization question — src/generator/dotnet/dto-mapping.ts",
+        "fixed (java): BOTH halves were wrong — the record used primitives (`int qty`, `boolean active`), so Jackson silently supplied 0/false for an omitted key while RequiredSet claimed qty required; operation components are now boxed + @NotNull (emit/dto.ts) and requiredParams no longer drops bare bools (emit/openapi-customizer.ts)"
+      ],
+      "tier": "static"
     }
   ]
 }

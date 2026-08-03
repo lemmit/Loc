@@ -352,7 +352,15 @@ export function emitRequestDtos(
     records.push({
       name: `${upperFirst(op.name)}${agg.name}Request`,
       params: op.params
-        .map((p) => dtoParam(wireType(p.type, ctx, "request"), upperFirst(p.name), "request"))
+        .map((p) =>
+          dtoParam(
+            wireType(p.type, ctx, "request"),
+            upperFirst(p.name),
+            "request",
+            undefined,
+            "operation",
+          ),
+        )
         .join(", "),
     });
   }

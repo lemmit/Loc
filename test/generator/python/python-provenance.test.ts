@@ -171,13 +171,18 @@ describe("python provenance runtime (W2)", () => {
     expect(routes).toContain("total_provenance: dict[str, object] | None = None");
   });
 
-  it("emits the LATE provenance migration (ALTER column + CREATE history)", async () => {
-    const mig = file(await generateSystemFiles(SOURCE), "_provenance.sql");
+  it("emits the LATE provenance migration (co-located ALTER only)", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const mig = file(files, "_provenance.sql");
     // The orders table lives in the `ordering` schema — the ALTER is qualified.
     expect(mig).toContain('ALTER TABLE "ordering".orders ADD COLUMN "total_provenance" jsonb;');
-    expect(mig).toContain("CREATE TABLE provenance_records (");
-    expect(mig).toContain('"snapshot_id" text NOT NULL');
-    expect(mig).toContain("--> statement-breakpoint");
+    // The history table's DDL moved to the shared MigrationsIR
+    // (`provenanceTableShape`), so it arrives in the ordinary module migration
+    // like the outbox and audit tables — not hand-written here.
+    expect(mig).not.toContain("CREATE TABLE");
+    const initial = file(files, "_ordering_initial.sql");
+    expect(initial).toContain('CREATE TABLE "provenance_records"');
+    expect(initial).toContain('CREATE INDEX "provenance_records_correlation_idx"');
   });
 
   it("the migration sorts after every module migration", async () => {

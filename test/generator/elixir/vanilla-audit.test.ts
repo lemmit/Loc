@@ -152,6 +152,14 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     // hand and never populates Ecto timestamps, so a NOT NULL `inserted_at`
     // would reject every audited command.
     expect(sql).not.toMatch(/audit_records[\s\S]{0,600}?timestamps\(\)/);
+    // Both indexes survive the move.  They did not, at first: the Ecto emitter's
+    // id-less-table branch rendered columns and stopped, which was invisible
+    // while every id-less table (outbox, saga state, projection read model)
+    // declared no index — `audit_records` was the first to arrive with two.  The
+    // failure is silent (reads just scan) and it desynchronises fresh-create
+    // from migrate-chain, since the DELTA path always rendered them.
+    expect(sql).toContain("create index(:audit_records, [:target_type, :target_id])");
+    expect(sql).toContain("create index(:audit_records, [:correlation_id])");
   });
 
   it("wraps the audited OPERATION persist in a forced transaction + records before/after", async () => {
