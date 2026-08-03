@@ -11,6 +11,13 @@ import {
   unionMembers,
 } from "../../../generator/_payload/union-wire.js";
 import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
+import {
+  historyMapperArgs,
+  historyMapperName,
+  historyNeedsPrincipal,
+  historySelectStatement,
+  renderHistoryEntryMapper,
+} from "../../../generator/typescript/emit/audit-history.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
@@ -116,6 +123,86 @@ function txWrapperCall(usingMikro: boolean): string {
 // unauthenticated → null → redacted.  A mask-free aggregate keeps `toWire`
 // verbatim, so non-mask projects stay byte-identical.
 
+// ── Entity history — `GET /<agg>/{id}/history` (docs/audit.md) ──────────────
+
+/** The per-entity history read.  Three things make it safe, in order:
+ *
+ *  1. **The gate.** `historyFind.requires` is the aggregate's own list-read
+ *     gate, copied at enrichment — so history is never easier to reach than
+ *     the entity read it replays.  Fails → 403, before any query runs.
+ *
+ *  2. **Entity reachability.** `audit_records` is a cross-context machinery
+ *     table: it carries `target_type`/`target_id` and NO tenant column, so
+ *     there is nothing on it for a capability query-filter to scope.  Scoping
+ *     is therefore done on the ENTITY: the handler resolves the row through
+ *     `repo.findById`, which already carries every capability predicate
+ *     (`tenantOwned`'s tenant floor included) and honours the find's
+ *     `ignoring` stance.  A row the caller cannot read yields 404 here — the
+ *     same answer the entity read gives, so history discloses nothing about
+ *     rows in another tenant, not even their existence.
+ *
+ *  3. **The mask.** The row → entry mapper drops each `mask unless` field's
+ *     change entry for a caller who fails the predicate.
+ *
+ *  All three are needed: the gate alone leaks across tenants, reachability
+ *  alone leaks masked fields to legitimate readers, and the mask alone leaves
+ *  the endpoint open. */
+function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: boolean): string[] {
+  const out: string[] = [];
+  const aggSlug = snake(plural(agg.name));
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "get",`);
+  out.push(`    path: "/{id}/history",`);
+  out.push(`    tags: ["${aggSlug}"],`);
+  out.push(`    operationId: "${camelId(opFind(agg.name, "history"))}",`);
+  out.push(`    request: { params: z.object({ id: z.string().uuid() }) },`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: z.array(AuditEntryResponse) } } },`,
+  );
+  if (find.requires) {
+    out.push(
+      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
+  out.push(
+    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (c) => {`);
+  out.push(`    const { id } = c.req.valid("param");`);
+  if (findGateUsesCurrentUser(find)) {
+    out.push(
+      `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
+  }
+  if (find.requires) {
+    out.push(`    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError("Forbidden");`);
+  }
+  // (2) above — capability scoping rides the entity read, because the audit
+  // table has no tenant column of its own to filter on.
+  out.push(`    const __target = await repo.findById(Ids.${agg.name}Id(id));`);
+  out.push(`    if (!__target) throw new AggregateNotFoundError("not_found");`);
+  // Fail-closed principal for the mask pass: unauthenticated → null → every
+  // masked field's change entry is dropped.  Bound only when there is a mask;
+  // otherwise the mapper takes no principal (and the project need not carry an
+  // `auth/user-types` module at all).
+  if (historyNeedsPrincipal(agg)) {
+    out.push(
+      `    const __histUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User | undefined }).get("currentUser") ?? null;`,
+    );
+  }
+  out.push(...historySelectStatement(agg, usingMikro).map((l) => `    ${l}`));
+  out.push(
+    `    return c.json(__rows.map((r) => ${historyMapperName(agg)}(${historyMapperArgs(agg)})), 200);`,
+  );
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
+}
+
 /** The `__maskUser` binding line(s) for a masked-aggregate response route. */
 function maskUserBind(agg: AggregateIR, pad: string): string[] {
   return aggHasFieldMask(agg)
@@ -194,6 +281,13 @@ export function buildRoutesFile(
   // Either feature pulls in the transactional handler + its db/events/
   // schema/randomUUID imports.
   const needsTx = fileHasAudit || fileHasProv;
+  // Entity history (docs/audit.md) — the read side of the trail those inserts
+  // write.  Driven by the enrichment-derived `historyFind` rather than by
+  // re-deriving "is this audited" here, so the read surface can never disagree
+  // with the gate/`ignoring` stance enrichment resolved.  `emitAudit` gates it
+  // too: a deployable with auditing off writes no rows, and a route serving an
+  // always-empty timeline reads as authoritative while saying nothing.
+  const historyFind = emitAudit ? repo?.historyFind : undefined;
   // Lifecycle stamps (audit / softDelete) no longer touch the route handler:
   // node-persist-time-auditing relocated stamping into the drizzle save()
   // (db/audit-stamp.ts), reading the principal from the ambient request context.
@@ -269,7 +363,16 @@ export function buildRoutesFile(
       lines.push(`import { requestContext } from "../obs/als";`);
       lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
       lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+      // The history read filters `audit_records` by (target_type, target_id) —
+      // the pair the write side indexes.  Only the read needs these operators;
+      // the inserts above take a plain values object.
+      if (historyFind) lines.push(`import { and, eq } from "drizzle-orm";`);
     }
+  }
+  if (historyFind) {
+    lines.push(
+      `import { type AuditEntry, type AuditFieldChange, type AuditHistoryRow, AuditEntryResponse, auditSnapshotValue, auditValueChanged } from "../audit/history";`,
+    );
   }
 
   // Schemas — value objects, enums, then per-DTO request / response
@@ -546,6 +649,14 @@ export function buildRoutesFile(
   // The router.  Audited / provenanced aggregates also receive `db` +
   // `events` so the operation can run its save + audit insert + provenance
   // flush in one transaction.
+  // The per-aggregate history mapper — module scope, beside the schemas, so the
+  // route handler stays a few lines.  It is where `mask unless` composes into
+  // the trail (see `renderHistoryEntryMapper`).
+  if (historyFind) {
+    lines.push(renderHistoryEntryMapper(agg));
+    lines.push("");
+  }
+
   const routerParams = needsTx
     ? `repo: ${agg.name}Repository, db: ${usingMikro ? "EntityManager" : "NodePgDatabase<typeof schema>"}, events: DomainEventDispatcher`
     : `repo: ${agg.name}Repository`;
@@ -738,6 +849,14 @@ export function buildRoutesFile(
       lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
       lines.push("");
     }
+  }
+
+  // Entity history — `GET /{id}/history` (docs/audit.md).  Two segments, so it
+  // cannot be shadowed by the `/{id}` param route below the way a static
+  // one-segment find can; registered here anyway to keep the reads together.
+  if (historyFind) {
+    lines.push(...emitHistoryRoute(agg, historyFind, usingMikro).map((l) => `  ${l}`));
+    lines.push("");
   }
 
   // Get by id.

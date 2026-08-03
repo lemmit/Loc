@@ -17,6 +17,8 @@ import {
   type EnrichedEntityPartIR,
   type ExprIR,
   exprUsesCurrentUser,
+  type FindIR,
+  findGateUsesCurrentUser,
   findUsesCurrentUser,
   type InvariantIR,
   type OperationIR,
@@ -47,6 +49,7 @@ import {
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { isServerSourcedDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
+import { pyHistoryMapperName, renderPyHistoryMapper } from "./emit/audit-history.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
 import {
@@ -123,6 +126,11 @@ export function buildPyRoutesFile(
   // by the aggregate router — the queryHandler's own route is the exposure — so
   // it contributes no route and no `<Agg>Paged` DTO here.
   const exposedFinds = emittableFinds(repo).filter((f) => !f.synthesized);
+  // Entity history (docs/audit.md) — the derived read over `audit_records`.
+  // Read off the enrichment-derived `historyFind` rather than re-deriving
+  // "is this audited" here, so the endpoint's gate + `ignoring` stance are the
+  // ones enrichment resolved and cannot drift from the aggregate's list read.
+  const historyFind = repo?.historyFind;
   const pagedCarriers = [...exposedFinds, ...(autoAllFind ? [autoAllFind] : [])];
   for (const f of pagedCarriers) {
     const paged = pagedReturn(f.returnType);
@@ -184,6 +192,13 @@ export function buildPyRoutesFile(
     "",
     "",
     byIdRoute(agg),
+    // Entity history (docs/audit.md) — two path segments, so no collision with
+    // the `/{id}` pattern above.  Driven by the enrichment-derived `historyFind`
+    // so the read surface cannot disagree with the gate / `ignoring` stance
+    // enrichment resolved.
+    historyFind
+      ? ["", "", renderPyHistoryMapper(agg), "", "", historyRoute(agg, historyFind)]
+      : null,
     agg.canonicalDestroy ? ["", "", destroyRoute(agg, conflictResolver(ctx))] : null,
     ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
     // Can-query companions register after the operation routes (static
@@ -264,6 +279,10 @@ export function buildPyRoutesFile(
         ))
       ? "from app.auth.user import User"
       : null,
+    historyFind
+      ? "from app.audit.history import AuditEntryListResponse, audit_snapshot_value, audit_value_changed"
+      : null,
+    historyFind ? "from app.db.audit import AuditRecordRow" : null,
     "from app.db.engine import get_session",
     // Wire-format helpers for a scalar operation-return value (money → its
     // canonical decimal string, datetime → ISO-8601) — the same projection
@@ -821,6 +840,33 @@ function byIdRoute(agg: EnrichedAggregateIR): string {
     `async def get_${snake(agg.name)}_by_id(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
     `    return ${wireResp(agg, `await repo.get_by_id(${agg.name}Id(id))`)}`,
+  );
+}
+
+/** `GET /{id}/history` — the per-entity audit trail (docs/audit.md).
+ *
+ *  Three guards, in order, mirroring the Hono port exactly:
+ *    1. the inherited `requires` gate → 403 before any query runs;
+ *    2. ENTITY reachability via `get_by_id`, which already carries every
+ *       capability query-filter (the `tenantOwned` tenant floor included) —
+ *       `audit_records` has no tenant column of its own to scope, so a row the
+ *       caller cannot read 404s here rather than yielding a readable timeline;
+ *    3. the per-caller mask, applied inside the mapper.
+ */
+function historyRoute(agg: EnrichedAggregateIR, find: FindIR): string {
+  const gateUsesUser = findGateUsesCurrentUser(find);
+  return lines(
+    `@router.get("/{id}/history", response_model=AuditEntryListResponse, operation_id="${camelId(opFind(agg.name, "history"))}"${errorResponsesKwarg("getById")})`,
+    `async def history_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> list[dict[str, object]]:`,
+    "    repo = _repo(session)",
+    gateUsesUser ? "    current_user_ = current_user()" : null,
+    find.requires
+      ? `    if not (${renderPyExpr(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}):\n        raise ForbiddenError("Forbidden")`
+      : null,
+    // (2) — reachability, not a predicate on the audit table.
+    `    await repo.get_by_id(${agg.name}Id(id))`,
+    `    __rows = await repo.history(${agg.name}Id(id))`,
+    `    return [${pyHistoryMapperName(agg)}(__r) for __r in __rows]`,
   );
 }
 

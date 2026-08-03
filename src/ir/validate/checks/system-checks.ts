@@ -12,7 +12,7 @@ import {
 import { descriptorFor } from "../../../platform/metadata.js";
 import { SHIPPED_COMBOS } from "../../../util/channels.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
-import { lowerFirst, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
   configSchemaFor,
@@ -668,6 +668,22 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
               source: `find/${repo.name}.${find.name}`,
             });
           }
+        }
+        // Entity history (docs/audit.md): `GET /<agg>/{id}/history` replays the
+        // `before`/`after` snapshots of every successful command on a row.  It
+        // is compiler-synthesized like `find all` — but unlike `find all` the
+        // author HAS a surface to gate it from, because history copies the list
+        // read's gate at enrichment.  So an ungated one is actionable, and
+        // under denyByDefault an ungated CHANGE HISTORY is a worse default than
+        // an ungated current-state read: it discloses who changed what and
+        // when, over the row's whole lifetime, in one request.
+        if (repo.historyFind && !repo.historyFind.requires) {
+          diags.push({
+            severity: "error",
+            code: "loom.audit-history-ungated",
+            message: `denyByDefault: '${repo.aggregateName}' is \`audited\`, so it serves \`GET /${snake(plural(repo.aggregateName))}/{id}/history\`, but its list read declares no \`requires\` gate — the change history is reachable by any authenticated caller. Declare \`find all(): ${repo.aggregateName}[] requires <expr>\` on '${repo.name}'; history inherits that gate (use \`requires true\` to allow anonymous access).`,
+            source: `find/${repo.name}.history`,
+          });
         }
       }
     }

@@ -1,6 +1,7 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { aggHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { lines } from "../../../util/code-builder.js";
+import { renderPyAuditHistoryModule } from "./audit-history.js";
 
 // ---------------------------------------------------------------------------
 // Per-operation audit runtime — Python / FastAPI counterpart of the Hono
@@ -54,8 +55,9 @@ function renderPyAudit(): string {
     `Emitted only when a served context declares an \`audited\` operation.  One`,
     `row per successful audited operation, persisted in the SAME session as the`,
     `aggregate save (atomic).  before/after are the wire-DTO snapshots either`,
-    `side of the mutation; the record is append-only and never exposed on the`,
-    `operation response."""`,
+    `side of the mutation.  The record is append-only; the operation response`,
+    `never carries it, but an audited aggregate serves its trail at`,
+    `GET /<aggregates>/{id}/history (see app/audit/history.py)."""`,
     ``,
     `from datetime import datetime`,
     ``,
@@ -79,8 +81,11 @@ function renderPyAudit(): string {
     `    target_type: Mapped[str] = mapped_column(Text)`,
     `    target_id: Mapped[str] = mapped_column(Text)`,
     `    actor: Mapped[object | None] = mapped_column(JSONB)`,
-    `    before: Mapped[object] = mapped_column(JSONB)`,
-    `    after: Mapped[object] = mapped_column(JSONB)`,
+    // Nullable, matching the shared `auditTableShape`: a lifecycle action has
+    // one side only.  The writer passes a JSON `null` literal today, but the
+    // READ side (entity history) must be able to type it as absent.
+    `    before: Mapped[object | None] = mapped_column(JSONB)`,
+    `    after: Mapped[object | None] = mapped_column(JSONB)`,
     `    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))`,
     `    status: Mapped[str] = mapped_column(Text)`,
     `    correlation_id: Mapped[str | None] = mapped_column(Text)`,
@@ -95,4 +100,11 @@ function renderPyAudit(): string {
 export function emitPyAudit(contexts: EnrichedBoundedContextIR[], out: Map<string, string>): void {
   if (!contextsHaveAudit(contexts)) return;
   out.set("app/db/audit.py", renderPyAudit());
+  // Entity history (docs/audit.md) — the shared shape + helpers the per-aggregate
+  // mappers call.  Emitted whenever any served repository carries the
+  // enrichment-derived history read, which is the same condition the routes
+  // builder gates its import on.
+  if (contexts.some((c) => c.repositories.some((r) => r.historyFind !== undefined))) {
+    out.set("app/audit/history.py", renderPyAuditHistoryModule());
+  }
 }

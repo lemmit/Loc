@@ -32,6 +32,7 @@ const SRC = `system S {
       aggregate P with crudish {
         name: string
         salary: decimal mask unless currentUser.permissions.contains(permissions.unmask)
+        homeAddress: string mask unless currentUser.permissions.contains(permissions.unmask)
       }
     }
   }
@@ -51,7 +52,7 @@ describe("mask unless — Python read redaction", () => {
   it("aggHasFieldMask / maskedWireFields detect the masked field", async () => {
     const { agg } = await ctxAndAgg();
     expect(aggHasFieldMask(agg)).toBe(true);
-    expect(maskedWireFields(agg).map((f) => f.name)).toEqual(["salary"]);
+    expect(maskedWireFields(agg).map((f) => f.name)).toEqual(["salary", "homeAddress"]);
   });
 
   it("emits a fail-closed to_wire_masked that redacts the field unless the predicate holds", async () => {
@@ -64,6 +65,13 @@ describe("mask unless — Python read redaction", () => {
     // The predicate reads the narrowed `_mask_user` local, not the bare getter.
     expect(method).toContain('"m.unmask" in _mask_user.permissions');
     expect(method).toContain('d["salary"] = None');
+    // The WIRE key, not the snake_cased Python attribute.  `to_wire` writes
+    // `"homeAddress"`, so redacting `d["home_address"]` would add a second key
+    // and leave the real one at its full value — the mask would do nothing for
+    // every multi-word field name.  A single-word fixture cannot tell the two
+    // apart, which is why this one is deliberately camelCase.
+    expect(method).toContain('d["homeAddress"] = None');
+    expect(method).not.toContain('d["home_address"] = None');
   });
 
   it("the repository imports the non-raising current_user getter", async () => {

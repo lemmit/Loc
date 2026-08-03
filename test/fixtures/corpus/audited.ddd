@@ -74,10 +74,12 @@ system AuditingSystem {
     port: 4000
   }
 
-  // Audit rows are never exposed on the operation response (the table has no
-  // read endpoint yet), so the runtime assertion here is that an audited
-  // command still behaves exactly like an unaudited one — the audit write must
-  // not change the response, and must not fail the request.
+  // Audit rows are not exposed on the operation response, so the runtime
+  // assertion here is that an audited command behaves exactly like an unaudited
+  // one — the audit write must not change the response, and must not fail the
+  // request.  The READ side lives in its own fixture (`audit-history.ddd`),
+  // declared for the backends that serve the read endpoint (node + python
+  // today; dotnet/java/elixir still write the trail but expose no route).
   // NOTE — `status: int = 0` is deliberately OMITTED from the create call
   // below: a `= default` field is optional create input, and the server
   // supplies the value. That used to hold on node/dotnet/java/python and fail
