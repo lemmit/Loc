@@ -37,13 +37,8 @@ system AuditingSystem {
           precondition reason >= 0
           status := reason
         }
-        // Body is incidental — only `private` matters to what this fixture
-        // proves.  It takes a param rather than the `quantity := quantity` it
-        // used to write: that lowered to `Quantity = this.Quantity;`, a
-        // self-assignment .NET's analyzer rejects outright (CA2245), so the
-        // corpus dotnet leg failed on this fixture from the day it landed.
-        private operation recalc(newQuantity: int) {
-          quantity := newQuantity
+        private operation recalc() {
+          quantity := quantity
         }
         destroy { }
       }
