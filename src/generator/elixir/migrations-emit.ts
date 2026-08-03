@@ -110,6 +110,12 @@ function timestampsMacro(table: TableShape): string | null {
   // populate Ecto timestamps — a bundled NOT NULL `inserted_at` would
   // reject every insert.
   if (table.name === "__loom_outbox") return null;
+  // Same rule for the audit history: `audit_records` is fixed machinery whose
+  // only time column is the explicit `at`.  The audit writer builds the row
+  // struct by hand and never populates Ecto timestamps, so a bundled NOT NULL
+  // `inserted_at` would reject every audited command — and because the insert
+  // rides the action's transaction, it would roll back the state change too.
+  if (table.name === "audit_records") return null;
   const hasUpdatedAt = table.columns.some((c) => c.name === "updated_at");
   return hasUpdatedAt ? null : "timestamps()";
 }

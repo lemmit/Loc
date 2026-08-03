@@ -1188,4 +1188,28 @@ export interface WalkerTarget {
   exprList(elements: string[]): string;
   /** Object literal — JS `{ n: v }` vs F# anonymous record `{| n = v |}`. */
   exprObject(fields: ReadonlyArray<{ name: string; value: string }>): string;
+
+  /** Scalar-intrinsic renderer (`src/util/intrinsics.ts` — `s.toUpper()`,
+   *  `n.abs()`, `d.round(2)`, …).  Loom's intrinsic SPELLING is its own; every
+   *  backend translates it through a per-language snippet table, and a target
+   *  that omits this seam emits the Loom spelling VERBATIM — which is a
+   *  compile error wherever the host language spells the op differently
+   *  (`toUpper` vs `toUpperCase`) and, worse, silently wrong wherever it
+   *  spells it the same but MEANS something else (`replace` = first vs all,
+   *  `substring` = start+end vs start+len).
+   *
+   *  Returning `undefined` means "not an intrinsic on this receiver, or I have
+   *  no arm for it" and the caller falls through to its ordinary method-call
+   *  emission — so a target may implement this partially.  The four JS targets
+   *  supply the shared `_expr/js-intrinsics.ts` table via `jsExprLeaves`
+   *  (they emit the same language the TypeScript backend does).  Feliz /
+   *  Flutter leave it undefined for now and keep today's verbatim behaviour —
+   *  each needs its own leaf table (F# `.ToUpper()`, Dart `.toUpperCase()`),
+   *  which is tracked separately. */
+  renderIntrinsic?(
+    receiverType: TypeIR,
+    member: string,
+    recv: string,
+    args: readonly string[],
+  ): string | undefined;
 }

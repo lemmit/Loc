@@ -90,6 +90,11 @@ export const CORPUS: readonly CorpusFeature[] = [
   },
   { id: "provenance", title: "provenanced stored fields — per-write-site rule snapshots", doc: "provenance", backends: ALL },
   {
+    id: "audited",
+    title: "command audit — aggregate-wide `audited` + per-command `audited`, transactional audit_records rows",
+    backends: ALL,
+  },
+  {
     id: "criterion-filter",
     title: "reusable criterion (criterion.md) used as `filter <Criterion>`",
     doc: "criterion",

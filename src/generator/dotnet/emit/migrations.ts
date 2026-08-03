@@ -109,30 +109,9 @@ export function emitDotnetProvenanceAuditMigration(
       }
     }
   }
-  if (opts.audit) {
-    stmts.push(
-      [
-        "CREATE TABLE IF NOT EXISTS audit_records (",
-        "  audit_id text PRIMARY KEY,",
-        "  operation_id text NOT NULL,",
-        "  action text NOT NULL,",
-        "  target_type text NOT NULL,",
-        "  target_id text NOT NULL,",
-        "  actor jsonb,",
-        "  before jsonb NOT NULL,",
-        "  after jsonb NOT NULL,",
-        "  at timestamptz NOT NULL,",
-        "  status text NOT NULL,",
-        "  correlation_id text,",
-        "  scope_id text,",
-        "  parent_id text",
-        ");",
-      ].join("\n"),
-    );
-    stmts.push(
-      "CREATE INDEX IF NOT EXISTS audit_records_target_idx ON audit_records (target_type, target_id);",
-    );
-  }
+  // The `audit_records` DDL moved to the shared MigrationsIR
+  // (`auditTableShape`) so all five backends derive it from one place.  Hono
+  // emitted none at all, so audited commands failed at runtime there.
   if (stmts.length === 0) return;
   const slug = `${PROV_AUDIT_VERSION}_ProvenanceAudit`;
   out.set(`Migrations/${slug}.cs`, renderMigrationClass(ns, `M${slug}`, slug, stmts.join("\n\n")));

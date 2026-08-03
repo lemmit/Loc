@@ -5,6 +5,7 @@ import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
+import { JS_INTRINSIC_RENDERERS } from "../_expr/js-intrinsics.js";
 import {
   type ExprTarget,
   type MarkedText,
@@ -287,56 +288,14 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${e.member}`;
 }
 
-// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
-// catalogue row, keyed `<receiver>.<name>`.  Exported so the intrinsic
-// completeness test can pin that every catalogue row has a TS arm.
-export const TS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
-  "string.trim": (recv) => `${recv}.trim()`,
-  "string.toUpper": (recv) => `${recv}.toUpperCase()`,
-  "string.toLower": (recv) => `${recv}.toLowerCase()`,
-  // 0-based clamping semantics = JS slice (see the catalogue contract).
-  "string.substring": (recv, args) =>
-    args.length > 1
-      ? `${recv}.slice(${args[0]}, (${args[0]}) + (${args[1]}))`
-      : `${recv}.slice(${args[0]})`,
-  "string.startsWith": (recv, args) => `${recv}.startsWith(${args[0]})`,
-  "string.endsWith": (recv, args) => `${recv}.endsWith(${args[0]})`,
-  "string.contains": (recv, args) => `${recv}.includes(${args[0]})`,
-  "string.replace": (recv, args) => `${recv}.replaceAll(${args[0]}, ${args[1]})`,
-  "string.split": (recv, args) => `${recv}.split(${args[0]})`,
-  // ---- numerics (A3) -------------------------------------------------------
-  // `money` is decimal.js `Decimal` on this backend; int/long/decimal are
-  // plain numbers (see the catalogue's representation note).  Loom
-  // expressions are pure, so a snippet may mention `recv` more than once.
-  "int.abs": (recv) => `Math.abs(${recv})`,
-  "long.abs": (recv) => `Math.abs(${recv})`,
-  "decimal.abs": (recv) => `Math.abs(${recv})`,
-  "money.abs": (recv) => `${recv}.abs()`,
-  // Truncating integer division (toward zero) — `Math.trunc` on the float quotient.
-  "int.divTrunc": (recv, args) => `Math.trunc(${recv} / ${args[0]})`,
-  "long.divTrunc": (recv, args) => `Math.trunc(${recv} / ${args[0]})`,
-  "int.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
-  "long.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
-  "decimal.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
-  "money.min": (recv, args) => `Decimal.min(${recv}, ${args[0]})`,
-  "int.max": (recv, args) => `Math.max(${recv}, ${args[0]})`,
-  "long.max": (recv, args) => `Math.max(${recv}, ${args[0]})`,
-  "decimal.max": (recv, args) => `Math.max(${recv}, ${args[0]})`,
-  "money.max": (recv, args) => `Decimal.max(${recv}, ${args[0]})`,
-  // HALF-AWAY-FROM-ZERO (catalogue contract) — `Math.round` alone rounds
-  // -2.5 UP to -2, so route through sign/abs on the float path.  Self-
-  // parenthesized: the snippet lands in arbitrary expression slots.
-  "decimal.round": (recv, args) =>
-    args.length > 0
-      ? `(Math.sign(${recv}) * (Math.round(Math.abs(${recv}) * 10 ** (${args[0]})) / 10 ** (${args[0]})))`
-      : `(Math.sign(${recv}) * Math.round(Math.abs(${recv})))`,
-  "money.round": (recv, args) =>
-    `${recv}.toDecimalPlaces(${args[0] ?? "0"}, Decimal.ROUND_HALF_UP)`,
-  "decimal.floor": (recv) => `Math.floor(${recv})`,
-  "decimal.ceil": (recv) => `Math.ceil(${recv})`,
-  "money.floor": (recv) => `${recv}.floor()`,
-  "money.ceil": (recv) => `${recv}.ceil()`,
-};
+// Scalar-intrinsic snippet table — MOVED to `../_expr/js-intrinsics.ts` and
+// re-exported here under its historical name.  The table is shared with the
+// four JS-embedding frontend walkers (React / Vue / Svelte / Angular), which
+// emit the same language this backend does; keeping one copy is what makes an
+// intrinsic mean the same thing in an aggregate `derived` and in a page body.
+// Still exported so the intrinsic completeness test can pin that every
+// catalogue row has a TS arm.
+export const TS_INTRINSIC_RENDERERS = JS_INTRINSIC_RENDERERS;
 
 function renderMethodCall(
   recv: string,

@@ -1,0 +1,85 @@
+name: Playground worker-realm check
+
+# Per-PR gate on ONE property: does the generated backend bundle EVALUATE
+# against the globals a browser worker actually has?
+#
+# `runtime/runtime.worker.ts` boots a generated backend with
+# `await import(blobUrl)`, which runs every module body in the bundle's graph
+# — our dependencies' included — inside a DedicatedWorker scope that has no
+# Node globals.  Two bugs shipped because a dependency read one at
+# MODULE-EVALUATION time, where no try/catch at a call site can help:
+#
+#   prom-client/lib/metrics/processStartTime.js:4   process.uptime()
+#   pg-protocol/dist/parser.js:14                   Buffer.allocUnsafe(0)
+#
+# Both were invisible to every gate we had:
+#   * `e2e:smoke` builds the identical bundle but imports it IN NODE, where
+#     `process` and `Buffer` are real — blind to the whole class by
+#     construction, despite its header claiming pipeline parity with the
+#     worker.  (Parity of pipeline; not of realm.  The realm is the bug.)
+#   * `playground-e2e.yml` DOES boot in a real worker and would have caught
+#     both — but it is post-merge / nightly / `run-e2e`-label only, because
+#     its specs cold-fetch npm tarballs and PGlite's WASM from esm.sh and
+#     jsdelivr.
+#   * `playground-e2e-no-network.yml` is per-PR but excludes every
+#     bundle/boot spec by documented invariant.
+#
+# The leverage: both failures happen at module evaluation, BEFORE PGlite,
+# before the database, before any HTTP.  So this needs no browser, no WASM,
+# and no jsdelivr — only npm tarballs (registry, not esm.sh) and a `vm`
+# realm built from a MEASURED worker global set
+# (`web/scripts/worker-globals.json`).  That is what makes it cheap and
+# stable enough to gate every PR.
+#
+# SCOPE, stated so nobody widens it by accident: this proves the module
+# graph evaluates.  It proves nothing about runtime behaviour, and it cannot
+# catch a global read LATER — on first request, or first `/metrics` scrape,
+# which is exactly how the `setImmediate` gap behaved.  `web/e2e/runtime.spec.ts`
+# (Bundle → Boot → dispatch, real worker) remains the authority for those.
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'src/platform/hono/**'
+      - 'src/generator/typescript/**'
+      - 'src/generator/_obs/**'
+      - '.github/workflows/playground-realm-check.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  realm-check:
+    name: playground-realm-check
+    runs-on: ubuntu-latest
+    # Minutes: generate + one npm install of the backend's real dependency
+    # tree + an esbuild bundle + an ESM evaluation, twice (legacy + system).
+    # No browser, no PGlite boot.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install toolchain deps
+        run: npm ci
+      - name: Build toolchain
+        # The smoke imports the compiled emitters from `out/`; a stale or
+        # missing `out/` makes it fail in generation with a confusing
+        # template error long before the realm check runs.
+        run: npm run build
+      - name: Install playground deps
+        working-directory: web
+        run: npm ci
+      - name: Generate → install → bundle → evaluate in a worker realm
+        working-directory: web
+        run: npm run e2e:realm

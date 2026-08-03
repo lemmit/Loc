@@ -1,8 +1,4 @@
-import type {
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  OperationIR,
-} from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { aggHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { lines } from "../../../util/code-builder.js";
 
@@ -29,18 +25,11 @@ import { lines } from "../../../util/code-builder.js";
 // the shared MigrationsIR.
 // ---------------------------------------------------------------------------
 
-/** The `audited` public operations on an aggregate — the per-op audit scope. */
-export function auditedOpsOf(agg: EnrichedAggregateIR): OperationIR[] {
-  return agg.operations.filter((o) => o.audited && o.visibility === "public");
-}
-
-/** True iff this aggregate has any `audited` public operation — gates the
- *  per-route operation audit instrumentation + the repository `record_audit`
- *  helper. */
-export function aggHasAuditedOp(agg: EnrichedAggregateIR): boolean {
-  return agg.operations.some((o) => o.audited && o.visibility === "public");
-}
-
+// `auditedOpsOf` / `aggHasAuditedOp` used to live here (and in the .NET and
+// Java siblings) but were never called by anything — the real gate is
+// `routes-builder.ts`'s inline `op.audited` reads.  Removed rather than
+// centralized: the three unused copies had already drifted apart, so they were
+// a trap for the next reader, not a shared seam.
 /** True iff any aggregate in the given contexts carries an `audited` command
  *  action — operation, lifecycle create, OR destroy (the SHARED predicate).
  *  Gates the shared runtime file + the audit_records DDL so a

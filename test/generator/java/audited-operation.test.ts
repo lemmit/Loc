@@ -16,7 +16,6 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 const SRC = readFileSync("test/e2e/fixtures/java-build/audited-operation.ddd", "utf8");
 const ROOT = "api/src/main/java/com/loom/api";
-const MIG = "api/src/main/resources/db/migration/V29991231235959.8__Audit.sql";
 
 const files = await generateSystemFiles(SRC);
 const get = (p: string): string => {
@@ -110,17 +109,21 @@ describe("java generator — audited operation instrumentation", () => {
 });
 
 describe("java generator — audit migration DDL", () => {
-  const sql = get(MIG);
-
-  it("creates audit_records with the who/what/when + before/after columns", () => {
-    expect(sql).toContain("CREATE TABLE IF NOT EXISTS audit_records (");
-    expect(sql).toContain("  actor jsonb,");
-    expect(sql).toContain("  before jsonb NOT NULL,");
-    expect(sql).toContain("  after jsonb NOT NULL,");
-    expect(sql).toContain("  status text NOT NULL,");
-    expect(sql).toContain(
-      "CREATE INDEX IF NOT EXISTS audit_records_target_idx ON audit_records (target_type, target_id);",
+  // The DDL moved to the shared MigrationsIR (`auditTableShape`), so it is
+  // rendered by the ordinary module-migration emitter rather than a hand-written
+  // late Flyway migration.  `before`/`after` are NULLABLE by design: a create
+  // has no before and a destroy no after, and a NOT NULL there rolled the whole
+  // action transaction back.
+  it("creates audit_records through the shared migration emitter", () => {
+    const mig = [...files.entries()].find(
+      ([p, c]) => p.includes("db/migration/") && c.includes("audit_records"),
     );
+    expect(mig, "audit_records DDL must be emitted somewhere").toBeDefined();
+    const sql = mig![1];
+    expect(sql).toMatch(/audit_records_target_idx/);
+    expect(sql).toMatch(/audit_records_correlation_idx/);
+    expect(sql).not.toMatch(/before[^,\n]*NOT NULL/i);
+    expect(sql).not.toMatch(/after[^,\n]*NOT NULL/i);
   });
 });
 

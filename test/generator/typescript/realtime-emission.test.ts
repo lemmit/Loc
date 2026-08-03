@@ -99,7 +99,7 @@ system TenantRealtime {
   context Fulfillment {
     aggregate Order with tenantOwned, crudish { status: string }
     repository Orders for Order { }
-    crossTenant aggregate Plan with crudish { code: string }
+    aggregate Plan crossTenant with crudish { code: string }
     repository Plans for Plan { }
     aggregate Organization with crudish { name: string }
 

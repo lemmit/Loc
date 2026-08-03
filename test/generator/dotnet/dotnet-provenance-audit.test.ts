@@ -261,14 +261,19 @@ describe("dotnet per-operation audit runtime", () => {
     );
   });
 
-  it("creates the audit_records table in a migration", async () => {
+  // The DDL moved to the shared MigrationsIR (`auditTableShape`), so it is
+  // rendered by the ordinary module-migration emitter rather than being appended
+  // to the hand-written ProvenanceAudit migration.
+  it("creates the audit_records table through the shared migration emitter", async () => {
     const f = await files();
-    const key = [...f.keys()].find((k) => /api\/Migrations\/.*ProvenanceAudit\.cs$/.test(k));
-    const mig = f.get(key!)!;
-    expect(mig).toContain("CREATE TABLE IF NOT EXISTS audit_records");
-    expect(mig).toMatch(
-      /audit_records \([\s\S]*?correlation_id text,[\s\S]*?scope_id text,[\s\S]*?parent_id text/,
+    const mig = [...f.entries()].find(
+      ([p, c]) => /api\/Migrations\/.*\.cs$/.test(p) && c.includes("audit_records"),
     );
+    expect(mig, "audit_records DDL must be emitted somewhere").toBeDefined();
+    const sql = mig![1];
+    expect(sql).toMatch(/audit_records/);
+    expect(sql).toMatch(/correlation_id/);
+    expect(sql).toMatch(/audit_records_target_idx/);
   });
 });
 

@@ -131,27 +131,27 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(audit).toContain("actor_id = RequestContext.actor_id()");
   });
 
-  it("emits the audit_records migration with the byte-shared columns + indexes", async () => {
-    const mig = file(await generateSystemFiles(SOURCE), "_create_audit.exs");
-    // Distinct higher version than provenance (29991231000000) so both late
-    // migrations sort deterministically.
-    expect(
-      [...(await generateSystemFiles(SOURCE)).keys()].some((k) =>
-        k.endsWith("29991231000001_create_audit.exs"),
-      ),
-    ).toBe(true);
-    expect(mig).toContain("create table(:audit_records, primary_key: false) do");
-    expect(mig).toContain("add :audit_id, :string, primary_key: true, null: false");
-    expect(mig).toContain("add :operation_id, :string, null: false");
-    expect(mig).toContain("add :action, :string, null: false");
-    expect(mig).toContain("add :target_type, :string, null: false");
-    expect(mig).toContain("add :target_id, :string, null: false");
-    expect(mig).toContain("add :actor, :map");
-    expect(mig).toContain("add :before, :map");
-    expect(mig).toContain("add :after, :map");
-    expect(mig).toContain("add :status, :string, null: false");
-    expect(mig).toContain("create index(:audit_records, [:target_type, :target_id])");
-    expect(mig).toContain("create index(:audit_records, [:correlation_id])");
+  // The audit DDL is no longer a hand-written late `_create_audit.exs`; it now
+  // comes from the shared MigrationsIR (`auditTableShape`) and is rendered by
+  // the ordinary Ecto migration emitter alongside every other table.
+  it("emits the audit_records DDL through the shared migration emitter", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const mig = [...files.entries()].find(
+      ([p, c]) => p.includes("priv/repo/migrations/") && c.includes("audit_records"),
+    );
+    expect(mig, "audit_records DDL must be emitted somewhere").toBeDefined();
+    const sql = mig![1];
+    expect(sql).toContain("audit_records");
+    expect(sql).toContain(":operation_id");
+    expect(sql).toContain(":target_type");
+    // `before`/`after` must stay NULLABLE — a create has no before, a destroy
+    // no after.  A NOT NULL here rolls back the whole action transaction.
+    expect(sql).not.toMatch(/:before[^\n]*null: false/);
+    expect(sql).not.toMatch(/:after[^\n]*null: false/);
+    // `timestamps()` must NOT be bundled: the audit writer builds the row by
+    // hand and never populates Ecto timestamps, so a NOT NULL `inserted_at`
+    // would reject every audited command.
+    expect(sql).not.toMatch(/audit_records[\s\S]{0,600}?timestamps\(\)/);
   });
 
   it("wraps the audited OPERATION persist in a forced transaction + records before/after", async () => {

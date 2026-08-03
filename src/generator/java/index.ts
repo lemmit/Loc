@@ -66,7 +66,6 @@ import { inlineRunBypassesByRetrieval, promotedCapabilities } from "./capability
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import {
   contextsHaveAudit,
-  emitJavaAuditMigration,
   renderAuditRecordEntity,
   renderAuditRecordRepository,
 } from "./emit/audit.js";
@@ -1257,9 +1256,6 @@ function emitProjectFromContexts(
   // Gated on a `provenanced` field, not a backend allowlist.
   emitJavaProvenanceMigration(contexts, system?.sys, out);
   // Per-operation audit DDL (audit-and-logging.md): one extra late Flyway
-  // migration creating `audit_records`, sorting after every module migration.
-  // Feature-local — not part of MigrationsIR.  Gated on an `audited` op.
-  emitJavaAuditMigration(contexts, out);
   const hasMigrations =
     allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null) ||
     hasProvenance ||

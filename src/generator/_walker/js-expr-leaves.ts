@@ -12,9 +12,12 @@
 // are byte-for-byte what `emitExpr` produced inline before the extraction.
 
 import type { BinOp, LiteralKind, PrimitiveName } from "../../ir/types/loom-ir.js";
+import { renderJsIntrinsic } from "../_expr/js-intrinsics.js";
 import type { WalkerTarget } from "./target.js";
 
-/** The seven expression-leaf methods every `WalkerTarget` supplies. */
+/** The seven expression-leaf methods every `WalkerTarget` supplies, plus the
+ *  optional scalar-intrinsic seam (`renderIntrinsic`) — the JS family shares
+ *  the TypeScript backend's snippet table, since it emits the same language. */
 type ExprLeaves = Pick<
   WalkerTarget,
   | "exprLiteral"
@@ -24,6 +27,7 @@ type ExprLeaves = Pick<
   | "exprConvert"
   | "exprList"
   | "exprObject"
+  | "renderIntrinsic"
 >;
 
 /** The JS leaf formatters — pure string→string, sub-expressions pre-rendered. */
@@ -73,6 +77,11 @@ export const jsExprLeaves: ExprLeaves = {
   exprObject(fields: ReadonlyArray<{ name: string; value: string }>): string {
     return `{ ${fields.map((f) => `${f.name}: ${f.value}`).join(", ")} }`;
   },
+  // The JS frontends and the Hono/TypeScript backend emit the SAME language,
+  // so they share ONE intrinsic snippet table — that shared table is what makes
+  // `s.replace(a, b)` mean replace-ALL in a page body exactly as it does in an
+  // aggregate `derived`.  See `_expr/js-intrinsics.ts`.
+  renderIntrinsic: renderJsIntrinsic,
 };
 
 /** Fail-loud expression leaves for a target that FORKS `emitExpr` (HEEx runs a
@@ -85,6 +94,9 @@ const unreachedExprLeaf = (name: string) => (): never => {
   );
 };
 export const unreachableExprLeaves: ExprLeaves = {
+  // HEEx forks the dispatcher entirely; it renders intrinsics in its own
+  // engine, so it never consults this seam.
+  renderIntrinsic: undefined,
   exprLiteral: unreachedExprLeaf("exprLiteral"),
   exprBinary: unreachedExprLeaf("exprBinary"),
   exprUnary: unreachedExprLeaf("exprUnary"),
