@@ -194,6 +194,11 @@ field-keyed diff is a typed projection where the masking rule is exact and
 checkable. Point-in-time state reconstruction ("time travel") is a separate
 feature and would need its own authorization story.
 
+### Rendering it
+
+*(The `Timeline` page primitive and the scaffolded History tab land on this
+branch — section fills in as they do.)*
+
 ### What history does *not* answer
 
 Only **successful** commands are recorded (§2). A denied, failed, or
