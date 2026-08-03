@@ -180,10 +180,10 @@ export function renderModel(
     ...state.map((f) => `    ${upperFirst(f.name)}: ${stateFieldFsType(f)}`),
     ...reads.flatMap((r) => [
       `    ${r.field}: Remote<${r.resultType}>`,
-      // A server-paged read carries the envelope's page count in a SIBLING int
-      // field, so the list field stays a plain `'T list` for `View.idOptions`
-      // and the realtime refetch (M-T2.6 Feliz leg).
-      ...(r.paging ? [`    ${r.paging.totalPagesField}: int`] : []),
+      // A server-paged read carries the envelope's page metadata in a SIBLING
+      // `PageMeta` record, so the list field stays a plain `'T list` for
+      // `View.idOptions` and the realtime refetch (M-T2.6 Feliz leg).
+      ...(r.paging ? [`    ${r.paging.metaField}: PageMeta`] : []),
     ]),
     ...forms.flatMap((f) => [
       `    ${f.formField}: ${f.formType}`,
@@ -245,9 +245,14 @@ export function renderInit(
     }),
     ...reads.flatMap((r) => [
       `      ${r.field} = Loading`,
-      // 1, not 0: the pager labels "Page 1 of N" before the first response
-      // lands, and `Next` must not be enabled against an unknown count.
-      ...(r.paging ? [`      ${r.paging.totalPagesField} = 1`] : []),
+      // `TotalPages = 1`, not 0: the pager labels "Page 1 of N" before the first
+      // response lands, and `Next` must not be enabled against an unknown count.
+      // The ROW count seeds at 0 instead — "0 results" until the rows arrive is
+      // true of the empty list beside it; "1 result" would not be.  `Page` seeds
+      // at the 1-based first page, `PageSize` at 0 (unknown until the server says).
+      ...(r.paging
+        ? [`      ${r.paging.metaField} = { Page = 1; PageSize = 0; Total = 0; TotalPages = 1 }`]
+        : []),
     ]),
     ...forms.flatMap((f) => [
       `      ${f.formField} = ${f.emptyBinding}`,
@@ -327,8 +332,10 @@ export function renderMsg(
       `  | ${r.msgCase} of Result<${readLoadedType(r)}, string>`,
       // The realtime handler has no `model` in scope, so it asks for a refetch
       // rather than issuing one — dispatching a paramless read there would
-      // silently reset the user's page and sort.
-      ...(r.paging ? [`  | ${refetchMsgCase(r.field)}`] : []),
+      // silently reset the user's page and sort.  Only a CONTROLLED read has
+      // that state to lose, and only it dispatches this (see `realtime.ts`), so
+      // declaring it for every paged read would emit a case nothing raises.
+      ...(r.paging?.controls ? [`  | ${refetchMsgCase(r.field)}`] : []),
     ]),
     ...mutations.flatMap((m) => [
       `  | ${m.dispatchCase} of string`,
@@ -634,9 +641,11 @@ export function renderUpdate(
   const readArms = reads.map((r) => {
     if (r.paging) {
       return (
-        `  | ${r.msgCase} (Ok (data, totalPages)) -> { model with ${r.field} = Loaded data; ${r.paging.totalPagesField} = totalPages }, Cmd.none\n` +
-        `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none\n` +
-        `  | ${refetchMsgCase(r.field)} -> model, ${pagedReadCmd(r, "model")}`
+        `  | ${r.msgCase} (Ok (data, meta)) -> { model with ${r.field} = Loaded data; ${r.paging.metaField} = meta }, Cmd.none\n` +
+        `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none` +
+        (r.paging.controls
+          ? `\n  | ${refetchMsgCase(r.field)} -> model, ${pagedReadCmd(r, "model")}`
+          : "")
       );
     }
     return (

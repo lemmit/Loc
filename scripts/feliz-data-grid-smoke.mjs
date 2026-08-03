@@ -63,7 +63,16 @@ try {
     r.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: ROWS }),
+      // Full paged envelope — see `feliz-table-smoke.mjs`; the DataGrid's own
+      // row model does the windowing, so the counts just describe one server
+      // page holding every row.
+      body: JSON.stringify({
+        items: ROWS,
+        page: 1,
+        pageSize: ROWS.length,
+        total: ROWS.length,
+        totalPages: 1,
+      }),
     }),
   );
   await page.goto(`${URL}products/grid`, { waitUntil: "networkidle" });

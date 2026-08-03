@@ -16,6 +16,7 @@ import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
+import { queryShape } from "../_walker/paged-query.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
@@ -760,8 +761,42 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   let dataHeex = "";
   let dataVar = "rows";
   let assignName = "items";
-  let isSingle = false;
-  let isPaged = false;
+  // Resolve the read's SHAPE up front, from the IR rather than from the flags.
+  // `paged:` / `single:` are opt-INs; the facts behind them are properties of
+  // the find, and taking them from the flags alone is what made a hand-written
+  // `QueryView { of: X.all }` render `Enum.empty?/1` against the paged envelope
+  // MAP (never empty, so the empty arm was dead and `<.table rows={…}>`
+  // iterated the map's key/value pairs) and a `byId` read without `single:`
+  // raise `Protocol.UndefinedError` on a struct.  Same derivation the JSX
+  // walker uses — see `_walker/paged-query.ts`.
+  //
+  // Pre-scanned rather than read inside the arg loop below: `data:` may precede
+  // `single:` in source order, and the data-lambda branch needs the answer.
+  const names = expr.argNames ?? [];
+  const litTrue = (i: number): boolean => {
+    const a = i >= 0 ? expr.args[i] : undefined;
+    return a?.kind === "literal" && a.value === "true";
+  };
+  const ofNode = expr.args[names.indexOf("of")];
+  const shape = ofNode
+    ? queryShape(ofNode, {
+        apiParamNames: new Set(ctx.ui.apiParams.map((p) => p.name)),
+        aggregatesByName: ctx.aggregatesByName,
+        bcByAggregate: ctx.bcByAggregate,
+      })
+    : { paged: false, single: false };
+  // Flag OR fact: an author may still opt in explicitly (the scaffold does),
+  // but omitting the flag no longer means "not paged" / "not single".
+  const isSingle = litTrue(names.indexOf("single")) || shape.single;
+  const explicitPaged = litTrue(names.indexOf("paged"));
+  const isPaged = explicitPaged || shape.paged;
+  // AUTO-paged: the read is paged but the body was written for a collection, so
+  // the lambda binding unwraps to the envelope's rows — the LiveView twin of
+  // the JSX walker's `.data.items` unwrap.  Without it a hand-written
+  // `Table { rows: rows }` passed the whole envelope MAP as `rows=`, and
+  // `<.table>` iterated its key/value pairs.  An explicit `paged: true` body
+  // (the scaffold) reads `rows.items` itself, so it binds the envelope.
+  const autoPaged = !explicitPaged && !isSingle && shape.paged;
 
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -769,10 +804,6 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     if (name === "of") {
       ofArgNode = arg;
       ofExpr = renderExpr(arg, { ...ctx, position: "template" });
-    } else if (name === "single") {
-      isSingle = arg.kind === "literal" && arg.value === "true";
-    } else if (name === "paged") {
-      isPaged = arg.kind === "literal" && arg.value === "true";
     } else if (name === "loading") {
       loadingHeex = renderChild(arg, ctx);
     } else if (name === "error") {
@@ -786,7 +817,9 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
         // Convention: "rows" → @items (list pages), "data" → @data (detail pages)
         assignName = dataVar === "rows" ? "items" : dataVar;
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
-        const remapping = new Map<string, string>([[dataVar, assignName]]);
+        const remapping = new Map<string, string>([
+          [dataVar, autoPaged ? `${assignName}.items` : assignName],
+        ]);
         // Type the data binding so a nested instance-qualified op-form
         // (`OperationForm(data.confirm)`) resolves the aggregate it operates on.
         const recordAgg = isSingle && ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;

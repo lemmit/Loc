@@ -6536,6 +6536,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               "$ref": "#/rules@172"
             },
             "arguments": []
+          },
+          {
+            "$type": "Keyword",
+            "value": "page"
           }
         ]
       },
@@ -12902,6 +12906,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "Keyword",
                   "value": "await"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "page"
                 }
               ]
             }
@@ -16100,6 +16108,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "page"
+          },
+          {
+            "$type": "Keyword",
             "value": "permissions"
           },
           {
@@ -17626,6 +17638,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "modules"
+          },
+          {
+            "$type": "Keyword",
+            "value": "page"
           },
           {
             "$type": "Keyword",

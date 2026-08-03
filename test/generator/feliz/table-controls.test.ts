@@ -227,18 +227,26 @@ describe("feliz server-paged scaffold list", () => {
     );
   });
 
-  it("decodes the page count into a SIBLING field, leaving the list a plain 'T list", async () => {
+  it("decodes the page metadata into a SIBLING record, leaving the list a plain 'T list", async () => {
     const fs = await scaffoldFs();
     // The list field is also read by `View.idOptions` (FK selects) and by the
     // realtime refetch, so widening it to the envelope would break both.
     expect(fs).toContain("AllProducts: Remote<Product list>");
-    expect(fs).toContain("AllProductsTotalPages: int");
-    expect(fs).toContain("| AllProductsLoaded of Result<Product list * int, string>");
+    // One `PageMeta` record rather than a Model field per member (M-T1.3
+    // Defect B): every non-row member of the envelope travels together, so the
+    // carrier can grow without another field and another Msg tuple slot.
+    expect(fs).toContain("AllProductsPageMeta: PageMeta");
+    expect(fs).toContain("| AllProductsLoaded of Result<Product list * PageMeta, string>");
     expect(fs).toContain(
-      "| AllProductsLoaded (Ok (data, totalPages)) -> { model with AllProducts = Loaded data; AllProductsTotalPages = totalPages }, Cmd.none",
+      "| AllProductsLoaded (Ok (data, meta)) -> { model with AllProducts = Loaded data; AllProductsPageMeta = meta }, Cmd.none",
     );
     // The pager reads the sibling, not a member of the list binding.
-    expect(fs).toContain("(max 1 (model.AllProductsTotalPages))");
+    expect(fs).toContain("(max 1 (model.AllProductsPageMeta.TotalPages))");
+    // Seeded so the first render tells the truth about an empty list: 1 page,
+    // 0 rows.  A `Total = 1` would render "1 result" beside no rows.
+    expect(fs).toContain(
+      "AllProductsPageMeta = { Page = 1; PageSize = 0; Total = 0; TotalPages = 1 }",
+    );
   });
 
   it("issues the FIRST fetch from the model's own initial page and sort", async () => {
@@ -249,7 +257,9 @@ describe("feliz server-paged scaffold list", () => {
     expect(fs).toContain(
       "Cmd.OfAsync.perform (fun () -> Api.allProducts __m.PageNum 10 __m.SortKey __m.SortDir) () AllProductsLoaded",
     );
-    expect(fs).toContain("AllProductsTotalPages = 1");
+    expect(fs).toContain(
+      "AllProductsPageMeta = { Page = 1; PageSize = 0; Total = 0; TotalPages = 1 }",
+    );
   });
 
   it("refetches ONCE per control change — on page and on direction, not on key", async () => {

@@ -128,6 +128,136 @@ describe("QueryView macro", () => {
     expect(tsx).toMatch(/<\/>[\s\S]*<\/Stack>/);
   });
 
+  // ---- Paged-envelope page metadata (M-T1.3 Defect B) --------------------
+  // `.all` is `paged<T>` by default (M-T2.6), so its `.data` is the envelope
+  // `{items, page, pageSize, total, totalPages}`.  A hand-written QueryView is
+  // AUTO-paged: the `data:` binding unwraps to `.items` so the body's
+  // `Table { rows: rows }` keeps iterating records — which used to put every
+  // metadata member one level too deep (`.data.items.total`: `undefined` at
+  // runtime, TS2339 at build).  The rows and the metadata come off different
+  // levels of the same envelope, and both have to be right at once.
+  it("auto-paged: `rows.total` resolves against the ENVELOPE while the rows stay the array", async () => {
+    const files = await buildAndGenerate(
+      ordersListBody(`QueryView {
+        of:      Sales.Order.all,
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rows => Stack {
+          Text { rows.total },
+          Table { rows: rows, Column { "ID", o => o.id } }
+        }
+      }`),
+    );
+    const tsx = files.get("web/src/pages/orders_list.tsx")!;
+    expect(tsx).toContain("{orderAll.data.total}");
+    expect(tsx).not.toContain("orderAll.data.items.total");
+    // The unwrap the metadata read is threading around is still in force.
+    expect(tsx).toMatch(/orderAll\.data\.items\.map\(\(row\) => \(/);
+  });
+
+  // `rows.page` is absent on purpose: `page` is a reserved keyword, so the
+  // member access doesn't PARSE (the same reason the scaffold's page-state
+  // field is named `pageNum`).  That member of the envelope is unreachable by
+  // spelling, which is a grammar limit and not this walker's to fix.
+  it("auto-paged: every spellable metadata member re-roots, `items` does NOT", async () => {
+    const files = await buildAndGenerate(
+      ordersListBody(`QueryView {
+        of:      Sales.Order.all,
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rows => Stack {
+          Text { rows.pageSize }, Text { rows.totalPages },
+          Text { rows.items }
+        }
+      }`),
+    );
+    const tsx = files.get("web/src/pages/orders_list.tsx")!;
+    expect(tsx).toContain("{orderAll.data.pageSize}");
+    expect(tsx).toContain("{orderAll.data.totalPages}");
+    // `items` is deliberately left alone: on an unwrapped binding `rows` IS the
+    // array, so re-rooting it would silently repair the author's own mistake
+    // into something that looks right and reads a different value.
+    expect(tsx).toContain("{orderAll.data.items.items}");
+  });
+
+  it("explicit `paged: true`: the binding is already the envelope, so metadata reads pass straight through", async () => {
+    const files = await buildAndGenerate(
+      ordersListBody(`QueryView {
+        of:      Sales.Order.all,
+        paged:   true,
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rows => Stack {
+          Text { rows.total },
+          Table { rows: rows.items, Column { "ID", o => o.id } }
+        }
+      }`),
+    );
+    const tsx = files.get("web/src/pages/orders_list.tsx")!;
+    expect(tsx).toContain("{orderAll.data.total}");
+    expect(tsx).toMatch(/orderAll\.data\.items\.map\(\(row\) => \(/);
+  });
+
+  // The binding map is keyed by the lambda's param NAME, so a nested QueryView
+  // reusing `rows` has to shadow the outer entry.  Inheriting it would resolve
+  // the inner `rows.total` against the OUTER query's envelope — a real number
+  // from the wrong read, which no compiler catches.
+  it("a nested QueryView reusing the param name shadows the outer paged binding", async () => {
+    const files = await buildAndGenerate(
+      ordersListBody(`QueryView {
+        of:      Sales.Order.all,
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rows => Stack {
+          Text { rows.total },
+          QueryView {
+            of:      Sales.Order.byId(id),
+            single:  true,
+            loading: Skeleton {},
+            error:   Alert { "err" },
+            empty:   Empty { "none" },
+            data:    rows => Text { rows.status }
+          }
+        }
+      }`),
+    );
+    const tsx = files.get("web/src/pages/orders_list.tsx")!;
+    // Outer: the metadata read still re-roots onto the list query's envelope.
+    expect(tsx).toContain("{orderAll.data.total}");
+    // Inner: `rows` is the byId record, untouched by the outer binding.
+    expect(tsx).toContain("{orderById.data.status}");
+    expect(tsx).not.toContain("orderById.data.total");
+  });
+
+  // `single:` restated a fact the IR already knows — the read yields one
+  // record — so a byId query written WITHOUT the flag took the COLLECTION
+  // arms: `.length` of one record is `undefined`, so neither `=== 0` nor
+  // `> 0` fires and the page renders blank (on HEEx, `Enum.empty?/1` of a
+  // struct raises).  Derived now, with the flag as an opt-in on top.
+  it("a byId query takes single-record semantics without a `single:` flag", async () => {
+    const files = await buildAndGenerate(
+      ordersListBody(`QueryView {
+        of:      Sales.Order.byId(id),
+        loading: Skeleton {},
+        error:   Alert { "err" },
+        empty:   Empty { "none" },
+        data:    rec => Text { rec.status }
+      }`),
+    );
+    const tsx = files.get("web/src/pages/orders_list.tsx")!;
+    // Presence/absence of the record, never `.length` of it — `.length` of one
+    // record is `undefined`, so both collection guards would be false and the
+    // page would render blank.
+    expect(tsx).toContain("!orderById.data &&");
+    expect(tsx).toContain("{ orderById.data && (");
+    expect(tsx).not.toContain("orderById.data.length");
+    expect(tsx).toContain("{orderById.data.status}");
+  });
+
   it("missing 'of:' surfaces a visible TSX comment, no crash", async () => {
     const files = await buildAndGenerate(
       ordersListBody(`QueryView {

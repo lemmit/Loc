@@ -29,8 +29,9 @@ import {
   formTouchedField,
   formTouchMsg,
   idLabelsFrom,
+  pageMetaFieldName,
+  pageMetaMember,
   readFieldName,
-  totalPagesFieldName,
 } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`). */
@@ -309,16 +310,17 @@ export const felizTarget: WalkerTarget = {
   // binding directly (no `.data` — the arm already unwrapped the `Remote`).
   renderQueryDataAccess: (handle) => lowerFirst(handle),
   // The Elmish decoder SPLITS the paged envelope: the rows land in the read's
-  // `Remote<'T list>` Model field and the page count in a sibling int (see
-  // `FelizReadPaging`).  So the scaffold's `rows.items` is the binding itself,
-  // and `rows.totalPages` is that sibling — named off the read's handle, since
-  // the binding is a list with no such member.
-  renderPagedEnvelopeMember: ({ member, binding, handle }) =>
-    member === "items"
-      ? binding
-      : member === "totalPages"
-        ? `model.${totalPagesFieldName(handle)}`
-        : undefined,
+  // `Remote<'T list>` Model field and the page METADATA in a sibling `PageMeta`
+  // record (see `FelizReadPaging`).  So the scaffold's `rows.items` is the
+  // binding itself, while `rows.total` / `rows.totalPages` / `rows.pageSize`
+  // are fields of that sibling — named off the read's handle, since the binding
+  // is a list with no such member.  Every member of the envelope resolves here;
+  // there is no Feliz-shaped gap left for the validator to gate.
+  renderPagedEnvelopeMember: ({ member, binding, handle }) => {
+    if (member === "items") return binding;
+    const meta = pageMetaMember(member);
+    return meta ? `model.${pageMetaFieldName(handle)}.${meta}` : undefined;
+  },
 
   // --- Control-flow seams — QueryView's loading/error/empty/data + Table's
   // per-row `For` exercise these in a parseable, Fable-verifiable position. --

@@ -23,9 +23,11 @@ import {
   wireFieldsForPart,
   wireFieldsForValueObject,
 } from "../../ir/enrich/wire-projection.js";
+import { PAGED_META_MEMBERS } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
+  BoundedContextIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
@@ -48,6 +50,7 @@ import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
+import { isPagedQuery } from "../_walker/paged-query.js";
 import { boolNamed } from "../_walker/shared/args.js";
 import { typeToFs } from "./type-fs.js";
 
@@ -103,8 +106,18 @@ export interface FelizPageControls {
   pageSize: number;
 }
 
+/** The paged envelope's page-METADATA wire members, in `PageMeta` field order.
+ *  Derived from the carrier shape so widening `paged` reaches Feliz here. */
+const PAGE_META_MEMBERS: ReadonlySet<string> = PAGED_META_MEMBERS;
+
+/** Thoth decoder for the `PageMeta` record — one `Decode.object` over the
+ *  envelope's metadata fields, so adding a member is a one-line change here
+ *  rather than a wider `Decode.mapN` and a wider `Loaded` tuple. */
+const PAGE_META_DECODER =
+  '(Decode.object (fun get -> { Page = get.Required.Field "page" Decode.int; PageSize = get.Required.Field "pageSize" Decode.int; Total = get.Required.Field "total" Decode.int; TotalPages = get.Required.Field "totalPages" Decode.int }))';
+
 /** A list read consumed as a PAGED envelope — the `QueryView paged: true` the
- *  scaffold emits alongside its `Table serverPaged: true`.  The page COUNT is
+ *  scaffold emits alongside its `Table serverPaged: true`.  The page COUNTS are
  *  always decoded; the CONTROLS are separate because a paged read is only
  *  refetchable when its `of:` actually threads page/sort state. */
 export interface FelizReadPaging {
@@ -112,16 +125,26 @@ export interface FelizReadPaging {
    *  Absent → the count still renders (truthfully), but the pager can't
    *  navigate: `Next` stays disabled rather than writing state nothing reads. */
   controls?: FelizPageControls;
-  /** Model field the envelope's `totalPages` lands in (`AllOrdersTotalPages`).
-   *  A SIBLING of the list field rather than an envelope wrapping it: the list
-   *  field is also read by `View.idOptions` (FK selects) and by the realtime
-   *  refetch, so widening its type would break both for no gain. */
-  totalPagesField: string;
+  /** Model field the envelope's page METADATA lands in, as one `PageMeta`
+   *  record (`AllOrdersPageMeta`).  A SIBLING of the list field rather than an
+   *  envelope wrapping it: the list field is also read by `View.idOptions` (FK
+   *  selects) and by the realtime refetch, so widening its type would break
+   *  both for no gain.  One record rather than a field per member, so the
+   *  carrier can grow without another Model field and another Msg tuple slot. */
+  metaField: string;
 }
 
-/** The Model field a server-paged read's `totalPages` lands in. */
-export function totalPagesFieldName(readField: string): string {
-  return `${readField}TotalPages`;
+/** The Model field a server-paged read's `PageMeta` record lands in. */
+export function pageMetaFieldName(readField: string): string {
+  return `${readField}PageMeta`;
+}
+
+/** The `PageMeta` member a paged-envelope wire member maps to, or undefined
+ *  when the envelope member isn't page metadata (`items` — the rows, which live
+ *  in the read's own list field).  The single place the wire's camelCase names
+ *  and F#'s PascalCase record labels are related. */
+export function pageMetaMember(wireMember: string): string | undefined {
+  return PAGE_META_MEMBERS.has(wireMember) ? upperFirst(wireMember) : undefined;
 }
 
 /** The `Msg` case that asks for a paged read to be re-issued with the model's
@@ -143,9 +166,9 @@ export function pagedReadCmd(r: FelizRead, modelExpr: string): string {
 }
 
 /** The F# type a read's `Loaded` Msg carries.  A paged read carries the page
- *  COUNT alongside the rows, so the update arm can store both in one step. */
+ *  metadata alongside the rows, so the update arm can store both in one step. */
 export function readLoadedType(r: FelizRead): string {
-  return r.paging ? `${r.resultType} * int` : r.resultType;
+  return r.paging ? `${r.resultType} * PageMeta` : r.resultType;
 }
 
 /** The Model field name for an aggregate list read (`Order` → `AllOrders`). */
@@ -170,7 +193,7 @@ export interface FelizAllReadOpts {
 export function felizAllRead(aggregate: string, opts: FelizAllReadOpts = {}): FelizRead {
   const field = readFieldName(aggregate);
   const paging: FelizReadPaging | undefined = opts.paged
-    ? { controls: opts.controls, totalPagesField: totalPagesFieldName(field) }
+    ? { controls: opts.controls, metaField: pageMetaFieldName(field) }
     : undefined;
   const items = `(Decode.field "items" (Decode.list Decoders.${lowerFirst(aggregate)}))`;
   return {
@@ -180,12 +203,14 @@ export function felizAllRead(aggregate: string, opts: FelizAllReadOpts = {}): Fe
     aggregate,
     resultType: `${upperFirst(aggregate)} list`,
     // The auto-`findAll` is paged-by-default (M-T2.6): `GET /<aggs>` returns the
-    // `{items, page, …}` wire envelope.  An UNCONTROLLED read wants only the
-    // rows; a page/sort-CONTROLLED one also needs the page count, so it decodes
-    // the pair the `Loaded` Msg carries.  Both keep the Model's list field a
-    // plain `'T list` — see `FelizReadPaging.totalPagesField`.
+    // `{items, page, …}` wire envelope.  A NON-paged read wants only the rows; a
+    // paged one decodes the whole envelope — rows plus the `PageMeta` record the
+    // page body reads off the binding (`rows.totalPages` drives the pager,
+    // `rows.total` a "N results" label) — as the pair the `Loaded` Msg carries.
+    // Both keep the Model's list field a plain `'T list`; see
+    // `FelizReadPaging.metaField`.
     decoderExpr: paging
-      ? `(Decode.map2 (fun __items __tp -> (__items, __tp)) ${items} (Decode.field "totalPages" Decode.int))`
+      ? `(Decode.map2 (fun __items __meta -> (__items, __meta)) ${items} ${PAGE_META_DECODER})`
       : items,
     route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
     binding: lowerFirst(field),
@@ -950,15 +975,17 @@ function exprChildren(e: ExprIR): ExprIR[] {
 }
 
 /** Every `QueryView(of: <expr>)` `of:` argument in a page body, in tree order. */
-function queryViewOfArgs(body: ExprIR): { of: ExprIR; paged: boolean }[] {
-  const out: { of: ExprIR; paged: boolean }[] = [];
+function queryViewOfArgs(body: ExprIR): { of: ExprIR; explicitPaged: boolean }[] {
+  const out: { of: ExprIR; explicitPaged: boolean }[] = [];
   const walk = (e: ExprIR): void => {
     if (e.kind === "call" && e.name === "QueryView") {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
-      // `paged: true` marks the `Paged<T>` envelope the auto-`findAll` returns
-      // (M-T2.6) — the scaffold emits it beside its `Table serverPaged: true`.
-      if (idx >= 0 && e.args[idx]) out.push({ of: e.args[idx], paged: boolNamed(e, "paged") });
+      // `paged: true` is the explicit OPT-IN the scaffold emits beside its
+      // `Table serverPaged: true`.  It is NOT how paged-ness is decided — the
+      // find's return type is (`isPagedQuery`); see `_walker/paged-query.ts`.
+      if (idx >= 0 && e.args[idx])
+        out.push({ of: e.args[idx], explicitPaged: boolNamed(e, "paged") });
     }
     for (const c of exprChildren(e)) walk(c);
   };
@@ -974,16 +1001,18 @@ export function collectPageReads(
   apiParamNames: ReadonlySet<string>,
   aggregatesByName: ReadonlySet<string>,
   nameCtx: PageNameCtx,
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
 ): FelizRead[] {
   if (!page.body) return [];
   const detCtx = { apiParamNames, aggregatesByName };
+  const pagedCtx = { ...detCtx, bcByAggregate };
   // The byId read is keyed to the hosting page's `Page` case, which is the
   // aggregate-qualified emit name (`OrderDetail`) — NOT the bare scaffold page
   // name (`Detail`), which collides across aggregates (Fable error 37/39).
   const pageCase = upperFirst(pageEmitName(page, nameCtx));
   const out: FelizRead[] = [];
   const seen = new Set<string>();
-  for (const { of: ofArg, paged } of queryViewOfArgs(page.body)) {
+  for (const { of: ofArg, explicitPaged } of queryViewOfArgs(page.body)) {
     const detected = tryDetectApiHook(ofArg, detCtx);
     if (detected?.kind !== "aggregate") continue;
     // List (`.all`) or single (`byId`) reads.  A byId read is keyed to the
@@ -991,7 +1020,11 @@ export function collectPageReads(
     let read: FelizRead | undefined;
     if (detected.operation === "all")
       read = felizAllRead(detected.aggregateName, {
-        paged,
+        // Paged-ness is DERIVED from the find's return type — the same call the
+        // walker makes — so a hand-written `QueryView { of: X.all }` decodes the
+        // envelope the walker already resolves `rows.total` against.  Keying
+        // this on the explicit flag instead is what let the two disagree.
+        paged: explicitPaged || isPagedQuery(ofArg, pagedCtx),
         controls: pagingFromArgs(detected.args, page),
       });
     else if (detected.operation === "byId") read = felizByIdRead(detected.aggregateName, pageCase);
@@ -2130,8 +2163,12 @@ function renderApiFn(r: FelizRead): (string | undefined)[] {
       "    }",
     ];
   }
+  // Paramless list read.  The return type must follow the DECODER, not the row
+  // type: an UNCONTROLLED read of a paged find still decodes the envelope (its
+  // page body can read `rows.total`), so `readLoadedType` — the single place
+  // that pairing is spelled — decides both, and they cannot drift.
   return [
-    `  let ${r.apiFn} () : Async<Result<${r.resultType}, string>> =`,
+    `  let ${r.apiFn} () : Async<Result<${readLoadedType(r)}, string>> =`,
     "    async {",
     `      let! (status, body) = Http.get "${r.route}"`,
     "      if status = 200 then",

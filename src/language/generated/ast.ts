@@ -1959,10 +1959,10 @@ export function isLValue(item: unknown): item is LValue {
     return reflection.isInstance(item, LValue.$type);
 }
 
-export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | CommonSoftKeywords | string;
+export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'page' | 'permissions' | 'ui' | 'views' | 'workflows' | CommonSoftKeywords | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'id' || item === 'modules' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'id' || item === 'modules' || item === 'page' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MacroArg extends langium.AstNode {
@@ -2141,10 +2141,10 @@ export function isMatchStmt(item: unknown): item is MatchStmt {
     return reflection.isInstance(item, MatchStmt.$type);
 }
 
-export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id' | 'ignoring' | 'modules' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows' | CommonSoftKeywords | string;
+export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id' | 'ignoring' | 'modules' | 'page' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows' | CommonSoftKeywords | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'find' || item === 'id' || item === 'ignoring' || item === 'modules' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'where' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'find' || item === 'id' || item === 'ignoring' || item === 'modules' || item === 'page' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'where' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MemberSuffix extends langium.AstNode {
@@ -2914,7 +2914,7 @@ export interface Property extends langium.AstNode {
     default?: Expression;
     maskUnless?: Expression;
     message?: string;
-    name: 'await' | CommonSoftKeywords | string;
+    name: 'await' | 'page' | CommonSoftKeywords | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -3454,10 +3454,10 @@ export function isStateField(item: unknown): item is StateField {
     return reflection.isInstance(item, StateField.$type);
 }
 
-export type StateFieldName = CommonSoftKeywords | string;
+export type StateFieldName = 'page' | CommonSoftKeywords | string;
 
 export function isStateFieldName(item: unknown): item is StateFieldName {
-    return isCommonSoftKeywords(item) || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'page' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type Statement = AssignOrCallStmt | EmitStmt | ForStmt | IfLetStmt | LetStmt | MatchStmt | PreconditionStmt | RequiresStmt | ReturnStmt;

@@ -44,6 +44,7 @@
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
+  BoundedContextIR,
   EnumIR,
   ExprIR,
   PageIR,
@@ -228,6 +229,14 @@ export interface WalkContext {
    *  hardcoded placeholder.  Empty map = no lookup available
    *  (validators upstream will catch missing aggregates). */
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Aggregate PascalCase name → its owning bounded context, so a `QueryView`
+   *  `of:` read can be resolved to the repository find behind it.  That is what
+   *  `queryShape` needs to DERIVE whether the read is paged and whether it
+   *  yields one record — facts the LiveView renderer previously took from the
+   *  author's `paged:` / `single:` flags alone, and got wrong whenever they
+   *  were absent.  Empty default ⇒ the collection shape, i.e. the old
+   *  behaviour. */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workspace-wide enum registry — drives `renderFieldInputForField`
    *  dispatch for enum-typed fields to `<.input type="select" options={...}>`.
    *  Built once at walker entry from every loaded context's enums. */
@@ -372,6 +381,9 @@ export function walkBodyToHeex(
    *  `match await` server-side op call (Stage 2).  Empty default ⇒ falls back
    *  to `appModule`. */
   contextModuleByAggName: ReadonlyMap<string, string> = new Map(),
+  /** Aggregate → owning bounded context, for `queryShape`'s find lookup.
+   *  Empty default ⇒ QueryView falls back to the author's flags alone. */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -388,6 +400,7 @@ export function walkBodyToHeex(
   const ctx: WalkContext = {
     appModule,
     aggregatesByName,
+    bcByAggregate,
     enumsByName,
     valueObjectsByName,
     idOptionsBindings: new Set(),
@@ -1745,6 +1758,7 @@ function renderRequiresGuardAt(
   const ctx: WalkContext = {
     appModule,
     aggregatesByName: new Map(),
+    bcByAggregate: new Map(),
     enumsByName: new Map(),
     valueObjectsByName: new Map(),
     idOptionsBindings: new Set(),
