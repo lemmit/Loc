@@ -3786,3 +3786,136 @@ The rules this pays for:
 The same fire-and-forget pattern is still present in the dotnet / dapper /
 python / java / mikroorm runners. It has not surfaced there — those runtimes
 exit faster — but the fuse is the same length.
+
+## 67. The assertion that could not fail, and the detector that found nothing (2026-08-03)
+
+`paged-envelope-members.test.ts` carried this, and it passed for its entire life:
+
+```ts
+const reads = files.get("web/lib/reads.dart") ?? "";
+expect(reads).not.toContain("class LoomPage<T>");
+```
+
+Flutter emits no `lib/reads.dart` for that fixture. `?? ""` turned the miss into
+an empty string, and a `.not.toContain` on an empty string is true for free. The
+assertion was not weak — it was *incapable of failing*. Underneath it sat a real
+bug: a parameterized find made the page walker emit `import '../reads.dart'` and
+`ref.watch(productByNameProvider(...))` for a provider the collector never
+produced, so the generated project would not pass `flutter analyze`.
+
+The detail that makes this worth writing down: **the same file already carried
+the warning.** `pageSource`, forty lines above, is documented as locating pages
+by content rather than path precisely because "a path guess that silently misses
+returns '' — which passes a `not.toContain` assertion for the wrong reason." One
+call site in the same file did it anyway. The knowledge was present, written,
+and adjacent, and it still did not prevent the bug.
+
+Then, building the gate for it, the first detector reported **zero offenders**
+across the whole tree — and I nearly shipped that as "the tree is clean". It was
+a broken regex. Running it against the known positive from the bug that started
+the search is the only reason it surfaced. A gate reporting zero and a gate that
+cannot report anything are indistinguishable from the outside.
+
+Measurement discipline mattered more than the fix here. Three counts, same
+question:
+
+| method | offenders |
+|---|---|
+| grep `?? ""` near `not.toContain` | 47 — almost all fine |
+| negative assertions on `?? ""` bindings | 66 |
+| …with nothing proving the file exists | **2** |
+
+Both survivors were probed by temporarily asserting non-emptiness: **neither was
+actually vacuous**, the files are emitted. The tree was at zero, which is what
+made a zero-tolerance gate possible instead of a ratcheting allowlist.
+
+The rules this pays for:
+
+- **A comment is not a gate.** Adjacent, correct, explicit prose did not stop the
+  identical mistake one screen below it. If a trap is worth documenting, it is
+  worth a test that fails on it.
+- **Never trust a green test you have not watched go red.** Every gate added this
+  session was run against the pre-fix code first. Twice that caught something a
+  passing run would have hidden: this detector, and a Flutter provider decoding
+  `body['items']` where the route emits a bare array.
+- **`?? ""` on a file lookup converts "absent" into "vacuously satisfied".** Use
+  `expectEmitted` (test/_helpers/emitted.ts) when a test asserts on content, or
+  pair the negative with a positive assertion that proves the file exists. To
+  assert genuine ABSENCE, say `expect(files.has(p)).toBe(false)` — which means
+  it, and which no detector needs to guess about.
+- **A crude count and a precise one differ by an order of magnitude.** 47 → 2.
+  Acting on the crude number would have meant 45 pointless edits and a
+  ratcheting allowlist nobody could ever drain.
+
+## 68. The gate that cannot see the failure mode it is named for (2026-08-03)
+
+Four bugs in one session, one shape. In each case a gate existed, looked like it
+covered the area, was green, and was structurally incapable of observing the
+defect:
+
+- **`corpus × dotnet` ran only EF Core.** An emitter referencing EF from a code
+  path Dapper also takes is invisible to it. That is how `IAuditWriter` shipped
+  as a dangling `CS0246` under `persistence: dapper` with the gate green — and
+  how the folded projection read controller shipped the same coupling before it,
+  and how two query-time projection handlers are *still* broken today.
+- **The Flutter CI showcase only used `.all`.** `flutter analyze` + `flutter
+  build web` both ran, both passed, and neither ever emitted a parameterized
+  find — the one shape that was broken.
+- **A `.not.toContain` on a missing file** (§67).
+- **Heavy gates do not run pre-merge.** Three merge-order collisions in one
+  session: two PRs each green alone and red together, plus a duplicate fix
+  written by a parallel agent while I was writing mine.
+
+The corrective is not a better assertion inside the existing gate — it is
+widening what the gate *sees*. `corpus × dotnet (Dapper)` runs the same corpus
+through the second persistence adapter; the Flutter showcase now declares a
+`find` and a `QueryView` over it. Both are cheap. Neither existed because the
+original gate looked adequate.
+
+The measurement is worth keeping: forcing the whole corpus through
+`persistence: dapper` and compiling gave **36 features → 35 generate → 33
+compile**, one honest `loom.dapper-unsupported` rejection, and two real silent
+gaps. An emit-only sweep would have reported 35/35 and missed both, because the
+audit bug also *generated* fine and failed only at `dotnet build`.
+
+The rules this pays for:
+
+- **Ask what a gate cannot see, not whether it is green.** "corpus × dotnet"
+  reads like full .NET coverage and is half of one axis.
+- **A second axis over an existing matrix is usually cheap.** The Dapper corpus
+  gate reuses the same fixtures, harness and compiler; the only new code is a
+  persistence override and a skip map.
+- **Emit ≠ compile ≠ run.** Each tier catches a class the one before it cannot.
+  The audit gap cleared parse and generate and died at compile; a wrong JSON
+  shape clears compile and dies at runtime.
+- **A gate that runs but gates nothing is worth nothing.** The new corpus job had
+  to be added to the `corpus-build-passed` rollup's `needs:`, or it would have
+  reported failures nobody's branch protection consulted.
+
+## 69. A stale `out/` is a lie the toolchain tells you twice (2026-08-03)
+
+Chasing "main is red", I found `generate ts` emitting 32 files where the test
+expected 33, with `obs/tracing.ts` missing. I diffed emitters, built a worktree
+at an older commit to compare, and confirmed the tracing sources were
+byte-identical across both — an impossible result that should have stopped me
+sooner. The cause was that `out/` in my checkout predated `HEAD`. Rebuilding
+emitted 33 files and the suite passed.
+
+It bit a second time in the same session: a `Handlebars: "errorTitleAttr" not
+defined` crash on a fixture that had nothing to do with i18n, immediately after
+a branch switch. Same cause, different disguise.
+
+The SessionStart hook skips `npm install` when `node_modules/.bin/biome` and
+`src/language/generated/` already exist — correct for a fresh container, wrong
+after any `git checkout` that moves `src/`.
+
+The rules this pays for:
+
+- **Rebuild after switching branches, before generating anything.** `out/` is not
+  tracked and nothing warns you it is behind.
+- **"The source is identical but the output differs" means the binary is not the
+  source.** Treat that contradiction as a build-staleness signal immediately,
+  not as a deep emitter mystery.
+- **Never run a long background suite across a branch switch.** One did, and
+  reported 713 failures that were pure artefact of the tree changing underneath
+  it — a phantom regression that cost a full re-verification to disprove.
