@@ -290,7 +290,15 @@ function renderedText(files: Map<string, string>): string {
     // `.loom/` review artifacts and the app's `src/locales/*.json` i18n
     // catalogs are DATA (raw source-language strings a translator edits,
     // escaped by the frontend at render time), never a raw markup position.
-    if (path.startsWith(".loom/") || path.includes("/locales/")) continue;
+    // …and the Phoenix `priv/gettext/**` `.po`/`.pot` message catalog is the
+    // same class of file: a translator-edited DATA catalog whose msgid IS the
+    // source string, parsed by gettext, never a markup position.  (The emitted
+    // `pgettext(…)` CALL is a different matter and is NOT excluded — its Elixir
+    // string literal `\x`-escapes `<`/`>`/`{`/`}` so it can't close the
+    // surrounding EEx tag or HEEx `{…}` attribute; see `elixir/i18n.ts`.)
+    if (path.startsWith(".loom/") || path.includes("/locales/") || path.includes("priv/gettext/")) {
+      continue;
+    }
     all += `\n${content.replace(I18N_CALL, "")}`;
   }
   return all;

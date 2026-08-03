@@ -3485,3 +3485,212 @@ nine new ones* for cases that had never had a golden — untracked, so easy to
 `git add -A` into the commit without noticing. Read `git status` after a
 rebaseline and clean what you did not intend; a golden is a reviewed answer key,
 and nine unreviewed ones are nine unreviewed decisions.
+
+## 63. An "unwrap for convenience" binding splits one value into two levels — and the second level goes missing (2026-08-01)
+
+M-T1.3 Defect B: `.all` is paged-by-default, so a `QueryView`'s `.data` is the
+envelope `{items, page, pageSize, total, totalPages}`. `rows.total` emitted
+`<hook>.data.items.total` — `undefined` at runtime, `TS2339` at build. The
+count that the backend had already computed, parsed and typed was unreachable
+from the DSL, and the mission that found it routed around it.
+
+**The cause was a convenience that is individually correct.** A hand-written
+`QueryView { of: X.all, data: rows => Table { rows: rows } }` was written for
+an array, so the binding UNWRAPS to `.items` and the body keeps iterating
+records without the author knowing the read went paged. That unwrap is right —
+and it silently redefines what every OTHER member read off that binding means,
+because the rows and the metadata live at different levels of the same object.
+The unwrap had exactly one consumer in mind and no story for the rest of the
+shape.
+
+- **When a binding is rewritten for one member's benefit, enumerate the other
+  members before shipping it.** The fix is not to undo the unwrap (that breaks
+  the iteration) but to re-root the members the unwrap moved. Deriving that set
+  from the carrier shape (`GENERIC_SHAPES.paged`) rather than re-spelling it
+  means widening the envelope reaches the frontends without a second edit.
+- **The exception proves it's a rewrite, not a projection:** `items` is
+  deliberately NOT re-rooted. On an unwrapped binding `rows` already IS the
+  array, so re-rooting `rows.items` would repair the author's own mistake into
+  something that reads a different value and looks right.
+
+**The sweep is the deliverable, not the first fix.** Unifying paged-ness
+prompted a question worth generalising: *which other author-supplied flags
+restate a fact the IR already knows?* Enumerating them took one grep — of the
+11 boolean flags the walker reads, 8 are genuine presentation choices
+(`striped`, `sticky`, `sortable`, …) and exactly 3 restate a fact: `paged`,
+`single`, `serverPaged`. Two of those were live bugs on **Phoenix**, which runs
+a parallel walker and so never inherited the JSX engine's derivation: a
+hand-written list read asked `Enum.empty?/1` of the 5-key envelope MAP (never
+empty, so the empty arm was dead and `<.table>` iterated key/value pairs), and
+a `byId` read without `single:` asked it of a struct (`Protocol.UndefinedError`).
+Both raise at RENDER — no compile signal on any gate. **When you fix a
+same-fact-two-sources bug, the fix is cheap and the SWEEP is where the value
+is: the pattern recurs wherever the codebase lets an author restate something
+it can derive.**
+
+The third, `serverPaged`, is deliberately NOT unified — see the note below on
+when a flag is genuinely a second axis.
+
+**A flag is legitimate when it selects a BEHAVIOUR the fact can't determine.**
+`paged: true` survives as an opt-in, but it no longer answers "is this read
+paged?" — it answers "bind the envelope rather than unwrapping to the rows",
+which is a shape choice the return type cannot make. `single:` had no such
+second axis, so it degraded to a pure override. `serverPaged` on `Table` turned
+out to be a real design question rather than a derivation: deriving it would
+give a hand-written table a pager that renders but cannot navigate (it writes
+page state no request reads), while leaving it gives one that client-slices a
+server window and lies about the total. Neither is obviously right, so it stays
+an owner decision. **Sort the flags into "restates a fact" (unify), "selects a
+behaviour" (keep), and "the answer is genuinely contested" (escalate) — merging
+the third into the first is how you ship a confident wrong default.**
+
+**Two layers disagreeing about the same boolean is a design bug, not a gate.**
+The walker DERIVED paged-ness from the find's return type; both frontend read
+collectors keyed their wire decode on the EXPLICIT `paged: true` flag. Both
+readings are defensible, and apart they emit F# that references a Model field
+the decoder never produced. My first instinct was to name the disagreement with
+a `loom.*` diagnostic — which is the right move for a capability a target
+genuinely lacks, and the wrong move here, because nothing was missing: the two
+sites just had to ask the same question. One derivation
+(`_walker/paged-query.ts`) with three consumers makes the disagreement
+unrepresentable. **A derived flag and a declared flag sharing a name are two
+flags; before gating the gap between them, check whether they should have been
+one.**
+
+Unifying it immediately surfaced two latent bugs that the disagreement had been
+hiding: an api function whose declared return type didn't match its own decoder
+(unreachable while a control-less read was never paged), and a realtime
+`Refetch` Msg hop keyed on paged-ness when what it actually preserves is
+page/sort CONTROLS. **A stale condition doesn't just misbehave — it keeps the
+code paths behind it from ever being exercised.**
+
+**A member with no SPELLING is invisible to every test that reads code.**
+The envelope's `page` was unreachable for a different reason than `total`:
+`page` is a declaration keyword, so `rows.page` didn't parse at all. That is
+easy to file as "a grammar limit, out of scope" — I did, twice — because
+nothing in the feature's own code is wrong. But it is the same
+declarable-but-unreadable class as M-T5.18 Track C's BUG-004 (`e.resource`):
+the framework fills a field the language can't name. The repo already had the
+mechanism (`CommonSoftKeywords` + per-position extras) and already had the
+exhaustive guard (`keyword-identifier-coverage.snapshot.json`, which caught the
+one-line drift and told me the remaining positions). Total cost: four tokens.
+**Before writing "left as found" about a limitation, grep for whether the repo
+already has the machine that fixes it** — a caveat in a doc is a permanent tax
+on every future reader, and this one had a four-token price.
+
+The snapshot also showed the fix was half-done twice: after `MemberName`, `page`
+covered five of six positions, missing `lValue` — a state field you can declare
+and read but never assign. A per-position coverage table beats a "does it parse"
+test precisely because it makes the MISSING cells visible.
+
+**"Or gate it honestly" is a licence to stop, so check what stopping costs.**
+The brief offered "a per-target seam or an explicit gap," and a gap is cheap to
+write and genuinely honest — it fails loudly in the DSL's own terms instead of
+in generated source. That made it easy to ship three gated cases (Flutter
+entirely, auto-paged Feliz, Feliz `pageSize`) and call the feature landed. It
+wasn't: the mission was to make the value reachable, and a compile error is not
+a reachable value. Closing them cost one Dart class and one F# record. **An
+honest gap is the right answer when a target cannot do the thing; it is the
+wrong answer when it merely doesn't do it yet — and the difference is worth
+measuring before writing the diagnostic, not after.**
+
+**Prove the defect, not just the fix.** `tsc --noEmit` on the generated app was
+clean afterwards, which says nothing on its own — the same file hand-edited
+back to `.data.items.total` reproduces `TS2339`. Running the compiler on the
+BEFORE shape is what turns "my change compiles" into "my change closed this."
+
+**Grepping for the seam name in the task description found nothing, because it
+had been renamed.** The brief said the wrinkle lived in `pagedDataIsList`; on
+fresh `main` that boolean was already a richer `renderPagedEnvelopeMember`
+seam, and the only surviving mention was a stale comment (now fixed). A named
+symbol in a task description is a claim about the tree, and it ages like any
+other — grep it first and re-read what you actually find.
+
+## 64. A gate that was red for its ENTIRE life, and the reframe that emptied it (2026-08-02)
+
+`channels-e2e.yml` had **never** produced a green run — every `push: main` run
+since it was created was `failure`. Nobody knew, because it is post-merge-only
+and non-required: no PR ever displays it, so the signal existed and was never
+read. Three separate production defects were sitting behind that. Draining it
+took three PRs, and every one of them was a real bug that a timeout bump would
+have buried.
+
+**The reframe that found all three:**
+
+> An assertion with an ample budget that still times out is describing a
+> delivery that **never happened**, not one that was slow.
+
+That single distinction decides whether to widen a timeout or go looking for a
+defect, and it was right three times running:
+
+- **elixir kafka DLQ** — 30s budget, 0-for-N. The first `produce_sync` to a
+  not-yet-created `<address>.dlq` fails, and **brod caches the failed topic
+  lookup as unknown**, with a negative entry that outlives the code's own
+  5×1s retry ladder. So the ladder could never win, and once poisoned the
+  client never parked again — a *second* poisoned record minutes later also
+  failed, with the topic by then existing. The fix is ordering (create the DLQ
+  topic at startup), not timing.
+- **java redis** — 20s budget, intermittent. `/ready` answered 200 for **~667ms
+  before the consumer had subscribed**, because `ChannelConsumerService`
+  implements `SmartLifecycle` without overriding `getPhase()`, inheriting
+  `Integer.MAX_VALUE` — while Spring Boot's web server sits at
+  `MAX_VALUE - 1` and therefore starts FIRST. Ephemeral pub/sub drops anything
+  published into that window, permanently.
+- The one case that genuinely WAS a budget problem (the kafka DLQ probe polling
+  with a JVM spawn per attempt, ~3 attempts in 30s) is the contrast that makes
+  the rule usable: **that** budget could not fit its own measurement method.
+  The other two could, and failed anyway.
+
+**A code comment claiming a race is handled is not evidence it is handled.**
+The elixir DLQ path carried a comment saying its create+retry covered the topic
+race. It didn't, and the comment is why nobody looked for a decade of runs. The
+repro overturned the comment in one measurement.
+
+**"The other backends' legs are green" is not evidence they are correct.**
+After fixing java I audited the same property across the rest: python
+(`asyncio.create_task` fire-and-forget, then the lifespan immediately
+`yield`s), dotnet (`BackgroundService.StartAsync` returns at the first `await`
+inside `ExecuteAsync`), and node (`startChannelConsumers` never awaits the
+async `subscribe`) all have the SAME shape. Java was not the buggy backend — it
+was the one whose window (JVM + Spring boot) was wide enough to lose the CI
+coin-flip often enough to notice. **A timing-dependent bug is invisible on
+whichever target happens to be fastest; green there means the window is
+narrow, not absent.**
+
+**Scoping a fix by the wrong axis, twice.** A counting bug hit dotnet, and I
+fixed "the dotnet legs" and wrote in the commit message that only they were
+affected — without checking. The next run failed elixir with the identical
+`expected 12 to be 6`. The real axis was the **log format**: any formatter that
+emits both a rendered message and structured metadata writes the event name
+twice per entry (.NET `AddJsonConsole`'s `Message` + `State`, Phoenix's
+`LogFormatter`'s `message` + merged `meta_map`); node/python/java emit it once
+as a structured field, which is why exactly those three passed. Group by the
+mechanism, not by the label on the failing job.
+
+**Concurrent probe runs manufacture false failures.** My first readiness probe
+reported NEVER DELIVERED — invalid: a previous run was still alive and the two
+raced over the container name and the ports, so `/ready` was answered by a
+stale container whose database I had just dropped. The tell was the
+`docker run` name conflict scrolling past in the output. This is §-the-same
+lesson as editing source while vitest is in flight: **a test harness you are
+running twice at once is not a test harness.** Kill and verify quiet before
+re-running, and treat any resource-name collision in the log as invalidating
+the result, not as noise.
+
+### Repro recipes that cost time to rediscover
+
+The shipped e2e harnesses boot backends NATIVELY, so on a box without that
+toolchain you must rebuild the harness by hand. Three sharp edges:
+
+- **Elixir in `hexpm/elixir:*-slim`** needs `build-essential` **and `cmake`** —
+  brod's `crc32cer` NIF fails with `make: cmake: No such file or directory`,
+  after first failing on plain `make`. Two rounds if you install only one.
+- **`mix local.hex` fails `unknown_ca` behind the egress proxy.** Erlang's
+  `:ssl` does not read the proxy CA. Mount `/root/.ccr` and
+  `cp ca-bundle.crt /usr/local/share/ca-certificates/ && update-ca-certificates`
+  before `local.hex`. (`LOOM_HEX_MIRROR=1` is the supported alternative.)
+  Deps land in the mounted volume, but **Mix still needs Hex installed to
+  resolve SCMs even when `deps/` is fully populated** — so persist `~/.mix`
+  across container runs rather than re-installing per boot.
+- **Java 25 targets need `gradle:9-jdk25`**; the host's JDK 21 + Gradle 8.14
+  cannot build them, and the failure surfaces late.

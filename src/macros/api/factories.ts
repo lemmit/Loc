@@ -603,6 +603,7 @@ export function singletonProjection(
       params: [],
       members,
       joins: [],
+      groupBys: [],
       selects: selectNodes,
       bypass: [],
       bypassAll: false,

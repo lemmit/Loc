@@ -56,9 +56,34 @@ function poString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
 }
 
-/** An Elixir double-quoted string literal, for the emitted `pgettext` args. */
+/** An Elixir double-quoted string literal for the emitted `pgettext` args.
+ *
+ *  Beyond the obvious `\\` / `"` / `#{` / newline, this `\\x`-escapes the four
+ *  characters that are SIGNIFICANT TO THE TEMPLATE GRAMMAR AROUND THE CALL, not
+ *  to Elixir:
+ *
+ *    - `>` and `<` — the call sits inside an EEx tag (`<%= pgettext(…) %>`), so
+ *      a `%>` anywhere in the message would TERMINATE that tag early and the
+ *      rest of the message would spill into markup.  A `.ddd` heading of
+ *      `"a <%= x %> b"` is enough to break the template.
+ *    - `{` and `}` — the attribute form (`aria-label={pgettext(…)}`) is a HEEx
+ *      `{…}` expression, which a `}` in the message would close early.
+ *
+ *  `\\xHH` produces the IDENTICAL runtime string, so the emitted msgid still
+ *  matches the `.po` entry byte-for-byte — this is purely about the bytes in the
+ *  generated source.  (Caught by `text-escaping-cross-target.test.ts`, which
+ *  drives a payload hostile in every text grammar through all six frontends.) */
 export function elixirI18nString(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/#/g, "\\#").replace(/\n/g, "\\n")}"`;
+  const body = value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/#/g, "\\#")
+    .replace(/\n/g, "\\n")
+    .replace(/</g, "\\x3C")
+    .replace(/>/g, "\\x3E")
+    .replace(/\{/g, "\\x7B")
+    .replace(/\}/g, "\\x7D");
+  return `"${body}"`;
 }
 
 /** `lib/<app>_web/gettext.ex` — the Gettext backend every `~H` template calls

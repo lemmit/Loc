@@ -60,6 +60,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/corpus-elixir-build.yml'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read
@@ -130,3 +131,27 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           echo 'See the "mix compile this corpus feature" step above for the captured `mix deps.get` + `mix compile --warnings-as-errors` diagnostics.' >> $GITHUB_STEP_SUMMARY
           echo 'This cell generates `test/fixtures/corpus/${{ matrix.feature }}.ddd` on `platform: elixir` and compiles it in the hexpm/elixir image via `test/e2e/corpus-elixir-build.test.ts` (LOOM_CORPUS_ELIXIR_CASE=${{ matrix.feature }}).' >> $GITHUB_STEP_SUMMARY
+
+  # ── Merge-queue / branch-protection rollup ────────────────────────────
+  # One stable check name for this workflow.  The jobs above are a matrix
+  # (or a fan-out), so their check names are dynamic and cannot be named as
+  # a required status check; this job can.  A skipped need counts as OK — a
+  # label-guarded or path-skipped job is a legitimate no-op.  Kept honest by
+  # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
+  corpus-elixir-build-passed:
+    name: corpus-elixir-build-passed
+    # `!cancelled()`, not `always()`: when a newer push supersedes this run,
+    # cancel-in-progress cancels the needed jobs — always() would then wake
+    # this rollup later and convert the quiet supersession into a spurious
+    # FAILURE check on the stale SHA (webhook noise for anyone babysitting
+    # the PR). !cancelled() skips the rollup with the run; a LONE cancelled
+    # need on a live run (a job timeout) still fails via the step below —
+    # that is the "cancelled reads as not-failed" trap, kept closed. Same
+    # pattern as test.yml's tests-passed.
+    if: ${{ !cancelled() }}
+    needs: [configure, corpus-elixir]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

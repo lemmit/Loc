@@ -41,7 +41,16 @@ import { generateSystemFiles } from "../_helpers/generate.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 
 /** One aggregate with the full lifted surface: create, getById, destroy, a
- *  declared find, a canonical `update`, and a non-canonical operation. */
+ *  declared find, a canonical `update`, and a non-canonical operation.
+ *
+ *  `cancel` is `when`-GATED on purpose.  A state gate is the `when` rung of the
+ *  denial ladder (`when` → 409, `requires` → 403, `precondition` → 422; RS-15),
+ *  and it is the rung that was missing from two backends' published contracts.
+ *  `examples/showcase.ddd` — the ONE fixture the per-PR `conformance-parity`
+ *  job boots — has no `when`-gated operation anywhere (every op there uses
+ *  `requires` + `precondition`), which is precisely why that gate compares the
+ *  `errorResponses` dimension and still saw nothing. A fixture that does not
+ *  exercise a feature cannot gate it. */
 const SOURCE = (platform: string): string => `
 system P {
   subdomain D {
@@ -49,7 +58,7 @@ system P {
       aggregate Order with crudish {
         code: string
         status: string
-        operation cancel() { status := "Cancelled" }
+        operation cancel() when status == "Open" { status := "Cancelled" }
       }
       repository Orders for Order {
         find byCode(code: string): Order option
@@ -155,7 +164,7 @@ function scrapeElixir(files: Map<string, string>): Route[] {
 // comparison would be brittle exactly where a shape comparison is exact.
 // ---------------------------------------------------------------------------
 
-type Shape = "none" | "paged" | "array" | "idEnvelope" | "entity";
+type Shape = "none" | "paged" | "array" | "idEnvelope" | "canEnvelope" | "entity";
 
 /** `undefined` = the backend's source does not state the type at this route.
  *  Kept distinct from a shape so it can't be mistaken for agreement — the
@@ -169,6 +178,10 @@ function shapeOfFields(fields: readonly string[]): Shape {
   const set = new Set(fields.map((f) => f.toLowerCase()));
   if (set.has("items") && set.has("totalpages")) return "paged";
   if (set.size === 1 && set.has("id")) return "idEnvelope";
+  // The `can_<op>` gate probe's `{ allowed }` — a bool on the wire, but an
+  // ENVELOPE, not a bare boolean.  Every client emitter unwraps it the same way
+  // it unwraps ProblemDetails on the error side.
+  if (set.size === 1 && set.has("allowed")) return "canEnvelope";
   return "entity";
 }
 
@@ -176,6 +189,9 @@ function shapeOfFields(fields: readonly string[]): Shape {
  *  client emitter does, so a mismatch here IS a broken generated client. */
 function expectedShape(op: ApiOperationIR): Shape {
   if (op.kind === "create") return "idEnvelope";
+  // The probe's `responseType` is the VALUE the caller cares about (`bool`);
+  // the body it rides in is the fixed `{ allowed }` envelope.
+  if (op.kind === "gateProbe") return "canEnvelope";
   if (!op.responseType) return "none";
   const coll = collectionSuccess(op.responseType);
   if (coll) return coll.carrier === "paged" ? "paged" : "array";
@@ -298,6 +314,7 @@ function shapesElixir(files: Map<string, string>): Map<string, MaybeShape> {
     // both live forms — create uses the second.
     if (/json\((?:conn, )?%\{"id" =>/.test(body)) return "idEnvelope";
     if (/json\(conn, %\{result \| items:/.test(body)) return "paged";
+    if (/json\(conn, %\{"allowed" =>/.test(body)) return "canEnvelope";
     if (/json\(conn, serialize\(/.test(body)) return "entity";
     return undefined;
   };
@@ -305,6 +322,74 @@ function shapesElixir(files: Map<string, string>): Map<string, MaybeShape> {
   const out = new Map<string, MaybeShape>();
   for (const m of scope.matchAll(/^\s*(get|post|put|patch|delete) "([^"]*)", \w+, :(\w+)/gm)) {
     out.set(key({ method: m[1]!, path: normalisePath(`/api${m[2]}`) }), action(m[3]!));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Declared error statuses.
+//
+// The third leg of the contract: a client can only type its failure union from
+// statuses somebody states.  `ApiOperationIR.errorStatuses` is what the M-T4.8
+// in-system clients read, and it used to be a SECOND hardcoded copy of a table
+// that already existed (`src/ir/util/openapi-errors.ts`, which all five
+// backends consume) — so the two drifted, in both directions at once: the
+// derivation declared 409 on create where the ladder says 422, carried 403 on
+// every find whether gated or not, and omitted 422 entirely.
+//
+// `conformance-parity` DOES compare this dimension (`errorResponses` in
+// `openapi-normalize.ts`), and its own comment asserts "Every backend declares
+// the SAME set (driven by openapi-errors.ts)".  That assertion was false for a
+// `when`-gated operation — python and java omitted the `Disallowed` 409 their
+// runtimes answer — and the gate could not see it because its single fixture
+// has no `when` gate.  Hence this check, on a fixture that does.
+// ---------------------------------------------------------------------------
+
+/** FastAPI — `responses={400: {"model": ProblemDetails, …}, …}` on the decorator. */
+function errorsPython(files: Map<string, string>): Map<string, number[]> {
+  const src = [...files].find(([p]) => p.endsWith("order_routes.py"))?.[1] ?? "";
+  const main = [...files].find(([p]) => p.endsWith("app/main.py"))?.[1] ?? "";
+  const mount = main.match(/include_router\(\s*order_router[^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? "";
+  const prefix = `${mount}${src.match(/APIRouter\([^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? ""}`;
+  const out = new Map<string, number[]>();
+  for (const m of src.matchAll(/@router\.(get|post|put|patch|delete)\("([^"]*)"([^\n]*)\)/g)) {
+    const codes = [...m[3]!.matchAll(/(\d{3}): \{"model"/g)].map((c) => Number(c[1]));
+    out.set(key({ method: m[1]!, path: normalisePath(`${prefix}${m[2]}`) }), codes.sort());
+  }
+  return out;
+}
+
+/** ASP.NET — the 4xx/5xx `[ProducesResponseType(typeof(ProblemDetails), NNN)]`. */
+function errorsDotnet(files: Map<string, string>): Map<string, number[]> {
+  const src =
+    [...files].find(([p, c]) => p.endsWith(".cs") && /\[Route\("api\/orders"\)\]/.test(c))?.[1] ??
+    "";
+  const base = src.match(/\[Route\("([^"]*)"\)\]/)?.[1] ?? "";
+  const out = new Map<string, number[]>();
+  for (const m of src.matchAll(
+    /\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?\]([\s\S]*?)public\s/g,
+  )) {
+    const seg = m[2] ? `/${m[2]}` : "";
+    const codes = [...m[3]!.matchAll(/\[ProducesResponseType\((?:typeof\(.+?\), )?([45]\d\d)\)\]/g)]
+      .map((c) => Number(c[1]))
+      .sort();
+    out.set(key({ method: m[1]!, path: normalisePath(`/${base}${seg}`) }), codes);
+  }
+  return out;
+}
+
+/** Spring — springdoc infers nothing useful here, so the contract lives in the
+ *  emitted `OpenApiContractCustomizer`'s `Route` table: `new Route(method, path,
+ *  successRef, new int[] {…}, …)`. Reading the customizer IS reading what java
+ *  publishes — the customizer is what edits the served document. */
+function errorsJava(files: Map<string, string>): Map<string, number[]> {
+  const src = [...files].find(([p]) => p.endsWith("OpenApiContractCustomizer.java"))?.[1] ?? "";
+  const out = new Map<string, number[]>();
+  for (const m of src.matchAll(
+    /new Route\("(\w+)",\s*"([^"]*)",\s*[^,]*,\s*new int\[\]\s*\{([^}]*)\}/g,
+  )) {
+    const codes = (m[3]!.match(/\d{3}/g) ?? []).map(Number).filter((c) => c >= 400);
+    out.set(key({ method: m[1]!, path: normalisePath(m[2]!) }), codes.sort());
   }
   return out;
 }
@@ -328,11 +413,23 @@ const BACKENDS: Record<
     platform: string;
     scrape(f: Map<string, string>): Route[];
     shapes(f: Map<string, string>): Map<string, MaybeShape>;
+    /** Absent when this backend states no error set in a form this gate can
+     *  read from the emitted project. */
+    errors?(f: Map<string, string>): Map<string, number[]>;
   }
 > = {
-  "Python/FastAPI": { platform: "python", scrape: scrapePython, shapes: shapesPython },
-  "Java/Spring": { platform: "java", scrape: scrapeJava, shapes: shapesJava },
-  ".NET": { platform: "dotnet", scrape: scrapeDotnet, shapes: shapesDotnet },
+  "Python/FastAPI": {
+    platform: "python",
+    scrape: scrapePython,
+    shapes: shapesPython,
+    errors: errorsPython,
+  },
+  "Java/Spring": { platform: "java", scrape: scrapeJava, shapes: shapesJava, errors: errorsJava },
+  ".NET": { platform: "dotnet", scrape: scrapeDotnet, shapes: shapesDotnet, errors: errorsDotnet },
+  // Phoenix declares its error set in the OpenApiSpex module, which is emitted
+  // only for a system carrying an `api` declaration — this fixture has none, so
+  // there is nothing to read.  Its ROUTES and BODIES are still gated above; the
+  // omission is the scraper's reach, not a gap in the backend.
   "Elixir/Phoenix": { platform: "elixir", scrape: scrapeElixir, shapes: shapesElixir },
 };
 
@@ -400,5 +497,34 @@ describe("api-surface parity — the derivation vs four independent backends", (
       // unreadable is a failure rather than a silently widened blind spot.
       expect(unresolved.sort()).toEqual([...UNRESOLVED[label]!].sort());
     });
+
+    if (backend.errors) {
+      it(`${label} declares exactly the derived error statuses`, async () => {
+        const source = SOURCE(backend.platform);
+        const model = await buildLoomModel(source);
+        const derived = deriveContextOperations(ordersContext(model)!);
+        const declared = backend.errors!(await generateSystemFiles(source));
+
+        expect(
+          declared.size,
+          `${label}: scraped no error sets — the scraper is stale`,
+        ).toBeGreaterThan(0);
+
+        const wrong: string[] = [];
+        for (const op of derived) {
+          const k = key({ method: op.method, path: op.path });
+          const actual = declared.get(k);
+          if (actual === undefined) continue; // path drift — the sibling test owns it
+          const want = [...op.errorStatuses].sort((a, b) => a - b);
+          if (JSON.stringify(actual) !== JSON.stringify(want)) {
+            wrong.push(`${k}: derived [${want}], ${label} declares [${actual}]`);
+          }
+        }
+        expect(
+          wrong,
+          `${label} declares a different failure set:\n  ${wrong.join("\n  ")}`,
+        ).toEqual([]);
+      });
+    }
   }
 });

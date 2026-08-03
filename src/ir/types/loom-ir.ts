@@ -1497,6 +1497,16 @@ export interface ProjectionQueryIR {
    *  That is gated per-backend (`loom.projection-whole-table-aggregation-
    *  unsupported`), so only a ported emitter ever reaches these selects. */
   selects?: { field: string; expr: ExprIR; type: TypeIR; aggregate?: ProjectionAggregateIR }[];
+  /** `group by <col>, …` (M-T4.2) — the grouping columns of a GROUPED read
+   *  model: one row per distinct value of these expressions, aggregate
+   *  `select`s computed per group, per-row `select`s restricted to the grouping
+   *  columns.  Each expression is lowered in the same source-candidate scope as
+   *  `select` (so `o.status` arrives as a `this`-rooted member access), and
+   *  validation pins it COLUMNAR — a single-hop member on the source row
+   *  (`loom.projection-groupby-key-not-columnar`) — so every backend can render
+   *  it as a bare SQL column.  Emitters ORDER BY these columns too, so the
+   *  grouped read is deterministic across backends.  Absent ⇒ not grouped. */
+  groupBy?: ExprIR[];
   /** Bulk-load plan derived from the `join` clauses — the `auxiliaries` shape
    *  built for by-id follows, populated by reading the
    *  DECLARED `join`s. */
@@ -1565,6 +1575,15 @@ export function isSingletonProjection(p: ProjectionIR): boolean {
  *  no table).  Derived: a query source with no fold handlers. */
 export function isQueryTimeProjection(p: ProjectionIR): boolean {
   return p.query?.source !== undefined && p.handlers.length === 0;
+}
+
+/** True when the projection is GROUPED (`group by` present): a query-time read
+ *  returning MANY rows — one per distinct value of the grouping columns — with
+ *  aggregate `select`s computed per group.  Its response is the LIST shape (an
+ *  array of the declared row), like the per-row query-time read, NOT the
+ *  singleton object.  Derived from clause presence — never stamped. */
+export function isGroupedProjection(p: ProjectionIR): boolean {
+  return (p.query?.groupBy?.length ?? 0) > 0;
 }
 
 /** True when the projection is the SHORTHAND form (the `view X = A where P`

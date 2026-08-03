@@ -522,7 +522,7 @@ Split the problem by where the rule lives:
 | `Table`, `Column` | Tabular display (data lambda accessors). |
 | `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts, pages and filters on every frontend. |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
-| `QueryView { of:, loading:, error:, empty:, data:, single?: }` | 4-arm query-state branching (collection or single-record). |
+| `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
 `Switch`, `Case`, `When`, `Sequence` — all subsumed by `match` plus the
@@ -668,6 +668,82 @@ because `table-core`'s `getState()` returns the raw `state` option — it does n
 merge its own defaults the way the framework adapters do — both targets spread
 `table.initialState` in first. Without that, `getHeaderGroups()` throws and the
 grid renders nothing, with the compiler and the bundler both reporting success.
+
+---
+
+### 9.2 `QueryView` over a paged read — the envelope's page metadata
+
+The auto-`findAll` is **paged by default** (M-T2.6), so `X.all` returns the
+`paged<T>` envelope rather than a bare array:
+
+```
+paged(T) → { items: T[]; page: int; pageSize: int; total: int; totalPages: int }
+```
+
+`QueryView` binds its `data:` lambda so both halves of that envelope are
+reachable from one binding — the rows to iterate, and the page metadata to
+label:
+
+```ddd
+QueryView {
+  of: Sales.Order.all,
+  data: rows => Stack {
+    Text { rows.total },                     // 1 284 — across ALL pages
+    Table { rows: rows, Column { "ID", o => o.id } }   // this page's rows
+  }
+}
+```
+
+```tsx
+const orderAll = useAllOrders();
+…
+<Text>{orderAll.data.total}</Text>
+<Table>{ orderAll.data.items.map((row) => ( … )) }</Table>
+```
+
+Note the two different levels of the same envelope. Which one `rows` itself
+binds to depends on the mode:
+
+| Mode | `rows` is | Written by |
+|---|---|---|
+| **auto-paged** — no `paged:` flag, but the query returns `paged<T>` | the row **array** (`.data.items`) | hand-written pages: the body was written for a collection, so `Table { rows: rows }` keeps iterating records |
+| **explicit** `paged: true` | the **envelope** (`.data`) | the scaffold's server-paged list, whose `Table` reads `rows.items` and whose pager reads `rows.totalPages` |
+
+In **both** modes a page-metadata read (`rows.total`, `rows.pageSize`,
+`rows.totalPages`) resolves against the envelope. Under auto-paging the binding
+was unwrapped one level, and the metadata read is re-rooted past that unwrap —
+`rows` stays the array and `rows.total` is still the true all-pages count.
+`rows.items` is deliberately **not** re-rooted: on an unwrapped binding `rows`
+already *is* the array.
+
+**Every frontend resolves it**, but not all of them by holding the envelope.
+The four JSX frontends and HEEx keep the whole object, so a metadata read is a
+plain member access. The two that decode the wire into typed values carry the
+metadata deliberately, through the `renderPagedEnvelopeMember` seam:
+
+| Frontend | How the metadata survives the decode |
+|---|---|
+| react / vue / svelte / angular / HEEx | the binding holds the envelope; nothing to do |
+| **feliz** | the Elmish decoder splits it — rows into the read's `Remote<'T list>` field, metadata into a sibling `PageMeta` record — so `rows.total` resolves to `model.<Read>PageMeta.Total`. The list field stays a plain `'T list` because `View.idOptions` (FK selects) and the realtime refetch both read it |
+| **flutter** | the Riverpod provider yields `Paged<T>` rather than a bare `List<T>`, so `rows.total` is a field of the loaded value |
+
+### The flags are opt-ins; the shape is derived
+
+`paged:` and `single:` look like they *declare* what a read returns. They do
+not — both are properties of the find, resolved once in
+`_walker/paged-query.ts` (`queryShape`) and consumed by the JSX walker, the
+HEEx renderer, and the Feliz and Flutter read collectors alike:
+
+| Fact | Derived from | What the flag adds |
+|---|---|---|
+| **paged** | the find returns `paged<T>` | `paged: true` also binds the ENVELOPE instead of unwrapping to the rows — a binding-shape choice the fact can't make for you (the scaffold's list reads `rows.items` itself) |
+| **single** | the read is `byId`, or the find returns `T` / `T?` | nothing the fact doesn't already say; kept as an override |
+
+Writing neither flag is the normal case and now works: a hand-written
+`QueryView { of: X.all, data: rows => Table { rows: rows } }` iterates records,
+reports the true `rows.total`, and — on Phoenix — asks emptiness of the rows
+rather than of the envelope map. Taking these from the flags alone is what made
+the same page render blank on the JSX frontends and raise on LiveView.
 
 ---
 

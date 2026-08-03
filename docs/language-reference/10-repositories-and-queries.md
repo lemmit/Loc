@@ -377,3 +377,41 @@ const projected = rows.map((r) => repo.toWire(r));   // the aggregate's own mapp
 All five backends emit the same shape — `.NET` `domain.Select(d => new ActiveOrdersRow(d.Id.Value, d.Total, d.Status, d.Version))`, Java `.map(a -> new ActiveOrdersRow(a.id().value(), …))`, Python `[repo.to_wire(r) for r in rows]`, Elixir `Enum.map(rows, &serialize/1)` — each reusing that backend's aggregate wire serializer, so a shorthand projection row is byte-identical to the aggregate's own read.
 
 **Aggregate source only.** The shorthand form is supported for a `from <Aggregate>` source. A `select`-less projection over a `from <Workflow>` or `from <Projection>` source is rejected (`loom.projection-shorthand-nonaggregate`) — those sources have no aggregate wire shape to inherit, so they still require an explicit `select`. A projection that declares row fields but omits the `select` to fill them is a different error (`loom.projection-fields-without-select`) — that is a half-written projection, not the shorthand.
+
+## Grouped projection — `group by`
+
+Mixing an aggregate `select` (`count()` / `sum(…)` / `avg(…)` / `min(…)` / `max(…)`) with a per-row `select` is a **GROUP BY** — one row per distinct value of the per-row column, not one row for the table. Declare the grouping explicitly with `group by <col>, …` (between `where`/`join` and `select`); the mix without the clause stays rejected (`loom.projection-groupby-missing`).
+
+```ddd
+projection SalesByStatus {
+  status: OrderStatus  orders: int  revenue: money
+  from Order as o
+  where Confirmed
+  group by o.status
+  select status = o.status, orders = count(), revenue = sum(o.total)
+}
+```
+
+The whole read happens **in SQL** — one query, no rows rehydrated — and returns the **list shape** (an array of the declared row, like the per-row read; the singleton whole-table aggregation returns one object). Rows come back **ordered by the grouping columns**, so the read is deterministic across backends:
+
+```ts
+// api/http/query-projections.ts (Hono) — GET /projections/sales_by_status
+const SalesByStatusResponse = z.array(SalesByStatusRow).openapi("SalesByStatusResponse");
+const rows = await db
+  .select({ status: schema.orders.status, orders: count(), revenue: sum(schema.orders.total) })
+  .from(schema.orders)
+  .where(eq(schema.orders.status, "Confirmed"))
+  .groupBy(schema.orders.status)
+  .orderBy(schema.orders.status);
+```
+
+The other backends emit the same query through their own persistence layer — `.NET` `…GroupBy(o => new { o.Status }).Select(g => new { g.Key.Status, Orders = g.Count(), Revenue = g.Sum(o => o.Total) }).OrderBy(x => x.Status)`, Java JPQL `select e.status, count(e), sum(e.total) from Order e group by e.status order by e.status`, Python `select(OrderRow.status, func.count(), func.sum(OrderRow.total)).group_by(OrderRow.status).order_by(OrderRow.status)`, Elixir `from(record in OrderRecord, group_by: record.status, order_by: record.status, select: %{…})` — each applying the same per-field wire coercions as the singleton path (a `money` aggregate rides the wire as a string; `count` zero-defaults).
+
+The shape discipline (each its own diagnostic):
+
+- **Aggregate `from` source required** — grouping reads (and groups) a source table; workflow/projection sources and folded projections are rejected (`loom.projection-groupby-source-unsupported`).
+- **At least one aggregate `select`** — a `group by` with only per-row selects is just DISTINCT (`loom.projection-groupby-no-aggregate`).
+- **Per-row selects must be grouping columns** — anything else has no single value per group, the same rule SQL enforces (`loom.projection-groupby-select-not-grouped`).
+- **Grouping columns are bare source columns** — `o.status`, not a computed key like `o.placedAt.date` (yet) (`loom.projection-groupby-key-not-columnar`).
+- **Aggregation arguments are bare source columns too** — `sum(o.total)`, never a computed expression (`sum(o.total + o.tax)`) or a bare unqualified name (`sum(total)`): SQL aggregates a column, not a per-row computation (`loom.projection-aggregate-arg-not-columnar`; applies to the singleton whole-table aggregation as well).
+- **No `join`, no `keyed by`** — a join is an app-level by-id load after the query (`loom.projection-groupby-join-unsupported`), and a grouped projection's rows are the groups, not id-keyed entities (`loom.projection-groupby-keyed-unsupported`).

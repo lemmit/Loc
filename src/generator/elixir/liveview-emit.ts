@@ -183,6 +183,7 @@ export function emitLiveViewPages(args: {
       authEnabled,
       partContextModule,
       contextModuleByAggName,
+      contextByAggName,
       i18nEnabled ? `component.${c.name}` : undefined,
     );
     componentInfo.set(c.name, {
@@ -214,6 +215,7 @@ export function emitLiveViewPages(args: {
       appModule,
       ui,
       aggregatesByName,
+      bcByAggregate: contextByAggName,
       enumsByName,
       valueObjectsByName,
       contextModuleByAggName,
@@ -269,6 +271,7 @@ export function emitLiveViewPages(args: {
         ui,
         appModule,
         aggregatesByName,
+        bcByAggregate: contextByAggName,
         enumsByName,
         valueObjectsByName,
         partContextModule,
@@ -293,6 +296,9 @@ interface RenderArgs {
   appModule: string;
   ui: UiIR;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Aggregate PascalCase name → its owning bounded context, for the walker's
+   *  `queryShape` derivation (is this read paged / single?). */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Workspace-wide enum registry — drives form select-input dispatch. */
   enumsByName: ReadonlyMap<string, EnumIR>;
   /** Workspace-wide VO registry — drives nested-form dispatch
@@ -473,6 +479,7 @@ function renderLiveView(a: RenderArgs): string {
     authEnabled,
     partContextModule,
     contextModuleByAggName,
+    a.bcByAggregate,
     // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
     // role-scoped `page.name`, not the router emit name); undefined when the ui
     // has no extractable strings (byte-identical to pre-i18n).
@@ -1160,6 +1167,9 @@ function renderUiComponents(args: {
   ui: UiIR;
   appModule: string;
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Aggregate PascalCase name → its owning bounded context, for the walker's
+   *  `queryShape` derivation (is this read paged / single?). */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   enumsByName: ReadonlyMap<string, EnumIR>;
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
   /** Entity-part name → module-qualified context, so a component-body
@@ -1206,6 +1216,7 @@ function renderUiComponents(args: {
         authEnabled,
         partContextModule,
         contextModuleByAggName,
+        args.bcByAggregate,
         args.i18nEnabled ? `component.${c.name}` : undefined,
       );
       const attrLines = c.params

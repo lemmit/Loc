@@ -309,6 +309,14 @@
   "global": [
     "paramName"
   ],
+  "group": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
+    "nameRef",
+    "paramName",
+    "stateField"
+  ],
   "guid": [],
   "handle": [
     "fieldName",
@@ -547,8 +555,12 @@
   "overlap": [],
   "ownTable": [],
   "page": [
+    "fieldName",
+    "lValue",
+    "memberAccess",
     "nameRef",
-    "paramName"
+    "paramName",
+    "stateField"
   ],
   "paged": [
     "fieldName",

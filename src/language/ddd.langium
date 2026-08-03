@@ -814,7 +814,10 @@ StateFieldName returns string:
     // StateFieldName-only extras (structural keywords not in the shared
     // value core; page/component `state {}` field name).  Composing CommonSoftKeywords here also closes the
     // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
-;
+    // `page` is admissible here but NOT in `CommonSoftKeywords`: a `state {}`
+    // body holds only field declarations, so it can't collide with the `page`
+    // declaration keyword the way a `ui` body member could.
+    | 'page';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -1538,6 +1541,14 @@ ProjectionMember:
 // reserving the pervasive domain word `order` needs a wider soft-keyword sweep
 // than this surface-only slice warrants, and ordering is only observable once
 // the read is actually emitted (paged reads).
+//
+// `group by <col>, …` (M-T4.2) makes the projection a GROUPED read model: one
+// row per distinct value of the grouping columns, aggregate `select`s computed
+// per group in SQL, per-row `select`s restricted to the grouping columns
+// (`loom.projection-groupby-*` gates).  `group` stays a SOFT keyword
+// (CommonSoftKeywords) so a field / value named `group` keeps parsing; rows
+// come back ordered by the grouping columns so the read is deterministic
+// across backends.
 // A query-time projection's `from` source — an AGGREGATE (read through its
 // repository), a WORKFLOW (read through its persisted instance / saga-state
 // rows, `instanceWireShape`), or another materialized PROJECTION (read through
@@ -1552,6 +1563,7 @@ fragment ProjectionQueryClauses:
     ('where' filter=Expression)?
     IgnoringClause?
     (joins+=ProjectionJoin)*
+    ('group' 'by' groupBys+=Expression (',' groupBys+=Expression)*)?
     ('select' selects+=ProjectionSelect (',' selects+=ProjectionSelect)*)?;
 
 // A by-id follow: resolve `<idRef>` (types to `<Aggregate> id`) to a loaded
@@ -1740,7 +1752,7 @@ FieldAccess returns string:
 Property:
     name=(ID | CommonSoftKeywords
         // Property-only (soft here but not in every value position):
-        | 'await')
+        | 'await' | 'page')
     ':' type=TypeRef
     // `provenanced` / `sensitive(...)` / the access modifier are pure
     // flag-like keywords carrying no expression content, so they parse in
@@ -1898,7 +1910,7 @@ Parameter:
 CommonSoftKeywords returns string:
       'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
-      | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
+      | 'every' | 'favicon' | 'filter' | 'group' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
       | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
@@ -2142,7 +2154,7 @@ LValueIdent returns string:
     // value core; assignment / call statement target).  Composing CommonSoftKeywords here also closes the
     // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
     | 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules'
-    | 'permissions' | 'ui' | 'views' | 'workflows';
+    | 'page' | 'permissions' | 'ui' | 'views' | 'workflows';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -2303,7 +2315,7 @@ MemberName returns string:
     // value core; member access after `.`).  Composing CommonSoftKeywords here also closes the
     // "declarable-but-unreadable" class (M-T5.18 Track C, BUG-004: `e.resource`).
     | 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id'
-    | 'ignoring' | 'modules' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows';
+    | 'ignoring' | 'modules' | 'page' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows';
 
 // Lambdas accept either a single expression body or a brace-wrapped block of
 // statements.  Block bodies are required for multi-statement event handlers in
@@ -2366,7 +2378,14 @@ TemplateHole:
 // admitted at the grammar level; the type system / each consumer
 // validates element shape per use site.
 ListLit:
-    {infer ListLit} '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
+    // Two spellings, because `[]` is a single KEYWORD token — the array
+    // marker in `string[]` / `Order id[]`.  The lexer matches keywords
+    // longest-first, so an UNSPACED `[]` becomes that one token and can never
+    // reach the bracket-pair form below; a SPACED `[ ]` lexes as '[' + ']'
+    // and does.  Both must be accepted, or `[]` stays a parse error (it was)
+    // and `[ ]` becomes one (it briefly did).
+    {infer ListLit} '[]'
+  | {infer ListLit} '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
 
 // Universal construction form.  Replaces `new Part { ... }`
 // and the walker-call form (`Form(state: ..., body: ...)`).  The

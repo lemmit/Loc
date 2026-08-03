@@ -21,11 +21,11 @@
 // vars the walker's `buildHookUse` seam resolves through — the page's hoisted
 // `ref.watch(<var>Provider)` and the emitted `<var>Provider` always agree.
 
-import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type { EnrichedBoundedContextIR, ExprIR, UiIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
+import { bcByAggregateOf, isPagedQuery } from "../_walker/paged-query.js";
 
 /** One distinct read a ui issues, projected to everything the provider emitter
  *  needs.  Deduped by `varName` across every page of the ui. */
@@ -113,6 +113,7 @@ export function collectFlutterReads(
   const apiParamNames = new Set((ui.apiParams ?? []).map((p) => p.name));
   const aggregatesByName = new Set(contexts.flatMap((c) => c.aggregates.map((a) => a.name)));
   const detCtx = { apiParamNames, aggregatesByName };
+  const pagedCtx = { ...detCtx, bcByAggregate: bcByAggregateOf(contexts) };
   const out: FlutterRead[] = [];
   const seen = new Set<string>();
   for (const page of ui.pages ?? []) {
@@ -124,19 +125,15 @@ export function collectFlutterReads(
       const varName = readVarName(detected.aggregateName, detected.operation);
       if (seen.has(varName)) continue;
       seen.add(varName);
-      // Paged-ness is read off the owning repository's find, exactly as the
-      // walker's `adjustFindHookArgs` reads it — so the provider's shape and the
-      // call site's args can never disagree about whether this read takes a
-      // query bag.
-      const bc = contexts.find((c) => c.aggregates.some((a) => a.name === detected.aggregateName));
-      const repo = bc?.repositories.find((r) => r.aggregateName === detected.aggregateName);
-      const find = repo?.finds.find((f) => f.name === detected.operation);
+      // Paged-ness comes from the SHARED derivation the walker also calls, so
+      // the provider's shape, the call site's args and the body's member reads
+      // cannot disagree about whether this read is paged.
       out.push({
         varName,
         aggregate: upperFirst(detected.aggregateName),
         single: detected.operation === "byId",
         routePath: `/${snake(plural(detected.aggregateName))}`,
-        paged: detected.operation !== "byId" && !!find && pagedReturn(find.returnType) !== null,
+        paged: detected.operation !== "byId" && isPagedQuery(ofArg, pagedCtx),
       });
     }
   }
@@ -245,13 +242,26 @@ const PAGED_PREAMBLE = lines(
   "/// cache on every rebuild and refetch forever.",
   "typedef LoomQuery = ({int page, int pageSize, String sort, String dir});",
   "",
-  "/// One page of a server-paged read: the rows plus the page count the pager",
-  "/// needs.  `totalPages` is clamped to at least 1 so an empty collection",
-  '/// still reads "Page 1 of 1" rather than "of 0".',
+  "/// One page of a server-paged read: the rows plus the WHOLE page-metadata",
+  "/// half of the `paged` wire envelope.  The pager only needs `totalPages`,",
+  "/// but a page body can read any of them off its `QueryView` binding",
+  '/// (`rows.total` — a "N results" label), and a member that is not decoded',
+  "/// here is a member the DSL cannot reach (M-T1.3 Defect B).",
+  "/// `totalPages` is clamped to at least 1 so an empty collection still reads",
+  '/// "Page 1 of 1" rather than "of 0".',
   "class LoomPage<T> {",
-  "  const LoomPage({required this.items, required this.totalPages});",
+  "  const LoomPage({",
+  "    required this.items,",
+  "    required this.page,",
+  "    required this.pageSize,",
+  "    required this.total,",
+  "    required this.totalPages,",
+  "  });",
   "",
   "  final List<T> items;",
+  "  final int page;",
+  "  final int pageSize;",
+  "  final int total;",
   "  final int totalPages;",
   "",
   "  static LoomPage<T> fromJson<T>(",
@@ -263,7 +273,13 @@ const PAGED_PREAMBLE = lines(
   "        .map((e) => fromItem(e as Map<String, dynamic>))",
   "        .toList();",
   "    final pages = (map['totalPages'] as num?)?.toInt() ?? 1;",
-  "    return LoomPage<T>(items: items, totalPages: pages < 1 ? 1 : pages);",
+  "    return LoomPage<T>(",
+  "      items: items,",
+  "      page: (map['page'] as num?)?.toInt() ?? 1,",
+  "      pageSize: (map['pageSize'] as num?)?.toInt() ?? items.length,",
+  "      total: (map['total'] as num?)?.toInt() ?? items.length,",
+  "      totalPages: pages < 1 ? 1 : pages,",
+  "    );",
   "  }",
   "}",
 );

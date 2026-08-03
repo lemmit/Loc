@@ -35,6 +35,7 @@ import {
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
+import { bcByAggregateOf } from "../_walker/paged-query.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import {
@@ -106,6 +107,18 @@ const REMOTE_TYPE = `type Remote<'T> =
   | Loading
   | LoadError of string
   | Loaded of 'T`;
+
+/** The paged envelope's page METADATA, decoded as one record per paged read
+ *  rather than N sibling ints.  The rows stay in the read's own
+ *  `Remote<'T list>` field (`View.idOptions` and the realtime refetch both read
+ *  it, so widening it to the envelope would break both) — but every NON-row
+ *  member of the envelope travels together, so one record keeps them together
+ *  and lets the carrier grow without a new Model field each time. */
+const PAGE_META_TYPE = `type PageMeta =
+  { Page: int
+    PageSize: int
+    Total: int
+    TotalPages: int }`;
 
 /** The auth session gate (D-AUTH-OIDC).  `SessionState` gates the whole app;
  *  the `Auth` module probes `/api/auth/me` (status-only) and redirects to the
@@ -564,8 +577,11 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   };
   const seen = new Set<string>();
   const out: FelizRead[] = [];
+  // Paged-ness is derived from the find's return type, so the collector needs
+  // the same aggregate→context index the walker resolves through.
+  const bcByAggregate = bcByAggregateOf(contexts);
   for (const page of ui.pages) {
-    for (const r of collectPageReads(page, apiParamNames, aggregateNames, nameCtx)) {
+    for (const r of collectPageReads(page, apiParamNames, aggregateNames, nameCtx, bcByAggregate)) {
       if (seen.has(r.field)) continue;
       seen.add(r.field);
       out.push(r);
@@ -934,6 +950,7 @@ function renderAppFs(
     }
   }
   const hasReads = reads.length > 0;
+  const hasPagedRead = reads.some((r) => r.paging);
   const hasForms = formRecords.length > 0;
   // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
   // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
@@ -1188,6 +1205,10 @@ function renderAppFs(
     hasWire && wire.domain,
     hasReads && "",
     hasReads && REMOTE_TYPE,
+    // `PageMeta` — emitted only when some read decodes a paged envelope, so a
+    // ui with no paged read keeps its App.fs byte-identical.
+    hasPagedRead ? "" : false,
+    hasPagedRead && PAGE_META_TYPE,
     hasWire && "",
     hasWire && wire.decoders,
     // Multi-variant async-effect outcome unions (after the records they wrap).

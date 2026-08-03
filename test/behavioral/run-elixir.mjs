@@ -25,10 +25,18 @@
 //
 // Usage:  node run-elixir.mjs [caseName...]
 // Exit code is non-zero if any case errors or any test fails.
+//
+// Env knobs:
+//   LOOM_BH_ELIXIR_BASE     dispatch at an already-running server (skip boot)
+//   LOOM_BH_ELIXIR_PORT     port to boot on (default 8127)
+//   LOOM_ELIXIR_DEP_CACHE   warm dependency-build dir (default .work-elixir/dep-cache)
+//   LOOM_ELIXIR_NO_DEP_CACHE=1  disable warm dep reuse — every case does its own
+//                           full `mix deps.get` + dep compile (debugging escape hatch)
 
 import { build } from "esbuild";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -54,6 +62,145 @@ const PORT = Number(process.env.LOOM_BH_ELIXIR_PORT ?? "8127");
 // manually-booted server.
 const EXTERNAL_BASE = process.env.LOOM_BH_ELIXIR_BASE;
 const BASE = EXTERNAL_BASE ?? `http://127.0.0.1:${PORT}`;
+
+// ── Warm dependency-build reuse ──────────────────────────────────────────────
+// Every case generates a FRESH Phoenix project whose hex dep tree is identical
+// (phoenix / ecto / postgrex / open_api_spex / opentelemetry → grpcbox +
+// chatterbox rebar3 builds). Compiling that tree once PER CASE — 30+ times a
+// run — is what made this the slowest behavioral leg by a factor of ~4. So the
+// DEPENDENCY build is primed once per distinct dep set and reused: every mix
+// invocation gets `MIX_DEPS_PATH` pointing at the shared, already-fetched deps
+// dir, and each dep's compiled `_build/<env>/lib/<dep>` is symlinked into the
+// case's own `_build` before the app is compiled.
+//
+// CORRECTNESS — only DEPENDENCY builds are shared, never the generated app.
+// The warm tree is produced by `mix deps.compile` (deps only), the app's build
+// dir is pruned from it at prime time, and it is skipped again at link time, so
+// `_build/<env>/lib/<app>` is always ABSENT when a case starts. `mix ecto.migrate`
+// / `mix phx.server` / `mix test` therefore compile the emitted code from scratch
+// with exactly the flags they used before — a codegen bug can never be masked by
+// a stale build.
+//
+// KEYING — a hash of the dep-DETERMINING slice of the generated mix.exs (the
+// `defp deps` block plus the `elixir:` requirement) and the Erlang/Elixir the
+// artefacts were built by — NOT the whole file, which carries the per-case app
+// name. Dep sets do differ across the corpus (an
+// `auth {}` case adds joken/joken_jwks, a HEEx `ui:` adds phoenix_live_view), so
+// a mismatch simply primes a second warm tree next to the first. Any failure in
+// the reuse path falls back to a plain, self-contained full compile for that case.
+const DEP_CACHE_OFF = process.env.LOOM_ELIXIR_NO_DEP_CACHE === "1";
+const DEP_CACHE_ROOT = process.env.LOOM_ELIXIR_DEP_CACHE ?? join(WORK, "dep-cache");
+/** Written last, so a half-primed tree (crash / cancelled job) is never trusted. */
+const WARM_MARKER = ".loom-warm-complete";
+/** The two MIX_ENVs a case uses: `dev` (ecto.create/migrate + phx.server) and
+ *  `test` (the emitted ExUnit unit tier). Deps compile per env, so warm both. */
+const MIX_ENVS = ["dev", "test"];
+
+/** `Elixir <v> / OTP <n> / erts-<v>` — the toolchain the BEAM artefacts belong
+ *  to. Folded into the fingerprint so a warm tree restored from a CI cache built
+ *  by a DIFFERENT Erlang/Elixir is never loaded (it is simply a different key).
+ *  Deliberately narrowed to the version numbers: `elixir --version` also prints
+ *  `smp:N:N`, which varies with the host's core count. */
+let beamIdCache = null;
+function beamId() {
+  if (beamIdCache) return beamIdCache;
+  let raw = "";
+  try {
+    raw = execFileSync("elixir", ["--version"], { encoding: "utf8" });
+  } catch {
+    /* no elixir on PATH — the case's own `mix` call reports it properly */
+  }
+  const otp = /Erlang\/OTP\s+(\S+)/.exec(raw)?.[1] ?? "?";
+  const erts = /erts-(\S+?)]/.exec(raw)?.[1] ?? "?";
+  const ex = /Elixir\s+(\S+)/.exec(raw)?.[1] ?? "?";
+  beamIdCache = `elixir-${ex}/otp-${otp}/erts-${erts}`;
+  return beamIdCache;
+}
+
+/** Hash of the dep-determining slice of a generated mix.exs (plus the BEAM the
+ *  artefacts would be built by). */
+function depsFingerprint(mixExs) {
+  const deps = /defp deps do\n([\s\S]*?)\n\s*end/.exec(mixExs)?.[1] ?? mixExs;
+  const elixir = /elixir:\s*"[^"]*"/.exec(mixExs)?.[0] ?? "";
+  const norm = `${beamId()}\n${elixir}\n${deps}`
+    .replace(/#[^\n]*/g, "") // comments don't change resolution
+    .replace(/\s+/g, " ")
+    .trim();
+  return createHash("sha256").update(norm).digest("hex").slice(0, 16);
+}
+
+/** The OTP app name (`app: :my_app`) of a generated mix.exs. */
+function appNameOf(mixExs) {
+  return /\bapp:\s*:([a-z0-9_]+)/.exec(mixExs)?.[1] ?? null;
+}
+
+/** Fetch + compile the dep tree ONCE into `warm`, from this case's project.
+ *  `mix deps.compile` builds dependencies only — the app is not compiled here
+ *  (and is pruned defensively below), so the warm tree can never carry emitted
+ *  code. */
+function primeWarm(deplDir, warm, appName) {
+  rmSync(warm, { recursive: true, force: true });
+  mkdirSync(warm, { recursive: true });
+  const shared = { MIX_DEPS_PATH: join(warm, "deps"), MIX_BUILD_ROOT: join(warm, "_build") };
+  execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: mixEnv(shared) });
+  for (const env of MIX_ENVS) {
+    execFileSync("mix", ["deps.compile"], { cwd: deplDir, stdio: "pipe", env: mixEnv({ ...shared, MIX_ENV: env }) });
+  }
+  if (appName) {
+    for (const env of MIX_ENVS) rmSync(join(warm, "_build", env, "lib", appName), { recursive: true, force: true });
+  }
+  // The resolved lock rides along, so every later case resolves the SAME
+  // versions the warm build was compiled from (and its `deps.get` is a no-op).
+  if (existsSync(join(deplDir, "mix.lock"))) copyFileSync(join(deplDir, "mix.lock"), join(warm, "mix.lock"));
+  writeFileSync(join(warm, WARM_MARKER), `${JSON.stringify({ createdAt: new Date().toISOString(), appName })}\n`);
+}
+
+/** Symlink every warm DEP build into this case's own `_build`, and seed the
+ *  lock. The app's own build dir is never linked — it compiles fresh. */
+function linkWarmDeps(deplDir, warm, appName) {
+  for (const env of MIX_ENVS) {
+    const from = join(warm, "_build", env, "lib");
+    if (!existsSync(from)) continue;
+    const to = join(deplDir, "_build", env, "lib");
+    mkdirSync(to, { recursive: true });
+    for (const name of readdirSync(from)) {
+      if (name === appName) continue; // never seed a build of the generated app
+      try {
+        symlinkSync(join(from, name), join(to, name), "dir");
+      } catch (err) {
+        if (err?.code !== "EEXIST") throw err;
+      }
+    }
+  }
+  if (existsSync(join(warm, "mix.lock")) && !existsSync(join(deplDir, "mix.lock"))) {
+    copyFileSync(join(warm, "mix.lock"), join(deplDir, "mix.lock"));
+  }
+}
+
+/** Fingerprints this run actually used — everything else in the cache root is a
+ *  tree an older dep set left behind (the CI cache restores by prefix, so they
+ *  would otherwise accumulate ~45 MB at a time). Pruned after a FULL run only:
+ *  a filtered run legitimately touches a subset. */
+const usedFingerprints = new Set();
+
+function pruneUnusedWarmTrees() {
+  if (DEP_CACHE_OFF || !existsSync(DEP_CACHE_ROOT)) return;
+  for (const name of readdirSync(DEP_CACHE_ROOT)) {
+    if (usedFingerprints.has(name)) continue;
+    rmSync(join(DEP_CACHE_ROOT, name), { recursive: true, force: true });
+    process.stdout.write(`  ⌫ pruned stale warm dep tree ${name}\n`);
+  }
+}
+
+/** `mix local.hex` / `local.rebar` install into ~/.mix — once per process, not
+ *  once per case (each one is a network fetch of the archive). */
+let mixToolingReady = false;
+function ensureMixTooling(cwd) {
+  if (mixToolingReady) return;
+  execFileSync("mix", ["local.hex", "--force"], { cwd, stdio: "pipe", env: mixEnv() });
+  execFileSync("mix", ["local.rebar", "--force"], { cwd, stdio: "pipe", env: mixEnv() });
+  mixToolingReady = true;
+}
 
 /** Recursively collect files under `dir` matching `pred`. */
 function walk(dir, pred, out = []) {
@@ -195,9 +342,60 @@ async function runCase(c) {
       // Fetch hex deps, create + migrate the schema, then boot the server.
       // Migrations auto-apply here (before phx.server), so a listening port
       // already implies a migrated schema.
-      execFileSync("mix", ["local.hex", "--force"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
-      execFileSync("mix", ["local.rebar", "--force"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
-      execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
+      ensureMixTooling(deplDir);
+
+      // Warm dep reuse (see the block above): point this case at the shared,
+      // already-compiled dep tree — priming it first if this dep set is new.
+      // `menv` folds MIX_DEPS_PATH into every mix invocation below; the app
+      // itself still compiles from scratch, here, with the same flags.
+      const mixExs = readFileSync(join(deplDir, "mix.exs"), "utf8");
+      const appName = appNameOf(mixExs);
+      let warmRoot = null;
+      let warmDeps = null;
+      let warmNote = "warm off";
+      const tDeps = Date.now();
+      /** Give up on the shared tree for this case — a pure-performance retreat. */
+      const dropWarm = (why, keepComplete) => {
+        rmSync(join(deplDir, "_build"), { recursive: true, force: true });
+        rmSync(join(deplDir, "mix.lock"), { force: true });
+        if (warmRoot && !(keepComplete && existsSync(join(warmRoot, WARM_MARKER)))) {
+          rmSync(warmRoot, { recursive: true, force: true });
+        }
+        warmDeps = null;
+        warmNote = `warm fallback (${String(why?.message ?? why).split("\n")[0].slice(0, 120)})`;
+      };
+      if (!DEP_CACHE_OFF) {
+        const fp = depsFingerprint(mixExs);
+        usedFingerprints.add(fp);
+        warmRoot = join(DEP_CACHE_ROOT, fp);
+        const hit = existsSync(join(warmRoot, WARM_MARKER));
+        try {
+          if (!hit) primeWarm(deplDir, warmRoot, appName);
+          linkWarmDeps(deplDir, warmRoot, appName);
+          warmDeps = join(warmRoot, "deps");
+          warmNote = hit ? `warm hit ${fp}` : `warm primed ${fp}`;
+        } catch (err) {
+          // Purely a performance path: on ANY trouble with the shared tree,
+          // throw the partial state away and let this case compile everything
+          // itself. Never a correctness fallback — the app was never shared.
+          // A HALF-primed tree is deleted (it would poison later cases); one
+          // already marked complete survives — the trouble was this case's linking.
+          dropWarm(err, true);
+        }
+      }
+      /** Every mix invocation for this case, with the shared deps path folded in. */
+      const menv = (extra = {}) => mixEnv({ ...(warmDeps ? { MIX_DEPS_PATH: warmDeps } : {}), ...extra });
+      try {
+        execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: menv() });
+      } catch (err) {
+        // A warm tree that no longer RESOLVES (truncated cache restore, a dep
+        // dir deleted underneath us) must not fail the case: discard it — marker
+        // and all, so the next case re-primes — and fetch cold.
+        if (!warmDeps) throw err;
+        dropWarm(err, false);
+        execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: menv() });
+      }
+      const depsMs = Date.now() - tDeps;
 
       // Run the emitted ExUnit domain suite (pure domain — no DB tables — but
       // `mix test` boots the app in :test env, so the `api_test` DB must exist
@@ -205,8 +403,9 @@ async function runCase(c) {
       // "N tests, M failures" summary line.
       const testDir = join(deplDir, "test");
       const hasUnit = existsSync(testDir) && walk(testDir, (p) => p.endsWith("_test.exs")).length > 0;
+      const tUnit = Date.now();
       if (hasUnit) {
-        const testEnv = mixEnv({ MIX_ENV: "test" });
+        const testEnv = menv({ MIX_ENV: "test" });
         try {
           execFileSync("mix", ["ecto.create"], { cwd: deplDir, stdio: "pipe", env: testEnv });
         } catch {
@@ -228,17 +427,20 @@ async function runCase(c) {
         }
       }
 
-      execFileSync("mix", ["ecto.create"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
+      const unitMs = Date.now() - tUnit;
+
+      const tBoot = Date.now();
+      execFileSync("mix", ["ecto.create"], { cwd: deplDir, stdio: "pipe", env: menv() });
       // Clean DB per case (context-named schemas + schema_migrations), else the
       // 2nd case collides.  ecto.create ensured the DB exists first.
       await resetDatabase(DATABASE_URL.replace("ecto://", "postgresql://"));
-      execFileSync("mix", ["ecto.migrate"], { cwd: deplDir, stdio: "pipe", env: mixEnv() });
+      execFileSync("mix", ["ecto.migrate"], { cwd: deplDir, stdio: "pipe", env: menv() });
 
       server = spawn("mix", ["phx.server"], {
         cwd: deplDir,
         stdio: "pipe",
         detached: true, // own process group so we can SIGTERM the whole app
-        env: mixEnv({ PHX_SERVER: "true", PORT: String(PORT), ...oidcEnv }),
+        env: menv({ PHX_SERVER: "true", PORT: String(PORT), ...oidcEnv }),
       });
       let serverLog = "";
       server.stdout.on("data", (d) => { serverLog += d; });
@@ -246,6 +448,9 @@ async function runCase(c) {
       const exited = new Promise((_, rej) => server.on("exit", (code) => rej(new Error(`mix phx.server exited early (code ${code})\n${serverLog.slice(-2000)}`))));
       await Promise.race([waitForPort(PORT), exited]);
       await waitForReady(BASE);
+      const bootMs = Date.now() - tBoot;
+      const s = (ms) => `${(ms / 1000).toFixed(1)}s`;
+      process.stdout.write(`  ⏱ deps ${s(depsMs)} [${warmNote}] · unit ${s(unitMs)} · migrate+boot ${s(bootMs)}\n`);
     }
 
     const entry = join(workDir, "entry.mts");
@@ -307,6 +512,11 @@ for (const c of corpus) {
 }
 
 await oidc?.stop();
+
+// Keep the shared dep-build cache bounded: a full run knows every dep set that
+// is still live, so anything else in the cache root is dead weight the CI cache
+// would otherwise carry forward.
+if (only.length === 0) pruneUnusedWarmTrees();
 
 const wireBad = await wire.finish();
 

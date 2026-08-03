@@ -70,6 +70,25 @@ export function genericShape(ctor: GenericCtorName): GenericShape {
   return GENERIC_SHAPES[ctor];
 }
 
+/** The field a `paged` envelope carries the ROWS in — the one member whose type
+ *  depends on the carrier argument.  Everything else is page metadata. */
+export const PAGED_ITEMS_MEMBER = "items";
+
+/** The `paged` envelope's page-METADATA members — every field except the rows
+ *  (`page`, `pageSize`, `total`, `totalPages`).  These are the members a page
+ *  body reads off a paged `QueryView` binding (`rows.total`), and the ones a
+ *  frontend has to resolve against the envelope rather than the row array.
+ *
+ *  Derived from `GENERIC_SHAPES.paged` rather than re-spelled, so widening the
+ *  carrier reaches the frontends without a second edit.  The carrier argument
+ *  is irrelevant here — only the field NAMES are read — so a `none` stands in. */
+export const PAGED_META_MEMBERS: ReadonlySet<string> = new Set(
+  GENERIC_SHAPES.paged
+    .fields({ kind: "none" })
+    .map((f) => f.name)
+    .filter((n) => n !== PAGED_ITEMS_MEMBER),
+);
+
 /** PascalCase base name for a carrier argument — the stem of a monomorphized
  *  payload name.  v1 carriers are always a primitive / id / enum / value
  *  object / entity (the carrier-bound check rejects slot + nesting), so the

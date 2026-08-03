@@ -454,10 +454,17 @@ projection RevenueByDay {
 }
 ```
 
-`group by` is **not in the grammar**; `read-path-architecture` reserves it behind
-`loom.projection-groupby-unsupported`, a code that does not exist in `src/`
-either — the reservation is documented, not enforced. This belongs with the
-read-path work in **M-T4.2**, not in a UI mission. Dependency runs 3 → 4.
+**✅ Shipped (with M-T4.2)** — `group by <col>, …` is in the grammar and emits
+on all five backends: one grouped SQL query per read (GROUP BY + deterministic
+ORDER BY over the grouping columns), the LIST response shape, the
+`loom.projection-groupby-*` shape gates replacing the old reservation
+(`docs/language-reference/10-repositories-and-queries.md` § "Grouped
+projection"). The residual for the series shape above: a COMPUTED grouping key
+(`o.placedAt.date` — date-truncating a datetime) is still gated
+(`loom.projection-groupby-key-not-columnar`); bare-column keys (`o.status`,
+`o.customerId`) work today. Frontend binding of a grouped projection stays
+gated (`loom.ui-projection-read-unsupported`) until Phase 4's `Chart`/`Table`
+binding. Dependency runs 3 → 4.
 
 ### 3.5 Phase 4 — the new primitives · `M`/`L` · **P2**
 
@@ -548,7 +555,8 @@ stay quiet about IR-tier gates by design.
    (singleton only); keyed reads + the five other frontends remain.
 3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. ✅ landed. **A real
    dashboard ships here, with no chart dependency anywhere.**
-4. **Phase 3** — `group by` (with M-T4.2).
+4. **Phase 3** — `group by` (with M-T4.2). ✅ landed (bare-column keys; the
+   computed date-key refinement remains).
 5. **Phase 4** — `Chart` on mantine v9, gated, a11y in slice 1.
 6. **Phase 5** — scaffolded chart; pack backfill; flip `REQUIRED_PRIMITIVES`.
 

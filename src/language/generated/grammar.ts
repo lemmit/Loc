@@ -6536,6 +6536,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               "$ref": "#/rules@172"
             },
             "arguments": []
+          },
+          {
+            "$type": "Keyword",
+            "value": "page"
           }
         ]
       },
@@ -11664,6 +11668,54 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "elements": [
               {
                 "$type": "Keyword",
+                "value": "group"
+              },
+              {
+                "$type": "Keyword",
+                "value": "by"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "groupBys",
+                "operator": "+=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@200"
+                  },
+                  "arguments": []
+                }
+              },
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": ","
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "groupBys",
+                    "operator": "+=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@200"
+                      },
+                      "arguments": []
+                    }
+                  }
+                ],
+                "cardinality": "*"
+              }
+            ],
+            "cardinality": "?"
+          },
+          {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
                 "value": "select"
               },
               {
@@ -12854,6 +12906,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "Keyword",
                   "value": "await"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "page"
                 }
               ]
             }
@@ -14138,6 +14194,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "filter"
+          },
+          {
+            "$type": "Keyword",
+            "value": "group"
           },
           {
             "$type": "Keyword",
@@ -16048,6 +16108,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "page"
+          },
+          {
+            "$type": "Keyword",
             "value": "permissions"
           },
           {
@@ -17577,6 +17641,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "page"
+          },
+          {
+            "$type": "Keyword",
             "value": "permissions"
           },
           {
@@ -17931,41 +17999,41 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "$type": "ParserRule",
       "name": "ListLit",
       "definition": {
-        "$type": "Group",
+        "$type": "Alternatives",
         "elements": [
           {
-            "$type": "Action",
-            "inferredType": {
-              "$type": "InferredType",
-              "name": "ListLit"
-            }
-          },
-          {
-            "$type": "Keyword",
-            "value": "["
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "ListLit"
+                }
+              },
+              {
+                "$type": "Keyword",
+                "value": "[]"
+              }
+            ]
           },
           {
             "$type": "Group",
             "elements": [
               {
-                "$type": "Assignment",
-                "feature": "elements",
-                "operator": "+=",
-                "terminal": {
-                  "$type": "RuleCall",
-                  "rule": {
-                    "$ref": "#/rules@200"
-                  },
-                  "arguments": []
+                "$type": "Action",
+                "inferredType": {
+                  "$type": "InferredType",
+                  "name": "ListLit"
                 }
+              },
+              {
+                "$type": "Keyword",
+                "value": "["
               },
               {
                 "$type": "Group",
                 "elements": [
-                  {
-                    "$type": "Keyword",
-                    "value": ","
-                  },
                   {
                     "$type": "Assignment",
                     "feature": "elements",
@@ -17977,21 +18045,42 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                       },
                       "arguments": []
                     }
+                  },
+                  {
+                    "$type": "Group",
+                    "elements": [
+                      {
+                        "$type": "Keyword",
+                        "value": ","
+                      },
+                      {
+                        "$type": "Assignment",
+                        "feature": "elements",
+                        "operator": "+=",
+                        "terminal": {
+                          "$type": "RuleCall",
+                          "rule": {
+                            "$ref": "#/rules@200"
+                          },
+                          "arguments": []
+                        }
+                      }
+                    ],
+                    "cardinality": "*"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": ",",
+                    "cardinality": "?"
                   }
                 ],
-                "cardinality": "*"
+                "cardinality": "?"
               },
               {
                 "$type": "Keyword",
-                "value": ",",
-                "cardinality": "?"
+                "value": "]"
               }
-            ],
-            "cardinality": "?"
-          },
-          {
-            "$type": "Keyword",
-            "value": "]"
+            ]
           }
         ]
       },

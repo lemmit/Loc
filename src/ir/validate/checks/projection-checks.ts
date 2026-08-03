@@ -24,6 +24,7 @@ import {
   isQueryTimeProjection,
   isShorthandProjection,
 } from "../../types/loom-ir.js";
+import { groupKeyColumn } from "../../util/projection-aggregate.js";
 import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
@@ -299,28 +300,53 @@ function validateQueryComprehension(
   // `validateWholeTableAggregationBackend` (system-checks.ts) instead — this
   // check has no platform in scope.  What is left here is the genuine typo.
   // MIXING an aggregation with a per-row `select` is a GROUP BY — one row per
-  // distinct value of the per-row column, not one row for the table.  That is a
-  // different query, a different response shape, and a clause the surface does
-  // not have yet (`group by`), so it is reserved rather than guessed at.
-  // read-path-architecture.md rev. 8 reserves exactly this combination.
+  // distinct value of the per-row column, not one row for the table.  That is
+  // the GROUPED read model (M-T4.2): declare it with an explicit `group by`
+  // clause (validated in `validateGroupBy` below); the mix WITHOUT the clause
+  // stays an error, now with the fix in the message.
   const selects = q.selects ?? [];
   const aggregating = selects.filter((s) => s.aggregate);
-  if (aggregating.length > 0 && aggregating.length < selects.length) {
+  const grouped = (q.groupBy?.length ?? 0) > 0;
+  if (!grouped && aggregating.length > 0 && aggregating.length < selects.length) {
     const perRow = selects.filter((s) => !s.aggregate).map((s) => s.field);
     diags.push({
       severity: "error",
-      code: "loom.projection-groupby-unsupported",
+      code: "loom.projection-groupby-missing",
       message:
-        `projection '${proj.name}' mixes whole-table aggregation ` +
+        `projection '${proj.name}' mixes aggregation ` +
         `(${aggregating.map((s) => s.field).join(", ")}) with per-row select(s) ` +
         `(${perRow.join(", ")}). That is a GROUP BY — one row per distinct ` +
-        `${perRow.join("/")} — which has no surface yet. Aggregate ALL fields (a ` +
-        `single-row total), or select all of them per-row.`,
+        `${perRow.join("/")} — so declare the grouping: add ` +
+        `'group by ${perRow.map((f) => `<source>.${f}`).join(", ")}' before the ` +
+        `'select'. Or aggregate ALL fields (a single-row total), or select all ` +
+        `of them per-row.`,
       source: `${ctx.name}/${proj.name}`,
     });
   }
+  if (grouped) validateGroupBy(ctx, proj, diags);
   for (const s of selects) {
-    if (s.aggregate) continue;
+    if (s.aggregate) {
+      // An aggregation ARGUMENT must be a plain source column (`sum(o.total)`)
+      // — every backend renders it as the bare column inside SQL's own
+      // aggregate (`SUM(total)` / `g.Sum(o => o.Total)` / `sum(e.total)`), so
+      // a computed expression (`sum(o.total + o.tax)`) or a bare unqualified
+      // name (`sum(total)`) has no rendering and used to CRASH codegen with an
+      // internal error from a model that validated clean.  Gate it honestly.
+      const arg = s.aggregate.arg;
+      if (arg && !(arg.kind === "member" && arg.receiver.kind === "this")) {
+        diags.push({
+          severity: "error",
+          code: "loom.projection-aggregate-arg-not-columnar",
+          message:
+            `projection '${proj.name}': 'select ${s.field} = ${s.aggregate.op}(…)' aggregates a ` +
+            `computed expression. An aggregation argument must be a plain column of the ` +
+            `'${q.source}' source, written '<alias>.<field>' (e.g. '${s.aggregate.op}(o.total)') — ` +
+            `SQL aggregates a column, not a per-row computation.`,
+          source: `${ctx.name}/${proj.name}`,
+        });
+      }
+      continue;
+    }
     const unresolved = firstUnresolvedRefName(s.expr);
     if (!unresolved) continue;
     const hint = WHOLE_TABLE_AGGREGATIONS.has(unresolved)
@@ -343,6 +369,126 @@ function validateQueryComprehension(
   // platform — node emits it (PR-C), the other backends still error — mirroring
   // `validatePagedQueryHandlerBackend`.  It can't live here because a
   // context-level check has no deployable/platform in scope.
+}
+
+/** The GROUPED read model's shape gates (M-T4.2).  A `group by` projection
+ *  returns MANY rows — one per distinct value of the grouping columns — with
+ *  the aggregate `select`s computed per group in SQL.  These checks pin the
+ *  disciplined shape `groupedAggregates` (projection-aggregate.ts) hands every
+ *  backend, so an emitter never guesses:
+ *
+ *   - `loom.projection-groupby-source-unsupported` — grouping needs a plain
+ *     AGGREGATE `from` source (the table the SQL groups over); no source,
+ *     a workflow / projection source, or event folds are all rejected.
+ *   - `loom.projection-groupby-keyed-unsupported` — a grouped projection's
+ *     rows are the groups, not id-keyed entities; `keyed by` doesn't apply.
+ *   - `loom.projection-groupby-join-unsupported` — a `join` is an app-level
+ *     bulk load AFTER the query, so its columns can't participate in a SQL
+ *     GROUP BY.
+ *   - `loom.projection-groupby-no-aggregate` — a `group by` whose selects
+ *     aggregate nothing is just DISTINCT; not the grouped read model.
+ *   - `loom.projection-groupby-key-not-columnar` — every grouping column must
+ *     be a bare source column (`o.status`) so it pushes down to SQL; computed
+ *     keys (`o.placedAt.date`) are a later refinement.
+ *   - `loom.projection-groupby-select-not-grouped` — a per-row `select` must
+ *     name one of the grouping columns; anything else has no single value per
+ *     group (the same rule SQL enforces). */
+function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagnostic[]): void {
+  const q = proj.query;
+  if (!q?.groupBy || q.groupBy.length === 0) return;
+  const at = `${ctx.name}/${proj.name}`;
+
+  if (!q.source || q.sourceKind === "workflow" || q.sourceKind === "projection") {
+    const why = q.source
+      ? `its 'from ${q.source}' source is a ${q.sourceKind}`
+      : "it has no 'from' source";
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-source-unsupported",
+      message:
+        `projection '${proj.name}' declares 'group by', but ${why}. A grouped ` +
+        `projection reads (and groups) an AGGREGATE source's table in SQL — ` +
+        `add 'from <Aggregate>'.`,
+      source: at,
+    });
+    return;
+  }
+  if (proj.handlers.length > 0) {
+    // `from` + folds is already `loom.projection-query-and-fold-unsupported`;
+    // nothing more to say here.
+    return;
+  }
+  if (proj.correlationField !== undefined) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-keyed-unsupported",
+      message:
+        `projection '${proj.name}' declares both 'keyed by ${proj.correlationField}' and ` +
+        `'group by'. A grouped projection's rows ARE the groups (one per distinct ` +
+        `key combination), not id-keyed entities — drop the 'keyed by'.`,
+      source: at,
+    });
+  }
+  if (q.joins.length > 0) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-join-unsupported",
+      message:
+        `projection '${proj.name}': 'join' and 'group by' don't compose — a join is a ` +
+        `by-id bulk load AFTER the query, so its columns can't participate in the SQL ` +
+        `GROUP BY. Group by source columns only, or drop the 'group by'.`,
+      source: at,
+    });
+  }
+  const selects = q.selects ?? [];
+  if (!selects.some((s) => s.aggregate)) {
+    diags.push({
+      severity: "error",
+      code: "loom.projection-groupby-no-aggregate",
+      message:
+        `projection '${proj.name}' declares 'group by' but no aggregate 'select' ` +
+        `(count/sum/avg/min/max) to compute per group — that is just DISTINCT. Add an ` +
+        `aggregate select (e.g. 'orders = count()'), or drop the 'group by' for the ` +
+        `per-row read.`,
+      source: at,
+    });
+  }
+  // Grouping columns must be bare source columns, so every backend can render
+  // them into the SQL GROUP BY (and the deterministic ORDER BY) directly.
+  const keyColumns = new Set<string>();
+  for (const g of q.groupBy) {
+    const col = groupKeyColumn(g);
+    if (col === null) {
+      diags.push({
+        severity: "error",
+        code: "loom.projection-groupby-key-not-columnar",
+        message:
+          `projection '${proj.name}': a 'group by' column must be a plain field of the ` +
+          `'${q.source}' source (e.g. '<alias>.<field>') so it can be grouped in SQL — ` +
+          `a computed grouping key is not supported yet.`,
+        source: at,
+      });
+    } else {
+      keyColumns.add(col);
+    }
+  }
+  // Each per-row select must project one of the grouping columns — one value
+  // per group.  (An aggregate select is per-group by construction.)
+  for (const s of selects) {
+    if (s.aggregate) continue;
+    const col = groupKeyColumn(s.expr);
+    if (col === null || !keyColumns.has(col)) {
+      diags.push({
+        severity: "error",
+        code: "loom.projection-groupby-select-not-grouped",
+        message:
+          `projection '${proj.name}': 'select ${s.field} = …' is per-row but not one of the ` +
+          `'group by' columns, so it has no single value per group. Select a grouping ` +
+          `column directly, aggregate it (sum/min/max/…), or add it to the 'group by'.`,
+        source: at,
+      });
+    }
+  }
 }
 
 function validateKey(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagnostic[]): void {

@@ -448,6 +448,19 @@ export function responseBodySchemas(spec: OpenApiSpec): Map<string, string> {
  * a missing status, a divergent body schema, or an error served as plain
  * `application/json` instead of `application/problem+json` (which reads as
  * `(none)`) — is a real cross-backend error-contract break.
+ *
+ * CAVEAT ON THAT "SAME SET" CLAIM — it is true of the shared table, and the
+ * per-operation CONFLICT statuses do not come from the shared table.  A `when`
+ * state gate's `Disallowed` and a versioned `update`'s `ConcurrencyConflict`
+ * are added at each backend's own call site, and python + java were adding only
+ * the second: a `when`-gated operation answered a 409 its own published
+ * contract omitted.  THIS dimension is exactly the one that should have caught
+ * it, and did not — because the single fixture the parity job boots
+ * (`examples/showcase.ddd`) has no `when`-gated operation, so the dimension had
+ * nothing to compare.  Fixed in both backends and now gated per-PR by
+ * `test/ir/api-surface-parity.test.ts`, whose fixture DOES carry a `when` gate.
+ * If you extend the ladder, extend that fixture too — a dimension that never
+ * sees a feature cannot gate it.
  */
 export function errorResponses(spec: OpenApiSpec): Map<string, string> {
   const PROBLEM_JSON = "application/problem+json";

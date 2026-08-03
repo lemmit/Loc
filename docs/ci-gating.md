@@ -35,10 +35,13 @@ gets attributed to a later, innocent commit.
 | **Merge queue** (`merge_group`, runs once on the final candidate) | The cross-backend runtime matrix — `behavioral-e2e-{dotnet,java,python,elixir,dapper,mikroorm}`, `tenancy-e2e` (10 legs), `*-obs-e2e`, `*-oidc-e2e`, `auth-oidc-compose-e2e`; the full `generated-react-build` Cartesian; `pages` build | What actually breaks `main` **and** the expensive ones. Runs once per landing, not per push. A PR revised 10× pays this once. |
 | **Nightly / label** (unchanged) | `conformance-full`, `generated-a11y`, `frontend-fullstack-e2e`, `k8s-e2e` | Broad, slow, low churn — post-hoc is fine. |
 
-Note: `generated-react-build` already emits a **slim** matrix on PRs
-(`showcase.ddd` × every pack) and the **full** Cartesian on `push:main` /
-`merge_group` — the per-PR/pre-land split the tiers call for is already built
-into its `configure` job.
+Note: `generated-react-build`, `generated-vue-build` and
+`generated-angular-build` each emit a **slim** matrix on PRs and the **full**
+Cartesian everywhere else. Their `configure` job keys on
+`github.event_name == 'pull_request'`, so `merge_group` (like `push:main` and
+`workflow_dispatch`) falls through to the full sweep — the per-PR/pre-land
+split the tiers call for is already built in, and the queue gets the full
+Cartesian on the rebased candidate.
 
 The playground suite is split the same way. `playground-e2e` (the whole
 Playwright suite, including the network-gated bundle/boot specs) stays
@@ -49,23 +52,159 @@ regressions are caught before merge.
 
 ## Enabling the merge queue (the structural fix)
 
-The `merge_group:` triggers are already present on `test.yml`, `tenancy-e2e`,
-the `*-obs-e2e` / `*-oidc-e2e` gates, `auth-oidc-compose-e2e`, `pages`,
-`behavioral-e2e`, and `behavioral-ui-e2e`. **They are inert until the queue is
-turned on.** To activate:
-
-1. Settings → Branches → branch protection for `main` → **Require merge queue**.
-2. Set **required status checks** to exactly the set that has a `merge_group`
-   trigger: `tests-passed` **plus** each heavy gate above. (A required check
-   with no `merge_group` trigger would stall the queue — only require checks
-   that run in the queue.)
-3. To pull a remaining gate into the queue later, add `merge_group:` to its
-   `on:` block and add it to the required-checks list.
-
 A merge queue runs the required checks on the **rebased** merge candidate
 before it lands, so the exact combination that will be on `main` is what gets
 gated — this is what closes the "never ran on the PR" hole for the push-only
 gates without charging every push.
+
+### Readiness: done. The workflow side is complete.
+
+Every workflow in the intended required set now (a) carries a `merge_group:`
+trigger, (b) exposes exactly **one stable check name** suitable for
+branch-protection "required status checks", and (c) behaves correctly on a
+`merge_group` event. **The triggers are inert until the queue is turned on** —
+all that remains is the repo-settings flip below.
+
+The set is written down once, in
+[`test/system/merge-queue-required-checks.ts`](../test/system/merge-queue-required-checks.ts),
+which is the **source of truth** — the table below is a rendering of it.
+`test/system/merge-queue-readiness.test.ts` (fast suite) asserts against the
+real workflow files that every entry exists, has `merge_group:`, resolves to a
+real job, and — for rollups — is `always()` over a non-empty `needs`. Drift is
+a red per-PR test today rather than a stalled queue on flip day.
+
+Two shapes of check name:
+
+- **Single-job workflows** expose the job's own name (its `name:` if declared,
+  else its job id). Nothing was added to these.
+- **Matrix / multi-job workflows** cannot: their cell names are dynamic
+  (`${{ matrix.backend }} × …`) and un-nameable in branch protection. Each got
+  one `<file-stem>-passed` rollup job — `if: always()`, `needs:` every job in
+  the workflow, fails when any need failed or was cancelled. A *skipped* need
+  counts as OK, which is what makes a label-guarded job legitimate on an
+  unlabelled PR run (in the queue it actually runs).
+
+#### The required-checks list (39)
+
+Per-PR lane — cheap, already runs on every push:
+
+| Workflow | Required check name |
+|---|---|
+| `test.yml` | `tests passed` |
+| `langium-generated.yml` | `check` |
+| `workflow-lint.yml` | `workflow-lint` |
+| `hono-build.yml` | `build-generated-ts` |
+| `dotnet-build.yml` | `build-generated-dotnet` |
+| `java-build.yml` | `build-generated-java` |
+| `python-build.yml` | `build-generated-python` |
+| `elixir-vanilla-build.yml` | `elixir-vanilla-build-passed` |
+| `corpus-build.yml` | `corpus-build-passed` |
+| `corpus-elixir-build.yml` | `corpus-elixir-build-passed` |
+| `generated-react-build.yml` | `generated-react-build-passed` |
+| `generated-vue-build.yml` | `generated-vue-build-passed` |
+| `generated-svelte-build.yml` | `generated-svelte-build-passed` |
+| `generated-angular-build.yml` | `generated-angular-build-passed` |
+| `generated-feliz-build.yml` | `feliz-build` |
+| `generated-flutter-build.yml` | `flutter-build` |
+| `conformance-parity.yml` | `parity` |
+| `behavioral-e2e.yml` | `behavioral` |
+
+Queue-heavy lane — the gates that only run on `push:main` / label today:
+
+| Workflow | Required check name |
+|---|---|
+| `behavioral-e2e-dotnet.yml` | `behavioral-dotnet` |
+| `behavioral-e2e-java.yml` | `behavioral-java` |
+| `behavioral-e2e-python.yml` | `behavioral-python` |
+| `behavioral-e2e-elixir.yml` | `behavioral-elixir` |
+| `behavioral-e2e-dapper.yml` | `behavioral-dapper` |
+| `behavioral-e2e-mikroorm.yml` | `behavioral-mikroorm` |
+| `behavioral-ui-e2e.yml` | `behavioral-ui` |
+| `tenancy-e2e.yml` | `tenancy-e2e-passed` |
+| `hono-obs-e2e.yml` | `hono-obs-e2e` |
+| `dotnet-obs-e2e.yml` | `dotnet-obs-e2e` |
+| `java-obs-e2e.yml` | `java-obs-e2e` |
+| `python-obs-e2e.yml` | `python-obs-e2e` |
+| `elixir-vanilla-obs-e2e.yml` | `vanilla-obs-e2e` |
+| `hono-oidc-e2e.yml` | `hono-oidc-e2e` |
+| `dotnet-oidc-e2e.yml` | `dotnet-oidc-e2e` |
+| `java-oidc-e2e.yml` | `java-oidc-e2e` |
+| `python-oidc-e2e.yml` | `python-oidc-e2e` |
+| `elixir-oidc-e2e.yml` | `elixir-oidc-compose-e2e` |
+| `auth-oidc-compose-e2e.yml` | `auth-oidc-compose-e2e` |
+| `migration-evolution-e2e.yml` | `migration-evolution-e2e-passed` |
+| `pages.yml` | `pages-passed` |
+
+> **`tests passed`, not `tests-passed`.** `tests-passed` is the *job id* in
+> `test.yml`; the check-run name GitHub reports is the job's `name:`, which is
+> `tests passed`. Branch protection matches the check-run name. Paste the name
+> from this table, and do not rename that job — it is the only required check
+> `main` has today.
+
+Everything *not* in these two tables stays as it is — `conformance-full`,
+`differential-report`, `channels-e2e`, `api-call-e2e`, the `k8s-*` gates, the
+`generated-*-e2e` SPA smokes, `playground-*`, `frontend-fullstack-e2e`,
+`generated-a11y`, `phoenix-ui-e2e`, `elixir-vanilla-vo-e2e`, `ci-red-alarm`,
+`cleanup-artifacts`, `email-e2e`, `context-integration-e2e`. They keep their
+nightly / label triggers and must **not** be added to required checks (a
+required check with no `merge_group` trigger stalls the queue forever).
+
+### The activation runbook (repo settings — the only remaining step)
+
+Nothing below is code; it is an admin action on `github.com/lemmit/Loc`.
+
+1. **Do not remove `tests passed` at any point.** It stays required from the
+   first click to the last, so there is never an unprotected window.
+2. **Settings → Rules → Rulesets** (or **Settings → Branches → branch
+   protection rule for `main`**, if the repo is still on classic protection).
+   Target branch: `main`.
+3. Enable **Require merge queue**. Recommended starting configuration:
+   - merge method: **Squash** (matches how `main` lands today);
+   - build concurrency: **5** (the queue-heavy lane is docker/boot-bound);
+   - only merge non-failing pull requests: **on**;
+   - "Merge candidates should require all checks to pass": **on**.
+4. Enable **Require status checks to pass** and add **exactly** the 39 check
+   names from the two tables above. Add them by pasting the name — the search
+   box only offers checks GitHub has seen recently, and several of these have
+   never reported on a PR (they are `push:main`-only today), so they must be
+   typed in.
+5. Save. From then on, PRs merge via the queue: GitHub builds a rebased
+   candidate, runs all 39 checks on it, and lands it only if they are green.
+6. **Watch the first day.** A check that never reports leaves candidates
+   pending — if that happens, the cause is a missing `merge_group:` trigger or
+   a mistyped check name. `npx vitest run test/system/merge-queue-readiness.test.ts`
+   re-verifies the workflow half in ~1s; the mistyped-name half is settings-only.
+
+To pull a further gate into the queue later: add `merge_group:` to its `on:`
+block, give it one stable check name (a `<stem>-passed` rollup if it is a
+matrix), add the row to `test/system/merge-queue-required-checks.ts` — the
+readiness test will then fail until the workflow matches — and add the name to
+the required-checks list in settings.
+
+**Scriptable alternative.** The same configuration can be applied as a repo
+ruleset via `gh api --method POST /repos/lemmit/Loc/rulesets` with a
+`merge_queue` rule plus a `required_status_checks` rule whose
+`required_status_checks[]` are the 39 names above. It is the reproducible path
+and worth capturing once the settings are stable, but the UI path is primary:
+ruleset JSON silently accepts check names that do not exist, which is the one
+mistake that stalls the queue.
+
+### Two merge-group behaviours worth knowing
+
+- **`pages.yml` builds in the queue but never deploys.** The workflow is split
+  into `build` (everything: docs render, playground typecheck, DDL unit, Node
+  smoke, npm-mirror + vendor + vite build) and `deploy`
+  (`if: github.event_name != 'merge_group'`, carrying the `github-pages`
+  environment). The split is not cosmetic: the `github-pages` environment is
+  branch-restricted to the Pages source, so a job carrying `environment:` would
+  be rejected on a `gh-readonly-queue/**` ref *before any step ran* — the queue
+  would see a hard failure on every candidate. `pages-passed` rolls the two up.
+- **Label guards already pass in the queue.** The uniform idiom
+  `github.event_name != 'pull_request' || github.event.label.name == '<label>'`
+  short-circuits to `true` on `merge_group`, so every labelled gate runs
+  unconditionally on a merge candidate with no edit. The readiness test pins
+  that: a required job whose `if:` reads `github.event.pull_request` or
+  compares `event_name` must use this idiom.
 
 ## The interim escape hatch: force a post-merge gate with a label
 

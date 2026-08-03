@@ -166,11 +166,13 @@ describe("feliz wire layer", () => {
     expect(app).toContain("open Fable.SimpleHttp");
     expect(app).toContain("open Thoth.Json");
     expect(app).toContain("module Api =");
-    expect(app).toContain("let allProducts () : Async<Result<Product list, string>> =");
+    // `.all` is paged-by-default (M-T2.6), so the read decodes the whole
+    // envelope — rows PLUS the `PageMeta` a page body reads `rows.total` off —
+    // not just the `items` field.
+    expect(app).toContain("let allProducts () : Async<Result<Product list * PageMeta, string>> =");
     expect(app).toContain('let! (status, body) = Http.get "/api/products"');
-    expect(app).toContain(
-      'match Decode.fromString (Decode.field "items" (Decode.list Decoders.product)) body with',
-    );
+    expect(app).toContain('Decode.field "items" (Decode.list Decoders.product)');
+    expect(app).toContain('get.Required.Field "total" Decode.int');
   });
 
   it("projects the read to the MVU quadruple (Model / init Cmd / Msg / update)", async () => {
@@ -180,11 +182,13 @@ describe("feliz wire layer", () => {
     // init starts Loading + fires the fetch Cmd.
     expect(app).toContain("AllProducts = Loading");
     expect(app).toContain("Cmd.OfAsync.perform Api.allProducts () AllProductsLoaded");
-    // Msg carries the decoded Result.
-    expect(app).toContain("| AllProductsLoaded of Result<Product list, string>");
-    // update discriminates Ok → Loaded, Error → LoadError.
+    // Msg carries the decoded Result — rows paired with the page metadata,
+    // since `.all` returns the paged envelope.
+    expect(app).toContain("| AllProductsLoaded of Result<Product list * PageMeta, string>");
+    // update discriminates Ok → Loaded, Error → LoadError.  The rows land in
+    // the `Remote` field and the metadata in its sibling record.
     expect(app).toContain(
-      "| AllProductsLoaded (Ok data) -> { model with AllProducts = Loaded data }, Cmd.none",
+      "| AllProductsLoaded (Ok (data, meta)) -> { model with AllProducts = Loaded data; AllProductsPageMeta = meta }, Cmd.none",
     );
     expect(app).toContain(
       "| AllProductsLoaded (Error e) -> { model with AllProducts = LoadError e }, Cmd.none",

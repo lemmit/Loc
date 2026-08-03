@@ -48,6 +48,7 @@ on:
       - 'test/e2e/generated-build.test.ts'
       - 'test/e2e/fixtures/ts-build/**'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read

@@ -165,6 +165,7 @@ export type DddKeywordNames =
     | "from"
     | "function"
     | "global"
+    | "group"
     | "guid"
     | "handle"
     | "header"
@@ -934,10 +935,10 @@ export function isCommandHandler(item: unknown): item is CommandHandler {
     return reflection.isInstance(item, CommandHandler.$type);
 }
 
-export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
+export type CommonSoftKeywords = 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'group' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix' | 'tenancy' | 'title' | 'token' | 'ttl' | 'use' | 'write';
 
 export function isCommonSoftKeywords(item: unknown): item is CommonSoftKeywords {
-    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'channels' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
+    return item === 'action' || item === 'asc' || item === 'body' || item === 'by' || item === 'canonical' || item === 'channels' || item === 'command' || item === 'config' || item === 'connection' || item === 'crossTenant' || item === 'dataSources' || item === 'desc' || item === 'description' || item === 'env' || item === 'envelope' || item === 'error' || item === 'eventLog' || item === 'every' || item === 'favicon' || item === 'filter' || item === 'group' || item === 'handle' || item === 'immutable' || item === 'implements' || item === 'instance' || item === 'internal' || item === 'isolationLevel' || item === 'join' || item === 'keyPrefix' || item === 'kind' || item === 'literal' || item === 'loads' || item === 'mailer' || item === 'managed' || item === 'message' || item === 'migration' || item === 'money' || item === 'objectStore' || item === 'ogImage' || item === 'option' || item === 'or' || item === 'paged' || item === 'parent' || item === 'payload' || item === 'query' || item === 'queue' || item === 'readonly' || item === 'replica' || item === 'resource' || item === 'response' || item === 'retain' || item === 'retrieval' || item === 'schema' || item === 'secret' || item === 'select' || item === 'service' || item === 'snapshot' || item === 'sort' || item === 'sql' || item === 'stamp' || item === 'state' || item === 'store' || item === 'tablePrefix' || item === 'tenancy' || item === 'title' || item === 'token' || item === 'ttl' || item === 'use' || item === 'write';
 }
 
 export interface Component extends langium.AstNode {
@@ -1958,10 +1959,10 @@ export function isLValue(item: unknown): item is LValue {
     return reflection.isInstance(item, LValue.$type);
 }
 
-export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | CommonSoftKeywords | string;
+export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'id' | 'modules' | 'page' | 'permissions' | 'ui' | 'views' | 'workflows' | CommonSoftKeywords | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'id' || item === 'modules' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'id' || item === 'modules' || item === 'page' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MacroArg extends langium.AstNode {
@@ -2140,10 +2141,10 @@ export function isMatchStmt(item: unknown): item is MatchStmt {
     return reflection.isInstance(item, MatchStmt.$type);
 }
 
-export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id' | 'ignoring' | 'modules' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows' | CommonSoftKeywords | string;
+export type MemberName = 'aggregates' | 'api' | 'contains' | 'contexts' | 'create' | 'destroy' | 'find' | 'id' | 'ignoring' | 'modules' | 'page' | 'permissions' | 'ui' | 'views' | 'where' | 'workflows' | CommonSoftKeywords | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'find' || item === 'id' || item === 'ignoring' || item === 'modules' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'where' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'aggregates' || item === 'api' || item === 'contains' || item === 'contexts' || item === 'create' || item === 'destroy' || item === 'find' || item === 'id' || item === 'ignoring' || item === 'modules' || item === 'page' || item === 'permissions' || item === 'ui' || item === 'views' || item === 'where' || item === 'workflows' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MemberSuffix extends langium.AstNode {
@@ -2796,6 +2797,7 @@ export interface Projection extends langium.AstNode {
     bypassAll: boolean;
     filter?: Expression;
     gate?: Expression;
+    groupBys: Array<Expression>;
     joins: Array<ProjectionJoin>;
     key?: LooseName;
     members: Array<ProjectionMember>;
@@ -2812,6 +2814,7 @@ export const Projection = {
     bypassAll: 'bypassAll',
     filter: 'filter',
     gate: 'gate',
+    groupBys: 'groupBys',
     joins: 'joins',
     key: 'key',
     members: 'members',
@@ -2911,7 +2914,7 @@ export interface Property extends langium.AstNode {
     default?: Expression;
     maskUnless?: Expression;
     message?: string;
-    name: 'await' | CommonSoftKeywords | string;
+    name: 'await' | 'page' | CommonSoftKeywords | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -3451,10 +3454,10 @@ export function isStateField(item: unknown): item is StateField {
     return reflection.isInstance(item, StateField.$type);
 }
 
-export type StateFieldName = CommonSoftKeywords | string;
+export type StateFieldName = 'page' | CommonSoftKeywords | string;
 
 export function isStateFieldName(item: unknown): item is StateFieldName {
-    return isCommonSoftKeywords(item) || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return isCommonSoftKeywords(item) || item === 'page' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type Statement = AssignOrCallStmt | EmitStmt | ForStmt | IfLetStmt | LetStmt | MatchStmt | PreconditionStmt | RequiresStmt | ReturnStmt;
@@ -6510,6 +6513,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 gate: {
                     name: Projection.gate,
+                    optional: true
+                },
+                groupBys: {
+                    name: Projection.groupBys,
+                    defaultValue: [],
                     optional: true
                 },
                 joins: {

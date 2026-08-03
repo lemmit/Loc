@@ -59,11 +59,17 @@ export function felizHasRealtimeHandlers(ui: UiIR): boolean {
  *  `App.fs` after `update` (it references `Msg`/`Api`/the reads' `Loaded`
  *  cases) and wired via `Program.withSubscription realtimeSub`. */
 export function renderFelizRealtime(ui: UiIR, reads: readonly FelizRead[] = []): string {
-  // A SERVER-paged read can't be re-issued from here: the subscription runs
+  // A CONTROLLED paged read can't be re-issued from here: the subscription runs
   // outside `update`, so it has no `model` and would have to guess the page and
   // sort — silently snapping the user back to page 1 of the default order.  It
   // dispatches a `Refetch<Field>` Msg instead, and `update` builds the Cmd.
-  const pagedFields = new Set(reads.filter((r) => r.paging).map((r) => r.field));
+  //
+  // Keyed on the CONTROLS, not on paged-ness.  Every `.all` is paged now (the
+  // auto-`findAll` returns the envelope), but a read whose `of:` threads no
+  // page/sort state has nothing to preserve — its refetch Cmd is the same
+  // paramless call the inline path makes, so the Msg hop would be indirection
+  // that buys nothing.
+  const pagedFields = new Set(reads.filter((r) => r.paging?.controls).map((r) => r.field));
   const notifications = ui.notifications ?? [];
   const byEvent = new Map<string, UiNotificationIR[]>();
   for (const n of notifications) {

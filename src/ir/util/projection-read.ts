@@ -20,11 +20,15 @@
 // ---------------------------------------------------------------------------
 
 import type { BoundedContextIR, ProjectionIR } from "../types/loom-ir.js";
-import { isQueryTimeProjection, isSingletonProjection } from "../types/loom-ir.js";
+import {
+  isGroupedProjection,
+  isQueryTimeProjection,
+  isSingletonProjection,
+} from "../types/loom-ir.js";
 
 /** True when a frontend can read this projection today.
  *
- *  Two conditions, both structural:
+ *  Three conditions, all structural:
  *
  *    QUERY-TIME — computed per read, so the backend serves it on a route.  A
  *      folded projection is materialized into a `<Proj>Row` table and read by
@@ -33,11 +37,14 @@ import { isQueryTimeProjection, isSingletonProjection } from "../types/loom-ir.j
  *      dashboard KPI reads, and the shape `QueryView`'s single-record mode
  *      already binds.  A keyed projection returns an array and wants
  *      `Table`-shaped binding.
+ *    NOT GROUPED — a `group by` projection is unkeyed but returns the LIST
+ *      shape (one row per group), so the singleton client's one-object parse
+ *      would reject it.  Its binding is `Table`/chart-shaped (M-T1.3 Phase 4).
  *
- *  Both narrowings are honest gaps, not oversights — each is reported by
+ *  All narrowings are honest gaps, not oversights — each is reported by
  *  `loom.ui-projection-read-unsupported` rather than mis-emitted. */
 export function isFrontendReadableProjection(p: ProjectionIR): boolean {
-  return isQueryTimeProjection(p) && isSingletonProjection(p);
+  return isQueryTimeProjection(p) && isSingletonProjection(p) && !isGroupedProjection(p);
 }
 
 /** Names of every frontend-readable projection across the given contexts. */
