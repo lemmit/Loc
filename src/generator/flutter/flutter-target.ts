@@ -447,8 +447,9 @@ export const flutterTarget: WalkerTarget = {
   // route on submit success, which dismisses the dialog — so no extra close
   // wiring is needed.  Only the trigger + `OperationForm(of:, op:)` shape is
   // emitted (the same flat shape `scaffoldOperations(of:)` builds); the
-  // state-controlled `open:` shape falls to a diagnostic comment (never broken
-  // Dart).  The nested op-form widget is emitted into `lib/forms.dart` by
+  // state-controlled `open:` shape falls through to the shared `emitModal`,
+  // which routes it to this pack's `primitive-modal-controlled` renderer.  The
+  // nested op-form widget is emitted into `lib/forms.dart` by
   // `collectFlutterForms` scanning the page body independently of this render.
   renderModal: (call, ctx) => {
     if (call.kind !== "call") return null;
@@ -459,11 +460,14 @@ export const flutterTarget: WalkerTarget = {
         a.kind === "call" && a.name === "OperationForm",
     );
     const trigger = namedArg(call, "trigger");
-    if (!formChild || trigger?.kind !== "call") {
-      return flutterTarget.renderComment(
-        "Modal: expects trigger: Button(...) and an OperationForm(of:, op:) child",
-      );
-    }
+    // Not the op-dialog shape → return null so the shared `emitModal` can try
+    // the STATE-CONTROLLED one (`Modal { …, open: <state bool> }`), which
+    // Flutter now renders through `LoomModalHost`.  Claiming the primitive with
+    // a comment here is what made a controlled Modal degrade to `/* … */`,
+    // silently dropping the dialog AND its content — and the comment described a
+    // shape the author hadn't written.  `emitModal` still emits its own
+    // explanatory comment when neither shape matches.
+    if (!formChild || trigger?.kind !== "call") return null;
     const ofArg = namedArg(formChild, "of");
     const opArg = namedArg(formChild, "op");
     const agg = ofArg?.kind === "ref" ? ctx.aggregatesByName.get(ofArg.name) : undefined;

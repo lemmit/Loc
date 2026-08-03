@@ -172,8 +172,8 @@ const PROBES: readonly Probe[] = [
  *  A waiver is a stated gap, never a silent one, and the list only shrinks.
  *  Deleting a line is how the gap closes. */
 const WAIVERS: Readonly<Record<string, string>> = {
-  "flutter:modalTitle":
-    "Flutter has no `primitive-modal-controlled` renderer (it ships the OP-DIALOG Modal and the forms themselves — only the `open:` shape is missing). No longer silent: `loom.modal-unsupported-target` rejects it at compile time",
+  // (empty — every target renders every slot.  Keep the mechanism: a new pack or
+  // frontend that can't express one states it here, with a reason.)
 };
 
 // --- harness ---------------------------------------------------------------

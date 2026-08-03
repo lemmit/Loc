@@ -834,14 +834,21 @@ function emitControlledModal(
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   // Children = the modal body (every positional except the op-form, which this
-  // shape doesn't have).
-  const childrenJsx = positionalArgs(call)
-    .map((c) => walk(c, ctx, depth + 1))
-    .join(`\n${indent}`);
+  // shape doesn't have).  Joined with the target's `interChildSeparator`, like
+  // every other container primitive: JSX children juxtapose (empty separator),
+  // but a Dart `<Widget>[…]` list needs the commas, and this emitter was the one
+  // container that hardcoded the JSX assumption.
+  const children = positionalArgs(call).map((c) => walk(c, ctx, depth + 1));
+  const childrenJsx = children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`);
   return renderPrimitive(ctx, "primitive-modal-controlled", {
     opened: stateName,
     setter,
     hasTitle,
+    // `childrenBlock`/`hasChildren` are the names the procedural packs' shared
+    // container helpers read (`childrenList` on Flutter); `childrenJsx` is what
+    // the `.hbs` templates already interpolate.  Same content, both spellings.
+    childrenBlock: childrenJsx,
+    hasChildren: children.length > 0,
     // The `title` named slot is user-visible text: a plain literal translates
     // through `t()` under i18n (keyed to the `modalTitle` catalog slot), else
     // byte-identical.  `title` is the text-children form (shadcn/chakra/mui/…),
