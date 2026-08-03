@@ -243,4 +243,33 @@ describe("kafka log transport — elixir leg (M-T4.4 slice 8d)", () => {
       consumer.indexOf(":brod.start_link_group_subscriber_v2"),
     );
   });
+
+  it("waits for the partition ASSIGNMENT, not just the subscriber process", async () => {
+    // `start_link_group_subscriber_v2` returns as soon as the supervision
+    // tree is up; the group join runs asynchronously in the coordinator.
+    // A replica that reports ready before its join lands makes the group
+    // rebalance mid-flight, and a rebalance MOVES partitions between
+    // replicas: a partition key's events then split across two consumers,
+    // breaking the same-replica ordering the key exists to provide.
+    // (Observed on the .NET leg as `expected 2 to be 1` in
+    // channels-e2e-kafka's per-key ownership assertion.)
+    const files = await generateSystemFiles(FIXTURE);
+    const consumer = files.get("ship_api/lib/ship_api/kafka_consumer.ex") ?? "";
+
+    // brod creates one worker per ASSIGNED partition, so a non-empty worker
+    // map is the assignment — that is what start/4 blocks on.
+    // get_workers/1 only — brod does not export the 2-arity timeout variant,
+    // and `mix compile --warnings-as-errors` fails on the private call.
+    expect(consumer).toContain(":brod_group_subscriber_v2.get_workers(pid)");
+    expect(consumer).toContain("if map_size(workers) > 0 do");
+    expect(consumer).toContain("await_assignment(pid, 30_000, address)");
+    // Bounded and non-fatal: a broker that never assigns must not wedge boot.
+    expect(consumer).toContain("channel_subscribe_slow");
+    expect(consumer).toContain("defp await_assignment(_pid, remaining_ms, address)");
+    // The gate runs AFTER the subscriber starts, and start/4 still returns
+    // the {:ok, pid} its caller pattern-matches on.
+    expect(consumer.indexOf(":brod.start_link_group_subscriber_v2")).toBeLessThan(
+      consumer.indexOf("await_assignment(pid, 30_000, address)"),
+    );
+  });
 });

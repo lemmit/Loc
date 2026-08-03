@@ -107,6 +107,34 @@ describe("kafka log transport — java leg (M-T4.4 slice 8c)", () => {
     }
   });
 
+  it("waits for the partition ASSIGNMENT, not just the subscribe call", async () => {
+    // `subscribe` only records intent — the group join happens on the first
+    // `poll`, on the loop thread.  A replica that reports ready before its
+    // join lands makes the group rebalance mid-flight, and a rebalance MOVES
+    // partitions between replicas: a partition key's events then split
+    // across two consumers, breaking the same-replica ordering the key
+    // exists to provide.  (Observed on the .NET leg as `expected 2 to be 1`
+    // in channels-e2e-kafka's per-key ownership assertion; the Java client
+    // documents the same lazy-join semantics.)
+    const files = await generateSystemFiles(FIXTURE);
+    const mod = find(files, "ship_api", "KafkaChannelTransport.java");
+    expect(mod).toContain("new ConsumerRebalanceListener()");
+    expect(mod).toContain(
+      "public void onPartitionsAssigned(Collection<TopicPartition> partitions)",
+    );
+    expect(mod).toContain("assigned.countDown();");
+    // The await is what makes it a gate — the listener alone changes nothing.
+    expect(mod).toContain("if (!assigned.await(30, TimeUnit.SECONDS))");
+    // ...and it is bounded, so a broker that never assigns cannot wedge boot.
+    expect(mod).toContain('"channel_subscribe_slow"');
+    // The gate must sit in subscribe, after the loop is started and before
+    // the caller is released.
+    const loopAt = mod.indexOf("loops.add(loop);");
+    const gateAt = mod.indexOf("if (!assigned.await(30, TimeUnit.SECONDS))");
+    expect(loopAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeGreaterThan(loopAt);
+  });
+
   it("routes broadcast/log events through the outbox and stamps loomKey", async () => {
     const files = await generateSystemFiles(FIXTURE);
     // `log` retention is durable — the §5 split applies (the tee records

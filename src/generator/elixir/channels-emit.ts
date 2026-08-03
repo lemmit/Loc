@@ -1209,6 +1209,57 @@ defmodule ${appModule}.KafkaConsumer do
       # of the group in a rejoin ping-pong.
       group_config: [offset_commit_policy: :commit_to_kafka_v2, group_instance_id: :null]
     })
+    |> case do
+      {:ok, pid} ->
+        await_assignment(pid, 30_000, address)
+        {:ok, pid}
+
+      other ->
+        other
+    end
+  end
+
+  # Block until the group has ASSIGNED us partitions, not merely until the
+  # subscriber process started.  start_link_group_subscriber_v2 returns as
+  # soon as the supervision tree is up; the join happens asynchronously in
+  # the group coordinator, and brod creates one worker per assigned
+  # partition — so a non-empty worker map IS the assignment.
+  #
+  # A replica that reports ready before its join lands makes the group
+  # rebalance mid-flight, and a rebalance moves partitions between
+  # replicas: a partition key's events then split across two consumers,
+  # breaking the same-replica ordering the key exists to give.
+  #
+  # Bounded, and never fatal — a broker that never assigns must not wedge
+  # boot, and the subscriber keeps retrying the join either way.
+  defp await_assignment(_pid, remaining_ms, address) when remaining_ms <= 0 do
+    Logger.warning(
+      "channel_subscribe_slow address=#{address} error=no partition assignment within 30s"
+    )
+
+    :ok
+  end
+
+  defp await_assignment(pid, remaining_ms, address) do
+    workers =
+      try do
+        # get_workers/1 only — brod exports the 1-arity form; the 2-arity
+        # timeout variant is private.  The call is a gen_server:call that
+        # replies straight from the subscriber's state, and the 30s bound
+        # below is what keeps the WAIT bounded, not this call.
+        :brod_group_subscriber_v2.get_workers(pid)
+      catch
+        # The subscriber is still starting up (or died) — indistinguishable
+        # from "no workers yet" for our purposes.
+        _, _ -> %{}
+      end
+
+    if map_size(workers) > 0 do
+      :ok
+    else
+      Process.sleep(200)
+      await_assignment(pid, remaining_ms - 200, address)
+    end
   end
 
   @impl :brod_group_subscriber_v2
