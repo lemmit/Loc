@@ -413,6 +413,11 @@ const AUDIT_TABLE = `export const auditRecords = pgTable("audit_records", {
   targetType: text("target_type").notNull(),
   targetId: text("target_id").notNull(),
   actor: jsonb("actor"),
+  // NULLABLE like the shared MigrationsIR auditTableShape: a lifecycle action
+  // only has one side — create has no before, destroy has no after — and the
+  // writers pass null on exactly those paths.  On PGlite the Drizzle table IS
+  // the DDL (no migration runs), so a .notNull() here turns every audited
+  // create into a not-null violation that rolls the aggregate save back.
   before: jsonb("before"),
   after: jsonb("after"),
   at: timestamp("at", { withTimezone: true }).notNull(),

@@ -38,7 +38,9 @@ system AuditingSystem {
           status := reason
         }
         private operation recalc() {
-          quantity := quantity
+          // A literal self-assign (`quantity := quantity`) emits C# that fails
+          // CA2245 under /warnaserror — the body just needs to write a field.
+          quantity := quantity + 1
         }
         destroy { }
       }
