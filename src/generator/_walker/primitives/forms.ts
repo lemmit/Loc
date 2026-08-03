@@ -18,7 +18,13 @@ import {
 } from "../../_frontend/form-helpers.js";
 import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
-import { localizedNamedAttr, localizedNamedText, localizedNamedValue } from "../i18n-emit.js";
+import {
+  localizedPageChromeText,
+  localizedPageChromeValue,
+  localizedNamedAttr,
+  localizedNamedText,
+  localizedNamedValue,
+} from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
   addImport,
@@ -164,12 +170,19 @@ export function emitDestroyForm(
     ctx.usesNavigate = true;
     thenJs = `navigate(${JSON.stringify(`/${snake(plural(agg.name))}`)})`;
   }
-  const confirmMsg = JSON.stringify(`Delete this ${humanize(agg.name).toLowerCase()}?`);
+  // Both the prompt and the button label are user-visible English the EMITTER
+  // builds from the aggregate name, so neither the content-hash extraction pass
+  // (literals in the .ddd body) nor the pack-chrome slice (.hbs templates) ever
+  // saw them — they shipped untranslated on every frontend.  Now stable
+  // `chrome.*` keys with the entity name as an ICU hole.
+  const entityLower = { name: "entity", expr: JSON.stringify(humanize(agg.name).toLowerCase()) };
+  const entity = { name: "entity", expr: JSON.stringify(humanize(agg.name)) };
+  const confirmMsg = localizedPageChromeValue(ctx, "deleteConfirm", [entityLower]);
   const onClick = `() => { if (window.confirm(${confirmMsg})) void ${localVar}.mutateAsync(id ?? "").then(() => { ${thenJs}; }); }`;
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-destroy`;
   ctx.collectedTestids.add(testidNamespace);
   return renderPrimitive(ctx, "primitive-button", {
-    label: `Delete ${humanize(agg.name)}`,
+    label: localizedPageChromeText(ctx, "deleteEntity", [entity]),
     onClick,
     hasOnClick: true,
     disabled: undefined,
@@ -243,6 +256,10 @@ function emitFormOfOperationByName(
   if (opFormStateType) addImport(ctx, `../api/${lowerFirst(agg.name)}`, opFormStateType);
   ctx.formOfs.push({
     kind: "operation",
+    // Pack chrome the op-module TEMPLATE bakes in — resolved HERE because this
+    // is where a WalkContext exists (the page-shell that renders the template
+    // has only the state + pack).
+    cancelLabel: localizedPageChromeText(ctx, "cancel"),
     agg,
     op,
     bc,
@@ -731,6 +748,10 @@ function emitFormOfOperation(
   if (opFormStateType) addImport(ctx, `../api/${lowerFirst(agg.name)}`, opFormStateType);
   ctx.formOfs.push({
     kind: "operation",
+    // Pack chrome the op-module TEMPLATE bakes in — resolved HERE because this
+    // is where a WalkContext exists (the page-shell that renders the template
+    // has only the state + pack).
+    cancelLabel: localizedPageChromeText(ctx, "cancel"),
     agg,
     op,
     bc,
@@ -808,7 +829,8 @@ function emitControlledModal(
   const setter = `set${stateName[0]!.toUpperCase()}${stateName.slice(1)}`;
   // `hasTitle` gates the title block exactly as before — true only for a literal
   // `title:` (a dynamic/absent title is byte-identical to the pre-i18n path).
-  const hasTitle = stringNamed(call, "title") !== undefined;
+  // Presence is the ARG, not a literal — a dynamic `title:` still has text.
+  const hasTitle = namedArgValue(call, "title") !== undefined;
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   // Children = the modal body (every positional except the op-form, which this

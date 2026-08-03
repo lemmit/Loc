@@ -48,6 +48,14 @@ export const CHROME_MESSAGES: Record<string, string> = {
   // spells it spells it identically (unlike the nav-toggle pair, which packs
   // genuinely word differently and therefore keeps two keys).
   [chromeKey("selectPlaceholder")]: "Select…",
+  // Emitter-built chrome — user-visible English constructed in the WALKER (not
+  // in a pack template), so neither the extraction pass nor the pack-chrome
+  // `.hbs` slice ever saw it.  `{entity}` is the humanized aggregate name: a
+  // DSL identifier, so it stays as authored while the sentence around it
+  // translates (the alternative is leaving the whole sentence English).
+  [chromeKey("deleteEntity")]: "Delete {entity}",
+  [chromeKey("deleteConfirm")]: "Delete this {entity}?",
+  [chromeKey("cancel")]: "Cancel",
 };
 
 /** The source-language text for a chrome key, for an emitter building the
@@ -164,6 +172,15 @@ export const APP_SHELL_CHROME: Record<string, string> = {
  *  one phrase, while a missing one is a binding no locale can ever reach. */
 export const FORM_CHROME: Record<string, string> = {
   [chromeKey("selectPlaceholder")]: "Select…",
+  // The destroy button's label, its `window.confirm` prompt, and the op
+  // dialog's Cancel — all built in the EMITTER from model data, so neither the
+  // content-hash extraction pass nor the pack-chrome `.hbs` slice ever saw
+  // them.  They sit here rather than in `CHROME_BY_PRIMITIVE` for the same
+  // reason `selectPlaceholder` does: `DestroyForm`/`Modal` are form primitives,
+  // and a form must not FLIP i18n on for an app with no authored strings.
+  [chromeKey("deleteEntity")]: "Delete {entity}",
+  [chromeKey("deleteConfirm")]: "Delete this {entity}?",
+  [chromeKey("cancel")]: "Cancel",
 };
 
 /** Every chrome table merged into a catalog ONLY when the UI is already

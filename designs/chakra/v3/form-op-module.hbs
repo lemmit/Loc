@@ -41,7 +41,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
                     {{/if}}</VStack>
                 </Dialog.Body>
                 <Dialog.Footer>
-                  <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+                  <Button type="button" variant="ghost" onClick={onClose}>{{{cancelLabel}}}</Button>
                   <Button type="submit" colorPalette="brand" loading={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
                 </Dialog.Footer>
               </form>

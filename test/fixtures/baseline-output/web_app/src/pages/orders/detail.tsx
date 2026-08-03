@@ -60,7 +60,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
         />
 
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-addLine-submit">Add Line</Button>
         </Group>
       </Stack>
@@ -100,7 +100,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
       <Stack>
         <Text c="dimmed">This operation has no parameters.</Text>
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-confirm-submit">Confirm</Button>
         </Group>
       </Stack>
@@ -151,7 +151,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
         <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-op-update-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
 
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-update-submit">Update</Button>
         </Group>
       </Stack>

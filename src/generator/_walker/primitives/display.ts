@@ -13,6 +13,7 @@ import {
 } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
+  namedArgValue,
   numericNamed,
   positionalArgs,
   stringNamed,
@@ -104,7 +105,10 @@ export function emitDivider(
   // catalog slot), else byte-identical.  `label` is the text-children form
   // (mui/vuetify/shadcn*/flowbite render the label as element text); `labelAttr`
   // is the complete bound-attribute fragment (mantine's `<Divider label=…>`).
-  const hasLabel = stringNamed(call, "label") !== undefined;
+  // Presence is the ARG, not a literal: a dynamic `label: row.name` used to
+  // read as "no label" and render a bare rule, silently dropping the author's
+  // text.  The label/labelAttr values below already handle the dynamic form.
+  const hasLabel = namedArgValue(call, "label") !== undefined;
   return renderPrimitive(ctx, "primitive-divider", {
     label: localizedNamedText(call, ctx, "dividerLabel", "label", '""'),
     labelAttr: localizedNamedAttr(call, ctx, "dividerLabel", "label", "label"),
@@ -197,7 +201,8 @@ export function emitAlert(
   const color = stringNamed(call, "color");
   // `hasTitle` gates the title block exactly as before — true only for a literal
   // `title:` (a dynamic/absent title is byte-identical to the pre-i18n path).
-  const hasTitle = stringNamed(call, "title") !== undefined;
+  // Presence is the ARG, not a literal — a dynamic `title:` still has text.
+  const hasTitle = namedArgValue(call, "title") !== undefined;
   return renderPrimitive(ctx, "primitive-alert", {
     // Both the message and the `title` named slot are user-visible text: a plain
     // literal translates through `t()` under i18n (keyed to the catalog), else

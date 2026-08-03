@@ -1,7 +1,7 @@
 import type { ExprIR, OperationIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { preconditionsAsInvariants } from "../_frontend/zod-schemas.js";
-import { localizedNamedText } from "../_walker/i18n-emit.js";
+import { localizedNamedText, localizedPageChromeText } from "../_walker/i18n-emit.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
@@ -96,9 +96,14 @@ export function renderAngularModal(
   const formChild = positionalArgs(call).find(
     (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "OperationForm",
   );
-  if (!formChild) {
-    return ctx.target.renderComment("Modal: expected an OperationForm child");
-  }
+  // No OperationForm child → this is not the op-dialog shape.  Return null so
+  // the shared `emitModal` can try the STATE-CONTROLLED shape
+  // (`Modal { …, open: <state bool> }`) — Angular now ships that template on all
+  // three packs.  Claiming the primitive with a comment here is what made a
+  // controlled Modal degrade to `<!-- … -->` on Angular: silent content loss,
+  // and no diagnostic anywhere.  (`emitModal` still emits its own explanatory
+  // comment when neither shape matches.)
+  if (!formChild) return null;
   const resolved = resolveOpForm(formChild, ctx);
   if (!resolved) {
     return ctx.target.renderComment("Modal: could not resolve the OperationForm operation");
@@ -212,7 +217,7 @@ export function renderAngularModal(
     `${deep}<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}-form">`,
     ...[...fieldMarkup, ...parts.groupMarkup, ...parts.arrayMarkup].map((m) => `${deep}  ${m}`),
     `${deep}  ${formButton(ctx, { type: "submit", emphasis: "primary", label, attrs: ` [disabled]="${mutationVar}.isPending()" data-testid="${ns}-submit"` })}`,
-    `${deep}  <button ${cancelBtn} (click)='${openSig}.set(false)'>Cancel</button>`,
+    `${deep}  <button ${cancelBtn} (click)='${openSig}.set(false)'>${localizedPageChromeText(ctx, "cancel")}</button>`,
     `${deep}</form>`,
     `${deep}</div>`,
     `${inner}}`,

@@ -4,6 +4,7 @@
   "format": "angular",
   "stack": "ng1",
   "emits": {
+    "primitive-modal-controlled": "primitive-modal-controlled.hbs",
     "primitive-heading": "primitive-heading.hbs",
     "primitive-text": "primitive-text.hbs",
     "primitive-stack": "primitive-stack.hbs",

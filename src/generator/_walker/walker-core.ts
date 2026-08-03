@@ -876,6 +876,9 @@ export interface OperationFormState extends FormStateBase {
    *  every pack hardcoded before this slot was honoured at all. */
   modalTitle?: string;
   modalTitleExpr?: string;
+  /** The op-module template's Cancel button label, routed through the stable
+   *  `chrome.cancel` catalog key (the template can't reach a WalkContext). */
+  cancelLabel?: string;
   /** True when this is the aggregate's primary operation (first
    *  public op) — `false` for the rest.  Platform-neutral emphasis
    *  token; each pack's template maps it to its button vocabulary. */

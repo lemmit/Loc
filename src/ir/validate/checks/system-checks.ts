@@ -53,7 +53,7 @@ import {
   realtimeEventTypes,
 } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
-import { bodyUsesDataGrid } from "../../util/data-grid.js";
+import { bodyUsesControlledModal, bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -307,6 +307,54 @@ export function validateProjectionSourceProjectionBackend(
  *  the page would otherwise render an empty slot (or a "not supported" comment
  *  on HEEx) and the author would only find out by looking at the running app. */
 const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular", "feliz"]);
+
+/** Frontends that ship the STATE-CONTROLLED `Modal { …, open: <state bool> }`.
+ *
+ *  Every JSX/markup pack carries a `primitive-modal-controlled` template, Feliz
+ *  renders it procedurally (a daisyUI dialog), and HEEx has `.modal` — Flutter
+ *  is the one target that does not: its pack is a walking skeleton that ships no
+ *  dialogs or forms at all.
+ *
+ *  Before this check that gap was SILENT: the walker fell through to a generic
+ *  "expects trigger: Button(...) and an OperationForm child" comment, which
+ *  describes a DIFFERENT shape — so an author who wrote a perfectly valid
+ *  controlled Modal saw their page content vanish and was told to fix input that
+ *  was not wrong.  Same rule as `loom.datagrid-unsupported-target`: an
+ *  unrenderable primitive is a compile error, not a blank region. */
+const CONTROLLED_MODAL_FRAMEWORKS = new Set<string>([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "phoenixLiveView",
+]);
+
+/** `Modal { …, open: <state> }` on a frontend that can't render it. */
+export function validateControlledModalFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    if (!d.uiName) continue;
+    const fw = d.uiFramework ?? "";
+    if (CONTROLLED_MODAL_FRAMEWORKS.has(fw)) continue;
+    const ui = sys.uis.find((u) => u.name === d.uiName);
+    if (!ui) continue;
+    for (const page of ui.pages) {
+      if (!bodyUsesControlledModal(page.body)) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.modal-unsupported-target",
+        message:
+          `page '${page.name}' uses a state-controlled 'Modal { …, open: … }', which deployable ` +
+          `'${d.name}' can't render (frontend '${fw || "unknown"}'). Flutter ships the OP-DIALOG Modal ` +
+          `(an AlertDialog around an OperationForm) but no state-controlled one, so this modal — ` +
+          `and everything inside it — would silently not render. ` +
+          `Move the content out of the Modal, or host this page on a frontend that supports it ` +
+          `(react, vue, svelte, angular, feliz, phoenixLiveView).`,
+        source: `${ui.name}/${page.name}`,
+      });
+    }
+  }
+}
 
 /** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */
 export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {

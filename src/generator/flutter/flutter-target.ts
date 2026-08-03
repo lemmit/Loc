@@ -30,6 +30,7 @@
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
 import { DART_LEAVES, dartString, dartZeroValue } from "./dart-expr.js";
@@ -484,9 +485,15 @@ export const flutterTarget: WalkerTarget = {
       firstPositional?.kind === "literal" && firstPositional.lit === "string"
         ? firstPositional.value
         : humanize(op.name);
+    // The dialog title: the authored `Modal { title: … }` (already translated —
+    // the `modalTitle` catalog slot, D-I18N-ATTR), else the humanized op name,
+    // which is what this renderer hardcoded.  `localizedNamedValue` yields a
+    // Dart EXPRESSION either way, so it drops straight into `Text(…)`.
+    const title =
+      localizedNamedValue(call, ctx, "modalTitle", "title") ?? dartString(humanize(op.name));
     return (
       `ElevatedButton(onPressed: () => showDialog(context: context, ` +
-      `builder: (dialogContext) => AlertDialog(title: Text(${dartString(humanize(op.name))}), ` +
+      `builder: (dialogContext) => AlertDialog(title: Text(${title}), ` +
       `content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ${widget}(id: id))))), ` +
       `child: Text(${dartString(label)}))`
     );

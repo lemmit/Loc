@@ -172,14 +172,8 @@ const PROBES: readonly Probe[] = [
  *  A waiver is a stated gap, never a silent one, and the list only shrinks.
  *  Deleting a line is how the gap closes. */
 const WAIVERS: Readonly<Record<string, string>> = {
-  "angularMaterial:modalTitle":
-    "no Angular pack carries `primitive-modal-controlled`, so a state-controlled Modal degrades to a comment (pre-existing primitive gap, M-T1.14 tail)",
-  "primeng:modalTitle":
-    "same as angularMaterial — no `primitive-modal-controlled` on any Angular pack",
-  "spartanNg:modalTitle":
-    "same as angularMaterial — no `primitive-modal-controlled` on any Angular pack",
   "flutter:modalTitle":
-    "the Flutter pack is a walking skeleton that deliberately ships no forms, so its `primitive-modal-controlled` capability probe reads absent (src/generator/flutter/pack.ts)",
+    "Flutter has no `primitive-modal-controlled` renderer (it ships the OP-DIALOG Modal and the forms themselves — only the `open:` shape is missing). No longer silent: `loom.modal-unsupported-target` rejects it at compile time",
 };
 
 // --- harness ---------------------------------------------------------------

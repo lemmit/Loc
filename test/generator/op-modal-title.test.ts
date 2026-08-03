@@ -67,6 +67,8 @@ const TARGETS: ReadonlyArray<{ id: string; platform: string; pack: string }> = [
   { id: "shadcn", platform: "static", pack: "shadcn" }, // title in markup TEXT
   { id: "mui", platform: "static", pack: "mui" },
   { id: "chakra", platform: "static", pack: "chakra" },
+  { id: "vuetify", platform: "vue", pack: "vuetify" }, // title in a bound ATTRIBUTE
+  { id: "shadcnVue", platform: "vue", pack: "shadcnVue" },
   { id: "shadcnSvelte", platform: "svelte", pack: "shadcnSvelte" },
   { id: "flowbite", platform: "svelte", pack: "flowbite" },
   { id: "angularMaterial", platform: "angular", pack: "angularMaterial" },

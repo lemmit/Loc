@@ -22,7 +22,7 @@
             {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
             {{/each}}{{else}}<p class="text-sm text-muted-foreground">This operation has no parameters.</p>
             {{/if}}<div class="flex justify-end gap-2 pt-2">
-              <button type="button" class="loom-btn loom-btn-outline" onclick={() => { {{opCamel}}ModalOpen = false; }}>Cancel</button>
+              <button type="button" class="loom-btn loom-btn-outline" onclick={() => { {{opCamel}}ModalOpen = false; }}>{{{cancelLabel}}}</button>
               <button type="submit" class="loom-btn loom-btn-primary" disabled={ {{opCamel}}.isPending } data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</button>
             </div>
           </div>

@@ -150,7 +150,10 @@ describe("HEEx primitive — testid: on bespoke renderers", () => {
       phoenixSystem(`Alert("oops", color: "red", testid: "alert-x")`),
     );
     const heex = findLandingHeex(files);
-    expect(heex).toMatch(/<div class="alert alert-red"[^>]*data-testid="alert-x"/);
+    // `color: "red"` maps to the daisyUI modifier `alert-error`; the renderer
+    // used to splice the raw colour (`alert-red`), a class neither HEEx pack
+    // defines, so a coloured alert rendered unstyled.
+    expect(heex).toMatch(/<div class="alert alert-error"[^>]*data-testid="alert-x"/);
   });
 
   it("IdLink: data-testid on the link", async () => {

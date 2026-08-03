@@ -461,8 +461,12 @@ function primitiveBadge(c: Ctx): string {
  *  translator a string the app never shows.  Raw text with i18n off, an
  *  already-rendered `Html.text ((I18n.t …))` element with it on. */
 function primitiveDivider(c: Ctx): string {
-  if (!c.hasLabel) return `Html.div [ prop.className "divider" ]`;
-  return `Html.div [ prop.className "divider"; ${textOrChildren(String(c.label ?? ""))} ]`;
+  // `testid:` was dropped here, so the shared testid-driven page objects could
+  // not target a Divider on Feliz (every other primitive carries it).
+  const tid = testidProp(c);
+  const props = [`prop.className "divider"`, tid].filter(Boolean);
+  if (c.hasLabel) props.push(textOrChildren(String(c.label ?? "")));
+  return `Html.div [ ${props.join("; ")} ]`;
 }
 
 function primitiveButton(c: Ctx): string {

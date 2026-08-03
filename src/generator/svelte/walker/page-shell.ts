@@ -169,6 +169,11 @@ function renderFormOpWiring(state: OperationFormState, pack: LoadedPack): FormWi
     // which is what every pack hardcoded before the slot was honoured.  Two
     // spellings because packs render the title in both positions: markup text
     // (`<DialogTitle>`) and a JS prop (Mantine's `modals.open({ title })`).
+    // Pack chrome the TEMPLATE bakes in: routed through the stable
+    // `chrome.cancel` key so the catalog entry the extraction pass records for
+    // a Modal is actually USED (an unused entry is the same dead-catalog bug as
+    // an unrendered slot, seen from the other side).
+    cancelLabel: state.cancelLabel ?? "Cancel",
     modalTitle: state.modalTitle || humanize(op.name),
     modalTitleExpr: state.modalTitleExpr ?? JSON.stringify(humanize(op.name)),
     slug: snake(plural(agg.name)),

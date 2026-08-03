@@ -36,7 +36,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
               {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
               {{/each}}{{else}}<p className="text-sm text-muted-foreground">This operation has no parameters.</p>
               {{/if}}<div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>{{{cancelLabel}}}</Button>
                 <Button type="submit" disabled={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
               </div>
             </div>

@@ -23,3 +23,17 @@ export function bodyUsesDataGrid(body: ExprIR | undefined): boolean {
 export function uiUsesDataGrid(ui: UiIR): boolean {
   return ui.pages.some((p) => bodyUsesDataGrid(p.body));
 }
+
+/** True when a page body contains a STATE-CONTROLLED `Modal { …, open: … }`.
+ *
+ *  The op-dialog shape (`Modal { OperationForm(…), trigger: … }`) is a different
+ *  primitive with its own per-frontend support, so only the `open:`-bearing form
+ *  counts here. */
+export function bodyUsesControlledModal(body: ExprIR | undefined): boolean {
+  let found = false;
+  walkExprDeep(body, (e) => {
+    if (e.kind !== "call" || e.name !== "Modal") return;
+    if ((e.argNames ?? []).includes("open")) found = true;
+  });
+  return found;
+}

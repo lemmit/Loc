@@ -952,6 +952,23 @@ export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Wa
   return `<div class="skeleton" aria-hidden="true"${testidAttr}>\n${lines}\n</div>`;
 }
 
+/** A Loom `color:` → the daisyUI alert modifier.  The renderer used to emit the
+ *  raw colour (`alert-red`), which matches no class in either HEEx pack's CSS —
+ *  so a coloured alert rendered unstyled.  Mirrors the mapping the JSX packs and
+ *  the (vestigial) `primitive-alert.heex.hbs` templates already use. */
+function alertVariant(color: string): string {
+  switch (color) {
+    case "yellow":
+      return "alert-warning";
+    case "green":
+      return "alert-success";
+    case "blue":
+      return "alert-info";
+    default:
+      return "alert-error";
+  }
+}
+
 /** `Alert("message", title?)` → `<div class="alert">`.
  *
  *  `title:` is a USER-VISIBLE slot (`alertTitle` in `USER_VISIBLE_SLOTS`), so it
@@ -975,7 +992,7 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   }
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const titleEl = title ? `<p class="font-medium">${title}</p>` : "";
-  return `<div class="alert alert-${color}" role="alert"${testidAttr}>${titleEl}${message}</div>`;
+  return `<div class="alert ${alertVariant(color)}" role="alert"${testidAttr}>${titleEl}${message}</div>`;
 }
 
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
