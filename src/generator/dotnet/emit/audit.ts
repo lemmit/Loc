@@ -42,8 +42,12 @@ export function renderAuditRecord(ns: string): string {
       "    public string TargetType { get; set; } = default!;",
       "    public string TargetId { get; set; } = default!;",
       "    public string? Actor { get; set; }",
-      "    public string Before { get; set; } = default!;",
-      "    public string After { get; set; } = default!;",
+      // Nullable, matching `migrations-builder`: a `create` has no BEFORE
+      // state and a `destroy` has no AFTER state.  A non-nullable reference
+      // type is REQUIRED by EF convention, so `string` here made EF build a
+      // NOT NULL column that the writer's own null contradicts.
+      "    public string? Before { get; set; }",
+      "    public string? After { get; set; }",
       "    public DateTime At { get; set; }",
       "    public string Status { get; set; } = default!;",
       "    public string? CorrelationId { get; set; }",
@@ -97,11 +101,12 @@ export function renderAuditRecordConfiguration(ns: string): string {
  *  (Infrastructure/Persistence, holding the scoped AppDbContext).  `Stage`
  *  only `Add`s the row; the handler's `_repo.SaveAsync` commits it alongside
  *  the aggregate, so the audit trail is atomic with the state change. */
-export function renderAuditWriterInterface(ns: string): string {
+export function renderAuditWriterInterface(ns: string, usingDapper = false): string {
   return (
     lines(
       "// Auto-generated.",
       `using ${ns}.Infrastructure.Persistence;`,
+      usingDapper ? "using System.Collections.Generic;" : null,
       "",
       `namespace ${ns}.Application.Common;`,
       "",
@@ -111,6 +116,50 @@ export function renderAuditWriterInterface(ns: string): string {
       "public interface IAuditWriter",
       "{",
       "    void Stage(AuditRecord record);",
+      // Dapper has no unit of work to stage onto, so the buffer is explicit and
+      // the repository drains it inside its own transaction.  EF's sibling needs
+      // no such member — AppDbContext IS the buffer.
+      usingDapper ? "" : null,
+      usingDapper
+        ? "    /// <summary>Take and clear the staged records.  Called by the repository"
+        : null,
+      usingDapper
+        ? "    /// inside its open transaction, so audit rows commit with the state change.</summary>"
+        : null,
+      usingDapper ? "    IReadOnlyList<AuditRecord> Drain();" : null,
+      "}",
+    ) + "\n"
+  );
+}
+
+/** The Dapper `AuditWriter` — a request-scoped buffer.
+ *
+ *  The EF sibling stages onto `AppDbContext` and lets `SaveChangesAsync` flush
+ *  it; with Dapper there is no unit of work, so records accumulate here and the
+ *  repository's `SaveAsync` drains them onto its already-open transaction (the
+ *  same seam the provenance flush uses).  Atomicity is therefore identical:
+ *  audit rows and the aggregate write commit or roll back together. */
+export function renderDapperAuditWriter(ns: string): string {
+  return (
+    lines(
+      "// Auto-generated.  Dapper audit staging (persistence: dapper).",
+      "using System.Collections.Generic;",
+      `using ${ns}.Application.Common;`,
+      "",
+      `namespace ${ns}.Infrastructure.Persistence;`,
+      "",
+      "public sealed class AuditWriter : IAuditWriter",
+      "{",
+      "    private readonly List<AuditRecord> _staged = new();",
+      "",
+      "    public void Stage(AuditRecord record) => _staged.Add(record);",
+      "",
+      "    public IReadOnlyList<AuditRecord> Drain()",
+      "    {",
+      "        var drained = _staged.ToArray();",
+      "        _staged.Clear();",
+      "        return drained;",
+      "    }",
       "}",
     ) + "\n"
   );

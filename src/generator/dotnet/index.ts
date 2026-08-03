@@ -77,6 +77,7 @@ import {
   renderAuditRecordConfiguration,
   renderAuditWriter,
   renderAuditWriterInterface,
+  renderDapperAuditWriter,
 } from "./emit/audit.js";
 import { renderDotnetChannels } from "./emit/channels.js";
 import {
@@ -687,13 +688,19 @@ function emitProjectFromContexts(
   // adapters — the shared ProvLineage SDK + the co-located `<field>_provenance`
   // columns + the append-only `provenance_records` flush; the Dapper repository
   // flushes via raw Npgsql (DbSchema owns the history table's DDL) instead of
-  // the EF ProvenanceRecord POCO/configuration.  Audit stays EF-only.
+  // the EF ProvenanceRecord POCO/configuration.  Audit now follows exactly that
+  // shape.  It used to be EF-only (`!usingDapper && …`), but the handler
+  // emitters kept referencing `IAuditWriter` under Dapper while the runtime went
+  // unemitted — a dangling CS0246 on every audited operation, and create/destroy
+  // audit silently dropped.  It is emitted on both adapters now: Dapper stages
+  // into a request-scoped buffer the repository drains onto its open
+  // transaction, so the atomicity guarantee is the same on both.
   const hasProvenance = contextsHaveProvenance(contexts);
   // Audit table/writer/DbSet emission is gated on the SHARED predicate
   // (operations ∪ creates ∪ destroys) so a lifecycle-only-audited aggregate
   // — `create(...) audited` / `destroy audited` with no audited operation —
   // still gets the audit_records table + IAuditWriter seam.
-  const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedTarget);
+  const hasAudit = merged.aggregates.some(aggHasAuditedTarget);
   // Shape routing (shared by both persistence paths): document-shaped aggregates
   // persist as one JSONB blob table (Dapper) / DbSet<Document> (EF); embedded
   // ones fold each containment into a JSONB column (Dapper) / owned `.ToJson()`.
@@ -805,18 +812,6 @@ function emitProjectFromContexts(
         renderProvenanceRecordConfiguration(ns),
       );
     }
-    // Per-operation audit shared files — the append-only audit POCO/configuration
-    // + the IAuditWriter staging seam.  Per-handler before/after capture is
-    // emitted in cqrs/commands.ts.
-    if (hasAudit) {
-      out.set("Infrastructure/Persistence/AuditRecord.cs", renderAuditRecord(ns));
-      out.set(
-        "Infrastructure/Persistence/Configurations/AuditRecordConfiguration.cs",
-        renderAuditRecordConfiguration(ns),
-      );
-      out.set("Application/Common/IAuditWriter.cs", renderAuditWriterInterface(ns));
-      out.set("Infrastructure/Persistence/AuditWriter.cs", renderAuditWriter(ns));
-    }
     // Persisted workflow-correlation state POCOs + EF configs (one per
     // correlation-bearing workflow); the DbSet/ApplyConfiguration wiring is
     // inside renderDbContext above.  The saga tables live in the workflow's
@@ -866,6 +861,27 @@ function emitProjectFromContexts(
     if (merged.workflows.length > 0 || merged.projections.length > 0) {
       out.set("Infrastructure/Persistence/PersistencePorts.cs", renderPersistencePortAdapters(ns));
     }
+  }
+  // Per-operation audit shared files — the append-only audit POCO + the
+  // IAuditWriter staging seam.  Per-handler before/after capture is emitted in
+  // cqrs/commands.ts.  Emitted OUTSIDE the persistence if/else because both
+  // adapters need the port and the record: EF stages onto AppDbContext, Dapper
+  // buffers and lets the repository drain onto its transaction.
+  if (hasAudit) {
+    out.set("Infrastructure/Persistence/AuditRecord.cs", renderAuditRecord(ns));
+    // The EntityTypeConfiguration is EF-only — under Dapper the table's DDL is
+    // owned by DbSchema.cs, exactly as it is for provenance_records.
+    if (!usingDapper) {
+      out.set(
+        "Infrastructure/Persistence/Configurations/AuditRecordConfiguration.cs",
+        renderAuditRecordConfiguration(ns),
+      );
+    }
+    out.set("Application/Common/IAuditWriter.cs", renderAuditWriterInterface(ns, usingDapper));
+    out.set(
+      "Infrastructure/Persistence/AuditWriter.cs",
+      usingDapper ? renderDapperAuditWriter(ns) : renderAuditWriter(ns),
+    );
   }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the

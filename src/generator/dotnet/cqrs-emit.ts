@@ -87,9 +87,14 @@ export function emitCqrs(
   // The route-driving create is the ES `create` for an event-sourced aggregate,
   // else the canonical create; a named create has no route, so only the
   // route-driving action's `audited` flag matters (mirrors the Hono gate).
+  // Not gated on the persistence adapter: Dapper emits the audit runtime too
+  // (index.ts `hasAudit`), draining its staged buffer onto the repository's
+  // transaction.  Excluding Dapper here silently dropped create/destroy audit
+  // rows while the OPERATION handlers kept staging them — the two halves
+  // disagreed, and the operation half didn't even compile.
   const auditedCreateAction = esCreate ?? agg.canonicalCreate ?? null;
-  const auditCreate = !options?.usingDapper && !!auditedCreateAction?.audited;
-  const auditDestroy = !options?.usingDapper && !!agg.canonicalDestroy?.audited;
+  const auditCreate = !!auditedCreateAction?.audited;
+  const auditDestroy = !!agg.canonicalDestroy?.audited;
   if (aggHasCreate) {
     emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out, {
       emitValidator: !esCreate,
