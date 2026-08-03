@@ -23,6 +23,7 @@ on:
     paths:
       - '.github/workflows/**'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read

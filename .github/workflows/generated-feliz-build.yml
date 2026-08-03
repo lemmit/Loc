@@ -52,6 +52,7 @@ on:
       - 'scripts/feliz-authgate-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   workflow_dispatch:
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

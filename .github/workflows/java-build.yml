@@ -41,6 +41,7 @@ on:
       - 'test/e2e/generated-java-build.test.ts'
       - 'test/e2e/fixtures/java-build/**'
   workflow_dispatch:
+  merge_group:
 
 permissions:
   contents: read
