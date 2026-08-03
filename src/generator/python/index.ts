@@ -1133,7 +1133,10 @@ function renderMain(
     // broker-bound events to the broker; the consumer loop feeds received
     // envelopes into the same in-process dispatcher local reactors use.
     hasChannels ? "    init_channel_transports()" : null,
-    hasChannelConsumers ? "    _channel_consumers = start_channel_consumers()" : null,
+    // Awaited, not fired-and-forgotten: the lifespan reaches `yield` — which is
+    // what makes uvicorn start accepting requests — only once every binding is
+    // subscribed.  See the note in the channels module.
+    hasChannelConsumers ? "    _channel_consumers = await start_channel_consumers()" : null,
     // Durable-channel relay: at-least-once redelivery of `__loom_outbox`
     // rows, drained on a background task for the process lifetime.
     startsRelay ? "    _outbox_relay = start_outbox_relay()" : null,

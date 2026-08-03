@@ -57,7 +57,7 @@ system Acme {
 /** The `shipping_svc:` service block of a compose file. */
 function serviceBlock(compose: string, name: string): string {
   const lines = compose.split("\n");
-  const start = lines.findIndex((l) => l === `  ${name}:`);
+  const start = lines.indexOf(`  ${name}:`);
   if (start < 0) throw new Error(`no service '${name}' in compose`);
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((l) => /^ {2}\S/.test(l));
