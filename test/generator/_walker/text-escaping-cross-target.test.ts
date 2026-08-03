@@ -172,6 +172,7 @@ const NON_TEXT_PRIMITIVES: Record<string, string> = {
   // Structural / data / control — no caller text literal in text position.
   Table: "data grid — cell text comes from row bindings",
   DataGrid: "TanStack grid — headers/cells come from column defs + row bindings",
+  Chart: "recharts canvas — data flows through dataKey/series props, no text children",
   Column: "sub-element of Table",
   Tab: "sub-element of Tabs",
   Divider: "rule/separator — optional label handled separately",

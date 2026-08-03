@@ -65,13 +65,15 @@ const REGISTERED: Ratchet[] = [
     file: "test/generator/elixir/heex-parity.test.ts",
     name: "KNOWN_HEEX_GAPS",
     kind: "record",
-    // 1 = `DataGrid`.  Raised 0→1 deliberately: DataGrid is TanStack-backed
-    // and holds a CLIENT row model, which LiveView has no analogue for (every
-    // interaction would be a server round-trip, and multi-column ORDER BY has
-    // no backend support).  Phoenix is not left degraded — `Table` gained real
-    // server-driven sort + pagination on HEEx, and a DataGrid on a non-React
-    // frontend is a compile error (`loom.datagrid-unsupported-target`).
-    max: 1,
+    // 2 = `DataGrid` + `Chart`.  DataGrid is TanStack-backed and holds a
+    // CLIENT row model, which LiveView has no analogue for (every interaction
+    // would be a server round-trip, and multi-column ORDER BY has no backend
+    // support).  Chart (M-T1.3 Phase 4) is recharts-backed on react/mantine
+    // v9 only; a JS-free LiveView charting story is a Phase 5+ design
+    // (Chart.js hook), and a Chart on any non-react target is a compile
+    // error (`loom.chart-unsupported-target`).  Neither leaves Phoenix
+    // degraded silently — `Table` is the universal fallback for both.
+    max: 2,
   },
   // Per-backend corpus compile-tier skips (a widening gate FIXES the emitter
   // and drops the entry — see each file's header).
