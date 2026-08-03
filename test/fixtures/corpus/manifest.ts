@@ -108,8 +108,8 @@ export const CORPUS: readonly CorpusFeature[] = [
     // broken gate, not a measured gap.  Widening this row IS the definition of
     // "backend X now serves history", and the wire golden is the answer key it
     // must match.
-    backends: ["node", "python"],
-    note: "read path ships on node + python; dotnet/java/elixir write audit_records but expose no history endpoint (M-T3.9)",
+    backends: ["node", "python", "java"],
+    note: "read path ships on node + python + java; dotnet/elixir write audit_records but expose no history endpoint (M-T3.9)",
   },
   {
     id: "criterion-filter",

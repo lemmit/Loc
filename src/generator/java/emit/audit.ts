@@ -47,7 +47,7 @@ export function contextsHaveAudit(contexts: EnrichedBoundedContextIR[]): boolean
  *  Mirrors the Hono `audit_records` Drizzle table / the .NET AuditRecord
  *  column-for-column: snake_case columns, jsonb on the actor / before / after
  *  blobs, indexes on (target_type, target_id) + (correlation_id). */
-export function renderAuditRecordEntity(basePkg: string): string {
+export function renderAuditRecordEntity(basePkg: string, withHistory = false): string {
   return lines(
     `package ${basePkg}.infrastructure.persistence;`,
     ``,
@@ -123,6 +123,43 @@ export function renderAuditRecordEntity(basePkg: string): string {
     `    public String auditId() {`,
     `        return auditId;`,
     `    }`,
+    // Read-side accessors (docs/audit.md §3) — the entity-history mapper
+    // projects a row into an `AuditEntry` and derives the per-field diff from
+    // the two snapshots.  `before`/`after` stay `Object`: the columns are jsonb,
+    // and what Hibernate's JSON FormatMapper hands back is normalized once, in
+    // `AuditHistory`, rather than assumed here.
+    ...(withHistory
+      ? [
+          ``,
+          `    public String operationId() {`,
+          `        return operationId;`,
+          `    }`,
+          ``,
+          `    public String action() {`,
+          `        return action;`,
+          `    }`,
+          ``,
+          `    public Object actor() {`,
+          `        return actor;`,
+          `    }`,
+          ``,
+          `    public Object before() {`,
+          `        return before;`,
+          `    }`,
+          ``,
+          `    public Object after() {`,
+          `        return after;`,
+          `    }`,
+          ``,
+          `    public OffsetDateTime at() {`,
+          `        return at;`,
+          `    }`,
+          ``,
+          `    public String correlationId() {`,
+          `        return correlationId;`,
+          `    }`,
+        ]
+      : []),
     `}`,
     ``,
   );
@@ -130,17 +167,30 @@ export function renderAuditRecordEntity(basePkg: string): string {
 
 /** Spring Data port for the audit table — the application service persists
  *  the record through `save` inside its own @Transactional method, so the
- *  audit row commits with the aggregate's state change. */
-export function renderAuditRecordRepository(basePkg: string): string {
+ *  audit row commits with the aggregate's state change.
+ *
+ *  `withHistory` additionally declares the per-entity history query
+ *  (docs/audit.md §3): a derived finder over the `(target_type, target_id)`
+ *  pair the write side indexes, oldest-first — a timeline reads forwards, and
+ *  `at` plus that index make it the natural scan order. */
+export function renderAuditRecordRepository(basePkg: string, withHistory = false): string {
   return lines(
     `package ${basePkg}.infrastructure.persistence;`,
     ``,
+    withHistory ? `import java.util.List;` : null,
+    withHistory ? `` : null,
     `import org.springframework.data.jpa.repository.JpaRepository;`,
     ``,
     `/** The append-only audit history port.  The application service persists`,
     ` *  the record through this inside its own @Transactional method, so the`,
     ` *  audit row commits in the same transaction as the aggregate save. */`,
     `public interface AuditRecordRepository extends JpaRepository<AuditRecord, String> {`,
+    ...(withHistory
+      ? [
+          `    /** One entity's trail, oldest first (\`GET /<agg>/{id}/history\`). */`,
+          `    List<AuditRecord> findByTargetTypeAndTargetIdOrderByAtAsc(String targetType, String targetId);`,
+        ]
+      : []),
     `}`,
     ``,
   );

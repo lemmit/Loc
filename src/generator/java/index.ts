@@ -69,6 +69,12 @@ import {
   renderAuditRecordEntity,
   renderAuditRecordRepository,
 } from "./emit/audit.js";
+import {
+  contextsServeHistory,
+  renderJavaAuditEntry,
+  renderJavaAuditFieldChange,
+  renderJavaAuditHistorySupport,
+} from "./emit/audit-history.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
   AMQP_CLIENT_VERSION,
@@ -514,12 +520,29 @@ function emitProjectFromContexts(
   // The actor / before / after blobs ride jsonb columns, so the Hibernate JSON
   // FormatMapper config is forced on too (idempotent with provenance).
   const hasAudit = contextsHaveAudit(contexts);
+  // Entity history (docs/audit.md §3) — the READ side of that trail.  Driven by
+  // the enrichment-derived `historyFind` (which sits BESIDE `finds`, carrying
+  // the inherited `requires` gate + `ignoring` stance) rather than by
+  // re-deriving "is this audited" here, so the endpoint's authorization cannot
+  // drift from the aggregate's list read.
+  const servesHistory = contextsServeHistory(contexts);
   if (hasAudit) {
-    place("AuditRecord.java", "infra-persistence", renderAuditRecordEntity(basePkg));
-    place("AuditRecordRepository.java", "infra-persistence", renderAuditRecordRepository(basePkg));
+    place("AuditRecord.java", "infra-persistence", renderAuditRecordEntity(basePkg, servesHistory));
+    place(
+      "AuditRecordRepository.java",
+      "infra-persistence",
+      renderAuditRecordRepository(basePkg, servesHistory),
+    );
     if (!hasProvenance) {
       place("LoomJsonFormatMapperConfig.java", "config", renderJsonFormatMapperConfig(basePkg));
     }
+  }
+  // The shared history wire records + read-time helpers.  Shape-only: no
+  // aggregate knowledge, so one copy serves every audited aggregate.
+  if (servesHistory) {
+    place("AuditFieldChange.java", "api-common", renderJavaAuditFieldChange(basePkg));
+    place("AuditEntry.java", "api-common", renderJavaAuditEntry(basePkg));
+    place("AuditHistory.java", "api-common", renderJavaAuditHistorySupport(basePkg));
   }
 
   // Lifecycle-stamp auditing (capability-stamp-dedup-simulation.md §5): any

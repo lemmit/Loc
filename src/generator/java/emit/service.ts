@@ -8,6 +8,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
@@ -19,6 +20,12 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import {
+  javaAuditApiPkg,
+  javaHistoryFind,
+  renderJavaHistoryMapper,
+  renderJavaHistoryServiceMethod,
+} from "./audit-history.js";
 import {
   declaredFinds,
   isPagedAutoAll,
@@ -203,6 +210,21 @@ export function renderJavaService(
           ``,
         ]),
   ];
+  // Entity history (docs/audit.md §3) — `GET /{id}/history`, served from
+  // `audit_records`.  The gate lives on the controller (403 before any query);
+  // this is guard (2) reachability + guard (3) the per-caller mask.
+  const historyFind = javaHistoryFind(repo);
+  const historyLines = historyFind ? renderJavaHistoryServiceMethod(agg, idClass) : [];
+  const historyMapperLines = historyFind ? renderJavaHistoryMapper(agg) : [];
+  // A masked aggregate's mapper reads the ambient principal off the STATIC
+  // accessor (fail-closed) — the same binding `<Agg>Response.fromMasked` uses,
+  // so it needs the `User` / `CurrentUserAccessor` imports even when nothing
+  // else on this service threads a principal.
+  const historyMasks = !!historyFind && maskedHistoryFields(agg).length > 0;
+  if (historyFind) {
+    imports.add("java.util.ArrayList");
+    imports.add(`${ctx.basePkg}.domain.common.AggregateNotFoundException`);
+  }
   const findLines = declaredFinds(repo)
     .map((f) => unionFindAsOptionalTwin(f, agg.name))
     .flatMap((f) => {
@@ -477,9 +499,14 @@ export function renderJavaService(
       ? [...unionReturnNames].sort().map((u) => `import ${ctx.entityPkg}.${u};`)
       : []),
     ctx.domainRepoPkg !== ctx.pkg ? `import ${ctx.domainRepoPkg}.${agg.name}Repository;` : null,
-    needsUserAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
-    needsUserAccessor ? `import ${ctx.basePkg}.auth.User;` : null,
+    needsUserAccessor || historyMasks ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
+    needsUserAccessor || historyMasks ? `import ${ctx.basePkg}.auth.User;` : null,
     anyAudited ? `import ${ctx.basePkg}.config.RequestContext;` : null,
+    // Entity history — the shared wire records + read-time helpers
+    // (`api-common`, so one copy serves every audited aggregate).
+    historyFind ? `import ${javaAuditApiPkg(ctx.basePkg)}.AuditEntry;` : null,
+    historyFind ? `import ${javaAuditApiPkg(ctx.basePkg)}.AuditFieldChange;` : null,
+    historyFind ? `import ${javaAuditApiPkg(ctx.basePkg)}.AuditHistory;` : null,
     anyAudited ? `import ${ctx.basePkg}.infrastructure.persistence.AuditRecord;` : null,
     anyAudited ? `import ${ctx.basePkg}.infrastructure.persistence.AuditRecordRepository;` : null,
     declaredFinds(repo).some(isPagedFind) || isPagedAutoAll(repo)
@@ -512,6 +539,8 @@ export function renderJavaService(
     ``,
     ...createLines,
     ...readLines,
+    ...historyLines,
+    ...historyMapperLines,
     ...findLines,
     ...opLines,
     ...canLines,
