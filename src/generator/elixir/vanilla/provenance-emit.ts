@@ -217,9 +217,13 @@ end
 `;
 }
 
-/** The ALTER TABLE (co-located columns) + CREATE TABLE (history) migration.
- *  The history table lands in `public` (a cross-context global); each ALTER
- *  carries the owning aggregate's `prefix:` so it targets the right schema. */
+/** The ALTER TABLE (co-located columns) migration — each ALTER carries the
+ *  owning aggregate's `prefix:` so it targets the right schema.  The
+ *  `provenance_records` history table is NOT created here: it is a shared
+ *  MigrationsIR companion table (`provenanceTableShape`), rendered by
+ *  `elixir/migrations-emit.ts` like the outbox and the audit log — and skipped
+ *  in that emitter's `timestamps()` bundling, since the flush inserts plain
+ *  maps and a NOT NULL `inserted_at` would reject every provenanced write. */
 function renderProvenanceMigration(
   appModule: string,
   provAggs: Array<{ agg: AggregateIR; fields: FieldIR[]; schema?: string }>,
@@ -236,23 +240,6 @@ function renderProvenanceMigration(
 
   def change do
 ${alters.join("\n\n")}
-
-    create table(:provenance_records, primary_key: false) do
-      add :trace_id, :string, primary_key: true, null: false
-      add :snapshot_id, :string, null: false
-      add :target_type, :string, null: false
-      add :field, :string, null: false
-      add :inputs, :map, null: false
-      add :computed_value, :map
-      add :at, :utc_datetime, null: false
-      add :correlation_id, :string
-      add :scope_id, :string
-      add :actor_id, :string
-      add :parent_id, :string
-    end
-
-    create index(:provenance_records, [:target_type, :field])
-    create index(:provenance_records, [:correlation_id])
   end
 end
 `;

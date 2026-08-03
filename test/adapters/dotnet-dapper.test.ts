@@ -1276,10 +1276,17 @@ system D {
     expect(
       files.has("api/Infrastructure/Persistence/Configurations/ProvenanceRecordConfiguration.cs"),
     ).toBe(false);
-    // DbSchema owns the history table + co-located column DDL.
+    // DbSchema owns the history table + co-located column DDL — the Dapper path
+    // emits no migration FILES, so this bootstrap is the only thing that creates
+    // the table.  It renders the SHARED MigrationsIR shape
+    // (`provenanceTableShape`, reaching this emitter as data off the snapshot)
+    // rather than the hand-written mirror it used to carry, so it now also gets
+    // the `correlation_id` index — and `IF NOT EXISTS` throughout, since
+    // DbSchema re-runs on every startup.
     const schema = files.get("api/Infrastructure/Persistence/DbSchema.cs")!;
     expect(schema).toContain("total_provenance jsonb");
-    expect(schema).toContain("CREATE TABLE IF NOT EXISTS provenance_records (");
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS ""provenance_records""');
+    expect(schema).toContain('CREATE INDEX IF NOT EXISTS ""provenance_records_correlation_idx""');
   });
 });
 

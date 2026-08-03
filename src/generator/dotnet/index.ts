@@ -727,6 +727,16 @@ function emitProjectFromContexts(
         docAggSet,
         embAggSet,
         dapperWorkflowDdl,
+        // The shared `provenance_records` shape, read off the MigrationsIR
+        // snapshot this deployable was handed.  The Dapper path emits no
+        // migration FILES (DbSchema self-applies instead), but it still gets the
+        // IR, so the bootstrap renders the one shared definition rather than a
+        // hand-written mirror of it.  Absent when the module has no provenanced
+        // field — or when another deployable owns this module's migrations, in
+        // which case that owner's migration creates the table.
+        (system?.migrations ?? [])
+          .flatMap((m) => m.next.tables)
+          .find((t) => t.name === "provenance_records"),
       ),
     );
     // Workflow / saga / event-store / projection port adapters + the reused

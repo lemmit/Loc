@@ -147,13 +147,24 @@ describe("vanilla provenance runtime (DEBT-06)", () => {
     expect(prov).toContain("count: length(rows)");
   });
 
-  it("emits the schema-prefixed ALTER + the history CREATE migration", async () => {
-    const mig = file(await generateSystemFiles(SOURCE), "_create_provenance.exs");
+  it("emits the schema-prefixed ALTER; the history table comes from MigrationsIR", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const mig = file(files, "_create_provenance.exs");
     // The orders table lives in the `orders` schema — the ALTER must match.
     expect(mig).toContain('alter table(:orders, prefix: "orders") do');
     expect(mig).toContain("add :total_provenance, :map");
-    expect(mig).toContain("create table(:provenance_records, primary_key: false) do");
-    expect(mig).toContain("create index(:provenance_records, [:target_type, :field])");
+    // The history table's DDL moved to the shared MigrationsIR
+    // (`provenanceTableShape`), so it is rendered by the ordinary Ecto
+    // migration emitter — including BOTH indexes, and deliberately WITHOUT the
+    // bundled `timestamps()` (the flush inserts plain maps via `insert_all`, so
+    // a NOT NULL `inserted_at` would reject every provenanced write and roll
+    // the aggregate save back with it).
+    expect(mig).not.toContain("create table(:provenance_records");
+    const created = file(files, "_create_provenance_records.exs");
+    expect(created).toContain("create table(:provenance_records, primary_key: false) do");
+    expect(created).toContain("create index(:provenance_records, [:target_type, :field])");
+    expect(created).toContain("create index(:provenance_records, [:correlation_id])");
+    expect(created).not.toContain("timestamps()");
   });
 
   it("is gated: no provenance files/capture when no field is provenanced", async () => {
