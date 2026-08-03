@@ -168,6 +168,18 @@ export const SPECS = {
   // named-arg editor already handles; it has no lambda slots of its own (the
   // per-column accessors ride the `Column` children, as with Table).
   DataGrid: { kind: "container", named: [{ key: "rows", kind: "expr" }] },
+  // Chart binds a grouped projection (`of:`) with x/y accessor lambdas and a
+  // literal kind — all four are expression-shaped named args, no children
+  // (M-T1.3 Phase 4; react + mantine v9, gated elsewhere).
+  Chart: {
+    kind: "leaf",
+    named: [
+      { key: "kind", kind: "expr" },
+      { key: "of", kind: "expr" },
+      { key: "x", kind: "expr" },
+      { key: "y", kind: "expr" },
+    ],
+  },
   Column: { kind: "container", positional: ["header"] },
   // QueryView wraps a `of:` query expression and renders one of its
   // loading/error/empty/data branches — each a nested node (data: is often a

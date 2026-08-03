@@ -106,9 +106,10 @@ import {
   renderToolbar as renderToolbarHeex,
 } from "../elixir/heex-walker.js";
 import type { A11yContract } from "./a11y.js";
-import { emitCodeBlock } from "./primitives/code-block.js";
 // Re-exported emitters from the React/TSX walker.  Each function
 // takes `(call, ctx, depth)` and returns the JSX fragment.
+import { emitChart } from "./primitives/chart.js";
+import { emitCodeBlock } from "./primitives/code-block.js";
 import { emitAction, emitButton, emitIdLink, emitQueryView } from "./primitives/controls.js";
 import { emitDataGrid } from "./primitives/data-grid.js";
 import {
@@ -516,6 +517,19 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     admissibleInSource: true,
     tsx: emitDataGrid,
     a11y: { role: "table", owns: "Column" },
+  },
+  // Kind-discriminated (line | bar) chart over a GROUPED query-time projection
+  // (M-T1.3 Phase 4).  react + mantine@v9 only for now — the pack matrix is
+  // the cost item, so it lands on the lead pack first behind an honest gate
+  // (`loom.chart-unsupported-target`).  `heex` is intentionally absent and
+  // pinned in heex-parity — the LiveView chart story (a Chart.js hook or a
+  // parity pin, no JS-free option) is Phase 5+ work, not a markup mapping.
+  // A chart is an image of data: `role="img"` + a derived `aria-label`.
+  Chart: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitChart,
+    a11y: { role: "img", needsName: true },
   },
   Money: {
     group: "layout",

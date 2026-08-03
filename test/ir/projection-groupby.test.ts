@@ -19,7 +19,10 @@ import {
   isSingletonProjection,
 } from "../../src/ir/types/loom-ir.js";
 import { groupedAggregates, wholeTableAggregates } from "../../src/ir/util/projection-aggregate.js";
-import { isFrontendReadableProjection } from "../../src/ir/util/projection-read.js";
+import {
+  isFrontendReadableProjection,
+  projectionReadShape,
+} from "../../src/ir/util/projection-read.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
 
@@ -82,7 +85,10 @@ describe("lowering the group by clause", () => {
     expect(isGroupedProjection(p)).toBe(true);
     // Grouped ⇒ many rows; still UNKEYED, but no longer the one-object read.
     expect(isSingletonProjection(p)).toBe(true);
-    expect(isFrontendReadableProjection(p)).toBe(false);
+    // Readable since M-T1.3 Phase 4 — the frontend client parses the LIST
+    // shape (`z.array` of the row), and `projectionReadShape` says "many".
+    expect(isFrontendReadableProjection(p)).toBe(true);
+    expect(projectionReadShape(p)).toBe("many");
   });
 
   it("splits keys from aggregates via groupedAggregates, with DECLARED wire types", async () => {
