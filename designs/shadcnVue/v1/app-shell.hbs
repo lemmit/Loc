@@ -70,7 +70,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
             <AlertDescription>\{{ appError.message }}</AlertDescription>
           </Alert>
           <div>
-            <Button variant="outline" @click="resetError">Back to home</Button>
+            <Button variant="outline" @click="resetError">{{{backToHomeText}}}</Button>
           </div>
         </div>
         <router-view v-else />

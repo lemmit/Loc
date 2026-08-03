@@ -313,6 +313,9 @@ export function prepareAppShellVM(
     // navigation"; each pack renders the token for the string it already spelt.
     openMenuAria: shellChromeAttr("aria-label", "openMenu", i18nEnabled),
     toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
+    // The recovery link, shared by the error boundary's button and the 404's
+    // anchor.  The 404's "← " prefix stays literal in the template.
+    backToHomeText: shellChromeText("backToHome", i18nEnabled),
   };
 }
 
@@ -320,7 +323,7 @@ export function prepareAppShellVM(
  *  default when `i18nEnabled` is false (byte-identical), else a
  *  `{t("chrome.<name>", "<default>")}` JSX interpolation keyed to the merged
  *  `APP_SHELL_CHROME` catalog. */
-function shellChromeText(name: string, i18nEnabled: boolean): string {
+export function shellChromeText(name: string, i18nEnabled: boolean): string {
   const english = APP_SHELL_CHROME[chromeKey(name)]!;
   return i18nEnabled
     ? `{t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`

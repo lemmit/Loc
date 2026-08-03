@@ -163,6 +163,10 @@ export interface AppShellVM {
    *  matches the string it already carried, so i18n-off stays byte-identical. */
   openMenuAria?: string;
   toggleNavAria?: string;
+  /** The "Back to home" recovery link, shared by the error boundary's button and
+   *  the 404 page's anchor.  The 404's `← ` prefix is decoration the template
+   *  keeps outside the token, so i18n-off still renders `← Back to home`. */
+  backToHomeText?: string;
 }
 
 /** A named-layout wrapper view-model.  Each slot's JSX is the

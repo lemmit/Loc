@@ -50,7 +50,7 @@ class AppErrorBoundary extends React.Component<
                 window.location.assign("/");
               }}
             >
-              Back to home
+              {t("chrome.backToHome", "Back to home")}
             </Button>
           </Group>
         </Stack>
@@ -64,7 +64,7 @@ function NotFound() {
   return (
     <Stack data-testid="not-found" p="md">
       <Title order={2}>{t("chrome.notFound", "Not found")}</Title>
-      <Anchor component={RouterLink} to="/">← Back to home</Anchor>
+      <Anchor component={RouterLink} to="/">← {t("chrome.backToHome", "Back to home")}</Anchor>
     </Stack>
   );
 }
