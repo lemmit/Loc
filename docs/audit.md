@@ -75,11 +75,92 @@ complete history of *changes*, and never as a complete history of *access*.
 
 ## 3. Reading history
 
-*(This section lands with the read-path slices on this branch.)*
+An `audited` aggregate automatically serves its own change history:
 
-## Status on this branch
+```
+GET /<aggregates>/{id}/history  →  AuditEntry[]
+```
 
-- [ ] Slice 1 — `AuditEntry` wire shape, derived `find history(id)`, `GET /<agg>/{id}/history` on Hono, wire golden
-- [ ] Slice 2 — authorization: mask composition, inherited read gate, tenancy filters
-- [ ] Slice 3 — .NET, Java, Python, Elixir against the golden
-- [ ] Slice 4 — `Timeline` walker primitive + scaffolded History tab
+Nothing is declared for it. Enrichment derives a `find history(id)` onto the
+aggregate's repository — the auto-`findAll` analog, in the same pure pass — and
+each backend serves it from `audit_records`.
+
+### The entry shape
+
+```jsonc
+[
+  {
+    "auditId": "…",
+    "at": "2026-08-03T05:19:50.554Z",
+    "action": "cancel",
+    "operationId": "cancelOrder",
+    "actor": { "…": "the principal, as recorded at command time" },
+    "correlationId": "…",
+    "changes": [
+      { "field": "status", "before": 0, "after": 7 }
+    ]
+  }
+]
+```
+
+Entries are ordered oldest-first — a timeline reads forwards, and `at` plus the
+`(target_type, target_id)` index make it the natural scan order.
+
+### `changes` is derived, not stored
+
+The diff is computed **at read time** by comparing the entry's two snapshots.
+Nothing about it is persisted: a stored diff is a cache with no invalidation
+story, and the snapshots already contain everything it says.
+
+A field appears in `changes` only if it actually moved. In the example above,
+`cancel` also re-saved `reference` and `quantity` unchanged, and neither is
+listed — a field that did not move is not a change. A `create` has no `before`,
+so every field reads `null → value`; a `destroy` has no `after`.
+
+**Managed and token fields are excluded.** `after` is captured *post-save*, so a
+lifecycle stamp (`auditable`'s `updatedAt` / `updatedBy`) and the `versioned`
+counter differ on every single entry. Left in, they would be most of the
+timeline and would bury the change the reader came for. The surviving set is
+exactly what a caller can influence — which is what "what changed" means. Also
+excluded, and for a stronger reason: `internal` and `secret` fields, which the
+snapshot holds but no API read may disclose.
+
+### Authorization
+
+The snapshots are written server-side **inside the command's transaction**,
+where there is no caller to mask against. They therefore hold **raw, unmasked**
+values for every field. History is a read surface over already-collected
+unmasked data, so each guard the entity read has is re-established on it
+explicitly:
+
+| Guard | How history gets it |
+|---|---|
+| **Read gate** | The synthesized find copies the aggregate's list read (`find all`) `requires` gate. Fails → `403`, before any query runs. Under `enforcement: denyByDefault`, an audited aggregate with an ungated list read is a compile error (`loom.audit-history-ungated`) — declare the gate on `find all` and history inherits it. |
+| **Capability filters** (`tenantOwned`, and any `filter` capability) | `audit_records` is machinery: it carries `target_type`/`target_id` and **no tenant column**, so there is nothing on it for a query-filter to scope. Scoping rides the **entity** instead — the handler resolves the row through `findById`, which already carries every capability predicate. A row the caller cannot read yields `404`, the same answer the entity read gives, so history discloses nothing about another tenant's rows, not even their existence. The find's `ignoring` stance is copied from the list read too, so widening one widens both. |
+| **`mask unless`** | The same predicate composes into every entry. |
+
+#### A masked field's change is dropped, not redacted
+
+When the caller fails a field's `mask unless` predicate, that field's
+`FieldChange` is **omitted from `changes` entirely** — not emitted with a
+redacted value.
+
+A redacted-but-present entry would still disclose *that* the field changed,
+*when*, and *by whom*. "The admin changed `salary` on the 3rd" is itself the
+leak; the number is only part of it. Masking is fail-closed: an unauthenticated
+caller has a null principal, so every masked field's entries drop.
+
+#### Why the raw snapshots are not exposed
+
+`AuditEntry` carries the derived `changes` list and not the `before`/`after`
+blobs. Publishing them whole would need a recursive redaction pass over
+arbitrary JSON with no schema to guarantee it reached every masked key. The
+field-keyed diff is a typed projection where the masking rule is exact and
+checkable. Point-in-time state reconstruction ("time travel") is a separate
+feature and would need its own authorization story.
+
+### What history does *not* answer
+
+Only **successful** commands are recorded (§2). A denied, failed, or
+precondition-tripped command leaves no row. Read a timeline as a complete
+history of *changes*, never as a complete history of *access* or of *attempts*.

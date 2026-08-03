@@ -18,6 +18,7 @@ import {
   buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
 import { addTsExtensionsForNodeDebug } from "../../../generator/typescript/debug-imports.js";
+import { renderAuditHistoryModule } from "../../../generator/typescript/emit/audit-history.js";
 import {
   aggregateIsAudited,
   renderAuditStampHelper,
@@ -916,6 +917,14 @@ export function generateTypeScriptForContexts(
     if (audited.length > 0) {
       out.set("db/audit-stamp.ts", renderAuditStampHelper(audited));
     }
+  }
+  // Entity history (docs/audit.md) — the shape + helpers the per-aggregate
+  // history mappers call.  Carries no aggregate knowledge, so one copy serves
+  // every audited aggregate; emitted whenever any served repository carries the
+  // enrichment-derived history read, which is the same condition the route
+  // builder gates its import on.
+  if (emitAudit && contexts.some((c) => c.repositories.some((r) => r.historyFind !== undefined))) {
+    out.set("audit/history.ts", renderAuditHistoryModule());
   }
   // Per-module Postgres migrations + Drizzle journal — emitted whenever
   // the system orchestrator hands us a migrations slice.  Empty slice

@@ -1,0 +1,99 @@
+{
+  "case": "audited",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/orders/{id}/cancel",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "quantity": 2,
+        "reference": "R1",
+        "status": 3,
+        "version": 2
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/orders/{id}/cancel",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders/{id}/history",
+      "status": 200,
+      "body": [
+        {
+          "action": "create",
+          "actor": null,
+          "at": "<timestamp>",
+          "auditId": "<volatile:key>",
+          "changes": [
+            {
+              "after": "R2",
+              "before": null,
+              "field": "reference"
+            },
+            {
+              "after": 5,
+              "before": null,
+              "field": "quantity"
+            },
+            {
+              "after": 0,
+              "before": null,
+              "field": "status"
+            }
+          ],
+          "correlationId": "<volatile:key>",
+          "operationId": "<volatile:key>"
+        },
+        {
+          "action": "cancel",
+          "actor": null,
+          "at": "<timestamp>",
+          "auditId": "<volatile:key>",
+          "changes": [
+            {
+              "after": 7,
+              "before": 0,
+              "field": "status"
+            }
+          ],
+          "correlationId": "<volatile:key>",
+          "operationId": "<volatile:key>"
+        }
+      ]
+    }
+  ]
+}

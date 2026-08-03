@@ -74,10 +74,12 @@ system AuditingSystem {
     port: 4000
   }
 
-  // Audit rows are never exposed on the operation response (the table has no
-  // read endpoint yet), so the runtime assertion here is that an audited
-  // command still behaves exactly like an unaudited one — the audit write must
-  // not change the response, and must not fail the request.
+  // Audit rows are not exposed on the operation response, so the runtime
+  // assertion here is that an audited command behaves exactly like an unaudited
+  // one — the audit write must not change the response, and must not fail the
+  // request.  The READ side lives in its own fixture (`audit-history.ddd`),
+  // declared for the backends that serve the read endpoint (node + python
+  // today; dotnet/java/elixir still write the trail but expose no route).
   // NOTE — `status: int = 0` is deliberately OMITTED from the create call
   // below: a `= default` field is optional create input, and the server
   // supplies the value. That used to hold on node/dotnet/java/python and fail
@@ -92,5 +94,23 @@ system AuditingSystem {
     let read = api.orders.getById(o)
     expect(read.reference).toBe("R1")
     expect(read.status).toBe(3)
+  }
+
+  // Entity history (docs/audit.md) — the read side of the trail the commands
+  // above wrote.  Two entries, oldest first: the `create`, then the `cancel`.
+  //
+  // The count is asserted here; the ENTRY CONTENT is pinned by the wire golden
+  // (`test/behavioral/wire-golden/audited.json`), which records the exact
+  // normalized response body every backend returns.  That is the right home for
+  // it — the golden is a reviewed answer key that all five backends diff
+  // against, so the derived diff (a `create` reading null → value for each
+  // field, then a `cancel` carrying ONLY `status`, because a field that did not
+  // move is not a change) becomes a cross-backend contract rather than one
+  // backend's self-assertion.
+  test e2e "entity history replays the commands that changed the row" against d {
+    let o = api.orders.create({ reference: "R2", quantity: 5, status: 0 })
+    api.orders.cancel(o, { reason: 7 })
+    let trail = api.orders.history(o)
+    expect(trail.length).toBe(2)
   }
 }

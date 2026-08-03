@@ -538,6 +538,18 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
     const idExpr = renderIdArg(args[0], ctx);
     return `await __get(\`\${base}${prefix}/${slug}/\${${idExpr}}\`)`;
   }
+  // Entity history (docs/audit.md) — the derived read over `audit_records`.
+  // Recognised like `getById` rather than through `findRepoQuery`, because the
+  // history find deliberately sits beside `finds` (see `RepositoryIR.historyFind`)
+  // and its path carries the id as a segment, not a query param.
+  if (call.method === "history") {
+    if (args.length < 1) {
+      throw new Error(`e2e: api.${call.aggregateSlug}.history(id) requires an id argument`);
+    }
+    const idExpr = renderIdArg(args[0], ctx);
+    return `await __get(\`\${base}${prefix}/${slug}/\${${idExpr}}/history\`)`;
+  }
+
   const op = agg.operations.find((o) => o.visibility === "public" && o.name === call.method);
   if (op) return renderOperationCall(op, slug, args, ctx);
 
@@ -549,7 +561,12 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
     ctx.contexts.flatMap((c) => c.repositories).find((r) => r.aggregateName === agg.name)?.finds ??
     []
   ).map((f) => f.name);
-  const known = ["create", "getById", ...ops, ...finds].join(", ");
+  const historyMethod = ctx.contexts
+    .flatMap((c) => c.repositories)
+    .find((r) => r.aggregateName === agg.name)?.historyFind
+    ? ["history"]
+    : [];
+  const known = ["create", "getById", ...historyMethod, ...ops, ...finds].join(", ");
   throw new Error(
     `e2e: unknown method 'api.${call.aggregateSlug}.${call.method}'. ` + `Available: ${known}.`,
   );

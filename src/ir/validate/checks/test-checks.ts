@@ -335,10 +335,22 @@ function checkMagicCall(
   const repo = contexts.flatMap((c) => c.repositories).find((r) => r.aggregateName === agg.name);
   const isFind = (repo?.finds ?? []).some((f) => f.name === method);
   if (isFind) return;
+  // Entity history (docs/audit.md): `api.<agg>.history(id)` → `GET
+  // /<agg>/{id}/history`.  Checked against `historyFind` rather than `finds` —
+  // the derived history read sits beside them (see `RepositoryIR.historyFind`),
+  // so an aggregate that is not `audited` has no history to call and the
+  // unknown-method error below is the right answer.
+  if (method === "history" && repo?.historyFind) return;
 
   const ops = agg.operations.filter((o) => o.visibility === "public").map((o) => o.name);
   const finds = (repo?.finds ?? []).map((f) => f.name);
-  const knownVerbs = ["create", "getById", ...ops, ...finds];
+  const knownVerbs = [
+    "create",
+    "getById",
+    ...(repo?.historyFind ? ["history"] : []),
+    ...ops,
+    ...finds,
+  ];
   diags.push({
     severity: "error",
     code: "loom.e2e-unknown-method",

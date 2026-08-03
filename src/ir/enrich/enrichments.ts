@@ -59,6 +59,7 @@ import type {
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { isShorthandProjection } from "../types/loom-ir.js";
+import { AUDIT_HISTORY_FIND, aggServesHistory, buildHistoryFind } from "../util/audit-history.js";
 import {
   buildDeepScopeFilter,
   buildDenyFilter,
@@ -695,7 +696,9 @@ export function enrichContext(
   // so the aggregate router does NOT auto-expose it (the queryHandler's own
   // route is the exposure).
   const repositories = synthesizePagedQueryHandlerFinds(
-    ensureFindAll(aggregates, ctx.repositories),
+    // `ensureHistoryFind` layers on top of `ensureFindAll` — it reads the `all`
+    // find's gate + `ignoring` stance, so the implicit `all` must exist first.
+    ensureHistoryFind(aggregates, ensureFindAll(aggregates, ctx.repositories)),
     ctx.queryHandlers,
     ctx.criteria,
   );
@@ -1739,6 +1742,56 @@ function ensureFindAll(
       };
       repo.finds = [all, ...repo.finds];
     }
+  }
+  return out;
+}
+
+/** Every AUDITED aggregate additionally gets an implicit `find history(id):
+ *  AuditEntry[]` — the per-entity read over the module's `audit_records` rows
+ *  (docs/audit.md).  Same slot and same rule as the auto-`findAll` above: a
+ *  synthesized addition in the one pure pass, and an author-declared find named
+ *  `history` wins.
+ *
+ *  ── The gate it inherits ────────────────────────────────────────────────
+ *  History is a read of the SAME rows the entity read covers, only replayed
+ *  over time, so it must be no easier to reach than that read.  It therefore
+ *  copies the aggregate's canonical list read (`all`) wholesale:
+ *
+ *    - `requires`   — the read gate, evaluated pre-query → 403.
+ *    - `bypassAll` / `bypassCaps` — the `ignoring` stance, so every capability
+ *      query-filter (`tenantOwned`'s tenant floor included) scopes history
+ *      exactly as it scopes the list, and an `ignoring` that widens the list
+ *      widens history identically rather than diverging silently.
+ *
+ *  Copying `all` rather than deriving a gate of its own is what keeps the two
+ *  surfaces from drifting: there is one place an author writes the aggregate's
+ *  read gate, and history is downstream of it by construction.  When `all`
+ *  carries NO gate, history carries none either — and under `denyByDefault`
+ *  that combination is a phase-⑦ error (`loom.audit-history-ungated`) rather
+ *  than a quietly-open timeline. */
+function ensureHistoryFind(
+  aggregates: EnrichedAggregateIR[],
+  existing: RepositoryIR[],
+): RepositoryIR[] {
+  const out = existing.map((r) => ({ ...r, finds: [...r.finds] }));
+  for (const agg of aggregates) {
+    // Abstract bases own no repository and emit no table (see `ensureFindAll`);
+    // they also carry no audited command of their own to trail.
+    if (agg.isAbstract) continue;
+    if (!aggServesHistory(agg)) continue;
+    const repo = out.find((r) => r.aggregateName === agg.name);
+    // `ensureFindAll` runs first and creates a repository for every concrete
+    // aggregate, so this is defensive rather than reachable.
+    if (!repo) continue;
+    // An author-declared `find history(...)` wins — same rule as `all`.  Their
+    // find keeps its own route; no `historyFind` is derived beside it, so the
+    // aggregate serves exactly one `history` read and it is theirs.
+    if (repo.finds.some((f) => f.name === AUDIT_HISTORY_FIND)) continue;
+    const listRead = repo.finds.find((f) => f.name === "all");
+    const history = buildHistoryFind(agg, listRead?.requires);
+    if (listRead?.bypassAll) history.bypassAll = true;
+    if (listRead?.bypassCaps) history.bypassCaps = [...listRead.bypassCaps];
+    repo.historyFind = history;
   }
   return out;
 }

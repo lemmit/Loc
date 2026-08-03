@@ -38,6 +38,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`domain-services.md`](domain-services.md) | `domainService` — stateless cross-aggregate pure calculators, the no-infra contract, and per-backend emission. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
 | [`stdlib.md`](stdlib.md) | The standard library — Layer-0 scalar intrinsics, collection operations, and the ambient prelude. Generated from the registries. |
+| [`audit.md`](audit.md) | `audited` — the append-only command trail, and the derived entity-history read (`GET /<agg>/{id}/history`): the read-time field diff, what it excludes, and how the read gate, capability filters and `mask unless` compose onto it. |
 | [`provenance.md`](provenance.md) | `provenanced` field modifier, the `ddd snapshot` capture step, and the Hono runtime trace SDK. |
 | [`observability.md`](observability.md) | The catalog envelope, per-backend log emission, the catalog extension surface. |
 | [`traceability.md`](traceability.md) | `requirement` / `solution` / `testCase` artefacts and the generated coverage report. |
