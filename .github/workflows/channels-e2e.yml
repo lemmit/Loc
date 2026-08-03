@@ -53,17 +53,23 @@ on:
   push:
     branches: [main]
     paths:
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
       - 'src/generator/_channels/**'
       - 'src/generator/typescript/emit/channels.ts'
       - 'src/generator/python/channels-builder.ts'
       - 'src/generator/dotnet/emit/channels.ts'
       - 'src/generator/java/emit/channels.ts'
       - 'src/generator/elixir/channels-emit.ts'
-      - 'src/util/channels.ts'
-      - 'src/language/validators/channel.ts'
-      - 'src/ir/validate/checks/system-checks.ts'
-      - 'src/ir/lower/lower-deployment.ts'
-      - 'src/system/**'
       - 'test/e2e/channels-e2e*.test.ts'
       - 'test/fixtures/corpus/channels-broker.ddd'
       - 'package.json'

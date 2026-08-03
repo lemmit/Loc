@@ -51,11 +51,17 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/macros/prelude.ts'
-      - 'src/language/validators/tenancy.ts'
-      - 'src/ir/validate/checks/tenancy-checks.ts'
-      - 'src/ir/util/tenant-stance.ts'
-      - 'src/ir/enrich/enrichments.ts'
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
       - 'src/generator/python/index.ts'
       - 'src/generator/java/emit/auth.ts'
       - 'src/generator/dotnet/emit/efcore.ts'

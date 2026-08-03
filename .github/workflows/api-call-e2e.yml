@@ -46,15 +46,19 @@ on:
   push:
     branches: [main]
     paths:
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
       - 'src/platform/hono/v4/adapters/api-client.ts'
       - 'src/generator/python/api-client.ts'
-      - 'src/ir/util/api-surface.ts'
-      - 'src/ir/util/api-resource-binding.ts'
-      - 'src/ir/util/foreign-ids.ts'
-      - 'src/util/resource-env.ts'
-      - 'src/ir/lower/lower.ts'
-      - 'src/ir/lower/lower-expr.ts'
-      - 'src/system/index.ts'
       - 'test/e2e/api-call-e2e.test.ts'
       - 'package.json'
       - '.github/workflows/api-call-e2e.yml'
