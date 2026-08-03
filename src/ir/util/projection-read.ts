@@ -28,23 +28,31 @@ import {
 
 /** True when a frontend can read this projection today.
  *
- *  Three conditions, all structural:
+ *  Two conditions, both structural:
  *
  *    QUERY-TIME — computed per read, so the backend serves it on a route.  A
  *      folded projection is materialized into a `<Proj>Row` table and read by
  *      key; that is a different route shape and a different binding.
- *    SINGLETON  — unkeyed, so the response is ONE object.  That is the shape a
- *      dashboard KPI reads, and the shape `QueryView`'s single-record mode
- *      already binds.  A keyed projection returns an array and wants
- *      `Table`-shaped binding.
- *    NOT GROUPED — a `group by` projection is unkeyed but returns the LIST
- *      shape (one row per group), so the singleton client's one-object parse
- *      would reject it.  Its binding is `Table`/chart-shaped (M-T1.3 Phase 4).
+ *    SINGLETON  — unkeyed, so the response has ONE shape per read: one object
+ *      for the whole-table aggregation (the dashboard KPI `QueryView`'s
+ *      single-record mode binds), or the LIST shape for a `group by`
+ *      projection (one row per group — the `Chart`/`Table`-shaped binding,
+ *      M-T1.3 Phase 4; `projectionReadShape` tells the two apart).  A keyed
+ *      projection returns an array parameterised by key and stays out.
  *
  *  All narrowings are honest gaps, not oversights — each is reported by
  *  `loom.ui-projection-read-unsupported` rather than mis-emitted. */
 export function isFrontendReadableProjection(p: ProjectionIR): boolean {
-  return isQueryTimeProjection(p) && isSingletonProjection(p) && !isGroupedProjection(p);
+  return isQueryTimeProjection(p) && isSingletonProjection(p);
+}
+
+/** The RESPONSE SHAPE a frontend read of this projection yields — `"one"`
+ *  object for the whole-table aggregation, `"many"` rows (a JSON array) for a
+ *  `group by` projection.  The client emitter, the walker's query-shape
+ *  derivation, and the validator all key their list-vs-object handling on this
+ *  one answer, same single-detector discipline as the readability predicate. */
+export function projectionReadShape(p: ProjectionIR): "one" | "many" {
+  return isGroupedProjection(p) ? "many" : "one";
 }
 
 /** Names of every frontend-readable projection across the given contexts. */
@@ -53,6 +61,19 @@ export function readableProjectionNames(contexts: Iterable<BoundedContextIR>): R
   for (const ctx of contexts) {
     for (const p of ctx.projections ?? []) {
       if (isFrontendReadableProjection(p)) names.add(p.name);
+    }
+  }
+  return names;
+}
+
+/** Names of every frontend-readable GROUPED projection (the `"many"` shape)
+ *  across the given contexts.  The `Chart` primitive's `of:` domain, and the
+ *  walker's list-vs-single discriminator for a projection read. */
+export function groupedProjectionNames(contexts: Iterable<BoundedContextIR>): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const ctx of contexts) {
+    for (const p of ctx.projections ?? []) {
+      if (isFrontendReadableProjection(p) && isGroupedProjection(p)) names.add(p.name);
     }
   }
   return names;

@@ -64,7 +64,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { readableProjectionNames } from "../../ir/util/projection-read.js";
+import { groupedProjectionNames, readableProjectionNames } from "../../ir/util/projection-read.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
@@ -464,6 +464,7 @@ export function walkBody(
     bcByAggregate,
     workflowsByName,
     projectionsByName: readableProjectionNames(new Set(bcByAggregate.values())),
+    groupedProjections: groupedProjectionNames(new Set(bcByAggregate.values())),
     bcByWorkflow,
     formOfs: [],
     // Shared opaque per-target sink.  Created ONCE on the root context (an
@@ -623,6 +624,11 @@ export interface WalkEnv {
    *  `QueryView`, so they have no projection read to resolve.  Absent ⇒ the
    *  detector's Pattern H is inert and the walk is byte-identical. */
   projectionsByName?: ReadonlySet<string>;
+  /** The GROUPED (`group by`) subset of `projectionsByName` — the reads whose
+   *  response is the LIST shape, one row per group (M-T1.3 Phase 4).  Drives
+   *  `queryShape`'s single-vs-list answer for a projection read and the
+   *  `Chart` primitive's binding.  Same optionality rationale as above. */
+  groupedProjections?: ReadonlySet<string>;
   /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
   /** Extern frontend functions declared on this ui

@@ -71,6 +71,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "Divider",
   "Table",
   "DataGrid",
+  "Chart",
   "Money",
   "DateDisplay",
   "EnumBadge",

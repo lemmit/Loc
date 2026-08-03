@@ -11,6 +11,7 @@ import {
   uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
+import { uiUsesChart } from "../../ir/util/chart.js";
 import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
@@ -436,7 +437,12 @@ export function generateReactForContexts(
     }
     out.set("src/lib/schemas.ts", schemas);
   }
-  out.set("package.json", renderShellFile("package-json", { usesMoney }, pack));
+  // `Chart` pulls in the pack's chart library (mantine v9: `@mantine/charts` +
+  // its recharts peer) only when some page/component actually renders one —
+  // same detect-once conditional-dep contract as `usesMoney` above.  Only the
+  // mantine v9 `package-json.hbs` references the flag today.
+  const usesChart = uiUsesChart(ui);
+  out.set("package.json", renderShellFile("package-json", { usesMoney, usesChart }, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
   out.set(

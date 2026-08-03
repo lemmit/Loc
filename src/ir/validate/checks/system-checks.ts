@@ -52,6 +52,7 @@ import {
   durableEventTypes,
   realtimeEventTypes,
 } from "../../util/channels.js";
+import { bodyUsesChart } from "../../util/chart.js";
 import { bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
@@ -328,6 +329,48 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
           `analogue). Use 'Table' — it supports column sort and pagination on every frontend, ` +
           `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
         source: `${ui.name}/${page.name}`,
+      });
+    }
+  }
+}
+
+/** `Chart` on a target that can't render it (M-T1.3 Phase 4).
+ *
+ *  Unlike `validateDataGridFramework` above, the membership rule is per-PACK,
+ *  not per-framework: `Chart` renders through the active design pack's
+ *  `primitive-chart` template plus a pack-specific chart dependency, and only
+ *  mantine v9 (the lead pack) ships both today.  Every other pack — shadcn,
+ *  mui, chakra, and every non-react framework — would crash codegen on the
+ *  missing template, so the gate keys on the deployable's fully-qualified
+ *  `design` (lowering resolves bareword `design: mantine` to `mantine@v9`).
+ *  Each pack backfill widens the set; the `REQUIRED_PRIMITIVES` flip retires
+ *  it (required-primitives.ts's staged policy). */
+const CHART_DESIGNS = new Set<string>(["mantine@v9"]);
+
+export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    if (!d.uiName) continue;
+    if (d.uiFramework === "react" && CHART_DESIGNS.has(d.design ?? "")) continue;
+    const ui = sys.uis.find((u) => u.name === d.uiName);
+    if (!ui) continue;
+    // Components render into pages, so a chart moved into one must not slip
+    // the gate — same body coverage as `validateUiProjectionReadFramework`.
+    const bodies: Array<{ what: string; body: ExprIR | undefined }> = [
+      ...ui.pages.map((p) => ({ what: `page '${p.name}'`, body: p.body })),
+      ...ui.components.map((c) => ({ what: `component '${c.name}'`, body: c.body })),
+    ];
+    for (const { what, body } of bodies) {
+      if (!bodyUsesChart(body)) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.chart-unsupported-target",
+        message:
+          `${what} uses 'Chart', which deployable '${d.name}' can't render ` +
+          `(frontend '${d.uiFramework ?? "unknown"}', design '${d.design ?? "none"}'). Chart ` +
+          `ships on react with the mantine@v9 design pack only for now (the staged pack ` +
+          `rollout). Host this ui there, or bind the grouped projection to 'Table' — it ` +
+          `renders the same rows on every frontend.`,
+        source: `${ui.name}/${what}`,
       });
     }
   }

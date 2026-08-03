@@ -268,8 +268,10 @@ function isDecimalLike(
   return base?.kind === "primitive" && (base.name === "money" || base.name === "decimal");
 }
 
-/** `o => o.sku` → `"sku"`.  Undefined for anything more complex. */
-function simpleAccessorField(accessor: ExprIR | undefined): string | undefined {
+/** `o => o.sku` → `"sku"`.  Undefined for anything more complex.  Shared with
+ *  `Chart` (chart.ts), whose `x:`/`y:` lambdas unwrap to accessor field
+ *  strings the same way a `Column` accessor does. */
+export function simpleAccessorField(accessor: ExprIR | undefined): string | undefined {
   if (accessor?.kind !== "lambda") return undefined;
   const body = accessor.body;
   if (body?.kind === "member" && body.receiver.kind === "ref") return body.member;

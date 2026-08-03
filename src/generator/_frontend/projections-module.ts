@@ -9,10 +9,11 @@
 // `/* unresolved: Sales */ undefined.SalesTotals` — a runtime TypeError and a
 // build break.  There was no lowering arm and no client; this is the client.
 //
-// Scope: the SINGLETON (unkeyed) query-time projection — a whole-table read
-// model whose response is one object, which is the shape a dashboard KPI reads.
-// A keyed/collection projection returns an array and wants `Table`-shaped
-// binding; it is gated (`loom.ui-projection-read-unsupported`) until that lands.
+// Scope: the UNKEYED query-time projection — the whole-table read model whose
+// response is one object (the shape a dashboard KPI reads), plus the `group by`
+// LIST shape (one row per group, a `z.array` of the same row — M-T1.3 Phase 4).
+// A keyed projection is read by key off its materialized row table; it is gated
+// (`loom.ui-projection-read-unsupported`) until that lands.
 //
 // ---------------------------------------------------------------------------
 // HOW THE REMAINING FRONTENDS PORT INTO THIS MODULE  (decided on the Vue port,
@@ -52,7 +53,7 @@
 // ---------------------------------------------------------------------------
 
 import type { BoundedContextIR, ProjectionIR } from "../../ir/types/loom-ir.js";
-import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import { contextUsesMoney, isGroupedProjection } from "../../ir/types/loom-ir.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { zodForResponse } from "./api-module.js";
@@ -90,13 +91,18 @@ export function buildProjectionsApiModule(
   for (const { proj } of projections) {
     const T = upperFirst(proj.name);
     const slug = snake(proj.name);
+    // A grouped (`group by`) projection returns the LIST shape — one row per
+    // group (M-T1.3 Phase 4) — so its Response wraps the object row in
+    // `z.array`.  The singleton stays the bare object, byte-identical.
+    const grouped = isGroupedProjection(proj);
     // The row schema mirrors the backend's `<Proj>Row` field-for-field — same
     // `wireShape`, so the two can't drift.
-    lines.push(`export const ${T}Response = z.object({`);
+    lines.push(`export const ${T}${grouped ? "Row" : "Response"} = z.object({`);
     for (const f of proj.wireShape ?? []) {
       lines.push(`  ${f.name}: ${zodForResponse(f.type, !!f.optional)},`);
     }
     lines.push(`});`);
+    if (grouped) lines.push(`export const ${T}Response = z.array(${T}Row);`);
     lines.push(`export type ${T}Response = z.infer<typeof ${T}Response>;`);
     lines.push("");
     // A singleton read takes no arguments and no id: the projection IS the row.

@@ -218,6 +218,16 @@ const SHOWCASE_EXCLUDED_PRIMITIVES: ReadonlySet<string> = new Set([
   //
   // Remove this entry if/when Feliz and Flutter gain a DataGrid.
   "DataGrid",
+  // Chart (M-T1.3 Phase 4) — excluded for BOTH reasons at once.  It ships on
+  // react + mantine@v9 only (`loom.chart-unsupported-target` staged rollout),
+  // so the cross-frontend fixture can't carry one; and its `of:` requires a
+  // readable GROUPED projection served by a backend, while `showcase.ddd`'s
+  // `Console` ui is the frontend-only render-matrix fixture.  Covered by its
+  // own suites instead (`test/generator/walker/walker-chart.test.ts`,
+  // `test/ir/ui-chart-gates.test.ts`,
+  // `test/generator/react/projection-read-grouped.test.ts`).  Remove when the
+  // pack backfill lands and `primitive-chart` joins REQUIRED_PRIMITIVES.
+  "Chart",
 ]);
 
 describe("conformance: showcase.ddd completeness", () => {
