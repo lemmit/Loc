@@ -3747,3 +3747,42 @@ mechanism and the failure mode turned a two-hour runtime debug into a one-line
 edit made before the first boot.  The rule from §59 is not "distrust comments" —
 it is "a comment asserting a safety property must say how it is enforced."  These
 did.
+
+## 66. A liveness probe cannot tell you WHICH server answered (2026-08-03)
+
+`behavioral-elixir` went red on this branch with 11 failing cases one run and 13
+the next — overlapping but not equal sets, and the two runs' Elixir emission was
+byte-identical (the only commit between them touched `.NET` files). A failure
+set that moves while the input does not is not a codegen defect; it is a race.
+
+The mechanism. Every case boots its server on the SAME port (`8127`). Teardown
+fired `SIGTERM` at the process group and returned immediately, without waiting
+for the process to die. The next case then dropped every schema
+(`resetDatabase`) and called `waitForPort`, which connected — to the PREVIOUS
+case's server, still listening. `/ready` answered 200, because readiness reports
+that *a* pool is healthy, not *which application* is behind the socket. So the
+new case's requests ran against the old case's app, whose schema had just been
+dropped underneath it: `relation "shop.orders" does not exist` → 500 on the
+first write. Which cases lose the race depends on how fast the BEAM shuts down,
+which is why the set moved between runs.
+
+The rules this pays for:
+
+- **A readiness check is not an identity check.** `waitForPort` + `/ready`
+  answer "is something serving?", never "is it MINE?". Where a port is reused
+  across cases, the only sound guard is on the *teardown* side: observe the port
+  FREE before the next boot. No amount of polling the new server can distinguish
+  it from the old one.
+- **Fire-and-forget teardown is a shared-resource leak with a delay fuse.** The
+  contrast is measurable: the old teardown returned in 0 ms with the port still
+  listening; awaiting the exit returns only once it is free. A cleanup that does
+  not await is not cleanup, it is a request for cleanup.
+- **A moving failure set is evidence about the harness, not the code.** Before
+  hunting a generator bug, diff the generated tree between the suspect commit
+  and its base. Here that took minutes and was conclusive: for all 11 failing
+  cases the emitted Elixir was identical to `main`, which ruled the PR out
+  entirely and redirected the search to the runner.
+
+The same fire-and-forget pattern is still present in the dotnet / dapper /
+python / java / mikroorm runners. It has not surfaced there — those runtimes
+exit faster — but the fuse is the same length.
