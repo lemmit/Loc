@@ -13,13 +13,26 @@ export function corpusSource(featureId: string): string {
   return fs.readFileSync(path.join(CORPUS_DIR, `${featureId}.ddd`), "utf8");
 }
 
-/** Specialise a corpus feature for one backend by swapping the platform token. */
-export function corpusSourceFor(featureId: string, backend: Backend): string {
+/** Specialise a corpus feature for one backend by swapping the platform token.
+ *
+ *  `persistence` selects a non-default persistence adapter on backends that have
+ *  one (`dotnet` → `efcore` | `dapper`, `node` → `drizzle` | `mikroorm`).  It is
+ *  a PLATFORM-CLAUSE override rather than a new `Backend` key on purpose: the
+ *  manifest's `backends:` lists describe which backends a feature targets, and
+ *  an adapter is a second axis over those, not a sixth backend. */
+export function corpusSourceFor(
+  featureId: string,
+  backend: Backend,
+  persistence?: string,
+): string {
   const src = corpusSource(featureId);
   if (!src.includes("__PLATFORM__")) {
     throw new Error(`corpus/${featureId}.ddd is missing the __PLATFORM__ token`);
   }
-  return src.replaceAll("__PLATFORM__", PLATFORM_CLAUSE[backend]);
+  const clause = persistence
+    ? `${PLATFORM_CLAUSE[backend]} { persistence: ${persistence} }`
+    : PLATFORM_CLAUSE[backend];
+  return src.replaceAll("__PLATFORM__", clause);
 }
 
 /** The deployable name every SINGLE-service corpus fixture uses → its emitted
@@ -43,9 +56,15 @@ export function corpusProjectDirs(featureId: string): readonly string[] {
  *  on disk, returning its path.  Lets the per-backend build gates generate the
  *  shared canonical fixture (one source of truth) instead of a per-backend
  *  duplicate `.ddd`.  The emitted project lands under `<out>/${CORPUS_DEPLOYABLE}`. */
-export function materializeCorpusFixture(featureId: string, backend: Backend, destDir: string): string {
-  const dest = path.join(destDir, `${featureId}.${backend}.ddd`);
-  fs.writeFileSync(dest, corpusSourceFor(featureId, backend));
+export function materializeCorpusFixture(
+  featureId: string,
+  backend: Backend,
+  destDir: string,
+  persistence?: string,
+): string {
+  const suffix = persistence ? `${backend}-${persistence}` : backend;
+  const dest = path.join(destDir, `${featureId}.${suffix}.ddd`);
+  fs.writeFileSync(dest, corpusSourceFor(featureId, backend, persistence));
   return dest;
 }
 
