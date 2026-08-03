@@ -45,6 +45,10 @@ export const CRASH_REASONS = [
   "window-error",
   "unhandledrejection",
   "worker-error",
+  // Synthesised at startup from a leftover phase marker — see
+  // `reapUnfinishedPhase`.  It is an error class (not a pressure breadcrumb)
+  // because it is the ONLY record that a process kill happened at all.
+  "died-in-phase",
 ] as const;
 export type CrashReason = (typeof CRASH_REASONS)[number];
 
@@ -190,6 +194,99 @@ export function clearLastCrash(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// PHASE MARKERS — the only instrument that survives a process kill.
+//
+// Everything else in this file is reactive: it needs an event (`error`,
+// `unhandledrejection`, `pagehide`) and then an ASYNC `capture()` that awaits
+// `navigator.storage.estimate()` before anything reaches localStorage.  When
+// iOS terminates the renderer for memory — the "bundles, then the whole page
+// refreshes, no error anywhere" report — there is no event and no microtask.
+// The ring necessarily records NOTHING, which is exactly why the reports keep
+// coming back empty on the interesting failure.
+//
+// So: write the phase name SYNCHRONOUSLY, BEFORE each risky step.  A kill
+// leaves the marker behind; the next page load finds it, and the phase names
+// where the process died.  This is forensics-by-tombstone, not logging.
+//
+// The write must stay tiny and synchronous — no JSON of a big object, no
+// awaits.  One short string is the whole budget.
+// ---------------------------------------------------------------------------
+
+const PHASE_KEY = "loom.diag.phase";
+
+/** Phases, in pipeline order.  Names are stable strings because they are read
+ *  back out of localStorage written by a PREVIOUS (possibly older) build. */
+export type DiagPhase =
+  | "generate"
+  | "bundle"
+  | "boot:start"
+  | "boot:import-bundle"
+  | "boot:pglite-assets"
+  | "boot:pglite-init"
+  | "boot:ddl"
+  | "boot:create-app";
+
+interface PhaseMark {
+  phase: string;
+  /** epoch ms — cheaper to write than an ISO string, formatted on read. */
+  t: number;
+}
+
+/** Record that we are ABOUT TO enter `phase`.  Synchronous by design. */
+export function markPhase(phase: DiagPhase): void {
+  try {
+    localStorage.setItem(PHASE_KEY, `${Date.now()}:${phase}`);
+  } catch {
+    // storage disabled / quota — diagnostics never break the app
+  }
+}
+
+/** Record that the risky window closed cleanly.  Anything left behind after
+ *  this is a genuine "died mid-phase". */
+export function clearPhase(): void {
+  try {
+    localStorage.removeItem(PHASE_KEY);
+  } catch {
+    // storage disabled — nothing to clear
+  }
+}
+
+function readPhase(): PhaseMark | null {
+  try {
+    const raw = localStorage.getItem(PHASE_KEY);
+    if (!raw) return null;
+    const sep = raw.indexOf(":");
+    if (sep < 0) return null;
+    const t = Number(raw.slice(0, sep));
+    const phase = raw.slice(sep + 1);
+    if (!Number.isFinite(t) || phase.length === 0) return null;
+    return { phase, t };
+  } catch {
+    return null;
+  }
+}
+
+/** Called once at startup.  A marker still present means the previous page
+ *  load entered that phase and never left it — no `pagehide`, no error, no
+ *  chance to clean up.  That is the signature of a renderer kill (iOS OOM) or
+ *  a hard reload, and it is precisely the event nothing else can observe.
+ *  Promote it into the ring so it lands in the pasted crash report. */
+export function reapUnfinishedPhase(): PhaseMark | null {
+  const mark = readPhase();
+  clearPhase();
+  if (!mark) return null;
+  void logDiagnostic("died-in-phase", {
+    message:
+      `previous load entered "${mark.phase}" at ` +
+      `${new Date(mark.t).toISOString()} and never completed it — no error and ` +
+      "no pagehide, i.e. the process was killed (typically iOS memory pressure) " +
+      "or hard-reloaded",
+    pane: mark.phase,
+  });
+  return mark;
+}
+
 function writeLastCrash(snap: DiagSnapshot): void {
   try {
     const flag: LastCrash = {
@@ -307,10 +404,18 @@ export async function logDiagnostic(reason: string, detail?: DiagDetail): Promis
  *  ring reader on `window` for console inspection after a reload. */
 export function installDiagnostics(): void {
   if (typeof window === "undefined") return;
+  // FIRST: harvest any phase marker the previous load left behind, before
+  // this load can write one of its own.
+  reapUnfinishedPhase();
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") void logDiagnostic("hidden");
   });
-  window.addEventListener("pagehide", () => void logDiagnostic("pagehide"));
+  // A real navigation/backgrounding is not a kill — drop the marker so it
+  // isn't misreported as one on the next load.
+  window.addEventListener("pagehide", () => {
+    clearPhase();
+    void logDiagnostic("pagehide");
+  });
   (window as unknown as { __loomDiag?: () => DiagSnapshot[] }).__loomDiag =
     readDiagnostics;
 }

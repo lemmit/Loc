@@ -13,6 +13,7 @@ import type {
   BootResult,
   DispatchResult,
   QueryResult,
+  RuntimeProgress,
   RuntimeRpcRequest,
   RuntimeRpcResponse,
   SerializedRequest,
@@ -20,6 +21,22 @@ import type {
 } from "./protocol.js";
 
 declare const self: DedicatedWorkerGlobalScope;
+
+/** Push a boot-progress note to the main thread.  Fire-and-forget: it carries
+ *  no `id`, so the client routes it by the `phase` field.
+ *
+ *  Boot's expensive interior (a ~2.5 MB bundle import, PGlite's WASM + data
+ *  dir) is where a memory-constrained device actually dies, and a worker has
+ *  no localStorage to leave a tombstone in.  Posting each step lets the main
+ *  thread write one synchronously, so a renderer kill mid-boot is attributable
+ *  to a step instead of to "boot". */
+function progress(phase: RuntimeProgress["phase"]): void {
+  try {
+    self.postMessage({ phase } satisfies RuntimeProgress);
+  } catch {
+    // never let instrumentation break a boot
+  }
+}
 
 // Install the permanent console tee ONCE, before any generated bundle is
 // imported, so pino (which binds `console.*` at logger creation during
@@ -189,6 +206,7 @@ async function boot(
   // bundle URL).
   await tearDownState();
 
+  progress("import-bundle");
   const blob = new Blob([bundleCode], { type: "application/javascript" });
   const url = URL.createObjectURL(blob);
   let mod: BundleModule;
@@ -213,7 +231,9 @@ async function boot(
   let pglite;
   let persistent = false;
   try {
+    progress("pglite-assets");
     const assets = await loadPgliteAssets();
+    progress("pglite-init");
     if (dataDir && dataDir !== ":memory:") {
       try {
         pglite = new mod.PGlite(dataDir, assets);
@@ -256,6 +276,7 @@ async function boot(
 
   let ddl: string;
   try {
+    progress("ddl");
     ddl = synthDDL(mod.schema, {
       is: mod.is,
       Table: mod.Table,
@@ -281,6 +302,7 @@ async function boot(
   let app: BundleModule["createApp"] extends (db: unknown) => infer R ? R : never;
   try {
     const db = mod.drizzle(pglite, { schema: mod.schema });
+    progress("create-app");
     app = mod.createApp(db);
   } catch (err) {
     return {

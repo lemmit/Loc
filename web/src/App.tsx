@@ -98,6 +98,7 @@ import type { OutputStream } from "./layout/OutputPanel";
 import { useGeneratedConflicts } from "./layout/use-generated-conflicts";
 import type { TestResult } from "./testing/harness";
 import type { LogLine } from "./util/log-line";
+import { clearPhase, markPhase } from "./util/diagnostics";
 
 // Cap on the live console buffers (Backend / App streams) so a chatty
 // handler or render loop can't grow them without bound; we keep the
@@ -1047,6 +1048,7 @@ export default function App(): JSX.Element {
   }
 
   async function runBundleStep(gen: GenerateOk): Promise<BundleStepResult | null> {
+    markPhase("bundle");
     const engine = engineRef.current;
     if (!engine) return null;
     const entries = analyzeDeployables(gen.files);
@@ -1115,6 +1117,7 @@ export default function App(): JSX.Element {
   ): Promise<boolean> {
     const engine = engineRef.current;
     if (!engine) return false;
+    markPhase("boot:start");
     dispatch({ type: "BOOT_START" });
     // Reset spec-driven state — a fresh boot may serve a different
     // contract, and a failed (re)boot shouldn't leave stale endpoints.
@@ -1139,16 +1142,19 @@ export default function App(): JSX.Element {
         // they don't accumulate toward the storage quota.  Only when the
         // boot is actually OPFS-backed, and never blocking the boot.
         if (res.persistent) void recordAndGcOpfs(sourceHash);
+        clearPhase();
         await loadOpenApiSpec(engine);
         return true;
       }
       dispatch({ type: "BOOT_FAIL", message: res.message });
+      clearPhase();
       return false;
     } catch (err) {
       dispatch({
         type: "BOOT_FAIL",
         message: err instanceof Error ? err.message : String(err),
       });
+      clearPhase();
       return false;
     }
   }
@@ -1263,6 +1269,13 @@ export default function App(): JSX.Element {
   // On any failure the user is left on their current tab; the
   // Problems tab carries a red-dot indicator for errors.
   async function runFull(): Promise<void> {
+    // Phase markers bracket the whole cascade.  They are the ONLY record that
+    // survives a renderer kill — no error fires, no `pagehide`, so the ring's
+    // async capture never runs.  `runBundleStep`/`runBootStep` narrow the
+    // marker as they go, and the runtime worker narrows it further still
+    // (see runtime/client.ts).  Whatever is left in localStorage after the
+    // page reloads names the step that killed it.
+    markPhase("generate");
     const gen = await runGenerateStep();
     if (!gen?.ok || gen.files.length === 0) return;
     // Intentional run → version the output and bundle the merged tree
@@ -1279,6 +1292,7 @@ export default function App(): JSX.Element {
     // the natural destination.  Otherwise the user gets the Backend
     // tab so they can poke endpoints against the live runtime.
     setActiveTab(bundleRes.react?.ok ? "preview" : "backend");
+    clearPhase();
   }
 
   async function runWipe(): Promise<void> {

@@ -8,6 +8,7 @@ import { ErrorBoundary, installGlobalErrorLogging } from "./ErrorBoundary";
 import { CrashTestHooks } from "./CrashTestHooks";
 import { LastCrashNotice } from "./LastCrashNotice";
 import { installDiagnostics } from "./util/diagnostics";
+import { gcOpfsAtStartup } from "./engine/opfs-gc";
 
 const theme = createTheme({
   fontFamilyMonospace:
@@ -16,6 +17,10 @@ const theme = createTheme({
 
 installGlobalErrorLogging();
 installDiagnostics();
+// Shed stale OPFS islands even when no boot ever succeeds — otherwise a
+// failing-boot loop only ever ADDS storage, and quota pressure is what makes
+// mobile browsers evict and reload the tab.  See engine/opfs-gc.ts.
+void gcOpfsAtStartup();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -4,6 +4,7 @@ import {
   capRing,
   clearDiagnostics,
   clearLastCrash,
+  clearPhase,
   DETAIL_COMPONENT_FRAMES,
   DETAIL_MESSAGE_MAX,
   DETAIL_STACK_FRAMES,
@@ -11,8 +12,10 @@ import {
   errorDetail,
   isCrashReason,
   logDiagnostic,
+  markPhase,
   readDiagnostics,
   readLastCrash,
+  reapUnfinishedPhase,
   truncateDetail,
 } from "../../web/src/util/diagnostics.js";
 
@@ -248,5 +251,76 @@ describe("logDiagnostic — round-trip through storage", () => {
   it("ignores a malformed lastCrash flag", () => {
     localStorage.setItem("loom.diag.lastCrash", '{"reason":42}');
     expect(readLastCrash()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase markers — the tombstone that survives a renderer kill.
+//
+// Every other capture point in this module is reactive: it needs an event
+// (`error` / `unhandledrejection` / `pagehide`) and then an ASYNC `capture()`
+// that awaits `navigator.storage.estimate()` before anything is written.  When
+// iOS terminates the renderer for memory there is no event and no microtask,
+// so the ring records nothing at all — which is why the field reports of
+// "bundles, then the whole page refreshes" arrived with an empty ring.
+//
+// A phase marker is written SYNCHRONOUSLY before each risky step, so a kill
+// leaves it behind and the next load can name the step that died.
+// ---------------------------------------------------------------------------
+describe("phase markers", () => {
+  it("writes synchronously — no await between mark and storage", () => {
+    markPhase("boot:pglite-init");
+    // Read back with no `await` anywhere: this is the whole point.  If the
+    // write ever moves behind a promise, a process kill loses it.
+    expect(localStorage.getItem("loom.diag.phase")).toMatch(/^\d+:boot:pglite-init$/);
+  });
+
+  it("reaps a leftover marker into the ring as an error-class entry", async () => {
+    markPhase("boot:import-bundle");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:import-bundle");
+    await Promise.resolve();
+    const ring = readDiagnostics();
+    const died = ring.find((s) => s.reason === "died-in-phase");
+    expect(died).toBeDefined();
+    // The phase rides in `pane`, which the crash report renders verbatim.
+    expect(died?.detail?.pane).toBe("boot:import-bundle");
+    expect(died?.detail?.message).toContain("boot:import-bundle");
+  });
+
+  it("consumes the marker so one kill is reported once", () => {
+    markPhase("bundle");
+    expect(reapUnfinishedPhase()?.phase).toBe("bundle");
+    expect(reapUnfinishedPhase()).toBeNull();
+  });
+
+  it("reports nothing when the phase completed cleanly", () => {
+    markPhase("generate");
+    clearPhase();
+    expect(reapUnfinishedPhase()).toBeNull();
+  });
+
+  it("counts `died-in-phase` as an error class, not a pressure breadcrumb", () => {
+    // It must sort into the report's "Crashes" section — it is the only
+    // record that a kill happened at all.
+    expect(isCrashReason("died-in-phase")).toBe(true);
+    expect(CRASH_REASONS).toContain("died-in-phase");
+  });
+
+  it("never throws when storage is unavailable", () => {
+    vi.stubGlobal("localStorage", {
+      getItem() {
+        throw new Error("denied");
+      },
+      setItem() {
+        throw new Error("denied");
+      },
+      removeItem() {
+        throw new Error("denied");
+      },
+    });
+    expect(() => markPhase("bundle")).not.toThrow();
+    expect(() => clearPhase()).not.toThrow();
+    expect(() => reapUnfinishedPhase()).not.toThrow();
   });
 });
