@@ -102,6 +102,7 @@ import {
   renderTable as renderTableHeex,
   renderTabs as renderTabsHeex,
   renderText as renderTextHeex,
+  renderTimeline as renderTimelineHeex,
   renderToggle as renderToggleHeex,
   renderToolbar as renderToolbarHeex,
 } from "../elixir/heex-walker.js";
@@ -170,6 +171,7 @@ import {
   emitMoney,
   emitText,
 } from "./primitives/text.js";
+import { emitTimeline } from "./primitives/timeline.js";
 import type { WalkContext as TsxWalkContext } from "./walker-core.js";
 
 /** Renderer signature for the React/TSX target.  Returns the
@@ -583,6 +585,21 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     admissibleInSource: true,
     tsx: emitProvenanceInfo,
     heex: renderProvenanceInfoHeex,
+    a11y: "presentational",
+  },
+  // Entity audit trail (docs/audit.md) — the `AuditEntry[]` a backend serves at
+  // `GET /<agg>/{id}/history`, as an ordered list of what changed, when and by
+  // whom.  Native `<ol>`/`<li>`/`<time>`/`<dl>`, like ProvenanceInfo: no
+  // design-pack component to keep in sync across 13 packs, no client state, and
+  // a timeline IS an ordered list — saying so in HTML beats styling a `<div>`.
+  // HEEx is implemented, NOT waived: Phoenix serves the endpoint too, so a
+  // TSX-only Timeline is the silent LiveView degradation heex-parity guards.
+  // `<ol>` carries its own list semantics — no ARIA obligation.
+  Timeline: {
+    group: "layout",
+    admissibleInSource: true,
+    tsx: emitTimeline,
+    heex: renderTimelineHeex,
     a11y: "presentational",
   },
   // Loading placeholder — content hidden from AT (aria-busy) while pending.

@@ -194,9 +194,22 @@ function invokedNames(model: Model): Set<string> {
  *  deployable (perturbing every conformance dimension, like
  *  `TenancyDecl`/`Projection`). It's covered by its own fixtures instead
  *  (`examples/provenance.ddd` + `web/src/examples/provenance-system.ddd` +
- *  the cross-target render gate `provenance-info-cross-target.test.ts`). */
+ *  the cross-target render gate `provenance-info-cross-target.test.ts`).
+ *
+ *  `Timeline` — the entity audit trail (docs/audit.md) — is out for the SAME
+ *  reason, one step removed: it is only meaningful over an `audited` aggregate,
+ *  and marking one `audited` in `showcase.ddd` would add the audit runtime
+ *  (the `audit_records` table plus a transactional insert on every public
+ *  command) to every cross-backend deployable — perturbing exactly the
+ *  conformance dimensions `provenanced` does.  Covered instead by
+ *  `test/generator/_walker/timeline-cross-target.test.ts`, which renders it
+ *  through React/Vue/Svelte/Angular AND HEEx, and by the `audit-history`
+ *  corpus fixture on the backend side.  (Feliz and Flutter fall through to a
+ *  visible comment for now — the `renderTimeline` WalkerTarget seam is where
+ *  they fork when they port it.) */
 const SHOWCASE_EXCLUDED_PRIMITIVES: ReadonlySet<string> = new Set([
   "ProvenanceInfo",
+  "Timeline",
   // DataGrid — excluded for the same reason as `ProvenanceInfo` above, not the
   // staged-pack-rollout one an earlier revision of this comment gave.
   //

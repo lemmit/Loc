@@ -155,6 +155,11 @@ const NON_TEXT_PRIMITIVES: Record<string, string> = {
   Money: "renders a value expression, not a text literal",
   DateDisplay: "renders a value expression, not a text literal",
   EnumBadge: "renders a value expression, not a text literal",
+  // Every string it renders (action, field name, before/after) comes off the
+  // wire, not from author source — there is no text literal in a `Timeline`
+  // call to escape.  The wire values ride each framework's own interpolation
+  // ({} / {{ }} / <%= %>), which escapes them.
+  Timeline: "renders wire values, not a text literal",
   // Attribute-valued media — literal lands in an attr (src/alt), covered by
   // attribute escaping, not the text funnel.
   Image: "literal renders in an attribute, not text position",

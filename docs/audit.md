@@ -196,8 +196,34 @@ feature and would need its own authorization story.
 
 ### Rendering it
 
-*(The `Timeline` page primitive and the scaffolded History tab land on this
-branch — section fills in as they do.)*
+The `Timeline` page primitive renders an `AuditEntry[]` as an ordered list of
+what changed, when, and by whom:
+
+```ddd
+page OrderHistory {
+  route: "/orders/{id}/history"
+  state { entries: string[] }
+  body: Stack {
+    Timeline { of: entries }
+  }
+}
+```
+
+It emits native `<ol>`/`<li>`/`<time>`/`<dl>` — no design-pack component, no
+client state. A timeline *is* an ordered list, and saying so in HTML beats
+styling a `<div>` to look like one; it also means the primitive needs no
+per-pack template across the 13 design packs. Ships on React, Vue, Svelte,
+Angular and Phoenix/HEEx. Feliz and Flutter fall through to a visible comment
+until they implement the `renderTimeline` `WalkerTarget` seam.
+
+Two things it deliberately does not do:
+
+- **No redacted placeholders.** A masked field's change is dropped
+  *server-side*, so the client never learns it existed — there is nothing to
+  render.
+- **An entry with no changes still renders its header.** A command that touched
+  only diff-excluded fields still happened, and "someone ran `recalc` at 14:02"
+  is information even when nothing user-visible moved.
 
 ### What history does *not* answer
 
