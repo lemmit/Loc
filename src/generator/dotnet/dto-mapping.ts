@@ -29,11 +29,13 @@ import { renderCsExpr } from "./render-expr.js";
  *  "a local variable named '…' is already defined in this scope") the moment
  *  ONE method body renders two masked projections.  That happens routinely:
  *  two `mask unless` fields on one aggregate (two wraps in one `new
- *  <Agg>Response(...)`), a masked containment nested inside a masked parent,
- *  and — the case this allocator was introduced for — an `audited` operation,
- *  whose handler serializes the wire projection TWICE (the `__before` and
- *  `__after` snapshots) into the same handler body.  A lambda body is no
- *  escape either: C# forbids shadowing an enclosing local (CS0136).
+ *  <Agg>Response(...)`), and — the case this allocator was introduced for — an
+ *  `audited` operation, whose handler serializes the wire projection TWICE (the
+ *  `__before` and `__after` snapshots) into the same handler body.  A lambda
+ *  body would be no escape either, so the nested containment projections share
+ *  the namer: C# forbids shadowing an enclosing local (CS0136).  (A contained
+ *  PART cannot carry a mask today — `wireFieldsForPart` drops `maskUnless` —
+ *  but threading it costs nothing and removes the trap if that changes.)
  *
  *  So the name is allocated, never hard-coded.  One namer spans one C# SCOPE:
  *  every emitter that renders more than one projection into a single method
@@ -530,9 +532,9 @@ export function projectEntityArgs(
       // NullReferenceException.  A collection never nulls; a required single
       // containment is defaulted, so both project unguarded.
       const single = !wireTypeInfo(wf.type, "response").isCollection;
-      // The nested projection shares this scope's namer: a C# lambda body is
-      // not an escape hatch (shadowing an enclosing local is CS0136), so a
-      // masked field inside a contained part must not reuse an outer name.
+      // The nested projection shares this scope's namer.  A C# lambda body is
+      // not an escape hatch (shadowing an enclosing local is CS0136), so were a
+      // contained part ever to carry a mask it must not reuse an outer name.
       const nested = { maskNames: names };
       args.push(
         wireTypeInfo(wf.type, "response").isCollection
