@@ -107,6 +107,30 @@ async function gcIslands(keepHashes: Iterable<string>): Promise<number> {
   return removed;
 }
 
+/** GC on STARTUP, independent of whether any boot succeeds.
+ *
+ *  `recordAndGcOpfs` runs only after a successful persistent boot, so a user
+ *  whose boot keeps failing never sheds a single island — storage climbs
+ *  monotonically across attempts (observed in the wild: 80 → 313 → 400 MB in
+ *  one session), which feeds the very quota pressure this module's header
+ *  describes, which makes the next attempt likelier to be killed.  A failing
+ *  boot could not previously break that loop.  This can.
+ *
+ *  Deliberately does NOT record a hash: it reuses whatever the LRU already
+ *  holds, so it can't evict the island the next boot is about to open.  And it
+ *  no-ops on an empty LRU — an empty list is "we don't know", not "keep
+ *  nothing", and treating it as the latter would delete a user's persisted
+ *  data (e.g. after localStorage alone is cleared). */
+export async function gcOpfsAtStartup(): Promise<void> {
+  try {
+    const lru = readLru();
+    if (lru.length === 0) return;
+    await gcIslands(lru.slice(-KEEP));
+  } catch {
+    // best-effort housekeeping — never let it affect startup
+  }
+}
+
 /** Record the just-booted source hash and GC every island outside the
  *  most-recent `KEEP`.  Fire-and-forget from the boot path; never throws. */
 export async function recordAndGcOpfs(hash: string): Promise<void> {

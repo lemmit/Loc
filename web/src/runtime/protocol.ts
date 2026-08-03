@@ -120,6 +120,21 @@ export type RuntimeRpcRequest =
   | { id: number; method: "reset"; params: Record<string, never> }
   | { id: number; method: "wipe"; params: Record<string, never> };
 
+/** Fire-and-forget progress note pushed by the worker DURING an RPC (it
+ *  carries no `id` and expects no reply, so the client tells it apart from a
+ *  response by the presence of `phase`).
+ *
+ *  Boot is one long RPC whose expensive interior — importing a ~2.5 MB bundle,
+ *  fetching and compiling PGlite's WASM, materialising its data dir — is where
+ *  a memory-constrained device actually dies.  Without this the main thread
+ *  sees a single opaque call and, if the renderer is killed mid-boot, cannot
+ *  say which step it was in.  The client turns each note into a synchronous
+ *  `markPhase` (workers have no localStorage), so the tombstone the next page
+ *  load finds is specific instead of just "boot". */
+export interface RuntimeProgress {
+  phase: "import-bundle" | "pglite-assets" | "pglite-init" | "ddl" | "create-app";
+}
+
 export interface RuntimeRpcResponse {
   id: number;
   result?: BootResult | DispatchResult | QueryResult | WipeResult | { ok: true };
