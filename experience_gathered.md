@@ -3694,3 +3694,86 @@ toolchain you must rebuild the harness by hand. Three sharp edges:
   across container runs rather than re-installing per boot.
 - **Java 25 targets need `gradle:9-jdk25`**; the host's JDK 21 + Gradle 8.14
   cannot build them, and the failure surfaces late.
+
+## 65. "Subscribed" is not one fact — it is two, and every broker client splits them differently (2026-08-03)
+
+The §64 readiness defect turned out to have a second level underneath it, and
+finding the second level only became possible after fixing the first.
+
+**Level 1** was: the port opens before the consumer subscribes. Five backends,
+five different shapes — a supervision-tree slot on elixir, `BackgroundService`'s
+first-await return on dotnet, an un-awaited `create_task` on python, three
+fire-and-forget drivers on node, a `SmartLifecycle` phase on java. All the same
+sentence: *boot did not wait for the subscribe.*
+
+**Level 2** is: on kafka, the subscribe call itself does not subscribe you.
+Every client separates *recording the subscription* from *joining the group*,
+and only the join makes you a consumer. `consumer.Subscribe(...)` /
+`consumer.subscribe(...)` / `start_link_group_subscriber_v2` all return
+immediately; the join lands later, on the poll loop or in a coordinator
+process. So after fixing level 1 you can be past the subscribe call and still
+not be in the group.
+
+The symptom is unlike level 1's. Level 1 loses envelopes (an ephemeral pub/sub
+publish into the window is dropped outright). Level 2 loses **ordering**: a
+late join makes the group rebalance mid-flight, a rebalance moves partitions
+between replicas, and a partition key's events then split across two consumers
+— exactly the guarantee the key exists to provide. It surfaced as
+`order <id> consumed by exactly one replica: expected 2 to be 1`.
+
+### The deduction that made it diagnosable
+
+Both of an order's events carry the order id as the partition key, so they hash
+to the **same partition**. There is therefore no arrangement of a *stable* group
+in which they reach different replicas. `owners.length === 2` is not "the
+consumer is flaky" — it is a proof that ownership moved, i.e. that a rebalance
+happened. Once the failure is read as evidence of a rebalance rather than as
+noise, the only question left is what triggered one mid-run, and "a replica
+joined late" is the short list.
+
+This is the §64 reframe applied again: **an assertion that fails in a way the
+system's own invariants forbid is telling you which invariant broke, not that
+the test is flaky.**
+
+### The survey found two backends already correct — by reading their source
+
+Pattern-matching would have "fixed" all five. Two needed nothing, and the way
+to know was to read the installed library, not to recall its semantics:
+
+- **kafkajs** — `runner.start()` does `await this.consumerGroup.joinAndSync()`,
+  so `await consumer.run(...)` already resolves post-join.
+- **aiokafka** — `AIOKafkaConsumer.start()` does
+  `await self._subscription.wait_for_assignment()` when topics are passed to
+  the constructor (which the emitter does).
+
+Both were checked by opening `node_modules/kafkajs/src/consumer/runner.js` and
+`.venv/.../aiokafka/consumer/consumer.py` in the generated projects. That took
+two minutes and prevented two unnecessary, risky changes to working code. The
+generated project's own dependency tree is the cheapest authority available —
+it is the exact version that ships.
+
+### And compiling caught what reading would not
+
+The elixir gate first called `:brod_group_subscriber_v2.get_workers(pid, 5_000)`.
+That function **exists** — it is right there in the source, one line below the
+1-arity form — but it is **not in the module's export list**.
+`mix compile --warnings-as-errors` rejected it. Reading the definition told me
+it existed; only the compiler told me I could not call it.
+
+Same lesson as §64's .NET scope error, in a different language: **"the function
+is defined" and "I may call it" are different facts, and only the toolchain
+knows the second.** Every backend fix in this class was verified by building
+the generated project — `dotnet build /warnaserror`, `gradle testClasses
+bootJar`, `mix compile --warnings-as-errors`, `ruff` + `mypy --strict`,
+`tsc --noEmit` — and three of the five verifications caught something a
+generator test could not see.
+
+### Test the gate, not the ingredient
+
+A `ConsumerRebalanceListener` that nothing waits on changes nothing. A
+`SetPartitionsAssignedHandler` that nothing awaits changes nothing. So the
+regression tests pin the **await and its position** — the gate must sit after
+the loop is registered and before the caller is released — rather than the
+presence of the handler. Same discipline as §64's elixir order assertion:
+`toContain("ChannelConsumer")` passes in both the broken and fixed arrangement,
+so it tests nothing.
