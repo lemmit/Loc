@@ -113,7 +113,8 @@ function renderCsStatement(
     case "assign": {
       const base = `${INDENT}${renderPath(s.target)} = ${renderCsExpr(s.value, ctx)};`;
       const traced = withValueComputed(base, s.target, traceCtx);
-      return withProvCapture(traced, s.prov, s.target, s.value, index, ctx);
+      const full = withProvCapture(traced, s.prov, s.target, s.value, index, ctx);
+      return isSelfAssign(s.target, s.value) ? withCa2245Suppressed(full) : full;
     }
     case "add": {
       const base = `${INDENT}${renderPrivatePath(s.target, ctx)}.Add(${renderCsExpr(s.value, ctx)});`;
@@ -264,6 +265,37 @@ const ns_DomainLog = "DomainLog";
 
 function renderPath(p: PathIR): string {
   return p.segments.map((s) => upperFirst(s)).join(".");
+}
+
+/** `x := x` on an entity field — a write whose value is the field's own
+ *  current value.  Legal Loom (a private command that only re-runs the
+ *  invariants is the canonical case, cf. `test/fixtures/corpus/audited.ddd`),
+ *  and it lowers to a single-segment target plus a `this-prop` ref naming that
+ *  same property. */
+function isSelfAssign(target: PathIR, value: ExprIR): boolean {
+  return (
+    target.segments.length === 1 &&
+    value.kind === "ref" &&
+    value.refKind === "this-prop" &&
+    value.name === target.segments[0]
+  );
+}
+
+/** Roslyn's CA2245 rejects `Quantity = this.Quantity`, and the generated .NET
+ *  projects build with `/warnaserror` — so a self-assignment that is perfectly
+ *  valid `.ddd` would fail the compile tier (it did: `corpus × dotnet`).
+ *
+ *  Suppressed at the statement rather than dropped, deliberately: the write
+ *  site still carries its provenance capture and `#line` trace mapping, both
+ *  of which are observable, and skipping the emission would silently discard
+ *  them.  The pragma is the outermost wrapper so it covers whatever those
+ *  layers added. */
+function withCa2245Suppressed(rendered: string): string {
+  return [
+    `${INDENT}#pragma warning disable CA2245 // \`x := x\` is a valid no-op write in Loom`,
+    rendered,
+    `${INDENT}#pragma warning restore CA2245`,
+  ].join("\n");
 }
 
 // For collection mutation we go via the private backing field —
