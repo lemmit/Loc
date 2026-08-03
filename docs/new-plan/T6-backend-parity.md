@@ -203,3 +203,76 @@ derives its required set from the create action's *params*, which for a
 over-requires. It has no caller in generated code (every write path goes
 through `base_changeset`); threading defaults onto crudish create params would
 ripple through every param-driven surface on all five backends.
+
+## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
+
+Four of the five query-time projection handler shapes inject `AppDbContext` and
+run EF LINQ, so a `persistence: dapper` deployable that declares one does not
+compile: `CS0234: 'EntityFrameworkCore' does not exist in the namespace
+'Microsoft'`. The `.ddd` parses, the project generates, and it breaks only at
+`dotnet build` — invisible to a generation-tier gate.
+
+**Scope is wider than the ratchet suggests.** Measured by emitting every corpus
+feature under `persistence: dapper` and compiling it (36 → 35 generate → 33
+compile):
+
+| shape | data path | dapper | coverage |
+|---|---|---|---|
+| per-row (`select` over an aggregate) | `IOrderRepository.<Proj>()` | ✅ already neutral | — |
+| whole-table aggregation | `AppDbContext` | ❌ CS0234 | `DAPPER_COMPILE_SKIP` |
+| grouped aggregation (`group by`) | `AppDbContext` | ❌ CS0234 | `DAPPER_COMPILE_SKIP` |
+| workflow-sourced (`from <Workflow>`) | `AppDbContext` | ❌ **untested** | none |
+| projection-sourced (`from <Projection>`) | `AppDbContext` | ❌ **untested** | none |
+
+The per-row shape routes through the repository and is persistence-neutral
+already — worth knowing, because it means this is not "port the projection
+emitter", it is "port the four shapes that bypass the repository". The last two
+are the ones a reader would miss: no corpus fixture exercises them, so they are
+silently broken rather than ratcheted, and **a fixture for each is the first
+slice** — the fix needs a witness before it needs an implementation.
+
+**Design decisions (owner, 2026-08-03).**
+
+1. **Extend `src/generator/sql-pg-expr.ts`** rather than write a second SQL
+   expression renderer. It is 120 lines (literals / refs / paren / unary /
+   binary / ternary), throws on anything else, and is already backed by a
+   validate-time predicate. Two hand-maintained copies of one translation is
+   exactly how the `audit_records` nullability drifted (§67-68,
+   `util/audit-records-table.ts`). Widening it touches the migration backfill
+   path too, which is covered by `schema-load` + `migration-evolution`.
+2. **Reject out-of-subset `where` at validate time** — a
+   `loom.dapper-unsupported` diagnostic naming the projection and the offending
+   expression, consistent with how `tenancy-hierarchy` is already refused on
+   this adapter. NOT an in-memory fallback: for an aggregation projection that
+   materialises the whole table to produce one integer, which is precisely the
+   scaling failure the shape exists to avoid (`projection-aggregation.ddd`'s own
+   header says so). A silent perf cliff is worse than a diagnostic.
+
+**Implementation notes** (gathered while scoping; make this mechanical):
+
+- The idiom is already in the tree — `projection-emit.ts` branches on a
+  `usingDapper` flag and swaps `AppDbContext` for `NpgsqlDataSource`, reading
+  through `conn.QueryAsync<TDbRow>(new CommandDefinition("SELECT …"))` with a
+  private `<T>DbRow` + `Map<T>` pair. `emitQueryProjections` takes no such flag
+  today; thread it from `index.ts`, which already knows.
+- **Cast in SQL so the existing coercion path is reused verbatim.** `csCoerce`
+  reads `agg?.<Field>` and already handles count / money-as-string / declared-
+  type casts. If the Dapper row class exposes the same property names and the
+  SQL casts to the CLR types EF produced — `COUNT(*)::int` (Postgres COUNT is
+  bigint → `long`, and the row field is `int`) — then `csAggregate`'s siblings
+  need no Dapper twin and the two arms cannot drift.
+- Table naming under Dapper is `plural(snake(aggName))`, unqualified
+  (`tableOf` in `emit/dapper.ts`); columns are `snake(field)`.
+- Grouped needs `GROUP BY <keys>` **and** `ORDER BY <keys>` — the EF arm's
+  comment is explicit that without the ORDER BY the group order is
+  engine-chosen and the M-T9.11 wire differential flakes on row order.
+
+**Verification.** Drop the two `DAPPER_COMPILE_SKIP` entries in
+`test/e2e/corpus-dotnet-dapper-build.test.ts` and lower its `allowlist-ratchet`
+`max` 2 → 0 in the same PR; add corpus fixtures for the workflow-sourced and
+projection-sourced shapes first, so their port has a gate. `dotnet build
+/warnaserror` in `mcr.microsoft.com/dotnet/sdk:10.0` is the compile proof;
+`behavioral-dapper` is the runtime one.
+
+**Sources:** #2394 (the gate that found it), `corpus-dotnet-dapper-build.test.ts`,
+`dapper-projection-emission.test.ts` (the folded-read precedent this follows).
