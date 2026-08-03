@@ -1069,16 +1069,6 @@ export function renderDapperRepository(
       "        }",
     ];
   });
-  // `destroy audited` makes DeleteAsync TRANSACTIONAL: the handler stages the
-  // audit row before calling it, and that row has to commit with the delete or
-  // roll back with it.  Every statement in the method then rides `__tx`.  An
-  // un-audited aggregate keeps the transaction-free emit byte-identical.
-  const delTx = aggHasAuditedTarget(agg) ? "transaction: __tx, " : "";
-  const assocDeleteLines = associations.map(
-    (a) =>
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
-  );
-
   // Nested entity parts (`contains lineItems: LineItem[]`).  Reads funnel every
   // root through `HydrateAsync` (loads each child table + reconstructs the root
   // with its children in State); saves full-list-replace each child table;
@@ -1132,6 +1122,26 @@ export function renderDapperRepository(
     `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
     ...saveInsert(pc, "aggregate.Id.Value", `aggregate.${upperFirst(pc.cont.name)}`),
   ]);
+  // DeleteAsync is TRANSACTIONAL whenever it issues more than one statement, or
+  // when the aggregate is audited.
+  //
+  //   - multi-statement: a `contains`/`X id[]` aggregate deletes its child and
+  //     join tables before the root.  Autocommitting those separately means a
+  //     crash mid-delete leaves the root alive with its children already gone —
+  //     the same data-loss class `SaveAsync` was made transactional for
+  //     (docs/audits/repo-code-review-2026-07.md T3), which fixed the save path
+  //     and left the delete path behind.
+  //   - audited: the handler stages the audit row before calling in, and it has
+  //     to commit with the delete or roll back with it.
+  //
+  // A single-statement delete (no children, no associations, not audited) keeps
+  // the transaction-free emit byte-identical.
+  const delMultiStatement = associations.length > 0 || partChildren.length > 0;
+  const delTx = aggHasAuditedTarget(agg) || delMultiStatement ? "transaction: __tx, " : "";
+  const assocDeleteLines = associations.map(
+    (a) =>
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
+  );
   // Delete only the root-level child tables by owner id; their FK ON DELETE
   // CASCADE removes every nested grandchild row.
   const containDeleteLines = partChildren.map(
@@ -1363,7 +1373,9 @@ export function renderDapperRepository(
         ...containDeleteLines,
         `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
         // Drain the staged `destroy audited` row onto the same transaction.
-        ...(delTx ? auditFlushLines : []),
+        // Gated on the AUDIT seam, not on `delTx` — `delTx` is now also set for
+        // an un-audited multi-statement delete, which has nothing to drain.
+        ...auditFlushLines,
         delTx ? "        await __tx.CommitAsync(cancellationToken);" : null,
         `    }`,
       )
