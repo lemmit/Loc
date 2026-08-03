@@ -36,7 +36,7 @@
                     <TextInput
                       size="xs"
                       mt={4}
-                      placeholder="Filter"
+                      {{{filterPlaceholderAttr}}}
                       aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
                       value={String(h.column.getFilterValue() ?? "")}
                       onChange={(e) => h.column.setFilterValue(e.currentTarget.value)}
@@ -64,7 +64,7 @@
           onClick={() => table.previousPage()}
           disabled={!table.getCanPreviousPage()}
         >
-          Previous
+          {{{prevLabel}}}
         </Button>
         <Text size="sm" aria-live="polite">
           Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
@@ -75,7 +75,7 @@
           onClick={() => table.nextPage()}
           disabled={!table.getCanNextPage()}
         >
-          Next
+          {{{nextLabel}}}
         </Button>
       </Group>
     </Stack>

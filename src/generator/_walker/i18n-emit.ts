@@ -37,7 +37,7 @@
 
 import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { ariaLabelAttr, escapeHtmlAttr } from "./a11y-emit.js";
-import { chromeKey } from "./i18n-chrome.js";
+import { chromeKey, chromeMessage } from "./i18n-chrome.js";
 import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
 import { addImport } from "./render-primitive.js";
 import { namedArgValue, positionalArgs, unwrapTextLiteral } from "./shared/args.js";
@@ -73,6 +73,25 @@ function translateCall(
   values?: ReadonlyArray<{ name: string; expr: string }>,
 ): string {
   addImport(ctx, I18N_MODULE, "t");
+  return translateExpr(ctx, key, message, values);
+}
+
+/** {@link translateCall} WITHOUT the import registration — the seam application
+ *  alone.
+ *
+ *  Split out for pack chrome that lands in a HOISTED CHILD file: on Vue, Svelte
+ *  and Angular a `DataGrid`'s markup is emitted into a separate component, so
+ *  the page's import map is the wrong place for its `t` and the child's own
+ *  renderer places the import (see `localizedChromeText` below).  Everything
+ *  else — the seam, the default JS spelling, the argument order — is shared, so
+ *  a chrome call and an authored-string call are spelled identically on every
+ *  frontend. */
+function translateExpr(
+  ctx: WalkContext,
+  key: string,
+  message: string,
+  values?: ReadonlyArray<{ name: string; expr: string }>,
+): string {
   if (ctx.target.renderTranslate) return ctx.target.renderTranslate({ key, message, values });
   const args = [JSON.stringify(key), JSON.stringify(message)];
   if (values) args.push(`{ ${values.map((v) => `${v.name}: ${v.expr}`).join(", ")} }`);
@@ -302,6 +321,84 @@ export function localizedChromeAria(ctx: WalkContext, name: string, english: str
     return ctx.target.renderAttrBinding(attrName, translateCall(ctx, chromeKey(name), english));
   }
   return ` aria-label="${escapeHtmlAttr(english)}"`;
+}
+
+// --- Chrome that lands in a HOISTED CHILD file -----------------------------
+//
+// `localizedChromeAria` above registers the `t` import on the walk context,
+// which is right for chrome rendered INTO THE PAGE.  The two helpers below
+// deliberately do NOT: a `DataGrid`'s pack markup is rendered into a hoisted
+// CHILD component (`renderDataGridChild`), and on Vue/Svelte/Angular that child
+// is a SEPARATE FILE — so the page's import map is the wrong place for its `t`.
+// Each target's child renderer places the import (or, on Angular, the class
+// member) itself; see `data-grid-child.ts` on all four JS frontends.
+//
+// Both read the English from `chromeMessage(name)` rather than taking it as an
+// argument, so the emitted `t()` default cannot drift from the catalog entry.
+
+/** The literal prefix of every chrome `t()` binding {@link localizedChromeText}
+ *  and {@link localizedChromeAttr} emit.
+ *
+ *  A hoisted-child renderer greps its RENDERED body for this to decide whether
+ *  that file needs `t` wired in — the honest question, because whether the
+ *  chrome appears at all is the active design pack's call (a pack with no pager
+ *  renders none).  Precise on purpose: a looser `"t("` test matches
+ *  `getContext(`, `format(` and friends. */
+export const CHROME_T_CALL = 't("chrome.';
+
+/** A pack-chrome string in a TEXT/children position (a grid pager's
+ *  "Previous"), for markup that may land in a hoisted child file.
+ *
+ *   - `ctx.i18nPrefix` set → the per-frontend interpolation of the `t()` call
+ *     (`{t("chrome.previous","Previous")}` on React/Svelte, `{{ t(…) }}` on
+ *     Vue/Angular), keyed to the merged chrome catalog;
+ *   - no prefix (a frontend with no i18n runtime, a string-less app) → the
+ *     escaped English — BYTE-IDENTICAL to the pre-i18n pack template.
+ *
+ *  Registers no import — see the section note above. */
+export function localizedChromeText(ctx: WalkContext, name: string): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) {
+    return ctx.target.renderInterpolation(translateExpr(ctx, chromeKey(name), english));
+  }
+  return ctx.target.escapeText(english);
+}
+
+/** The raw translation-call EXPRESSION for a pack-chrome string, unwrapped — for
+ *  a pack that splices it into its own expression language rather than into
+ *  markup (Feliz's `prop.text (…)`, Flutter's `Text(…)`).  Returns the plain
+ *  source-language literal, spelled by `renderStringLiteral`, when i18n is off.
+ *
+ *  Registers no import — see the section note above. */
+export function localizedChromeValue(ctx: WalkContext, name: string): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) return translateExpr(ctx, chromeKey(name), english);
+  return ctx.target.renderStringLiteral?.(english) ?? JSON.stringify(english);
+}
+
+/** A pack-chrome string in an ATTRIBUTE position (a grid's per-column
+ *  `placeholder="Filter"`), for markup that may land in a hoisted child file.
+ *
+ *  Returns the COMPLETE attribute fragment with NO leading space — unlike
+ *  `localizedChromeAria`, whose leading space replaces the one in the template.
+ *  Here the pack template keeps the attribute on its own indented line, so the
+ *  token stands exactly where the static attribute stood:
+ *
+ *      placeholder="Filter"     →     {{{filterPlaceholderAttr}}}
+ *
+ *  i18n off renders `placeholder="Filter"` verbatim (byte-identical); on, it is
+ *  the target's bound form (` placeholder={t(…)}` React/Svelte, `:placeholder="…"`
+ *  Vue, `[placeholder]="…"` Angular), trimmed of that leading space.
+ *
+ *  Registers no import — see the section note above. */
+export function localizedChromeAttr(ctx: WalkContext, attrName: string, name: string): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) {
+    return ctx.target
+      .renderAttrBinding(attrName, translateExpr(ctx, chromeKey(name), english))
+      .trimStart();
+  }
+  return `${attrName}="${escapeHtmlAttr(english)}"`;
 }
 
 /** {@link localizedRaw} unwrapped for a JSX-children text position — the

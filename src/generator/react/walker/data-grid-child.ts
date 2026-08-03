@@ -21,6 +21,7 @@
 // be resolved here, and `data:` takes a `as T[]` cast because the walker binds
 // `rows` as `readonly T[]`.
 
+import { CHROME_T_CALL } from "../../_walker/i18n-emit.js";
 import { addImport, addImportsForPrimitive } from "../../_walker/render-primitive.js";
 import type { DataGridChild, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
@@ -60,8 +61,20 @@ export function renderReactDataGridChild(spec: DataGridSpec, ctx: WalkContext): 
   // for free before the body render moved behind the seam.
   addImportsForPrimitive(ctx, "primitive-data-grid");
 
+  // Pack-chrome i18n (M-T1.11).  The pack's grid markup may carry
+  // `t("chrome.previous", …)` pager labels, and the shared chrome helpers
+  // deliberately register no import (on Vue/Svelte/Angular this markup lands in
+  // a SEPARATE file, where the page's import map would be the wrong place).
+  // React is the easy case — the child is a module decl in the PAGE's own file,
+  // so `t` on the page's import block is exactly the binding it resolves
+  // against, and `renderImportLines` rewrites `../i18n` to the page's depth.
+  // Gated on the RENDERED body so a pack that bakes in no chrome gets no
+  // import; i18n off never emits the call at all, so output stays identical.
+  const body = spec.renderBody();
+  if (body.includes(CHROME_T_CALL)) addImport(ctx, "../i18n", "t");
+
   return {
-    moduleDecl: renderGridComponent(spec),
+    moduleDecl: renderGridComponent(spec, body),
     // The call site is a single element — the grid's own layout lives inside
     // the hoisted component, so no depth-based indentation is needed here.
     callSite: spec.selection
@@ -83,9 +96,8 @@ function setterFor(field: string): string {
  *  `tsxTarget.dataGridRowVar`. */
 const ROW_VAR = "__loomRow";
 
-function renderGridComponent(spec: DataGridSpec): string {
+function renderGridComponent(spec: DataGridSpec, body: string): string {
   const { componentName, columns, multiSort, columnVisibility, anyFilterable, pageSize } = spec;
-  const body = spec.renderBody();
   const selection = spec.selection !== undefined;
 
   // A leading checkbox column when selection is on.  Emitted by the WALKER as

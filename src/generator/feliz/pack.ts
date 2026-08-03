@@ -321,6 +321,17 @@ function primitiveDataGrid(c: Ctx): string {
   const tid = testidProp(c);
   const tidPart = tid ? `${tid}; ` : "";
 
+  // Pack chrome (M-T1.11) — the pager labels and the filter placeholder.  The
+  // walker hands them as F# EXPRESSIONS (`localizedChromeValue`), not markup
+  // fragments: `prop.text` / `prop.placeholder` take a value, so the `.hbs`
+  // packs' attribute-fragment form is the wrong shape here.  i18n off → the
+  // plain F# literal `"Previous"`, byte-identical to the pre-i18n pager; on →
+  // `(I18n.t "chrome.previous" "Previous")` through the `renderTranslate` seam,
+  // keyed to the same shared catalog every other frontend uses.
+  const prevLabel = String(c.prevLabelValue ?? '"Previous"');
+  const nextLabel = String(c.nextLabelValue ?? '"Next"');
+  const filterPlaceholder = String(c.filterPlaceholderValue ?? '"Filter"');
+
   // Column-visibility toggles.  A column whose header is blank (the selection
   // column) falls back to its id so the checkbox still has a label.
   const visibility = c.hasColumnVisibility
@@ -336,7 +347,7 @@ function primitiveDataGrid(c: Ctx): string {
   // `filterable:` survived resolution (`getCanFilter()` is TanStack's answer).
   const filterInput = c.hasFilters
     ? `\n                  if unbox<bool> (h?column?getCanFilter()) then\n` +
-      `                    Html.input [ prop.type' "search"; prop.className "input input-xs input-bordered mt-1 w-full"; prop.placeholder "Filter"; prop.ariaLabel ("Filter by " + loomText (h?column?columnDef?header)); prop.value (loomText (h?column?getFilterValue())); prop.onChange (fun (v: string) -> loomHandle (h?column?setFilterValue) (box v)) ]`
+      `                    Html.input [ prop.type' "search"; prop.className "input input-xs input-bordered mt-1 w-full"; prop.placeholder ${filterPlaceholder}; prop.ariaLabel ("Filter by " + loomText (h?column?columnDef?header)); prop.value (loomText (h?column?getFilterValue())); prop.onChange (fun (v: string) -> loomHandle (h?column?setFilterValue) (box v)) ]`
     : "";
 
   // `aria-sort` on the header cell is the a11y contract the JSX packs already
@@ -363,9 +374,9 @@ function primitiveDataGrid(c: Ctx): string {
   // "Page 1 of 1" rather than "of 0".
   const pager =
     `\n      Html.div [ prop.className "flex items-center justify-between"; prop.children [\n` +
-    `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanPreviousPage()))); prop.onClick (fun _ -> loomInvoke (table?previousPage)); prop.text "Previous" ]\n` +
+    `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanPreviousPage()))); prop.onClick (fun _ -> loomInvoke (table?previousPage)); prop.text ${prevLabel} ]\n` +
     `        Html.span [ prop.className "text-sm"; prop.custom("aria-live", "polite"); prop.text ("Page " + string (unbox<int> (table?getState()?pagination?pageIndex) + 1) + " of " + string (max (unbox<int> (table?getPageCount())) 1)) ]\n` +
-    `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanNextPage()))); prop.onClick (fun _ -> loomInvoke (table?nextPage)); prop.text "Next" ]\n` +
+    `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanNextPage()))); prop.onClick (fun _ -> loomInvoke (table?nextPage)); prop.text ${nextLabel} ]\n` +
     `      ] ]`;
 
   const table =

@@ -37,6 +37,7 @@
 // 8.21 + Svelte 5.56: `svelte-check` 0 errors / 0 warnings, `vite build` green.
 
 import { lines } from "../../../util/code-builder.js";
+import { CHROME_T_CALL } from "../../_walker/i18n-emit.js";
 import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
@@ -119,6 +120,16 @@ function renderComponent(spec: DataGridSpec): string {
     (i) => `  import { ${i.named.join(", ")} } from "${i.from}";`,
   );
 
+  // Pack-chrome i18n (M-T1.11).  The pack's grid markup carries the pager's
+  // `{t("chrome.previous", …)}` labels under i18n, and this `.svelte` file is
+  // its own module — React's child gets `t` for free from the page's import
+  // block, this one does not, and an unimported `t` in Svelte is a RUNTIME
+  // `ReferenceError` (the same trap `cellImports` exists for).  `$lib/i18n` is
+  // the depth-agnostic specifier the walker's `../i18n` seam import rewrites to
+  // (`svelteImportPath`); the runtime lives at `src/lib/i18n.ts`.  Gated on the
+  // RENDERED body so a pack that bakes in no chrome gets no import.
+  const i18nImportLine = body.includes(CHROME_T_CALL) ? [`  import { t } from "$lib/i18n";`] : [];
+
   const props = selection
     ? lines(
         `  let { rows, onSelectionChange }: {`,
@@ -134,6 +145,7 @@ function renderComponent(spec: DataGridSpec): string {
     `  import {`,
     ...[...valueImports, ...typeImports].map((n) => `    ${n},`),
     `  } from "@tanstack/table-core";`,
+    ...i18nImportLine,
     ...packImportLines,
     ``,
     props,

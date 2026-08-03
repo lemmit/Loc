@@ -10,12 +10,19 @@
 // in the shadcn-family packs (shadcn / shadcnVue / shadcnSvelte / spartanNg), so
 // these tests pin one pack per frontend to exercise every attribute-binding
 // form (React `{…}`, Vue `:x="…"`, Svelte `{…}`, Angular `[attr.x]="…"`).
+//
+// The `DataGrid` pager block at the bottom is the harder case: its markup is
+// rendered into a HOISTED CHILD component, which on three of the four frontends
+// is a different FILE from the page — so the `t` those bindings resolve against
+// has to be wired into that file, not the page's import block.
 
 import { describe, expect, it } from "vitest";
-import { CHROME_MESSAGES } from "../../src/generator/_walker/i18n-chrome.js";
+import { APP_SHELL_CHROME, CHROME_MESSAGES } from "../../src/generator/_walker/i18n-chrome.js";
 import { generateSystemFiles } from "../_helpers/index.js";
 
-/** A one-page system on `<platform>`/`<design>` whose body is `<body>`. */
+/** A one-page system on `<platform>`/`<design>` whose body is `<body>`.
+ *  An empty `design` omits the clause entirely — Feliz hosts its own framework
+ *  and has no `.hbs` pack, so `design:` doesn't apply to it. */
 const SYSTEM = (platform: string, design: string, body: string) => `
   system Shop {
     subdomain Sales {
@@ -38,7 +45,7 @@ const SYSTEM = (platform: string, design: string, body: string) => `
       serves: SalesApi
       port: 3000
     }
-    deployable web { platform: ${platform} targets: api ui: Web { Sales: api } design: ${design} port: 3100 }
+    deployable web { platform: ${platform} targets: api ui: Web { Sales: api }${design === "" ? "" : ` design: ${design}`} port: 3100 }
   }
 `;
 
@@ -263,14 +270,167 @@ describe("pack-chrome i18n — loader aria-label", () => {
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
   });
 
-  it("merges the full chrome vocabulary into the catalog (translator-facing)", async () => {
+  it("every chrome key it DOES carry holds the canonical English", async () => {
+    // Chrome is used-only, so the catalog carries a SUBSET of the vocabulary
+    // (this page has a `Loader()` but no grid, hence no `chrome.previous`).
+    // What must hold for every key present is that its value is the canonical
+    // source-language text — the same string the emitted `t(key, default)`
+    // carries, or a locale-less app would render one thing and the catalog
+    // would document another.
     const files = await generateSystemFiles(
       SYSTEM("react", "shadcn", `Stack { Heading { "Welcome" }, Loader() }`),
     );
     const catalog = catalogOf(files);
-    for (const [key, message] of Object.entries(CHROME_MESSAGES)) {
-      expect(catalog[key]).toBe(message);
+    const chromeKeys = Object.keys(catalog).filter((k) => k.startsWith("chrome."));
+    expect(chromeKeys.length).toBeGreaterThan(0);
+    for (const key of chromeKeys) {
+      // Shell chrome (`APP_SHELL_CHROME`) is always merged and lives in its own
+      // table; primitive chrome comes from `CHROME_MESSAGES`.
+      expect(CHROME_MESSAGES[key] ?? APP_SHELL_CHROME[key]).toBe(catalog[key]);
     }
+    // The grid's chrome is NOT here — nothing on this page renders a pager.
+    expect(catalog["chrome.previous"]).toBeUndefined();
+    expect(catalog["chrome.next"]).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DataGrid pager chrome — the hoisted-child case
+// ---------------------------------------------------------------------------
+//
+// Unlike the app shell (rendered inline in the page/App component) and the
+// `Loader()` aria (rendered into the page body), the grid's pack markup is
+// rendered into a HOISTED CHILD component.  On React that child is a module
+// decl in the page's OWN file, so the page's `t` import already reaches it; on
+// Vue and Svelte it is a separate sibling FILE and on Angular a separate
+// COMPONENT, so each needs its own `t` — an import, and on Angular a class
+// member too (templates resolve names against the instance).  That wiring is
+// what these tests pin: the binding AND the thing it resolves against.
+
+/** A one-page system whose body is a `DataGrid` inside a `QueryView`.
+ *  `filterable` drives the per-column filter input — and therefore whether the
+ *  "Filter" placeholder is chrome this UI actually renders. */
+const GRID_BODY = (filterable: boolean) => `Stack {
+  Heading { "Orders" },
+  QueryView { of: Sales.Order.all, data: rows => DataGrid {
+    Column { "Status", o => o.status, sortable: true${filterable ? ", filterable: true" : ""} },
+    rows: rows,
+    testid: "orders-data-grid"
+  } }
+}`;
+
+/** The hoisted grid child, wherever this frontend puts it.  On React it is the
+ *  page itself (same file); the others emit a sibling. */
+function gridChildOf(files: Map<string, string>, ...suffixes: string[]): string {
+  for (const [p, c] of files) if (suffixes.some((s) => p.endsWith(s))) return c;
+  throw new Error(`no grid child emitted (looked for ${suffixes.join(", ")})`);
+}
+
+describe("pack-chrome i18n — DataGrid pager", () => {
+  it("React (mantine): pager + filter bind through t(), child shares the page's t import", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", GRID_BODY(true)));
+    const page = pageOf(files, "home.tsx");
+    expect(page).toContain(`{t("chrome.previous", "Previous")}`);
+    expect(page).toContain(`{t("chrome.next", "Next")}`);
+    expect(page).toContain(`placeholder={t("chrome.filter", "Filter")}`);
+    // The child is a module decl in the PAGE's file, so the page's own import
+    // block is exactly what it resolves against.
+    expect(page).toContain(`import { t } from "../i18n"`);
+    const catalog = catalogOf(files);
+    expect(catalog["chrome.previous"]).toBe("Previous");
+    expect(catalog["chrome.next"]).toBe("Next");
+    expect(catalog["chrome.filter"]).toBe("Filter");
+  });
+
+  it("Vue (vuetify): the sibling SFC carries its own ../i18n import", async () => {
+    const files = await generateSystemFiles(SYSTEM("vue", "vuetify", GRID_BODY(true)));
+    const child = gridChildOf(files, "src/components/OrdersDataGrid.vue");
+    expect(child).toContain(`{{ t("chrome.previous", "Previous") }}`);
+    expect(child).toContain(`{{ t("chrome.next", "Next") }}`);
+    expect(child).toContain(`:placeholder='t("chrome.filter", "Filter")'`);
+    // `src/components/` is one hop under `src/`, where the runtime lives — and
+    // unlike a page it never nests, so the specifier needs no depth rewrite.
+    expect(child).toContain(`import { t } from "../i18n";`);
+    expect(files.has("web/src/i18n.ts")).toBe(true);
+    expect(catalogOf(files)["chrome.previous"]).toBe("Previous");
+  });
+
+  it("Svelte (flowbite): the sibling component imports t from $lib/i18n", async () => {
+    const files = await generateSystemFiles(SYSTEM("svelte", "flowbite", GRID_BODY(true)));
+    const child = gridChildOf(files, "src/lib/components/OrdersDataGrid.svelte");
+    expect(child).toContain(`{t("chrome.previous", "Previous")}`);
+    expect(child).toContain(`{t("chrome.next", "Next")}`);
+    expect(child).toContain(`placeholder={t("chrome.filter", "Filter")}`);
+    // Depth-agnostic alias — the same specifier the walker's `../i18n` seam
+    // import rewrites to everywhere else on Svelte.
+    expect(child).toContain(`import { t } from "$lib/i18n";`);
+    expect(files.has("web/src/lib/i18n.ts")).toBe(true);
+    expect(catalogOf(files)["chrome.next"]).toBe("Next");
+  });
+
+  it("Angular (angularMaterial): the sibling component imports t AND lifts it onto the class", async () => {
+    const files = await generateSystemFiles(SYSTEM("angular", "angularMaterial", GRID_BODY(true)));
+    const child = gridChildOf(files, "src/app/components/orders-data-grid.component.ts");
+    expect(child).toContain(`{{ t("chrome.previous", "Previous") }}`);
+    expect(child).toContain(`{{ t("chrome.next", "Next") }}`);
+    expect(child).toContain(`[placeholder]='t("chrome.filter", "Filter")'`);
+    expect(child).toContain(`import { t } from "../../lib/i18n";`);
+    // The import alone is not enough — an Angular template evaluates against
+    // the component INSTANCE, so a module-scope `t` resolves to nothing.
+    expect(child).toContain("protected readonly t = t;");
+    expect(files.has("web/src/lib/i18n.ts")).toBe(true);
+    expect(catalogOf(files)["chrome.filter"]).toBe("Filter");
+  });
+
+  it("Feliz: the same chrome, spelled in F# through the renderTranslate seam", async () => {
+    // Feliz has no `.hbs` pack and no import map — it renders the grid from its
+    // own procedural pack into one `App.fs`.  So the chrome reaches it as a bare
+    // EXPRESSION (`localizedChromeValue`) rather than a markup fragment, and the
+    // call is spelled F# by the `renderTranslate` seam (#2370) instead of the JS
+    // `t(key, default)`.  Same keys, same catalog — which is the point: a Feliz
+    // grid must not carry catalog entries nothing emits.
+    const files = await generateSystemFiles(SYSTEM("feliz", "", GRID_BODY(true)));
+    const app = gridChildOf(files, "App.fs");
+    expect(app).toContain(`prop.text (I18n.t "chrome.previous" "Previous")`);
+    expect(app).toContain(`prop.text (I18n.t "chrome.next" "Next")`);
+    expect(app).toContain(`prop.placeholder (I18n.t "chrome.filter" "Filter")`);
+    // The F# runtime's own catalog carries them, so no key is unresolvable.
+    expect(app).toContain(`"chrome.previous", "Previous"`);
+  });
+
+  it("contributes chrome.filter ONLY when a column is filterable", async () => {
+    // The pager is unconditional in every pack; the filter input rides
+    // `hasFilters`.  Catalog and emission are gated by the SAME predicate
+    // (`data-grid-shape.ts`), so a grid with no filterable column must carry
+    // neither the key nor the binding — a mismatch either way is invisible to a
+    // structural test but breaks translators or the runtime.
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", GRID_BODY(false)));
+    const page = pageOf(files, "home.tsx");
+    expect(page).toContain(`{t("chrome.previous", "Previous")}`);
+    expect(page).not.toContain("chrome.filter");
+    const catalog = catalogOf(files);
+    expect(catalog["chrome.previous"]).toBe("Previous");
+    expect(catalog["chrome.filter"]).toBeUndefined();
+  });
+
+  it("a grid alone turns i18n on (used-only chrome is translatable)", async () => {
+    // No authored literal anywhere — the grid's pager is the ONLY user-visible
+    // text, and it is still translatable: the extractor yields the pager keys,
+    // the runtime ships, and the labels bind through t().
+    const files = await generateSystemFiles(
+      SYSTEM(
+        "react",
+        "mantine",
+        `QueryView { of: Sales.Order.all, data: rows => DataGrid {
+           Column { "Status", o => o.status },
+           rows: rows
+         } }`,
+      ),
+    );
+    const page = pageOf(files, "home.tsx");
+    expect(page).toContain(`{t("chrome.previous", "Previous")}`);
+    expect(page).toContain(`import { t } from "../i18n"`);
+    expect(catalogOf(files)["chrome.previous"]).toBe("Previous");
   });
 });
 
