@@ -138,8 +138,9 @@ describe("mask unless × audited — no duplicate pattern variable in one scope"
       .map(([k, v]) => [k, maskPatternVars(v)] as const)
       .filter(([, vars]) => new Set(vars).size !== vars.length)
       .map(([k, vars]) => `${k}: ${vars.join(", ")}`);
-    expect(offenders, `files redeclaring a mask pattern variable: ${offenders.join(" | ")}`).toEqual(
-      [],
-    );
+    expect(
+      offenders,
+      `files redeclaring a mask pattern variable: ${offenders.join(" | ")}`,
+    ).toEqual([]);
   });
 });
