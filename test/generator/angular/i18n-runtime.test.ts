@@ -213,20 +213,23 @@ describe("Angular i18n runtime", () => {
     expect(Object.values(JSON.parse(locale) as Record<string, string>)).toContain("Section break");
   });
 
-  it("has no modalTitle emission site — Angular ships no state-controlled Modal", async () => {
-    // The `modalTitle` slot lives on the STATE-CONTROLLED Modal
-    // (`primitive-modal-controlled`), which React/Vue/Svelte/Feliz packs carry
-    // and none of the three Angular packs do — the walker gates on the template
-    // being present, so an `open:` Modal degrades to a comment on Angular.  A
-    // pre-existing primitive gap (M-T1.14 tail), not an i18n one: pinned here so
-    // the slot's Angular status is a stated fact rather than a silent hole.
+  it("translates the Modal title named slot (modalTitle)", async () => {
+    // Angular carried no `primitive-modal-controlled` template at all, so an
+    // `open:` Modal degraded to an HTML comment — silent content loss, and the
+    // `modalTitle` slot had no emission site to translate.  All three Angular
+    // packs now ship the dialog, so the slot behaves like every other frontend.
     const files = await generateSystemFiles(
       SYSTEM(`Modal { Text { "Confirm archive?" }, open: archiveOpen, title: "Archive" }`).replace(
         'page Home { route: "/"',
         'page Home { route: "/" state { archiveOpen: bool = false }',
       ),
     );
-    expect(homeOf(files)).toContain("<!-- Modal: expected an OperationForm child -->");
+    const home = homeOf(files);
+    expect(home).not.toContain("<!-- Modal:");
+    expect(home).toMatch(/t\("page\.Home\.modalTitle\.\w+", "Archive"\)/);
+    // …in a dialog with an accessible name.
+    expect(home).toContain('role="dialog"');
+    expect(home).toContain('aria-modal="true"');
   });
 
   it("keeps the Toolbar's DEFAULT accessible name a static attribute", async () => {

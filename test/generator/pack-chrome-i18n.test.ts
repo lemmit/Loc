@@ -17,7 +17,11 @@
 // has to be wired into that file, not the page's import block.
 
 import { describe, expect, it } from "vitest";
-import { APP_SHELL_CHROME, CHROME_MESSAGES } from "../../src/generator/_walker/i18n-chrome.js";
+import {
+  APP_SHELL_CHROME,
+  CHROME_MESSAGES,
+  chromeKey,
+} from "../../src/generator/_walker/i18n-chrome.js";
 import { generateSystemFiles } from "../_helpers/index.js";
 
 /** A one-page system on `<platform>`/`<design>` whose body is `<body>`.
@@ -612,5 +616,22 @@ describe("pack-chrome i18n — select placeholder", () => {
     expect(page).not.toContain("chrome.selectPlaceholder");
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
     expect([...files].some(([p]) => p.endsWith("src/i18n.ts"))).toBe(false);
+  });
+
+  it("emitter-built form chrome reaches the catalog when a page uses it", async () => {
+    // `Delete <Agg>` and its `window.confirm` prompt are built in the EMITTER
+    // from the aggregate name, so neither the content-hash extraction pass
+    // (literals in the .ddd body) nor the pack-chrome `.hbs` slice ever saw
+    // them — they shipped untranslated on every frontend.  They ride
+    // `FORM_CHROME`, so they are merged for an app that is ALREADY i18n-enabled
+    // rather than flipping i18n on for a form-only page.
+    const files = await generateSystemFiles(
+      SYSTEM("react", "shadcn", `Stack { Heading { "Welcome" }, DestroyForm { of: Order } }`),
+    );
+    const catalog = catalogOf(files);
+    expect(catalog[chromeKey("deleteEntity")]).toBe(CHROME_MESSAGES[chromeKey("deleteEntity")]);
+    expect(catalog[chromeKey("deleteConfirm")]).toBe(CHROME_MESSAGES[chromeKey("deleteConfirm")]);
+    const page = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
+    expect(page).toContain('t("chrome.deleteConfirm"');
   });
 });

@@ -1131,7 +1131,11 @@ export function renderVueComponentFile(
         openVar: `${opCamel}Open`,
         formVar: `${opCamel}Form`,
         mutVar: opCamel,
-        title: humanize(st.op.name),
+        // Same two title spellings as the page-level call site above — this is
+        // the COMPONENT path (`component X { … }` bodies), and a template var
+        // only one caller passes throws on the strict-Handlebars packs.
+        title: st.modalTitle || humanize(st.op.name),
+        titleExpr: st.modalTitleExpr ?? JSON.stringify(humanize(st.op.name)),
         submitLabel: humanize(st.op.name),
         ns: st.testidNamespace,
         fieldsHtml: fields,

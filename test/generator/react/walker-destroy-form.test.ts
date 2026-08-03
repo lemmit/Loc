@@ -39,8 +39,12 @@ describe("DestroyForm — canonical destroy confirmation", () => {
     expect(page).toContain('import { useParams, useNavigate } from "react-router";');
     expect(page).toContain("const { id } = useParams<{ id: string }>();");
     expect(page).toContain("const deleteOrder = useDeleteOrder();");
+    // The prompt is emitter-built user-visible English, so it rides the stable
+    // `chrome.deleteConfirm` key with the entity name as an ICU hole (it used to
+    // ship untranslated on every frontend).
     expect(page).toContain(
-      'if (window.confirm("Delete this order?")) void deleteOrder.mutateAsync(id ?? "").then(() => { navigate("/orders"); });',
+      'if (window.confirm(t("chrome.deleteConfirm", "Delete this {entity}?", { entity: "order" }))) ' +
+        'void deleteOrder.mutateAsync(id ?? "").then(() => { navigate("/orders"); });',
     );
     expect(page).toContain('data-testid="orders-destroy"');
     expect(page).toContain("loading={deleteOrder.isPending}");

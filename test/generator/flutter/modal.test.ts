@@ -46,7 +46,13 @@ describe("flutter Modal (op-form dialog)", () => {
     const src = page![1];
     // Trigger button opens a dialog…
     expect(src).toContain("showDialog(context: context,");
-    expect(src).toContain("AlertDialog(title: Text('Add Note')");
+    // The dialog title is the AUTHORED `title: "Add note"` (translated — the
+    // `modalTitle` catalog slot), not the humanized op name "Add Note" this
+    // renderer used to hardcode while the authored title reached the catalog
+    // and nothing else.
+    expect(src).toMatch(
+      /AlertDialog\(title: Text\(t\('page\.\w+\.modalTitle\.\w+', 'Add note'\)\)/,
+    );
     // …wrapping the generated op-form widget (addressed by the route id).
     expect(src).toContain("AddNoteOrderForm(id: id)");
     // The button carries the trigger's label.
