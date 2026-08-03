@@ -106,4 +106,6 @@ Unlike the persistence surface [M-T9.2](./missions/M-T9.2-persistence-seam-desig
 
 **Scope guard:** this is a *sealing* mission. It does not add a framework and does not reopen the [T10 target freeze](T10-new-targets.md). It is explicitly allowed to conclude as a partial decline if a slice's port yields single-use contract methods — the M-T9.2 §0.4 net-negative-indirection test applies.
 
+**Sequencing prerequisite (2026-08-03):** slices 1–3 are **blocked on [#2340](https://github.com/lemmit/Loc/pull/2340)** (M-T9.25), which modifies five of the six files in their blast radius *and changes emitted output* — and byte-identical gating needs a baseline that holds still, so this is a method prerequisite, not a merge-conflict inconvenience. Routing around it by starting at slice 4/5 is explicitly rejected in §2.6: those are the two deliberate non-leaf fragments, and deriving the contract from its worst-fit consumers is how a seam grows the single-use methods the anti-criterion exists to reject.
+
 Sources: [M-T9.26 brief + design](./missions/M-T9.26-route-target-seam-brief.md). Related: M-T9.2 (the precedent + the decline discipline), M-T6.23 (the silent-omission failure mode), `_obs/` (the in-tree neutral-catalog-plus-renderers pattern this generalises).

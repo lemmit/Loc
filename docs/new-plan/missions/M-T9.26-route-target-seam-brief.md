@@ -184,7 +184,24 @@ Each slice keeps output **byte-identical** to today's Hono emission, gated by th
 
 Slice 6 is the only one with value beyond node, and it should be **re-scoped after slice 1** — plausibly only the *spec model* is shareable across languages, not the emission. Do not promise it up front.
 
-### 2.6 Success criterion — and the anti-criterion
+### 2.6 Sequencing prerequisite — byte-identical gating needs a quiet baseline
+
+*Added 2026-08-03 after a pre-implementation conflict check. This is a design constraint the original draft missed, not a scheduling note.*
+
+Every slice is gated on **output byte-identical to today's Hono emission**. That method silently requires the baseline to hold still: if another in-flight PR *changes* what the emitters emit, there is no fixed target to be identical to, and the gate degrades from a proof into a diff against a moving reference.
+
+**Check before starting any slice** — for each file in the slice, does an open PR modify it?
+
+```bash
+git fetch origin
+git diff --numstat origin/main...origin/<branch> -- src/platform/hono/v4/
+```
+
+**Blocked as of 2026-08-03:** [#2340](https://github.com/lemmit/Loc/pull/2340) (M-T9.25, cross-backend differential gate) touches **five of the six files in the slice 1–3 blast radius** — `routes-builder.ts` (87+/35−), `explicit-handlers-builder.ts` (22+/4−), `projection-query-routes-builder.ts` (24+/4−), `workflow-builder.ts` (34+/8−), `projection-builder.ts` (2+/1−). [#2363](https://github.com/lemmit/Loc/pull/2363) adds 12 lines to `routes-builder.ts`. Both change *emitted output*, so they move the baseline as well as the source. **Slices 1–3 wait for #2340 to land.**
+
+**Do not "start with slice 4 or 5 instead" to route around this.** `auth-emit.ts` and `realtime-builder.ts` are uncontended, but they are the two fragments §1.3 classifies as **`adapter`** and **`structural`** — the deliberate exceptions. Deriving the contract from its two worst-fit consumers would shape `RouteTarget` around the exceptions rather than the rule, which is how a seam ends up with the single-use methods §2.6 exists to reject. Easiest-first is a correctness property of this plan, not a convenience.
+
+### 2.6b Success criterion — and the anti-criterion
 
 Byte-identical Hono output through the seam, **plus**: every `RouteTarget` method must be exercised by the existing fixture corpus. A method no path reaches is dead contract surface.
 
