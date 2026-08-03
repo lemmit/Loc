@@ -1,1 +1,1 @@
-<mat-divider{{{testidAttr}}}{{{styleAttr}}}></mat-divider>
+{{#if hasLabel}}<div class="loom-divider-labelled"{{{testidAttr}}}{{{styleAttr}}}><mat-divider class="loom-divider-rule"></mat-divider><span class="loom-divider-label">{{{label}}}</span><mat-divider class="loom-divider-rule"></mat-divider></div>{{else}}<mat-divider{{{testidAttr}}}{{{styleAttr}}}></mat-divider>{{/if}}

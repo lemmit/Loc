@@ -593,6 +593,43 @@ three-way merge; the generated catalog key shape.
 
 ---
 
+## D-I18N-ATTR — who resolves an attribute-position string
+
+**Status:** PINNED.
+
+**Decision.** **The a11y/i18n helper emits an already-TRANSLATED value; a
+design pack never resolves a key.** A user-visible string in ATTRIBUTE
+position (`Button`'s aria-label, `Toolbar`'s aria-label, `Alert`/`Modal`
+title, `Divider` label) reaches a pack in exactly one of two spellings,
+both produced by `src/generator/_walker/i18n-emit.ts` from the same
+`messageKey()` the extraction pass uses:
+
+- an HTML-ish attribute **FRAGMENT** (`localizedAriaLabelAttr`,
+  `localizedNamedAttr`) — spliced verbatim by the four JSX/markup
+  frontends, whose packs are `.hbs` templates that can only interpolate
+  text;
+- a target-native **VALUE** (`localizedAriaLabelValue`, via the optional
+  `WalkerTarget.renderStringLiteral` seam) — for the packs that build
+  props procedurally rather than markup: Feliz (F# `prop.ariaLabel …`)
+  and Flutter (Dart `Semantics(label: …)`).
+
+The rejected alternative is handing the pack the **key** and letting it
+call the runtime: that duplicates the "is this app i18n-enabled at all"
+decision into every pack, and one pack forgetting the check emits a
+`t()` into an app with no runtime. Deciding once in the helper keeps the
+i18n-OFF path byte-identical by construction, and keeps
+`.loom/messages.en.json` the single catalog for both spellings.
+
+**Corollary.** A pack that *drops* a user-visible slot is a bug, not a
+style choice — the string still reaches the catalog, so a translator
+translates text the app never renders.
+
+**Affects.** `i18n.md`, `accessibility.md`; `_walker/i18n-emit.ts`,
+`_walker/a11y-emit.ts`, `_walker/target.ts`; every `primitive-*.hbs`
+carrying a user-visible attribute, plus the Feliz/Flutter packs.
+
+---
+
 ## D-CTX-SHAPE — the ambient `RequestContext` field set
 
 **Status:** PINNED. Full shape in

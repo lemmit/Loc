@@ -81,6 +81,27 @@ function testidProp(c: Ctx): string {
   return m ? `prop.custom("data-testid", ${m[1]})` : "";
 }
 
+/** The accessible name a primitive carries, as an F# EXPRESSION ready for
+ *  `prop.ariaLabel` — or `undefined` when the primitive has no name at all.
+ *
+ *  Feliz's markup is not HTML, so it cannot splice the walker's ` aria-label="…"`
+ *  fragment; the walker hands it the same name as a target-native VALUE instead
+ *  (`ariaLabelExpr`, D-I18N-ATTR in `_walker/i18n-emit.ts`).  That value is
+ *  ALREADY translated where the ui has strings — `(I18n.t "<key>" "<default>")`,
+ *  keyed to `.loom/messages.en.json` — and a plain F# `"…"` literal otherwise,
+ *  which is byte-identical to the pre-i18n emission.  Before this seam the pack
+ *  read the RAW `label:` text, which is why a Feliz Button/Toolbar shipped its
+ *  accessible name in English no matter the locale.
+ *
+ *  `fallback` is the pack's own default for a primitive whose contract requires
+ *  a name (Toolbar's `"Actions"`); it is already an F# literal. */
+function ariaLabelExpr(c: Ctx, fallback: string): string;
+function ariaLabelExpr(c: Ctx): string | undefined;
+function ariaLabelExpr(c: Ctx, fallback?: string): string | undefined {
+  const expr = String(c.ariaLabelExpr ?? "").trim();
+  return expr !== "" ? expr : fallback;
+}
+
 /** A flex-container primitive (Stack = vertical, Group = horizontal) with a
  *  daisyUI/Tailwind layout class.  Same offside-safe children handling either
  *  way — only the flex direction differs.  An empty container (e.g. a scaffold
@@ -147,8 +168,7 @@ function primitivePaper(c: Ctx): string {
 /** Toolbar — a page-header row (space-between flex container).  Its a11y
  *  contract makes it a labelled ARIA `toolbar` (default name "Actions"). */
 function primitiveToolbar(c: Ctx): string {
-  const label = String(c.label ?? "").trim() || "Actions";
-  const a11y = `prop.role "toolbar"; prop.ariaLabel "${label.replace(/"/g, '\\"')}"`;
+  const a11y = `prop.role "toolbar"; prop.ariaLabel ${ariaLabelExpr(c, `"Actions"`)}`;
   return containerEl("div", "flex flex-row items-center justify-between gap-2 py-2", c, a11y);
 }
 
@@ -423,8 +443,15 @@ function primitiveBadge(c: Ctx): string {
   return `Html.span [ prop.className "badge badge-neutral"; ${inner} ]`;
 }
 
-function primitiveDivider(_c: Ctx): string {
-  return `Html.div [ prop.className "divider" ]`;
+/** Divider — a daisyUI rule.  An optional `label:` rides INSIDE the rule
+ *  (`<div class="divider">Section break</div>` is daisyUI's labelled form), so
+ *  the slot is a real user-visible string here rather than a dropped one: it was
+ *  extracted into `.loom/messages.en.json` but rendered nowhere, which handed a
+ *  translator a string the app never shows.  Raw text with i18n off, an
+ *  already-rendered `Html.text ((I18n.t …))` element with it on. */
+function primitiveDivider(c: Ctx): string {
+  if (!c.hasLabel) return `Html.div [ prop.className "divider" ]`;
+  return `Html.div [ prop.className "divider"; ${textOrChildren(String(c.label ?? ""))} ]`;
 }
 
 function primitiveButton(c: Ctx): string {
@@ -439,8 +466,8 @@ function primitiveButton(c: Ctx): string {
   if (c.hasOnClick) props.push(`prop.onClick (${c.onClick})`);
   // `label:` supplies an explicit accessible name (the a11y contract's needsName)
   // — emitted as prop.ariaLabel when the visible text is an unhelpful glyph.
-  const ariaLabel = String(c.ariaLabel ?? "").trim();
-  if (ariaLabel !== "") props.push(`prop.ariaLabel "${ariaLabel.replace(/"/g, '\\"')}"`);
+  const aria = ariaLabelExpr(c);
+  if (aria !== undefined) props.push(`prop.ariaLabel ${aria}`);
   // The label is a user-visible slot — raw text, or an already-rendered
   // `Html.text (I18n.t …)` element under i18n (M-T1.11).
   props.push(textOrChildren(String(c.label ?? "")));

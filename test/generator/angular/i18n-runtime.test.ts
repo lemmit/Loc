@@ -204,4 +204,36 @@ describe("Angular i18n runtime", () => {
     const locale = [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1];
     expect(Object.values(JSON.parse(locale) as Record<string, string>)).toContain("Heads up");
   });
+
+  it("translates the Divider label named slot (dividerLabel)", async () => {
+    const files = await generateSystemFiles(SYSTEM(`Divider { label: "Section break" }`));
+    const home = homeOf(files);
+    expect(home).toMatch(/t\("page\.Home\.dividerLabel\.\w+", "Section break"\)/);
+    const locale = [...files].find(([p]) => p.endsWith("src/lib/locales/en.json"))![1];
+    expect(Object.values(JSON.parse(locale) as Record<string, string>)).toContain("Section break");
+  });
+
+  it("has no modalTitle emission site — Angular ships no state-controlled Modal", async () => {
+    // The `modalTitle` slot lives on the STATE-CONTROLLED Modal
+    // (`primitive-modal-controlled`), which React/Vue/Svelte/Feliz packs carry
+    // and none of the three Angular packs do — the walker gates on the template
+    // being present, so an `open:` Modal degrades to a comment on Angular.  A
+    // pre-existing primitive gap (M-T1.14 tail), not an i18n one: pinned here so
+    // the slot's Angular status is a stated fact rather than a silent hole.
+    const files = await generateSystemFiles(
+      SYSTEM(`Modal { Text { "Confirm archive?" }, open: archiveOpen, title: "Archive" }`).replace(
+        'page Home { route: "/"',
+        'page Home { route: "/" state { archiveOpen: bool = false }',
+      ),
+    );
+    expect(homeOf(files)).toContain("<!-- Modal: expected an OperationForm child -->");
+  });
+
+  it("keeps the Toolbar's DEFAULT accessible name a static attribute", async () => {
+    // "Actions" is the a11y contract's fallback — no source literal, so it is not
+    // in the catalog and must never bind through `t()` (its key would resolve to
+    // nothing).  Byte-identical to the pre-i18n emission.
+    const files = await generateSystemFiles(SYSTEM(`Toolbar { Heading { "Orders" } }`));
+    expect(homeOf(files)).toContain(`role="toolbar" aria-label="Actions"`);
+  });
 });

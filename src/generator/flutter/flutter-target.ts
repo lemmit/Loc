@@ -557,6 +557,10 @@ export const flutterTarget: WalkerTarget = {
   // A dynamic attribute → a named widget argument (leading space, camelCased
   // name so a hyphenated source attr stays a legal Dart identifier).
   renderAttrBinding: (name: string, jsExpr: string) => ` ${dartIdent(name)}: ${jsExpr}`,
+  // A Dart string literal — how a user-visible string reaching the pack as a
+  // VALUE (`localizedAriaLabelValue`, D-I18N-ATTR) is spelled with i18n off.
+  // The same single-quoted escaping the translation runtime uses for its keys.
+  renderStringLiteral: dartStringLit,
 
   // A call into the generated Dart translation runtime (M-T1.11).  The JS
   // frontends' `t(key, default, { name: expr })` is close but not Dart — the

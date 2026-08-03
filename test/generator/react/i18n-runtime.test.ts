@@ -240,4 +240,29 @@ describe("React i18n runtime", () => {
     ) as Record<string, string>;
     expect(Object.values(catalog)).toContain("Archive");
   });
+
+  it("keeps the Toolbar's DEFAULT accessible name a static attribute", async () => {
+    // "Actions" is the a11y contract's fallback — no source literal, so it is not
+    // in the catalog and must never bind through `t()` (its key would resolve to
+    // nothing).  Byte-identical to the pre-i18n emission.
+    const files = await generateSystemFiles(SYSTEM(`Toolbar { Heading { "Orders" } }`));
+    expect(await pageOf(files)).toContain(`role="toolbar" aria-label="Actions"`);
+  });
+
+  it("renders the translated Divider label on the chakra packs too", async () => {
+    // chakra v2/v3 had a `hasLabel` branch identical to the unlabelled one, so the
+    // label was extracted into the catalog and rendered NOWHERE — a translator
+    // translating a string the app never showed.  Both now split the rule.
+    for (const design of ["chakra", `"chakra@v2"`]) {
+      const files = await generateSystemFiles(
+        SYSTEM(`Divider { label: "Section break" }`).replace(
+          "ui: Web port: 3100",
+          `ui: Web port: 3100 design: ${design}`,
+        ),
+      );
+      const home = await pageOf(files);
+      expect(home, design).toMatch(/t\("page\.Home\.dividerLabel\.\w+", "Section break"\)/);
+      expect(home, design).toContain("<HStack");
+    }
+  });
 });

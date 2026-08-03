@@ -232,6 +232,54 @@ export function localizedAriaLabelAttr(
   return ariaLabelAttr(literal ?? defaultLabel);
 }
 
+/** The accessible name of a NAMED user-visible slot as a TARGET-NATIVE
+ *  EXPRESSION — the value-position twin of {@link localizedAriaLabelAttr}, and
+ *  the seam for the two frontends whose markup is NOT HTML.
+ *
+ *  D-I18N-ATTR (M-T1.11): **the a11y helper emits an already-TRANSLATED value;
+ *  a pack never resolves a key.**  One accessible name, two renderings, both
+ *  derived here from the SAME `messageKey()` the extraction pass uses:
+ *
+ *   - the HTML-ish attribute FRAGMENT (`localizedAriaLabelAttr`) — spliced
+ *     verbatim by the four JSX/markup frontends, whose packs are `.hbs`
+ *     templates that can only interpolate text;
+ *   - this VALUE (`localizedAriaLabelValue`) — an expression in the target's own
+ *     language, for the procedural packs that build props rather than markup
+ *     (Feliz `prop.ariaLabel <expr>`, Flutter `Semantics(label: <expr>)`).
+ *
+ *  The alternative — hand the pack the KEY and let it call the runtime — was
+ *  rejected: it duplicates the "is this app i18n-enabled at all" decision into
+ *  every pack, and a pack that forgets the check emits a `t()` call into an app
+ *  with no runtime.  Deciding once here keeps the i18n-OFF path byte-identical
+ *  by construction.
+ *
+ *  Returns `undefined` when the slot carries no name at all (no literal, no
+ *  `defaultLabel`) — the caller omits the prop, matching the empty-string
+ *  fragment `ariaLabelAttr` yields.  A DYNAMIC (non-literal) label is likewise
+ *  `undefined`: it has no stable source string, exactly as in the attribute
+ *  path. */
+export function localizedAriaLabelValue(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  name = "label",
+  defaultLabel?: string,
+): string | undefined {
+  const literal = literalString(namedArgValue(call, name));
+  if (literal !== undefined && ctx.i18nPrefix) {
+    return translateCall(ctx, messageKey(ctx.i18nPrefix, role, literal), literal);
+  }
+  const text = literal ?? defaultLabel;
+  if (text === undefined || text === "") return undefined;
+  return stringLiteral(ctx, text);
+}
+
+/** A plain string literal in the target's own expression language — the
+ *  `renderStringLiteral` seam, JSON-quoted when a target leaves it unset. */
+function stringLiteral(ctx: WalkContext, text: string): string {
+  return ctx.target.renderStringLiteral?.(text) ?? JSON.stringify(text);
+}
+
 /** An ` aria-label="…"` fragment for a PACK-CHROME string a design-pack
  *  template bakes in (a spinner's `aria-label="Loading"`) — the chrome twin of
  *  {@link localizedAriaLabelAttr}.  Unlike the named-slot helper the key is the

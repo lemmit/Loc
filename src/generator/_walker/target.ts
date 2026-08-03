@@ -694,6 +694,17 @@ export interface WalkerTarget {
    *  method every target must implement. */
   ariaAttrPrefix?: string;
 
+  /** OPTIONAL — the SPELLING of a plain STRING LITERAL in the target's own
+   *  expression language (M-T1.11).  Needed only where a user-visible string
+   *  reaches a pack as a VALUE rather than as an HTML-ish attribute fragment —
+   *  the `localizedAriaLabelValue` seam, whose two consumers are the frontends
+   *  whose markup is not HTML (Feliz's F# `"…"`, Flutter's Dart `'…'`).
+   *
+   *  The four JSX/markup frontends never call it (they splice the
+   *  `localizedAriaLabelAttr` fragment instead), so an omitted seam — the
+   *  JSON-quoted default — keeps them byte-identical. */
+  renderStringLiteral?(text: string): string;
+
   /** OPTIONAL — the SPELLING of a call into the generated translation runtime
    *  (M-T1.11).  The four JS frontends share one `t(key, default, values?)`
    *  shim, so an omitted seam yields exactly that JavaScript call and those

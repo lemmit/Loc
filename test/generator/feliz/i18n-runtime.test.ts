@@ -188,4 +188,63 @@ system Shop {
       expect(fs).toContain(`I18n.t "page.Home.${role}.`);
     }
   });
+
+  // --- ATTRIBUTE-position slots (D-I18N-ATTR) -------------------------------
+  // Feliz's markup is not HTML, so its pack cannot splice the walker's
+  // ` aria-label="…"` fragment.  It used to read the RAW `label:` text instead,
+  // which shipped the accessible name in English at every locale; it now takes
+  // the same name as a target-native VALUE (`localizedAriaLabelValue`), already
+  // translated.
+
+  it("translates named aria-label slots (Button + Toolbar) as F# props", async () => {
+    const src = SYS(
+      `Toolbar { label: "Order actions", Button { "+", label: "Add order", to: "/new" } }`,
+    );
+    const fs = await appFs(src);
+    const buttonKey = await keyFor(src, "Add order");
+    const toolbarKey = await keyFor(src, "Order actions");
+    expect(fs).toContain(`prop.ariaLabel (I18n.t "${buttonKey}" "Add order")`);
+    expect(fs).toContain(
+      `prop.role "toolbar"; prop.ariaLabel (I18n.t "${toolbarKey}" "Order actions")`,
+    );
+    // The English text must not ALSO be spliced as a raw F# literal.
+    expect(fs).not.toContain(`prop.ariaLabel "Add order"`);
+    expect(fs).not.toContain(`prop.ariaLabel "Order actions"`);
+  });
+
+  it("keeps the Toolbar's DEFAULT accessible name a plain F# literal", async () => {
+    // "Actions" is the pack's own fallback — no source literal, so it is not in
+    // the catalog and must never become an `I18n.t` call (its key would resolve
+    // to nothing).  This is the i18n-ON app exercising the value seam's OFF
+    // branch, byte-identical to the pre-i18n emission.
+    const fs = await appFs(SYS(`Toolbar { Heading { "Orders" } }`));
+    expect(fs).toContain(`prop.role "toolbar"; prop.ariaLabel "Actions"`);
+  });
+
+  it("renders + translates the Divider label (it was extracted but dropped)", async () => {
+    // The label reached `.loom/messages.en.json` while the pack emitted a bare
+    // rule — a translator translating a string the app never showed.  daisyUI's
+    // labelled form puts the text INSIDE the divider.
+    const src = SYS(`Divider { label: "Section break" }`);
+    const fs = await appFs(src);
+    const key = await keyFor(src, "Section break");
+    expect(fs).toContain(
+      `Html.div [ prop.className "divider"; prop.children [ Html.text ((I18n.t "${key}" "Section break")) ] ]`,
+    );
+  });
+
+  it("keeps an unlabelled Divider byte-identical", async () => {
+    const fs = await appFs(SYS(`Stack { Heading { "Orders" }, Divider { } }`));
+    expect(fs).toContain(`Html.div [ prop.className "divider" ]`);
+  });
+
+  it("translates the Modal title named slot (modalTitle)", async () => {
+    const src = SYS(
+      `Modal { Text { "Confirm archive?" }, open: archiveOpen, title: "Archive" }`,
+      "state { archiveOpen: bool = false }",
+    );
+    const fs = await appFs(src);
+    const key = await keyFor(src, "Archive");
+    expect(fs).toContain(`Html.text ((I18n.t "${key}" "Archive"))`);
+  });
 });
