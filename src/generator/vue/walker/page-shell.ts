@@ -13,6 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
@@ -766,51 +767,6 @@ function indent(markup: string, prefix: string): string {
 // — host the form on a page (the same posture Svelte shipped components
 // with).
 // ---------------------------------------------------------------------------
-
-/** Map a Loom type to its prop TS spelling — wire-DTO for aggregate
- *  params (recorded into `dtoImports`), primitives/ids/enums to their TS
- *  equivalents.  Mirrors `_frontend/extern-functions.ts`'s `wireTsType`. */
-function componentPropTsType(
-  t: TypeIR,
-  aggregatesByName: ReadonlyMap<string, AggregateIR>,
-  dtoImports: Map<string, string>,
-): string {
-  switch (t.kind) {
-    case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-        case "decimal":
-          return "number";
-        case "bool":
-          return "boolean";
-        case "string":
-        case "datetime":
-        case "guid":
-          return "string";
-        case "json":
-          return "unknown";
-        default:
-          throw new Error(`vue component: unsupported primitive '${t.name}' in prop.`);
-      }
-    case "entity":
-      if (aggregatesByName.has(t.name)) {
-        dtoImports.set(`${t.name}Response`, `../api/${lowerFirst(t.name)}`);
-        return `${t.name}Response`;
-      }
-      return "unknown";
-    case "id":
-      return "string";
-    case "enum":
-      return "string";
-    case "array":
-      return `${componentPropTsType(t.element, aggregatesByName, dtoImports)}[]`;
-    case "optional":
-      return `${componentPropTsType(t.inner, aggregatesByName, dtoImports)} | undefined`;
-    default:
-      throw new Error(`vue component: unsupported prop type kind '${t.kind}'.`);
-  }
-}
 
 /** A `slot`-typed param (`head: slot` / `head: slot?`). Vue slots are template
  *  content (`<slot>`), not props, so these are kept OUT of the props interface

@@ -1,0 +1,193 @@
+// Expression-vocabulary showcase — the frontend's `ExprIR` coverage fixture.
+//
+// WHY THIS FILE EXISTS.  The frontend body walker (`_walker/walker-core.ts`)
+// renders page/component expressions through a dispatcher that, unlike the
+// backends' `_expr/target.ts`, has no totality contract: an `ExprIR.kind` with
+// no arm falls through to `/* unsupported expr: … */ undefined`, and a method
+// call with no snippet table is emitted VERBATIM.  Neither failure was
+// visible, because a scan of every `.ddd` in the repo found ZERO page bodies
+// using a scalar intrinsic or a value-object construction.  The per-frontend
+// build gates (`generated-{react,vue,svelte,angular}-build`) were green
+// because they had no coverage, not because the code worked.
+//
+// This fixture is that coverage.  It exercises the `ExprIR` kinds and every
+// row of the `src/util/intrinsics.ts` catalogue in page/component bodies, and
+// is wired into the React build matrix, so `tsc --noEmit` actually compiles
+// these paths.  `test/generator/_walker/render-degradation.test.ts` asserts the
+// emitted output carries no degradation sentinel, on every frontend.
+//
+// Deliberately NOT here: stdlib COLLECTION ops in a page body
+// (`rows.count`, `rows.where(…)`).  Those are honestly rejected by
+// `loom.frontend-collection-op-unsupported` — a gated construct belongs in the
+// validator's negative tests, not in a fixture that must generate cleanly.
+//
+// Bodies use the BUILDER-BRACE form (`Stack { … }`) throughout — that is what
+// `src/language/print/` emits, so the file round-trips through
+// `print-structural-roundtrip` and `builder-page-model`.
+
+system ExpressionShowcase {
+
+  subdomain Catalog {
+    context Products {
+
+      enum Tier { Basic, Plus, Premium }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+      }
+
+      aggregate Product {
+        name: string
+        sku: string
+        note: string
+        quantity: int
+        weight: decimal
+        tier: Tier
+        active: bool
+
+        // The BACKEND half of every cross-surface pair below.  The same
+        // expression written in a page body must render to the same MEANING;
+        // `js-intrinsics.test.ts` pins the agreement for the JS frontends.
+        derived shoutName: string = name.toUpper()
+        derived quietName: string = name.toLower()
+        derived tidySku: string = sku.trim()
+        derived skuHead: string = sku.substring(0, 3)
+        derived noteClean: string = note.replace("--", "-")
+        derived hasDash: bool = sku.contains("-")
+        derived absQty: int = quantity.abs()
+        derived roundedWeight: decimal = weight.round(2)
+      }
+
+      repository Products for Product { }
+    }
+  }
+
+  api CatalogApi from Catalog
+
+  storage db { type: postgres }
+  resource productsState { for: Products, kind: state, use: db }
+
+  ui Showcase {
+    framework: react
+    api Catalog: CatalogApi
+
+    // ---- component params: a non-string param must type as a non-string ---
+    component TierBadge(label: string, level: int) {
+      body: Stack {
+        Text { label },
+        Text { level > 2 ? "high" : "low" },
+        Text { string((level + 1) * 2) },
+        Text { string(-level) }
+      }
+    }
+
+    // ---- every scalar intrinsic, in a user-visible slot -------------------
+    page Intrinsics {
+      route: "/intrinsics"
+      state {
+        s: string = "  Hello-World  "
+        n: int = -7
+        d: decimal = 3.14159
+      }
+      body: Stack {
+        Heading { "Scalar intrinsics" },
+
+        // string intrinsics — all nine catalogue rows
+        Stat { "trim", s.trim() },
+        Stat { "toUpper", s.toUpper() },
+        Stat { "toLower", s.toLower() },
+        Stat { "substring", s.substring(2, 5) },
+        Stat { "startsWith", string(s.startsWith("  ")) },
+        Stat { "endsWith", string(s.endsWith("  ")) },
+        Stat { "contains", string(s.contains("Hello")) },
+        Stat { "replace", s.replace("-", " ") },
+        Stat { "split", string(s.split("-")) },
+
+        // numeric intrinsics
+        Stat { "abs", string(n.abs()) },
+        Stat { "min", string(n.min(0)) },
+        Stat { "max", string(n.max(0)) },
+        Stat { "divTrunc", string(n.divTrunc(2)) },
+        Stat { "round", string(d.round(2)) },
+        Stat { "floor", string(d.floor()) },
+        Stat { "ceil", string(d.ceil()) }
+      }
+    }
+
+    // ---- the structural expression kinds ---------------------------------
+    page Kinds {
+      route: "/kinds"
+      state {
+        count: int = 3
+        flag: bool = true
+        label: string = "kinds"
+      }
+      derived doubled: int = count * 2
+      body: Stack {
+        Heading { "Expression kinds" },
+
+        // paren — grouping that used to render as `undefined`
+        Stat { "paren", string((count + 1) * 2) },
+        // cast
+        Stat { "cast", string(count) },
+        // ternary
+        Stat { "ternary", flag ? "yes" : "no" },
+        // unary
+        Stat { "unary", string(!flag) },
+        // binary chain + a `derived` ref
+        Stat { "binary", string(count + doubled - 1) },
+        // match
+        Stat { "match", match {
+          count > 5 => "many",
+          count > 1 => "some",
+          else => "none"
+        } },
+        // interpolated template (concat / ICU lowering)
+        Text { `Label {label} has {count} items` },
+        // value-object construction — a VO is a plain record on the wire
+        Stat { "valueObject", Money(9.99, "USD").currency },
+        // user component with named args, passing a NON-STRING param
+        TierBadge { label: label, level: count }
+      }
+    }
+
+    // ---- list/table lambdas + api reads ----------------------------------
+    page ProductList {
+      route: "/products"
+      body: QueryView { of: Catalog.Product.all, data: rows => Table {
+        Column { "Name", p => p.name },
+        Column { "Shout", p => p.shoutName },
+        Column { "Sku head", p => p.skuHead },
+        Column { "Qty", p => string(p.quantity) },
+        rows: rows
+      } }
+    }
+
+    // ---- route `id` + detail scope ---------------------------------------
+    page ProductDetail {
+      route: "/products/:id"
+      body: QueryView { of: Catalog.Product.byId(id), single: true, data: p => Stack {
+        Heading { p.name },
+        // an intrinsic on a WIRE field, in the detail scope
+        Stat { "Upper", p.name.toUpper() },
+        Stat { "Qty", string(p.quantity) }
+      } }
+    }
+  }
+
+  deployable api {
+    platform: node
+    contexts: [Products]
+    dataSources: [productsState]
+    serves: CatalogApi
+    port: 3000
+  }
+
+  deployable web_app {
+    platform: static
+    targets: api
+    port: 3001
+    ui: Showcase { Catalog: api }
+  }
+}
