@@ -88,11 +88,19 @@ describe("explicit Order DSL ↔ scaffold Order equivalence", () => {
     }
   });
 
-  it("explicit OrderList auto-injects useAllOrders (same hook as scaffold)", async () => {
+  it("explicit OrderList auto-injects useAllOrders — with the SAME query bag as scaffold", async () => {
     const explicit = await generateFromFile("examples/acme-order-explicit.ddd");
     const tsx = explicit.get("web/src/pages/order_list.tsx")!;
     expect(tsx).toMatch(/import \{ useAllOrders \} from "\.\.\/api\/order"/);
-    expect(tsx).toMatch(/useAllOrders\(\)/);
+    // This used to assert the PARAMLESS `useAllOrders()`, which is what an
+    // explicit page emitted before a bare `Table` over a paged read was
+    // auto-upgraded — i.e. the assertion pinned the very divergence this file
+    // exists to rule out.  `.all` is paged, so the scaffold has always sent the
+    // page/sort bag; the explicit page now does too, and the two are equivalent
+    // in the way the header claims rather than only in file paths and testids.
+    expect(tsx).toMatch(
+      /useAllOrders\(\{ page: pageNum, pageSize: \d+, sort: sortKey, dir: sortDir \}\)/,
+    );
   });
 
   it("explicit OrderNew exposes the scaffold's form testids (input-* + submit)", async () => {
