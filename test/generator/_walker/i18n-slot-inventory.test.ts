@@ -33,6 +33,8 @@ const NO_SLOT_YET: Readonly<Record<string, string>> = {
   "icon.ts":
     "`Icon(label:)` is an ACCESSIBLE NAME (role=img), so it belongs with the aria slots rather than the text ones",
   "code-block.ts": "`CodeBlock(title:)` — a caption above a code sample",
+  "chart.ts":
+    'the derived accessible name ("Line chart of <projection>: <y> by <x>", a11y `role="img"` + needsName) is EMITTER-built from model identifiers, so it belongs with the `chrome.*` sentence-frame keys rather than a per-call catalog slot',
   "file-link.ts": "the download affordance's label text",
   "provenance-info.ts": "the disclosure's summary text (pack chrome, not authored)",
   "for.ts": "`For(empty:)` renders authored markup, whose own primitives localize",
