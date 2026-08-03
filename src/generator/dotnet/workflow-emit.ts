@@ -42,6 +42,7 @@ import {
   collectWireUsings,
   csIdValueClrType,
   dtoParam,
+  maskNamer,
   projectEntityExpr,
   projectToResponse,
   wireToCommandArgument,
@@ -1571,6 +1572,12 @@ export function csWorkflowStmtTarget(
   // Unique suffix per in-body audit capture so multiple audited op-calls don't
   // collide on the before/after temp-var names.
   let auditSeq = 0;
+  // Same collision, one level down: every masked field projected into THIS
+  // method body binds a C# `is { } …` pattern variable in the body's scope, and
+  // each audited op-call renders the projection twice (before + after).  One
+  // namer per rendered body hands out a distinct name to every wrap — see
+  // `MaskNamer` in dto-mapping.ts.
+  const maskNames = maskNamer();
   return {
     indentUnit: "    ",
     precondition: (st, indent) => {
@@ -1672,9 +1679,9 @@ export function csWorkflowStmtTarget(
         const before = `__wfAuditBefore${n}`;
         const after = `__wfAuditAfter${n}`;
         return [
-          `${indent}var ${before} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx)});`,
+          `${indent}var ${before} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames })});`,
           callLine,
-          `${indent}var ${after} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx)});`,
+          `${indent}var ${after} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames })});`,
           `${indent}_audit.Stage(new AuditRecord`,
           `${indent}{`,
           `${indent}    AuditId = Guid.NewGuid().ToString(),`,
