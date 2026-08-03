@@ -156,12 +156,16 @@ export function wireType(
  *     property-based DataAnnotations reader marks them required in the
  *     response schema directly.
  *
- *  Exception: a non-nullable `bool` in a REQUEST is NOT required.  ASP.NET
- *  model-binding defaults an omitted bool to `false` (no error), matching
- *  Hono's `z.coerce.boolean()` (coerces `undefined` → `false`); both
- *  backends accept the field's omission, so neither marks it required.
- *  Numbers differ — `z.coerce.number()` rejects `undefined`, so numeric
- *  request fields stay required on both sides. */
+ *  Exception: a non-nullable `bool` in a CREATE request is NOT required.
+ *  ASP.NET model-binding defaults an omitted bool to `false` (no error), and
+ *  Hono's create slot spells the same rule explicitly as
+ *  `z.boolean().default(false)`; both backends accept the field's omission,
+ *  so neither marks it required.  Numbers differ — `z.coerce.number()`
+ *  rejects `undefined`, so numeric request fields stay required on both
+ *  sides.  This is a CREATE-slot exception only (`slot`, below): on an
+ *  operation body an omitted bool is a client error (RS-26), which is why
+ *  Hono's body slot is an UNCOERCED `z.boolean()` — `z.coerce.boolean()`
+ *  is `Boolean(input)` and would accept `undefined` as `false`. */
 export function dtoParam(
   csType: string,
   name: string,

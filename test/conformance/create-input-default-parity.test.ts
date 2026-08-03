@@ -165,10 +165,18 @@ function updateRequiresField(files: Map<string, string>, backend: Backend, field
   switch (backend) {
     case "node": {
       const block = sliceBlock(all, "const UpdateItemRequest = z.object({", "})");
-      return (
-        new RegExp(`\\b${field}:`).test(block) &&
-        !new RegExp(`\\b${field}:[^,\\n]*\\.default\\(`).test(block)
-      );
+      const decl = new RegExp(`\\b${field}:([^,\\n]*)`).exec(block);
+      if (decl === null) return false;
+      const zod = decl[1];
+      // Requiredness in zod is "does the schema REJECT `undefined`" — which is
+      // also exactly what zod-to-openapi asks (`schema.isOptional()`) when it
+      // builds the served spec's `required[]`.  So the absence of `.default(`
+      // is NOT enough: `z.coerce.boolean()` is `Boolean(input)`, and
+      // `Boolean(undefined) === false`, so a COERCED bool accepts an omitted
+      // key and yields `false` — the same silent wire default, spelled without
+      // the word `default`.  This gate used to miss it, and the divergence
+      // surfaced only in the 5-way OpenAPI parity run.
+      return !/\.default\(|\.optional\(|\.nullish\(|z\.coerce\.boolean/.test(zod);
     }
     case "python": {
       const block = sliceBlock(all, "class UpdateItemRequest(BaseModel):", "\n\n");

@@ -730,11 +730,23 @@ the conforming backends, and the fix that established it.
   that attribute tests for **null**, and an omitted value type binds to
   `0`/`false`, so presence had to become a *deserialization* question via
   `[property: JsonRequired]`.
+- **The coercion is a default.** The node fix took two rounds, and the second is
+  the reusable lesson: `.default(false)` was only the *visible* half.
+  `z.coerce.boolean()` is `Boolean(input)` and `Boolean(undefined) === false`,
+  so the coercion **is** a wire default — removing the `.default(` changed
+  nothing. The first version of the static gate keyed on the *absence* of
+  `.default(`, so it passed a backend that still had the bug; the divergence
+  surfaced only in the 5-way OpenAPI parity run, because `zod-to-openapi`
+  derives `required[]` from `schema.isOptional()` — literally "does it accept
+  `undefined`". Body bools are now uncoerced `z.boolean()` (JSON carries real
+  booleans; only query params, which are strings, keep the coercion), and the
+  gate asks the behavioural question instead of the spelling one.
 - **Provenance.** Found 2026-08-01 reconciling where `= default` belongs (domain
   vs wire boundary); node fixed by scoping the implicit-bool rule to a
-  `create-body` context in `routes-builder.ts`. Tier: **static** — the four open
-  backends are ratcheting waivers in `create-input-default-parity.test.ts`, each
-  asserting its backend *still* fails so a silent fix cannot go untracked.
+  `create-body` context in `routes-builder.ts`, then by uncoercing body bools.
+  Tier: **static** — `create-input-default-parity.test.ts` asserts the rule on
+  all five, and keeps an empty `UPDATE_BOOL_WAIVED` map as the ratchet so a
+  regression is recorded rather than the assertion relaxed.
 
 ---
 

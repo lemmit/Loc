@@ -184,10 +184,18 @@ describe("bool create default reaches the wire (B14)", () => {
   it("Hono: `bool = true` emits `.default(true)`, a bare bool stays `.default(false)`", async () => {
     const files = await generateSystemFiles(BOOL_FIXTURE);
     const routes = findFile(files, /toggle\.routes\.ts$/i)!;
-    expect(routes).toMatch(/enabled:\s*z\.coerce\.boolean\(\)\.default\(true\)/);
+    // UNCOERCED `z.boolean()`: `z.coerce.boolean()` is `Boolean(input)`, so it
+    // accepts an omitted key as `false` — an implicit wire default that made the
+    // update slot violate RS-26 and dropped the field from the served spec's
+    // `required[]` (zod-to-openapi reads `isOptional()`).  JSON carries real
+    // booleans, so a body has nothing to coerce; only query params keep it.
+    expect(routes).toMatch(/enabled:\s*z\.boolean\(\)\.default\(true\)/);
     // No stale `.default(false)` slipped in front of the real default.
-    expect(routes).not.toMatch(/enabled:\s*z\.coerce\.boolean\(\)\.default\(false\)/);
-    expect(routes).toMatch(/plain:\s*z\.coerce\.boolean\(\)\.default\(false\)/);
+    expect(routes).not.toMatch(/enabled:\s*z\.boolean\(\)\.default\(false\)/);
+    expect(routes).toMatch(/plain:\s*z\.boolean\(\)\.default\(false\)/);
+    // (The update slot — where the coercion did the damage — is gated by
+    // `test/conformance/create-input-default-parity.test.ts` against the
+    // `field-defaults` corpus fixture; this aggregate declares no `update`.)
   });
 
   it(".NET: `bool = true` becomes a record default, sorted after required params", async () => {

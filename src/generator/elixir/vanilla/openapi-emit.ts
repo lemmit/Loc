@@ -853,11 +853,11 @@ function openApiType(t: TypeIR, schemasModule: string): string {
 }
 
 /** Render a list of fields into OpenApiSpex properties + required list.
- *  `isRequest` drops non-nullable `bool` fields from the `required` list:
- *  Phoenix's controller (like Hono's `z.coerce.boolean()` and .NET's
- *  model-binding) treats an omitted request bool as `false`, so neither
- *  backend marks request bools required — matching keeps the parity gate
- *  green. */
+ *  The `create` slot drops non-nullable `bool` fields from the `required`
+ *  list: Phoenix's controller (like Hono's `z.boolean().default(false)` and
+ *  .NET's model-binding) treats an omitted CREATE bool as `false`, so no
+ *  backend marks create bools required — matching keeps the parity gate
+ *  green.  `operation` bodies require them (RS-26). */
 /** Which wire slot a schema describes.  Only `create` gets the implicit-bool
  *  optionality (RS-6); `operation` bodies require every declared field (RS-26). */
 type SchemaSlot = "response" | "create" | "operation";

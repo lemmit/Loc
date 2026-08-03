@@ -362,7 +362,7 @@ export function buildRoutesFile(
           // `zodFor` (the implicit bool rule).  When the field carries an
           // EXPLICIT default we drop that baked-in `.default(false)` and let
           // the declared literal drive the `.default(...)` below — otherwise a
-          // `bool = true` would emit `z.coerce.boolean().default(false).default(true)`.
+          // `bool = true` would emit `z.boolean().default(false).default(true)`.
           const info = wireTypeInfo(f.type, "request");
           const plainBool =
             info.refKind === "primitive" &&
@@ -373,7 +373,7 @@ export function buildRoutesFile(
             name: f.name,
             base:
               plainBool && d !== undefined && !serverSourced
-                ? "z.coerce.boolean()"
+                ? "z.boolean()"
                 : zodFor(f.type, "create-body"),
             default: d && !serverSourced ? wireDefaultLiteral(f.type, d) : undefined,
             optional: serverSourced || undefined,
@@ -1823,8 +1823,21 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       //
       // Query params keep the plain coercion (Phoenix doesn't special-case
       // query bools).
-      if (info.primitive === "bool" && context === "create-body") {
-        return "z.coerce.boolean().default(false)";
+      //
+      // A body bool must NOT be coerced.  `z.coerce.boolean()` is
+      // `Boolean(input)`, and `Boolean(undefined) === false` — so a coerced
+      // bool ACCEPTS an absent key and yields `false`.  That is the same
+      // silent wire-default the paragraph above rejects, just spelled
+      // implicitly: dropping the `.default(false)` from the update slot did
+      // nothing while the coercion stayed, because the coercion IS the
+      // default.  It is also why the field vanished from the served spec's
+      // `required` — zod-to-openapi derives requiredness from
+      // `schema.isOptional()`, i.e. "does it accept `undefined`", and a
+      // coerced bool does (`required-only-dotnet=[onCall]` in the 5-way
+      // parity diff).  JSON carries real booleans, so there is nothing to
+      // coerce in a body anyway.
+      if (info.primitive === "bool" && context !== "query") {
+        return context === "create-body" ? "z.boolean().default(false)" : "z.boolean()";
       }
       return REQUEST_PRIMITIVE[info.primitive!];
     case "id":

@@ -646,15 +646,24 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     //
     // 1-vs-4, with the MINORITY correct.  Node's `.default(false)` was added
     // deliberately to match .NET model-binding and Phoenix, so four backends
-    // agreed and the agreement was wrong (the RS-15 shape inverted).  Node is
-    // fixed; the other four are ratcheting waivers in
-    // `create-input-default-parity.test.ts` — each asserts its backend STILL
-    // fails, so a backend that starts conforming reddens the gate until its
-    // waiver comes out.
+    // agreed and the agreement was wrong (the RS-15 shape inverted).  All five
+    // conform now, and NO TWO NEEDED THE SAME FIX (see `provenance`), which is
+    // why the rule was worth numbering rather than patching one emitter.
+    //
+    // The node fix took two rounds, and the second is the reusable lesson: the
+    // `.default(false)` was only the VISIBLE half.  `z.coerce.boolean()` is
+    // `Boolean(input)` and `Boolean(undefined) === false`, so the coercion IS a
+    // wire default — removing the `.default(` left the behaviour unchanged.  It
+    // was invisible to the first version of the static gate (which keyed on the
+    // absence of `.default(`) and surfaced only in the 5-way OpenAPI parity run,
+    // because zod-to-openapi derives `required[]` from `schema.isOptional()` —
+    // literally "does it accept `undefined`".  A gate that asks about SPELLING
+    // rather than BEHAVIOUR passes a backend that still has the bug.
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
       "fixed (node): zodFor gained a `create-body` context so the implicit-bool rule fires only on create — src/platform/hono/v4/routes-builder.ts",
+      "fixed (node, round 2): dropping the `.default(false)` was not enough — `z.coerce.boolean()` is `Boolean(input)`, so a coerced bool still ACCEPTED an omitted key as `false` and zod-to-openapi (which reads `schema.isOptional()`) dropped it from the served `required[]`.  Body bools are now UNCOERCED `z.boolean()`; only query params keep the coercion — src/platform/hono/v4/routes-builder.ts",
       "fixed (python): requestFieldDecl gained a `slot` so the implicit bool `= False` fires only on create — src/generator/python/routes-builder.ts",
       "fixed (elixir): SPEC-only divergence — `@update_required` already listed every bool at runtime while the OpenApiSpex schema did not; renderProperties gained a slot — src/generator/elixir/vanilla/openapi-emit.ts",
       "fixed (dotnet): `[Required]` on a non-nullable value type cannot reject absence (RequiredAttribute tests for null; an omitted int/bool binds to 0/false). Operation params gained `[property: JsonRequired]` ALONGSIDE `[Required]` — presence is a deserialization question — src/generator/dotnet/dto-mapping.ts",
