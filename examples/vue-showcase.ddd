@@ -146,6 +146,19 @@ system AcmeVue {
                     where this.customerId == customerId
             }
 
+            criterion ConfirmedOrders of Order as o = o.status == OrderStatus.Confirmed
+
+            // A SINGLETON query-time projection — aggregated in SQL, one object
+            // out.  Read by the Dashboard page below through `Sales.RevenueSnapshot`
+            // (M-T1.3 Phase 1), which is what makes the Vue build gate compile
+            // `src/api/projections.ts` + the single-record `QueryView` binding.
+            projection RevenueSnapshot {
+                confirmed: int
+                from Order as o
+                where ConfirmedOrders
+                select confirmed = count
+            }
+
             // Workflow surfacing — exercises the React generator's
             // workflow UI (slice 18.A) end-to-end: a draft order +
             // initial line in one orchestration.  The frontend
@@ -359,7 +372,25 @@ system AcmeVue {
             route: "/dashboard"
             title: "Dashboard"
             layout: Marketing
-            body: Stack { StatusPill("Active"), StatusPill("Idle"), NewCustomerWidget() }
+            body: Stack {
+                StatusPill("Active"),
+                StatusPill("Idle"),
+                NewCustomerWidget(),
+                // Projection read (M-T1.3 Phase 1).  Single-record by
+                // construction — a singleton returns ONE object, so the walker
+                // must not apply collection semantics to it.  `Money { … }`
+                // wraps the decimal figure, which is a Decimal client-side.
+                QueryView {
+                    of: Sales.RevenueSnapshot,
+                    loading: Loader { },
+                    error: Alert { "Could not load order totals" },
+                    empty: Text { "No confirmed orders yet" },
+                    data: t => Group {
+                        Stat { "Confirmed orders", t.confirmed },
+                        testid: "revenue-snapshot"
+                    }
+                }
+            }
         }
     }
 

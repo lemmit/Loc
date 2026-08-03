@@ -13,6 +13,42 @@
 // model whose response is one object, which is the shape a dashboard KPI reads.
 // A keyed/collection projection returns an array and wants `Table`-shaped
 // binding; it is gated (`loom.ui-projection-read-unsupported`) until that lands.
+//
+// ---------------------------------------------------------------------------
+// HOW THE REMAINING FRONTENDS PORT INTO THIS MODULE  (decided on the Vue port,
+// M-T1.3 Phase 1; read this BEFORE reaching for a per-framework seam)
+// ---------------------------------------------------------------------------
+//
+// This module stays ONE shared emitter widened by a plain options object — it
+// does NOT get a `ProjectionsTarget` seam object in the `WalkerTarget` shape.
+// The rule for picking between the two, and why Vue landed on the first:
+//
+//   REUSE (widen `options`) while the divergence is LEAF-SHAPED — a string
+//     substituted into otherwise identical output.  Vue is exactly that: the
+//     only thing that differs from React is the import specifier, because
+//     `@tanstack/vue-query`'s `useQuery` is API-compatible with the React one
+//     (same call form, same `.data`).  `queryPackage` already existed for it.
+//     Svelte is likely still on this side of the line but needs THREE more
+//     leaves, all visible in its workflows fork: the factory name
+//     (`createQuery` not `useQuery`), the thunk call form
+//     (`createQuery(() => ({…}))`), and the module dir (`src/lib/api/`, which
+//     moves the `./client` + `../lib/schemas` relative imports).  Add them as
+//     named options with React-shaped defaults so every existing caller stays
+//     byte-identical.
+//
+//   FORK when the divergence is STRUCTURAL — the emitted unit stops being "a
+//     zod schema plus a query hook" at all.  Angular (an injectable service
+//     over RxJS/signals), Feliz (F#, not TypeScript) and Flutter (Dart +
+//     Riverpod) are all on this side: none of them can share a TypeScript
+//     string emitter, no matter how many knobs it grows.
+//
+// This is not a new judgement call — `workflows-module.ts` is the same problem
+// one feature earlier and already settled it the same way: React and Vue share
+// it through `queryPackage`, Svelte forked into `svelte/workflow-builder.ts`,
+// Angular into `buildAngularWorkflowsModule`.  Follow that precedent, and
+// prefer a shared emitter with defaults over a seam interface until a SECOND
+// consumer has actually proved the divergence axis — the `WalkerTarget`
+// extraction itself only happened after a real second target existed.
 // ---------------------------------------------------------------------------
 
 import type { BoundedContextIR, ProjectionIR } from "../../ir/types/loom-ir.js";
