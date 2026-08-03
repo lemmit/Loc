@@ -60,7 +60,11 @@ describe("QueryView macro", () => {
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/import \{ useAllOrders \} from "\.\.\/api\/order"/);
-    expect(tsx).toMatch(/const orderAll = useAllOrders\(\)/);
+    // `.all` is paged, and a bare `Table` over a paged read is auto-upgraded to
+    // server paging — so the hook carries the page/sort bag the pager drives.
+    expect(tsx).toMatch(
+      /const orderAll = useAllOrders\(\{ page: pageNum, pageSize: \d+, sort: sortKey, dir: sortDir \}\)/,
+    );
     expect(tsx).toMatch(/\{ orderAll\.isLoading && \(/);
     expect(tsx).toMatch(/\{ orderAll\.isError && \(/);
     expect(tsx).toMatch(/\{ orderAll\.data && orderAll\.data\.items\.length === 0 && \(/);

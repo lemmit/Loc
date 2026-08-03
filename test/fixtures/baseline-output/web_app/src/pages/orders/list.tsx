@@ -43,7 +43,7 @@ export default function OrderList() {
           ) }
           { orderByCustomer.data && orderByCustomer.data.length > 0 && (
             <Paper p="md">
-              <Table striped highlightOnHover stickyHeader>
+              <><Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th><button type="button" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>ID{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</button></Table.Th>
@@ -65,7 +65,7 @@ export default function OrderList() {
                   )) }
                 </Table.Tbody>
               </Table>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const sv = (v: unknown) => (v === null || typeof v !== "object" || Array.isArray(v)) ? v : (Number.isNaN(Number(v)) ? v : Number(v)); const av = sv((a as Record<string, unknown>)[sortKey]); const bv = sv((b as Record<string, unknown>)[sortKey]); const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))}</span><button type="button" disabled={pageNum >= Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const sv = (v: unknown) => (v === null || typeof v !== "object" || Array.isArray(v)) ? v : (Number.isNaN(Number(v)) ? v : Number(v)); const av = sv((a as Record<string, unknown>)[sortKey]); const bv = sv((b as Record<string, unknown>)[sortKey]); const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const sv = (v: unknown) => (v === null || typeof v !== "object" || Array.isArray(v)) ? v : (Number.isNaN(Number(v)) ? v : Number(v)); const av = sv((a as Record<string, unknown>)[sortKey]); const bv = sv((b as Record<string, unknown>)[sortKey]); const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))}</span><button type="button" disabled={pageNum >= Math.max(1, Math.ceil(([...(orderByCustomer.data)].sort((a, b) => { if (!sortKey) { return 0; } const sv = (v: unknown) => (v === null || typeof v !== "object" || Array.isArray(v)) ? v : (Number.isNaN(Number(v)) ? v : Number(v)); const av = sv((a as Record<string, unknown>)[sortKey]); const bv = sv((b as Record<string, unknown>)[sortKey]); const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; return sortDir === "desc" ? -c : c; })).length / 10))} onClick={() => setPageNum(pageNum + 1)}>Next</button></div></>
             </Paper>
           ) }
         </>) : <>
@@ -84,7 +84,7 @@ export default function OrderList() {
           ) }
           { orderAll.data && orderAll.data.items.length > 0 && (
             <Paper p="md">
-              <Table striped highlightOnHover stickyHeader>
+              <><Table striped highlightOnHover stickyHeader>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th><button type="button" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", userSelect: "none" }} onClick={() => { if (sortKey === "id") { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey("id"); setSortDir("asc"); } }}>ID{sortKey === "id" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</button></Table.Th>
@@ -106,7 +106,7 @@ export default function OrderList() {
                   )) }
                 </Table.Tbody>
               </Table>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, orderAll.data.totalPages)}</span><button type="button" disabled={pageNum >= Math.max(1, orderAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>Next</button></div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, orderAll.data.totalPages)}</span><button type="button" disabled={pageNum >= Math.max(1, orderAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>Next</button></div></>
             </Paper>
           ) }
         </>}

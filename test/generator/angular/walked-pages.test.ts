@@ -599,12 +599,19 @@ async function tablePage(): Promise<string> {
 }
 
 describe("angular generator — Table in a QueryView data branch", () => {
-  it("renders a plain @for table with column headers and the style modifiers", async () => {
+  it("renders an @for table with SORTABLE column headers and the style modifiers", async () => {
     const page = await tablePage();
     expect(page).toContain(
       '<table class="loom-table loom-table-striped loom-table-highlight loom-table-sticky">',
     );
-    expect(page).toContain("<tr><th>ID</th><th>Customer</th><th>Status</th><th>Placed</th></tr>");
+    // The headers used to be plain `<th>ID</th>` text.  `.all` is paged, so a
+    // bare `Table` over it is auto-upgraded to server paging — and a column
+    // whose accessor is a simple member read gains a sort button that asks the
+    // server to order by it.  Plain text headers meant a table hard-capped at
+    // the backend's first page with no way to sort or reach the rest.
+    for (const col of ["id", "customerId", "status", "placedAt"]) {
+      expect(page, col).toContain(`sortKey.set('${col}')`);
+    }
     expect(page).toContain("@for (row of orderAll.data()!.items; track row.id) {");
     expect(page).toContain("[attr.data-testid]='(\"orders-row-\" + row.id)'");
   });

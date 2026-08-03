@@ -303,7 +303,7 @@ function normalizeStateSpec(s: string | StateFieldSpec): StateFieldSpec {
 
 /** A `state { … }` block prop carrying the given state fields (bare names ⇒
  * `string`-init-`""`; specs carry their own type + init). */
-function stateBlock(specs: ReadonlyArray<string | StateFieldSpec>): StateBlock {
+export function stateBlock(specs: ReadonlyArray<string | StateFieldSpec>): StateBlock {
   const origin = _currentOrigin();
   const fields = specs.map((s) => typedStateField(normalizeStateSpec(s)));
   const block = _tag(mkStateBlock({ $type: "StateBlock", fields }), origin);

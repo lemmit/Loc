@@ -135,6 +135,26 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   wrong column, or dropped the offset is caught rather than masked by a
   coincidentally-shared order. Gates in `behavioral-e2e.yml` right after the
   api/unit tier; run: `node pagination.mjs`.
+- **paged-ui** — the browser half of the same story (`paged-ui.mjs`, fixture
+  `paged-ui.ddd`, spec `paged-ui.pw.ts`). `pagination.mjs` proves the *server*
+  windows correctly; this proves the page an author actually **writes** can
+  reach those windows. The fixture's `WidgetList` is the simplest spelling —
+  a bare `Table` over `.all`, no `paged:`, no `page:`, no state block — which
+  is auto-upgraded to server paging at the macro layer; before that it
+  rendered the backend's default first window with no pager, so rows 21+ were
+  unreachable and nothing on screen said so. It reuses the UI tier's
+  one-origin stack (`ui-stack.mjs`: generated Hono backend on PGlite + the
+  vite-built React bundle), seeds 1000 widgets over HTTP, then drives the
+  built page in headless Chromium: `Next` must reach rows the first window
+  never contained, the pager's count must come from the server's
+  `totalPages`, and a column header must sort on the **server** by field *and*
+  direction (again via the reversed `name`/`rank` seed). The spec is
+  hand-authored rather than emitted for the same reason as `pagination.mjs` —
+  the DSL's `test e2e` has no loop, so it can never seed a real second page;
+  it is copied into the generated `e2e/` dir as `paged-ui.spec.ts` (the
+  committed file is named `.pw.ts` so the repo's vitest run never discovers
+  it). Gates in `behavioral-ui-e2e.yml` after the emitted round-trips; run:
+  `node paged-ui.mjs`.
 
 ## Why
 

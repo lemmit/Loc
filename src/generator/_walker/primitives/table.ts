@@ -289,17 +289,22 @@ export function emitTable(
   );
   if (ctx.target.joinRoots && roots.length > 1) return ctx.target.joinRoots(roots);
   let result = pagerMarkup ? `${tableMarkup}\n${closeIndent}${pagerMarkup}` : tableMarkup;
-  if (filterMarkup) {
-    result = `${filterMarkup}\n${closeIndent}${result}`;
-    // The filter box makes the table MULTI-ROOT (the search box + the table are
-    // adjacent siblings).  JSX rejects adjacent elements in a single-expression
-    // slot — a `QueryView`'s `{cond && ( … )}`, a conditional child — so React
-    // wraps the pair in a `<>…</>` fragment; the multi-root-tolerant frameworks
-    // (Vue/Svelte/Angular) omit the seam.  Scoped to the filter box: the pager
-    // alone is emitted under a pack wrapper (`<Paper>`) in scaffolded pages, so
-    // wrapping it too would add a redundant fragment there (fixture drift) for
-    // no gain — a bare pager-only `QueryView` is a pre-existing edge left as-is.
-    if (ctx.target.wrapMultiRoot) result = ctx.target.wrapMultiRoot(result);
+  if (filterMarkup) result = `${filterMarkup}\n${closeIndent}${result}`;
+  // Sibling chrome — a filter box above, a pager below — makes the table
+  // MULTI-ROOT, and JSX rejects adjacent elements in a single-expression slot
+  // (a `QueryView`'s `{cond && ( … )}`, a conditional child).  React wraps the
+  // group in a `<>…</>` fragment; the multi-root-tolerant frameworks
+  // (Vue/Svelte/Angular) omit the seam.
+  //
+  // Applied to the PAGER too, not just the filter box.  It used to be
+  // filter-only on the reasoning that a pager always sits under a pack wrapper
+  // (`<Paper>`) in scaffolded pages — true of the scaffold, and not something
+  // this primitive can know.  A hand-written page that gets a pager emits the
+  // table and the pager as bare siblings and fails to compile (TS2657), so the
+  // wrap belongs where the sibling is ADDED rather than where it happens to be
+  // contained.  The redundant fragment inside a `<Paper>` is inert.
+  if ((filterMarkup || pagerMarkup) && ctx.target.wrapMultiRoot) {
+    result = ctx.target.wrapMultiRoot(result);
   }
   return result;
 }
