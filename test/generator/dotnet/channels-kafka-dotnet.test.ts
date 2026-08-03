@@ -105,6 +105,31 @@ describe("kafka log transport — dotnet leg (M-T4.4 slice 8b)", () => {
     }
   });
 
+  it("waits for the partition ASSIGNMENT, not just the Subscribe call", async () => {
+    // `Subscribe` only records intent — the group join happens on the first
+    // `Consume`, inside the detached loop.  A replica that reports ready
+    // before its join lands makes the group rebalance mid-flight, and a
+    // rebalance MOVES partitions between replicas: a partition key's events
+    // then split across two consumers, breaking the same-replica ordering
+    // the key exists to provide.  (Observed as `expected 2 to be 1` in
+    // channels-e2e-kafka-dotnet's per-key ownership assertion.)
+    const files = await generateSystemFiles(FIXTURE);
+    const mod = find(files, "ship_api", "ChannelTransport.cs");
+    expect(mod).toContain(".SetPartitionsAssignedHandler((_, _parts) => assigned.TrySetResult())");
+    // The await is what makes it a gate — the handler alone changes nothing.
+    expect(mod).toContain("await Task.WhenAny(assigned.Task,");
+    // ...and it is bounded, so a broker that never assigns cannot wedge boot.
+    expect(mod).toContain("Task.Delay(TimeSpan.FromSeconds(30))");
+    expect(mod).toContain('"channel_subscribe_slow"');
+    // The gate must sit in SubscribeAsync, ahead of the method's close —
+    // i.e. after the loop is registered, before the caller is released.
+    const subscribeAt = mod.indexOf("public async Task SubscribeAsync(");
+    const gateAt = mod.indexOf("await Task.WhenAny(assigned.Task,");
+    const parkAt = mod.indexOf("private async Task ParkAsync(");
+    expect(gateAt).toBeGreaterThan(subscribeAt);
+    expect(gateAt).toBeLessThan(parkAt);
+  });
+
   it("routes broadcast/log events through the outbox and stamps LoomKey", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const mod = find(files, "sales_api", "ChannelTransport.cs");

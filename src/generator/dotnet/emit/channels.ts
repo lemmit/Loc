@@ -510,13 +510,19 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
     public async Task SubscribeAsync(string address, string? group, Func<LoomEventEnvelope, Task> handler)
     {
         await EnsureTopicAsync(address);
+        // Completed by the rebalance callback below — see the await at the
+        // end of this method for why the group JOIN, not the Subscribe call,
+        // is what "subscribed" has to mean on kafka.
+        var assigned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var consumer = new ConsumerBuilder<string, string>(ApplySasl(new ConsumerConfig
         {
             BootstrapServers = _bootstrap,
             GroupId = group ?? address,
             EnableAutoCommit = false,
             AutoOffsetReset = AutoOffsetReset.Latest,
-        })).Build();
+        }))
+            .SetPartitionsAssignedHandler((_, _parts) => assigned.TrySetResult())
+            .Build();
         consumer.Subscribe(address);
         _loops.Add(Task.Run(async () =>
         {
@@ -566,6 +572,19 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
             }
             consumer.Close();
         }));
+        // Block until the group has ASSIGNED us partitions, not merely until
+        // Subscribe returned.  Subscribe only records the intent; the join
+        // happens on the first Consume, inside the loop above.  A replica
+        // that reports ready before its join lands makes the group rebalance
+        // mid-flight, and a rebalance moves partitions between replicas —
+        // which splits a partition key's events across two consumers and
+        // breaks the same-replica ordering guarantee the key exists to give.
+        // Bounded: a broker that never assigns must not wedge boot forever;
+        // the loop keeps retrying and the failure is visible in the log.
+        if (await Task.WhenAny(assigned.Task, Task.Delay(TimeSpan.FromSeconds(30))) != assigned.Task)
+        {
+            _log.LogWarning("{Event} {Address} {Error}", "channel_subscribe_slow", address, "no partition assignment within 30s");
+        }
     }
 
     private async Task ParkAsync(string address, Message<string, string> message)
