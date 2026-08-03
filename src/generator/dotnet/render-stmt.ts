@@ -289,7 +289,23 @@ function isSelfAssign(target: PathIR, value: ExprIR): boolean {
  *  site still carries its provenance capture and `#line` trace mapping, both
  *  of which are observable, and skipping the emission would silently discard
  *  them.  The pragma is the outermost wrapper so it covers whatever those
- *  layers added. */
+ *  layers added.
+ *
+ *  WHY ONLY .NET.  The other backends emit the same self-assignment and none of
+ *  them needs a suppression, but for DIFFERENT reasons — worth stating, because
+ *  "the linter is off" is the plausible-sounding wrong answer:
+ *
+ *    - node: `biome.generated.json` sets `recommended: true`, so
+ *      `correctness/noSelfAssign` IS enabled.  It simply does not cover member
+ *      expressions — it fires on `x = x` and not on `this._q = this._q`, which
+ *      is the only shape this emitter produces.  Verified against the rule, not
+ *      inferred from the config.
+ *    - java / python / elixir: `x = x` on a field is neither an error nor a
+ *      lint failure in their emitted-code gates.
+ *
+ *  So the asymmetry is Roslyn's analyzer being stricter than the rest, not a
+ *  gap in the other backends' gates.  If biome ever extends `noSelfAssign` to
+ *  member expressions, node needs the `// biome-ignore` twin of this pragma. */
 function withCa2245Suppressed(rendered: string): string {
   return [
     `${INDENT}#pragma warning disable CA2245 // \`x := x\` is a valid no-op write in Loom`,
