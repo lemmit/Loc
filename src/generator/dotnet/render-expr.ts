@@ -306,10 +306,23 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   bindingRefText: (binding) => binding,
   // Union-find repos return `Agg?` (payloads.md §Union finds).
   absenceCheck: (subject) => `${subject} is not null`,
-  // List literals are walker-config sugar (e.g. responsive Grid cols).  No
-  // .NET render context emits one today; keep total with an array initializer
-  // fallback so unexpected uses produce valid C#.
-  list: (elements) => `new[] { ${elements.join(", ")} }`,
+  // List literals were walker-config sugar only (e.g. responsive Grid cols)
+  // until `[]` started parsing; `tags := […]` in a domain body is the first
+  // render context that actually reaches this leaf.  Doing so surfaced that
+  // the old `new[] { … }` was wrong in BOTH directions:
+  //
+  //   - empty    → CS0826, no element type to infer from `new[] {  }`;
+  //   - NON-empty → CS0029, `new[] { "a" }` is a `string[]`, but a collection
+  //                 property lowers to `List<string>` — the implicit array
+  //                 does not convert.
+  //
+  // The leaf receives only rendered element strings, never the element TYPE,
+  // so neither `Array.Empty<T>()` nor `new List<T> { … }` is reachable here.
+  // C# 12's collection expression is TARGET-TYPED — it takes its shape from
+  // the assignment target — so one spelling serves `T[]`, `List<T>` and
+  // `IReadOnlyList<T>`, empty or not.  (Both arms verified by building the
+  // generated project under `/warnaserror`.)
+  list: (elements) => `[${elements.join(", ")}]`,
 };
 
 /** EF-translated-position twin of `CS_TARGET` (find `Where`,

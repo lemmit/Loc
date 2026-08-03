@@ -57,6 +57,7 @@ on:
       - '!src/platform/hono/**'
       - '!src/platform/hono.ts'
   workflow_dispatch:
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -111,3 +112,27 @@ jobs:
         env:
           LOOM_ANGULAR_BUILD_CASE: ${{ matrix.case }}:${{ matrix.pack }}
         run: npx vitest run test/e2e/generated-angular-build.test.ts
+
+  # ── Merge-queue / branch-protection rollup ────────────────────────────
+  # One stable check name for this workflow.  The jobs above are a matrix
+  # (or a fan-out), so their check names are dynamic and cannot be named as
+  # a required status check; this job can.  A skipped need counts as OK — a
+  # label-guarded or path-skipped job is a legitimate no-op.  Kept honest by
+  # test/system/merge-queue-readiness.test.ts; see docs/ci-gating.md.
+  generated-angular-build-passed:
+    name: generated-angular-build-passed
+    # `!cancelled()`, not `always()`: when a newer push supersedes this run,
+    # cancel-in-progress cancels the needed jobs — always() would then wake
+    # this rollup later and convert the quiet supersession into a spurious
+    # FAILURE check on the stale SHA (webhook noise for anyone babysitting
+    # the PR). !cancelled() skips the rollup with the run; a LONE cancelled
+    # need on a live run (a job timeout) still fails via the step below —
+    # that is the "cancelled reads as not-failed" trap, kept closed. Same
+    # pattern as test.yml's tests-passed.
+    if: ${{ !cancelled() }}
+    needs: [configure, matrix]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

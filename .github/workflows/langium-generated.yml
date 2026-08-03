@@ -18,6 +18,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/langium-generated.yml'
+  merge_group:
 
 permissions:
   contents: read

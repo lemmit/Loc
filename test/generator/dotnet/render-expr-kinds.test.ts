@@ -673,10 +673,19 @@ describe("dotnet renderCsExpr — lambda, new, list, object", () => {
     );
   });
 
-  it("renders list literal as a C# array initializer", () => {
+  // A TARGET-TYPED collection expression, not `new[] { … }`.  The leaf never
+  // sees the element type, and a collection property lowers to `List<T>`, so
+  // the implicitly-typed array was wrong both ways: empty → CS0826 (nothing
+  // to infer T from), non-empty → CS0029 (`string[]` does not convert to
+  // `List<string>`).  `[…]` takes its shape from the assignment target.
+  it("renders list literal as a target-typed C# collection expression", () => {
     expect(renderCsExpr({ kind: "list", elements: [litInt("1"), litInt("2"), litInt("3")] })).toBe(
-      "new[] { 1, 2, 3 }",
+      "[1, 2, 3]",
     );
+  });
+
+  it("renders the EMPTY list literal as `[]` (never `new[] {  }` — CS0826)", () => {
+    expect(renderCsExpr({ kind: "list", elements: [] })).toBe("[]");
   });
 
   it("renders object literal as an anonymous object with PascalCase members", () => {

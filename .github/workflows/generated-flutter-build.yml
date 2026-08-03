@@ -45,6 +45,7 @@ on:
       - 'scripts/flutter-table-controls-test.dart'
       - '.github/workflows/generated-flutter-build.yml'
   workflow_dispatch:
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -30,6 +30,11 @@ describe("feliz Button — label: → prop.ariaLabel (a11y)", () => {
   it("a plain text Button gets no ariaLabel (its text is the name)", async () => {
     const app = await appFs(`Button { "Save" }`);
     expect(app).not.toContain("prop.ariaLabel");
-    expect(app).toContain('prop.text "Save"');
+    // The visible label is a user-visible slot, so it rides the translation
+    // runtime (M-T1.11); `prop.text` takes a string, so the `I18n.t` ELEMENT
+    // goes through `prop.children` instead.
+    expect(app).toMatch(
+      /prop\.children \[ Html\.text \(\(I18n\.t "page\.\w+\.button\.\w+" "Save"\)\) \]/,
+    );
   });
 });

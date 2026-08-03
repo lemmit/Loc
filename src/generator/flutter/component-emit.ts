@@ -47,6 +47,10 @@ export interface ComponentWalkCtx {
   apiParams: readonly UiApiParamIR[];
   aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>;
   bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR>;
+  /** True when the ui has extractable user-visible strings (M-T1.11) — the walk
+   *  then keys every literal text slot to the catalog (`component.<Name>.…`) and
+   *  emits `t(…)`.  False → no prefix, byte-identical to pre-i18n. */
+  i18nEnabled?: boolean;
 }
 
 interface ComponentWalkResult {
@@ -76,6 +80,15 @@ function walkComponent(
     ctx.apiParams,
     ctx.aggregatesByName,
     ctx.bcByAggregate,
+    new Map(), // workflowsByName — a component hosts no WorkflowForm
+    new Map(), // bcByWorkflow
+    new Map(), // paramTypes
+    new Map(), // pageRoutes
+    new Set(), // externFunctions
+    new Set(), // derivedNames — `candidates()` excludes derived-bearing components
+    false, // authUi
+    // i18n key prefix — `component.<Name>` matches the catalog.
+    ctx.i18nEnabled ? `component.${c.name}` : undefined,
   );
   return { widget: r.tsx.trim(), hasReads: r.usedApiHooks.size > 0 };
 }
@@ -286,6 +299,9 @@ export function renderComponentsFile(
   const imports = ["import 'package:flutter/material.dart';"];
   if (needsModels(used)) imports.push("import 'models.dart';");
   if (usesIntl(blocks.join("\n"))) imports.push("import 'package:intl/intl.dart';");
+  // The generated translation runtime (M-T1.11) — a sibling of this file under
+  // `lib/`, imported only when a component body resolved a `t(…)` call.
+  if (/(?<![A-Za-z0-9_$.])t\(/.test(blocks.join("\n"))) imports.push("import 'i18n.dart';");
   return `${lines(
     "// User components — one widget per `component Foo(params) { body }` a ui",
     "// hosts (StatelessWidget, or StatefulWidget when it carries `state`).",

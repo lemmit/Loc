@@ -2378,7 +2378,14 @@ TemplateHole:
 // admitted at the grammar level; the type system / each consumer
 // validates element shape per use site.
 ListLit:
-    {infer ListLit} '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
+    // Two spellings, because `[]` is a single KEYWORD token — the array
+    // marker in `string[]` / `Order id[]`.  The lexer matches keywords
+    // longest-first, so an UNSPACED `[]` becomes that one token and can never
+    // reach the bracket-pair form below; a SPACED `[ ]` lexes as '[' + ']'
+    // and does.  Both must be accepted, or `[]` stays a parse error (it was)
+    // and `[ ]` becomes one (it briefly did).
+    {infer ListLit} '[]'
+  | {infer ListLit} '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
 
 // Universal construction form.  Replaces `new Part { ... }`
 // and the walker-call form (`Form(state: ..., body: ...)`).  The

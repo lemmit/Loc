@@ -56,9 +56,12 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
+import { messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
+import { elixirI18nString } from "./i18n.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -346,6 +349,12 @@ export interface WalkContext {
    *  their children; undefined at page top ⇒ depth 0 ⇒ `<h2>` (the app shell
    *  owns the single `<h1>`). */
   headingDepth?: number;
+  /** i18n key prefix for this body — `page.<Page>` / `component.<Comp>`
+   *  (M-T1.11).  Set only when the ui has extractable user-visible strings;
+   *  undefined ⇒ every literal renders raw (byte-identical to pre-i18n).
+   *  The HEEx engine is a FORK of the shared walker, so this mirrors
+   *  `_walker/walker-core.ts`'s `i18nPrefix` rather than sharing it. */
+  i18nPrefix?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +393,9 @@ export function walkBodyToHeex(
   /** Aggregate → owning bounded context, for `queryShape`'s find lookup.
    *  Empty default ⇒ QueryView falls back to the author's flags alone. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** i18n key prefix (M-T1.11) — `page.<Name>` / `component.<Name>`, matching
+   *  the shared catalog.  Undefined ⇒ no translation, byte-identical. */
+  i18nPrefix: string | undefined = undefined,
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -423,6 +435,7 @@ export function walkBodyToHeex(
     authEnabled,
     partContextModule,
     contextModuleByAggName,
+    i18nPrefix,
   };
 
   // Hoist named page `action`s (named-actions-and-stores.md, Proposal A
@@ -1239,6 +1252,15 @@ export interface PrimitiveSpec {
   labelAsAriaLabel?: boolean;
 }
 
+/** The i18n catalog ROLE of a primitive's positional slot, from the shared
+ *  `USER_VISIBLE_SLOTS` table — undefined when that position holds no
+ *  user-visible text.  Reading the same table the extraction pass reads is what
+ *  keeps the emitted key equal to the catalog key (M-T1.11). */
+export function positionalRole(primitive: string, index: number): string | undefined {
+  return USER_VISIBLE_SLOTS[primitive]?.find((s) => s.kind === "positional" && s.index === index)
+    ?.role;
+}
+
 export function renderPrimitive(
   spec: PrimitiveSpec,
   expr: Extract<ExprIR, { kind: "call" }>,
@@ -1306,10 +1328,17 @@ export function renderPrimitive(
     return `<.empty${attrs} />`;
   }
 
-  // Other primitives — render children (if any).
-  const childrenHeex = [...childrenExprs, ...(spec.takesChildren ? positional : [])]
-    .map((c) => renderChild(c, ctx))
-    .join("\n");
+  // Other primitives — render children (if any).  A POSITIONAL child may be a
+  // user-visible text slot (`Text`/`Bold`/`Badge`/`Button`/… index 0), so it is
+  // rendered with its catalog role; `childrenExprs` are nested markup and never
+  // carry one.  The role table is the shared `USER_VISIBLE_SLOTS`, so the key
+  // the walker emits equals the key the extraction pass put in the catalog.
+  const childrenHeex = [
+    ...childrenExprs.map((c) => renderChild(c, ctx)),
+    ...(spec.takesChildren
+      ? positional.map((c, i) => renderChild(c, ctx, positionalRole(expr.name, i)))
+      : []),
+  ].join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
     return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
@@ -1371,7 +1400,34 @@ export function escapeHeexAttr(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
-export function renderChild(child: ExprIR, ctx: WalkContext): string {
+/** A literal user-visible slot, translated through the generated Gettext
+ *  backend when the body opted into i18n (M-T1.11).
+ *
+ *  `pgettext(<loom key>, <English>)` — the CONTEXT is Loom's content-hashed
+ *  catalog key (identical to `.loom/messages.en.json` and to what the other
+ *  five frontends emit), the msgid is the source-language default, so gettext's
+ *  own "empty translation ⇒ render the msgid" rule gives the same fallback the
+ *  JS `messages[key] ?? default` shim has.  Wrapped in `<%= … %>`: it is a
+ *  function call in HEEx text position, not static markup.
+ *
+ *  Returns undefined when i18n is off, the slot has no role, or the value isn't
+ *  a plain literal — every one of which keeps the pre-i18n raw path.  (An
+ *  INTERPOLATED slot is deliberately out of scope: gettext interpolates
+ *  `%{name}`, not ICU `{name}`.) */
+function localizedHeex(
+  arg: ExprIR,
+  ctx: WalkContext,
+  role: string | undefined,
+): string | undefined {
+  if (!ctx.i18nPrefix || !role) return undefined;
+  if (arg.kind !== "literal" || arg.lit !== "string") return undefined;
+  const key = messageKey(ctx.i18nPrefix, role, arg.value);
+  return `<%= pgettext(${elixirI18nString(key)}, ${elixirI18nString(arg.value)}) %>`;
+}
+
+export function renderChild(child: ExprIR, ctx: WalkContext, role?: string): string {
+  const localized = localizedHeex(child, ctx, role);
+  if (localized !== undefined) return localized;
   // If the child is itself a primitive call that returns HEEx markup,
   // render it directly without `<%= %>` wrapping.
   if (child.kind === "call" && isHEExCall(child.name, ctx)) {
@@ -1383,7 +1439,9 @@ export function renderChild(child: ExprIR, ctx: WalkContext): string {
   return `<%= ${renderExpr(child, { ...ctx, position: "template" })} %>`;
 }
 
-export function renderInTemplate(arg: ExprIR, ctx: WalkContext): string {
+export function renderInTemplate(arg: ExprIR, ctx: WalkContext, role?: string): string {
+  const localized = localizedHeex(arg, ctx, role);
+  if (localized !== undefined) return localized;
   if (arg.kind === "literal" && arg.lit === "string") return escapeHeexText(arg.value);
   // HEEx-generating calls should not be wrapped in <%= %>.
   if (arg.kind === "call" && isHEExCall(arg.name, ctx)) {

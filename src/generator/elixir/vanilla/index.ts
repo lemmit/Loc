@@ -50,6 +50,7 @@ import {
 import { contextHasDispatcher, emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import { emitDomainServices } from "../domain-service-emit.js";
 import { renderEventModule } from "../events-emit.js";
+import { heexI18nUi } from "../i18n.js";
 import type { GenerateElixirArgs } from "../index.js";
 import { emitLiveViewPages, type LiveRoute } from "../liveview-emit.js";
 import { emitMigrations } from "../migrations-emit.js";
@@ -729,6 +730,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     [...schedulerChildren, ...channelChildren],
     usesOban,
     authChildren,
+    // i18n (M-T1.11): the mounted ui, but only when it has extractable
+    // user-visible strings — that is the single gate for the Gettext backend,
+    // the `priv/gettext` catalog, the hex dep and the `html_helpers` import.
+    heexI18nUi(sys, deployable),
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto

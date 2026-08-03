@@ -51,6 +51,7 @@ on:
       - 'langium-config.json'
       - '.github/workflows/conformance-parity.yml'
   workflow_dispatch:
+  merge_group:
 
 concurrency:
   group: conformance-parity-${{ github.ref }}

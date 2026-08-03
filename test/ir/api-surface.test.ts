@@ -211,9 +211,22 @@ describe("api-surface lift", () => {
     expect(place?.id).toBe("placeOrder");
     expect(place?.method).toBe("post");
     expect(place?.path).toBe("/api/orders/{id}/place");
-    // A client can only type its failure union if the statuses are data.
-    expect(place?.errorStatuses).toContain(404);
-    expect(place?.errorStatuses).toContain(409);
+
+    // A client can only type its failure union if the statuses are data — and
+    // the statuses have to be the ones the callee actually sends.  This used to
+    // assert `toContain(409)` on `place`, which has a `precondition` and NO
+    // `when` gate: on the denial ladder (RS-15) a precondition answers 422 and
+    // 409 is the `when` rung, so `place` can never send 409.  The assertion
+    // passed only because the derivation kept its own hardcoded status table
+    // that put 409 on every operation — a test pinning the defect, the same way
+    // `slice2-crud-write.test.ts` pinned Phoenix's PATCH route.
+    //
+    // Asserted as an exact set, and against BOTH rungs, so neither can drift
+    // back: `place` (precondition, ungated) vs `cancel` (`when`-gated).
+    expect([...(place?.errorStatuses ?? [])].sort()).toEqual([400, 404, 422]);
+
+    const cancel = deriveContextOperations(ctx).find((o) => o.id === "cancelOrder");
+    expect([...(cancel?.errorStatuses ?? [])].sort()).toEqual([400, 404, 409, 422]);
   });
 
   it("emits no create route for a non-constructible aggregate", async () => {

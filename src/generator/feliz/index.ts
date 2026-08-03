@@ -33,6 +33,7 @@ import {
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import { bcByAggregateOf } from "../_walker/paged-query.js";
 import { walkBody } from "../_walker/walker-core.js";
@@ -48,7 +49,14 @@ import {
 } from "./auth-gate.js";
 import { FELIZ_GRID_PRELUDE } from "./data-grid-child.js";
 import { felizTarget } from "./feliz-target.js";
-import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
+import {
+  type FsExprCtx,
+  fsString,
+  renderFsExpr,
+  storeModelField,
+  storeMsgCase,
+} from "./fs-expr.js";
+import { FELIZ_INTL_MESSAGEFORMAT, felizI18nEnabled, renderFelizI18nModule } from "./i18n.js";
 import { felizPack } from "./pack.js";
 import { felizRealtimeRefetchAggregates, renderFelizRealtime } from "./realtime.js";
 import {
@@ -281,6 +289,10 @@ function renderPageView(
    *  walk so `Action { instance.op }` buttons gate on currentUser-only op
    *  `requires` (the action-level mirror of the page gate). */
   authUi = false,
+  /** True when this ui has extractable user-visible strings (M-T1.11) — the walk
+   *  then keys every literal text slot to the catalog and emits `I18n.t`/`tf`.
+   *  False → the prefix stays undefined and the body is byte-identical. */
+  i18nEnabled = false,
 ): string {
   // A detail page's view takes the route `id` (bound by its `Page` case); the
   // body's `byId(id)` renders through the `renderRouteId` seam to this local.
@@ -305,6 +317,10 @@ function renderPageView(
     externFunctionNames, // extern frontend function names
     new Set(), // derivedNames (Feliz has no page-derived bindings)
     authUi, // gate `Action` buttons on currentUser-only op `requires`
+    // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
+    // role-scoped `page.name`, e.g. `List`, not the router emit name);
+    // undefined when the ui has no extractable strings (byte-identical).
+    i18nEnabled ? `page.${page.name}` : undefined,
   );
   if (used) {
     for (const c of result.usedUserComponents) used.components.add(c);
@@ -446,7 +462,7 @@ function humanizeLabel(name: string): string {
  *  one menu item per TOP-LEVEL page (a static route, no `:param`; detail pages
  *  are reached from their list, not the nav).  Returns "" when there are fewer
  *  than two top-level pages (a lone nav item isn't worth a bar). */
-function renderNavbar(pages: readonly PageIR[], brand: string): string {
+function renderNavbar(pages: readonly PageIR[], brand: string, i18nEnabled = false): string {
   const navPages = pages.filter((p) => !hasRouteParam(p));
   if (navPages.length < 2) return "";
   const items = navPages
@@ -458,8 +474,12 @@ function renderNavbar(pages: readonly PageIR[], brand: string): string {
     .join("\n");
   // The bar is a real <nav> landmark (a11y contract) — a screen reader
   // announces it as the primary navigation and can jump straight to it.
+  // The landmark's accessible name is pack-chrome: translated through the
+  // generated runtime under i18n (M-T1.11, keyed to `APP_SHELL_CHROME`), the raw
+  // English literal otherwise (byte-identical).
+  const navAria = shellChrome("primaryNav", i18nEnabled);
   return [
-    '    Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel "Primary navigation"; prop.children [',
+    `    Html.nav [ prop.className "navbar bg-base-200 rounded-box mb-4"; prop.ariaLabel ${navAria}; prop.children [`,
     '      Html.div [ prop.className "flex-1"; prop.children [',
     `        Html.a [ prop.className "btn btn-ghost text-xl"; prop.href "/"; prop.text "${humanizeLabel(brand)}" ]`,
     "      ] ]",
@@ -472,18 +492,30 @@ function renderNavbar(pages: readonly PageIR[], brand: string): string {
   ].join("\n");
 }
 
+/** A baked-in app-shell chrome string as an F# EXPRESSION — `I18n.t "<key>"
+ *  "<english>"` under i18n (M-T1.11), else the plain quoted literal, which is
+ *  byte-identical to the pre-i18n shell.  `english` comes from the shared
+ *  `APP_SHELL_CHROME` table so the emitted default equals the catalog entry. */
+function shellChrome(name: string, i18nEnabled: boolean): string {
+  const english = APP_SHELL_CHROME[chromeKey(name)]!;
+  return i18nEnabled
+    ? `(I18n.t ${fsString(chromeKey(name))} ${fsString(english)})`
+    : fsString(english);
+}
+
 function renderRootView(
   pages: readonly PageIR[],
   nameCtx: PageNameCtx,
   fnName = "view",
   brand = "",
+  i18nEnabled = false,
 ): string {
   const arms = pages.map((p) =>
     hasRouteParam(p)
       ? `        | ${pageCase(p, nameCtx)} id -> ${pageViewFn(p, nameCtx)} model dispatch id`
       : `        | ${pageCase(p, nameCtx)} -> ${pageViewFn(p, nameCtx)} model dispatch`,
   );
-  const navbar = renderNavbar(pages, brand);
+  const navbar = renderNavbar(pages, brand, i18nEnabled);
   const router = [
     "    React.router [",
     // PATH-based routing (History API), NOT hash (`#/…`) — the generated SPA
@@ -517,7 +549,7 @@ function renderRootView(
     "    prop.children [",
     // Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element, visually
     // hidden until focused, jumps past the nav to the <main> landmark.
-    '      Html.a [ prop.className "sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 btn btn-sm"; prop.href "#main-content"; prop.text "Skip to content" ]',
+    `      Html.a [ prop.className "sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 btn btn-sm"; prop.href "#main-content"; prop.text ${shellChrome("skipToContent", i18nEnabled)} ]`,
     // `renderNavbar` emits at a 4-space base; here it is a sibling of the
     // skip link + <main> at 6 spaces, so re-indent it +2 to keep all three
     // list elements on the SAME offside column — F# keys a newline-separated
@@ -803,6 +835,13 @@ function renderAppFs(
   if (pages.length === 0) {
     return `module App\n\nopen Feliz\n\n// ui '${ui.name}' declares no pages\n`;
   }
+  // i18n (M-T1.11 Feliz runtime): when this ui has extractable user-visible
+  // strings, every literal text slot in a page body emits `I18n.t "<key>"
+  // "<default>"` (keyed identically to the catalog via the SHARED walker seam)
+  // and `App.fs` carries the generated `I18n` module — the F#-language sibling
+  // of the JS frontends' `src/i18n.ts` shim.  Empty catalog → no module, the
+  // walks pass no prefix, and the file is byte-identical to pre-i18n.
+  const i18nEnabled = felizI18nEnabled(ui);
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   // Aggregate-qualified page-name context (`classifyPage` inputs) — the scaffold
@@ -1058,10 +1097,11 @@ function renderAppFs(
             asyncEffectActions,
             pageGate,
             authUi,
+            i18nEnabled,
           ),
         ),
         "",
-        renderRootView(pages, nameCtx, rootFn, ui.name),
+        renderRootView(pages, nameCtx, rootFn, ui.name, i18nEnabled),
       ]
     : [
         renderPageView(
@@ -1079,6 +1119,7 @@ function renderAppFs(
           asyncEffectActions,
           pageGate,
           authUi,
+          i18nEnabled,
         ),
       ];
   // A gated app defines `forbiddenView` ahead of the page views that render it
@@ -1121,8 +1162,20 @@ function renderAppFs(
     // A FileUpload mints its multipart FormData via the JS-interop escape
     // hatch; the realtime subscription uses `?`/`jsNative`/`Emit` too
     // (`jsNative` lives in `Fable.Core`, the `?` operator in `.JsInterop`).
-    (hasRealtime || used.usesDataGrid) && "open Fable.Core",
-    (hasFileUploads || hasRealtime || used.usesDataGrid) && "open Fable.Core.JsInterop",
+    // The i18n runtime reaches `intl-messageformat` the same way — `import` +
+    // `jsNative` — and builds its ICU values bag with `createObj`.  BOTH opens
+    // are required: `jsNative` resolves through `Fable.Core`, `import` /
+    // `createObj` through `.JsInterop`.  (Caught by `feliz-build` on the
+    // SCAFFOLD app, which carries neither a DataGrid nor realtime and so was the
+    // first app to emit the i18n module with only `.JsInterop` opened.)
+    (hasRealtime || used.usesDataGrid || i18nEnabled) && "open Fable.Core",
+    (hasFileUploads || hasRealtime || used.usesDataGrid || i18nEnabled) &&
+      "open Fable.Core.JsInterop",
+    // Translation runtime (M-T1.11) — catalog + `t`/`tf`.  Ahead of everything
+    // else: F# is order-sensitive and every page view below calls into it, while
+    // the module itself references nothing.
+    i18nEnabled ? "" : false,
+    i18nEnabled ? renderFelizI18nModule(ui) : false,
     // Auth session gate — SessionState (gates the Model) + the Auth probe module.
     // Under a page gate the probe decodes the verified claims into `CurrentUser`
     // (record + decoder ahead of the claims-variant Auth module); a gate-free
@@ -1274,7 +1327,7 @@ const DOTNET_TOOLS = `{
  *  (`data-grid-child.ts`).  Same package the Svelte target uses, so the two
  *  adapter-less frontends run the same row model at the same version.  Omitted
  *  from a grid-free app so its dependency list stays minimal. */
-const PACKAGE_JSON = (name: string, usesDataGrid = false): string =>
+const PACKAGE_JSON = (name: string, usesDataGrid = false, usesI18n = false): string =>
   `${JSON.stringify(
     {
       name,
@@ -1289,6 +1342,9 @@ const PACKAGE_JSON = (name: string, usesDataGrid = false): string =>
         react: "^18.2.0",
         "react-dom": "^18.2.0",
         ...(usesDataGrid ? { "@tanstack/table-core": "^8.21.3" } : {}),
+        // The ICU half of the generated `I18n` module (M-T1.11) — the same
+        // engine, at the same pin, the four JS frontends' stacks carry.
+        ...(usesI18n ? { "intl-messageformat": FELIZ_INTL_MESSAGEFORMAT } : {}),
       },
       // Tailwind + daisyUI drive the design system: the pack emits daisyUI
       // component classes (`btn` / `card` / `table` / `badge` / …), Vite runs
@@ -1481,7 +1537,10 @@ export function generateFelizForContexts(
   out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi, hasFileUploads));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);
-  out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`, uiUsesDataGrid(ui)));
+  out.set(
+    "package.json",
+    PACKAGE_JSON(`${deployable.name}-feliz`, uiUsesDataGrid(ui), felizI18nEnabled(ui)),
+  );
   out.set("vite.config.js", renderViteConfig(basePath));
   out.set("index.html", INDEX_HTML(theme));
   out.set("styles.css", STYLES_CSS);

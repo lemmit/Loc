@@ -1,9 +1,9 @@
-// Shared between the slow React-build sweep
-// (generated-react-build.test.ts, excluded from the fast `npm test`)
-// and the always-on matrix drift guard (react-build-matrix-sync.test.ts,
-// which DOES run in the fast suite).  Keeping the list in one place is
-// what lets the guard pin the CI workflow matrix against the exact set
-// the build test would run.
+// The example list AND the pack list the React build sweep runs, shared
+// between the slow sweep itself (generated-react-build.test.ts, excluded
+// from the fast `npm test`) and the always-on matrix drift guard
+// (react-build-matrix-sync.test.ts, which DOES run in the fast suite).
+// Keeping them in one place is what lets the guard pin the CI workflow
+// matrix against the exact set the build test would run.
 //
 // Single-file examples only.  The build harness copies one .ddd into a
 // temp dir before injecting the design pack, so multi-file examples with
@@ -74,3 +74,30 @@ export const reactBuildExamples = [
   // would tsc-error.  Guards the scaffold display path compiling.
   { ddd: "web/src/examples/file-scaffold-system.ddd", reactDir: "web_app" },
 ] as const;
+
+export interface ReactPackSpec {
+  readonly family: "mantine" | "shadcn" | "mui" | "chakra";
+  readonly version: string;
+}
+
+/** The `family@version` packs every example above is swept against.  Lives
+ *  here (rather than in the build harness) for the same reason the example
+ *  list does: the always-on drift guard pins the workflow's slim PR pack
+ *  slice against it without importing the slow suite.  Adding a pack version
+ *  here grows the sweep multiplicatively with no other code edit — the full
+ *  CI sweep asks the harness for "all packs" per example rather than
+ *  enumerating them in the workflow. */
+export const reactBuildPacks: readonly ReactPackSpec[] = [
+  { family: "mantine", version: "v7" },
+  { family: "mantine", version: "v9" },
+  { family: "shadcn", version: "v3" },
+  { family: "shadcn", version: "v4" },
+  { family: "mui", version: "v5" },
+  { family: "mui", version: "v7" },
+  { family: "chakra", version: "v2" },
+  { family: "chakra", version: "v3" },
+];
+
+export function reactPackId(p: ReactPackSpec): string {
+  return `${p.family}@${p.version}`;
+}

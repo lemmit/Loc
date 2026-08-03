@@ -88,6 +88,21 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   can't reach hex.pm from Elixir's `:ssl` — set `HEX_MIRROR_URL` or run the
   repo's loopback hex mirror (CLAUDE.md → "Egress proxy wrinkle"); CI runners
   have direct hex.pm access, so no mirror is needed there.
+
+  **Warm dependency reuse.** Every case generates a fresh project with the
+  *same* hex dep tree, and compiling that tree per case (phoenix/ecto/postgrex/
+  opentelemetry → grpcbox+chatterbox rebar3 builds) was ~90% of this leg's wall
+  clock. So the DEPENDENCY build is primed once per distinct dep set into
+  `LOOM_ELIXIR_DEP_CACHE` (default `.work-elixir/dep-cache`, cached across CI
+  runs) and reused: `MIX_DEPS_PATH` points at the shared deps, and each
+  `_build/<env>/lib/<dep>` is symlinked into the case's own `_build`. Only
+  dependencies are shared — the generated app's build dir is never seeded, so it
+  still compiles from scratch every case and a codegen bug can't be masked by a
+  stale build. The tree is content-addressed by a hash of the generated
+  `defp deps` block + the Erlang/Elixir versions; a mismatch (an `auth {}` case
+  adds joken, say) just primes a second tree, and any trouble with the shared
+  tree falls back to a full self-contained compile for that case.
+  `LOOM_ELIXIR_NO_DEP_CACHE=1` turns the whole mechanism off.
 - **mikroorm** — the SAME emitted api e2e, run against a booted **generated
   node/Hono backend on the MikroORM persistence adapter** (`persistence:
   mikroorm`) over real HTTP (`run-mikroorm.mjs`). The default node tier

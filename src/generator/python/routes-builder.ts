@@ -343,20 +343,40 @@ export function errorResponsesKwarg(
   return `, responses={${entries.join(", ")}}`;
 }
 
-/** A versioned aggregate's `update` declares 409 (stale `If-Match` →
- *  optimistic-concurrency conflict), mirroring the Hono / .NET / Phoenix /
- *  Java contract so the conformance error-response dimension compares equal. */
-function versionedConflictStatuses(
+/** The per-operation CONFLICT statuses the shared `errorStatuses` table cannot
+ *  know, because both are facts about this operation rather than its kind:
+ *
+ *   - a `when` STATE GATE can answer `Disallowed` — the `when` rung of the
+ *     denial ladder (`when` → 409, `requires` → 403, `precondition` → 422;
+ *     RS-15);
+ *   - a versioned aggregate's `update` can answer `ConcurrencyConflict` on a
+ *     stale `If-Match`.
+ *
+ *  Both resolve through the `httpStatus` mapper (M-T3.4a) and DEDUPE, so with
+ *  no override they collapse to a single declared 409 — byte-identical to what
+ *  this emitted before for the versioned-update case.
+ *
+ *  The `when` arm was missing here.  This backend's runtime raises
+ *  `DisallowedError`, which `app/domain/errors.py` maps to 409, but the route
+ *  declared only `{400, 404, 422}` — so a `when`-gated operation answered a
+ *  status its own published contract did not list.  Hono, .NET and Phoenix all
+ *  declared it; python and java did not.  `conformance-parity` compares this
+ *  dimension (`errorResponses`) and still could not see it: the ONE fixture it
+ *  boots, `examples/showcase.ddd`, has no `when`-gated operation — every op
+ *  there uses `requires` + `precondition`. */
+function operationConflictStatuses(
   agg: EnrichedAggregateIR,
   op: OperationIR,
-  /** Structural-conflict resolver (M-T3.4a) — the stale-`If-Match` 409 is the
-   *  `ConcurrencyConflict` built-in, remappable via `httpStatus`; omitted ⇒
-   *  literal 409. */
+  /** Structural-conflict resolver (M-T3.4a) — each conflict is remappable via
+   *  `httpStatus`; omitted ⇒ literal 409. */
   resolve?: (name: string) => number,
 ): number[] {
-  return op.name === "update" && aggregateIsVersioned(agg)
-    ? [resolve?.("ConcurrencyConflict") ?? 409]
-    : [];
+  const out = new Set<number>();
+  if (op.when) out.add(resolve?.("Disallowed") ?? 409);
+  if (op.name === "update" && aggregateIsVersioned(agg)) {
+    out.add(resolve?.("ConcurrencyConflict") ?? 409);
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 /** `resolveErrorStatus` bound to a context's `httpStatus` override map — the
@@ -967,7 +987,7 @@ function operationRoute(
     if (usesUser) callArgs.push("current_user");
     const vsave = versionedSave(agg);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), operationConflictStatuses(agg, op, resolve), resolve)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
@@ -1014,7 +1034,7 @@ function operationRoute(
   if (op.returnType) {
     const wireType = responsePyType(op.returnType, ctx);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=${wireType}, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
+      `@router.post("/{id}/${opSnake}", response_model=${wireType}, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), operationConflictStatuses(agg, op, resolve), resolve)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> ${wireType}:`,
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
@@ -1035,7 +1055,7 @@ function operationRoute(
     );
   }
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op, resolve), resolve)})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), operationConflictStatuses(agg, op, resolve), resolve)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
