@@ -43,6 +43,7 @@ import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
 import {
   aggUsesPrincipalContextFilter,
@@ -286,6 +287,9 @@ export function buildPyRepositoryFile(
     aggHasFieldMask(agg) ? ["", toWireMaskedMethod(agg)] : null,
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
     aggHasAuditedTarget(agg) ? ["", recordAuditMethod()] : null,
+    // Entity history (docs/audit.md) — the read over `audit_records`, gated on
+    // the enrichment-derived find so it appears exactly where a route needs it.
+    repo?.historyFind ? ["", renderPyHistoryRepoMethod(agg)] : null,
   );
 
   // Import narrowing via body scan (string literals stripped).
