@@ -42,7 +42,11 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
-import { exprUsesCurrentUser, isQueryTimeProjection } from "../../types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  isGroupedProjection,
+  isQueryTimeProjection,
+} from "../../types/loom-ir.js";
 import {
   backendServesRealtime,
   durableEventTypes,
@@ -145,6 +149,34 @@ export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomD
             source: `${c.name}/${p.name}`,
           });
         }
+      }
+    }
+  }
+}
+
+// GROUPED projection (`group by`, M-T4.2) — one row per distinct grouping-key
+// combination, aggregates computed per group in SQL, the LIST response shape.
+// A distinct emit arm from both the singleton aggregation (one row) and the
+// per-row read (rows mapped in the app), so a new backend gates on it
+// separately until its port lands — the same reviewed-gap discipline as
+// `PROJECTION_AGG_SUPPORTED` above.  All five current backends emit it.
+const PROJECTION_GROUPBY_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
+
+export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    if (!platformOwnsBackend(d.platform) || PROJECTION_GROUPBY_SUPPORTED.has(d.platform)) continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        if (!isGroupedProjection(p)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-groupby-unsupported-backend",
+          message: `projection '${p.name}' uses 'group by' (the grouped read model), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Host the projection on a supported deployable, or express the read per-row.`,
+          source: `${c.name}/${p.name}`,
+        });
       }
     }
   }

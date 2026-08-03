@@ -44,6 +44,9 @@ import {
 import {
   type AggregateSelect,
   aggregateCoercion,
+  type GroupKeySelect,
+  groupedAggregates,
+  groupKeyColumn,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { snake, upperFirst } from "../../../util/naming.js";
@@ -179,6 +182,72 @@ function renderQueryProjectionModule(
 
   const lines: string[] = [];
   lines.push(principal ? "" : "    _ = current_user");
+
+  // GROUPED AGGREGATION (M-T4.2) — `group by` present: ONE ROW PER DISTINCT
+  // GROUP, computed in SQL as a single Ecto query with `group_by:` over the
+  // grouping columns and the aggregates in the `select`.  `order_by:` over the
+  // same columns is REQUIRED — deterministic cross-backend reads.  The response
+  // is the LIST shape (like the per-row read), never the singleton map.
+  const grouped = groupedAggregates(proj);
+  if (grouped) {
+    const groupCols = grouped.groupBy.map((g) => {
+      const col = groupKeyColumn(g);
+      if (col === null) {
+        throw new Error(
+          "internal: a grouped projection's group-by entry must name a source column",
+        );
+      }
+      return `record.${snake(col)}`;
+    });
+    const groupClause = groupCols.length === 1 ? groupCols[0]! : `[${groupCols.join(", ")}]`;
+    const selectCols = [
+      ...grouped.keys.map((k) => {
+        const col = groupKeyColumn(k.expr);
+        if (col === null) {
+          throw new Error("internal: a grouped projection's key select must name a source column");
+        }
+        return `${k.field}: record.${snake(col)}`;
+      }),
+      ...grouped.aggregates.map((a) => `${a.field}: ${ectoAggregate(a.aggregate)}`),
+    ].join(", ");
+    lines.push("    rows =");
+    lines.push(
+      where
+        ? `      from(record in ${sourceMod}, where: ${where}, group_by: ${groupClause}, order_by: ${groupClause}, select: %{${selectCols}})`
+        : `      from(record in ${sourceMod}, group_by: ${groupClause}, order_by: ${groupClause}, select: %{${selectCols}})`,
+    );
+    lines.push(`      |> Repo.all()`);
+    lines.push(`    Enum.map(rows, fn row ->`);
+    lines.push(`      %{`);
+    const entries = [
+      ...grouped.keys.map((k) => `${k.field}: ${ectoKeyCoerce(k, `row.${k.field}`)}`),
+      ...grouped.aggregates.map((a) => `${a.field}: ${ectoCoerce(a, `row.${a.field}`)}`),
+    ];
+    entries.forEach((e, i) => {
+      lines.push(`        ${e}${i === entries.length - 1 ? "" : ","}`);
+    });
+    lines.push(`      }`);
+    lines.push(`    end)`);
+    return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  Query-time projection: ${upperFirst(proj.name)}
+  Source aggregate: ${upperFirst(source)}
+  Form: query-time GROUPED aggregation (one row per group, computed in SQL).
+  Foundation: vanilla (plain Ecto).
+  """
+
+  import Ecto.Query
+  alias ${appModule}.Repo
+
+  @doc "Execute the grouped aggregation and return one projected row per group."
+  @spec run(any()) :: [map()]
+  def run(current_user \\\\ nil) do
+${lines.filter((l) => l !== "").join("\n")}
+  end
+end
+`;
+  }
 
   // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE Ecto query with
   // `count`/`sum`/`avg`/`min`/`max` in the `select`, no rows loaded.  The shape
@@ -341,6 +410,31 @@ function ectoCoerce(s: AggregateSelect, read: string): string {
       : `if(is_nil(${read}), do: 0.0, else: ${num})`;
   }
   return c.optional ? read : `${read} || 0`;
+}
+
+/** Coerce one grouping-key value to the row's DECLARED wire type.
+ *
+ *  Ecto's map-`select` loads schema fields through their types exactly like a
+ *  struct read, so most keys pass through as the per-row arm ships them: an
+ *  `Ecto.Enum` field is an atom (Jason encodes it as the declared string), a
+ *  `:binary_id` id is already a string, ints/strings/datetimes are themselves.
+ *  The exceptions are the RS-24 split the per-row serializers make: `money`
+ *  rides the Elixir wire as a STRING (`%Decimal{}` → `to_string`) and a plain
+ *  `decimal` as a NUMBER (`Decimal.to_float`).  Keys are never zero-defaulted —
+ *  a group's key value is whatever the column holds (nil only when optional). */
+function ectoKeyCoerce(k: GroupKeySelect, read: string): string {
+  const inner = k.type.kind === "optional" ? k.type.inner : k.type;
+  const optional = k.type.kind === "optional";
+  if (inner.kind === "primitive" && inner.name === "money") {
+    return optional
+      ? `if(is_nil(${read}), do: nil, else: to_string(${read}))`
+      : `to_string(${read})`;
+  }
+  if (inner.kind === "primitive" && inner.name === "decimal") {
+    const num = `Decimal.to_float(Decimal.new(to_string(${read})))`;
+    return optional ? `if(is_nil(${read}), do: nil, else: ${num})` : num;
+  }
+  return read;
 }
 
 /** Render one `select` expression against the source `record` and the join

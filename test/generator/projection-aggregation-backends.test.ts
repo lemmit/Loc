@@ -154,6 +154,25 @@ describe("java", () => {
     expect(svc).toContain('r[1] == null ? "0" : r[1].toString()');
     expect(svc).toContain("r[2] == null ? BigDecimal.ZERO : new BigDecimal(r[2].toString())");
   });
+
+  it("emits the `requires` gate on a gated singleton aggregation — 403 BEFORE the query", async () => {
+    // Regression: the singleton arm once `continue`d past the shared gate
+    // block, serving a `requires`-gated aggregation UNGATED on Java alone —
+    // every other backend enforced it.  The route keeps the one-row shape.
+    const gated = system("java")
+      .replace("from Order as o", 'from Order as o\n        requires currentUser.role == "admin"')
+      .replace("system Shop {", "system Shop {\n  user { id: string role: string }")
+      .replace("port: 8080 }", "port: 8080 auth: required }");
+    const files = await generateSystemFiles(gated);
+    let controller = "";
+    for (const [path, content] of files)
+      if (path.endsWith("OrdersQueryProjectionsController.java")) controller = content;
+    expect(controller).toContain("public SalesTotalsRow salesTotals()");
+    const gateAt = controller.indexOf("ForbiddenException");
+    const readAt = controller.indexOf("queryProjections.salesTotals()");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(readAt).toBeGreaterThan(gateAt);
+  });
 });
 
 describe("elixir", () => {

@@ -76,7 +76,14 @@ export function lowerProjection(p: Projection, env: Env): ProjectionIR {
 
 /** Whether the projection declares any query-time comprehension clause. */
 function hasQueryClauses(p: Projection): boolean {
-  return !!p.source || !!p.gate || !!p.filter || p.joins.length > 0 || p.selects.length > 0;
+  return (
+    !!p.source ||
+    !!p.gate ||
+    !!p.filter ||
+    p.joins.length > 0 ||
+    p.groupBys.length > 0 ||
+    p.selects.length > 0
+  );
 }
 
 /** Lower the query-time comprehension (`from`/`where`/`join`/`select`).
@@ -137,6 +144,12 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
     scope = withLocal(scope, j.alias, "let", { kind: "entity", name: aggName });
   }
 
+  // `group by` columns lower in the same source-candidate scope as `select`,
+  // so `group by o.status` arrives as the same `this`-rooted member access a
+  // per-row `select status = o.status` lowers to — which is what lets the
+  // validator match them structurally (`loom.projection-groupby-select-not-grouped`).
+  const groupBy = p.groupBys.map((g) => lowerExpr(g, scope));
+
   const selects = p.selects.map((s) => {
     const expr = lowerExpr(s.expr, scope);
     const aggregate = wholeTableAggregation(expr);
@@ -168,6 +181,7 @@ function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
     const ref = criterionRefOf(p.filter, scope);
     if (ref) query.criterionRef = ref;
   }
+  if (groupBy.length > 0) query.groupBy = groupBy;
   if (selects.length > 0) query.selects = selects;
   return query;
 }

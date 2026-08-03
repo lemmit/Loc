@@ -10,6 +10,10 @@ import { tableOwnerName } from "../../ir/util/inheritance.js";
 import {
   type AggregateSelect,
   aggregateCoercion,
+  type GroupedSelects,
+  type GroupKeySelect,
+  groupedAggregates,
+  groupKeyColumn,
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
 import { lines } from "../../util/code-builder.js";
@@ -81,26 +85,30 @@ export function buildPyQueryProjectionsFile(
   }
 
   const models = projections.map((p) => projectionRowModels(p, ctx)).join("");
-  // WHOLE-TABLE AGGREGATION takes precedence over every other shape: it queries
-  // the table directly, never through a repository, because the point of the
-  // shape is to materialise no rows at all.  Its `where` lowers here so a
-  // filtered aggregation keeps its filter (mirrors `rowLowered` above).
+  // AGGREGATION (whole-table singleton OR grouped) takes precedence over every
+  // other shape: it queries the table directly, never through a repository,
+  // because the point of the shape is to materialise no source rows at all.
+  // Its `where` lowers here so a filtered aggregation keeps its filter
+  // (mirrors `rowLowered` above).
   const aggLowered = new Map<string, PyPredicate | null>();
   for (const p of projections) {
-    if (!wholeTableAggregates(p) || !p.query?.source) continue;
+    if ((!wholeTableAggregates(p) && !groupedAggregates(p)) || !p.query?.source) continue;
     const agg = ctx.aggregates.find((a) => a.name === p.query!.source);
     aggLowered.set(
       p.name,
       agg && p.query.filter ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null,
     );
   }
-  const routeBlocks = projections.map((p) =>
-    wholeTableAggregates(p)
-      ? aggregateProjectionRoute(p, ctx, aggLowered.get(p.name) ?? null)
-      : isWorkflowSourced(p) || isProjectionSourced(p)
-        ? rowSourcedProjectionRoute(p, `${p.query!.source!}Row`, rowLowered.get(p.name) ?? null)
-        : projectionRoute(p, dispatcherExpr, ctx),
-  );
+  const routeBlocks = projections.map((p) => {
+    const grouped = groupedAggregates(p);
+    return grouped
+      ? groupedProjectionRoute(p, ctx, grouped, aggLowered.get(p.name) ?? null)
+      : wholeTableAggregates(p)
+        ? aggregateProjectionRoute(p, ctx, aggLowered.get(p.name) ?? null)
+        : isWorkflowSourced(p) || isProjectionSourced(p)
+          ? rowSourcedProjectionRoute(p, `${p.query!.source!}Row`, rowLowered.get(p.name) ?? null)
+          : projectionRoute(p, dispatcherExpr, ctx);
+  });
   const body = `${models}router = APIRouter(prefix="/projections", tags=["projections"])\n\n\n${routeBlocks.join("\n\n\n")}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -112,12 +120,14 @@ export function buildPyQueryProjectionsFile(
   const repoAggs = [
     ...new Set(
       projections.flatMap((p) => [
-        // An AGGREGATION queries the table directly — no repository — so it
-        // must not drag in a repo import ruff would flag as unused (F401).
+        // An AGGREGATION (singleton or grouped) queries the table directly —
+        // no repository — so it must not drag in a repo import ruff would flag
+        // as unused (F401).
         ...(p.query?.source &&
         !isWorkflowSourced(p) &&
         !isProjectionSourced(p) &&
-        !wholeTableAggregates(p)
+        !wholeTableAggregates(p) &&
+        !groupedAggregates(p)
           ? [p.query.source]
           : []),
         ...(p.query?.auxiliaries ?? []).map((a) => a.aggName),
@@ -131,14 +141,21 @@ export function buildPyQueryProjectionsFile(
   const rowSourcedProjections = projections.filter(
     (p) => isWorkflowSourced(p) || isProjectionSourced(p),
   );
-  const aggregatingProjections = projections.filter((p) => wholeTableAggregates(p) !== null);
+  const aggregatingProjections = projections.filter(
+    (p) => wholeTableAggregates(p) !== null || groupedAggregates(p) !== null,
+  );
   const schemaRows = [
     ...new Set([
       ...rowSourcedProjections.map((p) => `${p.query!.source!}Row`),
       // An aggregation names the SOURCE aggregate's ORM row class as a value
       // (`select(func.count()).select_from(OrderRow)`), so it needs the same
-      // `app.db.schema` import a raw-table source does.
-      ...aggregatingProjections.map((p) => rowClassName(p.query!.source!)),
+      // `app.db.schema` import a raw-table source does.  TPH concretes query
+      // the base's shared table (same owner rule the routes use), so the
+      // import must name the owner row, not the concrete.
+      ...aggregatingProjections.map((p) => {
+        const agg = ctx.aggregates.find((a) => a.name === p.query!.source);
+        return rowClassName(agg ? tableOwnerName(agg, ctx.aggregates) : p.query!.source!);
+      }),
     ]),
   ]
     .filter(refersTo)
@@ -365,6 +382,96 @@ function pyCoerce(s: AggregateSelect, expr: string): string {
   if (c.isCount) return `int(${expr} or 0)`;
   if (c.optional) return `None if ${expr} is None else ${c.asString ? "str" : "float"}(${expr})`;
   return c.asString ? `str(${expr} or "0")` : `float(${expr} or 0)`;
+}
+
+/** `GET /projections/<name>` for a GROUPED aggregation (`group by …`, M-T4.2):
+ *  one SQL query — `SELECT <keys>, <aggs> … GROUP BY <keys> ORDER BY <keys>` —
+ *  one row per distinct group, no source rows materialised.  The ORDER BY over
+ *  the grouping columns is REQUIRED (deterministic cross-backend reads), and
+ *  unlike the whole-table singleton the response is the LIST shape
+ *  (`RootModel[list[<P>Row]]`), one entry per group. */
+function groupedProjectionRoute(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  grouped: GroupedSelects,
+  pred: PyPredicate | null,
+): string {
+  const source = proj.query!.source!;
+  const agg = ctx.aggregates.find((a) => a.name === source);
+  // TPH concretes query the base's shared table — the same owner rule the
+  // filter lowering uses, so the `where` and the `select_from` can't disagree.
+  const row = rowClassName(agg ? tableOwnerName(agg, ctx.aggregates) : source);
+  const fn = snake(proj.name);
+  const gate = proj.query!.requires;
+  const needsUser = queryProjectionUsesCurrentUser(proj) || !!gate;
+  const sig = [...(needsUser ? ["request: Request"] : []), "session: SessionDep"].join(", ");
+  // Validation pins every grouping expr (and every key select's expr) to a bare
+  // source column by emit time — a null here is an internal invariant break.
+  const keyCol = (e: ExprIR): string => {
+    const col = groupKeyColumn(e);
+    if (!col) {
+      throw new Error("internal: a grouped projection's grouping expr must name a source column");
+    }
+    return `${row}.${snake(col)}`;
+  };
+  const cols = [
+    ...grouped.keys.map((k) => keyCol(k.expr)),
+    ...grouped.aggregates.map((s) => pyAggregate(s.aggregate, row)),
+  ].join(", ");
+  // GROUP BY and ORDER BY exactly the declared grouping columns — a superset of
+  // the selected keys (a column may be grouped without being selected).
+  const byCols = grouped.groupBy.map(keyCol).join(", ");
+  const where = pred ? `.where(${pred.expr})` : "";
+  const out: string[] = [
+    `@router.get("/${fn}", response_model=${proj.name}Response, operation_id="projection${proj.name}")`,
+    `async def ${fn}_projection(${sig}) -> list[dict[str, object]]:`,
+    needsUser ? "    current_user: User = request.state.current_user" : null,
+    ...(gate
+      ? [
+          // renderPyNegatedGuard: a `.contains(...)` membership gate emits
+          // `x not in y`, not `not (x in y)` (ruff E713).
+          `    if ${renderPyNegatedGuard(gate)}:`,
+          `        raise ForbiddenError(${JSON.stringify(`Forbidden: projection ${proj.name}`)})`,
+        ]
+      : []),
+    "    result = (",
+    "        await session.execute(",
+    `            select(${cols})`,
+    `            .select_from(${row})${where}`,
+    `            .group_by(${byCols})`,
+    `            .order_by(${byCols})`,
+    "        )",
+    "    ).all()",
+    "    return [",
+    "        {",
+    ...grouped.keys.map((k, i) => `            "${k.field}": ${pyKeyCoerce(k, `r[${i}]`)},`),
+    ...grouped.aggregates.map(
+      (s, i) => `            "${s.field}": ${pyCoerce(s, `r[${grouped.keys.length + i}]`)},`,
+    ),
+    "        }",
+    "        for r in result",
+    "    ]",
+  ].filter((l): l is string => l != null);
+  return out.join("\n");
+}
+
+/** Coerce one grouping-key column to the projection row's declared wire type.
+ *  Most key columns already carry the wire spelling off the ORM row (enums
+ *  store their value text, ids/guids read as `str`, ints as `int`); only the
+ *  `Decimal`-backed columns need mapping — `money` crosses the wire as its
+ *  canonical decimal STRING, a plain `decimal` as a number.  Mirrors the
+ *  per-row route, where the same fields pass through untouched. */
+function pyKeyCoerce(k: GroupKeySelect, expr: string): string {
+  const inner = k.type.kind === "optional" ? k.type.inner : k.type;
+  const optional = k.type.kind === "optional";
+  const conv =
+    inner.kind === "primitive" && inner.name === "money"
+      ? "str"
+      : inner.kind === "primitive" && inner.name === "decimal"
+        ? "float"
+        : null;
+  if (!conv) return expr;
+  return optional ? `None if ${expr} is None else ${conv}(${expr})` : `${conv}(${expr})`;
 }
 
 /** `GET /projections/<name>` for a `from <Workflow>` / `from <Projection>`

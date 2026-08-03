@@ -60,6 +60,7 @@ import {
   validateFilterBypassSupport,
   validateFindPredicateAdapterSupport,
   validateFlutterPrimitiveSupport,
+  validateGroupedProjectionBackend,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
   validateJavaStampSupport,
@@ -184,6 +185,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validatePagedQueryHandlerBackend(sys, diags);
     validateQueryTimeProjectionBackend(sys, diags);
     validateWholeTableAggregationBackend(sys, diags);
+    validateGroupedProjectionBackend(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

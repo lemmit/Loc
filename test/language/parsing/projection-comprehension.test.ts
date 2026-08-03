@@ -182,6 +182,68 @@ describe("parsing — projection comprehension", () => {
     expect(reProj.selects.map((s) => s.field)).toEqual(["orderId", "customerName"]);
   });
 
+  it("parses + round-trips a GROUPED projection (`group by`, M-T4.2)", async () => {
+    const src = wrap(`
+      projection SalesByStatus {
+        status: OrderStatus  orders: int  revenue: money
+        from Order as o
+        where o.status == Confirmed
+        group by o.status
+        select status = o.status, orders = count(), revenue = sum(o.total)
+      }
+    `);
+    const { model, errors } = await parseString(src);
+    expect(errors).toEqual([]);
+    const proj = model.members
+      .find(isBoundedContext)!
+      .members.filter(isProjection)
+      .find((p) => p.name === "SalesByStatus")!;
+    expect(proj.groupBys).toHaveLength(1);
+    const printed = printStructural(proj);
+    expect(printed).toContain("group by o.status");
+    // Grammar order: `where` before `group by` before `select`.
+    expect(printed.indexOf("where ")).toBeLessThan(printed.indexOf("group by"));
+    expect(printed.indexOf("group by")).toBeLessThan(printed.indexOf("select "));
+    const { model: re, errors: reErrors } = await parseString(wrap(printed));
+    expect(reErrors).toEqual([]);
+    const reProj = re.members
+      .find(isBoundedContext)!
+      .members.filter(isProjection)
+      .find((p) => p.name === "SalesByStatus")!;
+    expect(reProj.groupBys).toHaveLength(1);
+  });
+
+  it("parses a multi-column `group by`", async () => {
+    const { model, errors } = await parseString(
+      wrap(`
+        projection ByStatusAndCustomer {
+          status: OrderStatus  customerId: Customer id  orders: int
+          from Order as o
+          group by o.status, o.customerId
+          select status = o.status, customerId = o.customerId, orders = count()
+        }
+      `),
+    );
+    expect(errors).toEqual([]);
+    const proj = model.members
+      .find(isBoundedContext)!
+      .members.filter(isProjection)
+      .find((p) => p.name === "ByStatusAndCustomer")!;
+    expect(proj.groupBys).toHaveLength(2);
+  });
+
+  it("keeps `group` usable as a domain identifier (field name)", async () => {
+    // `group` is a soft keyword (CommonSoftKeywords): only the `group by`
+    // sequence in a projection body has structural meaning.
+    const { errors } = await parseString(`
+      context Sales {
+        aggregate Widget { group: string  n: int }
+        repository Widgets for Widget { }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
   it("keeps `order` / `select` / `join` usable as domain identifiers (field / key)", async () => {
     // `order` as a field name AND as the `keyed by` key; `select`/`join` as fields.
     const { errors } = await parseString(`
