@@ -609,12 +609,12 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
   // must propagate so the driver's bounded-retry/park owns it.  Broadcast
   // (redis) subscriptions keep the logged handler (fire-and-forget contract).
   const strictSubscribe = `await transport.SubscribeAsync(binding.Address, binding.Group,
-                    envelope => ConsumeAsync(binding, envelope, stoppingToken));`;
+                    envelope => ConsumeAsync(binding, envelope, _stopping.Token));`;
   const loggedSubscribe = `await transport.SubscribeAsync(binding.Address, null, async envelope =>
                 {
                     try
                     {
-                        await ConsumeAsync(binding, envelope, stoppingToken);
+                        await ConsumeAsync(binding, envelope, _stopping.Token);
                     }
                     catch (Exception ex)
                     {
@@ -667,13 +667,39 @@ public sealed class ChannelConsumerService : BackgroundService
         _log = log;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private readonly CancellationTokenSource _stopping = new();
+
+    /// <summary>Establish every subscription BEFORE the host reports started.
+    ///
+    /// Deliberately overrides StartAsync rather than living in ExecuteAsync:
+    /// BackgroundService.StartAsync invokes ExecuteAsync and returns at its
+    /// FIRST await, so the host would go on to start Kestrel while the
+    /// subscribe calls are still in flight — the port accepts traffic and
+    /// /ready answers 200 with no consumer attached.  An ephemeral pub/sub
+    /// envelope published into that window is dropped by the broker and never
+    /// redelivered, so no consumer-side timeout can recover it (the Java
+    /// backend had the identical defect, measured at ~667ms — #2350).
+    ///
+    /// Safe to await here because every driver's SubscribeAsync registers and
+    /// returns: redis attaches a handler, rabbit declares + binds and hooks
+    /// ReceivedAsync, and kafka's consume loop is a detached Task.Run.  None
+    /// of them runs the poll loop inline, so this cannot stall boot.</summary>
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
         foreach (var binding in ChannelBindings.All)
         {
             var transport = _transports.For(binding.CsName);
             ${subscribeBody}
         }
+        await base.StartAsync(cancellationToken);
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _stopping.CancelAsync();
+        await base.StopAsync(cancellationToken);
     }
 
     private async Task ConsumeAsync(ChannelBinding binding, LoomEventEnvelope envelope, CancellationToken cancellationToken)
