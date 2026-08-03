@@ -91,6 +91,24 @@ const REGISTERED: Ratchet[] = [
     max: 0,
   },
   { file: "test/e2e/corpus-tsc-build.test.ts", name: "TS_COMPILE_SKIP", kind: "record", max: 0 },
+  // The .NET Dapper adapter's compile tier.  Both entries are the SAME bug —
+  // query-time projection handlers are EF-LINQ over `AppDbContext` — and the
+  // folded read controller already has the raw-Npgsql port they need, so this
+  // is a port with a precedent, not an open design question.
+  {
+    file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
+    name: "DAPPER_COMPILE_SKIP",
+    kind: "record",
+    max: 2,
+  },
+  // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
+  // not gaps — these never reach the compiler.
+  {
+    file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
+    name: "DAPPER_UNSUPPORTED",
+    kind: "record",
+    max: 1,
+  },
   // Primitives exempt from the pack testid contract.
   {
     file: "test/conformance/pack-testid-coverage.test.ts",

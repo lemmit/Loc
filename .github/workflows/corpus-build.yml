@@ -44,6 +44,7 @@ on:
       - 'test/fixtures/corpus/**'
       - 'test/e2e/corpus-tsc-build.test.ts'
       - 'test/e2e/corpus-dotnet-build.test.ts'
+      - 'test/e2e/corpus-dotnet-dapper-build.test.ts'
       - 'test/e2e/corpus-java-build.test.ts'
       - 'test/e2e/corpus-python-build.test.ts'
       - 'package.json'
@@ -59,6 +60,7 @@ on:
       - 'test/fixtures/corpus/**'
       - 'test/e2e/corpus-tsc-build.test.ts'
       - 'test/e2e/corpus-dotnet-build.test.ts'
+      - 'test/e2e/corpus-dotnet-dapper-build.test.ts'
       - 'test/e2e/corpus-java-build.test.ts'
       - 'test/e2e/corpus-python-build.test.ts'
       - 'package.json'
@@ -121,6 +123,37 @@ jobs:
         run: npm run build
       - name: dotnet build /warnaserror against every corpus feature
         run: npm run test:dotnet-corpus
+
+  # .NET / Dapper — the SECOND persistence adapter.  `corpus × dotnet` only ever
+  # exercised EF Core, so an emitter referencing EF from a code path Dapper also
+  # takes was invisible to it (that is how the #2387 IAuditWriter CS0246 shipped
+  # green).  Same corpus, same compiler, `persistence: dapper` forced.
+  corpus-dotnet-dapper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: corpus × dotnet (Dapper)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('src/generator/dotnet/templates/program.tpl.ts') }}
+          restore-keys: |
+            nuget-
+      - name: Install Loom toolchain
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: dotnet build /warnaserror against every corpus feature (dapper)
+        run: npm run test:dapper-corpus
 
   # Java/Spring — gradle testClasses bootJar per feature.
   corpus-java:
@@ -192,7 +225,7 @@ jobs:
     # that is the "cancelled reads as not-failed" trap, kept closed. Same
     # pattern as test.yml's tests-passed.
     if: ${{ !cancelled() }}
-    needs: [corpus-tsc, corpus-dotnet, corpus-java, corpus-python]
+    needs: [corpus-tsc, corpus-dotnet, corpus-dotnet-dapper, corpus-java, corpus-python]
     runs-on: ubuntu-latest
     steps:
       - name: fail if any needed job failed
