@@ -13,6 +13,9 @@
 //   inside Section > Card > Sect. → <h5>
 //   explicit `level:` wins        → <h{level}>
 
+// NOTE (M-T1.11): the heading TEXT now rides the translation runtime
+// (`<%= pgettext(<key>, "Top") %>`), so each assertion matches the text loosely
+// inside the tag.  What these tests pin is the derived RANK, which is unchanged.
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
@@ -42,7 +45,7 @@ async function landingHeex(uiBody: string): Promise<string> {
 describe("HEEx Heading — structure-derived rank", () => {
   it("a top-level Heading (depth 0) renders <h2>, never <h1>", async () => {
     const heex = await landingHeex(`Stack { Heading { "Top" } }`);
-    expect(heex).toMatch(/<h2 [^>]*>Top<\/h2>/);
+    expect(heex).toMatch(/<h2 [^>]*>.*?Top.*?<\/h2>/);
     expect(heex).not.toContain(">Top</h1>");
     // Regression guard: no longer routed through the fixed-level `.header`.
     expect(heex).not.toContain("<.header");
@@ -50,12 +53,12 @@ describe("HEEx Heading — structure-derived rank", () => {
 
   it("a Heading inside one Section renders <h3>", async () => {
     const heex = await landingHeex(`Section { Heading { "Inner" } }`);
-    expect(heex).toMatch(/<h3 [^>]*>Inner<\/h3>/);
+    expect(heex).toMatch(/<h3 [^>]*>.*?Inner.*?<\/h3>/);
   });
 
   it("a Heading inside one Card renders <h3>", async () => {
     const heex = await landingHeex(`Card { Heading { "InCard" } }`);
-    expect(heex).toMatch(/<h3 [^>]*>InCard<\/h3>/);
+    expect(heex).toMatch(/<h3 [^>]*>.*?InCard.*?<\/h3>/);
   });
 
   it("nesting compounds: Section > Card > Section deepens the rank each level", async () => {
@@ -69,10 +72,10 @@ describe("HEEx Heading — structure-derived rank", () => {
         }
       }
     }`);
-    expect(heex).toMatch(/<h2 [^>]*>L2<\/h2>/);
-    expect(heex).toMatch(/<h3 [^>]*>L3<\/h3>/);
-    expect(heex).toMatch(/<h4 [^>]*>L4<\/h4>/);
-    expect(heex).toMatch(/<h5 [^>]*>L5<\/h5>/);
+    expect(heex).toMatch(/<h2 [^>]*>.*?L2.*?<\/h2>/);
+    expect(heex).toMatch(/<h3 [^>]*>.*?L3.*?<\/h3>/);
+    expect(heex).toMatch(/<h4 [^>]*>.*?L4.*?<\/h4>/);
+    expect(heex).toMatch(/<h5 [^>]*>.*?L5.*?<\/h5>/);
   });
 
   it("rank is clamped at 6 no matter how deep the nesting", async () => {
@@ -80,13 +83,13 @@ describe("HEEx Heading — structure-derived rank", () => {
     const heex = await landingHeex(
       `Section { Section { Section { Section { Section { Heading { "Deep" } } } } } }`,
     );
-    expect(heex).toMatch(/<h6 [^>]*>Deep<\/h6>/);
+    expect(heex).toMatch(/<h6 [^>]*>.*?Deep.*?<\/h6>/);
     expect(heex).not.toContain(">Deep</h7>");
   });
 
   it("an explicit level: wins over the derived rank", async () => {
     const heex = await landingHeex(`Section { Heading("Pinned", level: 2) }`);
     // depth would derive <h3>, but the explicit level: 2 pins <h2>.
-    expect(heex).toMatch(/<h2 [^>]*>Pinned<\/h2>/);
+    expect(heex).toMatch(/<h2 [^>]*>.*?Pinned.*?<\/h2>/);
   });
 });

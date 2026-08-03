@@ -101,7 +101,7 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
       }
     }
   }
-  label = positional[0] ? renderInTemplate(positional[0], ctx) : "";
+  label = positional[0] ? renderInTemplate(positional[0], ctx, "anchor") : "";
   const testidAttr = testIdAttr(expr, ctx);
   if (toLiteral !== undefined) {
     if (toLiteral.startsWith("/")) {
@@ -131,9 +131,11 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "title") {
+      // A user-visible named slot (`modalTitle`) — translated under i18n
+      // (M-T1.11), the raw escaped literal otherwise (byte-identical).
       title =
         arg.kind === "literal"
-          ? escapeHeexText(arg.value)
+          ? renderInTemplate(arg, ctx, "modalTitle")
           : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "trigger") {
       triggerExpr = arg;
@@ -878,12 +880,9 @@ export function renderKeyValueRow(
   }
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
-  const label =
-    positionals[0]?.kind === "literal"
-      ? escapeHeexText(positionals[0].value)
-      : positionals[0]
-        ? renderInTemplate(positionals[0], ctx)
-        : "Field";
+  // The row label is a user-visible slot (`keyValue`), so a plain literal rides
+  // the translation runtime under i18n (M-T1.11) and stays raw otherwise.
+  const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "keyValue") : "Field";
   const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
   return `<div class="key-value-row"${testidAttr}>\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value">${value}</dd>\n</div>`;
 }
@@ -917,7 +916,7 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   let message = "";
   let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
-  if (positionals[0]) message = renderInTemplate(positionals[0], ctx);
+  if (positionals[0]) message = renderInTemplate(positionals[0], ctx, "alert");
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
@@ -1125,7 +1124,7 @@ export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
     }
   }
   const rank = level ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
-  const text = positional[0] ? renderInTemplate(positional[0], ctx) : "";
+  const text = positional[0] ? renderInTemplate(positional[0], ctx, "heading") : "";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   return `<h${rank} class="text-lg font-semibold leading-8 text-zinc-800"${testidAttr}>${text}</h${rank}>`;
 }
@@ -1183,8 +1182,8 @@ export function renderStat(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   }
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
-  const label = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
-  const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
+  const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "statLabel") : "";
+  const value = positionals[1] ? renderInTemplate(positionals[1], ctx, "statValue") : "";
   return `<div class="stat"${testidAttr}>\n  <div class="stat-label text-sm text-gray-500">${label}</div>\n  <div class="stat-value text-2xl font-semibold">${value}</div>\n</div>`;
 }
 
