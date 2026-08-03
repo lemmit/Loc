@@ -230,6 +230,33 @@ against `app.fetch`. All third-party deps stay external (resolved from
 this dir's `node_modules`), so there is one drizzle instance and PGlite's
 wasm assets load normally.
 
+### Booting a real server (`proc.mjs`)
+
+The node tier boots in-process, but the five cross-backend legs
+(`run-{dotnet,dapper,python,java,mikroorm,elixir}.mjs`) spawn a real server per
+case on ONE fixed port. That makes teardown a correctness concern, not a
+tidiness one: a case that SIGTERMs its server without waiting leaves the socket
+held, so the next case's `waitForPort` connects to the PREVIOUS case's app —
+which then serves requests against a schema `resetDatabase` has just dropped
+(`relation "…" does not exist` → 500 on the first write). `/ready` cannot save
+you: readiness reports that *a* pool is healthy, never *which* app is behind the
+socket.
+
+So all six use `proc.mjs`:
+
+- `waitForPort(port, timeoutMs)` — resolve once the server accepts.
+- `stopServer(server, { graceMs })` — SIGTERM the process **group**, await the
+  actual exit, escalate to SIGKILL after the grace period. Every runner spawns
+  with `detached: true`, because the process holding the port is a child of the
+  launcher (`dotnet run`, `uv run uvicorn`, `npm run dev`, `mix phx.server`).
+- `waitForPortFree(port, timeoutMs)` — call before spawning; rejects if a
+  leftover never releases the port, rather than booting on top of it.
+
+The module is dependency-free on purpose (no `pg`/`esbuild` like `cases.mjs`) so
+the main vitest suite can import it: `test/harness/behavioral-proc.test.ts`
+gates this behaviour on every PR against a server that deliberately ignores
+SIGTERM. Left to these legs, a race is only tested when it is lost.
+
 ## UI tier (`run-ui.mjs`)
 
 The sibling runner for the **`ui`** tier — the emitted Playwright spec
