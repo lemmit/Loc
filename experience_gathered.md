@@ -3605,3 +3605,92 @@ fresh `main` that boolean was already a richer `renderPagedEnvelopeMember`
 seam, and the only surviving mention was a stale comment (now fixed). A named
 symbol in a task description is a claim about the tree, and it ages like any
 other — grep it first and re-read what you actually find.
+
+## 64. A gate that was red for its ENTIRE life, and the reframe that emptied it (2026-08-02)
+
+`channels-e2e.yml` had **never** produced a green run — every `push: main` run
+since it was created was `failure`. Nobody knew, because it is post-merge-only
+and non-required: no PR ever displays it, so the signal existed and was never
+read. Three separate production defects were sitting behind that. Draining it
+took three PRs, and every one of them was a real bug that a timeout bump would
+have buried.
+
+**The reframe that found all three:**
+
+> An assertion with an ample budget that still times out is describing a
+> delivery that **never happened**, not one that was slow.
+
+That single distinction decides whether to widen a timeout or go looking for a
+defect, and it was right three times running:
+
+- **elixir kafka DLQ** — 30s budget, 0-for-N. The first `produce_sync` to a
+  not-yet-created `<address>.dlq` fails, and **brod caches the failed topic
+  lookup as unknown**, with a negative entry that outlives the code's own
+  5×1s retry ladder. So the ladder could never win, and once poisoned the
+  client never parked again — a *second* poisoned record minutes later also
+  failed, with the topic by then existing. The fix is ordering (create the DLQ
+  topic at startup), not timing.
+- **java redis** — 20s budget, intermittent. `/ready` answered 200 for **~667ms
+  before the consumer had subscribed**, because `ChannelConsumerService`
+  implements `SmartLifecycle` without overriding `getPhase()`, inheriting
+  `Integer.MAX_VALUE` — while Spring Boot's web server sits at
+  `MAX_VALUE - 1` and therefore starts FIRST. Ephemeral pub/sub drops anything
+  published into that window, permanently.
+- The one case that genuinely WAS a budget problem (the kafka DLQ probe polling
+  with a JVM spawn per attempt, ~3 attempts in 30s) is the contrast that makes
+  the rule usable: **that** budget could not fit its own measurement method.
+  The other two could, and failed anyway.
+
+**A code comment claiming a race is handled is not evidence it is handled.**
+The elixir DLQ path carried a comment saying its create+retry covered the topic
+race. It didn't, and the comment is why nobody looked for a decade of runs. The
+repro overturned the comment in one measurement.
+
+**"The other backends' legs are green" is not evidence they are correct.**
+After fixing java I audited the same property across the rest: python
+(`asyncio.create_task` fire-and-forget, then the lifespan immediately
+`yield`s), dotnet (`BackgroundService.StartAsync` returns at the first `await`
+inside `ExecuteAsync`), and node (`startChannelConsumers` never awaits the
+async `subscribe`) all have the SAME shape. Java was not the buggy backend — it
+was the one whose window (JVM + Spring boot) was wide enough to lose the CI
+coin-flip often enough to notice. **A timing-dependent bug is invisible on
+whichever target happens to be fastest; green there means the window is
+narrow, not absent.**
+
+**Scoping a fix by the wrong axis, twice.** A counting bug hit dotnet, and I
+fixed "the dotnet legs" and wrote in the commit message that only they were
+affected — without checking. The next run failed elixir with the identical
+`expected 12 to be 6`. The real axis was the **log format**: any formatter that
+emits both a rendered message and structured metadata writes the event name
+twice per entry (.NET `AddJsonConsole`'s `Message` + `State`, Phoenix's
+`LogFormatter`'s `message` + merged `meta_map`); node/python/java emit it once
+as a structured field, which is why exactly those three passed. Group by the
+mechanism, not by the label on the failing job.
+
+**Concurrent probe runs manufacture false failures.** My first readiness probe
+reported NEVER DELIVERED — invalid: a previous run was still alive and the two
+raced over the container name and the ports, so `/ready` was answered by a
+stale container whose database I had just dropped. The tell was the
+`docker run` name conflict scrolling past in the output. This is §-the-same
+lesson as editing source while vitest is in flight: **a test harness you are
+running twice at once is not a test harness.** Kill and verify quiet before
+re-running, and treat any resource-name collision in the log as invalidating
+the result, not as noise.
+
+### Repro recipes that cost time to rediscover
+
+The shipped e2e harnesses boot backends NATIVELY, so on a box without that
+toolchain you must rebuild the harness by hand. Three sharp edges:
+
+- **Elixir in `hexpm/elixir:*-slim`** needs `build-essential` **and `cmake`** —
+  brod's `crc32cer` NIF fails with `make: cmake: No such file or directory`,
+  after first failing on plain `make`. Two rounds if you install only one.
+- **`mix local.hex` fails `unknown_ca` behind the egress proxy.** Erlang's
+  `:ssl` does not read the proxy CA. Mount `/root/.ccr` and
+  `cp ca-bundle.crt /usr/local/share/ca-certificates/ && update-ca-certificates`
+  before `local.hex`. (`LOOM_HEX_MIRROR=1` is the supported alternative.)
+  Deps land in the mounted volume, but **Mix still needs Hex installed to
+  resolve SCMs even when `deps/` is fully populated** — so persist `~/.mix`
+  across container runs rather than re-installing per boot.
+- **Java 25 targets need `gradle:9-jdk25`**; the host's JDK 21 + Gradle 8.14
+  cannot build them, and the failure surfaces late.
