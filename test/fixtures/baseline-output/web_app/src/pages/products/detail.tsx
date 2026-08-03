@@ -12,7 +12,7 @@ import { Controller, useForm } from "react-hook-form";
 import { useProductById } from "../../api/product";
 function openUpdateModal(mut: ReturnType<typeof useUpdateProduct>): void {
   modals.open({
-    title: "Update",
+    title: t("page.Detail.modalTitle.uk4kus", "Update"),
     children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }

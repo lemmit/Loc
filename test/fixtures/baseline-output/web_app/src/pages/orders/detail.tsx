@@ -13,7 +13,7 @@ import { Controller, useForm } from "react-hook-form";
 import { useOrderById } from "../../api/order";
 function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
   modals.open({
-    title: "Add Line",
+    title: t("page.Detail.modalTitle.uhabr2", "Add Line"),
     children: <AddLineForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -69,7 +69,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
 }
 function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
   modals.open({
-    title: "Confirm",
+    title: t("page.Detail.modalTitle.8tbqwf", "Confirm"),
     children: <ConfirmForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -109,7 +109,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
 }
 function openUpdateModal(mut: ReturnType<typeof useUpdateOrder>): void {
   modals.open({
-    title: "Update",
+    title: t("page.Detail.modalTitle.uk4kus", "Update"),
     children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
