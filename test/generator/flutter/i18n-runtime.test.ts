@@ -175,4 +175,45 @@ describe("Flutter i18n runtime", () => {
     // The Anchor's label is the TextButton's child widget, not a quoted string.
     expect(dart).toMatch(/TextButton\(onPressed: [^,]+, child: Text\(t\('page\.Home\.anchor\./);
   });
+
+  // --- ATTRIBUTE-position slots (D-I18N-ATTR) -------------------------------
+  // Flutter's markup is not HTML, so its pack cannot splice the walker's
+  // ` aria-label="…"` fragment; it consumes the same accessible name as a
+  // target-native VALUE (`localizedAriaLabelValue`), already translated.
+
+  it("translates named aria-label slots (Button + Toolbar) as Semantics labels", async () => {
+    const src = SYSTEM(
+      `Toolbar { label: "Order actions", Button { "+", label: "Add order", to: "/new" } }`,
+    );
+    const dart = await homeDart(src);
+    const buttonKey = await keyFor(src, "Add order");
+    const toolbarKey = await keyFor(src, "Order actions");
+    expect(dart).toContain(`Semantics(label: t('${buttonKey}', 'Add order')`);
+    expect(dart).toContain(`Semantics(container: true, label: t('${toolbarKey}', 'Order actions')`);
+  });
+
+  it("keeps the Toolbar's DEFAULT accessible name a plain Dart literal", async () => {
+    // "Actions" is the pack's own fallback — no source literal, so it is not in
+    // the catalog and must never become a `t()` call (its key would resolve to
+    // nothing).  This is the i18n-ON app exercising the value seam's OFF branch.
+    const dart = await homeDart(SYSTEM(`Toolbar { Heading { "Orders" } }`));
+    expect(dart).toContain("Semantics(container: true, label: 'Actions'");
+  });
+
+  it("renders + translates the Divider label (it was extracted but dropped)", async () => {
+    // The label reached `.loom/messages.en.json` while `const Divider()` rendered
+    // nothing — a translator translating a string the app never showed.  Now the
+    // rule splits around it.
+    const src = SYSTEM(`Divider { label: "Section break" }`);
+    const dart = await homeDart(src);
+    const key = await keyFor(src, "Section break");
+    expect(dart).toContain("Row(children: <Widget>[const Expanded(child: Divider())");
+    expect(dart).toContain(`child: Text(t('${key}', 'Section break'))`);
+  });
+
+  it("keeps an unlabelled Divider byte-identical", async () => {
+    const dart = await homeDart(SYSTEM(`Stack { Heading { "Orders" }, Divider { } }`));
+    expect(dart).toContain("const Divider()");
+    expect(dart).not.toContain("Expanded(child: Divider())");
+  });
 });

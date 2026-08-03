@@ -4,7 +4,7 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedAriaLabelAttr, localizedText } from "../i18n-emit.js";
+import { localizedAriaLabelAttr, localizedAriaLabelValue, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   namedArgValue,
@@ -290,9 +290,12 @@ export function emitToolbar(
     // role="toolbar" + accessible name (Toolbar a11y contract).  The name is
     // translated through `t()` on an i18n frontend (M-T1.11, `toolbarAria` slot),
     // static otherwise (byte-identical).  The default "Actions" has no source
-    // literal → not in the catalog → always static.  Feliz reads the raw `label`.
+    // literal → not in the catalog → always static.  The two frontends whose
+    // markup is not HTML build a prop from `ariaLabelExpr` instead: the SAME
+    // accessible name, already translated, as a target-native expression
+    // (D-I18N-ATTR).
     a11yAttr: ` role="toolbar"${localizedAriaLabelAttr(call, ctx, "toolbarAria", "label", "Actions")}`,
-    label: stringNamed(call, "label"),
+    ariaLabelExpr: localizedAriaLabelValue(call, ctx, "toolbarAria", "label", "Actions"),
   });
 }
 

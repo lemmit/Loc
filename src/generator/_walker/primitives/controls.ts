@@ -7,7 +7,7 @@ import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
-import { localizedAriaLabelAttr, localizedText } from "../i18n-emit.js";
+import { localizedAriaLabelAttr, localizedAriaLabelValue, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { queryShape } from "../paged-query.js";
 import { renderPrimitive } from "../render-primitive.js";
@@ -141,10 +141,10 @@ export function emitButton(
   const icon = stringNamed(call, "icon");
   const iconSvg = stringNamed(call, "iconSvg");
   const iconPosition = stringNamed(call, "iconPosition") ?? "right";
-  // `label:` supplies an explicit accessible name (aria-label) — the command's
-  // a11y contract needs a name, and the visible text can be an unhelpful glyph
-  // or the default "Button" when the button leads with an `icon:`.
-  const ariaLabel = stringNamed(call, "label");
+  // (`label:` supplies an explicit accessible name — the command's a11y contract
+  // needs a name, and the visible text can be an unhelpful glyph or the default
+  // "Button" when the button leads with an `icon:`.  It is read below through
+  // the i18n seam, in both an attribute-fragment and a value spelling.)
   // Resolve a builtin icon name to its inline SVG so the template
   // doesn't need to know the registry.  Custom SVG passes through.
   let resolvedIconSvg: string | undefined = iconSvg;
@@ -166,9 +166,11 @@ export function emitButton(
     iconPosition,
     // HTML-ish frontends consume the ready-made ` aria-label="…"` fragment —
     // translated through `t()` on an i18n frontend (M-T1.11, `buttonAria` slot),
-    // static otherwise (byte-identical); Feliz (F#) reads the raw `ariaLabel`.
+    // static otherwise (byte-identical).  The two frontends whose markup is not
+    // HTML build a prop from `ariaLabelExpr` instead: the SAME accessible name,
+    // already translated, as a target-native expression (D-I18N-ATTR).
     a11yAttr: localizedAriaLabelAttr(call, ctx, "buttonAria"),
-    ariaLabel,
+    ariaLabelExpr: localizedAriaLabelValue(call, ctx, "buttonAria"),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

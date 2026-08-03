@@ -231,4 +231,12 @@ describe("Vue i18n runtime", () => {
     ) as Record<string, string>;
     expect(Object.values(catalog)).toContain("Archive");
   });
+
+  it("keeps the Toolbar's DEFAULT accessible name a static attribute", async () => {
+    // "Actions" is the a11y contract's fallback — no source literal, so it is not
+    // in the catalog and must never bind through `t()` (its key would resolve to
+    // nothing).  Byte-identical to the pre-i18n emission.
+    const files = await generateSystemFiles(SYSTEM(`Toolbar { Heading { "Orders" } }`));
+    expect(await homeOf(files)).toContain(`role="toolbar" aria-label="Actions"`);
+  });
 });

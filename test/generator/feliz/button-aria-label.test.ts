@@ -24,7 +24,11 @@ async function appFs(body: string): Promise<string> {
 describe("feliz Button — label: → prop.ariaLabel (a11y)", () => {
   it("emits prop.ariaLabel from a Button label: hint", async () => {
     const app = await appFs(`Button { icon: "trash", label: "Delete item" }`);
-    expect(app).toContain('prop.ariaLabel "Delete item"');
+    // `label:` is itself a user-visible slot (`buttonAria`), so this ui HAS
+    // extractable strings and the accessible name rides the translation runtime
+    // (M-T1.11 / D-I18N-ATTR).  Before that seam the pack read the RAW label and
+    // shipped `prop.ariaLabel "Delete item"` — English at every locale.
+    expect(app).toMatch(/prop\.ariaLabel \(I18n\.t "page\.\w+\.buttonAria\.\w+" "Delete item"\)/);
   });
 
   it("a plain text Button gets no ariaLabel (its text is the name)", async () => {

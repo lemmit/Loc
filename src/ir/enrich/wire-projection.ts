@@ -97,26 +97,52 @@ export function buildCreateInput(agg: AggregateIR): CreateInputFieldIR[] {
   }));
 }
 
+/** The shape both {@link isRequiredCreateInput} and
+ *  {@link isRequiredUpdateInput} decide over — satisfied by `FieldIR` and by
+ *  `ParamIR` alike, so an emitter can apply the same rule to an aggregate's
+ *  fields and to a create action's params without re-deriving either. */
+export interface RequirableInput {
+  readonly optional?: boolean;
+  readonly default?: ExprIR;
+  readonly type: TypeIR;
+}
+
+/** Nullable either by the `field: T?` flag or by an `optional`-wrapped type
+ *  (how a `ParamIR` carries the same fact). */
+function isNullable(f: RequirableInput): boolean {
+  return f.optional === true || f.type.kind === "optional";
+}
+
 /** A create-input field is **required** (client must supply it) unless it
  *  can be omitted: nullable fields, fields with an explicit `= default`,
  *  and fields whose type carries a language-defined implicit default all
  *  collapse onto the "may omit" side.  This is the canonical rule the
  *  per-backend required-set derivations should consume in place of each
  *  re-deciding from type nullability alone. */
-function isRequiredCreateInput(f: FieldIR): boolean {
-  if (f.optional) return false; // nullable → client may omit
+export function isRequiredCreateInput(f: RequirableInput): boolean {
+  if (isNullable(f)) return false; // nullable → client may omit
   if (f.default !== undefined) return false; // explicit default → may omit
   if (hasImplicitDefault(f.type)) return false; // implicit default → may omit
   return true;
 }
 
+/** The UPDATE-side twin of {@link isRequiredCreateInput}.  An explicit
+ *  `= default` is a CREATE-input relaxation only — a PATCH names the value it
+ *  is writing, so a defaulted field stays required — but the implicit `bool`
+ *  default applies on both seams.  This is what the Hono / .NET / Java /
+ *  Python update DTOs already encode (`flag: z.coerce.boolean().default(false)`
+ *  beside a required `status`), stated once here. */
+export function isRequiredUpdateInput(f: RequirableInput): boolean {
+  if (isNullable(f)) return false;
+  return !hasImplicitDefault(f.type);
+}
+
 /** Whether a type has a language-defined implicit default, so an omitted
  *  value is well-defined without an explicit `= default`.  Only `bool`
  *  qualifies: an absent request bool is treated as `false` (the behaviour
- *  .NET model-binding and Phoenix already apply, and the Hono request
- *  schema approximates with `.default(false)`).  No other primitive has a
- *  domain-safe omission — `""`/`0` are not valid stand-ins for an absent
- *  `name`/`age`. */
+ *  .NET model-binding applies, and the Hono request schema approximates with
+ *  `.default(false)`).  No other primitive has a domain-safe omission —
+ *  `""`/`0` are not valid stand-ins for an absent `name`/`age`. */
 function hasImplicitDefault(t: TypeIR): boolean {
   const base = t.kind === "optional" ? t.inner : t;
   return base.kind === "primitive" && base.name === "bool";
