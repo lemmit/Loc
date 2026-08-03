@@ -165,9 +165,26 @@ export function omittableCreateInputs(agg: AggregateIR): ReadonlySet<string> {
  *   - `default`  — its explicit `= <expr>` default (render in-language);
  *   - `false`    — a bare `bool`'s implicit default;
  *   - `null`     — an optional-typed field with no default.
- * Backends apply this when the client omits the field (factory `?? …`,
- * Ecto changeset default), so a defaulted field's value is never lost just
- * because it became optional input. */
+ *
+ * So a defaulted field's value is never lost just because it became optional
+ * input.  WHERE that happens is per-backend, and this comment used to claim a
+ * uniformity that does not exist — it said backends apply it "factory `?? …`",
+ * which none of node/python/dotnet/java does:
+ *
+ *   - the WIRE boundary applies it on all five (zod `.default`, a Pydantic
+ *     field initialiser, a record positional default, a Java service-side
+ *     coalesce, an Ecto schema default) — pinned by
+ *     `test/conformance/create-input-default-parity.test.ts`;
+ *   - the emitted TEST and SEED call sites substitute it explicitly, which is
+ *     what this function's callers actually are;
+ *   - the DOMAIN FACTORY accepts an omitted defaulted field only on Elixir
+ *     (`create(attrs)` over a changeset).  The other four require every
+ *     create-input field, so hand-written `Item.create({ name })` against
+ *     `qty: int = 1` does not compile there.
+ *
+ * That 4-vs-1 split is an open question — is `= default` a wire-boundary
+ * concept or a domain-layer one? — not a settled contract, so do not read this
+ * type as promising the domain-layer half. */
 export type CreateOmissionValue =
   | { readonly kind: "default"; readonly expr: ExprIR }
   | { readonly kind: "false" }

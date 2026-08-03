@@ -1,4 +1,4 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -262,9 +262,29 @@ export function renderCreateInput(
   agg: AggregateIR,
   ctx: BoundedContextIR,
 ): string {
-  const types = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
-  return obj.fields
-    .map((f) => `${snake(f.name)}=${coerceCreateValue(f.value, types.get(f.name), ctx)}`)
+  const written = new Map(obj.fields.map((f) => [f.name, f.value] as const));
+  // Iterate the DECLARED create-input set, not just the fields the test author
+  // wrote: `create` is keyword-only with no kwarg defaults, so an omitted
+  // defaulted field (`Item.create(name="N")` against `qty: int = 1`) emits a
+  // call mypy --strict rejects as `Missing named argument`.  Same shape the TS
+  // emitter had; Java already substituted omissions this way.
+  return forCreateInput(agg.fields)
+    .map((f) => {
+      const value = written.get(f.name);
+      if (value !== undefined) {
+        return `${snake(f.name)}=${coerceCreateValue(value, f.type, ctx)}`;
+      }
+      // An OPTIONAL field already carries `= None` on the factory signature, so
+      // an omitted one needs nothing — passing `description=None` explicitly is
+      // redundant noise the emitter used to (correctly) leave out.  Only a
+      // NON-optional param lacks a default, which is where an omission would
+      // otherwise be `mypy --strict: Missing named argument`.
+      if (f.optional) return null;
+      const omission = createOmissionValue(f);
+      if (omission.kind === "default") return `${snake(f.name)}=${renderPyExpr(omission.expr)}`;
+      return `${snake(f.name)}=${omission.kind === "false" ? "False" : "None"}`;
+    })
+    .filter((p): p is string => p !== null)
     .join(", ");
 }
 

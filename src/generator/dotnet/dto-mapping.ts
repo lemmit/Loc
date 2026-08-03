@@ -156,12 +156,16 @@ export function wireType(
  *     property-based DataAnnotations reader marks them required in the
  *     response schema directly.
  *
- *  Exception: a non-nullable `bool` in a REQUEST is NOT required.  ASP.NET
- *  model-binding defaults an omitted bool to `false` (no error), matching
- *  Hono's `z.coerce.boolean()` (coerces `undefined` → `false`); both
- *  backends accept the field's omission, so neither marks it required.
- *  Numbers differ — `z.coerce.number()` rejects `undefined`, so numeric
- *  request fields stay required on both sides. */
+ *  Exception: a non-nullable `bool` in a CREATE request is NOT required.
+ *  ASP.NET model-binding defaults an omitted bool to `false` (no error), and
+ *  Hono's create slot spells the same rule explicitly as
+ *  `z.boolean().default(false)`; both backends accept the field's omission,
+ *  so neither marks it required.  Numbers differ — `z.coerce.number()`
+ *  rejects `undefined`, so numeric request fields stay required on both
+ *  sides.  This is a CREATE-slot exception only (`slot`, below): on an
+ *  operation body an omitted bool is a client error (RS-26), which is why
+ *  Hono's body slot is an UNCOERCED `z.boolean()` — `z.coerce.boolean()`
+ *  is `Boolean(input)` and would accept `undefined` as `false`. */
 export function dtoParam(
   csType: string,
   name: string,
@@ -171,13 +175,30 @@ export function dtoParam(
    *  (`Type Name = <lit>`) and carries no `[Required]` — STJ applies the
    *  default when the field is omitted, dropping it from the required-set. */
   defaultLiteral?: string,
+  /** Which request slot this DTO is.  `create` keeps the implicit-bool
+   *  optionality (RS-6); `operation` requires every declared param (RS-26). */
+  slot: "create" | "operation" = "create",
 ): string {
   if (defaultLiteral !== undefined && dir === "request") {
     return `${csType} ${name} = ${defaultLiteral}`;
   }
-  const optionalBoolRequest = dir === "request" && csType === "bool";
+  const optionalBoolRequest = dir === "request" && csType === "bool" && slot === "create";
   const required = !csType.endsWith("?") && !optionalBoolRequest;
   if (!required) return `${csType} ${name}`;
+  // RS-26 on an OPERATION body: `[Required]` alone cannot reject an omitted
+  // VALUE TYPE.  RequiredAttribute tests for null, and a missing `int qty` /
+  // `bool active` binds to the CLR default (0/false) — non-null, so validation
+  // passes and the update silently overwrites stored state with a zero value.
+  // `[property: JsonRequired]` moves the check to deserialization, where the
+  // question is "was the MEMBER present", which is the one actually being
+  // asked.  Deliberately not applied to create bodies: there an omitted field
+  // is legitimately absent (RS-6 / a declared `= default`), and adding it would
+  // change the create contract this rule is not about.
+  // Emitted ALONGSIDE `[Required]`, not instead of it: the two answer different
+  // questions.  JsonRequired asks "was the member present"; Required asks "is
+  // the bound value null".  Dropping Required here would let an explicit
+  // `"name": null` reach the domain, which it does not today.
+  const jsonRequired = dir === "request" && slot === "operation" ? "[property: JsonRequired] " : "";
   // Request → parameter target (bare `[Required]`) so ASP.NET record
   // validation doesn't throw at model-binding time; response → property
   // target (`[property: Required]`).  See the doc comment above.
@@ -192,11 +213,12 @@ export function dtoParam(
   // a `RequiredAttribute`, so Swashbuckle's `RequiredFromCtorParamFilter`
   // keeps the field in the OpenAPI required-set.
   const attr =
-    dir === "request"
+    jsonRequired +
+    (dir === "request"
       ? csType === "string"
         ? "[Required(AllowEmptyStrings = true)] "
         : "[Required] "
-      : "[property: Required] ";
+      : "[property: Required] ");
   return `${attr}${csType} ${name}`;
 }
 

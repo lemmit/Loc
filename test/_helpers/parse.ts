@@ -1,4 +1,4 @@
-import { type Diagnostic, EmptyFileSystem, type LangiumDocument } from "langium";
+import { type Diagnostic, EmptyFileSystem, type LangiumDocument, type URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { createDddServices } from "../../src/language/ddd-module.js";
@@ -25,6 +25,38 @@ export const extractErrors = (diagnostics: readonly Diagnostic[] = []): string[]
 export const extractWarnings = (diagnostics: readonly Diagnostic[] = []): string[] =>
   diagnostics.filter(isWarning).map(fmt);
 
+// One shared service instance for every `parseString` call.
+//
+// Constructing the services is cheap (~1% of a parse), but the Chevrotain
+// parser it lazily builds on FIRST parse is not: a fresh instance per call
+// costs ~173ms, a shared one ~19ms — a 9x difference across a suite that
+// parses thousands of times.
+//
+// The catch is that `parseHelper` mints a new URI per call (`file:///1.ddd`,
+// `2.ddd`, …) and leaves each document in the shared workspace, so documents
+// ACCUMULATE and later parses link against earlier ones.  That is not a
+// slow leak, it is a correctness hole: a doc referencing an undeclared
+// `Ghost id` resolves happily against a `Ghost` some earlier test declared,
+// so every "could not resolve" negative would pass vacuously.  Verified
+// directly — shared-without-eviction reports 0 errors where a fresh instance
+// reports 1.
+//
+// So: share the instance, and evict so each call sees exactly its own document,
+// as before.  See `evictPrevious` for why the eviction happens on the way IN.
+let _services: ReturnType<typeof createDddServices> | undefined;
+const sharedServices = (): ReturnType<typeof createDddServices> =>
+  (_services ??= createDddServices(NodeFileSystem));
+
+/** URI of the last document `parseString` built, pending eviction. */
+let _previousUri: URI | undefined;
+
+async function evictPrevious(services: ReturnType<typeof createDddServices>): Promise<void> {
+  if (_previousUri === undefined) return;
+  const uri = _previousUri;
+  _previousUri = undefined;
+  await services.shared.workspace.DocumentBuilder.update([], [uri]);
+}
+
 /**
  * Parse an in-memory `.ddd` source string and (by default) run validation.
  * Replaces the `parseHelper(services.Ddd)` + diagnostics-filter boilerplate
@@ -34,9 +66,23 @@ export async function parseString(
   source: string,
   { validate = true }: { validate?: boolean } = {},
 ): Promise<ParseResult> {
-  const services = createDddServices(NodeFileSystem);
+  const services = sharedServices();
+  // Evict the PREVIOUS parse before this one, not this one after itself.
+  //
+  // `LangiumDocuments.deleteDocument` alone is not enough — it drops the
+  // document but leaves its exported symbols in the IndexManager's global
+  // scope, so the next parse still links against them (verified: the `Ghost`
+  // reference above still resolved).  Routing the deletion through the
+  // DocumentBuilder does invalidate the index — but it also RESETS the deleted
+  // document below ComputedScopes, and callers keep walking the AST we return
+  // (`Attempted reference resolution before document reached ComputedScopes`).
+  //
+  // Evicting on the way IN satisfies both: this parse sees an empty workspace,
+  // and the document we hand back is left fully linked.
+  await evictPrevious(services);
   const helper = parseHelper<Model>(services.Ddd);
   const doc = await helper(source, { validation: validate });
+  _previousUri = doc.uri;
   const diagnostics = doc.diagnostics ?? [];
   return {
     model: doc.parseResult.value,

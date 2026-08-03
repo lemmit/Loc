@@ -487,20 +487,21 @@ function requiredWireFields(fields: readonly WireField[]): string[] {
   return fields.filter((w) => w.source === "id" || !w.optional).map((w) => w.name);
 }
 
-/** Required params for a request DTO: those neither optional-typed nor a bare
- *  body-bool (a non-nullable bool defaults to `false` when omitted, so the
- *  other backends drop it from `required` — see Hono `zodFor`). */
+/** Required params for an OPERATION request DTO: every param that is not
+ *  optional-typed.
+ *
+ *  RS-26.  A bare body-bool used to be dropped here too, on the reasoning that
+ *  a non-nullable bool "defaults to false when omitted" — but that is a
+ *  CREATE-input rule (`hasImplicitDefault`), and an operation body constructs
+ *  nothing, so an omitted param is a missing required one.  Keeping the
+ *  exclusion made the spec claim a PUT could omit `active: bool = true` when
+ *  doing so silently stored `false`. */
 function requiredParams(params: readonly { name: string; type: TypeIR }[]): string[] {
-  return params.filter((p) => !isOptionalType(p.type) && !isBareBool(p.type)).map((p) => p.name);
+  return params.filter((p) => !isOptionalType(p.type)).map((p) => p.name);
 }
 
 function isOptionalType(t: TypeIR): boolean {
   return t.kind === "optional";
-}
-
-function isBareBool(t: TypeIR): boolean {
-  const base = t.kind === "optional" ? t.inner : t;
-  return base.kind === "primitive" && base.name === "bool";
 }
 
 /** The enum name a type references, peeling array/optional wrappers; undefined

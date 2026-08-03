@@ -42,6 +42,10 @@ export interface DtoFile {
   content: string;
 }
 
+function isOptionalType(t: TypeIR): boolean {
+  return t.kind === "optional";
+}
+
 /** Normalise the optional flag into the type so wire helpers see one
  *  canonical shape. */
 function eff(t: TypeIR, optional: boolean): TypeIR {
@@ -178,7 +182,18 @@ export function renderDtoFiles(
     const imports = new Set<string>();
     const components = op.params.map((p) => {
       collectWireImports(p.type, imports);
-      return `${wireJavaType(p.type, "Request")} ${p.name}`;
+      if (isOptionalType(p.type)) return `${wireJavaType(p.type, "Request")} ${p.name}`;
+      // RS-26: an omitted operation param must be REJECTED, not silently
+      // zero-valued.  A primitive component cannot express absence — Jackson
+      // deserializes a missing `boolean active` to `false` and a missing
+      // `int qty` to `0`, so a PUT that left out a field quietly overwrote
+      // stored state, while this backend's own RequiredSet claimed the field
+      // was required.  Boxing gives us a null to detect and `@NotNull` turns
+      // it into the 400 the contract promises (`@Valid` is already on the
+      // controller's @RequestBody).
+      imports.add("jakarta.validation.constraints.NotNull");
+      const boxed = eff(p.type, true);
+      return `@NotNull ${wireJavaType(boxed, "Request")} ${p.name}`;
     });
     out.push({
       name: `${upperFirst(op.name)}${agg.name}Request.java`,

@@ -1,0 +1,77 @@
+name: Schema load (emitted DDL)
+
+# Does the emitted migration chain actually LOAD into Postgres?
+#
+# The per-PR compile gates (`tsc --noEmit`, `mix compile`, `gradle testClasses`,
+# `dotnet build`, `mypy`) are structurally blind to the emitted SCHEMA: it is
+# data, not code, so a project whose migrations Postgres will refuse still
+# compiles green on every backend.  G2 (#2316) is the proof — a user-declared
+# `version: string` collided with the `versioned` capability's counter and
+# emitted `"version" TEXT NOT NULL DEFAULT 1`, which Postgres rejects at CREATE
+# TABLE.  The stack never starts, five backends compiled clean, and no gate saw
+# it.
+#
+# This is the cheapest oracle that would have: generate every corpus fixture,
+# then `psql -f` its migration chain into a throwaway database.  Nothing is
+# compiled, nothing is booted, no application exists — the only question is
+# whether the DDL is valid SQL that Postgres accepts.
+#
+# UNLIKE its heavier siblings (migration-evolution / tenancy / obs), this runs on
+# EVERY PR rather than behind a label.  It needs one `services: postgres` and no
+# docker-in-docker, no generated-project build, and no boot — the whole corpus
+# loads in well under a minute.  The failure it catches ("the generated stack
+# cannot start") is also the least acceptable one to discover a merge later.
+#
+# Scope is one backend on purpose: `MigrationsIR` is derived once in phase ⑨ and
+# the Postgres renderer (`src/generator/sql-pg.ts`) is shared, so node's chain
+# exercises the same derivation python and java emit from.  See the header of
+# test/e2e/schema-load.test.ts.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  merge_group:
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schema-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # The harness reads host/port/credentials from this URL and creates one
+      # database per (fixture, deployable) itself, so it needs the maintenance
+      # db — same convention as the migration-evolution gate.  `psql` is
+      # preinstalled on the runner.
+      - name: Load every corpus fixture's migration chain
+        run: npm run test:schema-load
+        env:
+          LOOM_MIGRATION_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres

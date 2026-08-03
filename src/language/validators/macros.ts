@@ -24,9 +24,9 @@ export function checkMacroExpansion(
 ): void {
   const doc = AstUtils.getDocument(model);
   for (const d of drainMacroDiagnostics(doc)) {
-    accept(d.severity, d.message, { node: d.node as AstNode, property: d.property });
+    accept(d.severity, d.message, { node: d.node as AstNode, property: d.property, code: d.code });
   }
   collectUnresolvedMacroRefs(model, services?.shared, (d) => {
-    accept(d.severity, d.message, { node: d.node as AstNode, property: d.property });
+    accept(d.severity, d.message, { node: d.node as AstNode, property: d.property, code: d.code });
   });
 }

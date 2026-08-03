@@ -690,6 +690,64 @@ the conforming backends, and the fix that established it.
 - **Provenance.** Found 2026-08-01 by the M-T9.11 gate on the elixir leg
   (`tenancy-owned` `$.tenantId`). Tier: **behavioral**.
 
+### RS-26 · An omitted UPDATE field is a client error, never a silent default
+- **Guarantee.** A field omitted from a full-replacement `PUT` is **rejected** as
+  missing required input. It is not silently set to a zero value, and the create
+  default is **not** re-applied.
+- **Trigger.** `active: bool = true`; a PUT body omitting `active`.
+- **Observable.** `PUT` without `"active"` is rejected — it does **not** store
+  `active=false`.
+- **Relation to [RS-6](#rs-6--boolean-create-defaults-materialize-at-the-wire-boundary).**
+  The exact inverse, and the half that eats data. RS-6 says an omitted *create*
+  bool materializes its declared default. A default is a **construction** rule,
+  so on update — where nothing is constructed — "absent" cannot mean "the
+  default"; it can only mean a required field is missing.
+- **Why it mattered.** The emitted `UpdateItemRequest` carried
+  `active: z.coerce.boolean().default(false)` against a model declaring
+  `active: bool = true`. A PUT omitting `active` flipped a stored `true` to
+  `false` — not even the declared default, because the value came from a
+  hardcoded implicit-bool rule rather than the model. The rule was a
+  **create-input** rule (`hasImplicitDefault`) that leaked into every request
+  body through one shared helper, so it hit every operation's bool parameter,
+  not just `update`.
+- **Prior art.** This is the proto3 lesson: a wire-level default makes "absent"
+  indistinguishable from "the default value", which breaks partial and
+  full-replacement updates alike. proto3 dropped custom field defaults for
+  exactly this reason and had to re-add explicit field presence in 3.15.
+- **The split.** 1-vs-4 with the **minority correct** — the inverse of RS-15's
+  shape. Node's `.default(false)` was added deliberately to match .NET
+  model-binding and Phoenix, so four backends agreed and the agreement was
+  wrong.
+- **Conforms.** node, dotnet, java, python, elixir — and **no two backends
+  needed the same fix**, which is the case for numbering the rule rather than
+  patching one emitter: node scoped `zodFor` to a `create-body` context; python
+  gave `requestFieldDecl` a slot; elixir's runtime *already* conformed and only
+  its **spec** disagreed (`@update_required` listed every bool while the
+  OpenApiSpex schema did not — RS-25's divergence inverted); java had **both**
+  halves wrong (primitive record components let Jackson supply `0`/`false` for
+  an omitted key while `RequiredSet` claimed the field required) and needed
+  boxing + `@NotNull`; and .NET could not express it with `[Required]` at all —
+  that attribute tests for **null**, and an omitted value type binds to
+  `0`/`false`, so presence had to become a *deserialization* question via
+  `[property: JsonRequired]`.
+- **The coercion is a default.** The node fix took two rounds, and the second is
+  the reusable lesson: `.default(false)` was only the *visible* half.
+  `z.coerce.boolean()` is `Boolean(input)` and `Boolean(undefined) === false`,
+  so the coercion **is** a wire default — removing the `.default(` changed
+  nothing. The first version of the static gate keyed on the *absence* of
+  `.default(`, so it passed a backend that still had the bug; the divergence
+  surfaced only in the 5-way OpenAPI parity run, because `zod-to-openapi`
+  derives `required[]` from `schema.isOptional()` — literally "does it accept
+  `undefined`". Body bools are now uncoerced `z.boolean()` (JSON carries real
+  booleans; only query params, which are strings, keep the coercion), and the
+  gate asks the behavioural question instead of the spelling one.
+- **Provenance.** Found 2026-08-01 reconciling where `= default` belongs (domain
+  vs wire boundary); node fixed by scoping the implicit-bool rule to a
+  `create-body` context in `routes-builder.ts`, then by uncoercing body bools.
+  Tier: **static** — `create-input-default-parity.test.ts` asserts the rule on
+  all five, and keeps an empty `UPDATE_BOOL_WAIVED` map as the ratchet so a
+  regression is recorded rather than the assertion relaxed.
+
 ---
 
 ## Adding a rule
