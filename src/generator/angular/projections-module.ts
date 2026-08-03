@@ -1,5 +1,8 @@
 import type { BoundedContextIR } from "../../ir/types/loom-ir.js";
+import { lines } from "../../util/code-builder.js";
+import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { readableProjections } from "../_frontend/projections-module.js";
+import { wireTsType } from "./workflows-module.js";
 
 // ---------------------------------------------------------------------------
 // Angular query-time PROJECTION client (`src/api/projections.ts`) — M-T1.3
@@ -39,4 +42,66 @@ import { readableProjections } from "../_frontend/projections-module.js";
 /** Whether this deployable serves any frontend-readable projection. */
 export function hasReadableProjections(contexts: BoundedContextIR[]): boolean {
   return readableProjections(contexts).length > 0;
+}
+
+/** Emit `src/api/projections.ts` — every readable projection across the served
+ *  contexts as a row interface + a `ProjectionsService` method + a read
+ *  factory.  Structural twin of `buildAngularWorkflowsModule`. */
+export function buildAngularProjectionsModule(contexts: BoundedContextIR[]): string {
+  const projections = readableProjections(contexts);
+  const out: string[] = [
+    "// Auto-generated.  Do not edit by hand.",
+    'import { HttpClient } from "@angular/common/http";',
+    'import { Injectable, inject } from "@angular/core";',
+    'import { injectQuery } from "@tanstack/angular-query-experimental";',
+    'import { firstValueFrom } from "rxjs";',
+    'import { API_BASE_URL } from "./config";',
+    "",
+  ];
+
+  // Row interfaces — field-for-field off the SAME `wireShape` the backend's
+  // `<Proj>Row` is built from, so the two cannot drift.  Typed through
+  // `HttpClient`'s generic rather than parsed, which is why there is no zod
+  // schema here (see the fork rationale above).
+  for (const { proj } of projections) {
+    out.push(`export interface ${upperFirst(proj.name)}Row {`);
+    for (const f of proj.wireShape ?? []) {
+      out.push(`  ${f.name}${f.optional ? "?" : ""}: ${wireTsType(f.type)};`);
+    }
+    out.push("}");
+    out.push("");
+  }
+
+  out.push(`@Injectable({ providedIn: "root" })`);
+  out.push(`export class ProjectionsService {`);
+  out.push("  private readonly http = inject(HttpClient);");
+  for (const { proj } of projections) {
+    // A singleton read takes no id and no query params — the projection IS the
+    // row — so the method is nullary, unlike the aggregate services' `byId`.
+    out.push("");
+    out.push(`  ${lowerFirst(proj.name)}() {`);
+    out.push(
+      `    return this.http.get<${upperFirst(proj.name)}Row>(\`\${API_BASE_URL}/projections/${snake(proj.name)}\`);`,
+    );
+    out.push("  }");
+  }
+  out.push("}");
+  out.push("");
+
+  for (const { proj } of projections) {
+    const T = upperFirst(proj.name);
+    out.push(
+      `/** \`${proj.name}\` singleton projection read — one row, no arguments. */`,
+      `export function use${T}() {`,
+      "  const service = inject(ProjectionsService);",
+      "  return injectQuery(() => ({",
+      `    queryKey: ["projections", "${snake(proj.name)}"] as const,`,
+      `    queryFn: () => firstValueFrom(service.${lowerFirst(proj.name)}()),`,
+      "  }));",
+      "}",
+      "",
+    );
+  }
+
+  return lines(...out);
 }

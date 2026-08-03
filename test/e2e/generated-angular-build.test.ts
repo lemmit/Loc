@@ -116,9 +116,18 @@ const SHOWCASE: Case = {
             priority: int
             rush: bool
             placedAt: datetime
+            total: money?
             operation confirm() { }
           }
           repository Orders for Order { }
+          criterion ConfirmedOrders of Order as o = o.status == OrderStatus.Confirmed
+          projection RevenueSnapshot {
+            confirmed: int
+            revenue: money
+            from Order as o
+            where ConfirmedOrders
+            select confirmed = count, revenue = sum(o.total)
+          }
         }
       }
       ui WebApp {
@@ -131,7 +140,18 @@ const SHOWCASE: Case = {
               of: Sales.Order.all,
               loaded: rows => Table { of: rows, columns: [o => o.customerId, o => o.status] }
             },
-            Anchor { "New order", to: "/orders/new" }
+            Anchor { "New order", to: "/orders/new" },
+            QueryView {
+              of: Sales.RevenueSnapshot,
+              loading: Loader { },
+              error: Alert { "Could not load revenue" },
+              empty: Text { "No confirmed orders yet" },
+              data: r => Group {
+                Stat { "Confirmed orders", r.confirmed },
+                Stat { "Revenue", Money { r.revenue } },
+                testid: "revenue-snapshot"
+              }
+            }
           }
         }
         page OrderNew {
