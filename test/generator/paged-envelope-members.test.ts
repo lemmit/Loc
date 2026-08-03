@@ -155,7 +155,7 @@ system S {
     context Orders {
       aggregate Product { name: string }
       repository Products for Product {
-        find named(name: string): Product[] { where name == name }
+        find named(term: string): Product[] where this.name == term
       }
     }
   }
