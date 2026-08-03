@@ -41,6 +41,12 @@ import type { ApiRoute } from "../api-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { renderExpr as renderElixirExpr } from "../render-expr.js";
 import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
+import {
+  aggregateServesHistoryRoute,
+  renderVanillaHistoryAction,
+  renderVanillaHistoryMapper,
+  vanillaHistoryFind,
+} from "./audit-history-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isVanillaDocAgg } from "./document-emit.js";
@@ -74,6 +80,18 @@ function memberOperations(agg: { operations: readonly OperationIR[] }): Operatio
 
 export interface VanillaApiEmitResult {
   routes: ApiRoute[];
+}
+
+/** Does this aggregate's controller serve `GET /<plural>/:id/history`?
+ *
+ *  An event-sourced aggregate has its own controller (`renderEsController`)
+ *  with no CRUD read seam for the reachability guard to ride, and an abstract
+ *  inheritance base is a read-only polymorphic reader that is never a command
+ *  target — neither can host the endpoint, so neither gets the route.  Both are
+ *  HONEST gaps: no route is emitted, rather than one that 500s. */
+function servesHistory(ctx: BoundedContextIR, agg: AggregateIR): boolean {
+  if (isEventSourced(agg) || isAbstractBase(agg)) return false;
+  return aggregateServesHistoryRoute(ctx, agg);
 }
 
 /**
@@ -153,6 +171,18 @@ export function emitVanillaApiControllers(
       controller: controllerName,
       action: ":show",
     });
+    // Entity history (docs/audit.md) — the derived read over `audit_records`.
+    // Two path segments, so no collision with the `/:id` show route above.
+    // Driven by the enrichment-derived `historyFind` so the route and the gate
+    // it enforces cannot disagree with the aggregate's list read.
+    if (servesHistory(ctx, agg)) {
+      routes.push({
+        method: "get",
+        path: `/${aggsPath}/:id/history`,
+        controller: controllerName,
+        action: ":history",
+      });
+    }
     // Write path.  The create route rides the shared `emitsRestCreate`
     // predicate — the SAME gate the OpenAPI `post` operation uses — so the
     // route and the documented contract can never diverge (`generators.md`:
@@ -696,6 +726,17 @@ ${cuBind}${updateCuBind}${versionBind}
     ? ""
     : [createAction, updateAction, deleteAction].filter((a) => a !== "").join("\n\n");
 
+  // Entity history (docs/audit.md) — the `history` action + its per-aggregate
+  // row → entry mapper.  The mapper is per-aggregate because it needs the
+  // aggregate's diff field set and — the point of the exercise — its
+  // `mask unless` predicates, which render against the same ambient principal
+  // the redacting `serialize/1` above masks against.
+  const historyFind = servesHistory(ctx, agg) ? vanillaHistoryFind(ctx, agg) : undefined;
+  const historyAction = historyFind
+    ? `\n\n${renderVanillaHistoryAction(appModule, ctxModule, ctx, agg, historyFind, principal)}`
+    : "";
+  const historyMapper = historyFind ? `\n\n${renderVanillaHistoryMapper(appModule, ctx, agg)}` : "";
+
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
@@ -713,7 +754,7 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
-  end
+  end${historyAction}
 
 ${writeActions}
 ${findActions}
@@ -740,7 +781,7 @@ ${((): string => {
     : renderWireSerialize(agg, ctx, { contextModule: facadeMod });
   const nested = helpers.length > 0 ? `\n\n${helpers.join("\n\n")}` : "";
   return `${serialize}${nested}${refIdsHelper}`;
-})()}
+})()}${historyMapper}
 end
 `;
 }
