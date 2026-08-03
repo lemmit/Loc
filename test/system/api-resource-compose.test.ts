@@ -20,6 +20,7 @@ import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
 import { resourceEnvUrlVar } from "../../src/util/resource-env.js";
+import { expectEmitted } from "../_helpers/emitted.js";
 
 async function emit(src: string) {
   const services = createDddServices(NodeFileSystem);
@@ -86,7 +87,9 @@ describe("api-bound resource — derived compose wiring", () => {
 
   it("leaves the called service with no reverse dependency", async () => {
     const files = await emit(TWO_SERVICES);
-    const callee = serviceBlock(files.get("docker-compose.yml") ?? "", "orders_svc");
+    // `expectEmitted`, not `?? ""`: the assertions below are NEGATIVE, and an
+    // absent compose file would satisfy them for free (test/_helpers/emitted.ts).
+    const callee = serviceBlock(expectEmitted(files, "docker-compose.yml"), "orders_svc");
     expect(callee).not.toContain("shipping_svc");
     expect(callee).not.toContain(resourceEnvUrlVar("orders"));
   });

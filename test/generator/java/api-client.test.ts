@@ -19,6 +19,7 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateSystems } from "../../../src/system/index.js";
 import { resourceEnvUrlVar } from "../../../src/util/resource-env.js";
+import { expectEmitted } from "../../_helpers/emitted.js";
 
 async function emit(src: string) {
   const services = createDddServices(NodeFileSystem);
@@ -125,7 +126,9 @@ describe("Java typed in-system api client", () => {
     expect(src).toContain("MAPPER.readValue(res.body(), OrderResponse.class)");
     // Both ship with the JDK / Spring Boot, so the build file is untouched.
     const files = await emit(system("string"));
-    const gradle = files.get("shipping_svc/build.gradle.kts") ?? "";
+    // `expectEmitted`, not `?? ""`: the assertion below is NEGATIVE, and a
+    // missing build file would satisfy it for free (test/_helpers/emitted.ts).
+    const gradle = expectEmitted(files, "shipping_svc/build.gradle.kts");
     expect(gradle).not.toContain("java.net.http");
   });
 
