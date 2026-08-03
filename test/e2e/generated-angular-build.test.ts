@@ -293,6 +293,73 @@ const FILE: Case = {
   `,
 };
 
+/** DataGrid (M-T1.1 slice 10) — the TanStack-backed grid, whose markup the
+ *  walker renders into a HOISTED SIBLING COMPONENT
+ *  (`src/app/components/<kebab>.component.ts`) rather than the page.  Angular
+ *  is the target where that matters most: its template is type-checked under
+ *  `strictTemplates`, and every name the markup calls has to be re-exposed as
+ *  a CLASS MEMBER (`String`, `Math`, the format helpers, `t` for the pager's
+ *  translated chrome) — a missing member is an `ng build` error the page's own
+ *  compile never sees.
+ *
+ *  React has had a DataGrid build case since the primitive landed
+ *  (`react-build-cases.ts`); Vue, Svelte and Angular never did.  Filterable +
+ *  computed-cell + selection on purpose: those switch on the branches
+ *  (`hasFilters`, the `@if` cell branch, the `selectionChange` output) a bare
+ *  grid leaves unemitted. */
+const GRID: Case = {
+  name: "grid",
+  angularDir: "web",
+  source: `
+    system AGrid {
+      subdomain Sales { context Orders {
+        enum Tier { Bronze, Silver, Gold }
+        aggregate Customer {
+          name: string
+          tier: Tier
+          sequence: int
+          spend: money
+        }
+        repository Customers for Customer { }
+      } }
+      api SalesApi from Sales
+      ui WebApp {
+        api Sales: SalesApi
+        page CustomerGrid {
+          route: "/customers"
+          title: "Customers"
+          state { selectedIds: string[] }
+          body: Stack {
+            Heading { "Customers", level: 1 },
+            Text { \`Selected: {selectedIds.length}\` },
+            QueryView { of: Sales.Customer.all, data: rows => DataGrid {
+              Column { "Name", o => o.name, sortable: true, filterable: true },
+              Column { "Sequence", o => o.sequence, sortable: true },
+              Column { "Spend", o => o.spend, sortable: true },
+              Column { "Tier", o => EnumBadge { o.tier } },
+              rows: rows,
+              selection: selectedIds,
+              multiSort: true,
+              columnVisibility: true,
+              pageSize: 25,
+              testid: "customer-data-grid"
+            } }
+          }
+        }
+      }
+      storage primary { type: postgres }
+      resource ordersState { for: Orders, kind: state, use: primary }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
+      deployable web {
+        platform: angular
+        targets: api
+        ui: WebApp { Sales: api }
+        port: 3004
+      }
+    }
+  `,
+};
+
 const PACKS = ["angularMaterial@v1", "primeng@v1", "spartanNg@v1"] as const;
 
 interface MatrixCase extends Case {
@@ -300,7 +367,7 @@ interface MatrixCase extends Case {
   label: string;
 }
 
-const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE, FILE].flatMap((c) =>
+const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE, FILE, GRID].flatMap((c) =>
   PACKS.map((pack) => ({ ...c, pack, label: `${c.name}:${pack}` })),
 );
 

@@ -1,0 +1,87 @@
+// DataGrid (M-T1.1 slice 10) — the Svelte sibling of the vue/angular `grid`
+// build cases, and of `data-grid-showcase.ddd` on React.
+//
+// WHY IT NEEDS ITS OWN CASE
+// -------------------------
+// The grid's markup does NOT land in the page.  The walker renders it into a
+// hoisted sibling component (`src/lib/components/<Name>.svelte`) that carries
+// its own pack imports, its own `$lib/format` import, its own `$lib/i18n`
+// import for the pager's translated chrome, and the walker-built header/cell
+// fragments.  None of that is reachable from any other Svelte build case, and
+// on Svelte a name nothing imported is a RUNTIME `ReferenceError` rather than
+// a build failure — so `svelte-check` over this file is the gate.
+//
+// Filterable + computed-cell + selection are all on deliberately: each one
+// switches on a branch (`hasFilters`, the `{:else if}` cell branch, the
+// `onSelectionChange` prop) that a bare grid leaves unemitted.
+system SGrid {
+  subdomain Sales {
+    context Orders {
+      enum Tier { Bronze, Silver, Gold }
+
+      aggregate Customer {
+        name: string
+        tier: Tier
+        sequence: int
+        // `money` reaches the row as a decimal OBJECT, which is what forces the
+        // emitted `compareDecimal` comparator — a sortable money column is the
+        // only way that helper gets type-checked.
+        spend: money
+      }
+
+      repository Customers for Customer { }
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui WebApp {
+    api Sales: SalesApi
+
+    page CustomerGrid {
+      route: "/customers"
+      title: "Customers"
+      // The one piece of grid view-state the page can read.  Must be
+      // `string[]` — `loom.datagrid-selection-not-array` otherwise.
+      state { selectedIds: string[] }
+      body: Stack {
+        Heading { "Customers", level: 1 },
+        // A sibling reading the selection is the whole reason `selection:`
+        // exists — it pins the child → page callback prop end to end.
+        Text { `Selected: {selectedIds.length}` },
+        QueryView { of: Sales.Customer.all, data: rows => DataGrid {
+          // Simple member accessors become TanStack `accessorKey`s, which is
+          // what makes sort + filter work by value.
+          Column { "Name", o => o.name, sortable: true, filterable: true },
+          Column { "Sequence", o => o.sequence, sortable: true },
+          Column { "Spend", o => o.spend, sortable: true },
+          // A computed cell — no accessorKey, so sort/filter are forced off and
+          // the row binds through the emitted `asRow` cast.
+          Column { "Tier", o => EnumBadge { o.tier } },
+          rows: rows,
+          selection: selectedIds,
+          multiSort: true,
+          columnVisibility: true,
+          pageSize: 25,
+          testid: "customer-data-grid"
+        } },
+        testid: "customer-grid-page"
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+
+  deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
+  // Multi-line, with `platform:` on its own line: the build harnesses inject
+  // `design:` right after that line precisely because a single-line deployable
+  // carrying a nested `ui: WebApp { … }` brace cuts their match short and
+  // silently leaves the project on its default pack.
+  deployable web {
+    platform: svelte
+    targets: api
+    ui: WebApp { Sales: api }
+    port: 3005
+  }
+}
