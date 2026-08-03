@@ -49,7 +49,11 @@ describe("vanilla — Slice 2 CRUD write path + Changeset", () => {
     expect(cs).toContain("import Ecto.Changeset");
     expect(cs).toContain("alias Api.Tracker.Task");
     expect(cs).toContain("@all_fields [:title, :done, :version]");
-    expect(cs).toContain("@required_fields [:title, :done, :version]");
+    // Only `title` is required INPUT: `done: bool` carries the language's
+    // implicit `false` default and `version: int token = 1` an explicit one, so
+    // both are omittable on the wire (as they already were on the other four
+    // backends) and are supplied by `__default/3` instead.
+    expect(cs).toContain("@required_fields [:title]");
     expect(cs).toContain("def base_changeset");
     expect(cs).toContain("|> cast(attrs, @all_fields)");
     expect(cs).toContain("|> validate_required(@required_fields)");

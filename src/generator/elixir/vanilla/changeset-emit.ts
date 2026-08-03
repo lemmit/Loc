@@ -12,15 +12,23 @@
 // doesn't consume it yet.
 // ---------------------------------------------------------------------------
 
+import {
+  createOmissionValue,
+  isRequiredCreateInput,
+  isRequiredUpdateInput,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  FieldIR,
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
+import { renderExpr as renderElixirExpr } from "../render-expr.js";
 import {
   aggregateHasResidualInvariants,
   messagedRoutesToResidual,
@@ -37,12 +45,11 @@ import { usesRelationalContainments } from "./schema-emit.js";
 import { stampedFieldNames } from "./stamp-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
-interface AggField {
-  name: string;
-  type: { kind: string; name?: string; inner?: { kind: string; name?: string } };
-  optional?: boolean;
-  access?: string;
-}
+/** The cast/required derivations below run over real `FieldIR`s so they can
+ *  consume the canonical create/update required-ness rules from
+ *  `wire-projection` (which need the field's `default` and its typed `TypeIR`)
+ *  instead of re-deciding from `optional` alone. */
+type AggField = FieldIR;
 
 /** A lifecycle-managed field (audit `createdBy`/`updatedBy`, etc.) is never cast
  *  from client attrs nor `validate_required`d — the server owns its value and
@@ -157,7 +164,54 @@ function renderChangeset(
   // server-managed (a `stamp` target or `access: managed`); a plain declared
   // timestamp field is cast + validated like any column (see managed-timestamps).
   const allFields = castScalarFields(agg, ctx);
-  const requiredFields = allFields.filter((f) => !f.optional);
+  // Required-ness comes from the canonical create-input rule, NOT from type
+  // nullability alone: an explicit `= default` and a bare `bool`'s implicit
+  // default both make a field OMITTABLE input, exactly as the Hono / .NET /
+  // Java / Python create DTOs already encode.  Deciding it locally here is what
+  // made Phoenix the sole backend to 422 `can't be blank` on a create that
+  // every other backend accepted.
+  const requiredFields = allFields.filter((f) => isRequiredCreateInput(f));
+
+  // Dropping an omittable field from `validate_required` is only half the fix:
+  // its column is still `null: false`, so without a value the 422 would simply
+  // become an insert failure.  Supply the declared default for every omittable
+  // create input that has one — an explicit `= <expr>` (rendered in-language)
+  // or a bare `bool`'s implicit `false`.  Applied AFTER `cast`, so it also
+  // covers an explicit `null` in the body, and keyed on the RESOLVED field
+  // value, so an update over a loaded struct (which already has one) is a
+  // no-op.  Nullable-with-no-default fields are skipped: `nil` is their value.
+  //
+  // Server-sourced defaults (`now()` / `currentUser.*`) are deliberately NOT
+  // here — the controller coalesces those into the params ahead of the
+  // changeset (`api-emit`), because they need the per-request actor.
+  const defaultLines = allFields
+    .filter((f) => !isRequiredCreateInput(f))
+    .map((f) => {
+      const omission = createOmissionValue(f);
+      if (omission.kind === "null") return null;
+      const value =
+        omission.kind === "false"
+          ? "false"
+          : isServerSourcedDefault(omission.expr)
+            ? null
+            : renderElixirExpr(omission.expr);
+      return value === null ? null : `    |> __default(:${snake(f.name)}, ${value})`;
+    })
+    .filter((l): l is string => l !== null);
+  const defaultBlock = defaultLines.length > 0 ? `\n${defaultLines.join("\n")}` : "";
+  const defaultHelper =
+    defaultLines.length > 0
+      ? `
+
+  # Supply an omittable create input's declared default when the attrs carried
+  # no value (or an explicit null), so the \`null: false\` column is satisfied
+  # without \`validate_required\` rejecting a create the wire contract accepts.
+  defp __default(changeset, field, value) do
+    if is_nil(get_field(changeset, field)),
+      do: put_change(changeset, field, value),
+      else: changeset
+  end`
+      : "";
 
   const allCols = allFields.map((f) => `:${snake(f.name)}`).join(", ");
   const requiredCols = requiredFields.map((f) => `:${snake(f.name)}`).join(", ");
@@ -372,7 +426,7 @@ ${keyAliasPairs.join(",\n")}
   const updateReqList = updateFieldsDiffer ? "@update_required" : "@required_fields";
   const updateAttrDecls = updateFieldsDiffer
     ? `\n  @update_fields [${updateFields.map((f) => `:${snake(f.name)}`).join(", ")}]\n  @update_required [${updateFields
-        .filter((f) => !f.optional)
+        .filter((f) => isRequiredUpdateInput(f))
         .map((f) => `:${snake(f.name)}`)
         .join(", ")}]`
     : "";
@@ -427,9 +481,9 @@ defmodule ${changesetMod} do
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
     attrs = __normalize_keys(attrs)
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
-    |> cast(attrs, @all_fields)
+    |> cast(attrs, @all_fields)${defaultBlock}
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}
-  end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
+  end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${defaultHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end
@@ -449,18 +503,26 @@ function renderActionHelper(
 ): string {
   const aggPascal = aggModule.split(".").pop()!;
   const opName = snake(op.name);
-  const paramCols = op.params
-    .filter((p) => !vcFieldNames.has(p.name) && !refColl.has(snake(p.name)))
-    .map((p) => `:${snake(p.name)}`)
-    .join(", ");
+  const castParams = op.params.filter(
+    (p) => !vcFieldNames.has(p.name) && !refColl.has(snake(p.name)),
+  );
+  const paramCols = castParams.map((p) => `:${snake(p.name)}`).join(", ");
   const allowList = paramCols ? `[${paramCols}]` : "[]";
 
   if (kind === "create") {
+    // The cast allow-list is every param; the REQUIRED list is only the params
+    // the caller must actually supply (`isRequiredCreateInput`) — an optional
+    // param or one carrying a `= default` is omittable, so requiring it here
+    // would reject a create the wire contract accepts.
+    const requiredCols = castParams
+      .filter((p) => isRequiredCreateInput(p))
+      .map((p) => `:${snake(p.name)}`)
+      .join(", ");
     return `  @doc "Changeset for the create action \`${op.name}\`."
   def change_${opName}(attrs) do
     %${aggPascal}{}
     |> cast(attrs, ${allowList})
-    |> validate_required(${allowList})
+    |> validate_required(${requiredCols ? `[${requiredCols}]` : "[]"})
   end`;
   }
   if (kind === "destroy") {
