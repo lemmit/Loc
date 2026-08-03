@@ -94,7 +94,21 @@ export const CORPUS: readonly CorpusFeature[] = [
   {
     id: "audited",
     title: "command audit — aggregate-wide `audited` + per-command `audited`, transactional audit_records rows",
+    doc: "audit",
     backends: ALL,
+  },
+  {
+    id: "audit-history",
+    title: "entity history — the derived `GET /<agg>/{id}/history` read over audit_records",
+    doc: "audit",
+    // node ONLY, deliberately.  The read path ships on Hono; the other four
+    // backends still write the trail (see the `audited` row above, ALL) but
+    // serve no endpoint over it.  Listing them here would run this fixture's
+    // e2e block against a route they do not have — a broken gate, not a
+    // measured gap.  Widening this row IS the definition of "backend X now
+    // serves history", and the wire golden is the answer key it must match.
+    backends: ["node"],
+    note: "read path is node-only; the other four write audit_records but expose no history endpoint (M-T3.9)",
   },
   {
     id: "criterion-filter",

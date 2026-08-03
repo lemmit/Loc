@@ -1,0 +1,69 @@
+// Entity history (docs/audit.md) — the READ side of the `audited` command
+// trail: `GET /<aggregates>/{id}/history`, derived by enrichment onto every
+// audited aggregate and served from the module's `audit_records` rows.
+//
+// Split out from `audited.ddd` (the WRITE-side fixture, declared on all five
+// backends) because the read path currently ships on **node only**.  Keeping
+// them in one fixture would have meant the other four backends running an
+// e2e block against an endpoint they do not serve — a broken gate rather than
+// an honest gap.  Widening this row in `manifest.ts` is what "backend X now
+// serves history" means, and the shared wire golden
+// (`test/behavioral/wire-golden/audit-history.json`) is the answer key it has
+// to match.
+//
+// What the trail must say, and why:
+//
+//   - Two entries, oldest first: the `create`, then the `cancel`.
+//   - The `create` entry reads null → value for every diffable field, because
+//     a create has no `before` snapshot.
+//   - The `cancel` entry carries ONLY `status`.  `reference` and `quantity`
+//     were re-saved unchanged, and a field that did not move is not a change.
+//     That is the point of deriving the diff at read time from the two
+//     snapshots rather than storing it: the timeline says what happened, not
+//     what existed.
+//   - `version` appears in NEITHER entry, even though the entity read shows it
+//     — the `versioned` counter increments on every command, so leaving it in
+//     would make stamp churn most of the timeline.
+//
+// The counts are asserted here; the exact bodies are pinned by the wire golden,
+// which is where a cross-backend contract belongs.
+system AuditHistorySystem {
+  subdomain Ordering {
+    context Ordering {
+      aggregate Order audited with versioned {
+        reference: string
+        quantity: int
+        status: int
+        create(reference: string, quantity: int) {
+          reference := reference
+          quantity := quantity
+          status := 0
+        }
+        operation cancel(reason: int) {
+          precondition reason >= 0
+          status := reason
+        }
+      }
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+  api OrderingApi from Ordering
+  storage primary { type: postgres }
+  resource orderingState { for: Ordering, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 4000
+  }
+
+  test e2e "entity history replays the commands that changed the row" against d {
+    let o = api.orders.create({ reference: "R1", quantity: 5, status: 0 })
+    api.orders.cancel(o, { reason: 7 })
+    let trail = api.orders.history(o)
+    expect(trail.length).toBe(2)
+  }
+}

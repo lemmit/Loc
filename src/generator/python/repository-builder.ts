@@ -1596,7 +1596,12 @@ export function toWireMaskedMethod(agg: EnrichedAggregateIR): string {
     // `currentUserExpr`).  Guard the null caller before evaluating (fail-closed).
     const pred = renderPyExpr(f.maskUnless!, { thisName: "self", currentUserExpr: "_mask_user" });
     body.push(`        if not (_mask_user is not None and (${pred})):`);
-    body.push(`            d[${JSON.stringify(snake(f.name))}] = None`);
+    // The WIRE key, not the snake_cased Python attribute name.  `to_wire`
+    // writes `"<wf.name>"` verbatim (only the attribute ACCESS is snaked), so
+    // redacting `d[snake(name)]` silently ADDED a second key for any camelCase
+    // field and left the real one at its full value — i.e. the mask did nothing
+    // for exactly the fields whose names are multi-word.
+    body.push(`            d[${JSON.stringify(f.name)}] = None`);
   }
   body.push(`        return d`);
   return lines(...body);
