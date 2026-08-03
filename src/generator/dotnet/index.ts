@@ -10,7 +10,6 @@ import type {
   RepositoryIR,
   SystemIR,
   TimerSourceIR,
-  TypeIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { isMaterializedProjection, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
@@ -22,7 +21,7 @@ import {
 } from "../../ir/util/aggregate-flags.js";
 import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
-import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
+import { durableEventTypes } from "../../ir/util/channels.js";
 import { directParentName } from "../../ir/util/containment-parent.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";

@@ -50,7 +50,6 @@ import {
   refCollRepoHelpers,
 } from "./ref-collection-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
-import { usesRelationalContainments } from "./schema-emit.js";
 import {
   aggregateHasStamps,
   stampPutChanges,

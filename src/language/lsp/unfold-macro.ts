@@ -631,7 +631,7 @@ export function enumerateScaffoldPageUnfolds(
   const host = findCallHost(call);
   if (!host || hostKindOf(host) !== "ui") return [];
   const macro = lookupMacro(call.name);
-  if (!macro || macro.target !== "ui") return [];
+  if (macro?.target !== "ui") return [];
 
   const args = bindArgsForUnfold(document, macro, call);
   const origin: OriginToken = {

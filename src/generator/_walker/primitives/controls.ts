@@ -19,14 +19,12 @@ import {
   namedArgValue,
   positionalArgs,
   stringNamed,
-  unwrapTextLiteral,
 } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
   emitStmt,
   extendLambdaParams,
-  firstPositionalContent,
   propagateChildFlags,
   recordStoreUse,
   storeLocalFor,

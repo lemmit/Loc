@@ -126,7 +126,7 @@ function peelHole(expr: ExprIR): { value: ExprIR; name: string | undefined } {
  *  Shared by the catalog builder and the React runtime so the emitted key +
  *  default line up with the catalog entry. */
 export function icuFromConcat(expr: ExprIR | undefined): IcuMessage | undefined {
-  if (!expr || expr.kind !== "binary" || expr.op !== "+") return undefined;
+  if (expr?.kind !== "binary" || expr.op !== "+") return undefined;
   const pieces = flattenConcatChain(expr);
   let display = "";
   let positional = "";

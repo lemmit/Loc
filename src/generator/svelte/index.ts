@@ -29,11 +29,14 @@ import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
+import {
+  jsxChromeAttr as shellChromeAttr,
+  jsxChromeText as shellChromeText,
+} from "../_frontend/shell-chrome.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
-import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { buildSvelteApiModule } from "./api-builder.js";
 import {
@@ -349,28 +352,6 @@ export function generateSvelteForContexts(
     prefixed.set(`${pathPrefix}${path}`, content);
   }
   return prefixed;
-}
-
-/** A Svelte text-position token for an app-shell chrome string: the raw source
- *  default when `i18nEnabled` is false (byte-identical), else a
- *  `{t("chrome.<name>", "<default>")}` interpolation keyed to the merged
- *  `APP_SHELL_CHROME` catalog (mirrors the React `shellChromeText`). */
-function shellChromeText(name: string, i18nEnabled: boolean): string {
-  const english = APP_SHELL_CHROME[chromeKey(name)]!;
-  return i18nEnabled
-    ? `{t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
-    : english;
-}
-
-/** An `<attr>=…` fragment (NO leading space — the template keeps the surrounding
- *  whitespace) for an app-shell chrome string in ATTRIBUTE position: the static
- *  `<attr>="<default>"` when i18n is off (byte-identical), else a bound
- *  `<attr>={t(…)}` (Svelte attr form, same shape as JSX). */
-function shellChromeAttr(attr: string, name: string, i18nEnabled: boolean): string {
-  const english = APP_SHELL_CHROME[chromeKey(name)]!;
-  return i18nEnabled
-    ? `${attr}={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
-    : `${attr}="${english}"`;
 }
 
 /** Theme tokens for the pack's `theme` template (CSS custom props).

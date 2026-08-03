@@ -29,13 +29,13 @@ import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
+import { angularChromeAttr, angularChromeText } from "../_frontend/shell-chrome.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
-import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
@@ -398,20 +398,12 @@ export function generateAngularForContexts(
   // import + the `protected readonly t = t;` member so the Angular
   // interpolation resolves against the component instance — the same lift the
   // page shell applies (page-shell.ts), one hop shallower.
-  const skipToContentText = i18nEnabled
-    ? `{{ t(${JSON.stringify(chromeKey("skipToContent"))}, ${JSON.stringify(
-        APP_SHELL_CHROME[chromeKey("skipToContent")]!,
-      )}) }}`
-    : APP_SHELL_CHROME[chromeKey("skipToContent")]!;
+  const skipToContentText = angularChromeText("skipToContent", i18nEnabled);
   // The primary-navigation landmark's `aria-label` — an attribute fragment (NO
   // leading space; the template keeps the surrounding whitespace): Angular's
   // bound `[attr.aria-label]='t(…)'` (single-quoted, the `t()` call holds double
   // quotes) under i18n, else the static `aria-label="…"`.
-  const primaryNavAria = i18nEnabled
-    ? `[attr.aria-label]='t(${JSON.stringify(chromeKey("primaryNav"))}, ${JSON.stringify(
-        APP_SHELL_CHROME[chromeKey("primaryNav")]!,
-      )})'`
-    : `aria-label="${APP_SHELL_CHROME[chromeKey("primaryNav")]}"`;
+  const primaryNavAria = angularChromeAttr("aria-label", "primaryNav", i18nEnabled);
   // The `AppComponent` class body is rendered here rather than in the `.hbs`
   // template because Handlebars can't lex a tag-close (`}}`) directly abutting
   // the class's literal closing `}` (`{{/if}}}` reads as `CLOSE_UNESCAPED`).

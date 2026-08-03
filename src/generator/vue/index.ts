@@ -33,6 +33,10 @@ import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
+import {
+  vueChromeAttr as shellChromeAttr,
+  vueChromeText as shellChromeText,
+} from "../_frontend/shell-chrome.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
@@ -41,7 +45,6 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
-import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral pieces that live react-side today (same sharing
@@ -651,30 +654,6 @@ export function generateVueForContexts(
 
 function renderShell(pack: LoadedPack, name: string, vm: unknown): string {
   return pack.render(name, vm);
-}
-
-/** A Vue text-position token for an app-shell chrome string (M-T1.11,
- *  pack-chrome): the raw source default when `i18nEnabled` is false
- *  (byte-identical), else a `{{ t("chrome.<name>", "<default>") }}` template
- *  interpolation keyed to the merged `APP_SHELL_CHROME` catalog.  The braces are
- *  DATA here, not Handlebars — the shell renders the token via `{{{…}}}`, so it
- *  reaches the emitted `.vue` file verbatim. */
-function shellChromeText(name: string, i18nEnabled: boolean): string {
-  const english = APP_SHELL_CHROME[chromeKey(name)]!;
-  return i18nEnabled
-    ? `{{ t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)}) }}`
-    : english;
-}
-
-/** An `<attr>=…` fragment (NO leading space — the template keeps the surrounding
- *  whitespace) for an app-shell chrome string in ATTRIBUTE position: the static
- *  `<attr>="<default>"` when i18n is off (byte-identical), else Vue's bound
- *  `:<attr>='t(…)'` (single-quoted, since the `t()` call holds double quotes). */
-function shellChromeAttr(attr: string, name: string, i18nEnabled: boolean): string {
-  const english = APP_SHELL_CHROME[chromeKey(name)]!;
-  return i18nEnabled
-    ? `:${attr}='t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})'`
-    : `${attr}="${english}"`;
 }
 
 // ---------------------------------------------------------------------------

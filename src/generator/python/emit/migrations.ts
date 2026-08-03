@@ -1,12 +1,7 @@
-import type {
-  BoundedContextIR,
-  EnrichedBoundedContextIR,
-  SystemIR,
-} from "../../../ir/types/loom-ir.js";
+import type { BoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { snake } from "../../../util/naming.js";
 import { renderPgStep } from "../../sql-pg.js";
-import { contextsHaveAudit } from "./audit.js";
 import {
   provenancedAggregates,
   provenanceMigrationTag,
@@ -76,11 +71,6 @@ export function emitPythonProvenanceMigration(
   if (provAggs.length === 0) return;
   out.set(`migrations/${provenanceMigrationTag()}.sql`, renderPyProvenanceMigration(provAggs));
 }
-
-// A version far in the future so this migration sorts after every module's
-// initial + delta migrations (parity with the provenance migration's
-// `29991231000000`).  `_1` keeps it distinct from the provenance tag.
-const AUDIT_MIGRATION_TAG = "29991231000001_audit";
 
 // The LATE audit migration used to live here.  The `audit_records` DDL moved
 // to the shared MigrationsIR (`auditTableShape`) so all five backends derive it
