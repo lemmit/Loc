@@ -26,6 +26,7 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { bcByAggregateOf, isPagedQuery } from "../_walker/paged-query.js";
+import { dartType } from "./dart-types.js";
 
 /** One distinct read a ui issues, projected to everything the provider emitter
  *  needs.  Deduped by `varName` across every page of the ui. */
@@ -45,6 +46,35 @@ export interface FlutterRead {
    *  and is what makes a SERVER-DRIVEN `Table` possible: a sort or page tap
    *  writes page state, the family key changes, and Riverpod refetches. */
   paged: boolean;
+  /** A PARAMETERIZED repository find (`find named(n: string): Product[]`) — the
+   *  declared params, in order, with the Dart type each lowers to.
+   *
+   *  Present only for a named find; `.all` / `.byId` leave it undefined and
+   *  emit exactly as before.  The provider becomes a `.family` keyed by a Dart
+   *  RECORD of these params, which is what the page walker already calls
+   *  (`ref.watch(productNamedProvider((n: 'x')))`) — before this, the walker
+   *  emitted that call and the import for a provider the collector never
+   *  produced, so the generated project had a dangling `import '../reads.dart'`
+   *  and would not pass `flutter analyze`. */
+  params?: ReadonlyArray<{ name: string; dartType: string }>;
+}
+
+/** Resolve a repository find by name on the aggregate that owns it.  Returns
+ *  undefined when no repository declares it — the caller then skips the read
+ *  rather than emitting a provider it cannot type. */
+function findOnAggregate(
+  contexts: readonly EnrichedBoundedContextIR[],
+  aggregateName: string,
+  findName: string,
+) {
+  for (const c of contexts) {
+    for (const repo of c.repositories) {
+      if (repo.aggregateName !== aggregateName) continue;
+      const hit = repo.finds.find((f) => f.name === findName);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
 }
 
 /** The provider-local var a detected api read resolves to (`Product` + `all` →
@@ -121,10 +151,34 @@ export function collectFlutterReads(
     for (const ofArg of queryViewOfArgs(page.body)) {
       const detected = tryDetectApiHook(ofArg, detCtx);
       if (detected?.kind !== "aggregate") continue;
-      if (detected.operation !== "all" && detected.operation !== "byId") continue;
+      const isLifecycle = detected.operation === "all" || detected.operation === "byId";
+      // A PARAMETERIZED repository find (anything that is not `.all` / `.byId`)
+      // resolves against the aggregate's repository.  Skipping it here is what
+      // left the page walker calling `<agg><Find>Provider(...)` — and importing
+      // `reads.dart` — for a provider that was never emitted.
+      const find = isLifecycle
+        ? undefined
+        : findOnAggregate(contexts, detected.aggregateName, detected.operation);
+      if (!isLifecycle && !find) continue;
       const varName = readVarName(detected.aggregateName, detected.operation);
       if (seen.has(varName)) continue;
       seen.add(varName);
+      if (find) {
+        out.push({
+          varName,
+          aggregate: upperFirst(detected.aggregateName),
+          // A find returning `T?` is a single-record read; `T[]` is a list.
+          single: find.returnType.kind !== "array",
+          // Matches the backend route the other frontends already call:
+          // `GET /<plural(agg)>/<snake(findName)>?<params>` (cf. the React
+          // `useNamedProduct` client — the contract is read off that, not
+          // invented here).
+          routePath: `/${snake(plural(detected.aggregateName))}/${snake(detected.operation)}`,
+          paged: false,
+          params: find.params.map((p) => ({ name: p.name, dartType: dartType(p.type) })),
+        });
+        continue;
+      }
       // Paged-ness comes from the SHARED derivation the walker also calls, so
       // the provider's shape, the call site's args and the body's member reads
       // cannot disagree about whether this read is paged.
@@ -175,6 +229,42 @@ export function renderAppConfig(): string {
  *  `FutureProvider.family<T?, String>` (GET `/<coll>/$id`, 404 → `null`). */
 function renderReadProvider(read: FlutterRead): string {
   const { aggregate, varName, routePath } = read;
+  if (read.params) {
+    // A parameterized find → a `.family` keyed by a Dart RECORD of the declared
+    // params, matching the call the page walker already emits.  A record (not a
+    // class) for the same reason the paged `LoomQuery` is one: `.family`
+    // compares keys with `==`, and records have structural equality for free —
+    // a key type without it would miss the cache and refetch on every rebuild.
+    const recordType = `({${read.params.map((p) => `${p.dartType} ${p.name}`).join(", ")}})`;
+    const returnType = read.single ? `${aggregate}?` : `List<${aggregate}>`;
+    const queryEntries = read.params.map((p) => `    '${p.name}': '\${q.${p.name}}',`);
+    return lines(
+      `final ${varName}Provider =`,
+      `    FutureProvider.family<${returnType}, ${recordType}>((ref, q) async {`,
+      `  final res = await http.get(apiUri('${routePath}').replace(queryParameters: {`,
+      ...queryEntries,
+      "  }));",
+      read.single ? "  if (res.statusCode == 404) return null;" : null,
+      "  if (res.statusCode != 200) {",
+      `    throw Exception('GET ${routePath} failed (\${res.statusCode})');`,
+      "  }",
+      ...(read.single
+        ? [`  return ${aggregate}.fromJson(jsonDecode(res.body) as Map<String, dynamic>);`]
+        : [
+            // A named find returns a BARE ARRAY, not the paged `{items: […]}`
+            // envelope — `.all` is paged-by-default (M-T2.6) and a find is not
+            // (the backend emits `c.json(result.map(toWire))`).  Decoding this
+            // as a Map would throw at runtime, and `flutter analyze` cannot see
+            // a wrong JSON shape, so it is read off the emitted route rather
+            // than assumed to match `.all`.
+            "  final items = jsonDecode(res.body) as List<dynamic>;",
+            "  return items",
+            `      .map((e) => ${aggregate}.fromJson(e as Map<String, dynamic>))`,
+            "      .toList();",
+          ]),
+      "});",
+    );
+  }
   if (read.single) {
     return lines(
       `final ${varName}Provider = FutureProvider.family<${aggregate}?, String>((ref, id) async {`,
