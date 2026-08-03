@@ -12,9 +12,15 @@ import {
   type RepositoryIR,
 } from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
-import { aggregateHasProvenanced, emitOperationUnionResponse } from "../_frontend/api-module.js";
 import {
+  aggregateHasProvenanced,
+  emitOperationUnionResponse,
+  historyHookName,
+} from "../_frontend/api-module.js";
+import {
+  AUDIT_ENTRY_LIST_TYPE,
   collectUsedTypes,
+  emitAuditEntrySchemas,
   emitEnumSchema,
   emitObjectWithRefines,
   emitResponseSchema,
@@ -155,6 +161,10 @@ export function buildSvelteApiModule(
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
   }
+  // Entity-history entry DTOs (docs/audit.md) — gated on the enrichment-derived
+  // `historyFind`, which sits BESIDE `finds` (see `RepositoryIR.historyFind`),
+  // so the loops above cannot surface it and it must be asked for by name.
+  if (repo?.historyFind) lines.push(...emitAuditEntrySchemas());
   {
     const unionSeen = new Set<string>();
     for (const find of repo?.finds ?? []) {
@@ -314,6 +324,23 @@ export function buildSvelteApiModule(
       lines.push(`}`);
       lines.push("");
     }
+  }
+
+  // The derived per-entity audit trail (`GET /<tag>/{id}/history`).  Accessor-
+  // shaped like `use<Agg>ById` — svelte-query v6 re-reads the options thunk, so
+  // a route-param change refetches without a remount.
+  if (repo?.historyFind) {
+    lines.push(`export function ${historyHookName(agg.name)}(id: () => string | undefined) {`);
+    lines.push(`  return createQuery(() => ({`);
+    lines.push(`    queryKey: ["${tag}", id(), "history"],`);
+    lines.push(`    enabled: !!id(),`);
+    lines.push(`    queryFn: async () => {`);
+    lines.push(`      const r = await api.get(\`/${tag}/\${id()}/history\`);`);
+    lines.push(`      return ${AUDIT_ENTRY_LIST_TYPE}.parse(r);`);
+    lines.push(`    },`);
+    lines.push(`  }));`);
+    lines.push(`}`);
+    lines.push("");
   }
 
   return lines.join("\n");

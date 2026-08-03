@@ -26,6 +26,7 @@ import type {
   ValueObject,
   Workflow,
 } from "../../../language/generated/ast.js";
+import { AUDIT_HISTORY_FIND } from "../../../util/audit-names.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import {
   binaryExpr,
@@ -536,8 +537,127 @@ export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {
   return callExpr("Stack", scaffoldDetailsParts(agg, opts));
 }
 
+/** Whether a scaffolded Detail page gets a History section — the MACRO-TIME
+ *  (AST) mirror of the enrichment's `aggServesHistory` (`src/ir/util/
+ *  audit-history.ts`), which the scaffolder cannot call because it runs at
+ *  phase ② over the Langium AST, before there is an `AggregateIR` to ask.
+ *
+ *  It must not over-approximate: an aggregate whose repository ends up WITHOUT
+ *  a `historyFind` gets no `history()` client method, so a History section over
+ *  it would call a hook that was never emitted and fail `tsc`.  Every clause
+ *  below therefore mirrors one clause of the IR rule, and each errs toward
+ *  emitting nothing:
+ *
+ *    - abstract bases own no repository and emit no table (`ensureHistoryFind`
+ *      skips them);
+ *    - the audit target — the same "at least one audited public command"
+ *      question `aggHasAuditedTarget` asks, read off the AST flags the lowerer
+ *      resolves (`aggregate X audited` marks every public command; a `private
+ *      operation` is never audited — the opt-out);
+ *    - at least one diffable field, so the timeline could say something.  The
+ *      declared non-`internal`/`secret`/`managed`/`token` properties are a
+ *      SUBSET of the IR's `historyDiffFields` (which also counts derived +
+ *      containments), so a false here is a safe under-emit;
+ *    - an author-declared `find history(...)` WINS over the derived read
+ *      (`ensureHistoryFind` bails), and it keeps its own generic route + object-
+ *      shaped client hook — so the scaffold must not claim the derived one. */
+export function aggregateServesHistory(agg: Aggregate): boolean {
+  if (agg.isAbstract) return false;
+  if (!aggregateHasAuditedCommand(agg)) return false;
+  if (!agg.members.some(isHistoryDiffProperty)) return false;
+  if (aggregateHasDeclaredHistoryFind(agg)) return false;
+  return true;
+}
+
+/** AST mirror of `aggHasAuditedTarget` — at least one audited PUBLIC command
+ *  action (`operation` / `create` / `destroy`).  The aggregate-header `audited`
+ *  is the aggregate-wide form the lowerer resolves into the per-command flags
+ *  (`lowerAggregate`), so it counts only when such a command exists. */
+function aggregateHasAuditedCommand(agg: Aggregate): boolean {
+  return agg.members.some((m) => {
+    if (m.$type === "Operation") return !m.private && (m.audited || agg.audited);
+    if (m.$type === "Create" || m.$type === "Destroy") return m.audited || agg.audited;
+    return false;
+  });
+}
+
+/** A declared property that could carry a per-entry field change: the API-read
+ *  set (`forApiRead`) minus the server-lifecycle stamp churn `forHistoryDiff`
+ *  drops (`managed` / `token`). */
+function isHistoryDiffProperty(m: { $type: string }): boolean {
+  if (m.$type !== "Property") return false;
+  const access = (m as Property).access;
+  return access !== "internal" && access !== "secret" && access !== "managed" && access !== "token";
+}
+
+/** An author-declared `find history(...)` on this aggregate's repository — the
+ *  one that WINS over the synthesized read (same rule as `all`). */
+function aggregateHasDeclaredHistoryFind(agg: Aggregate): boolean {
+  for (const m of agg.$container.members) {
+    if (m.$type !== "Repository") continue;
+    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
+    if (m.finds.some((f) => f.name === AUDIT_HISTORY_FIND)) return true;
+  }
+  return false;
+}
+
+/** The Detail page's History section — a framed `Timeline` over the derived
+ *  `history(id)` read (docs/audit.md).
+ *
+ *  A page-level sibling of the record `QueryView`, not a child of its `data`
+ *  lambda: the trail is keyed by the route `id`, not by the loaded record, so
+ *  it neither needs nor should wait for the entity read.  The `QueryView`
+ *  wrapper is what gives it the same loading / error / empty arms every other
+ *  scaffolded read has — an audit trail that silently renders nothing while
+ *  in-flight reads as "this entity was never touched", which is a lie. */
+function scaffoldHistorySection(agg: Aggregate, queryRoot: () => Expression): Expression {
+  const slug = snake(plural(agg.name));
+  const timeline = callExpr("Timeline", [
+    { name: "of", value: nameRefExpr("entries") },
+    { name: "testid", value: stringLit(`${slug}-detail-history-timeline`) },
+  ]);
+  return callExpr("Card", [
+    {
+      value: callExpr("Stack", [
+        {
+          value: callExpr("Heading", [
+            { value: stringLit("History") },
+            { name: "level", value: intLit(4) },
+          ]),
+        },
+        {
+          value: callExpr("QueryView", [
+            {
+              name: "of",
+              value: memberAccess(queryRoot(), AUDIT_HISTORY_FIND, {
+                call: true,
+                args: [nameRefExpr("id")],
+              }),
+            },
+            { name: "loading", value: callExpr("Skeleton", [{ name: "count", value: intLit(3) }]) },
+            {
+              name: "error",
+              value: callExpr("Alert", [{ value: stringLit("Couldn't load history") }]),
+            },
+            {
+              name: "empty",
+              value: callExpr("Alert", [
+                { value: stringLit("No history yet.") },
+                { name: "color", value: stringLit("yellow") },
+              ]),
+            },
+            { name: "data", value: lambda("entries", timeline) },
+          ]),
+        },
+      ]),
+    },
+    { name: "testid", value: stringLit(`${slug}-detail-history`) },
+  ]);
+}
+
 /** The Detail read-section's `Stack` children — `[Breadcrumbs, Heading,
- *  QueryView]`.  Exposed separately so the Detail page can *flatten* them into
+ *  QueryView]`, plus a History section for an audited aggregate.  Exposed
+ *  separately so the Detail page can *flatten* them into
  *  its outer `Stack` alongside the operation modals (flattened into the page Stack rather than nested). */
 export function scaffoldDetailsParts(
   agg: Aggregate,
@@ -609,6 +729,10 @@ export function scaffoldDetailsParts(
         { name: "data", value: lambda(cellVar, dataBody) },
       ]),
     },
+    // The audit trail, for an aggregate that serves one.  Gated so a
+    // non-audited aggregate's Detail page stays byte-identical — there is no
+    // `history()` on its api client to call.
+    ...(aggregateServesHistory(agg) ? [{ value: scaffoldHistorySection(agg, queryRoot) }] : []),
   ];
 }
 
