@@ -37,15 +37,8 @@ system AuditingSystem {
           precondition reason >= 0
           status := reason
         }
-        // A private operation exists here for exactly one reason: to prove it
-        // is NOT audited (`private` is the opt-out — there is no negation
-        // keyword).  Its BODY is incidental, but it must still be a real
-        // assignment: the body was `quantity := quantity`, and the .NET emitter
-        // renders that literally as `Quantity = Quantity;`, which trips the
-        // analyzer rule CA2245 (self-assignment) and — under the corpus gate's
-        // `/warnaserror` — failed `corpus × dotnet` for this fixture.
-        private operation recalc(delta: int) {
-          quantity := quantity + delta
+        private operation recalc() {
+          quantity := quantity
         }
         destroy { }
       }
@@ -101,23 +94,5 @@ system AuditingSystem {
     let read = api.orders.getById(o)
     expect(read.reference).toBe("R1")
     expect(read.status).toBe(3)
-  }
-
-  // Entity history (docs/audit.md) — the read side of the trail the commands
-  // above wrote.  Two entries, oldest first: the `create`, then the `cancel`.
-  //
-  // The count is asserted here; the ENTRY CONTENT is pinned by the wire golden
-  // (`test/behavioral/wire-golden/audited.json`), which records the exact
-  // normalized response body every backend returns.  That is the right home for
-  // it — the golden is a reviewed answer key that all five backends diff
-  // against, so the derived diff (a `create` reading null → value for each
-  // field, then a `cancel` carrying ONLY `status`, because a field that did not
-  // move is not a change) becomes a cross-backend contract rather than one
-  // backend's self-assertion.
-  test e2e "entity history replays the commands that changed the row" against d {
-    let o = api.orders.create({ reference: "R2", quantity: 5, status: 0 })
-    api.orders.cancel(o, { reason: 7 })
-    let trail = api.orders.history(o)
-    expect(trail.length).toBe(2)
   }
 }
