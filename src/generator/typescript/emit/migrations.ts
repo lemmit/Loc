@@ -1,5 +1,5 @@
 import type { EnrichedBoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
-import type { MigrationsIR, TableShape } from "../../../ir/types/migrations-ir.js";
+import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake } from "../../../util/naming.js";
 import { renderPgStep } from "../../sql-pg.js";
@@ -150,14 +150,14 @@ function versionToEpochMillis(version: string): number {
 // ---------------------------------------------------------------------------
 // LATE provenance migration (provenance.md) — the Hono/Drizzle counterpart of
 // `emitDotnetProvenanceAuditMigration` / `emitPythonProvenanceMigration` /
-// elixir-vanilla's `create_provenance` migration.  Provenance is NOT part of
-// the platform-neutral `MigrationsIR` (it's feature-local, mirroring the
-// co-located `<field>_provenance` column `db/schema.ts` already declares), so
-// without this the Drizzle schema model references a column and a
-// `provenance_records` table that no migration ever creates.  A version far in
-// the future sorts this migration after every module's initial + delta
-// migrations (parity with the `29991231235959` / `29991231000000` siblings),
-// regardless of module count.
+// elixir-vanilla's `create_provenance` migration.  Carries the CO-LOCATED
+// `<field>_provenance` columns only: they hang off the aggregate tables
+// `MigrationsIR` owns, so they must be ALTERed in after those exist, and a
+// version far in the future sorts this after every module's initial + delta
+// migrations (parity with the `29991231235959` / `29991231000000` siblings)
+// regardless of module count.  The `provenance_records` history table used to
+// be created here too; it is now a shared `MigrationsIR` companion table
+// (`provenanceTableShape`), like the outbox and the audit log.
 // ---------------------------------------------------------------------------
 
 const PROVENANCE_MIGRATION_VERSION = "29991231000000";
@@ -176,10 +176,8 @@ function provColumn(fieldName: string): string {
 }
 
 /** Emit `db/migrations/<version>_provenance.sql`: ADD the co-located
- *  `<field>_provenance` jsonb column per provenanced aggregate table, then
- *  CREATE the `provenance_records` history table (column-for-column parity
- *  with the `db/schema.ts` `provenanceRecords` table).  No-op (nothing
- *  emitted, `undefined` returned) when no served aggregate declares a
+ *  `<field>_provenance` jsonb column per provenanced aggregate table.  No-op
+ *  (nothing emitted, `undefined` returned) when no served aggregate declares a
  *  provenanced field. Returns the `(version, tag)` pair so the caller can fold
  *  it into the Drizzle journal — a `.sql` file that's absent from the journal
  *  is never applied by the runtime migrator. */
@@ -211,41 +209,11 @@ export function emitTypescriptProvenanceMigration(
   }
   if (steps.length === 0) return undefined;
 
-  const historyTable: TableShape = {
-    name: "provenance_records",
-    ownerModule: "provenance",
-    columns: [
-      { name: "trace_id", type: { kind: "text" }, nullable: false },
-      { name: "snapshot_id", type: { kind: "text" }, nullable: false },
-      { name: "target_type", type: { kind: "text" }, nullable: false },
-      { name: "field", type: { kind: "text" }, nullable: false },
-      { name: "inputs", type: { kind: "json" }, nullable: false },
-      { name: "computed_value", type: { kind: "json" }, nullable: true },
-      { name: "at", type: { kind: "datetime" }, nullable: false },
-      { name: "correlation_id", type: { kind: "text" }, nullable: true },
-      { name: "scope_id", type: { kind: "text" }, nullable: true },
-      { name: "actor_id", type: { kind: "text" }, nullable: true },
-      { name: "parent_id", type: { kind: "text" }, nullable: true },
-    ],
-    primaryKey: ["trace_id"],
-    foreignKeys: [],
-    indexes: [
-      {
-        name: "provenance_records_target_idx",
-        table: "provenance_records",
-        columns: ["target_type", "field"],
-        unique: false,
-      },
-      {
-        name: "provenance_records_correlation_idx",
-        table: "provenance_records",
-        columns: ["correlation_id"],
-        unique: false,
-      },
-    ],
-  };
-  steps.push(renderPgStep({ op: "createTable", table: historyTable }));
-
+  // The `provenance_records` history table itself is NOT emitted here: it moved
+  // to the shared MigrationsIR (`provenanceTableShape`), so all five backends
+  // derive one definition.  What stays is the per-aggregate half above — the
+  // co-located `<field>_provenance` columns, which hang off tables MigrationsIR
+  // already owns and so must be ALTERed in after them.
   const tag = provenanceMigrationTag();
   out.set(`db/migrations/${tag}.sql`, `${steps.join(`\n${STATEMENT_BREAKPOINT}\n`)}\n`);
   return { version: PROVENANCE_MIGRATION_VERSION, tag };

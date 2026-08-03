@@ -107,7 +107,16 @@ export function renderRenameIndexSql(step: { from: string; to: string; schema?: 
   return `ALTER INDEX ${qualified(step.schema, step.from)} RENAME TO ${ident(step.to)}`;
 }
 
-function renderCreateTable(table: TableShape): string {
+/** `renderCreateTable` in its IDEMPOTENT form (`IF NOT EXISTS` on the table and
+ *  on every index).  For the self-applying schema bootstraps that run on EVERY
+ *  startup instead of through a tracked migration — the .NET Dapper
+ *  `DbSchema.cs` — so they can render a shared `TableShape` rather than keeping
+ *  a hand-written mirror of it that drifts. */
+export function renderCreateTableIfNotExists(table: TableShape): string {
+  return renderCreateTable(table, true);
+}
+
+function renderCreateTable(table: TableShape, ifNotExists = false): string {
   const lines: string[] = [];
   // A value-object array's parent stand-in column is skipped on relational
   // backends — its elements live in the id-less child table, not a column.
@@ -128,8 +137,9 @@ function renderCreateTable(table: TableShape): string {
   // Create the owning context's schema first (idempotent) so the
   // `<schema>.<table>` the EF / Drizzle mappings query actually exists.
   const createSchema = table.schema ? `CREATE SCHEMA IF NOT EXISTS ${ident(table.schema)};\n` : "";
-  let sql = `${createSchema}CREATE TABLE ${qualified(table.schema, table.name)} (\n${body}\n);`;
-  for (const idx of table.indexes) sql += "\n" + renderAddIndex(idx, table.schema);
+  const exists = ifNotExists ? "IF NOT EXISTS " : "";
+  let sql = `${createSchema}CREATE TABLE ${exists}${qualified(table.schema, table.name)} (\n${body}\n);`;
+  for (const idx of table.indexes) sql += "\n" + renderAddIndex(idx, table.schema, ifNotExists);
   return sql;
 }
 
@@ -170,7 +180,7 @@ function renderFkConstraint(fk: FKShape, schema?: string): string {
   );
 }
 
-function renderAddIndex(idx: IndexShape, schema?: string): string {
+function renderAddIndex(idx: IndexShape, schema?: string, ifNotExists = false): string {
   const unique = idx.unique ? "UNIQUE " : "";
   // Partial index (`WHERE …`) — set on a `unique` index derived for a
   // softDeletable aggregate so re-create after soft-delete is allowed.
@@ -183,8 +193,9 @@ function renderAddIndex(idx: IndexShape, schema?: string): string {
       return oc ? `${ident(c)} ${oc}` : ident(c);
     })
     .join(", ");
+  const exists = ifNotExists ? "IF NOT EXISTS " : "";
   return (
-    `CREATE ${unique}INDEX ${ident(idx.name)} ON ${qualified(schema, idx.table)} ` +
+    `CREATE ${unique}INDEX ${exists}${ident(idx.name)} ON ${qualified(schema, idx.table)} ` +
     `(${cols})${where};`
   );
 }

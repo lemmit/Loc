@@ -44,6 +44,7 @@ import {
   tableOwnerName,
   tphConcretesOf,
 } from "../ir/util/inheritance.js";
+import { contextsHaveProvenancedField } from "../ir/util/prov-id.js";
 import {
   effectiveSavingShape,
   resolveContextSchema,
@@ -311,6 +312,19 @@ export function schemaFromModule(
   if (module.contexts.some((c) => contextHasAuditedTarget(c))) {
     tables.push(auditTableShape(module.name));
   }
+  // Provenance history (provenance.md): the append-only per-write lineage log,
+  // emitted when any hosted context declares a `provenanced` field.  Same
+  // machinery-not-domain category as the outbox and the audit table — rows
+  // carry `target_type`, so it is cross-context and takes NO context schema.
+  //
+  // Gated on the SAME predicate the Hono Drizzle schema uses
+  // (`contextsHaveProvenancedField`, which counts part fields too) — node has
+  // two runtime paths that build the table from different definitions (the
+  // `.sql` migration on real Postgres, `synthDDL` over the Drizzle table on
+  // PGlite), so a gate that disagreed would create it on one and not the other.
+  if (module.contexts.some((c) => contextsHaveProvenancedField([c]))) {
+    tables.push(provenanceTableShape(module.name));
+  }
   // Cross-context id references get NO foreign key (M-T4.4): the SQL
   // renderer qualifies an FK with the REFERENCING table's schema, so a
   // reference into another context would point at a table that doesn't
@@ -407,6 +421,63 @@ function auditTableShape(ownerModule: string): TableShape {
       {
         name: "audit_records_correlation_idx",
         table: "audit_records",
+        columns: ["correlation_id"],
+        unique: false,
+      },
+    ],
+  };
+}
+
+/** The provenance history table (provenance.md) — one per module whose contexts
+ *  declare any `provenanced` field.  Append-only: one row per provenanced write
+ *  site, carrying the rule-snapshot id, the resolved inputs and the computed
+ *  value, inserted inside the same transaction as the aggregate save.  The
+ *  CURRENT lineage is also stored co-located on the aggregate row's
+ *  `<field>_provenance` jsonb column — that half is per-aggregate and stays in
+ *  each backend's late migration; only this fixed, cross-context table is
+ *  shared.
+ *
+ *  Column-for-column the shape the six hand-written copies carried (Drizzle
+ *  schema + late `.sql`, .NET EF migration + the second Dapper copy, Java
+ *  Flyway, Python `.sql`, Elixir Ecto), so this is schema-identical for all of
+ *  them bar one drift it closes: the .NET EF migration created only the
+ *  `(target_type, field)` index and silently omitted the `correlation_id` one
+ *  its five siblings emit — the index that makes "show me every lineage row
+ *  from one request" not a sequential scan. */
+function provenanceTableShape(ownerModule: string): TableShape {
+  return {
+    name: "provenance_records",
+    ownerModule,
+    columns: [
+      { name: "trace_id", type: { kind: "text" }, nullable: false },
+      // The rule-snapshot id is a compile-time literal baked into the write
+      // site, so it is never absent; `inputs` is always at least an empty
+      // array.  Both stay NOT NULL — checked against the writers, not
+      // transcribed: `computed_value` and the four request-context ids are the
+      // only columns any backend's flush can leave null.
+      { name: "snapshot_id", type: { kind: "text" }, nullable: false },
+      { name: "target_type", type: { kind: "text" }, nullable: false },
+      { name: "field", type: { kind: "text" }, nullable: false },
+      { name: "inputs", type: { kind: "json" }, nullable: false },
+      { name: "computed_value", type: { kind: "json" }, nullable: true },
+      { name: "at", type: { kind: "datetime" }, nullable: false },
+      { name: "correlation_id", type: { kind: "text" }, nullable: true },
+      { name: "scope_id", type: { kind: "text" }, nullable: true },
+      { name: "actor_id", type: { kind: "text" }, nullable: true },
+      { name: "parent_id", type: { kind: "text" }, nullable: true },
+    ],
+    primaryKey: ["trace_id"],
+    foreignKeys: [],
+    indexes: [
+      {
+        name: "provenance_records_target_idx",
+        table: "provenance_records",
+        columns: ["target_type", "field"],
+        unique: false,
+      },
+      {
+        name: "provenance_records_correlation_idx",
+        table: "provenance_records",
         columns: ["correlation_id"],
         unique: false,
       },

@@ -69,26 +69,11 @@ export function emitDotnetProvenanceAuditMigration(
 ): void {
   const stmts: string[] = [];
   if (opts.provenance) {
-    stmts.push(
-      [
-        "CREATE TABLE IF NOT EXISTS provenance_records (",
-        "  trace_id text PRIMARY KEY,",
-        "  snapshot_id text NOT NULL,",
-        "  target_type text NOT NULL,",
-        "  field text NOT NULL,",
-        "  inputs jsonb NOT NULL,",
-        "  computed_value jsonb,",
-        "  at timestamptz NOT NULL,",
-        "  correlation_id text,",
-        "  scope_id text,",
-        "  actor_id text,",
-        "  parent_id text",
-        ");",
-      ].join("\n"),
-    );
-    stmts.push(
-      "CREATE INDEX IF NOT EXISTS provenance_records_target_idx ON provenance_records (target_type, field);",
-    );
+    // The `provenance_records` DDL moved to the shared MigrationsIR
+    // (`provenanceTableShape`) so all five backends derive it from one place —
+    // and the copy that used to live here was already drifting: it created only
+    // the `(target_type, field)` index, silently omitting the `correlation_id`
+    // one its four siblings emit.  What stays is the per-aggregate half:
     // Co-located current-lineage column per provenanced field, on each owning
     // aggregate's table.  The table is schema-/prefix-qualified the same way
     // efcore.ts `ToTable` derives it from the resolved dataSource binding, so

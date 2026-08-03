@@ -226,10 +226,12 @@ export function provenanceMigrationTag(): string {
   return `${PROVENANCE_MIGRATION_VERSION}_provenance`;
 }
 
-/** The co-located-column ALTERs + the history-table CREATE, rendered as a
- *  single `.sql` file split into one statement per `--> statement-breakpoint`
- *  (asyncpg runs one statement per call).  Each ALTER is schema-qualified to
- *  the owning aggregate's table. */
+/** The co-located-column ALTERs, rendered as a single `.sql` file split into
+ *  one statement per `--> statement-breakpoint` (asyncpg runs one statement per
+ *  call).  Each ALTER is schema-qualified to the owning aggregate's table.  The
+ *  `provenance_records` history table used to be created here as well; it is
+ *  now a shared MigrationsIR companion table (`provenanceTableShape`) and
+ *  arrives in the ordinary module migration. */
 export function renderPyProvenanceMigration(
   provAggs: Array<{ agg: AggregateIR; fields: FieldIR[]; schema?: string }>,
 ): string {
@@ -240,28 +242,5 @@ export function renderPyProvenanceMigration(
       statements.push(`ALTER TABLE ${qualified} ADD COLUMN "${provColumn(f.name)}" jsonb;`);
     }
   }
-  statements.push(
-    [
-      "CREATE TABLE provenance_records (",
-      '\t"trace_id" text PRIMARY KEY NOT NULL,',
-      '\t"snapshot_id" text NOT NULL,',
-      '\t"target_type" text NOT NULL,',
-      '\t"field" text NOT NULL,',
-      '\t"inputs" jsonb NOT NULL,',
-      '\t"computed_value" jsonb,',
-      '\t"at" timestamptz NOT NULL,',
-      '\t"correlation_id" text,',
-      '\t"scope_id" text,',
-      '\t"actor_id" text,',
-      '\t"parent_id" text',
-      ");",
-    ].join("\n"),
-  );
-  statements.push(
-    'CREATE INDEX "provenance_records_target_idx" ON provenance_records ("target_type","field");',
-  );
-  statements.push(
-    'CREATE INDEX "provenance_records_correlation_idx" ON provenance_records ("correlation_id");',
-  );
   return `${statements.join("\n--> statement-breakpoint\n")}\n`;
 }
