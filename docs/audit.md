@@ -6,8 +6,10 @@ exposes those rows as an entity's change history.
 
 - Write side — `aggregate X audited { … }` / `operation f() audited`. Ships on
   all five backends.
-- Read side — `GET /<aggregates>/{id}/history`. **Under construction on this
-  branch** (see the checklist at the bottom).
+- Read side — `GET /<aggregates>/{id}/history`. Served by **node and python**
+  today (§3); consumed by the api clients and the scaffolded Detail page on the
+  four JS-family frontends ("Rendering it"). The remaining backends and
+  frontends are named where they fall short, not left to be discovered.
 
 ---
 
