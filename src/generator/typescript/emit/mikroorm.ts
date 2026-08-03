@@ -527,8 +527,12 @@ function auditRecordEntity(): { block: string; schemaName: string } {
     TEXT("targetType"),
     TEXT("targetId"),
     JSONB("actor", true),
-    JSONB("before", false),
-    JSONB("after", false),
+    // Nullable, matching `migrations-builder`: a `create` has no BEFORE state
+    // and a `destroy` has no AFTER state, and the routes insert `null` for
+    // each.  Declaring them NOT NULL here made the emitted DDL contradict the
+    // insert sites.
+    JSONB("before", true),
+    JSONB("after", true),
     TIMESTAMPTZ("at"),
     TEXT("status"),
     TEXT("correlationId", { nullable: true }),

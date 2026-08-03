@@ -33,6 +33,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { aggHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -1010,9 +1011,14 @@ export function renderDapperRepository(
       "        }",
     ];
   });
+  // `destroy audited` makes DeleteAsync TRANSACTIONAL: the handler stages the
+  // audit row before calling it, and that row has to commit with the delete or
+  // roll back with it.  Every statement in the method then rides `__tx`.  An
+  // un-audited aggregate keeps the transaction-free emit byte-identical.
+  const delTx = aggHasAuditedTarget(agg) ? "transaction: __tx, " : "";
   const assocDeleteLines = associations.map(
     (a) =>
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
   );
 
   // Nested entity parts (`contains lineItems: LineItem[]`).  Reads funnel every
@@ -1072,7 +1078,7 @@ export function renderDapperRepository(
   // CASCADE removes every nested grandchild row.
   const containDeleteLines = partChildren.map(
     (pc) =>
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
   );
   const containMembers = hasContains ? containmentMembers(agg, partChildren, idClass) : [];
 
@@ -1086,6 +1092,21 @@ export function renderDapperRepository(
         "        foreach (var __lin in aggregate.DrainProv())",
         "        {",
         `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO provenance_records (trace_id, snapshot_id, target_type, field, inputs, computed_value, at, correlation_id, scope_id, actor_id, parent_id) VALUES (@trace_id, @snapshot_id, @target_type, @field, CAST(@inputs AS jsonb), CAST(@computed_value AS jsonb), @at, @correlation_id, @scope_id, @actor_id, @parent_id)", new { trace_id = Guid.NewGuid().ToString(), snapshot_id = __lin.SnapshotId, target_type = __lin.Target.Type, field = __lin.Target.Field, inputs = System.Text.Json.JsonSerializer.Serialize(__lin.Inputs, ProvJson.Options), computed_value = System.Text.Json.JsonSerializer.Serialize(__lin.ComputedValue, ProvJson.Options), at = DateTime.UtcNow, correlation_id = RequestContext.Current?.CorrelationId, scope_id = RequestContext.Current?.ScopeId, actor_id = RequestContext.Current?.ActorId, parent_id = RequestContext.Current?.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
+        "        }",
+      ]
+    : [];
+
+  // Audit flush (audit-and-logging.md): drain the request-scoped IAuditWriter
+  // buffer the command handler staged onto, and append one `audit_records` row
+  // per staged record on the SAME transaction as the aggregate upsert — the
+  // Dapper mirror of the EF writer's `_db.AuditRecords.Add` + shared
+  // SaveChangesAsync.  `before`/`after` are already-serialized JSON strings
+  // (the handler serializes the wire snapshots), so they CAST to jsonb.
+  const auditFlushLines = aggHasAuditedTarget(agg)
+    ? [
+        "        foreach (var __ar in _audit.Drain())",
+        "        {",
+        `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO audit_records (audit_id, operation_id, action, target_type, target_id, actor, before, after, at, status, correlation_id, scope_id, parent_id) VALUES (@audit_id, @operation_id, @action, @target_type, @target_id, CAST(@actor AS jsonb), CAST(@before AS jsonb), CAST(@after AS jsonb), @at, @status, @correlation_id, @scope_id, @parent_id)", new { audit_id = __ar.AuditId, operation_id = __ar.OperationId, action = __ar.Action, target_type = __ar.TargetType, target_id = __ar.TargetId, actor = __ar.Actor, before = __ar.Before, after = __ar.After, at = __ar.At, status = __ar.Status, correlation_id = __ar.CorrelationId, scope_id = __ar.ScopeId, parent_id = __ar.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
         "        }",
       ]
     : [];
@@ -1290,9 +1311,15 @@ export function renderDapperRepository(
         `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
         `    {`,
         `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
+        delTx
+          ? "        await using var __tx = await conn.BeginTransactionAsync(cancellationToken);"
+          : null,
         ...assocDeleteLines,
         ...containDeleteLines,
-        `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+        `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
+        // Drain the staged `destroy audited` row onto the same transaction.
+        ...(delTx ? auditFlushLines : []),
+        delTx ? "        await __tx.CommitAsync(cancellationToken);" : null,
         `    }`,
       )
     : "";
@@ -1314,6 +1341,8 @@ export function renderDapperRepository(
       `using ${ns}.Domain.Common;`,
       // `User currentUser` param on a `currentUser`-referencing find.
       anyFindUsesUser ? `using ${ns}.Auth;` : null,
+      // IAuditWriter — the staging port drained by SaveAsync.
+      auditFlushLines.length > 0 ? `using ${ns}.Application.Common;` : null,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
@@ -1321,16 +1350,22 @@ export function renderDapperRepository(
       "{",
       "    private readonly NpgsqlDataSource _db;",
       "    private readonly IDomainEventDispatcher _events;",
+      // The request-scoped audit buffer the handler staged onto; drained inside
+      // SaveAsync's transaction (see `auditFlushLines`).
+      auditFlushLines.length > 0 ? "    private readonly IAuditWriter _audit;" : null,
       // shape: embedded: the STJ options the containment-column (de)serialisation
       // uses (Web defaults — matching the document path + the entity snapshots).
       embedded
         ? "    private static readonly System.Text.Json.JsonSerializerOptions __json =\n        new(System.Text.Json.JsonSerializerDefaults.Web);"
         : null,
       "",
-      `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events)`,
+      auditFlushLines.length > 0
+        ? `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events, IAuditWriter audit)`
+        : `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events)`,
       "    {",
       "        _db = db;",
       "        _events = events;",
+      auditFlushLines.length > 0 ? "        _audit = audit;" : null,
       "    }",
       "",
       "    private sealed class Row",
@@ -1412,6 +1447,7 @@ export function renderDapperRepository(
       ...assocSaveLines,
       ...containSaveLines,
       ...provFlushLines,
+      ...auditFlushLines,
       // Commit the write set atomically before events fire — a rolled-back save
       // (concurrency conflict throw, mid-replace crash) must not dispatch events.
       "        await __tx.CommitAsync(cancellationToken);",
@@ -1928,7 +1964,40 @@ export function renderDapperSchema(
         ].join("\n"),
       ]
     : [];
-  const ddl = [...stateTables, ...eventLogTables, ...provenanceTable, ...extraTables].join("\n\n");
+  // The append-only audit table (audit-and-logging.md) — the Dapper sibling of
+  // the EF AuditRecordConfiguration, column-for-column the shape
+  // `migrations-builder` derives.  `before`/`after` are NULLABLE: a create has
+  // no before-state and a destroy has no after-state.
+  const auditTable = aggs.some(aggHasAuditedTarget)
+    ? [
+        [
+          "CREATE TABLE IF NOT EXISTS audit_records (",
+          "    audit_id text primary key,",
+          "    operation_id text not null,",
+          "    action text not null,",
+          "    target_type text not null,",
+          "    target_id text not null,",
+          "    actor jsonb,",
+          "    before jsonb,",
+          "    after jsonb,",
+          "    at timestamptz not null,",
+          "    status text not null,",
+          "    correlation_id text,",
+          "    scope_id text,",
+          "    parent_id text",
+          ");",
+          "CREATE INDEX IF NOT EXISTS audit_records_target_idx ON audit_records (target_type, target_id);",
+          "CREATE INDEX IF NOT EXISTS audit_records_correlation_idx ON audit_records (correlation_id);",
+        ].join("\n"),
+      ]
+    : [];
+  const ddl = [
+    ...stateTables,
+    ...eventLogTables,
+    ...provenanceTable,
+    ...auditTable,
+    ...extraTables,
+  ].join("\n\n");
   return (
     lines(
       "// Auto-generated.  Dapper schema bootstrap (persistence: dapper).",
