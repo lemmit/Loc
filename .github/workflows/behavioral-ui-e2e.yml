@@ -100,3 +100,12 @@ jobs:
       - name: Run behavioral UI tier (Playwright round-trips gate)
         working-directory: test/behavioral
         run: node run-ui.mjs
+
+      # The hand-written-page half of paged-by-default: a bare `Table` over
+      # `.all` is auto-upgraded to server paging, so 1000 seeded rows must be
+      # NAVIGABLE in a real browser — `Next` reaching rows the first window
+      # never contained, and a column header sorting on the server.  Emitted
+      # text can only pin the rewrite's shape; this proves it works.
+      - name: Run paged-table UI acceptance (1000-row seed, browser)
+        working-directory: test/behavioral
+        run: node paged-ui.mjs

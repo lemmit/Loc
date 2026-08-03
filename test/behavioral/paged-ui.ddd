@@ -1,0 +1,57 @@
+// The hand-written paged-table acceptance fixture.
+//
+// `WidgetList` below is the SIMPLEST spelling of a list page — a bare
+// `Table` over `.all`, with no `paged:`, no `page:`, no state block.  That
+// spelling used to render the backend's default first window (20 rows) with
+// no pager, so rows 21+ were unreachable and nothing on screen said so; it
+// is auto-upgraded to server paging at the macro layer instead.
+//
+// `paged-ui.mjs` boots this on PGlite, seeds 1000 widgets over the real HTTP
+// surface, and drives the built React bundle in a real browser: the pager
+// must navigate to rows the first window never contained.  Seeding runs
+// `name` OPPOSITE to `rank` (name asc == rank desc) so a sort that reached
+// the server on the wrong column is caught rather than masked by a
+// coincidentally-shared order.
+
+system PagedUiSystem {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Widget with crudish {
+        name: string
+        rank: int
+      }
+    }
+  }
+
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  ui Web {
+    api C: CatalogApi
+    page WidgetList {
+      route: "/widgets"
+      body: QueryView {
+        of: C.Widget.all,
+        data: rows => Table { rows: rows,
+          Column { "Name", o => Text { o.name } },
+          Column { "Rank", o => Text { o.rank } }
+        }
+      }
+    }
+  }
+
+  deployable api {
+    platform: node
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 3000
+  }
+  deployable web {
+    platform: static
+    targets: api
+    ui: Web { C: api }
+    port: 3001
+  }
+}
