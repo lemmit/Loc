@@ -48,7 +48,10 @@ system Shop {
     const files = await generateSystemFiles(source);
     const cs = csFor(files, "order");
     expect(cs).toContain("@all_fields [:label, :created_at, :version]");
-    expect(cs).toContain("@required_fields [:label, :created_at, :version]");
+    // `version` is `int token = 1` — an explicit `= default` makes it OMITTABLE
+    // create input on every backend, so it is cast but not required.  `label`
+    // and `created_at` carry no default and stay required.
+    expect(cs).toContain("@required_fields [:label, :created_at]");
     expect(cs).toContain("|> cast(attrs, @all_fields)");
   });
 

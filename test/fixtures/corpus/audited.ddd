@@ -27,7 +27,7 @@ system AuditingSystem {
       aggregate Order audited {
         reference: string
         quantity: int
-        status: int
+        status: int = 0
         create(reference: string, quantity: int) {
           reference := reference
           quantity := quantity
@@ -78,15 +78,16 @@ system AuditingSystem {
   // read endpoint yet), so the runtime assertion here is that an audited
   // command still behaves exactly like an unaudited one — the audit write must
   // not change the response, and must not fail the request.
-  // NOTE — `status: int = 0` is passed EXPLICITLY below rather than relying on
-  // the default to make it optional input. A `= default` field is optional on
-  // node (`z.coerce.number().int().default(0)`) but the Elixir changeset still
-  // `validate_required`s it, so omitting it 422s there ("can't be blank") while
-  // passing everywhere else. That cross-backend divergence is a real parity gap
-  // in how `= default` is treated at the wire boundary — it is NOT specific to
-  // audit, and it is deliberately not worked around in the compiler here.
+  // NOTE — `status: int = 0` is deliberately OMITTED from the create call
+  // below: a `= default` field is optional create input, and the server
+  // supplies the value. That used to hold on node/dotnet/java/python and fail
+  // on Elixir, whose Ecto changeset still `validate_required`d the field and so
+  // answered 422 ("can't be blank") to a body every other backend accepted.
+  // Keeping the omission here makes this fixture the RUNTIME gate for that
+  // parity rule on every backend's behavioral leg (the structural gate is
+  // test/conformance/create-required-parity.test.ts).
   test e2e "an audited command behaves like any other" against d {
-    let o = api.orders.create({ reference: "R1", quantity: 2, status: 0 })
+    let o = api.orders.create({ reference: "R1", quantity: 2 })
     api.orders.cancel(o, { reason: 3 })
     let read = api.orders.getById(o)
     expect(read.reference).toBe("R1")

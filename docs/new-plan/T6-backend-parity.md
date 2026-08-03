@@ -141,7 +141,7 @@ Neither is reachable from a shared behavioural system today, which is why the pe
 
 Sources: found 2026-07-29 while landing RS-15 (#2300). Related: M-T6.20 (the `raise`-path half of the same protocol), M-T5.20 (routing the ladder through `resolveErrorStatus`).
 
-## M-T6.x — `= default` fields are optional input on node, still required on elixir — `open` · **S** · P2
+## M-T6.x — `= default` fields are optional input on node, still required on elixir — `landed` · **S** · P2
 
 Surfaced 2026-08-01 by the `audited` corpus fixture in the behavioral tier, not
 by anything audit-specific.
@@ -163,6 +163,43 @@ defaulted field must be dropped from the required set.
 Check the other three backends (python/java/dotnet) before closing: only node
 and elixir were observed here, so the split may be wider than 1-vs-1.
 
-Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
-explicitly, with a comment pointing here — deliberately NOT worked around in the
-compiler.
+**Landed.** The split was **4-vs-1**, not 1-vs-1: python (`status: int = 0`),
+java (`RequiredSet("CreateThingRequest", ["name"])`) and dotnet
+(`int Status = 0`) already agreed with node. Elixir was the sole outlier —
+`changeset-emit.ts` derived its required set from `!f.optional`, ignoring both
+the explicit `= default` and the bare-`bool` implicit default, while the IR had
+already reified the rule as `CreateInputFieldIR.requiredInput`. Fixed by
+consuming it (`isRequiredCreateInput`, now exported alongside a new
+`isRequiredUpdateInput` for the PATCH seam, where an explicit default stays
+required and only the bool relaxation applies — matching the other four).
+
+Two findings worth keeping:
+
+- **The reported repro under-stated the fix.** `status: int = 0` alone did NOT
+  422: a *literal* default is also emitted as the Ecto schema `default:`, so
+  `%Agg{}` already carried it and `validate_required` passed by accident. The
+  shapes that actually failed were the ones no schema default covers — a bare
+  `bool` and an **enum-valued** default (`renderEctoDefault` returns null for
+  both). Dropping them from `validate_required` is only half the fix; the
+  column is `null: false`, so the changeset now also applies the declared value
+  via a `__default/3` step after `cast` (which additionally covers an explicit
+  `null` in the body). Server-sourced defaults (`now()`/`currentUser.*`) keep
+  their existing controller-side params coalesce.
+- **Why every gate was blind.** Compile tier: both backends build. Wire-golden
+  differential: the request 422s before producing a comparable response. And
+  the OpenAPI parity gate too — Elixir's own *spec* emitter already used the
+  correct rule (`wireCreateDefault`), so the disagreement was between Elixir's
+  published contract and Elixir's runtime enforcement, which no spec-vs-spec
+  diff can see. New gate `test/conformance/create-required-parity.test.ts`
+  therefore asserts each backend's **enforcement** surface (changeset / DTO /
+  validator) against the canonical `requiredInput` set — verified to fail on
+  the pre-fix emitter. `test/fixtures/corpus/audited.ddd` now OMITS the
+  defaulted field from its `test e2e` create call, making the behavioral legs
+  the runtime half of the same gate.
+
+Not addressed (noted, out of scope): the emitted `change_<create>/1` helper
+derives its required set from the create action's *params*, which for a
+`crudish` aggregate do not carry the field-level `default` — so it still
+over-requires. It has no caller in generated code (every write path goes
+through `base_changeset`); threading defaults onto crudish create params would
+ripple through every param-driven surface on all five backends.
