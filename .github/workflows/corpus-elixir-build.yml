@@ -128,6 +128,21 @@ jobs:
 
       # `npm ci` runs the `prepare` lifecycle (langium:generate + build); the
       # toolchain compiles before the test's `generate system` step needs it.
+      # Docker Hub pulls flake: a registry timeout (Client.Timeout on
+      # registry-1.docker.io) killed an otherwise-green cell on #2380 with
+      # exit 125 before any compile ran. Pre-pull with backoff so a transient
+      # hiccup costs seconds, not the cell. The tag is grepped from the test
+      # file — the single source of truth — so a version bump cannot drift.
+      - name: Pre-pull the hexpm/elixir image (retries)
+        run: |
+          IMG=$(grep -ohE 'hexpm/elixir:[A-Za-z0-9._-]+' test/e2e/corpus-elixir-build.test.ts | head -1)
+          echo "pre-pulling $IMG"
+          for i in 1 2 3 4; do
+            docker pull "$IMG" && exit 0
+            echo "pull failed (attempt $i), retrying in $((i*10))s"; sleep $((i*10))
+          done
+          exit 1
+
       - name: Install Loom toolchain
         run: npm ci
 
