@@ -88,6 +88,26 @@ export function buildProjectionsApiModule(
   }
   lines.push("");
 
+  // Enum lookup across the served contexts: a projection row's enum field
+  // renders INLINE as `z.enum([...])` — the same self-contained choice the
+  // backend's `zodForRow` makes — because the `<Enum>Schema` consts live in the
+  // per-AGGREGATE api modules and this module has no ownership rule to import
+  // them by (an enum may back several aggregates' modules, or none).
+  const enumValues = new Map<string, string[]>();
+  for (const ctx of contexts) for (const e of ctx.enums ?? []) enumValues.set(e.name, e.values);
+  const zodForProjField = (
+    t: import("../../ir/types/loom-ir.js").TypeIR,
+    optional: boolean,
+  ): string => {
+    const inner = t.kind === "optional" ? t.inner : t;
+    if (inner.kind === "enum") {
+      const values = enumValues.get(inner.name) ?? [];
+      const lit = `z.enum([${values.map((v) => JSON.stringify(v)).join(", ")}])`;
+      return optional || t.kind === "optional" ? `${lit}.nullish()` : lit;
+    }
+    return zodForResponse(t, optional);
+  };
+
   for (const { proj } of projections) {
     const T = upperFirst(proj.name);
     const slug = snake(proj.name);
@@ -99,7 +119,7 @@ export function buildProjectionsApiModule(
     // `wireShape`, so the two can't drift.
     lines.push(`export const ${T}${grouped ? "Row" : "Response"} = z.object({`);
     for (const f of proj.wireShape ?? []) {
-      lines.push(`  ${f.name}: ${zodForResponse(f.type, !!f.optional)},`);
+      lines.push(`  ${f.name}: ${zodForProjField(f.type, !!f.optional)},`);
     }
     lines.push(`});`);
     if (grouped) lines.push(`export const ${T}Response = z.array(${T}Row);`);

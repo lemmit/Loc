@@ -82,6 +82,11 @@ describe("react grouped projection client", () => {
     expect(m).toContain("orders: z.number().int(),");
     expect(m).toContain("revenue: moneySchema,");
     expect(m).toContain("export const SalesByStatusResponse = z.array(SalesByStatusRow);");
+    // The enum KEY renders INLINE (`z.enum([...])`), never as a reference to a
+    // per-aggregate `<Enum>Schema` const this module doesn't import — the
+    // unimported-reference form was a real TS2304 in the generated app.
+    expect(m).toContain('status: z.enum(["Draft", "Confirmed"])');
+    expect(m).not.toContain("OrderStatusSchema");
   });
 
   it("hook hits the projection route and parses the array", async () => {
