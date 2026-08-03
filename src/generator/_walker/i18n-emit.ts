@@ -73,6 +73,25 @@ function translateCall(
   values?: ReadonlyArray<{ name: string; expr: string }>,
 ): string {
   addImport(ctx, I18N_MODULE, "t");
+  return translateExpr(ctx, key, message, values);
+}
+
+/** {@link translateCall} WITHOUT the import registration — the seam application
+ *  alone.
+ *
+ *  Split out for pack chrome that lands in a HOISTED CHILD file: on Vue, Svelte
+ *  and Angular a `DataGrid`'s markup is emitted into a separate component, so
+ *  the page's import map is the wrong place for its `t` and the child's own
+ *  renderer places the import (see `localizedChromeText` below).  Everything
+ *  else — the seam, the default JS spelling, the argument order — is shared, so
+ *  a chrome call and an authored-string call are spelled identically on every
+ *  frontend. */
+function translateExpr(
+  ctx: WalkContext,
+  key: string,
+  message: string,
+  values?: ReadonlyArray<{ name: string; expr: string }>,
+): string {
   if (ctx.target.renderTranslate) return ctx.target.renderTranslate({ key, message, values });
   const args = [JSON.stringify(key), JSON.stringify(message)];
   if (values) args.push(`{ ${values.map((v) => `${v.name}: ${v.expr}`).join(", ")} }`);
@@ -340,11 +359,21 @@ export const CHROME_T_CALL = 't("chrome.';
 export function localizedChromeText(ctx: WalkContext, name: string): string {
   const english = chromeMessage(name);
   if (ctx.i18nPrefix) {
-    return ctx.target.renderInterpolation(
-      `t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})`,
-    );
+    return ctx.target.renderInterpolation(translateExpr(ctx, chromeKey(name), english));
   }
   return ctx.target.escapeText(english);
+}
+
+/** The raw translation-call EXPRESSION for a pack-chrome string, unwrapped — for
+ *  a pack that splices it into its own expression language rather than into
+ *  markup (Feliz's `prop.text (…)`, Flutter's `Text(…)`).  Returns the plain
+ *  source-language literal, spelled by `renderStringLiteral`, when i18n is off.
+ *
+ *  Registers no import — see the section note above. */
+export function localizedChromeValue(ctx: WalkContext, name: string): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) return translateExpr(ctx, chromeKey(name), english);
+  return ctx.target.renderStringLiteral?.(english) ?? JSON.stringify(english);
 }
 
 /** A pack-chrome string in an ATTRIBUTE position (a grid's per-column
@@ -366,10 +395,7 @@ export function localizedChromeAttr(ctx: WalkContext, attrName: string, name: st
   const english = chromeMessage(name);
   if (ctx.i18nPrefix) {
     return ctx.target
-      .renderAttrBinding(
-        attrName,
-        `t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})`,
-      )
+      .renderAttrBinding(attrName, translateExpr(ctx, chromeKey(name), english))
       .trimStart();
   }
   return `${attrName}="${escapeHtmlAttr(english)}"`;

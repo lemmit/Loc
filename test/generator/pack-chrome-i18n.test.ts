@@ -20,7 +20,9 @@ import { describe, expect, it } from "vitest";
 import { APP_SHELL_CHROME, CHROME_MESSAGES } from "../../src/generator/_walker/i18n-chrome.js";
 import { generateSystemFiles } from "../_helpers/index.js";
 
-/** A one-page system on `<platform>`/`<design>` whose body is `<body>`. */
+/** A one-page system on `<platform>`/`<design>` whose body is `<body>`.
+ *  An empty `design` omits the clause entirely — Feliz hosts its own framework
+ *  and has no `.hbs` pack, so `design:` doesn't apply to it. */
 const SYSTEM = (platform: string, design: string, body: string) => `
   system Shop {
     subdomain Sales {
@@ -43,7 +45,7 @@ const SYSTEM = (platform: string, design: string, body: string) => `
       serves: SalesApi
       port: 3000
     }
-    deployable web { platform: ${platform} targets: api ui: Web { Sales: api } design: ${design} port: 3100 }
+    deployable web { platform: ${platform} targets: api ui: Web { Sales: api }${design === "" ? "" : ` design: ${design}`} port: 3100 }
   }
 `;
 
@@ -378,6 +380,22 @@ describe("pack-chrome i18n — DataGrid pager", () => {
     expect(child).toContain("protected readonly t = t;");
     expect(files.has("web/src/lib/i18n.ts")).toBe(true);
     expect(catalogOf(files)["chrome.filter"]).toBe("Filter");
+  });
+
+  it("Feliz: the same chrome, spelled in F# through the renderTranslate seam", async () => {
+    // Feliz has no `.hbs` pack and no import map — it renders the grid from its
+    // own procedural pack into one `App.fs`.  So the chrome reaches it as a bare
+    // EXPRESSION (`localizedChromeValue`) rather than a markup fragment, and the
+    // call is spelled F# by the `renderTranslate` seam (#2370) instead of the JS
+    // `t(key, default)`.  Same keys, same catalog — which is the point: a Feliz
+    // grid must not carry catalog entries nothing emits.
+    const files = await generateSystemFiles(SYSTEM("feliz", "", GRID_BODY(true)));
+    const app = gridChildOf(files, "App.fs");
+    expect(app).toContain(`prop.text (I18n.t "chrome.previous" "Previous")`);
+    expect(app).toContain(`prop.text (I18n.t "chrome.next" "Next")`);
+    expect(app).toContain(`prop.placeholder (I18n.t "chrome.filter" "Filter")`);
+    // The F# runtime's own catalog carries them, so no key is unresolvable.
+    expect(app).toContain(`"chrome.previous", "Previous"`);
   });
 
   it("contributes chrome.filter ONLY when a column is filterable", async () => {

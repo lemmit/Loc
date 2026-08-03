@@ -40,7 +40,7 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 
-import { localizedChromeAttr, localizedChromeText } from "../i18n-emit.js";
+import { localizedChromeAttr, localizedChromeText, localizedChromeValue } from "../i18n-emit.js";
 import {
   boolNamed,
   namedArgValue,
@@ -143,6 +143,15 @@ export function emitDataGrid(
           prevLabel: localizedChromeText(ctx, "previous"),
           nextLabel: localizedChromeText(ctx, "next"),
           filterPlaceholderAttr: localizedChromeAttr(ctx, "placeholder", "filter"),
+          // The same three strings as bare EXPRESSIONS, for a pack that splices
+          // them into its own language rather than into markup — Feliz's
+          // `prop.text (…)` takes an F# value, not an HTML fragment.  Same split
+          // `localizedAriaLabelAttr` vs `localizedAriaLabelValue` already makes
+          // (D-I18N-ATTR); both forms come from one `chromeMessage` lookup and
+          // one `renderTranslate` seam, so the two spellings can't disagree.
+          prevLabelValue: localizedChromeValue(ctx, "previous"),
+          nextLabelValue: localizedChromeValue(ctx, "next"),
+          filterPlaceholderValue: localizedChromeValue(ctx, "filter"),
           // Every target-specific key a pack may reference is defaulted here,
           // not just supplied by the target that uses it.  `emitPageObjectsForUi`
           // drives the REACT tsx walker over whichever pack is active — Vue and
