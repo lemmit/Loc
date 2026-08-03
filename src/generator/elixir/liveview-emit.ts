@@ -49,6 +49,7 @@ import {
   type UploadBinding,
   walkBodyToHeex,
 } from "./heex-walker.js";
+import { heexI18nEnabled } from "./i18n.js";
 import { buildPlaywrightPageObject } from "./page-objects-emit.js";
 import { exprUsesBind, REALTIME_TOPIC, renderMessageExprElixir } from "./realtime-liveview.js";
 import { renderStoreModule } from "./store-emit.js";
@@ -90,6 +91,13 @@ export function emitLiveViewPages(args: {
   if (!deployable.uiName) return { files: out, routes };
   const ui = sys.uis.find((u) => u.name === deployable.uiName);
   if (!ui) return { files: out, routes };
+
+  // i18n (M-T1.11 Phoenix runtime): when this ui has extractable user-visible
+  // strings, every literal text slot emits `pgettext(<catalog key>, <English>)`
+  // and the app ships a Gettext backend + `priv/gettext/**` built from the SAME
+  // catalog the other five frontends' runtimes read.  Empty catalog ⇒ no
+  // prefix, no backend, no dep — byte-identical to pre-i18n.
+  const i18nEnabled = heexI18nEnabled(ui);
 
   // `<App>Web` module prefix — used for the store modules
   // (`<App>Web.Stores.<Store>`) + the per-page `alias`.
@@ -176,6 +184,7 @@ export function emitLiveViewPages(args: {
       partContextModule,
       contextModuleByAggName,
       contextByAggName,
+      i18nEnabled ? `component.${c.name}` : undefined,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
@@ -213,6 +222,7 @@ export function emitLiveViewPages(args: {
       partContextModule,
       componentInfo,
       authEnabled,
+      i18nEnabled,
     });
     out.set(filePath, source);
     sourcemap?.file(filePath, source, page.origin, pageConstructId(ui.name, page));
@@ -267,6 +277,7 @@ export function emitLiveViewPages(args: {
         partContextModule,
         contextModuleByAggName,
         authEnabled,
+        i18nEnabled,
       }),
     );
   }
@@ -275,6 +286,10 @@ export function emitLiveViewPages(args: {
 }
 
 interface RenderArgs {
+  /** True when the ui has extractable user-visible strings (M-T1.11) — the
+   *  page walk then keys every literal text slot to the shared catalog and
+   *  emits `pgettext(<key>, <English>)`.  False ⇒ no prefix, byte-identical. */
+  i18nEnabled?: boolean;
   page: PageIR;
   liveModule: string;
   appName: string;
@@ -465,6 +480,10 @@ function renderLiveView(a: RenderArgs): string {
     partContextModule,
     contextModuleByAggName,
     a.bcByAggregate,
+    // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
+    // role-scoped `page.name`, not the router emit name); undefined when the ui
+    // has no extractable strings (byte-identical to pre-i18n).
+    a.i18nEnabled ? `page.${page.name}` : undefined,
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
@@ -1162,6 +1181,8 @@ function renderUiComponents(args: {
   /** True when the host deployable runs `auth: required` — drives
    *  currentUser action-button gating inside component bodies. */
   authEnabled: boolean;
+  /** True when the ui has extractable user-visible strings (M-T1.11). */
+  i18nEnabled?: boolean;
 }): string {
   const {
     ui,
@@ -1196,6 +1217,7 @@ function renderUiComponents(args: {
         partContextModule,
         contextModuleByAggName,
         args.bcByAggregate,
+        args.i18nEnabled ? `component.${c.name}` : undefined,
       );
       const attrLines = c.params
         .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)

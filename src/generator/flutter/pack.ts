@@ -68,16 +68,26 @@ function unescapeHtmlEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** The accessible name carried by a walker `a11yAttr` fragment
- *  (` role="toolbar" aria-label="Actions"`), Dart-string-ready.  Flutter's
- *  markup is not HTML, so it can't splice the fragment; it parses the
- *  `aria-label` back out (the same move `testidKey` makes for `testidAttr`)
- *  and re-expresses it as a `Semantics(label:)`.  Defaults to "Actions" (the
- *  `Toolbar` contract's default) when no name is present. */
-function ariaLabelFrom(c: Ctx, fallback: string): string {
+/** The accessible name carried by a walker `a11yAttr` fragment, as a Dart
+ *  EXPRESSION.  Flutter's markup is not HTML, so it can't splice the fragment;
+ *  it parses the name back out (the same move `testidKey` makes for
+ *  `testidAttr`) and re-expresses it as a `Semantics(label:)`.  Two shapes
+ *  arrive, and both must be handled:
+ *
+ *   - the static ` role="toolbar" aria-label="Actions"` fragment → a quoted
+ *     Dart literal (byte-identical to the pre-i18n emission);
+ *   - the BOUND ` ariaLabel: t('<key>', 'Actions')` form the walker produces
+ *     under i18n (M-T1.11) via `renderAttrBinding` → the expression verbatim,
+ *     so the accessible name is translated rather than silently lost to the
+ *     fallback.
+ *
+ *  Defaults to `fallback` ("Actions" for `Toolbar`) when no name is present. */
+function ariaLabelExpr(c: Ctx, fallback: string): string {
   const raw = String(c.a11yAttr ?? "");
+  const bound = raw.match(/ariaLabel:\s*(.+)$/);
+  if (bound) return bound[1]!.trim();
   const m = raw.match(/aria-label="([^"]*)"/);
-  return dartLit(unescapeHtmlEntities(m ? m[1] : fallback));
+  return `'${dartLit(unescapeHtmlEntities(m ? m[1] : fallback))}'`;
 }
 
 /** Apply a text style to a walked text value that may arrive EITHER as raw
@@ -209,7 +219,7 @@ function primitivePaper(c: Ctx): string {
 function primitiveToolbar(c: Ctx): string {
   if (!c.hasChildren) return "const SizedBox.shrink()";
   const row = `Row(${arg(testidKey(c))}mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.center, children: ${childrenList(c)})`;
-  return `Semantics(container: true, label: '${ariaLabelFrom(c, "Actions")}', child: ${row})`;
+  return `Semantics(container: true, label: ${ariaLabelExpr(c, "Actions")}, child: ${row})`;
 }
 
 /** Breadcrumbs — a nav trail (a horizontal `Wrap` of links/text). */
@@ -335,12 +345,16 @@ function primitiveKeyValueRow(c: Ctx): string {
 
 /** Anchor(label, to?) — a navigation link (or plain text when `to:` is absent). */
 function primitiveAnchor(c: Ctx): string {
-  const label = String(c.label ?? "");
-  if (!c.hasTo) return `Text('${dartStr(label)}')`;
+  // The label is a user-visible slot: raw text normally, an already-rendered
+  // `Text(t(…))` widget under i18n (M-T1.11).  `asText` takes either form —
+  // splicing the widget into a Dart string literal would render the whole call
+  // as visible text.
+  const label = asText(String(c.label ?? ""));
+  if (!c.hasTo) return label;
   const to = String(c.to ?? '"/"');
   const lit = to.match(/^"(.*)"$/);
   const route = lit ? `'${dartStr(lit[1])}'` : to;
-  return `TextButton(onPressed: () => Navigator.of(context).pushNamed(${route}), child: Text('${dartStr(label)}'))`;
+  return `TextButton(onPressed: () => Navigator.of(context).pushNamed(${route}), child: ${label})`;
 }
 
 /** IdLink — a table-cell link from a row id to its detail route. */
@@ -517,9 +531,14 @@ function primitiveButton(c: Ctx): string {
   const label = String(c.label ?? "").trim();
   const child = asWidget(label);
   const onPressed = c.hasOnClick ? String(c.onClick) : "null";
-  const ariaLabel = String(c.ariaLabel ?? "").trim();
+  // The accessible name (`label:`) rides the walker's `a11yAttr` fragment, so it
+  // is translated under i18n (M-T1.11) and a plain quoted literal otherwise —
+  // byte-identical when i18n is off.  Empty fragment → no `Semantics` wrapper.
+  const ariaLabel = String(c.a11yAttr ?? "").trim() === "" ? "" : ariaLabelExpr(c, "");
   const btn = `ElevatedButton(${arg(testidKey(c))}onPressed: ${onPressed}, child: ${child})`;
-  return ariaLabel !== "" ? `Semantics(label: '${dartStr(ariaLabel)}', child: ${btn})` : btn;
+  return ariaLabel !== "" && ariaLabel !== "''"
+    ? `Semantics(label: ${ariaLabel}, child: ${btn})`
+    : btn;
 }
 
 // ---------------------------------------------------------------------------

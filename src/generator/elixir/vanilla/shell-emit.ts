@@ -11,8 +11,15 @@
 // Hono, .NET, Java, and Python backends.
 // ---------------------------------------------------------------------------
 
+import type { UiIR } from "../../../ir/types/loom-ir.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import type { ApiRoute } from "../api-emit.js";
+import {
+  GETTEXT_DEP,
+  GETTEXT_DOMAIN,
+  renderGettextBackend,
+  renderGettextCatalog,
+} from "../i18n.js";
 import type { LiveRoute } from "../liveview-emit.js";
 import {
   renderApplication,
@@ -61,8 +68,14 @@ export function emitVanillaShellFiles(
   // OIDC JWKS strategy child(ren) — started BEFORE the Endpoint so a
   // `first_fetch_sync` fetch warms the signer cache before `/health` serves.
   preEndpointChildren: string[] = [],
+  /** The mounted ui (M-T1.11) — present only when it has extractable
+   *  user-visible strings, in which case the Gettext backend + `priv/gettext`
+   *  catalog are emitted and the `gettext` dep + `html_helpers` import ride
+   *  along.  Undefined ⇒ every emitted file is byte-identical to pre-i18n. */
+  i18nUi: UiIR | undefined = undefined,
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
+  const i18nEnabled = i18nUi !== undefined;
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
   // application starts — even for the SMTP adapter, which sends through
   // gen_smtp and needs no HTTP client.  The smtp mailer pulls `swoosh` +
@@ -72,7 +85,14 @@ export function emitVanillaShellFiles(
   const swooshSmtpOnly = "swoosh" in extraHexDeps && !("hackney" in extraHexDeps);
   out.set(
     "mix.exs",
-    renderVanillaMixExs(appName, appModule, extraHexDeps, authEnabled && oidc, hasLiveView),
+    renderVanillaMixExs(
+      appName,
+      appModule,
+      extraHexDeps,
+      authEnabled && oidc,
+      hasLiveView,
+      i18nEnabled,
+    ),
   );
   out.set(".formatter.exs", renderVanillaFormatterExs());
   // Application boot — shared renderer emits the catalog
@@ -100,7 +120,10 @@ export function emitVanillaShellFiles(
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
   // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
-  out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule, hasLiveView));
+  out.set(
+    `lib/${appName}_web.ex`,
+    renderVanillaWebModule(appName, appModule, hasLiveView, i18nEnabled),
+  );
   out.set(
     `lib/${appName}_web/endpoint.ex`,
     renderVanillaEndpoint(appName, appModule, hasLiveView, hasEmbeddedSpa),
@@ -128,9 +151,22 @@ export function emitVanillaShellFiles(
     out.set(`lib/${appName}_web/components/layouts/root.html.heex`, renderRootLayout(appName));
     out.set(
       `lib/${appName}_web/components/layouts/app.html.heex`,
-      renderAppLayout(appModule, hasSidebar, authEnabled),
+      renderAppLayout(appModule, hasSidebar, authEnabled, i18nEnabled),
     );
     out.set(`lib/${appName}_web/nav.ex`, renderLiveNav(appModule));
+    // Translation runtime (M-T1.11) — the Gettext backend every `~H` template
+    // calls into, plus the source-language catalog built from the SAME
+    // `buildUiCatalog` the other five frontends' runtimes read.  Only when the
+    // ui actually has extractable strings; otherwise byte-identical (no
+    // module, no `priv/gettext`, no `gettext` dep).
+    if (i18nUi) {
+      out.set(`lib/${appName}_web/gettext.ex`, renderGettextBackend(appName, appModule));
+      out.set(`priv/gettext/${GETTEXT_DOMAIN}.pot`, renderGettextCatalog(i18nUi, "pot"));
+      out.set(
+        `priv/gettext/en/LC_MESSAGES/${GETTEXT_DOMAIN}.po`,
+        renderGettextCatalog(i18nUi, "po"),
+      );
+    }
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(
@@ -157,11 +193,17 @@ function renderVanillaMixExs(
   extraHexDeps: Record<string, string>,
   oidc: boolean,
   hasLiveView: boolean,
+  /** True when the mounted ui has extractable user-visible strings (M-T1.11) —
+   *  adds the `gettext` dep the generated backend + `priv/gettext/**` need.
+   *  False ⇒ the dep list is byte-identical to pre-i18n. */
+  i18nEnabled = false,
 ): string {
   // LiveView dep — only when the deployable mounts a HEEx `ui:`.
   // `phoenix_html` is already in the base set; LiveView adds
   // `phoenix_live_view` (the `~H`/`live` runtime).  Pinned to `~> 1.0`.
   const liveViewDep = hasLiveView ? `,\n      {:phoenix_live_view, "~> 1.0"}` : "";
+  // Translation runtime (M-T1.11) — only when the ui has strings to translate.
+  const gettextDep = i18nEnabled ? `,\n      ${GETTEXT_DEP}` : "";
   // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
   // req) ride alongside the core Phoenix/Ecto set.  Sorted for stable output.
   // Values already include the surrounding `"…"`.
@@ -222,7 +264,7 @@ defmodule ${appModule}.MixProject do
       # is set (config/runtime.exs).
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry, "~> 1.5"},
-      {:opentelemetry_exporter, "~> 1.8"}${liveViewDep}${extraBlock}${oidcDep}
+      {:opentelemetry_exporter, "~> 1.8"}${liveViewDep}${gettextDep}${extraBlock}${oidcDep}
     ]
   end
 
@@ -263,7 +305,15 @@ end
 `;
 }
 
-function renderVanillaWebModule(_appName: string, appModule: string, hasLiveView: boolean): string {
+function renderVanillaWebModule(
+  _appName: string,
+  appModule: string,
+  hasLiveView: boolean,
+  /** True when the ui translates (M-T1.11) — `import <App>Web.Gettext` joins
+   *  `html_helpers` so `pgettext/2` resolves unqualified inside every `~H`
+   *  template.  False ⇒ byte-identical. */
+  i18nEnabled = false,
+): string {
   const webModule = `${appModule}Web`;
   // LiveView spine: a HEEx `ui:` needs the `:live_view` / `:html` /
   // `:component` quotes (each pulls in the `~H` sigil + CoreComponents +
@@ -369,7 +419,14 @@ defmodule ${webModule} do
   defp html_helpers do
     quote do
       import Phoenix.HTML
-      import ${webModule}.CoreComponents
+      import ${webModule}.CoreComponents${
+        // Gettext >= 0.26 SPLIT the backend from the macros: `use Gettext.Backend`
+        // defines the backend module, and a consumer gets `pgettext/2` from
+        // `use Gettext, backend: …` — an `import` of the backend brings in
+        // nothing, which the real compiler reports as `undefined function
+        // pgettext/2` at every call site (M-T1.11).
+        i18nEnabled ? `\n      use Gettext, backend: ${webModule}.Gettext` : ""
+      }
       alias Phoenix.LiveView.JS
       unquote(verified_routes())
     end

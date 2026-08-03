@@ -39,6 +39,7 @@ import {
   operationFormWidgetName,
   workflowFormWidgetName,
 } from "./forms-emit.js";
+import { dartStringLit } from "./i18n.js";
 
 /** True when a value is provably a `string` already, so a `Text(…)` child can
  *  take it without the `.toString()` coercion. */
@@ -556,6 +557,20 @@ export const flutterTarget: WalkerTarget = {
   // A dynamic attribute → a named widget argument (leading space, camelCased
   // name so a hyphenated source attr stays a legal Dart identifier).
   renderAttrBinding: (name: string, jsExpr: string) => ` ${dartIdent(name)}: ${jsExpr}`,
+
+  // A call into the generated Dart translation runtime (M-T1.11).  The JS
+  // frontends' `t(key, default, { name: expr })` is close but not Dart — the
+  // values bag is a typed map literal, and the strings are single-quoted with
+  // Dart's escapes.  The key, the source default and the hole values are shared
+  // verbatim, so the catalog entry is identical on every frontend.
+  renderTranslate: ({ key, message, values }) => {
+    const args = [dartStringLit(key), dartStringLit(message)];
+    if (values && values.length > 0) {
+      const pairs = values.map((v) => `${dartStringLit(v.name)}: ${v.expr}`).join(", ");
+      args.push(`<String, Object>{${pairs}}`);
+    }
+    return `t(${args.join(", ")})`;
+  },
   // A conditional child → a ternary over two widgets (a single child expression,
   // valid anywhere a widget is expected).
   renderConditionalChild: (cond, thenS, elseS, _depth) => `(${cond} ? ${thenS} : ${elseS})`,
