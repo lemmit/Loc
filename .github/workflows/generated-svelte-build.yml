@@ -7,9 +7,9 @@ name: Generated Svelte build
 # generated-react-build.yml — catches generator/pack drift invisible
 # to the IR-level tests.
 #
-# Matrix policy: the svelte example set is small (one feature example
-# × two packs), so every event runs the full Cartesian — no PR slice
-# needed yet.  The list MUST match `svelteBuildExamples` ×
+# Matrix policy: the svelte example set is small (five examples × two
+# packs), so every event runs the full Cartesian — no PR slice needed
+# yet.  The list MUST match `svelteBuildExamples` ×
 # `sveltePacks` in test/e2e/generated-svelte-build.test.ts (pinned by
 # the matrix-sync guard there).
 
@@ -24,6 +24,7 @@ on:
       - 'stacks/**'
       - 'test/e2e/generated-svelte-build.test.ts'
       - 'test/e2e/fixtures/svelte-build/**'
+      - 'web/src/examples/svelte-*.ddd'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -38,6 +39,7 @@ on:
       - 'stacks/**'
       - 'test/e2e/generated-svelte-build.test.ts'
       - 'test/e2e/fixtures/svelte-build/**'
+      - 'web/src/examples/svelte-*.ddd'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -69,7 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: ['examples/svelte-shop.ddd', 'test/e2e/fixtures/svelte-build/auth-ui.ddd', 'web/src/examples/svelte-store-showcase.ddd', 'web/src/examples/svelte-file-upload.ddd']
+        example: ['examples/svelte-shop.ddd', 'test/e2e/fixtures/svelte-build/auth-ui.ddd', 'web/src/examples/svelte-store-showcase.ddd', 'web/src/examples/svelte-file-upload.ddd', 'web/src/examples/svelte-data-grid.ddd']
         pack: ['shadcnSvelte@v1', 'flowbite@v1']
     timeout-minutes: 10
     name: ${{ matrix.example }} × ${{ matrix.pack }}
