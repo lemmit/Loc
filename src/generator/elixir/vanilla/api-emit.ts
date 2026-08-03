@@ -88,8 +88,14 @@ export interface VanillaApiEmitResult {
  *  with no CRUD read seam for the reachability guard to ride, and an abstract
  *  inheritance base is a read-only polymorphic reader that is never a command
  *  target — neither can host the endpoint, so neither gets the route.  Both are
- *  HONEST gaps: no route is emitted, rather than one that 500s. */
-function servesHistory(ctx: BoundedContextIR, agg: AggregateIR): boolean {
+ *  HONEST gaps: no route is emitted, rather than one that 500s.
+ *
+ *  Exported and consumed by `openapi-emit.ts` too, for the same reason
+ *  `emitsRestCreate` is: this backend has twice shipped a route its own
+ *  published spec disagreed with (the PATCH-vs-POST `update` path, the unmounted
+ *  `can_<op>` probe), and `conformance-parity` cannot see it because it diffs
+ *  SPECS.  One predicate, both halves. */
+export function servesHistory(ctx: BoundedContextIR, agg: AggregateIR): boolean {
   if (isEventSourced(agg) || isAbstractBase(agg)) return false;
   return aggregateServesHistoryRoute(ctx, agg);
 }

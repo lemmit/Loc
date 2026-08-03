@@ -82,6 +82,26 @@ describe("entity history — elixir route surface", () => {
     expect(mod).toContain("def snapshot_value(");
     expect(mod).not.toContain("Employee");
   });
+
+  it("declares the route in its own OpenAPI, so spec and router agree", async () => {
+    // This backend has twice shipped a route its published spec disagreed with
+    // (the PATCH-vs-POST `update` path, the unmounted `can_<op>` probe), and
+    // `conformance-parity` cannot see it because it diffs SPECS.  The route and
+    // the PathItem ride ONE predicate (`servesHistory`); this pins that.
+    const files = await emit(MASKED);
+    const spec = fileEndingWith(files, "lib/api_web/api/a_spec.ex");
+    expect(spec).toContain('"/employees/{id}/history" => %OpenApiSpex.PathItem{');
+    // Same operationId helper the node port uses — one name across backends.
+    expect(spec).toContain('operationId: "historyEmployee"');
+    // The gate exists, so the 403 it produces is declared.
+    expect(spec).toMatch(/history"[\s\S]*?403 => %OpenApiSpex\.Response\{/);
+    // The body schema is built from the platform-neutral `auditEntryWireShape`,
+    // so the published keys cannot drift from the mapper's.
+    const schema = fileEndingWith(files, "api/schemas/audit_entry.ex");
+    expect(schema).toContain('title: "AuditEntry"');
+    expect(schema).toContain("changes: %OpenApiSpex.Schema{type: :array");
+    expect(schema).toContain("required: [:auditId, :at, :action, :operationId, :changes]");
+  });
 });
 
 describe("entity history — elixir negative authz", () => {
@@ -155,9 +175,11 @@ describe("entity history — aggregates that serve none", () => {
   it("emits no history route, action or module when nothing is audited", async () => {
     const files = await emit(MASKED.replace("aggregate Employee audited", "aggregate Employee"));
     expect([...files.keys()].some((p) => p.endsWith("lib/api/audit/history.ex"))).toBe(false);
+    expect([...files.keys()].some((p) => p.endsWith("api/schemas/audit_entry.ex"))).toBe(false);
     expect(fileEndingWith(files, "lib/api_web/router.ex")).not.toContain("/history");
     expect(fileEndingWith(files, "controllers/employee_controller.ex")).not.toContain(
       "def history(conn",
     );
+    expect(fileEndingWith(files, "lib/api_web/api/a_spec.ex")).not.toContain("/history");
   });
 });

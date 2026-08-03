@@ -114,6 +114,15 @@ defmodule ${appModule}.Audit.History do
   same thing here — a \`create\` row has no \`before\` object at all, and its fields
   must read as \`nil\` rather than raise.
 
+  The snapshot arrives as a plain map: \`before\`/\`after\` bind through the
+  \`Audit.Json\` Ecto type over a \`jsonb\` column, so there is no decode step to
+  perform and the absent lifecycle side is a real \`nil\`, never the string
+  \`"null"\`.  (Every backend binds an object over that column; the column itself
+  comes from one shared definition, \`auditTableShape\`.)  Reading it directly is
+  also why the stored bytes are none of our business — Postgres normalizes jsonb
+  on the way in, so only the derived \`changes\` output is a cross-backend
+  contract.
+
   The snake_case fallback is a wart of THIS backend's write side, recorded
   rather than hidden: an audited \`create\`/\`destroy\` snapshots through the
   controller's wire serializer (camelCase wire keys), while an audited
@@ -136,7 +145,7 @@ defmodule ${appModule}.Audit.History do
   @doc """
   Did this key actually move between the two snapshots?
 
-  Strict term comparison over the two jsonb-decoded values, so a value object or
+  Strict term comparison over the two loaded values, so a value object or
   a containment list compares by CONTENT rather than by identity — which is what
   a reader expects of "changed".  Strict (\`!==\`) so an integer never reads as
   equal to the same-valued float: a type change on the wire IS a change.
