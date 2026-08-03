@@ -24,7 +24,7 @@ import {
   isQueryTimeProjection,
   isShorthandProjection,
 } from "../../types/loom-ir.js";
-import { groupKeyColumn } from "../../util/projection-aggregate.js";
+import { type GroupKey, groupKeyOf, sameGroupKey } from "../../util/projection-aggregate.js";
 import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
@@ -453,31 +453,37 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
       source: at,
     });
   }
-  // Grouping columns must be bare source columns, so every backend can render
-  // them into the SQL GROUP BY (and the deterministic ORDER BY) directly.
-  const keyColumns = new Set<string>();
+  // Grouping keys must be source columns — bare, or wrapped in ONE of the
+  // supported computed-key transforms (`startOfDay()`) — so every backend can
+  // render them into the SQL SELECT, GROUP BY and (deterministic) ORDER BY as
+  // the same expression.  Arithmetic and every other computed shape stays out:
+  // it has no single agreed SQL rendering across the five dialects.
+  const keys: GroupKey[] = [];
   for (const g of q.groupBy) {
-    const col = groupKeyColumn(g);
-    if (col === null) {
+    const key = groupKeyOf(g);
+    if (key === null) {
       diags.push({
         severity: "error",
         code: "loom.projection-groupby-key-not-columnar",
         message:
           `projection '${proj.name}': a 'group by' column must be a plain field of the ` +
-          `'${q.source}' source (e.g. '<alias>.<field>') so it can be grouped in SQL — ` +
-          `a computed grouping key is not supported yet.`,
+          `'${q.source}' source (e.g. '<alias>.<field>'), optionally bucketed by a ` +
+          `supported grouping transform ('<alias>.<datetime field>.startOfDay()'), so it ` +
+          `can be grouped in SQL — other computed grouping keys are not supported yet.`,
         source: at,
       });
-    } else {
-      keyColumns.add(col);
+    } else if (!keys.some((k) => sameGroupKey(k, key))) {
+      keys.push(key);
     }
   }
-  // Each per-row select must project one of the grouping columns — one value
-  // per group.  (An aggregate select is per-group by construction.)
+  // Each per-row select must project one of the grouping keys — one value
+  // per group.  (An aggregate select is per-group by construction.)  The whole
+  // key matches, transform included: `select day = o.placedAt` against
+  // `group by o.placedAt.startOfDay()` is per-row, not per-group.
   for (const s of selects) {
     if (s.aggregate) continue;
-    const col = groupKeyColumn(s.expr);
-    if (col === null || !keyColumns.has(col)) {
+    const key = groupKeyOf(s.expr);
+    if (key === null || !keys.some((k) => sameGroupKey(k, key))) {
       diags.push({
         severity: "error",
         code: "loom.projection-groupby-select-not-grouped",

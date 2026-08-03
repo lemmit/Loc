@@ -13,6 +13,14 @@
 // coercions from the singleton path carry over unchanged (money aggregates
 // ride the wire as strings, count zero-defaults), plus the new key-column
 // mapping (an enum key serialises as its wire string, an id key as a string).
+//
+// Also covers the COMPUTED grouping key — `o.placedAt.startOfDay()`, the daily
+// series bucket.  It is the one key whose SELECT expression is not a bare
+// column, so each backend has to render the SAME truncation in the SELECT, the
+// GROUP BY and the ORDER BY (Postgres matches a grouped select against the
+// GROUP BY expression syntactically), and then decode a value that arrives
+// OUTSIDE the ORM's schema type mapping — the position where four of the five
+// backends needed a fix to agree on `2026-08-01T00:00:00Z`.
 system ProjectionGroupBySys {
   subdomain Sales {
     context Orders {
@@ -24,6 +32,7 @@ system ProjectionGroupBySys {
 
       aggregate Order with crudish {
         code: string
+        placedAt: datetime
         total: money
         lineCount: int
         status: OrderStatus
@@ -49,6 +58,21 @@ system ProjectionGroupBySys {
                orders = count(),
                revenue = sum(o.total),
                avgLines = avg(o.lineCount)
+      }
+
+      // COMPUTED grouping key — the daily revenue series.  `startOfDay()` is a
+      // catalogued queryable datetime intrinsic, so the bucket is computed IN
+      // SQL (`date_trunc('day', …)`) in all three clause positions, and the
+      // key rides the wire as a `datetime` (midnight UTC).
+      projection RevenueByDay {
+        day: datetime
+        orders: int
+        revenue: money
+        from Order as o
+        group by o.placedAt.startOfDay()
+        select day = o.placedAt.startOfDay(),
+               orders = count(),
+               revenue = sum(o.total)
       }
 
       // Unfiltered, multi-column grouping (enum + id key), min/max operators.

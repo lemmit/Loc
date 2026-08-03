@@ -555,8 +555,24 @@ stay quiet about IR-tier gates by design.
    (singleton only); keyed reads + the five other frontends remain.
 3. **Phase 2** — `scaffoldDashboard` + `scaffoldHome` upgrade. ✅ landed. **A real
    dashboard ships here, with no chart dependency anywhere.**
-4. **Phase 3** — `group by` (with M-T4.2). ✅ landed (bare-column keys; the
-   computed date-key refinement remains).
+4. **Phase 3** — `group by` (with M-T4.2). ✅ landed, and the computed date-key
+   refinement with it: `group by o.placedAt.startOfDay()` (a catalogued
+   queryable `datetime` intrinsic → `date_trunc('day', …)`) makes the daily
+   series a first-class grouping key on all five backends. Verified by BOOTING
+   each backend against Postgres, which is the only way it could have been:
+   four of the five were wrong in the read-back position, where the bucket
+   arrives OUTSIDE the ORM's schema type mapping and every failure was a
+   runtime one — Drizzle hands a raw `sql` member back as text
+   (`.toISOString is not a function`), SQLAlchemy rendered the unit as a bind
+   param (Postgres then rejected the grouped select outright), a `datetime`
+   key was returned unencoded (FastAPI 500), and Ecto's `fragment` bypassed the
+   `:utc_datetime` mapping (`…T00:00:00.000000` vs `…T00:00:00Z` — a wrong
+   VALUE, silent). Java got a defensive normaliser for the same class. All five
+   now answer identically. Separately, this surfaced a shipped Python bug with
+   nothing to do with grouping: a query-time projection was mapped as a keyless
+   read-model table, so `configure_mappers()` threw and **any** generated
+   FastAPI app containing one — including the Phase 0 singleton — failed to
+   boot. Fixed here.
 5. **Phase 4** — `Chart` on mantine v9, gated, a11y in slice 1. ✅ landed
    (`Chart { kind, of, x, y }` over grouped projections; react + mantine@v9,
    `loom.chart-*` gates elsewhere; grouped projections became frontend-readable

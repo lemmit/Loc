@@ -1,5 +1,8 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
-import { lowerToDrizzle } from "../../../generator/typescript/repository-find-predicate.js";
+import {
+  DRIZZLE_INTRINSIC_SQL,
+  lowerToDrizzle,
+} from "../../../generator/typescript/repository-find-predicate.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
@@ -14,9 +17,11 @@ import {
 import {
   type AggregateSelect,
   aggregateCoercion,
+  GROUP_KEY_TRANSFORM_INTRINSIC,
+  type GroupKey,
   type GroupKeySelect,
   groupedAggregates,
-  groupKeyColumn,
+  groupKeyOf,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -97,9 +102,13 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   // lowering serves both.
   const aggWheres = new Map<string, string | undefined>();
   for (const p of projections) {
-    const aggregates = groupedAggregates(p)?.aggregates ?? wholeTableAggregates(p);
+    const grouped = groupedAggregates(p);
+    const aggregates = grouped?.aggregates ?? wholeTableAggregates(p);
     if (!aggregates || !p.query?.source) continue;
     for (const s of aggregates) rawDrizzleOps.add(s.aggregate.op);
+    // A COMPUTED grouping key (`group by o.placedAt.startOfDay()`) renders
+    // through the Drizzle intrinsic snippets, which build a `sql` template.
+    if ((grouped?.groupBy ?? []).some((e) => groupKeyOf(e)?.transform)) rawDrizzleOps.add("sql");
     if (!p.query.filter) {
       aggWheres.set(p.name, undefined);
       continue;
@@ -274,9 +283,9 @@ function emitQueryProjectionRoute(
   // grouping columns, in one query.
   if (grouped) {
     const sourceTable = `schema.${lowerFirst(plural(source))}`;
-    const groupCols = grouped.groupBy.map((e) => `${sourceTable}.${groupKeyCol(e)}`).join(", ");
+    const groupCols = grouped.groupBy.map((e) => groupKeyExpr(e, sourceTable)).join(", ");
     const cols = [
-      ...grouped.keys.map((k) => `${k.field}: ${sourceTable}.${groupKeyCol(k.expr)}`),
+      ...grouped.keys.map((k) => `${k.field}: ${groupKeyExpr(k.expr, sourceTable, true)}`),
       ...grouped.aggregates.map((s) => `${s.field}: ${drizzleAggregate(s.aggregate, sourceTable)}`),
     ].join(", ");
     out.push(
@@ -286,7 +295,7 @@ function emitQueryProjectionRoute(
     );
     out.push(`    const projected = rows.map((r) => ({`);
     for (const k of grouped.keys) {
-      out.push(`      ${k.field}: ${coerceGroupKey(k, `r.${k.field}`)},`);
+      out.push(`      ${k.field}: ${coerceGroupKey(k, `r.${k.field}`, groupKeyOrThrow(k.expr))},`);
     }
     for (const s of grouped.aggregates) {
       out.push(`      ${s.field}: ${coerceAggregate(s, `r.${s.field}`)},`);
@@ -423,18 +432,54 @@ function coerceAggregate(sel: AggregateSelect, expr: string): string {
   return c.asString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
 }
 
-/** The Drizzle column ref for a validated grouping expression.  The validator
- *  pins every `group by` column (and every key select) to a bare source column
- *  (`loom.projection-groupby-key-not-columnar`) whose name IS the schema column
- *  key, so — mirroring `aggregateColumn` — a miss here is an internal error,
- *  not a fallback. */
-function groupKeyCol(e: ExprIR): string {
-  const col = groupKeyColumn(e);
-  if (col === null) {
+/** The validated grouping key an expression names.  The validator pins every
+ *  `group by` entry (and every key select) to a source column, optionally
+ *  bucketed by one supported transform (`loom.projection-groupby-key-not-
+ *  columnar`), so — mirroring `aggregateColumn` — a miss here is an internal
+ *  error, not a fallback. */
+function groupKeyOrThrow(e: ExprIR): GroupKey {
+  const key = groupKeyOf(e);
+  if (key === null) {
     throw new Error("internal: a group-by column must be a source column reference");
   }
-  return col;
+  return key;
 }
+
+/** The Drizzle expression for one grouping key.  A BARE key is the plain
+ *  `schema.<table>.<column>` ref (the column name IS the schema key); a
+ *  COMPUTED key routes through the SAME `DRIZZLE_INTRINSIC_SQL` snippet a
+ *  where-position intrinsic uses, so the SELECT, GROUP BY and ORDER BY all
+ *  carry a byte-identical expression — which is what makes Postgres accept the
+ *  grouped select at all (a SELECT expression must match a GROUP BY one). */
+function groupKeyExpr(e: ExprIR, sourceTable: string, forSelect = false): string {
+  const key = groupKeyOrThrow(e);
+  const col = `${sourceTable}.${key.column}`;
+  if (!key.transform) return col;
+  const snippet = DRIZZLE_INTRINSIC_SQL[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
+  if (!snippet) {
+    throw new Error(
+      `internal: no Drizzle snippet for grouping transform '${key.transform}' — the intrinsic catalogue and the transform table disagree`,
+    );
+  }
+  const sql = snippet(col, []);
+  // In the SELECT position the value is READ BACK, so it needs a decoder.
+  // Drizzle does NOT apply the driver's type parser to a raw `sql` member: it
+  // hands back the wire text verbatim (`"2026-08-01 00:00:00+00"`), NOT a
+  // `Date` — a `.toISOString()` on it is a runtime TypeError that no `as Date`
+  // cast can catch.  `.mapWith(<column>)` reuses that column's own
+  // `mapFromDriverValue`, so a bucketed key decodes exactly like the bare
+  // column it was computed from.  GROUP BY / ORDER BY read nothing back, so
+  // they stay the plain snippet and keep matching the SELECT byte-for-byte.
+  return forSelect ? `${sql}.mapWith(${col})` : sql;
+}
+
+/** The runtime TS type a transformed grouping key comes back as.  Drizzle types
+ *  a raw `sql` select member `unknown`, so the projection has to re-assert what
+ *  the driver actually returns before coercing it to the wire shape —
+ *  `date_trunc` over a `timestamp` column still yields a `Date`. */
+const GROUP_KEY_TRANSFORM_TS_TYPE: Record<GroupKey["transform"] & string, string> = {
+  startOfDay: "Date",
+};
 
 /** Coerce one grouping-key column value to the projection row's DECLARED wire
  *  type — the key-side twin of `coerceAggregate`.  A key arrives as whatever
@@ -442,11 +487,14 @@ function groupKeyCol(e: ExprIR): string {
  *  number, uuid/text → string — those pass through untouched — but `numeric`
  *  (money/decimal) is a STRING through the driver and `timestamp` a `Date`,
  *  so the numeric family and datetime rewrap to match the row schema. */
-function coerceGroupKey(sel: GroupKeySelect, expr: string): string {
+function coerceGroupKey(sel: GroupKeySelect, expr: string, key: GroupKey): string {
   const optional = sel.type.kind === "optional";
   const inner = sel.type.kind === "optional" ? sel.type.inner : sel.type;
-  const coerced = groupKeyWireExpr(inner, expr);
-  if (coerced === expr) return expr;
+  // A TRANSFORMED key is selected as a raw `sql` expression, which Drizzle
+  // types `unknown` — re-assert the driver's runtime type before coercing.
+  const read = key.transform ? `(${expr} as ${GROUP_KEY_TRANSFORM_TS_TYPE[key.transform]})` : expr;
+  const coerced = groupKeyWireExpr(inner, read);
+  if (coerced === read) return read;
   return optional ? `${expr} == null ? null : ${coerced}` : coerced;
 }
 

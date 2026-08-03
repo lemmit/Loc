@@ -96,6 +96,11 @@ export interface IntrinsicSignature {
 //     receiver type.  SQL `LEAST()` / `GREATEST()` (two-value, not the
 //     aggregate min/max).  A column-typed `other` is allowed in queryable
 //     position (`LEAST(col_a, col_b)` is legitimate SQL).
+//   - `startOfDay()` — truncates a `datetime` to MIDNIGHT UTC, staying a
+//     `datetime` (there is no `date` primitive).  The day boundary is UTC on
+//     every backend, in memory as well as in SQL — timestamps are stored in
+//     UTC, so `date_trunc('day', …)` and the in-memory arms agree.  The
+//     grouping bucket for a daily series (`group by o.placedAt.startOfDay()`).
 export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
   // ---- string ------------------------------------------------------------
   {
@@ -217,6 +222,19 @@ export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
       signature: `(divisor: ${receiver}): ${receiver}`,
     },
   ]),
+  // ---- datetime ------------------------------------------------------------
+  // Truncates a timestamp to MIDNIGHT UTC — the grouping bucket for a daily
+  // series (`group by o.placedAt.startOfDay()`).  The result is still a
+  // `datetime` (no `date` primitive exists); every SQL backend renders it as
+  // `date_trunc('day', …)`, so the bucket boundary is UTC on every target.
+  {
+    receiver: "datetime",
+    name: "startOfDay",
+    params: [],
+    returns: "datetime",
+    queryable: true,
+    signature: "(): datetime",
+  },
   ...(["decimal", "money"] as const).flatMap((receiver): IntrinsicSignature[] => [
     {
       receiver,

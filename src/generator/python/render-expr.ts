@@ -450,6 +450,13 @@ export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "decimal.ceil": (recv) => `float(math.ceil(${recv}))`,
   "money.floor": (recv) => `${recv}.to_integral_value(rounding="ROUND_FLOOR")`,
   "money.ceil": (recv) => `${recv}.to_integral_value(rounding="ROUND_CEILING")`,
+  // ---- datetime — midnight UTC of the receiver's day (catalogue contract).
+  // Columns are `DateTime(timezone=True)`, so the value is tz-aware;
+  // `astimezone(UTC)` makes the day boundary UTC regardless of the incoming
+  // offset before the fields are zeroed.  Needs `from datetime import UTC`
+  // (PY_INTRINSIC_IMPORTS mirrors).
+  "datetime.startOfDay": (recv) =>
+    `${recv}.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)`,
 };
 
 // Intrinsic snippets above whose emitted Python reaches for an import —
@@ -457,11 +464,13 @@ export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
 // a pure mirror of the renderer.  `decimal.*` rounding rides on `math`;
 // `money.round` constructs `Decimal(1)` (the receiver alone wouldn't force
 // the import when no money literal appears in the expression).
-const PY_INTRINSIC_IMPORTS: Record<string, "math" | "decimal"> = {
+const PY_INTRINSIC_IMPORTS: Record<string, "math" | "decimal" | "datetime"> = {
   "decimal.round": "math",
   "decimal.floor": "math",
   "decimal.ceil": "math",
   "money.round": "decimal",
+  // `astimezone(UTC)` names the UTC constant (`from datetime import UTC, …`).
+  "datetime.startOfDay": "datetime",
 };
 
 function renderMethodCall(

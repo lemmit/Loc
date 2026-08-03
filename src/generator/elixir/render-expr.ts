@@ -605,6 +605,11 @@ export const ELIXIR_INTRINSIC_RENDERERS: Record<string, (recv: string, args: str
     "money.floor": (recv) => `Decimal.round(${recv}, 0, :floor)`,
     "decimal.ceil": (recv) => `Decimal.round(${recv}, 0, :ceiling)`,
     "money.ceil": (recv) => `Decimal.round(${recv}, 0, :ceiling)`,
+    // ---- datetime — Loom `datetime` is a `%DateTime{}` in UTC
+    // (`:utc_datetime` fields, `DateTime.utc_now()` binds), so truncating the
+    // TIME to midnight is the catalogue's midnight-UTC bucket.
+    "datetime.startOfDay": (recv) =>
+      `DateTime.new!(DateTime.to_date(${recv}), ~T[00:00:00], "Etc/UTC")`,
   };
 
 export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: string[]) => string> = {
@@ -640,6 +645,10 @@ export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: strin
   "money.floor": (recv) => `fragment("floor(?)", ${recv})`,
   "decimal.ceil": (recv) => `fragment("ceil(?)", ${recv})`,
   "money.ceil": (recv) => `fragment("ceil(?)", ${recv})`,
+  // ---- datetime — midnight-UTC bucket; `:utc_datetime` columns are stored
+  // in UTC, so `date_trunc('day', …)` cuts at the same boundary as the
+  // in-memory arm.
+  "datetime.startOfDay": (recv) => `fragment("date_trunc('day', ?)", ${recv})`,
 };
 
 function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: RenderCtx): string {

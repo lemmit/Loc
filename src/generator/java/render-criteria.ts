@@ -152,6 +152,14 @@ export const JAVA_CRITERIA_INTRINSICS: Record<string, (recv: string, args: strin
   "money.floor": (recv) => `cb.floor(${recv})`,
   "decimal.ceil": (recv) => `cb.ceiling(${recv})`,
   "money.ceil": (recv) => `cb.ceiling(${recv})`,
+  // ---- datetime — midnight-UTC bucket.  No CriteriaBuilder method truncates
+  // a temporal, so this rides the same `cb.function` escape hatch the
+  // two-value min/max rows use: `date_trunc('day', path)` passed through to
+  // Postgres, with java.time.Instant as the result-type witness (Loom
+  // `datetime` is Instant on this backend) and the literal unit as an
+  // Expression argument.
+  "datetime.startOfDay": (recv) =>
+    `cb.function("date_trunc", java.time.Instant.class, cb.literal("day"), ${recv})`,
 };
 
 // The generated Specification lambda receives the plain JPA

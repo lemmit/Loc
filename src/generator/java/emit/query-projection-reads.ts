@@ -12,15 +12,16 @@ import { exprUsesCurrentUser, isQueryTimeProjection } from "../../../ir/types/lo
 import {
   type AggregateSelect,
   aggregateCoercion,
+  GROUP_KEY_TRANSFORM_INTRINSIC,
   groupedAggregates,
-  groupKeyColumn,
+  groupKeyOf,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
-import { renderJpqlWhere } from "../render-jpql.js";
+import { JPQL_INTRINSIC_SQL, renderJpqlWhere } from "../render-jpql.js";
 import { projectionRepoField } from "./projection-reads.js";
 import { projectionRowClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
@@ -125,6 +126,9 @@ export function renderJavaQueryProjections(
   // gate in `api.ts`.
   const controllerGateImports = new Set<string>();
   let usesEntityManager = false;
+  // Emitted only when some grouped projection carries a TRANSFORMED key (the
+  // `function(…)` HQL escape has no static return type) — see the call site.
+  let needsGroupKeyInstant = false;
   let anyGate = false;
   let anyGateUsesUser = false;
 
@@ -172,14 +176,26 @@ export function renderJavaQueryProjections(
       usesEntityManager = true;
       imports.add("jakarta.persistence.EntityManager");
       imports.add("jakarta.persistence.PersistenceContext");
+      // ONE renderer for all three key positions (select / group by / order by)
+      // so they cannot disagree — Postgres matches a grouped select against the
+      // GROUP BY expression syntactically.  A COMPUTED key (M-T4.2 date bucket)
+      // reuses the SAME `JPQL_INTRINSIC_SQL` entry the `where` position emits.
       const keyCol = (e: ExprIR): string => {
-        const col = groupKeyColumn(e);
-        if (!col) {
+        const key = groupKeyOf(e);
+        if (!key) {
           throw new Error(
             "internal: a grouping column must be a bare source column — the IR validator should have rejected this projection",
           );
         }
-        return `e.${col}`;
+        const col = `e.${key.column}`;
+        if (key.transform === undefined) return col;
+        const sql = JPQL_INTRINSIC_SQL[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
+        if (!sql) {
+          throw new Error(
+            `internal: no JPQL rendering for grouping-key transform '${key.transform}'`,
+          );
+        }
+        return sql(col, []);
       };
       const keyCols = grouped.keys.map((k) => keyCol(k.expr));
       const groupCols = grouped.groupBy.map(keyCol);
@@ -192,8 +208,20 @@ export function renderJavaQueryProjections(
       const jpql =
         `select ${[...keyCols, ...aggCols].join(", ")} from ${source} e${where}` +
         ` group by ${groupCols.join(", ")} order by ${groupCols.join(", ")}`;
+      // A TRANSFORMED key rides HQL's `function(…)` escape, for which Hibernate
+      // has no static return type — the driver may hand back a
+      // `java.sql.Timestamp` (whose `toString()` is `2026-08-03 00:00:00.0`,
+      // NOT ISO-8601) instead of an `Instant`.  Those keys route through the
+      // emitted `groupKeyInstant` normaliser so the wire value matches the
+      // other four backends whatever Hibernate returns; an untransformed key
+      // keeps the typed property path and needs no normalisation.
+      if (grouped.keys.some((k) => groupKeyOf(k.expr)?.transform !== undefined)) {
+        needsGroupKeyInstant = true;
+      }
       const args = [
-        ...grouped.keys.map((k, i) => groupKeyCoerce(k.type, `r[${i}]`, imports)),
+        ...grouped.keys.map((k, i) =>
+          groupKeyCoerce(k.type, `r[${i}]`, imports, groupKeyOf(k.expr)?.transform !== undefined),
+        ),
         ...grouped.aggregates.map((a, i) => {
           if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
           return jpqlCoerce(a, `r[${grouped.keys.length + i}]`);
@@ -480,6 +508,24 @@ export function renderJavaQueryProjections(
       `    }`,
       ``,
       ...methods,
+      // The grouping-key normaliser (M-T4.2 computed date key).  HQL's
+      // `function('date_trunc', …)` escape carries no static return type, so
+      // Hibernate hands back whatever the JDBC driver produced.  Normalising
+      // to `Instant` here is what keeps this backend's `2026-08-03T00:00:00Z`
+      // identical to the other four; the throw makes an unmodelled driver type
+      // loud instead of silently emitting a non-ISO string.
+      ...(needsGroupKeyInstant
+        ? [
+            `    private static java.time.Instant groupKeyInstant(Object v) {`,
+            `        if (v instanceof java.time.Instant i) return i;`,
+            `        if (v instanceof java.sql.Timestamp t) return t.toInstant();`,
+            `        if (v instanceof java.time.OffsetDateTime o) return o.toInstant();`,
+            `        if (v instanceof java.time.LocalDateTime l) return l.toInstant(java.time.ZoneOffset.UTC);`,
+            `        throw new IllegalStateException("unexpected grouping-key type: " + v.getClass());`,
+            `    }`,
+            ``,
+          ]
+        : []),
       `}`,
       ``,
     ),
@@ -587,9 +633,14 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
  *  guid reads cast to that mapping while the numerics keep the same
  *  `Number`/`toString` discipline as the aggregates.  A nullable key (optional
  *  column ⇒ a NULL group) stays null. */
-function groupKeyCoerce(t: TypeIR, read: string, imports: Set<string>): string {
+function groupKeyCoerce(
+  t: TypeIR,
+  read: string,
+  imports: Set<string>,
+  viaFunction = false,
+): string {
   if (t.kind === "optional") {
-    return `${read} == null ? null : ${groupKeyCoerce(t.inner, read, imports)}`;
+    return `${read} == null ? null : ${groupKeyCoerce(t.inner, read, imports, viaFunction)}`;
   }
   if (t.kind === "enum") return `(${t.name}) ${read}`;
   if (t.kind === "id") {
@@ -612,8 +663,9 @@ function groupKeyCoerce(t: TypeIR, read: string, imports: Set<string>): string {
         imports.add("java.math.BigDecimal");
         return `new BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
       case "datetime":
-        // Instant → ISO-8601 wire string.
-        return `${read}.toString()`;
+        // Instant → ISO-8601 wire string.  Through HQL's `function(…)` escape
+        // Hibernate has no static return type, so normalise first.
+        return viaFunction ? `groupKeyInstant(${read}).toString()` : `${read}.toString()`;
       case "string":
         return `(String) ${read}`;
       case "bool":
