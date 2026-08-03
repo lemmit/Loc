@@ -6,10 +6,11 @@ exposes those rows as an entity's change history.
 
 - Write side — `aggregate X audited { … }` / `operation f() audited`. Ships on
   all five backends.
-- Read side — `GET /<aggregates>/{id}/history`. Served by **node and python**
-  today (§3); consumed by the api clients and the scaffolded Detail page on the
-  four JS-family frontends ("Rendering it"). The remaining backends and
-  frontends are named where they fall short, not left to be discovered.
+- Read side — `GET /<aggregates>/{id}/history`. Served by a subset of the
+  backends (§3 — the list lives in the corpus manifest, not in prose), and
+  consumed by the api clients and the scaffolded Detail page on the four
+  JS-family frontends ("Rendering it"). Every target that falls short is named
+  where it does, rather than left to be discovered.
 
 ---
 
@@ -115,13 +116,21 @@ Nothing is declared for it. Enrichment derives a `find history(id)` onto the
 aggregate's repository — the auto-`findAll` analog, in the same pure pass — and
 the backend serves it from `audit_records`.
 
-> **Backend support — all five.** The read endpoint ships on Hono/node,
-> FastAPI/python, Spring Boot/java, .NET and Phoenix/elixir, alongside the
-> write side. `test/fixtures/corpus/audit-history.ddd` is declared for every
-> backend, and each one's behavioral leg diffs its booted responses against
-> `test/behavioral/wire-golden/audit-history.json` — minted from node, the
-> oracle. A≡golden ∧ B≡golden ⇒ A≡B, so that is a real cross-backend
-> equality proof rather than five self-assertions.
+> **Backend support — all five, and don't take that from prose.** The
+> `audit-history` row in `test/fixtures/corpus/manifest.ts` names exactly the
+> backends that serve the endpoint, and widening that row *is* what "backend X
+> now serves history" means. It currently reads `ALL`, so the read side has
+> caught up with the write side; a hand-maintained list here would be one more
+> thing to forget, and it already had been once.
+>
+> That claim is proven, not asserted: each backend's behavioral leg diffs its
+> booted responses against `test/behavioral/wire-golden/audit-history.json`,
+> minted from node — the oracle. A≡golden ∧ B≡golden ⇒ A≡B, so the row being
+> `ALL` is a cross-backend equality rather than five self-assertions. The shape,
+> the diff boundary and the authorization rules below are platform-neutral
+> (`src/ir/util/audit-history.ts`), which is why the ports were emitter work.
+
+
 ### The entry shape
 
 ```jsonc
