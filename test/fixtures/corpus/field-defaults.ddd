@@ -15,6 +15,14 @@
 //   - `bool = false` — deliberately indistinguishable from a bare bool, so it
 //     stays on the implicit rule and the emitted bytes do not change.
 // `name` is the control: no default, so it must stay required input.
+//
+// `flag` is the BARE bool — no `= default`, so it rides the language-defined
+// implicit one.  It separates the two seams, which is the whole of RS-26: the
+// implicit rule relaxes CREATE input (`flag` may be omitted from a POST and
+// materializes as `false`) and relaxes NOTHING on update (a PUT omitting it is
+// a missing required field, because full replacement constructs nothing).  A
+// backend that collapses the two seams onto one predicate looks correct on
+// every OTHER field in this fixture and wrong only here.
 system Defaults {
   subdomain Catalog {
     context Items {
@@ -24,6 +32,7 @@ system Defaults {
         note: string = "none"
         active: bool = true
         archived: bool = false
+        flag: bool
 
         test "an omitted default is applied at construction" {
           let i = Item.create({ name: "N" })

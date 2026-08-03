@@ -126,15 +126,26 @@ export function isRequiredCreateInput(f: RequirableInput): boolean {
   return true;
 }
 
-/** The UPDATE-side twin of {@link isRequiredCreateInput}.  An explicit
- *  `= default` is a CREATE-input relaxation only — a PATCH names the value it
- *  is writing, so a defaulted field stays required — but the implicit `bool`
- *  default applies on both seams.  This is what the Hono / .NET / Java /
- *  Python update DTOs already encode (`flag: z.coerce.boolean().default(false)`
- *  beside a required `status`), stated once here. */
+/** The UPDATE-side twin of {@link isRequiredCreateInput}: every non-nullable
+ *  field is required input.  Only optionality relaxes an update; NEITHER kind
+ *  of default does.
+ *
+ *  A default — explicit `= value` or the language-defined implicit `bool` one —
+ *  is a CONSTRUCTION rule, and Loom's update contract is full-replacement (the
+ *  PUT carries every field), so there is nothing to construct and "absent" can
+ *  only mean "a required field is missing".  That is RS-26
+ *  (`test/conformance/semantics-rules.ts`), and it is why this function must
+ *  NOT consult `hasImplicitDefault` — a create-input predicate.
+ *
+ *  It did, briefly, and the consequence is the reason the rule is spelled out
+ *  here at length: the bool arm fired before the explicit default was ever
+ *  considered, so `active: bool = true` came back omittable.  Elixir's
+ *  changeset (the sole consumer) then stopped enforcing a field its own
+ *  OpenApiSpex schema still advertised as required — a served document
+ *  promising what the runtime does not check.  The other four backends require
+ *  every non-nullable update field, which is what this now states once. */
 export function isRequiredUpdateInput(f: RequirableInput): boolean {
-  if (isNullable(f)) return false;
-  return !hasImplicitDefault(f.type);
+  return !isNullable(f);
 }
 
 /** Whether a type has a language-defined implicit default, so an omitted

@@ -195,13 +195,26 @@ function updateRequiresField(files: Map<string, string>, backend: Backend, field
       return new RegExp(`"${field}"`).test(block);
     }
     case "vanilla": {
-      // Scoped to the update-request MODULE, not the joined blob: every
-      // OpenApiSpex schema carries a `required:` list, so a blob-wide
-      // `indexOf("required: [")` matches whichever comes first (the shared
-      // `File` schema, as it happens) and the check silently answers about the
-      // wrong module.
-      const mod = fileNamed(files, /update_item_request\.ex$/);
-      return new RegExp(`required: \\[[^\\]]*:${field}\\b`).test(mod);
+      // TWO artifacts, and BOTH must agree — this is the one backend where the
+      // document and the enforcement live in different files.
+      //
+      //   update_item_request.ex   OpenApiSpex `required:` — what the served
+      //                            spec PROMISES a client
+      //   item_changeset.ex        `@update_required` → `validate_required/2`
+      //                            — what actually REJECTS the request
+      //
+      // Asserting only the schema is how #2377's `isRequiredUpdateInput`
+      // regression got past this gate: it dropped every bool from
+      // `@update_required`, so Elixir advertised `active` as required and then
+      // accepted a PUT without it.  A gate that reads the documentation cannot
+      // see a runtime that stopped honouring it.  (Sibling of the node arm
+      // above, which asked the right question of the right file in the wrong
+      // VOCABULARY — spelling instead of behaviour.)
+      const schema = fileNamed(files, /update_item_request\.ex$/);
+      const changeset = fileNamed(files, /item_changeset\.ex$/);
+      const inSchema = new RegExp(`required: \\[[^\\]]*:${field}\\b`).test(schema);
+      const inChangeset = new RegExp(`@update_required \\[[^\\]]*:${field}\\b`).test(changeset);
+      return inSchema && inChangeset;
     }
   }
 }
@@ -221,9 +234,14 @@ function sliceBlock(source: string, from: string, to: string): string {
 }
 
 describe("an omitted UPDATE bool is rejected, not silently defaulted", () => {
-  // Both fixture bools are declared with an explicit `= default`, so a wire
-  // default on the update side can only come from the implicit-bool rule.
-  const BOOLS = ["active", "archived"];
+  // `active`/`archived` carry an explicit `= default`, so a wire default on the
+  // update side can only come from the implicit-bool rule.  `flag` is BARE — it
+  // has nothing but the implicit rule — and it is the discriminating case: a
+  // backend that applies `hasImplicitDefault` (a CREATE-input predicate) to the
+  // update seam still requires the two explicitly-defaulted bools on some
+  // paths, and drops `flag` on all of them.  Covering only defaulted bools
+  // leaves "the two seams were collapsed into one" invisible.
+  const BOOLS = ["active", "archived", "flag"];
 
   for (const backend of BACKENDS) {
     const waiver = UPDATE_BOOL_WAIVED[backend];

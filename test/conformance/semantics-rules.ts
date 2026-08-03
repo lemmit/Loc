@@ -659,6 +659,14 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // because zod-to-openapi derives `required[]` from `schema.isOptional()` —
     // literally "does it accept `undefined`".  A gate that asks about SPELLING
     // rather than BEHAVIOUR passes a backend that still has the bug.
+    //
+    // The elixir regression later the same day is that lesson's twin.  A gate
+    // can ask the right question in the right vocabulary and still ask the
+    // WRONG ARTIFACT: the arm read the OpenApiSpex schema, which DOCUMENTS,
+    // while the Ecto changeset, which ENFORCES, had quietly stopped listing the
+    // field.  Where a backend splits "what the server says" from "what the
+    // server checks" across two files, a conformance gate owes an assertion to
+    // each — otherwise it certifies the promise, not the behaviour.
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
@@ -668,6 +676,8 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "fixed (elixir): SPEC-only divergence — `@update_required` already listed every bool at runtime while the OpenApiSpex schema did not; renderProperties gained a slot — src/generator/elixir/vanilla/openapi-emit.ts",
       "fixed (dotnet): `[Required]` on a non-nullable value type cannot reject absence (RequiredAttribute tests for null; an omitted int/bool binds to 0/false). Operation params gained `[property: JsonRequired]` ALONGSIDE `[Required]` — presence is a deserialization question — src/generator/dotnet/dto-mapping.ts",
       "fixed (java): BOTH halves were wrong — the record used primitives (`int qty`, `boolean active`), so Jackson silently supplied 0/false for an omitted key while RequiredSet claimed qty required; operation components are now boxed + @NotNull (emit/dto.ts) and requiredParams no longer drops bare bools (emit/openapi-customizer.ts)",
+      "regressed 2026-08-03 (elixir) by #2377's `isRequiredUpdateInput`, which tested the implicit-bool rule and never reached the explicit default, so `active: bool = true` came back omittable and `@update_required` stopped listing it — while the OpenApiSpex schema still advertised it. Elixir promised what it did not enforce; fixed by making the predicate `!isNullable(f)` (a default of EITHER kind is a construction rule, so neither relaxes a full-replacement update) — src/ir/enrich/wire-projection.ts",
+      "the gate missed that regression because its elixir arm read update_item_request.ex (the OpenApiSpex SCHEMA) and not item_changeset.ex (validate_required, which ENFORCES); it now asserts both, and the fixture gained a bare `flag: bool` — the case that separates the create seam from the update seam",
     ],
     // Static: assertable against each backend's emitted update-request contract
     // (zod schema / Pydantic model / record attributes / RequiredSet /
