@@ -315,7 +315,11 @@ export function generateSvelteForContexts(
       // `i18nEnabled` flag through the template's `<script>` block.
       i18nEnabled,
       skipToContentText: shellChromeText("skipToContent", i18nEnabled),
-      primaryNavAria: shellChromeAria("primaryNav", i18nEnabled),
+      primaryNavAria: shellChromeAttr("aria-label", "primaryNav", i18nEnabled),
+      // The mobile nav toggle's aria — "Toggle navigation" on both Svelte packs
+      // (flowbite, shadcnSvelte).  Neither Svelte pack renders an error boundary
+      // heading, so `chrome.somethingWentWrong` has no Svelte token.
+      toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
     }),
   );
   out.set("src/routes/+layout.svelte", pack.render("root-layout", { hasRealtimeHandlers, authUi }));
@@ -358,15 +362,15 @@ function shellChromeText(name: string, i18nEnabled: boolean): string {
     : english;
 }
 
-/** An `aria-label` attribute fragment (NO leading space — the template keeps the
- *  surrounding whitespace) for an app-shell chrome string in ATTRIBUTE position:
- *  the static `aria-label="<default>"` when i18n is off (byte-identical), else a
- *  bound `aria-label={t(…)}` (Svelte attr form, same shape as JSX). */
-function shellChromeAria(name: string, i18nEnabled: boolean): string {
+/** An `<attr>=…` fragment (NO leading space — the template keeps the surrounding
+ *  whitespace) for an app-shell chrome string in ATTRIBUTE position: the static
+ *  `<attr>="<default>"` when i18n is off (byte-identical), else a bound
+ *  `<attr>={t(…)}` (Svelte attr form, same shape as JSX). */
+function shellChromeAttr(attr: string, name: string, i18nEnabled: boolean): string {
   const english = APP_SHELL_CHROME[chromeKey(name)]!;
   return i18nEnabled
-    ? `aria-label={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
-    : `aria-label="${english}"`;
+    ? `${attr}={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
+    : `${attr}="${english}"`;
 }
 
 /** Theme tokens for the pack's `theme` template (CSS custom props).

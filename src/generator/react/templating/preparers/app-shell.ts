@@ -304,7 +304,15 @@ export function prepareAppShellVM(
     // keyed to `APP_SHELL_CHROME` (M-T1.11).
     notFoundText: shellChromeText("notFound", i18nEnabled),
     skipToContentText: shellChromeText("skipToContent", i18nEnabled),
-    primaryNavAria: shellChromeAria("primaryNav", i18nEnabled),
+    primaryNavAria: shellChromeAttr("aria-label", "primaryNav", i18nEnabled),
+    // The error boundary's heading — TEXT position on shadcn (`<AlertTitle>`),
+    // a `title=` prop on mantine's `<Alert>`.  Same key, two tokens.
+    errorTitleText: shellChromeText("somethingWentWrong", i18nEnabled),
+    errorTitleAttr: shellChromeAttr("title", "somethingWentWrong", i18nEnabled),
+    // The mobile nav toggle — chakra's "Open menu" vs shadcn's "Toggle
+    // navigation"; each pack renders the token for the string it already spelt.
+    openMenuAria: shellChromeAttr("aria-label", "openMenu", i18nEnabled),
+    toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
   };
 }
 
@@ -319,13 +327,14 @@ function shellChromeText(name: string, i18nEnabled: boolean): string {
     : english;
 }
 
-/** An `aria-label` attribute fragment (NO leading space — the template keeps the
- *  surrounding whitespace) for an app-shell chrome string in ATTRIBUTE position:
- *  the static `aria-label="<default>"` when i18n is off (byte-identical), else a
- *  bound `aria-label={t("chrome.<name>", "<default>")}` (React attr form). */
-function shellChromeAria(name: string, i18nEnabled: boolean): string {
+/** An `<attr>=…` fragment (NO leading space — the template keeps the surrounding
+ *  whitespace) for an app-shell chrome string in ATTRIBUTE position: the static
+ *  `<attr>="<default>"` when i18n is off (byte-identical), else a bound
+ *  `<attr>={t("chrome.<name>", "<default>")}` (React attr form).  `attr` varies
+ *  by pack — `aria-label` on a nav landmark/toggle, `title` on Mantine's Alert. */
+function shellChromeAttr(attr: string, name: string, i18nEnabled: boolean): string {
   const english = APP_SHELL_CHROME[chromeKey(name)]!;
   return i18nEnabled
-    ? `aria-label={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
-    : `aria-label="${english}"`;
+    ? `${attr}={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
+    : `${attr}="${english}"`;
 }

@@ -555,20 +555,12 @@ export function generateVueForContexts(
   // and the `t` import is gated on `i18nEnabled` with a per-render-site
   // relative path (App.vue → `./i18n`; the one-level-deeper DefaultLayout.vue →
   // `../i18n`).
-  const skipToContentText = i18nEnabled
-    ? `{{ t(${JSON.stringify(chromeKey("skipToContent"))}, ${JSON.stringify(
-        APP_SHELL_CHROME[chromeKey("skipToContent")],
-      )}) }}`
-    : APP_SHELL_CHROME[chromeKey("skipToContent")]!;
+  const skipToContentText = shellChromeText("skipToContent", i18nEnabled);
   // The primary-navigation landmark's `aria-label` — an attribute fragment (NO
   // leading space; the template keeps the surrounding whitespace): Vue's bound
   // `:aria-label='t(…)'` (single-quoted, the `t()` call holds double quotes)
   // under i18n, else the static `aria-label="…"`.
-  const primaryNavAria = i18nEnabled
-    ? `:aria-label='t(${JSON.stringify(chromeKey("primaryNav"))}, ${JSON.stringify(
-        APP_SHELL_CHROME[chromeKey("primaryNav")],
-      )})'`
-    : `aria-label="${APP_SHELL_CHROME[chromeKey("primaryNav")]}"`;
+  const primaryNavAria = shellChromeAttr("aria-label", "primaryNav", i18nEnabled);
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
     navSections,
@@ -578,6 +570,13 @@ export function generateVueForContexts(
     i18nEnabled,
     skipToContentText,
     primaryNavAria,
+    // The error boundary's "Something went wrong" heading — a TEXT child on
+    // shadcnVue's `<AlertTitle>`, a `title=` prop on vuetify's `<v-alert>`.
+    errorTitleText: shellChromeText("somethingWentWrong", i18nEnabled),
+    errorTitleAttr: shellChromeAttr("title", "somethingWentWrong", i18nEnabled),
+    // The mobile nav toggle's aria — "Toggle navigation" (shadcnVue; vuetify's
+    // drawer toggle carries no label, so it stays untouched).
+    toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
   };
   if (useLayouts) {
     // The chrome (and its toast/realtime hosts) move OUT of App.vue into
@@ -650,6 +649,30 @@ export function generateVueForContexts(
 
 function renderShell(pack: LoadedPack, name: string, vm: unknown): string {
   return pack.render(name, vm);
+}
+
+/** A Vue text-position token for an app-shell chrome string (M-T1.11,
+ *  pack-chrome): the raw source default when `i18nEnabled` is false
+ *  (byte-identical), else a `{{ t("chrome.<name>", "<default>") }}` template
+ *  interpolation keyed to the merged `APP_SHELL_CHROME` catalog.  The braces are
+ *  DATA here, not Handlebars — the shell renders the token via `{{{…}}}`, so it
+ *  reaches the emitted `.vue` file verbatim. */
+function shellChromeText(name: string, i18nEnabled: boolean): string {
+  const english = APP_SHELL_CHROME[chromeKey(name)]!;
+  return i18nEnabled
+    ? `{{ t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)}) }}`
+    : english;
+}
+
+/** An `<attr>=…` fragment (NO leading space — the template keeps the surrounding
+ *  whitespace) for an app-shell chrome string in ATTRIBUTE position: the static
+ *  `<attr>="<default>"` when i18n is off (byte-identical), else Vue's bound
+ *  `:<attr>='t(…)'` (single-quoted, since the `t()` call holds double quotes). */
+function shellChromeAttr(attr: string, name: string, i18nEnabled: boolean): string {
+  const english = APP_SHELL_CHROME[chromeKey(name)]!;
+  return i18nEnabled
+    ? `:${attr}='t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})'`
+    : `${attr}="${english}"`;
 }
 
 // ---------------------------------------------------------------------------

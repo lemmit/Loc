@@ -61,4 +61,11 @@ export const APP_SHELL_CHROME: Record<string, string> = {
   [chromeKey("notFound")]: "Not found",
   [chromeKey("skipToContent")]: "Skip to content",
   [chromeKey("primaryNav")]: "Primary navigation",
+  [chromeKey("somethingWentWrong")]: "Something went wrong",
+  // The mobile nav toggle: two keys, not one, because the packs genuinely spell
+  // it differently (chakra "Open menu" vs the shadcn/flowbite family "Toggle
+  // navigation").  Collapsing them onto one canonical English would silently
+  // re-word a pack and break the i18n-off byte-identical guarantee.
+  [chromeKey("openMenu")]: "Open menu",
+  [chromeKey("toggleNavigation")]: "Toggle navigation",
 };

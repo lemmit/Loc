@@ -61,6 +61,14 @@ function appOf(files: Map<string, string>): string {
   return entry[1];
 }
 
+/** The app-shell source for a non-React frontend (`src/App.vue`,
+ *  `(app)/+layout.svelte`, …) — the shell-chrome render site. */
+function shellOf(files: Map<string, string>, suffix: string): string {
+  const entry = [...files].find(([p]) => p.endsWith(suffix));
+  if (!entry) throw new Error(`no app shell emitted (looked for ${suffix})`);
+  return entry[1];
+}
+
 describe("pack-chrome i18n — React app-shell chrome", () => {
   it("binds the 404 + skip-link text through t() and imports t into App.tsx", async () => {
     const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
@@ -84,6 +92,114 @@ describe("pack-chrome i18n — React app-shell chrome", () => {
     expect(app).toContain(`aria-label="Primary navigation"`);
     expect(app).not.toContain("import { t }");
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
+  });
+});
+
+// The remaining shell chrome is NON-uniform: coverage and attribute position
+// both vary per pack.  "Something went wrong" is a `title=` prop on mantine's
+// `<Alert>` / vuetify's `<v-alert>` but a TEXT child of shadcn's `<AlertTitle>`;
+// the mobile nav toggle is spelled "Open menu" by chakra and "Toggle
+// navigation" by the shadcn/flowbite family — two keys, because collapsing them
+// onto one canonical English would re-word a pack and break byte-identical.
+describe("pack-chrome i18n — error-boundary heading", () => {
+  it("React (mantine): binds the `title=` ATTRIBUTE through t()", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
+    expect(appOf(files)).toContain(
+      `<Alert color="red" title={t("chrome.somethingWentWrong", "Something went wrong")}>`,
+    );
+    expect(catalogOf(files)["chrome.somethingWentWrong"]).toBe("Something went wrong");
+  });
+
+  it("React (shadcn): binds the TEXT position through t()", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "shadcn", `Heading { "Welcome" }`));
+    expect(appOf(files)).toContain(
+      `<AlertTitle>{t("chrome.somethingWentWrong", "Something went wrong")}</AlertTitle>`,
+    );
+    expect(catalogOf(files)["chrome.somethingWentWrong"]).toBe("Something went wrong");
+  });
+
+  it("Vue (vuetify): binds the `title=` ATTRIBUTE as :title='t(…)'", async () => {
+    const files = await generateSystemFiles(SYSTEM("vue", "vuetify", `Heading { "Welcome" }`));
+    expect(shellOf(files, "src/App.vue")).toContain(
+      `<v-alert type="error" :title='t("chrome.somethingWentWrong", "Something went wrong")' :text="appError.message" />`,
+    );
+    expect(catalogOf(files)["chrome.somethingWentWrong"]).toBe("Something went wrong");
+  });
+
+  it("Vue (shadcnVue): binds the TEXT position as {{ t(…) }}", async () => {
+    const files = await generateSystemFiles(SYSTEM("vue", "shadcnVue", `Heading { "Welcome" }`));
+    expect(shellOf(files, "src/App.vue")).toContain(
+      `<AlertTitle>{{ t("chrome.somethingWentWrong", "Something went wrong") }}</AlertTitle>`,
+    );
+    expect(catalogOf(files)["chrome.somethingWentWrong"]).toBe("Something went wrong");
+  });
+
+  it("stays byte-identical (raw heading, both positions) with i18n off", async () => {
+    const mantine = await generateSystemFiles(SYSTEM("react", "mantine", `Text { status }`));
+    expect(appOf(mantine)).toContain(`<Alert color="red" title="Something went wrong">`);
+    const shadcn = await generateSystemFiles(SYSTEM("react", "shadcn", `Text { status }`));
+    expect(appOf(shadcn)).toContain(`<AlertTitle>Something went wrong</AlertTitle>`);
+    const vuetify = await generateSystemFiles(SYSTEM("vue", "vuetify", `Text { status }`));
+    expect(shellOf(vuetify, "src/App.vue")).toContain(
+      `<v-alert type="error" title="Something went wrong" :text="appError.message" />`,
+    );
+    const shadcnVue = await generateSystemFiles(SYSTEM("vue", "shadcnVue", `Text { status }`));
+    expect(shellOf(shadcnVue, "src/App.vue")).toContain(
+      `<AlertTitle>Something went wrong</AlertTitle>`,
+    );
+  });
+});
+
+describe("pack-chrome i18n — nav-toggle aria", () => {
+  it("React (chakra): binds `Open menu` — its own key, not the shadcn wording", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "chakra", `Heading { "Welcome" }`));
+    const app = appOf(files);
+    expect(app).toContain(`aria-label={t("chrome.openMenu", "Open menu")}`);
+    expect(app).not.toContain("Toggle navigation");
+    expect(catalogOf(files)["chrome.openMenu"]).toBe("Open menu");
+  });
+
+  it("React (shadcn): binds `Toggle navigation`", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "shadcn", `Heading { "Welcome" }`));
+    expect(appOf(files)).toContain(
+      `aria-label={t("chrome.toggleNavigation", "Toggle navigation")}`,
+    );
+    expect(catalogOf(files)["chrome.toggleNavigation"]).toBe("Toggle navigation");
+  });
+
+  it("Vue (shadcnVue): binds as :aria-label='t(…)'", async () => {
+    const files = await generateSystemFiles(SYSTEM("vue", "shadcnVue", `Heading { "Welcome" }`));
+    expect(shellOf(files, "src/App.vue")).toContain(
+      `data-testid="nav-burger" :aria-label='t("chrome.toggleNavigation", "Toggle navigation")'`,
+    );
+    expect(catalogOf(files)["chrome.toggleNavigation"]).toBe("Toggle navigation");
+  });
+
+  it("Svelte (shadcnSvelte): binds as aria-label={t(…)}", async () => {
+    const files = await generateSystemFiles(
+      SYSTEM("svelte", "shadcnSvelte", `Heading { "Welcome" }`),
+    );
+    expect(shellOf(files, "(app)/+layout.svelte")).toContain(
+      `aria-label={t("chrome.toggleNavigation", "Toggle navigation")}`,
+    );
+    expect(catalogOf(files)["chrome.toggleNavigation"]).toBe("Toggle navigation");
+  });
+
+  it("stays byte-identical (raw aria, both wordings) with i18n off", async () => {
+    const chakra = await generateSystemFiles(SYSTEM("react", "chakra", `Text { status }`));
+    expect(appOf(chakra)).toContain(`aria-label="Open menu"`);
+    const shadcn = await generateSystemFiles(SYSTEM("react", "shadcn", `Text { status }`));
+    expect(appOf(shadcn)).toContain(`aria-label="Toggle navigation"`);
+    const shadcnVue = await generateSystemFiles(SYSTEM("vue", "shadcnVue", `Text { status }`));
+    expect(shellOf(shadcnVue, "src/App.vue")).toContain(
+      `data-testid="nav-burger" aria-label="Toggle navigation"`,
+    );
+    const shadcnSvelte = await generateSystemFiles(
+      SYSTEM("svelte", "shadcnSvelte", `Text { status }`),
+    );
+    expect(shellOf(shadcnSvelte, "(app)/+layout.svelte")).toContain(
+      `aria-label="Toggle navigation"`,
+    );
   });
 });
 

@@ -115,6 +115,9 @@ describe("Svelte i18n runtime", () => {
     ) as Record<string, string>;
     expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
     expect(catalog["chrome.primaryNav"]).toBe("Primary navigation");
+    // The mobile nav toggle's aria — "Toggle navigation" on both Svelte packs.
+    expect(shell).toContain(`aria-label={t("chrome.toggleNavigation", "Toggle navigation")}`);
+    expect(catalog["chrome.toggleNavigation"]).toBe("Toggle navigation");
   });
 
   it("keeps the app-shell skip link byte-identical (raw, no t import) for a string-less app", async () => {
@@ -123,6 +126,7 @@ describe("Svelte i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`Text { status }`));
     const shell = shellOf(files);
     expect(shell).toContain(`>Skip to content</a>`);
+    expect(shell).toContain(`aria-label="Toggle navigation"`);
     expect(shell).not.toContain("import { t }");
     expect(shell).not.toContain("chrome.skipToContent");
     // No locale catalog for a string-less app.
