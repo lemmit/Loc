@@ -336,21 +336,18 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
 
 /** `Chart` on a target that can't render it (M-T1.3 Phase 4).
  *
- *  Unlike `validateDataGridFramework` above, the membership rule is per-PACK,
- *  not per-framework: `Chart` renders through the active design pack's
- *  `primitive-chart` template plus a pack-specific chart dependency, and only
- *  mantine v9 (the lead pack) ships both today.  Every other pack — shadcn,
- *  mui, chakra, and every non-react framework — would crash codegen on the
- *  missing template, so the gate keys on the deployable's fully-qualified
- *  `design` (lowering resolves bareword `design: mantine` to `mantine@v9`).
- *  Each pack backfill widens the set; the `REQUIRED_PRIMITIVES` flip retires
- *  it (required-primitives.ts's staged policy). */
-const CHART_DESIGNS = new Set<string>(["mantine@v9"]);
-
+ *  The gate was per-PACK during the staged rollout (mantine v9 was the only
+ *  pack shipping a `primitive-chart` template + a chart dependency).  The
+ *  backfill is complete — all EIGHT tsx packs ship both — so `primitive-chart`
+ *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
+ *  it a pack-LOAD failure rather than something to re-check here.  What remains
+ *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`: vue,
+ *  svelte, angular, feliz, flutter and HEEx have no chart template and would
+ *  crash codegen, so they stay honest gaps. */
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.uiName) continue;
-    if (d.uiFramework === "react" && CHART_DESIGNS.has(d.design ?? "")) continue;
+    if (d.uiFramework === "react") continue;
     const ui = sys.uis.find((u) => u.name === d.uiName);
     if (!ui) continue;
     // Components render into pages, so a chart moved into one must not slip
@@ -366,10 +363,9 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
         code: "loom.chart-unsupported-target",
         message:
           `${what} uses 'Chart', which deployable '${d.name}' can't render ` +
-          `(frontend '${d.uiFramework ?? "unknown"}', design '${d.design ?? "none"}'). Chart ` +
-          `ships on react with the mantine@v9 design pack only for now (the staged pack ` +
-          `rollout). Host this ui there, or bind the grouped projection to 'Table' — it ` +
-          `renders the same rows on every frontend.`,
+          `(frontend '${d.uiFramework ?? "unknown"}'). Chart ships on react — on every ` +
+          `react design pack. Host this ui on a react deployable, or bind the grouped ` +
+          `projection to 'Table' — it renders the same rows on every frontend.`,
         source: `${ui.name}/${what}`,
       });
     }

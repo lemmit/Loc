@@ -78,6 +78,18 @@ export const SQLALCHEMY_INTRINSIC_SQL: Record<string, (recv: string, args: strin
   "money.floor": (recv) => `func.floor(${recv})`,
   "decimal.ceil": (recv) => `func.ceil(${recv})`,
   "money.ceil": (recv) => `func.ceil(${recv})`,
+  // ---- datetime — midnight-UTC bucket (the daily-series grouping key).
+  // `DateTime(timezone=True)` columns are stored in UTC, so Postgres
+  // `date_trunc('day', …)` cuts at the same boundary as the in-memory arm.
+  //
+  // The unit MUST be a `literal_column`, not the plain string `"day"`: a
+  // string renders as a BIND PARAMETER, and Postgres compares a grouped
+  // select against the GROUP BY expression syntactically — `date_trunc($1,
+  // placed_at)` in the select and `date_trunc($2, placed_at)` in the group by
+  // are different expressions, so the query dies with `column
+  // "orders.placed_at" must appear in the GROUP BY clause`.  Verified against
+  // a real Postgres, not just asserted.
+  "datetime.startOfDay": (recv) => `func.date_trunc(literal_column("'day'"), ${recv})`,
 };
 
 export function lowerToSqlAlchemy(

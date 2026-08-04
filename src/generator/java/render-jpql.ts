@@ -75,6 +75,13 @@ export const JPQL_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) =
   "money.floor": (recv) => `floor(${recv})`,
   "decimal.ceil": (recv) => `ceiling(${recv})`,
   "money.ceil": (recv) => `ceiling(${recv})`,
+  // ---- datetime — midnight-UTC bucket.  HQL has no portable truncation
+  // function over an Instant, so this is the documented escape hatch:
+  // `function('name', args…)` passes `date_trunc` straight through to
+  // Postgres (the Criteria-side `cb.function` at render-criteria.ts is the
+  // same discipline).  `timestamptz` is stored in UTC, so the day boundary
+  // matches the in-memory `truncatedTo(DAYS)`.
+  "datetime.startOfDay": (recv) => `function('date_trunc', 'day', ${recv})`,
 };
 
 export function renderJpqlWhere(e: ExprIR, ctx: JpqlCtx): string {

@@ -47,6 +47,7 @@
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-chart": "primitive-chart.hbs",
     "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
@@ -108,6 +109,15 @@
     }
   },
   "imports": {
+    "primitive-chart": [
+      {
+        "from": "@mui/x-charts",
+        "named": [
+          "BarChart",
+          "LineChart"
+        ]
+      }
+    ],
     "primitive-data-grid": [{"from": "@mui/material", "named": ["Button", "Checkbox", "FormControlLabel", "FormGroup", "Paper", "Stack", "Table", "TableBody", "TableCell", "TableContainer", "TableHead", "TableRow", "TableSortLabel", "TextField", "Typography"]}],
     "primitive-heading": [
       {

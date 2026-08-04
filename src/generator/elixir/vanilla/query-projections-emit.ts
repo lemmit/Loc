@@ -44,16 +44,17 @@ import {
 import {
   type AggregateSelect,
   aggregateCoercion,
+  GROUP_KEY_TRANSFORM_INTRINSIC,
   type GroupKeySelect,
   groupedAggregates,
-  groupKeyColumn,
+  groupKeyOf,
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { projectionRowModule, stateModule } from "../dispatch-emit.js";
-import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { ECTO_INTRINSIC_FRAGMENTS, type RenderCtx, renderExpr } from "../render-expr.js";
 import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
 import { hasRefColls, preloadSuffix } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
@@ -190,24 +191,32 @@ function renderQueryProjectionModule(
   // is the LIST shape (like the per-row read), never the singleton map.
   const grouped = groupedAggregates(proj);
   if (grouped) {
-    const groupCols = grouped.groupBy.map((g) => {
-      const col = groupKeyColumn(g);
-      if (col === null) {
+    // One renderer for every key position (SELECT, `group_by:`, `order_by:`)
+    // so the three can't disagree — Postgres matches a grouped select against
+    // the GROUP BY expression syntactically, and a bare column in the select
+    // with a truncated column in the group_by is a hard SQL error.  A COMPUTED
+    // key (M-T4.2 date bucket) reuses the SAME Ecto fragment the `where`
+    // position emits for that intrinsic, so a `group by o.placedAt.startOfDay()`
+    // and a `where o.placedAt.startOfDay() == …` render byte-identically.
+    const keyExpr = (e: ExprIR): string => {
+      const key = groupKeyOf(e);
+      if (key === null) {
         throw new Error(
-          "internal: a grouped projection's group-by entry must name a source column",
+          "internal: a grouped projection's key must name a source column — the IR validator should have rejected this projection",
         );
       }
-      return `record.${snake(col)}`;
-    });
+      const col = `record.${snake(key.column)}`;
+      if (key.transform === undefined) return col;
+      const frag = ECTO_INTRINSIC_FRAGMENTS[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
+      if (!frag) {
+        throw new Error(`internal: no Ecto fragment for grouping-key transform '${key.transform}'`);
+      }
+      return frag(col, []);
+    };
+    const groupCols = grouped.groupBy.map(keyExpr);
     const groupClause = groupCols.length === 1 ? groupCols[0]! : `[${groupCols.join(", ")}]`;
     const selectCols = [
-      ...grouped.keys.map((k) => {
-        const col = groupKeyColumn(k.expr);
-        if (col === null) {
-          throw new Error("internal: a grouped projection's key select must name a source column");
-        }
-        return `${k.field}: record.${snake(col)}`;
-      }),
+      ...grouped.keys.map((k) => `${k.field}: ${keyExpr(k.expr)}`),
       ...grouped.aggregates.map((a) => `${a.field}: ${ectoAggregate(a.aggregate)}`),
     ].join(", ");
     lines.push("    rows =");
@@ -220,9 +229,20 @@ function renderQueryProjectionModule(
     lines.push(`    Enum.map(rows, fn row ->`);
     lines.push(`      %{`);
     const entries = [
-      ...grouped.keys.map((k) => `${k.field}: ${ectoKeyCoerce(k, `row.${k.field}`)}`),
+      ...grouped.keys.map(
+        (k) =>
+          `${k.field}: ${ectoKeyCoerce(k, `row.${k.field}`, groupKeyOf(k.expr)?.transform !== undefined)}`,
+      ),
       ...grouped.aggregates.map((a) => `${a.field}: ${ectoCoerce(a, `row.${a.field}`)}`),
     ];
+    const needsUtcHelper = grouped.keys.some((k) => {
+      const inner = k.type.kind === "optional" ? k.type.inner : k.type;
+      return (
+        groupKeyOf(k.expr)?.transform !== undefined &&
+        inner.kind === "primitive" &&
+        inner.name === "datetime"
+      );
+    });
     entries.forEach((e, i) => {
       lines.push(`        ${e}${i === entries.length - 1 ? "" : ","}`);
     });
@@ -245,7 +265,23 @@ defmodule ${moduleName} do
   def run(current_user \\\\ nil) do
 ${lines.filter((l) => l !== "").join("\n")}
   end
-end
+${
+  needsUtcHelper
+    ? `
+  # A bucketed grouping key is SELECTed as a raw \`fragment\`, which bypasses
+  # Ecto's schema type mapping — Postgrex returns a \`%NaiveDateTime{}\` with
+  # microsecond precision where the schema-typed \`:utc_datetime\` field would
+  # give a second-precision \`%DateTime{}\`.  Without this the key serialised
+  # \`2026-08-01T00:00:00.000000\` instead of \`2026-08-01T00:00:00Z\`, diverging
+  # from the other four backends.  Accepts either shape so a driver that
+  # already hands back a \`%DateTime{}\` stays correct.
+  defp group_key_utc(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
+
+  defp group_key_utc(%NaiveDateTime{} = ndt),
+    do: ndt |> DateTime.from_naive!("Etc/UTC") |> DateTime.truncate(:second)
+`
+    : ""
+}end
 `;
   }
 
@@ -422,9 +458,18 @@ function ectoCoerce(s: AggregateSelect, read: string): string {
  *  rides the Elixir wire as a STRING (`%Decimal{}` → `to_string`) and a plain
  *  `decimal` as a NUMBER (`Decimal.to_float`).  Keys are never zero-defaulted —
  *  a group's key value is whatever the column holds (nil only when optional). */
-function ectoKeyCoerce(k: GroupKeySelect, read: string): string {
+function ectoKeyCoerce(k: GroupKeySelect, read: string, viaFragment = false): string {
   const inner = k.type.kind === "optional" ? k.type.inner : k.type;
   const optional = k.type.kind === "optional";
+  // A TRANSFORMED key is selected as a raw `fragment`, which bypasses Ecto's
+  // schema type mapping: Postgrex hands back a `%NaiveDateTime{}` with
+  // microsecond precision, so the key serialised `2026-08-01T00:00:00.000000`
+  // where a schema-typed `:utc_datetime` field (and every other backend)
+  // gives `2026-08-01T00:00:00Z`.  Normalise back onto the field convention.
+  if (viaFragment && inner.kind === "primitive" && inner.name === "datetime") {
+    const norm = `group_key_utc(${read})`;
+    return optional ? `if(is_nil(${read}), do: nil, else: ${norm})` : norm;
+  }
   if (inner.kind === "primitive" && inner.name === "money") {
     return optional
       ? `if(is_nil(${read}), do: nil, else: to_string(${read}))`

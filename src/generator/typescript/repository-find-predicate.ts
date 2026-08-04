@@ -69,6 +69,10 @@ export const DRIZZLE_INTRINSIC_SQL: Record<string, (recv: string, args: string[]
   "money.floor": (recv) => `sql\`floor(\${${recv}})\``,
   "decimal.ceil": (recv) => `sql\`ceil(\${${recv}})\``,
   "money.ceil": (recv) => `sql\`ceil(\${${recv}})\``,
+  // ---- datetime — midnight-UTC bucket (the daily-series grouping key).
+  // `timestamptz` columns are stored in UTC, so `date_trunc('day', …)` cuts
+  // the day at the UTC boundary, matching the in-memory snippet.
+  "datetime.startOfDay": (recv) => `sql\`date_trunc('day', \${${recv}})\``,
 };
 
 // IR expression → Drizzle expression

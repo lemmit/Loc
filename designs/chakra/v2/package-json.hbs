@@ -14,7 +14,8 @@
     "@emotion/react": "^11.13.0",
     "@emotion/styled": "^11.13.0",
     "framer-motion": "^11.0.0"{{#if usesMoney}},
-    "decimal.js": "^10.4.3"{{/if}}
+    "decimal.js": "^10.4.3"{{/if}}{{#if usesChart}},
+    "recharts": "^2.13.0"{{/if}}
   },
   "devDependencies": {
 {{> stack-package-devdeps}}

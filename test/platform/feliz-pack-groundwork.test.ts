@@ -39,6 +39,10 @@ describe("feliz pack format groundwork", () => {
     // for Feliz too — EXCEPT `primitive-form-of`, which Feliz renders inline
     // through the Elmish `renderCreateForm`… seams (never pack-dispatched, the
     // same drop as Angular).  Unlike Angular, Feliz keeps `primitive-modal`.
+    // `primitive-chart` is TSX-ONLY (M-T1.3 Phase 5): each react pack binds its
+    // own charting library, and no feliz pack ships a chart template — `Chart`
+    // stays an honest `loom.chart-unsupported-target` gap here.
+    tsx.delete("primitive-chart");
     for (const name of tsx) {
       // The TSX form-pipeline surface has no procedural analogue: Feliz builds
       // form inputs inline via the walker seams, so none of the field-input-* /

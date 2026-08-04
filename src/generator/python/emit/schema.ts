@@ -6,6 +6,7 @@ import type {
   ProjectionIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
+import { isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import { directParentName } from "../../../ir/util/containment-parent.js";
 import {
@@ -213,6 +214,14 @@ export function renderPySchema(
   // per projection, keyed by its correlation column, non-key columns nullable
   // (a fold upserts partial rows) — matches the shared nullable DDL.
   for (const proj of ctx.projections) {
+    // A QUERY-TIME projection has no read-model table — it is computed live
+    // from its source on every read, and `buildMigrations` emits no DDL for
+    // it.  Mapping one anyway produced a keyless `Base` subclass over a table
+    // that does not exist, and SQLAlchemy refuses to configure a mapper with
+    // no primary key: `configure_mappers()` raised at import time, so the
+    // WHOLE app failed to boot as soon as any query-time projection existed.
+    // The other four backends already skip these here.
+    if (isQueryTimeProjection(proj)) continue;
     models.push(renderProjectionStateModel(proj, ctx, resolveProjectionSchema?.(proj)));
   }
   // Transactional outbox (dispatch-delivery-semantics.md): the shared

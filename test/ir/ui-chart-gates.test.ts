@@ -78,13 +78,31 @@ describe("loom.chart-unsupported-target (per-pack gate)", () => {
     expect(hit?.severity).toBe("error");
     // The message must point at the alternative that actually works.
     expect(hit?.message).toContain("Table");
-    expect(hit?.message).toContain("mantine@v9");
+    expect(hit?.message).toContain("react");
   });
 
-  it("rejects Chart on react with a non-mantine design pack", async () => {
-    const diags = await diagsOf(sys({ design: "shadcn" }));
-    expect(diags.find((d) => d.code === "loom.chart-unsupported-target")).toBeDefined();
-  });
+  // The pack backfill is complete (M-T1.3 Phase 5): every tsx pack emits
+  // `primitive-chart`, so the gate collapsed from a per-PACK set to the same
+  // per-FRAMEWORK rule `DataGrid` uses.  A missing template is now a pack-LOAD
+  // failure via `REQUIRED_PRIMITIVES.tsx.core`, not something re-checked here.
+  // Barewords resolve to each family's LATEST pack; the `@vN` pins cover the
+  // older majors, which bind different chart-library versions (x-charts v7 vs
+  // v8, tailwind v3's `hsl(var(--token))` vs v4's `var(--token)`).  A pinned
+  // spelling is a STRING in the grammar, so it is quoted here.
+  for (const design of [
+    "shadcn",
+    "mui",
+    "chakra",
+    `"shadcn@v3"`,
+    `"mui@v5"`,
+    `"chakra@v2"`,
+    `"mantine@v7"`,
+  ]) {
+    it(`accepts Chart on react with the ${design} design pack`, async () => {
+      const diags = await diagsOf(sys({ design }));
+      expect(diags.filter((d) => d.code?.startsWith("loom.chart-"))).toEqual([]);
+    });
+  }
 
   it("accepts Chart on react with the default design (mantine@v9)", async () => {
     const diags = await diagsOf(sys({}));

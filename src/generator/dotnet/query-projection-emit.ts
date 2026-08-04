@@ -11,15 +11,21 @@ import { exprUsesCurrentUser, isQueryTimeProjection } from "../../ir/types/loom-
 import {
   type AggregateSelect,
   aggregateCoercion,
+  GROUP_KEY_TRANSFORM_INTRINSIC,
   groupedAggregates,
-  groupKeyColumn,
+  groupKeyOf,
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
 import { projectionRowDbSet } from "./projection-state-emit.js";
-import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
+import {
+  CS_INTRINSIC_QUERY_RENDERERS,
+  CS_INTRINSIC_RENDERERS,
+  collectCsExprUsings,
+  renderCsExpr,
+} from "./render-expr.js";
 import { workflowStateDbSet } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -413,16 +419,36 @@ function renderGroupedHandler(
   // order — the GroupBy key, the ORDER BY chain, and (via `g.Key`) the
   // projected key members all derive from exactly these.  Validation pins
   // every entry to a bare source column before emit.
-  const cols: string[] = [];
-  for (const e of grouped.groupBy) {
-    const col = groupKeyColumn(e);
-    if (!col) {
+  //
+  // Each entry carries the anonymous-type MEMBER name and the DECLARATION that
+  // produces it.  A bare column declares as `o.Status`, letting C# infer the
+  // member name `Status` — byte-identical to the pre-transform emission.  A
+  // COMPUTED key (M-T4.2 date bucket) has no inferable name, so it declares
+  // explicitly (`PlacedAtStartOfDay = o.PlacedAt.Date`) and the member name
+  // encodes the transform: the same column grouped raw and grouped-by-day are
+  // different groups, so they must not collapse onto one member.
+  const groupCol = (e: ExprIR): { member: string; decl: string } => {
+    const key = groupKeyOf(e);
+    if (!key) {
       throw new Error(
         `internal: projection ${proj.name}: a group-by column must be a bare source column`,
       );
     }
-    const pascal = upperFirst(col);
-    if (!cols.includes(pascal)) cols.push(pascal);
+    const prop = upperFirst(key.column);
+    if (key.transform === undefined) return { member: prop, decl: `o.${prop}` };
+    const render =
+      CS_INTRINSIC_QUERY_RENDERERS[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]] ??
+      CS_INTRINSIC_RENDERERS[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
+    if (!render) {
+      throw new Error(`internal: no C# rendering for grouping-key transform '${key.transform}'`);
+    }
+    const member = `${prop}${upperFirst(key.transform)}`;
+    return { member, decl: `${member} = ${render(`o.${prop}`, [])}` };
+  };
+  const cols: Array<{ member: string; decl: string }> = [];
+  for (const e of grouped.groupBy) {
+    const gc = groupCol(e);
+    if (!cols.some((c) => c.member === gc.member)) cols.push(gc);
   }
 
   const usings = new Set<string>();
@@ -464,10 +490,12 @@ function renderGroupedHandler(
   // so the ORDER BY below can reach it), then one member per aggregate select
   // named after its wire field.
   const members = [
-    ...cols.map((c) => `g.Key.${c}`),
+    ...cols.map((c) => `g.Key.${c.member}`),
     ...grouped.aggregates.map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`),
   ].join(", ");
-  const orderBy = cols.map((c, i) => `.${i === 0 ? "OrderBy" : "ThenBy"}(x => x.${c})`).join("");
+  const orderBy = cols
+    .map((c, i) => `.${i === 0 ? "OrderBy" : "ThenBy"}(x => x.${c.member})`)
+    .join("");
 
   // Map each raw group to the declared row, in wire-shape order.
   const keyByField = new Map(grouped.keys.map((k) => [k.field, k] as const));
@@ -475,13 +503,9 @@ function renderGroupedHandler(
   const args = (proj.wireShape ?? []).map((f) => {
     const key = keyByField.get(f.name);
     if (key) {
-      const col = groupKeyColumn(key.expr);
-      if (!col) {
-        throw new Error(
-          `internal: projection ${proj.name}: a grouping-key select must read a bare source column`,
-        );
-      }
-      return projectToResponse(`x.${upperFirst(col)}`, key.type, ctx);
+      // Reads the SAME anonymous member the GroupBy declared — so a computed
+      // key's select and its grouping can't drift apart.
+      return projectToResponse(`x.${groupCol(key.expr).member}`, key.type, ctx);
     }
     const agg = aggByField.get(f.name);
     if (agg) return csCoerce(agg, "x", ctx);
@@ -516,7 +540,7 @@ ${ctor}
     public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
 ${gate}        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}
-            .GroupBy(o => new { ${cols.map((c) => `o.${c}`).join(", ")} })
+            .GroupBy(o => new { ${cols.map((c) => c.decl).join(", ")} })
             .Select(g => new { ${members} })
             ${orderBy}
             .ToListAsync(cancellationToken);

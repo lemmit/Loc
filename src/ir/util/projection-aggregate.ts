@@ -11,6 +11,7 @@
 // top that every emitter would otherwise repeat.
 // ---------------------------------------------------------------------------
 
+import { intrinsicFor } from "../../util/intrinsics.js";
 import type { ExprIR, ProjectionAggregateIR, ProjectionIR, TypeIR } from "../types/loom-ir.js";
 
 export interface AggregateSelect {
@@ -57,8 +58,10 @@ export interface GroupKeySelect {
   type: TypeIR;
   /** The key's column expression, source-row-rooted (`this.status` after
    *  `o.status` lowers).  Validation pins it to a single-hop member on the
-   *  source row (`loom.projection-groupby-key-not-columnar`), so
-   *  `groupKeyColumn` can always name the bare column. */
+   *  source row — optionally wrapped in one COMPUTED-key transform
+   *  (`o.placedAt.startOfDay()`) — via
+   *  `loom.projection-groupby-key-not-columnar`, so `groupKeyOf` can always
+   *  name the bare column plus the transform applied to it. */
   expr: ExprIR;
 }
 
@@ -97,17 +100,96 @@ export function groupedAggregates(p: ProjectionIR): GroupedSelects | null {
   return { keys, aggregates, groupBy };
 }
 
-/** The bare source column a validated grouping expression names, or `null` for
- *  any other shape (the validator rejects those before emit).  Two spellings
- *  lower from the source-candidate scope: `o.status` becomes a member access on
- *  `this` whose `member` IS the schema column key (the same fact
- *  `aggregateColumn` uses for `sum(o.total)`), and a bare `status` becomes a
- *  `this-prop` ref.  A member on any OTHER receiver (a join alias, a param) is
- *  not a source column. */
-export function groupKeyColumn(e: ExprIR): string | null {
+/** A COMPUTED grouping key's transform — the scalar intrinsic applied to the
+ *  source column before grouping.  Deliberately a closed union rather than any
+ *  catalogued intrinsic name: each entry has to be renderable in the SELECT,
+ *  GROUP BY and ORDER BY of every backend's dialect, and the key's declared
+ *  wire type has to survive it.  `startOfDay` truncates a `datetime` to
+ *  midnight UTC (`date_trunc('day', …)`) and stays a `datetime` — the daily
+ *  series bucket. */
+export type GroupKeyTransform = "startOfDay";
+
+/** The grouping key a validated `group by` / key-`select` expression names:
+ *  the bare source column, plus the transform applied to it (absent for a
+ *  plain column). */
+export interface GroupKey {
+  column: string;
+  transform?: GroupKeyTransform;
+}
+
+/** Every catalogued intrinsic that may wrap a grouping column, keyed
+ *  `<receiver>.<name>` (`intrinsicKey`).  Membership here is necessary but not
+ *  sufficient — the catalogue row must also be `queryable` and take no
+ *  arguments, both re-checked below, so a row that loses its queryability
+ *  stops being a legal grouping key rather than emitting untranslatable SQL. */
+const GROUP_KEY_TRANSFORMS: Record<string, GroupKeyTransform> = {
+  "datetime.startOfDay": "startOfDay",
+};
+
+/** The catalogue key (`intrinsicKey(receiver, name)`) each transform maps to —
+ *  the inverse of `GROUP_KEY_TRANSFORMS`.  Backends render a transformed key
+ *  by looking this up in their own intrinsic SQL table, so the SELECT, GROUP BY
+ *  and ORDER BY all get the byte-identical expression a `where`-position
+ *  intrinsic would produce. */
+export const GROUP_KEY_TRANSFORM_INTRINSIC: Record<GroupKeyTransform, string> = {
+  startOfDay: "datetime.startOfDay",
+};
+
+/** The source column (and any transform) a validated grouping expression
+ *  names, or `null` for any other shape (the validator rejects those before
+ *  emit).
+ *
+ *  Two BARE spellings lower from the source-candidate scope: `o.status`
+ *  becomes a member access on `this` whose `member` IS the schema column key
+ *  (the same fact `aggregateColumn` uses for `sum(o.total)`), and a bare
+ *  `status` becomes a `this-prop` ref.  A member on any OTHER receiver (a join
+ *  alias, a param) is not a source column.
+ *
+ *  On top of those, ONE computed shape is admitted: a zero-arg queryable
+ *  scalar intrinsic from `GROUP_KEY_TRANSFORMS` applied to a bare column
+ *  (`o.placedAt.startOfDay()` — a `method-call` on the member, since the
+ *  intrinsic is catalogue-resolved, not a distinct `ExprIR.kind`).  Comparing
+ *  the WHOLE `GroupKey` is what keeps `select day = o.placedAt.startOfDay()`
+ *  matched to `group by o.placedAt.startOfDay()` while a bare
+ *  `select day = o.placedAt` against the same `group by` stays a
+ *  `loom.projection-groupby-select-not-grouped`. */
+export function groupKeyOf(e: ExprIR): GroupKey | null {
+  const bare = bareColumn(e);
+  if (bare !== null) return { column: bare };
+  if (e.kind === "method-call" && e.args.length === 0 && !e.isCollectionOp) {
+    const column = bareColumn(e.receiver);
+    if (column === null) return null;
+    if (e.receiverType.kind !== "primitive") return null;
+    const transform = GROUP_KEY_TRANSFORMS[`${e.receiverType.name}.${e.member}`];
+    if (!transform) return null;
+    const sig = intrinsicFor(e.receiverType.name, e.member);
+    if (!sig?.queryable || sig.params.length > 0) return null;
+    return { column, transform };
+  }
+  return null;
+}
+
+function bareColumn(e: ExprIR): string | null {
   if (e.kind === "member" && e.receiver.kind === "this") return e.member;
   if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
   return null;
+}
+
+/** Two grouping keys name the same group iff BOTH the column and the transform
+ *  agree — `o.placedAt` and `o.placedAt.startOfDay()` are different groups. */
+export function sameGroupKey(a: GroupKey, b: GroupKey): boolean {
+  return a.column === b.column && a.transform === b.transform;
+}
+
+/** LEGACY narrow reading: the bare source column, `null` for anything else —
+ *  INCLUDING a computed key, which has no bare-column emission.  The backends
+ *  that have not yet grown a transform arm still call this, and each throws on
+ *  `null`; that loud failure is deliberate (a silent fallback to the untrimmed
+ *  column would group every timestamp into its own bucket).  Prefer
+ *  `groupKeyOf`. */
+export function groupKeyColumn(e: ExprIR): string | null {
+  const key = groupKeyOf(e);
+  return key && key.transform === undefined ? key.column : null;
 }
 
 function declaredType(p: ProjectionIR, field: string): TypeIR | undefined {

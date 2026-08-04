@@ -3942,3 +3942,49 @@ The rules this pays for:
 - **Never run a long background suite across a branch switch.** One did, and
   reported 713 failures that were pure artefact of the tree changing underneath
   it — a phantom regression that cost a full re-verification to disprove.
+
+## 70. A macro's AST does not lower like the parser's — and a gate written against one rejects the other (2026-08-04)
+
+`scaffoldDashboard` stopped generating on `main`. Every `with scaffoldDashboard`
+context died on the macro's OWN emitted projection:
+
+    projection 'OrderTotals': 'select totalSum = sum(…)' aggregates a computed
+    expression. An aggregation argument must be a plain column …
+
+The gate (`loom.projection-aggregate-arg-not-columnar`) was added a few days
+earlier with the grouped read model, to close a real crash: `sum(o.total +
+o.tax)` validated clean and then threw an internal error inside every emitter.
+It tested `arg.kind === "member" && arg.receiver.kind === "this"`, which is
+precisely what a PARSED `sum(o.total)` lowers to.
+
+A **macro-built** `sum(o.total)` does not lower to that shape. Same source
+spelling, same intent, different IR — so the gate rejected the scaffold whose
+output the emitters had been rendering correctly all along.
+
+- **Write a shape gate against what the EMITTERS accept, not against what the
+  parser happens to produce.** Every backend's `aggregateColumn` reads
+  `.member` alone (`${sourceTable}.${arg.member}`) — it never looks at the
+  receiver. That set, `member`, was the correct test; the extra `receiver.kind
+  === "this"` clause was an accident of the one example in front of me. The
+  fix rejects exactly the same crash class (`binary`, bare `ref`) and nothing
+  else.
+- **Two sources produce IR: the parser and the macro layer.** A validator arm
+  exercised only through `parseString` fixtures has seen half its input. When
+  a gate constrains expression SHAPE, test it against a macro-built expression
+  too — the stdlib macros (`scaffold*`, `crudish`, `softDelete`) are a
+  second, equally real front end.
+- **`git checkout <commit-before-the-gate>` settles authorship in one command.**
+  "Did I break this, or was it always broken?" is answerable, not arguable: the
+  pre-gate commit generated the same model clean and emitted
+  `sum(schema.orders.total)`. That single check turned "the macro looks wrong"
+  into "my gate is wrong" and pointed straight at the fix.
+- **A generate-only regression test can pass WITH the bug still in.** The first
+  version of the test called `generateSystemFiles` and went green against the
+  broken gate — the toolkit helper does not run phase ⑦ validation. Only
+  reverting the fix and watching the test stay green exposed that. **Always run
+  a new regression test against the unfixed code**; a test you have never seen
+  fail is a test you have not written yet.
+- **Green AST-level tests are not coverage of the pipeline.** The macro's own
+  tests assert the nodes it builds, and they stayed green through the entire
+  breakage — the defect lived one phase later, where those nodes meet a
+  validator. That gap is how this reached `main`.

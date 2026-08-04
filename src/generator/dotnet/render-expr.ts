@@ -719,6 +719,12 @@ export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "money.floor": (recv) => `Math.Floor(${recv})`,
   "decimal.ceil": (recv) => `Math.Ceiling(${recv})`,
   "money.ceil": (recv) => `Math.Ceiling(${recv})`,
+  // ---- datetime — midnight of the receiver's day.  Every DateTime on this
+  // backend is UTC (`DateTime.UtcNow` binds, `timestamptz` columns read back
+  // Kind=Utc through Npgsql), so `.Date` IS the midnight-UTC bucket, and EF
+  // Core translates the `DateTime.Date` member to SQL `date_trunc('day', …)`
+  // — the query position rides the same LINQ path (hence no SQL-table row).
+  "datetime.startOfDay": (recv) => `${recv}.Date`,
 };
 
 // EF-query-position overrides (sparse).  EF Core translates ONLY the

@@ -77,7 +77,16 @@ describe("Chart walker emit (react + mantine v9)", () => {
     const page = await dashPage();
     expect(page).toContain('import { useSalesByStatus } from "../api/projections";');
     expect(page).toContain("const salesByStatus = useSalesByStatus();");
-    expect(page).toContain("data={ salesByStatus.data ?? [] }");
+    // The row is projected to the two plotted columns, with the SERIES coerced
+    // to a number.  Both halves are load-bearing, and neither was in the
+    // original Phase 4 emit: a `money` field parses client-side into a
+    // `Decimal`, which no chart library can plot — `@mui/x-charts` rejects it
+    // at compile time while recharts / `@mantine/charts` accept it and then
+    // render nothing.  Projecting (rather than spreading `...r`) also drops
+    // sibling money columns that would fail the same dataset type.
+    expect(page).toContain(
+      "data={ (salesByStatus.data ?? []).map((r) => ({ status: r.status, revenue: Number(r.revenue) })) }",
+    );
     // The pre-Phase-4 failure mode this closes.
     expect(page).not.toContain("unresolved");
     expect(page).not.toContain("undefined.SalesByStatus");

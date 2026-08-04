@@ -211,9 +211,27 @@ const TSX_FORM: readonly string[] = [
 // `loom.datagrid-unsupported-target` rather than rendering a blank page region.
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 
+// `Chart` — the line/bar chart over a grouped projection's LIST response
+// (M-T1.3 Phase 4).  TSX ONLY, and deliberately narrower than
+// `DATA_GRID_PRIMITIVES`: each pack binds its own charting library
+// (`@mantine/charts`, `@mui/x-charts`, recharts for shadcn/chakra) as a
+// conditional dependency, and only the eight tsx packs have one.  Vue, Svelte
+// and Angular packs ship no chart template — their libraries were sketched in
+// the mission but not chosen — and Feliz/Flutter/HEEx have no JSX chart at all,
+// so every one of those stays an honest `loom.chart-unsupported-target` gap
+// rather than a blank page region.  Adding it to another format's `core` means
+// backfilling EVERY pack of that format first; the gate is what makes the
+// interim state honest.
+const CHART_PRIMITIVES: readonly string[] = ["primitive-chart"];
+
 export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {
   tsx: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
+    core: [
+      ...SHARED_PRIMITIVES,
+      ...TSX_ONLY_PRIMITIVES,
+      ...DATA_GRID_PRIMITIVES,
+      ...CHART_PRIMITIVES,
+    ],
     shell: SHARED_SHELL,
     fieldInput: TSX_FIELD_INPUT,
     form: TSX_FORM,
