@@ -14,7 +14,12 @@ name: Generated Angular build
 #                       whose template — strictTemplates-checked, and resolving
 #                       every name against the CLASS — no other case reaches.
 #   - push: main /    → full sweep
-#     workflow_dispatch  ({minimal, scaffold, showcase, store, file, grid}).
+#     workflow_dispatch  ({minimal, scaffold, showcase, store, file, grid,
+#                        history}).
+#   - ALWAYS (both)   → `history × angularMaterial@v1`, added through
+#                       `include:` rather than by widening CASES, so it costs
+#                       ONE cell instead of one-per-pack.  See the `include`
+#                       block below for why one Angular cell is the whole gate.
 #
 # Cell names MUST match the case labels in
 # test/e2e/generated-angular-build.test.ts (`<case>:<pack>`).
@@ -87,7 +92,21 @@ jobs:
             CASES='["minimal","scaffold","showcase","store","file","grid"]'
             PACKS='["angularMaterial@v1", "primeng@v1", "spartanNg@v1"]'
           fi
-          echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
+          # `history` (an `audited` aggregate + a scaffolded ui → the
+          # scaffolded History section) rides in through `include:`, NOT by
+          # being added to CASES.  A CASES entry is multiplied by every pack —
+          # 2 cells per PR, 3 post-merge.  An include entry whose keys collide
+          # with the matrix dimensions cannot be folded into an existing
+          # combination, so GitHub appends it as exactly ONE new cell.
+          #
+          # One cell is the whole gate, and one FRONTEND is too:  the section's
+          # payload is a template over an `AuditEntry[]` typed `unknown` at the
+          # leaves, and `ng build` is the only per-PR gate that runs
+          # `strictTemplates` over generated markup.  The defect this exists to
+          # catch — a double `?? []` guard, TS2869 — fails here.  The pack is
+          # irrelevant to it (`Timeline` emits native `<ol>`/`<li>`/`<dl>`, no
+          # pack components), hence one pack, the default.
+          echo "matrix={\"case\":$CASES,\"pack\":$PACKS,\"include\":[{\"case\":\"history\",\"pack\":\"angularMaterial@v1\"}]}" >> "$GITHUB_OUTPUT"
 
   matrix:
     needs: configure

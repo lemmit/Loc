@@ -37,7 +37,7 @@ import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
  *  walker renders `Timeline`.  Both halves are required — a target that renders
  *  the primitive but binds the wrong read is worse than one that renders
  *  nothing, because it looks like it works. */
-const HISTORY_CAPABLE_FRAMEWORKS: ReadonlySet<string> = new Set([
+export const HISTORY_CAPABLE_FRAMEWORKS: ReadonlySet<string> = new Set([
   "react",
   "vue",
   "svelte",

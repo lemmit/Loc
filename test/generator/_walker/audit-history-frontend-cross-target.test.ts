@@ -28,6 +28,17 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
+import {
+  HISTORY_CAPABLE_FRAMEWORKS,
+  skipsEntityHistoryRead,
+} from "../../../src/generator/_walker/history-read.js";
+import { angularTarget } from "../../../src/generator/angular/walker/angular-target.js";
+import { heexTarget } from "../../../src/generator/elixir/heex-target.js";
+import { felizTarget } from "../../../src/generator/feliz/feliz-target.js";
+import { flutterTarget } from "../../../src/generator/flutter/flutter-target.js";
+import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
+import { svelteTarget } from "../../../src/generator/svelte/walker/svelte-target.js";
+import { vueTarget } from "../../../src/generator/vue/walker/vue-target.js";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
 /** The same scaffolded system twice — `audited` on or off.  Everything else is
@@ -246,5 +257,47 @@ describe("frontends that don't collect the read degrade honestly", () => {
     expect(out).toContain("orders-detail-history");
     // The misbinding this gate exists to prevent: the trail is not the list.
     expect(out).not.toContain("assign(socket, :entries");
+  });
+
+  // The three cases above assert what today's three unported frontends DO.
+  // This one pins the DISPOSITION ITSELF: every framework a walker target
+  // declares is either in the capable set or named here as a reviewed skip.
+  //
+  // Two drifts it stops, both of which the per-frontend cases above are blind
+  // to.  A SEVENTH frontend target lands and nobody thinks about the audit
+  // trail: it inherits the skip by default, silently, and this test fails
+  // until someone writes the name down.  Or a frontend is PORTED — the read
+  // collected, `Timeline` rendered — and its name moves out of `SKIPPED` into
+  // `HISTORY_CAPABLE_FRAMEWORKS`, which is the same edit that makes the port
+  // real.  Neither can happen quietly.
+  it("every walker target's framework is dispositioned — capable, or a named skip", () => {
+    const declared = [
+      tsxTarget,
+      vueTarget,
+      svelteTarget,
+      angularTarget,
+      felizTarget,
+      flutterTarget,
+      heexTarget,
+    ].map((t) => t.framework);
+
+    /** Frameworks whose read layer does NOT collect `history(id)` — see the
+     *  module header of `_walker/history-read.ts` for what each does wrong. */
+    const SKIPPED = ["feliz", "flutter", "phoenixLiveView"];
+
+    expect([...declared].sort()).toEqual([...HISTORY_CAPABLE_FRAMEWORKS, ...SKIPPED].sort());
+    // And the predicate agrees with the table, rather than merely coexisting
+    // with it: a skipped framework really does skip a history read.
+    const aggregates = { has: (n: string) => n === "Order" };
+    const historyRead = {
+      kind: "method-call",
+      member: "history",
+      receiver: { kind: "ref", name: "Order" },
+    } as unknown as Parameters<typeof skipsEntityHistoryRead>[1];
+    for (const framework of declared) {
+      expect(skipsEntityHistoryRead(framework, historyRead, aggregates)).toBe(
+        SKIPPED.includes(framework),
+      );
+    }
   });
 });
