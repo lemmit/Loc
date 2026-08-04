@@ -130,12 +130,20 @@ data, and the mission should re-measure before acting on it):
 
 `commandHandler` / `queryHandler` appear nowhere in
 [`docs/language.md`](../../language.md) — they are documented only in proposals
-(`extern.md`, `unfoldable-api-derivation.md`, and this plan). That is grammar
-plus five backend emitters plus a print arm for a construct that never became
-part of the language we teach. `domainService`, by contrast, has a worked
-three-tier justification in [`docs/domain-services.md`](../../domain-services.md);
-its low count reads as *young*, not redundant. **The usage table is a prompt to
-ask the question per carrier, not a licence to delete the low rows.**
+(`extern.md`, `unfoldable-api-derivation.md`, and this plan). `domainService`,
+by contrast, has a worked three-tier justification in
+[`docs/domain-services.md`](../../domain-services.md); its low count reads as
+*young*, not redundant.
+
+**The usage table is a prompt to ask the question per carrier, not a licence to
+delete the low rows** — and the handler row is the worked example of why. Its
+seven files are five `scaffold-handlers` *build fixtures*, one `extern-handlers`
+corpus fixture, and one explicit-handler test: handlers are barely
+hand-written, but they sit on the **macro output path**. `scaffoldHandlers`
+(`target: "context"`) synthesises one per create / operation / find / get-by-id
+for every aggregate in the host context, so every `with scaffoldHandlers`
+context emits them. Low authorship ≠ low load-bearing. See §Open question 4 for
+the dispositions this leaves.
 
 ## Why this is the cheap fix
 
@@ -246,11 +254,8 @@ already has the machinery), then hard errors one release later. Corpus
 codemodded in the same PR, per the M-T5.17 Phase-2 precedent.
 
 **Phase 4 — re-derive the exclusions.** Walk `CALLABLE_SITES` row by row and
-either justify each exclusion in a comment or delete it. This is where the
-`commandHandler`/`queryHandler` question gets settled on evidence: if the
-unified `Callable` makes them a context-level `operation` with a different
-modifier set, they may not need to be separate keywords at all — but that is a
-*conclusion of the work*, not a premise.
+either justify each exclusion in a comment or delete it. §Open question 4 is the
+first row to walk.
 
 ## Sizing, sequencing, gates
 
@@ -281,3 +286,48 @@ modifier set, they may not need to be separate keywords at all — but that is a
 3. **Is `Create`/`Destroy`'s optional name worth keeping?** Three of the fifteen
    rules allow an unnamed form. Uniformity says no; `destroy { }` reading well
    says yes. Cosmetic — decide with the table, not before it.
+
+4. **Do `commandHandler` / `queryHandler` stay two keywords?** The dispositions,
+   with the two that are already ruled out:
+
+   | | disposition | verdict |
+   |---|---|---|
+   | **A** | keep both keywords; they become two `CALLABLE_SITES` rows, the rules are deleted | **default** — zero user-visible change, cost is two rows |
+   | **B** | one `handler` keyword, command-vs-query **derived** from the body | **no** — see below |
+   | **B′** | one `handler` keyword + a `readonly` modifier row | **the only cut worth evaluating** |
+   | **C** | demote to a context-level `operation` | **no** — `operation` would mean two things by site |
+   | **D** | keep them, unexported from the author surface (macro-internal) | **not viable** — see below |
+
+   **Why not B.** The compiler already derives the split: `handlerMutates()`
+   (`src/ir/validate/checks/api-checks.ts:36`) walks the body for
+   saves / emits / op-calls / creates / assignments, and `aggregatesTouched()`
+   counts aggregates — the same shape as `classifyDomainServiceTier`. So the
+   keyword carries no information the compiler lacks, which *looks* like a
+   textbook "derive, don't stamp" candidate. It isn't: the keyword is **declared
+   intent that the derivation checks**, and the checking is the whole value —
+
+   ```
+   loom.query-handler-saves             // "you said queryHandler; the body mutates"
+   loom.command-handler-multi-aggregate // "you said commandHandler; you touched 2 → workflow"
+   ```
+
+   Derive the kind silently and a read-only handler that starts mutating simply
+   *becomes* a command handler; the diagnostic cannot exist and the guarantee
+   goes with it. Derivation is right for facts, declaration is right for intent
+   you want enforced. **B′ is the version that keeps the check** — the assertion
+   moves from a keyword to a legality-table modifier, so
+   `loom.query-handler-saves` survives verbatim and the keyword count still
+   drops by one.
+
+   **Why not C.** An aggregate `operation` mutates `this`; a context has no
+   `this`. One keyword meaning two things by site is precisely the overload this
+   mission exists to remove (see `function`'s three meanings, §Symptom 2).
+
+   **Why D is not viable.** `scaffoldHandlers` is a `with`-clause macro, and
+   `src/language/lsp/unfold-macro.ts` states the contract: *"Macros become
+   demonstrably sugar — any user can unfold and edit … the unfolded output
+   re-parses to a working program."* A keyword an author cannot write makes
+   `unfold` emit source that does not parse. **The unfold guarantee forces every
+   macro-emitted construct to stay author-writable** — a general constraint on
+   this mission, not a fact about handlers alone, and the reason "just make it
+   internal" is unavailable for any carrier a stdlib macro emits.
