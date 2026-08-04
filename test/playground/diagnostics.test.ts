@@ -307,6 +307,40 @@ describe("phase markers", () => {
     expect(CRASH_REASONS).toContain("died-in-phase");
   });
 
+  // The phase says WHERE it died; the note says how much work it was
+  // carrying.  A field report landed on `boot:ddl` with PGlite already
+  // initialised — the next one needs to distinguish "182 statements, 61KB"
+  // from "3 statements" before any fix is worth attempting.
+  it("round-trips a scale note alongside the phase", () => {
+    markPhase("boot:ddl-apply", "182 stmts, 61KB");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:ddl-apply");
+    expect(mark?.note).toBe("182 stmts, 61KB");
+  });
+
+  it("surfaces the note in the reaped message the report renders", async () => {
+    markPhase("boot:ddl-apply", "182 stmts, 61KB");
+    reapUnfinishedPhase();
+    await Promise.resolve();
+    const died = readDiagnostics().find((s) => s.reason === "died-in-phase");
+    expect(died?.detail?.message).toContain("182 stmts, 61KB");
+    // The phase still rides in `pane` on its own — the report renders that
+    // field verbatim and it must stay a clean phase name.
+    expect(died?.detail?.pane).toBe("boot:ddl-apply");
+  });
+
+  it("caps the note so a pathological one can't blow the storage budget", () => {
+    markPhase("boot:ddl-apply", "x".repeat(500));
+    expect((localStorage.getItem("loom.diag.phase") ?? "").length).toBeLessThan(200);
+  });
+
+  it("still parses a marker with no note", () => {
+    markPhase("boot:pglite-init");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:pglite-init");
+    expect(mark?.note).toBeUndefined();
+  });
+
   it("never throws when storage is unavailable", () => {
     vi.stubGlobal("localStorage", {
       getItem() {

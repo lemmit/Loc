@@ -30,9 +30,9 @@ declare const self: DedicatedWorkerGlobalScope;
  *  no localStorage to leave a tombstone in.  Posting each step lets the main
  *  thread write one synchronously, so a renderer kill mid-boot is attributable
  *  to a step instead of to "boot". */
-function progress(phase: RuntimeProgress["phase"]): void {
+function progress(phase: RuntimeProgress["phase"], note?: string): void {
   try {
-    self.postMessage({ phase } satisfies RuntimeProgress);
+    self.postMessage({ phase, note } satisfies RuntimeProgress);
   } catch {
     // never let instrumentation break a boot
   }
@@ -276,7 +276,7 @@ async function boot(
 
   let ddl: string;
   try {
-    progress("ddl");
+    progress("ddl-synth");
     ddl = synthDDL(mod.schema, {
       is: mod.is,
       Table: mod.Table,
@@ -291,7 +291,7 @@ async function boot(
 
   let migrated = false;
   try {
-    migrated = await migrateOrApplyDDL(pglite, ddl);
+    migrated = await migrateOrApplyDDL(pglite, ddl, progress);
   } catch (err) {
     return {
       ok: false,
@@ -353,7 +353,12 @@ async function boot(
 async function migrateOrApplyDDL(
   pglite: PgliteHandle,
   ddl: string,
+  progress: (phase: RuntimeProgress["phase"], note?: string) => void,
 ): Promise<boolean> {
+  // Scale of the work this call is about to do, carried on every mark below
+  // so a kill reports not just WHICH step but how much it was chewing.
+  const scale = `${ddl.split(";").length - 1} stmts, ${Math.round(ddl.length / 1024)}KB`;
+  progress("ddl-meta", scale);
   // Bootstrap the meta table.  Both statements are idempotent.
   await pglite.exec(
     "CREATE SCHEMA IF NOT EXISTS __loom; " +
@@ -382,10 +387,14 @@ async function migrateOrApplyDDL(
     // foreign-keyed rows would otherwise block the drop.  Drops every
     // generated schema (a system-mode backend's `sales` etc.), not
     // just `public`, while keeping our `__loom` hash bookkeeping.
+    progress("ddl-drop", scale);
     await pglite.exec(dropUserSchemasSql(false));
     migrated = true;
   }
-  if (ddl.trim().length > 0) await pglite.exec(ddl);
+  if (ddl.trim().length > 0) {
+    progress("ddl-apply", scale);
+    await pglite.exec(ddl);
+  }
 
   // Record the new hash.  ON CONFLICT for the case where the row
   // existed (drift) and INSERT for first boot.

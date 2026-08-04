@@ -224,19 +224,34 @@ export type DiagPhase =
   | "boot:import-bundle"
   | "boot:pglite-assets"
   | "boot:pglite-init"
-  | "boot:ddl"
+  // `boot:ddl` was one marker over four very different operations, and a
+  // field report landed on it — PGlite had already initialised, so the kill
+  // was in the SQL work, not the WASM setup.  Split so the next one says
+  // WHICH: pure-JS synthesis, the tiny bookkeeping round-trip, the
+  // drift-path `DROP SCHEMA … CASCADE`, or applying the generated DDL.
+  | "boot:ddl-synth"
+  | "boot:ddl-meta"
+  | "boot:ddl-drop"
+  | "boot:ddl-apply"
   | "boot:create-app";
 
 interface PhaseMark {
   phase: string;
+  /** Optional scale/context captured with the mark (e.g. `"180 stmts, 61KB"`).
+   *  A phase name says where; this says how big, which is what separates
+   *  "this step is inherently heavy here" from "this step is normally fine". */
+  note?: string;
   /** epoch ms — cheaper to write than an ISO string, formatted on read. */
   t: number;
 }
 
 /** Record that we are ABOUT TO enter `phase`.  Synchronous by design. */
-export function markPhase(phase: DiagPhase): void {
+export function markPhase(phase: DiagPhase, note?: string): void {
   try {
-    localStorage.setItem(PHASE_KEY, `${Date.now()}:${phase}`);
+    // `|` separates the optional note; it can't occur in a phase name, and
+    // the whole record stays one short line so the write stays cheap.
+    const suffix = note ? `|${note.slice(0, 120)}` : "";
+    localStorage.setItem(PHASE_KEY, `${Date.now()}:${phase}${suffix}`);
   } catch {
     // storage disabled / quota — diagnostics never break the app
   }
@@ -259,9 +274,11 @@ function readPhase(): PhaseMark | null {
     const sep = raw.indexOf(":");
     if (sep < 0) return null;
     const t = Number(raw.slice(0, sep));
-    const phase = raw.slice(sep + 1);
-    if (!Number.isFinite(t) || phase.length === 0) return null;
-    return { phase, t };
+    const rest = raw.slice(sep + 1);
+    if (!Number.isFinite(t) || rest.length === 0) return null;
+    const bar = rest.indexOf("|");
+    if (bar < 0) return { phase: rest, t };
+    return { phase: rest.slice(0, bar), note: rest.slice(bar + 1), t };
   } catch {
     return null;
   }
@@ -278,7 +295,7 @@ export function reapUnfinishedPhase(): PhaseMark | null {
   if (!mark) return null;
   void logDiagnostic("died-in-phase", {
     message:
-      `previous load entered "${mark.phase}" at ` +
+      `previous load entered "${mark.phase}"${mark.note ? ` (${mark.note})` : ""} at ` +
       `${new Date(mark.t).toISOString()} and never completed it — no error and ` +
       "no pagehide, i.e. the process was killed (typically iOS memory pressure) " +
       "or hard-reloaded",

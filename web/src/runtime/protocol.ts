@@ -132,7 +132,22 @@ export type RuntimeRpcRequest =
  *  `markPhase` (workers have no localStorage), so the tombstone the next page
  *  load finds is specific instead of just "boot". */
 export interface RuntimeProgress {
-  phase: "import-bundle" | "pglite-assets" | "pglite-init" | "ddl" | "create-app";
+  phase:
+    | "import-bundle"
+    | "pglite-assets"
+    | "pglite-init"
+    // `ddl` was one phase over four different operations; a field report
+    // landed on it with PGlite already initialised, so the kill was in the
+    // SQL work.  These say which.
+    | "ddl-synth"
+    | "ddl-meta"
+    | "ddl-drop"
+    | "ddl-apply"
+    | "create-app";
+  /** Optional scale note (e.g. `"182 stmts, 61KB"`).  The phase says where it
+   *  died; this says how much work it was carrying, which is the difference
+   *  between "inherently heavy on this device" and "should have been cheap". */
+  note?: string;
 }
 
 export interface RuntimeRpcResponse {
