@@ -141,13 +141,20 @@ jobs:
         run: npx playwright test --project=chromium $SPECS
 
       # The Playwright step above ran `vite build` via its webServer, so
-      # `web/dist/` exists here.  Assert that the chunks reached only through
-      # `await import(...)` are still LAZY: `manualChunks` groups by package
-      # scope, and one static import anywhere in that scope silently promotes
-      # the whole group onto the eager path.  That has happened three times
-      # (monaco service overrides; @xyflow dragging LikeC4 + Graphviz WASM —
-      # 3.07 MB of a 15.87 MB eager total).  Chunk-size output looks identical
-      # either way, so nothing else notices.  Cheap: pure file analysis.
+      # `web/dist/` exists here.  Assert that the code reached only through
+      # `await import(...)` is still LAZY, three ways: chunk NAMES, source
+      # SIGNATURES (checked both for absence from the eager graph and presence
+      # somewhere in dist/, so the check can't rot into a permanent pass), and
+      # a hard eager BYTE BUDGET.
+      #
+      # This class of regression has now shipped four times — monaco service
+      # overrides; @xyflow dragging LikeC4 + Graphviz WASM (3.07 MB of a
+      # 15.87 MB eager total); the agent chat dragging Langium + chevrotain
+      # onto the main thread; and vite's own preload helper, a virtual module
+      # that matched no manualChunks rule and got parked in the 9.56 MB monaco
+      # chunk.  Chunk-size output looks identical either way and every
+      # `await import(...)` call site still reads as lazy, so nothing else
+      # notices.  Cheap: pure file analysis.  See M-T8.15.
       - name: Lazy chunks are still lazy
         working-directory: web
         run: node scripts/check-eager-chunks.mjs
