@@ -96,11 +96,25 @@ function buildSoftDeletable(): Capability {
  * tenant, every create is stamped with it, and `internal` keeps both
  * `tenantId` and `dataKey` out of client create/update inputs.
  *
- * NOTE: the stamp/filter claim field is hardcoded `tenantId` here — the
- * capability does NOT read the system's `tenancy by user.<claim>`
- * declaration.  That the declared claim actually is `tenantId` (and that a
- * `tenancy by` declaration exists at all) is verified by the slice-1a.3
- * tenancy validators, not by this capability.
+ * NOTE: the stamp/filter claim field is spelled `tenantId` here because a
+ * capability is a PRELUDE definition — built once at language-module init,
+ * with no system in scope — so it cannot read the system's `tenancy by
+ * user.<claim>` declaration.  It is not the final binding: enrichment
+ * (`bindTenancyClaim`, phase ⑥) rewrites the principal side of both the stamp
+ * and the filter to the DECLARED claim, exactly as it already derives the
+ * registry self-scope.  Edit the two in step — the name here is a placeholder
+ * that pass keys on, not a contract.
+ *
+ * The `tenantId` on the LEFT of the filter (and the stamp's target field) is a
+ * different thing and stays put: that is the ROW column this capability
+ * provides.  Only the `currentUser.` side is claim-dependent.
+ *
+ * (An earlier version of this note claimed the tenancy validators verified the
+ * declared claim is literally `tenantId`.  They never did — they check the
+ * claim EXISTS on the principal and that its TYPE binds, not its name — so a
+ * non-`tenantId` claim emitted a backend referencing a claim the principal did
+ * not have: a compile error on node/.NET/Java, a per-request 500 on
+ * Python/Elixir.  See `test/fixtures/corpus/tenancy-claim-name.ddd`.)
  *
  * `dataKey := currentUser.orgPath` is a pure claim-copy stamp exactly like
  * `tenantId`'s — it rides the same `contextStamp` pipeline, no per-backend

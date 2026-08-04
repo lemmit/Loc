@@ -124,8 +124,16 @@ export function buildRegistrySelfScopeFilter(
   };
 }
 
-/** The tenant-discriminator column the `tenantOwned` capability provides
- *  (`src/macros/prelude.ts`) — the flat tenant floor's LHS. */
+/** The tenant-discriminator COLUMN the `tenantOwned` capability provides
+ *  (`src/macros/prelude.ts`) — the flat tenant floor's LHS.
+ *
+ *  This is a ROW column name, owned by the capability and not the author's to
+ *  choose, so it is a constant.  It is deliberately NOT the principal-side
+ *  name: the claim the row is compared against is whatever `tenancy by
+ *  user.<claim>` declared, which is a per-system fact and travels as an
+ *  argument (see {@link buildTenantFloorFilter}).  The two coincide in every
+ *  fixture that declares the claim as `tenantId`, which is exactly how they
+ *  stayed conflated — see `tenancy-claim-name.ddd`. */
 export const TENANT_OWNED_TENANT_ID_FIELD = "tenantId";
 
 /** The derived principal member that carries the caller's materialized org
@@ -180,7 +188,11 @@ export const DEEP_SCOPE_SEMANTICS = "descendant-or-self path prefix; NULL-dataKe
  *  anchors at {@link ORG_PATH_CLAIM_FIELD} (the caller's own node +
  *  descendants); `global` anchors at {@link ROOT_ORG_CLAIM_FIELD} (the caller's
  *  ROOT node + descendants — the whole root subtree). */
-function buildScopeFilter(agg: Pick<AggregateIR, "name">, anchorClaim: string): ExprIR {
+function buildScopeFilter(
+  agg: Pick<AggregateIR, "name">,
+  anchorClaim: string,
+  tenantClaim: string,
+): ExprIR {
   const userShape: TypeIR = { kind: "entity", name: "__User__" };
   const claim = (member: string): ExprIR => ({
     kind: "member",
@@ -195,7 +207,7 @@ function buildScopeFilter(agg: Pick<AggregateIR, "name">, anchorClaim: string): 
     filter: {
       kind: "scope",
       anchorClaim: claim(anchorClaim),
-      tenantClaim: claim(TENANT_OWNED_TENANT_ID_FIELD),
+      tenantClaim: claim(tenantClaim),
     },
   };
 }
@@ -207,19 +219,30 @@ function scopeOf(e: ExprIR): Extract<AuthzFilterKind, { kind: "scope" }> | undef
 }
 
 /** The `deep` read-level reachability predicate — the descendant-or-self
- *  materialized-path scope anchored at `currentUser.orgPath` (P2.4). */
-export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
-  return buildScopeFilter(agg, ORG_PATH_CLAIM_FIELD);
+ *  materialized-path scope anchored at `currentUser.orgPath` (P2.4).
+ *  `tenantClaim` is the system's declared tenancy claim, used by the
+ *  NULL-`dataKey` fallback branch that degrades to the flat tenant floor. */
+export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">, tenantClaim: string): ExprIR {
+  return buildScopeFilter(agg, ORG_PATH_CLAIM_FIELD, tenantClaim);
 }
 
-/** The flat tenant FLOOR predicate `this.tenantId == currentUser.tenantId` —
+/** The flat tenant FLOOR predicate `this.tenantId == currentUser.<claim>` —
  *  the exact ExprIR shape the `tenantOwned` prelude capability filter lowers to
  *  (`src/macros/prelude.ts`), rebuilt here so the `local` WRITE level
  *  (authorization Phase 3 P3.1) can restore the floor at a mutation's command
  *  load even when the READ filter has been widened to `deep`/`global` in
  *  enrichment.  Every backend already renders this shape (it is today's tenant
- *  floor), so the write guard needs no new render code. */
-export function buildTenantFloorFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+ *  floor), so the write guard needs no new render code.
+ *
+ *  The two sides are NOT the same name: the left is the capability's row
+ *  COLUMN ({@link TENANT_OWNED_TENANT_ID_FIELD}), the right is the system's
+ *  declared `tenancy by user.<claim>` CLAIM.  `tenantClaim` is required rather
+ *  than defaulted — a default is precisely how the principal side stayed
+ *  pinned to `tenantId` on every backend. */
+export function buildTenantFloorFilter(
+  agg: Pick<AggregateIR, "name">,
+  tenantClaim: string,
+): ExprIR {
   const userShape: TypeIR = { kind: "entity", name: "__User__" };
   const stringType: TypeIR = { kind: "primitive", name: "string" };
   return {
@@ -235,7 +258,7 @@ export function buildTenantFloorFilter(agg: Pick<AggregateIR, "name">): ExprIR {
     right: {
       kind: "member",
       receiver: { kind: "ref", name: "currentUser", refKind: "current-user", type: userShape },
-      member: TENANT_OWNED_TENANT_ID_FIELD,
+      member: tenantClaim,
       receiverType: userShape,
       memberType: stringType,
     },
@@ -249,9 +272,13 @@ export function buildTenantFloorFilter(agg: Pick<AggregateIR, "name">): ExprIR {
  *  at `currentUser.rootOrg` (the first `orgPath` segment) instead of `orgPath`,
  *  so it widens from the caller's own node to the caller's ENTIRE root subtree.
  *  Only emitted under a hierarchy registry; under flat tenancy `rootOrg ==
- *  orgPath == the tenant floor` so the levels coincide. */
-export function buildGlobalScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
-  return buildScopeFilter(agg, ROOT_ORG_CLAIM_FIELD);
+ *  orgPath == the tenant floor` so the levels coincide.  `tenantClaim` is the
+ *  system's declared tenancy claim (see {@link buildDeepScopeFilter}). */
+export function buildGlobalScopeFilter(
+  agg: Pick<AggregateIR, "name">,
+  tenantClaim: string,
+): ExprIR {
+  return buildScopeFilter(agg, ROOT_ORG_CLAIM_FIELD, tenantClaim);
 }
 
 /** True when `e` is a subtree read-level sentinel (an `authz-filter` node
@@ -299,6 +326,22 @@ export function deepScopeAnchorClaim(e: ExprIR): string {
   const anchor = scopeOf(e)?.anchorClaim;
   if (anchor?.kind === "member") return anchor.member;
   return ORG_PATH_CLAIM_FIELD;
+}
+
+/** The TENANT principal-claim field a subtree sentinel's NULL-`dataKey`
+ *  fallback branch compares against — read off the `scope` decision's
+ *  `tenantClaim` member name, which enrichment binds to the system's declared
+ *  `tenancy by user.<claim>`.  The twin of {@link deepScopeAnchorClaim}, and
+ *  the reason the five backends must not reach for
+ *  {@link TENANT_OWNED_TENANT_ID_FIELD} on the principal side: that constant is
+ *  the ROW column, and the two names only coincide when the claim happens to
+ *  be called `tenantId`.  Falls back to the constant for a hand-built sentinel
+ *  whose `tenantClaim` isn't a `member` (defensive; the builders always emit
+ *  one). */
+export function deepScopeTenantClaim(e: ExprIR): string {
+  const tenant = scopeOf(e)?.tenantClaim;
+  if (tenant?.kind === "member") return tenant.member;
+  return TENANT_OWNED_TENANT_ID_FIELD;
 }
 
 export type TenantStance = "tenantOwned" | "crossTenant" | "registry" | "unscoped";

@@ -5,6 +5,7 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
+  deepScopeTenantClaim,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -369,7 +370,10 @@ function renderCsAuthzFilter(
       const principal = ctx.currentUserExpr ?? "currentUser";
       // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
       const org = `${principal}.${upperFirst(deepScopeAnchorClaim(e))}`;
-      const tenant = `${principal}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
+      // Tenant claim: the system's declared `tenancy by user.<claim>` — NOT
+      // the row column above, which only coincides when the author happened to
+      // name the claim `tenantId`.
+      const tenant = `${principal}.${upperFirst(deepScopeTenantClaim(e))}`;
       const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
       return (
         `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +

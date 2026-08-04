@@ -3,6 +3,7 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
+  deepScopeTenantClaim,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -294,7 +295,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
       // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the pinned
       // fail-closed materialized-path scope fragment.
       case "scope":
-        return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e));
+        return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e), deepScopeTenantClaim(e));
       default: {
         const _exhaustive: never = e.filter;
         throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
@@ -716,12 +717,19 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
  *  the sentinel here directly, so the principal pins are ALREADY fail-closed —
  *  it must NOT run this through `pinPrincipal` again.  `thisName` is the query
  *  binding (`record`). */
-export function renderDeepScopeEcto(thisName: string, anchorClaim = ORG_PATH_CLAIM_FIELD): string {
+export function renderDeepScopeEcto(
+  thisName: string,
+  anchorClaim = ORG_PATH_CLAIM_FIELD,
+  tenantClaim = TENANT_OWNED_TENANT_ID_FIELD,
+): string {
   const dk = `${thisName}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
   const tid = `${thisName}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
   // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
   const org = `^(current_user && current_user.${snake(anchorClaim)})`;
-  const tenant = `^(current_user && current_user.${snake(TENANT_OWNED_TENANT_ID_FIELD)})`;
+  // Tenant claim: the system's declared `tenancy by user.<claim>` — NOT the
+  // `tid` row column above, which only coincides when the author happened to
+  // name the claim `tenantId`.
+  const tenant = `^(current_user && current_user.${snake(tenantClaim)})`;
   const sql = `(? IS NOT NULL AND (? = ? OR ? LIKE ? || '${DATA_KEY_PATH_DELIMITER}%')) OR (? IS NULL AND ? = ?)`;
   return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
 }
