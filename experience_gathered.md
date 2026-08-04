@@ -4552,3 +4552,70 @@ Three elixir legs went red across this branch and **none was a compile error**:
 `status: 125` and a hex-install banner are infrastructure. A real failure prints
 Elixir diagnostics *before* the harness error. Check which before rebasing,
 re-running, or — worst — "fixing" emitted code that was never broken.
+## 80. An emitted attribute can be enforcement on one seam and documentation on the other (2026-08-03)
+
+`= default` create-input parity (#2377 → #2390 closed → #2392) cost three PRs for
+a one-line rule, and every wrong turn was a *verification* that looked rigorous.
+
+**The reported repro did not reproduce.** The bug arrived as "`status: int = 0`,
+POST without it: node 201, Elixir 422". It doesn't — a *literal* default is also
+emitted as the Ecto schema `default:`, so `%Agg{}` already carries `0` and
+`validate_required` passes by accident. The shapes that actually 422'd were the
+two no schema default covers: a bare `bool` and an **enum-valued** default
+(`renderEctoDefault` returns `null` for both). Had I fixed the reported symptom
+I would have fixed nothing and shipped a green gate over it.
+
+**Then the fixture agreed for the wrong reason.** I did generate all five
+backends and read them rather than assume — but the fixture's only defaulted
+bool was `onoff: bool = true`, and at that base node still emitted
+`.default(false)` for bools on update. So the one field that could separate
+"explicit default" from "implicit bool default" showed all five agreeing. Five-
+way agreement on a fixture that cannot *separate* two rules is not evidence both
+rules are right; it is evidence the fixture is underpowered. #2329 later removed
+that bool wire-default, the two rules came apart, and the assertion I had
+written pinned the defect.
+
+**And the deepest one: `@update_required` is not enforcement on update.** #2392
+correctly fixed the predicate so Elixir's changeset lists every non-nullable
+field, matching its OpenApiSpex schema and the other four backends. The runtime
+divergence survived it. Ecto's `validate_required` resolves through `get_field`,
+which falls back to the loaded struct — and the update path passes a row read
+from the database:
+
+```
+omit active+flag, stored row has values:   valid?=true   errors=[]
+omit active+flag, fresh struct:            valid?=false  errors=[flag: "can't be blank"]
+```
+
+The same attribute genuinely *enforces* on create (fresh struct, nils are
+visible) and merely *documents* on update. Nothing upstream compensates: the
+router is `plug :accepts, ["json"]` with no `OpenApiSpex.Plug.CastAndValidate`,
+so the schema's `required:` is inert, and the controller hands raw params
+straight to the changeset. A `PUT` omitting the field still answers 204 on
+Elixir and 422 on the four backends that reject at the DTO layer, before any row
+exists to fall back to.
+
+The rules this pays for:
+
+- **Reproduce the reported symptom before fixing it.** If it does not reproduce,
+  the report under-describes the class — find the shapes that *do* fail and fix
+  those. A fix aimed at a symptom that never fired is a fix aimed at nothing.
+- **A fixture must be able to SEPARATE the rules it claims to pin.** Ask which
+  field distinguishes rule A from rule B; if none does, agreement across
+  backends is uninformative. §67's assertion could not fail; this fixture could
+  not disagree — same family, one level earlier.
+- **"Enforcement surface" is per-seam, not per-file.** The same emitted construct
+  can gate one request shape and describe another. Before trusting an artifact
+  as the enforcement point, ask what it is compared *against* at runtime — a
+  not-nil check on a merged changeset is a different question from a key-presence
+  check on a request body.
+- **Check for an upstream enforcer before concluding there is none** (and before
+  concluding there is one). Confirming the absence of `CastAndValidate` in the
+  router is what made the finding safe to report; assuming either way would have
+  produced a confident wrong review.
+- **Prose written alongside the code is not independent of it** (§59). Here the
+  docstring, the PR description, and the table all stated the rule correctly and
+  the single line of code did not — authored together, so three correct-sounding
+  restatements surrounded one wrong implementation. Non-vacuity checking did not
+  save it either: reverting the predicate *did* fail my gate, because the gate
+  asserted the wrong expectation confidently.
