@@ -491,3 +491,88 @@ describe("pack-chrome i18n — back-to-home + root error boundary", () => {
     expect(boundary).not.toContain("import { t }");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The `<select>` picker placeholder
+// ---------------------------------------------------------------------------
+//
+// `SelectField` renders `primitive-select-field`, and nothing else does — so
+// contributing `chrome.selectPlaceholder` off that call node is EXACT.
+//
+// The form-built pickers (`field-input-id-select` / `-enum-select`) are
+// deliberately NOT wired: see the note in `i18n-chrome.ts`.  The last test here
+// pins the reason, because the tempting fix regresses something a structural
+// assertion would not notice.
+
+describe("pack-chrome i18n — select placeholder", () => {
+  const SELECT_BODY = `Stack {
+    Heading { "Pick one" },
+    SelectField { "Choice", bind: choice, options: ["a", "b"] }
+  }`;
+
+  /** The one-page system, with a `choice` state field for the picker to bind. */
+  const SELECT_SYSTEM = (platform: string, design: string) =>
+    SYSTEM(platform, design, SELECT_BODY).replace(
+      `page Home { route: "/" body:`,
+      `page Home { route: "/" state { choice: string = "" } body:`,
+    );
+
+  it("React (shadcn): binds the placeholder through t() keyed to the catalog", async () => {
+    const files = await generateSystemFiles(SELECT_SYSTEM("react", "shadcn"));
+    const page = pageOf(files, "home.tsx");
+    expect(page).toContain(`placeholder={t("chrome.selectPlaceholder", "Select…")}`);
+    // Renders into the PAGE, so `t` must be on the page's own import block —
+    // the half a "does it contain t(...)" check would miss.
+    expect(page).toContain(`import { t } from "../i18n"`);
+    expect(catalogOf(files)["chrome.selectPlaceholder"]).toBe("Select…");
+  });
+
+  it("Vue (shadcnVue): binds it as :placeholder='t(…)'", async () => {
+    const files = await generateSystemFiles(SELECT_SYSTEM("vue", "shadcnVue"));
+    const page = pageOf(files, "home.vue");
+    expect(page).toContain(`:placeholder='t("chrome.selectPlaceholder", "Select…")'`);
+    expect(catalogOf(files)["chrome.selectPlaceholder"]).toBe("Select…");
+  });
+
+  it("a form's OWN pickers stay English — and must not drag the runtime in", async () => {
+    // A `CreateForm` whose aggregate has an `X id` (with `derived display`) and
+    // an enum field renders two pickers from `field-input-*-select`, which this
+    // slice leaves hardcoded.  The temptation is to contribute
+    // `chrome.selectPlaceholder` from `CreateForm` — that would key those
+    // bindings, but it also turns i18n ON for any app with a form, shipping
+    // `src/i18n.ts`, `locales/en.json` and the `intl-messageformat` dependency
+    // to a UI with nothing to translate.  This pins BOTH halves of that trade so
+    // the tempting change fails loudly rather than silently regressing.
+    const files = await generateSystemFiles(`
+      system Shop {
+        subdomain Sales {
+          context Orders {
+            enum Tier { Bronze, Silver }
+            aggregate Customer with crudish {
+              name: string
+              derived display: string = this.name
+            }
+            aggregate Order with crudish { customer: Customer id  tier: Tier }
+            repository Orders for Order { }
+          }
+        }
+        api SalesApi from Sales
+        ui Web {
+          api Sales: SalesApi
+          page Home { route: "/" body: CreateForm { of: Order } }
+        }
+        storage primary { type: postgres }
+        resource st { for: Orders, kind: state, use: primary }
+        deployable api { platform: node, contexts: [Orders], dataSources: [st], serves: SalesApi, port: 3000 }
+        deployable web { platform: static targets: api ui: Web { Sales: api } design: shadcn port: 3100 }
+      }
+    `);
+    const page = pageOf(files, "home.tsx");
+    // The pickers are there, still English, and NOT bound to a key.
+    expect(page).toContain(`placeholder="Select…"`);
+    expect(page).not.toContain("chrome.selectPlaceholder");
+    // …and the app carries no translation runtime at all.
+    expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
+    expect([...files].some(([p]) => p.endsWith("src/i18n.ts"))).toBe(false);
+  });
+});

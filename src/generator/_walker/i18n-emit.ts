@@ -336,6 +336,17 @@ export function localizedChromeAria(ctx: WalkContext, name: string, english: str
 // Both read the English from `chromeMessage(name)` rather than taking it as an
 // argument, so the emitted `t()` default cannot drift from the catalog entry.
 
+/** Register the `t` import on the page's import map.
+ *
+ *  The chrome helpers below deliberately do NOT, because their markup may land
+ *  in a hoisted CHILD file — but chrome rendered straight INTO THE PAGE
+ *  (`SelectField`, a form's field inputs) resolves `t` against the page's own
+ *  import block and must ask for it.  Exported so those call sites don't repeat
+ *  the module specifier, which only this file should know. */
+export function registerI18nImport(ctx: WalkContext): void {
+  addImport(ctx, I18N_MODULE, "t");
+}
+
 /** The literal prefix of every chrome `t()` binding {@link localizedChromeText}
  *  and {@link localizedChromeAttr} emit.
  *
