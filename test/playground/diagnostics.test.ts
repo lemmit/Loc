@@ -11,6 +11,7 @@ import {
   type DiagSnapshot,
   errorDetail,
   isCrashReason,
+  isFatalCrashReason,
   logDiagnostic,
   markPhase,
   readDiagnostics,
@@ -339,6 +340,20 @@ describe("phase markers", () => {
     const mark = reapUnfinishedPhase();
     expect(mark?.phase).toBe("boot:pglite-construct");
     expect(mark?.note).toBeUndefined();
+  });
+
+  // A process kill is the only crash class with NO visible symptom: no error,
+  // no console line, the page simply comes back.  Two field reports arrived
+  // that way, with the user re-tapping Run into the same kill each time.  The
+  // notice is the whole feedback loop.
+  it("arms the next-boot notice, because the user saw the page vanish", async () => {
+    markPhase("boot:ddl-meta", "9 stmts, 1KB");
+    reapUnfinishedPhase();
+    await Promise.resolve();
+    expect(isFatalCrashReason("died-in-phase")).toBe(true);
+    const flag = readLastCrash();
+    expect(flag?.reason).toBe("died-in-phase");
+    expect(flag?.message).toContain("boot:ddl-meta");
   });
 
   it("never throws when storage is unavailable", () => {

@@ -1128,7 +1128,26 @@ export default function App(): JSX.Element {
     setOpenApiSpec(null);
     try {
       const sourceHash = fnv1a32(sourceRef.current);
-      const dataDir = `opfs-ahp://loom-${sourceHash}`;
+      // MOBILE: in-memory, not OPFS.
+      //
+      // Two field reports in a row died at `boot:ddl-meta` — PGlite's real
+      // startup, which is deferred to its first SQL statement (constructor
+      // 0.7 ms vs 5469 ms for that exec).  The SQL itself is 9 statements /
+      // 1 KB, so the cost is Postgres coming up, and freeing the bundler's
+      // ~8.8k-file VFS first (#2420) did not bring it under iOS's budget.
+      //
+      // `opfs-ahp://` adds an Access Handle Pool on top of that: a set of
+      // sync file handles opened up front, each holding resources, which is
+      // comparatively expensive on WebKit.  `:memory:` seeds the same
+      // pre-baked cluster from `pglite.data` into memfs and skips the pool
+      // entirely — strictly less startup work, which is the only budget
+      // under pressure here.
+      //
+      // The cost is real: no persistence across reloads on mobile, so rows
+      // don't survive a refresh.  A database that starts and forgets beats
+      // one that never starts, and the badge already reports `persistent`
+      // honestly rather than claiming persistence it doesn't have.
+      const dataDir = isDesktop ? `opfs-ahp://loom-${sourceHash}` : ":memory:";
       const res = await engine.boot(hono.code, dataDir, { fresh: opts?.fresh });
       if (res.ok) {
         dispatch({
