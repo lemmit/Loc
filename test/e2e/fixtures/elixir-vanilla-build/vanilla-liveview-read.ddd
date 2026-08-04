@@ -35,7 +35,7 @@ system VanillaLiveViewRead {
       body: Stack {
         Heading { "Customers" },
         QueryView {
-          of:      Sales.Customer.all,
+          of:      Customer.all,
           loading: Loader {},
           error:   Alert { "Couldn't load customers" },
           empty:   Empty { "No customers yet." },
@@ -73,7 +73,7 @@ system VanillaLiveViewRead {
       body: Stack {
         Heading { "Products" },
         QueryView {
-          of:      Sales.Product.all,
+          of:      Product.all,
           loading: Loader {},
           error:   Alert { "Couldn't load products" },
           empty:   Empty { "No products yet." },
