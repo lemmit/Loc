@@ -223,12 +223,12 @@ export type DiagPhase =
   | "boot:start"
   | "boot:import-bundle"
   | "boot:pglite-assets"
-  | "boot:pglite-init"
+  | "boot:pglite-construct"
   // `boot:ddl` was one marker over four very different operations, and a
-  // field report landed on it — PGlite had already initialised, so the kill
-  // was in the SQL work, not the WASM setup.  Split so the next one says
-  // WHICH: pure-JS synthesis, the tiny bookkeeping round-trip, the
-  // drift-path `DROP SCHEMA … CASCADE`, or applying the generated DDL.
+  // field report landed on it.  Split so the next one says WHICH: pure-JS
+  // synthesis, the tiny bookkeeping round-trip, the drift-path
+  // `DROP SCHEMA … CASCADE`, or applying the generated DDL.  Note that
+  // `ddl-meta` is ALSO where PGlite really starts up — its first exec.
   | "boot:ddl-synth"
   | "boot:ddl-meta"
   | "boot:ddl-drop"

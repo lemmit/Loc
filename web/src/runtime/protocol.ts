@@ -135,10 +135,10 @@ export interface RuntimeProgress {
   phase:
     | "import-bundle"
     | "pglite-assets"
-    | "pglite-init"
-    // `ddl` was one phase over four different operations; a field report
-    // landed on it with PGlite already initialised, so the kill was in the
-    // SQL work.  These say which.
+    | "pglite-construct"
+    // `ddl` was one phase over four different operations, and a field report
+    // landed on it.  These say which — and note that the FIRST of them is
+    // also where PGlite really starts up (see `pglite-construct`).
     | "ddl-synth"
     | "ddl-meta"
     | "ddl-drop"

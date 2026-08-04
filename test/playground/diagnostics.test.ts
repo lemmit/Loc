@@ -269,10 +269,10 @@ describe("logDiagnostic — round-trip through storage", () => {
 // ---------------------------------------------------------------------------
 describe("phase markers", () => {
   it("writes synchronously — no await between mark and storage", () => {
-    markPhase("boot:pglite-init");
+    markPhase("boot:pglite-construct");
     // Read back with no `await` anywhere: this is the whole point.  If the
     // write ever moves behind a promise, a process kill loses it.
-    expect(localStorage.getItem("loom.diag.phase")).toMatch(/^\d+:boot:pglite-init$/);
+    expect(localStorage.getItem("loom.diag.phase")).toMatch(/^\d+:boot:pglite-construct$/);
   });
 
   it("reaps a leftover marker into the ring as an error-class entry", async () => {
@@ -335,9 +335,9 @@ describe("phase markers", () => {
   });
 
   it("still parses a marker with no note", () => {
-    markPhase("boot:pglite-init");
+    markPhase("boot:pglite-construct");
     const mark = reapUnfinishedPhase();
-    expect(mark?.phase).toBe("boot:pglite-init");
+    expect(mark?.phase).toBe("boot:pglite-construct");
     expect(mark?.note).toBeUndefined();
   });
 

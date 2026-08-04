@@ -233,7 +233,13 @@ async function boot(
   try {
     progress("pglite-assets");
     const assets = await loadPgliteAssets();
-    progress("pglite-init");
+    // NOT "init": measured, `new PGlite(...)` is 0.7 ms and does nothing.
+    // Postgres' real startup — WASM instantiation, initdb, materialising the
+    // data dir — is deferred to the FIRST exec, i.e. `ddl-meta` below, which
+    // took 5469 ms against 5.9 ms for the second exec.  Naming this "init"
+    // cost a diagnosis cycle: a field report showed it passing and we read
+    // that as "PGlite is up", when it only meant the constructor returned.
+    progress("pglite-construct");
     if (dataDir && dataDir !== ":memory:") {
       try {
         pglite = new mod.PGlite(dataDir, assets);
