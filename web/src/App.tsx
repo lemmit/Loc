@@ -1286,6 +1286,16 @@ export default function App(): JSX.Element {
     lastBundleReadyRef.current = bundleGen;
     const bundleRes = await runBundleStep(bundleGen);
     if (!bundleRes?.hono.ok) return;
+    // MOBILE: hand the memory back before booting.  The bundler worker has
+    // done its job for this Run and is still holding an esbuild context plus
+    // the whole installed npm VFS (~8.8k files); PGlite's real startup —
+    // deferred to its first SQL statement, ~5.5s of WASM instantiation and
+    // initdb — is the peak of the whole cascade, and it is where iOS has been
+    // killing the tab (`died-in-phase: boot:ddl`).  Desktop keeps the warm
+    // context: it has the headroom, and rebuild speed is worth more there.
+    // Costs the next mobile bundle a cold start, largely served by the IDB
+    // install cache.  A slower second Run beats a first Run that never ends.
+    if (!isDesktop) engineRef.current?.releaseBundler?.();
     const booted = await runBootStep(bundleRes.hono);
     if (!booted) return;
     // React frontend present and successfully bundled → Preview is

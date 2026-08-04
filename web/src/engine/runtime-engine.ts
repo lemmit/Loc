@@ -152,6 +152,16 @@ export interface RuntimeEngine extends RuntimeDispatcher {
    *  (a real-Node engine has an equivalent) stays. */
   respawn(): void;
 
+  /** Release whatever the bundler is holding, if this engine has one.
+   *
+   *  Optional: not every engine bundles in-browser.  The npm engine's
+   *  bundler worker caches an esbuild context per build key, each keeping the
+   *  entire installed npm VFS alive for fast rebuilds — memory that is well
+   *  spent on desktop and actively harmful on a phone just before boot, where
+   *  PGlite's real startup needs the headroom and iOS kills the tab rather
+   *  than paging. */
+  releaseBundler?(): void;
+
   /** Capture restorable state for tab-suspension persistence.
    *  P1 stub returns null (nothing to restore yet). */
   snapshot(): Promise<EngineSnapshot | null>;
