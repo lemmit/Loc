@@ -65,6 +65,7 @@
     "primitive-tabs": "primitive-tabs.hbs",
     "components-ui-tabs": "components-ui-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-chart": "primitive-chart.hbs",
     "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
@@ -96,6 +97,22 @@
     "primitive-file-upload": "primitive-file-upload.hbs"
   },
   "imports": {
+    "primitive-chart": [
+      {
+        "from": "recharts",
+        "named": [
+          "Bar",
+          "BarChart",
+          "CartesianGrid",
+          "Line",
+          "LineChart",
+          "ResponsiveContainer",
+          "Tooltip",
+          "XAxis",
+          "YAxis"
+        ]
+      }
+    ],
     "primitive-data-grid": [{"from": "@/components/ui/table", "named": ["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"]}, {"from": "@/components/ui/button", "named": ["Button"]}],
     "primitive-button": [
       {

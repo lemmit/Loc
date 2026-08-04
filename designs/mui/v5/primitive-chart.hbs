@@ -1,0 +1,23 @@
+{{!-- primitive-chart — @mui/x-charts line/bar chart over a grouped
+  projection's LIST response (M-T1.3 Phase 4 pack backfill).
+
+  x-charts is MUI's own charting package, so it reads the active MUI theme for
+  its series colour, axis ink and grid — no colour is passed here on purpose.
+  That keeps the chart on the pack's palette (including its dark mode) and
+  leaves the per-pack WCAG-AA contrast gate reasoning about one set of tokens
+  rather than a chart-only palette.
+
+  x-charts binds data differently from recharts: rows go to `dataset`, the
+  category axis names its column via `dataKey`, and each series names its
+  measure the same way.  The axis `scaleType` differs by kind — `point` for a
+  line (values sit ON the tick) and `band` for bars (each bar occupies a slot).
+
+  A chart is an image of data, so the wrapper carries `role="img"` plus the
+  walker-derived `aria-label` (same contract as primitive-data-grid).  One
+  series, so the legend is off: the label names the measure already — spelled
+  `slotProps={{ legend: { hidden: true } }}`, which is x-charts v7's form of it
+  (the `hideLegend` shorthand the v8-era mui/v7 pack uses does not exist here). --}}
+    <div role="img" aria-label="{{ariaLabel}}"{{{testidAttr}}}>
+{{#if isLine}}      <LineChart dataset={ {{{dataExpr}}} } xAxis={[{ dataKey: "{{dataKey}}", scaleType: "point" }]} series={[{ dataKey: "{{seriesField}}" }]} height={300} slotProps=\{{ legend: { hidden: true } }} />
+{{else}}      <BarChart dataset={ {{{dataExpr}}} } xAxis={[{ dataKey: "{{dataKey}}", scaleType: "band" }]} series={[{ dataKey: "{{seriesField}}" }]} height={300} slotProps=\{{ legend: { hidden: true } }} />
+{{/if}}    </div>

@@ -1,0 +1,32 @@
+{{!-- primitive-chart — recharts line/bar chart over a grouped projection's
+  LIST response (M-T1.3 Phase 4 pack backfill).
+
+  Chakra ships no charting component, so the pack binds recharts directly and
+  dresses it in Chakra's own CSS variables: the mark takes the pack's `brand`
+  palette (the same one `colorPalette="brand"` resolves for every button), and
+  the chrome takes the built-in `border` / `fg.muted` / `bg.panel` semantic
+  tokens.  Staying on pack tokens is what keeps the per-pack WCAG-AA contrast
+  gate reasoning about ONE palette instead of a chart-only set of hexes.
+
+  A chart is an image of data, so the wrapper carries `role="img"` plus the
+  walker-derived `aria-label` (same contract as primitive-data-grid).  One
+  series, so no legend — the label already names the measure — and the grid and
+  axes stay recessive so the mark carries the eye. --}}
+    <Box role="img" aria-label="{{ariaLabel}}"{{{testidAttr}}} h="300px" w="100%">
+      <ResponsiveContainer width="100%" height="100%">
+{{#if isLine}}        <LineChart data={ {{{dataExpr}}} }>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--chakra-colors-border)" />
+          <XAxis dataKey="{{dataKey}}" stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
+          <YAxis stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
+          <Tooltip contentStyle=\{{ background: "var(--chakra-colors-bg-panel)", border: "1px solid var(--chakra-colors-border)", borderRadius: "6px", color: "var(--chakra-colors-fg)" }} />
+          <Line type="monotone" dataKey="{{seriesField}}" stroke="var(--chakra-colors-brand-500)" strokeWidth={2} dot={false} />
+        </LineChart>
+{{else}}        <BarChart data={ {{{dataExpr}}} }>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--chakra-colors-border)" />
+          <XAxis dataKey="{{dataKey}}" stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
+          <YAxis stroke="var(--chakra-colors-fg-muted)" fontSize={12} />
+          <Tooltip contentStyle=\{{ background: "var(--chakra-colors-bg-panel)", border: "1px solid var(--chakra-colors-border)", borderRadius: "6px", color: "var(--chakra-colors-fg)" }} />
+          <Bar dataKey="{{seriesField}}" fill="var(--chakra-colors-brand-500)" radius={[4, 4, 0, 0]} />
+        </BarChart>
+{{/if}}      </ResponsiveContainer>
+    </Box>

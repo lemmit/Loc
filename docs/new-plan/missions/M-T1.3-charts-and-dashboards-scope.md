@@ -577,7 +577,32 @@ stay quiet about IR-tier gates by design.
    (`Chart { kind, of, x, y }` over grouped projections; react + mantine@v9,
    `loom.chart-*` gates elsewhere; grouped projections became frontend-readable
    with the LIST-shape client on the way).
-6. **Phase 5** — scaffolded chart; pack backfill; flip `REQUIRED_PRIMITIVES`.
+6. **Phase 5** — pack backfill + `REQUIRED_PRIMITIVES` flip ✅ landed; scaffolded
+   chart still open. All **eight** tsx packs now ship `primitive-chart`, so
+   `primitive-chart` joined `REQUIRED_PRIMITIVES.tsx.core` and
+   `loom.chart-unsupported-target` collapsed from a per-PACK set to the same
+   per-FRAMEWORK rule `DataGrid` uses — vue/svelte/angular/feliz/flutter/HEEx
+   stay honest gaps. Library bindings landed as the mission sketched them:
+   `@mantine/charts` (mantine v7/v9), `@mui/x-charts` (mui v5/v7), recharts
+   direct (shadcn v3/v4, chakra v2/v3), each a conditional dependency keyed on
+   `usesChart`, each dressed in that pack's own tokens rather than a chart-only
+   palette.
+
+   Verified by `npm install` + `tsc --noEmit` on a generated project **per
+   pack**, which is what caught the two defects worth recording. (a) The
+   **series was never numeric**: a `money` field parses client-side into a
+   `Decimal`, and no chart library can plot an object — `@mui/x-charts` rejects
+   it at compile time while recharts and `@mantine/charts` compile and then
+   render NOTHING. That was a live bug in the merged Phase 4 emit, on the single
+   most likely series there is (`revenue = sum(o.total)`); the walker now
+   projects each row to its two plotted columns and coerces the series with
+   `Number(...)`. Projecting rather than spreading matters too — a sibling money
+   column fails the same `dataset` type even when the plotted series is clean.
+   (b) The **kind-specific import filter was hardcoded** to `LineChart`/
+   `BarChart`, which is all a mantine/mui pack names; a recharts pack also
+   imports the per-kind MARK (`Line`/`Bar`) alongside shared pieces, so the
+   filter became a per-kind name SET or the generated project failed
+   `noUnusedImports`.
 
 Steps 1–3 are the cheap 80% and carry no third-party charting dependency. Worth
 shipping and living with before paying step 4–6's 17-pack cost.

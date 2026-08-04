@@ -132,7 +132,7 @@ State is an Angular signal: `readonly draftName = signal("")`; reads call `draft
 
 > **Pack vs. framework.** The four tabs above mix two axes. The next section isolates the *pack* axis — same framework (React), two design systems — so you can see the difference the `design:` pin alone makes.
 
-## `Chart` — grouped-projection series (react + mantine v9)
+## `Chart` — grouped-projection series (react, every pack)
 
 A `Chart` renders a GROUPED query-time projection (`group by`, M-T4.2) as a line or bar series. `kind:` is `"line"` or `"bar"` (kind-discriminated — there is no separate `LineChart`), `of:` names a grouped projection through an api handle, and `x:`/`y:` are accessor lambdas over the projection's declared row:
 
@@ -143,14 +143,18 @@ Chart { kind: "bar", of: Sales.SalesByStatus, x: r => r.status, y: r => r.revenu
 ```tsx
 // pages/dash.tsx (react, mantine v9) — the hook is Pattern-H hoisted like any
 // projection read; the accessors become the Recharts dataKey/series strings.
+// The row is projected to just the two plotted columns and the SERIES is
+// coerced with `Number(...)`: a `money` field parses into a `Decimal`, which no
+// chart library can plot (x-charts rejects it at compile time; recharts and
+// @mantine/charts render nothing).
 const salesByStatus = useSalesByStatus();
 …
 <div role="img" aria-label="Bar chart of SalesByStatus: revenue by status">
-  <BarChart data={salesByStatus.data ?? []} dataKey="status" series={[{ name: "revenue" }]} h={300} withLegend />
+  <BarChart data={(salesByStatus.data ?? []).map((r) => ({ status: r.status, revenue: Number(r.revenue) }))} dataKey="status" series={[{ name: "revenue" }]} h={300} withLegend />
 </div>
 ```
 
-The `of:` projection must be **grouped** — a singleton (whole-table aggregation) has one row and nothing to chart (`loom.chart-of-not-grouped`); `x:`/`y:` must be plain accessors to declared row fields (`loom.chart-accessor-not-field`). v1 ships on the **react frontend + `mantine@v9` pack only** — every other framework/pack combination is rejected honestly (`loom.chart-unsupported-target`; a `Table` over the same projection is the universal fallback). The `@mantine/charts` + recharts dependencies enter the generated `package.json` only when a page actually uses a Chart.
+The `of:` projection must be **grouped** — a singleton (whole-table aggregation) has one row and nothing to chart (`loom.chart-of-not-grouped`); `x:`/`y:` must be plain accessors to declared row fields (`loom.chart-accessor-not-field`). `Chart` ships on the **react frontend, on every react design pack** — the eight tsx packs all emit a `primitive-chart` template, so it is part of `REQUIRED_PRIMITIVES.tsx.core`. Each pack binds its own charting library, and the dependency enters the generated `package.json` only when a page actually uses a Chart: `@mantine/charts` (mantine v7/v9), `@mui/x-charts` (mui v5/v7), and recharts directly (shadcn v3/v4, chakra v2/v3, which ship no chart component of their own). Every NON-react frontend — vue, svelte, angular, feliz, flutter and Phoenix HEEx — is rejected honestly (`loom.chart-unsupported-target`); a `Table` over the same projection is the universal fallback.
 
 ## Design-pack divergence (`pack`)
 

@@ -103,7 +103,11 @@ describe("grouped projection bindings in a page", () => {
     const page = (await files()).get("src/pages/dash.tsx")!;
     expect(page).toContain('import { useSalesByStatus } from "../api/projections";');
     expect(page).toContain("const salesByStatus = useSalesByStatus();");
-    expect(page).toContain("data={ salesByStatus.data ?? [] }");
+    // The hook's LIST data reaches the chart projected to its two plotted
+    // columns, with the series coerced to a number — a `money` series parses
+    // into a `Decimal` no chart library can plot (see walker-chart.test.ts).
+    expect(page).toContain("(salesByStatus.data ?? []).map((r) => ({");
+    expect(page).toContain("Number(r.revenue)");
     expect(page).not.toContain("unresolved");
     expect(page).not.toContain("undefined.SalesByStatus");
   });

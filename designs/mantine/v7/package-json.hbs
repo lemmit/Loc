@@ -16,7 +16,9 @@
     "@mantine/dates": "^7.13.0",
     "@mantine/modals": "^7.13.0",
     "@tabler/icons-react": "^3.20.0"{{#if usesMoney}},
-    "decimal.js": "^10.4.3"{{/if}}
+    "decimal.js": "^10.4.3"{{/if}}{{#if usesChart}},
+    "@mantine/charts": "^7.13.0",
+    "recharts": "^2.13.0"{{/if}}
   },
   "devDependencies": {
 {{> stack-package-devdeps}}
