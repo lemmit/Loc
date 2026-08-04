@@ -11,7 +11,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import { lines } from "../../../util/code-builder.js";
-import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { collectUnionFindLets, renderWorkflowStmtChunks } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";

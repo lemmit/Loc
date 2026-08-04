@@ -13,7 +13,10 @@
 import { emitsRestCreate } from "../../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
-import { APP_SHELL_CHROME, chromeKey } from "../../../_walker/i18n-chrome.js";
+import {
+  jsxChromeAttr as shellChromeAttr,
+  jsxChromeText as shellChromeText,
+} from "../../../_frontend/shell-chrome.js";
 import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
 
 function upperFirst(s: string): string {
@@ -317,27 +320,4 @@ export function prepareAppShellVM(
     // anchor.  The 404's "← " prefix stays literal in the template.
     backToHomeText: shellChromeText("backToHome", i18nEnabled),
   };
-}
-
-/** A React text-position token for an app-shell chrome string: the raw source
- *  default when `i18nEnabled` is false (byte-identical), else a
- *  `{t("chrome.<name>", "<default>")}` JSX interpolation keyed to the merged
- *  `APP_SHELL_CHROME` catalog. */
-export function shellChromeText(name: string, i18nEnabled: boolean): string {
-  const english = APP_SHELL_CHROME[chromeKey(name)]!;
-  return i18nEnabled
-    ? `{t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
-    : english;
-}
-
-/** An `<attr>=…` fragment (NO leading space — the template keeps the surrounding
- *  whitespace) for an app-shell chrome string in ATTRIBUTE position: the static
- *  `<attr>="<default>"` when i18n is off (byte-identical), else a bound
- *  `<attr>={t("chrome.<name>", "<default>")}` (React attr form).  `attr` varies
- *  by pack — `aria-label` on a nav landmark/toggle, `title` on Mantine's Alert. */
-function shellChromeAttr(attr: string, name: string, i18nEnabled: boolean): string {
-  const english = APP_SHELL_CHROME[chromeKey(name)]!;
-  return i18nEnabled
-    ? `${attr}={t(${JSON.stringify(chromeKey(name))}, ${JSON.stringify(english)})}`
-    : `${attr}="${english}"`;
 }

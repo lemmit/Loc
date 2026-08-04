@@ -13,7 +13,6 @@ import type {
   RepositoryIR,
   SystemIR,
   TimerSourceIR,
-  TypeIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import {
@@ -1081,7 +1080,7 @@ function emitProjectFromContexts(
   // emitted above (hostedDurable > 0).  Broker-wired projects take the broker
   // path below instead; channel-less projects emit none of this.
   if (standaloneOutbox) {
-    for (const f of renderJavaOutboxFiles(basePkg, {
+    for (const f of renderJavaOutboxFiles({
       configPkg: pkgFor("config"),
       entityPkg: pkgFor("infra-persistence"),
       repoPkg: pkgFor("spring-data-repository"),
@@ -1179,7 +1178,7 @@ function emitProjectFromContexts(
     // polling relay that publishes drained rows to the broker.  Only where
     // HOSTED durable events ride a broker-bound channel.
     if (durableBrokerEvents.size > 0) {
-      for (const f of renderJavaOutboxFiles(basePkg, {
+      for (const f of renderJavaOutboxFiles({
         configPkg: pkgFor("config"),
         entityPkg: pkgFor("infra-persistence"),
         repoPkg: pkgFor("spring-data-repository"),
