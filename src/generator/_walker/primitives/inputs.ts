@@ -4,6 +4,7 @@
 // helpers are private to this module.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { localizedChromeAttr, registerI18nImport } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import { namedArgValue, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
@@ -178,8 +179,23 @@ export function emitSelectField(
     error,
     hasError: error !== undefined,
     optionsExpr,
+    // The picker's empty-state text (M-T1.11).  Renders into the PAGE, so the
+    // `t` it resolves against goes on the page's import map — unlike the
+    // DataGrid chrome, whose markup lands in a hoisted child file.
+    selectPlaceholderAttr: selectPlaceholderAttr(ctx),
     testidAttr: testidAttr(call, ctx),
   });
+}
+
+/** The picker's `placeholder="Select…"` fragment.  Under i18n it is the
+ *  target's bound form keyed to `chrome.selectPlaceholder`; with i18n off it is
+ *  the raw attribute, byte-identical to the pre-i18n pack template.
+ *
+ *  Registers the `t` import — unlike the DataGrid chrome, this markup renders
+ *  into the PAGE, so `t` resolves against the page's own import block. */
+function selectPlaceholderAttr(ctx: WalkContext): string {
+  if (ctx.i18nPrefix) registerI18nImport(ctx);
+  return localizedChromeAttr(ctx, "placeholder", "selectPlaceholder");
 }
 
 export function emitFileUpload(

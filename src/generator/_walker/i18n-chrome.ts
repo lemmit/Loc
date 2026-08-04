@@ -43,6 +43,11 @@ export const CHROME_MESSAGES: Record<string, string> = {
   [chromeKey("previous")]: "Previous",
   [chromeKey("next")]: "Next",
   [chromeKey("filter")]: "Filter",
+  // The empty-state text of a `<select>` picker.  One key rather than one per
+  // call site: it is the same sentence to a translator, and every pack that
+  // spells it spells it identically (unlike the nav-toggle pair, which packs
+  // genuinely word differently and therefore keeps two keys).
+  [chromeKey("selectPlaceholder")]: "Select…",
 };
 
 /** The source-language text for a chrome key, for an emitter building the
@@ -86,6 +91,27 @@ export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
     entry("next"),
     ...(gridHasFilterableColumn(call) ? [entry("filter")] : []),
   ],
+  // A `SelectField` ALWAYS renders the picker, so this is exact — the primitive
+  // is the only thing that renders `primitive-select-field`.
+  //
+  // The form-built pickers (`field-input-id-select` / `-enum-select`, for an
+  // `X id` field whose target has a `derived display`, or an enum field) are
+  // NOT here, and deliberately still ship English.  Contributing from
+  // `CreateForm`/`OperationForm`/`WorkflowForm` would be the obvious move and
+  // is wrong twice over: a form of plain strings would carry a key nothing
+  // renders, and — measured, not assumed — it would turn the whole i18n runtime
+  // ON for such an app, shipping `src/i18n.ts`, `locales/en.json` and the
+  // `intl-messageformat` dependency to a UI with nothing to translate.
+  //
+  // Gating it exactly is not cheap: unlike `DataGrid`'s `filterable:` (readable
+  // straight off the call node, hence one shared ctx-free helper), the answer
+  // needs the aggregate/enum tables the extraction pass deliberately lacks
+  // (`collectUiMessages(ui)` is ctx-free so `ddd i18n extract` runs without
+  // codegen) AND it would have to re-derive THREE different field sources — the
+  // create-input projection, an operation's params, a workflow's params — each
+  // a fresh chance to drift from the code that actually emits.  That belongs in
+  // its own slice with a shared predicate, not smuggled in here.
+  SelectField: [entry("selectPlaceholder")],
 };
 
 /** Resolve a primitive's chrome contribution against the call node that
