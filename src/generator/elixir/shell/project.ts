@@ -17,6 +17,13 @@ export function renderDockerfile(
    *  build`, so its stage needs a .NET-SDK+Node base image (mirrors the feliz
    *  standalone Dockerfile).  Only consulted when `embedReact` is set. */
   spaBuildKind: "vite" | "feliz" = "vite",
+  /** LiveView deployables ship the design-pack `assets/` pipeline (Tailwind
+   *  entry + config + LiveSocket JS + assets/package.json).  When set, an
+   *  `assets-build` stage compiles app.css/app.js and the builder copies them
+   *  into priv/static/assets before `mix release` packages priv/.  Mutually
+   *  exclusive with `embedReact` (an embedded-SPA host owns `assets/` for the
+   *  SPA project instead). */
+  hasLiveViewAssets = false,
 ): string {
   // Embedded-SPA mode: a first `spa-build` stage runs the hosted SPA's own
   // build (the frontend project the orchestrator emitted under `assets/`),
@@ -58,6 +65,26 @@ RUN npm run build
     ? `COPY --from=spa-build /spa/${spaOutDir} priv/static/app
 `
     : "";
+  // LiveView asset pipeline — tailwind scans the emitted HEEx/Elixir sources
+  // (content globs reference ../lib), so the stage needs lib/ alongside
+  // assets/; the built app.css/app.js land in /priv/static/assets and are
+  // copied over the context's priv/ (which carries the generated theme.css).
+  const assetsBuildStage = hasLiveViewAssets
+    ? `FROM node:24-alpine AS assets-build
+WORKDIR /assets
+COPY assets/package.json ./
+RUN npm install --no-audit --no-fund
+COPY assets/ ./
+COPY lib /lib
+RUN mkdir -p /priv/static/assets && npm run build
+
+`
+    : "";
+  const assetsCopy = hasLiveViewAssets
+    ? `COPY --from=assets-build /priv/static/assets/app.css priv/static/assets/app.css
+COPY --from=assets-build /priv/static/assets/app.js priv/static/assets/app.js
+`
+    : "";
   return `# syntax=docker/dockerfile:1
 # Auto-generated.
 
@@ -68,7 +95,7 @@ ARG DEBIAN_VERSION=bookworm-20260610-slim
 ARG BUILDER_IMAGE="hexpm/elixir:\${ELIXIR_VERSION}-erlang-\${OTP_VERSION}-debian-\${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:\${DEBIAN_VERSION}"
 
-${spaBuildStage}FROM \${BUILDER_IMAGE} AS build
+${spaBuildStage}${assetsBuildStage}FROM \${BUILDER_IMAGE} AS build
 RUN apt-get update -y && apt-get install -y build-essential${needsCmake ? " cmake" : ""} git ca-certificates \\
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 WORKDIR /app
@@ -92,7 +119,7 @@ RUN mkdir config
 COPY config/config.exs config/$MIX_ENV.exs config/
 RUN mix deps.compile
 COPY priv priv
-${spaCopy}COPY lib lib
+${spaCopy}${assetsCopy}COPY lib lib
 RUN mix compile
 COPY config/runtime.exs config/
 COPY rel rel
@@ -122,12 +149,16 @@ CMD ["/app/bin/server"]
 }
 
 export function renderDockerignore(): string {
+  // priv/static/assets is NOT excluded: the generator writes theme.css there
+  // (design tokens the root layout links) and it must reach the image; the
+  // built app.css/app.js are produced inside the assets-build stage, never
+  // from the host context, so there is no stale-artifact risk.
   return `# Auto-generated.
 _build
 deps
 .elixir_ls
 .fetch
-priv/static/assets
+assets/node_modules
 .git
 .env
 .env.*

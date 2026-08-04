@@ -27,6 +27,7 @@ import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { brokerChannelBindings } from "../../_channels/bindings.js";
 import { embedSpaInto } from "../../_frontend/embedded-spa.js";
+import { prepareThemeVM } from "../../_frontend/theme-preparer.js";
 import { generateAngularForContexts } from "../../angular/index.js";
 import { generateFelizForContexts } from "../../feliz/index.js";
 import { generateReactForContexts } from "../../react/index.js";
@@ -51,14 +52,13 @@ import { contextHasDispatcher, emitDispatch, emitWorkflowStateSchemas } from "..
 import { emitDomainServices } from "../domain-service-emit.js";
 import { renderEventModule } from "../events-emit.js";
 import { heexI18nUi } from "../i18n.js";
-import type { GenerateElixirArgs } from "../index.js";
+import type { GenerateVanillaElixirArgs } from "../index.js";
 import { emitLiveViewPages, type LiveRoute } from "../liveview-emit.js";
 import { emitMigrations } from "../migrations-emit.js";
 import { renderRelEnv, renderRelease, renderRelServer } from "../shell/config.js";
 import { renderDockerfile, renderDockerignore } from "../shell/project.js";
 import { renderSidebarComponent } from "../sidebar-emit.js";
 import { emitAggregateTests, emitTestHelper } from "../tests-emit.js";
-import { renderThemeCss } from "../theme-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaAudit } from "./audit-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
@@ -96,8 +96,8 @@ import {
 } from "./workflow-execution-emit.js";
 import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
-export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
-  const { contexts, deployable, sys, sourcemap } = args;
+export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): Map<string, string> {
+  const { contexts, deployable, sys, sourcemap, pack } = args;
   const out = new Map<string, string>();
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
@@ -544,13 +544,29 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
           appModule,
           nameCtx,
           authEnabled: deployable.auth?.required === true,
+          pack,
         }),
       );
       hasSidebar = true;
-      out.set("priv/static/assets/theme.css", renderThemeCss(sys.theme));
     }
   }
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
+
+  // Design-pack asset pipeline — only for a LiveView-serving deployable (an
+  // embedded-SPA host owns `assets/` for the SPA project instead, and a
+  // JSON-API-only deployable serves no static assets at all).  The pack owns
+  // the design vocabulary end to end: theme tokens (theme.css, linked by the
+  // root layout), the Tailwind entry + config (which is where daisyui's
+  // plugin lands), the LiveSocket entry, and the assets/package.json that
+  // builds them into priv/static/assets (see `npm run build` there; the
+  // Dockerfile's assets-build stage runs it for the shipped image).
+  if (hasLiveView) {
+    out.set("priv/static/assets/theme.css", pack.render("theme", prepareThemeVM(sys.theme)));
+    out.set("assets/css/app.css", pack.render("assets-css", {}));
+    out.set("assets/js/app.js", pack.render("assets-js", {}));
+    out.set("assets/tailwind.config.js", pack.render("tailwind-config", { appName }));
+    out.set("assets/package.json", pack.render("package-json", { appName }));
+  }
 
   // Auth modules — the Auth plug (Bearer-JWT → `conn.assigns
   // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the
@@ -716,6 +732,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   emitVanillaShellFiles(
     appName,
     appModule,
+    pack,
     out,
     apiRoutes,
     hexDeps,
@@ -756,6 +773,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       // needs a .NET-SDK+Node base image (not the node-only vite stage the
       // React/Vue/Svelte/Angular embeds use).
       deployable.uiFramework === "feliz" ? "feliz" : "vite",
+      // LiveView deployables carry the pack-emitted assets/ pipeline — the
+      // Dockerfile adds an assets-build stage (tailwind + esbuild) whose
+      // app.css/app.js land in priv/static/assets before `mix release`.
+      hasLiveView,
     ),
   );
   out.set(".dockerignore", renderDockerignore());
