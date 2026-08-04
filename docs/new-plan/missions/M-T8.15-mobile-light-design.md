@@ -1,6 +1,7 @@
 # M-T8.15 — Mobile light: shed the IDE, keep the app
 
-*Design doc. Status: proposed. Owner-review requested before slice 2.*
+*Design doc. Status: slices 1–3 + 5 landed; slice 4 deferred (§4).  Numbers
+below are as measured when the doc was written — the "after" column is in §4.*
 
 The playground does not boot on an iPhone. Four fixes across this session each
 made the app measurably lighter and **none of them moved the failure** — it
@@ -138,7 +139,7 @@ not a narrow view of the same application.
 | Tests / Migrations / History / Auth panels | **lazy**, not dropped | occasionally wanted, never on the boot path |
 
 Projected eager JS on mobile: **12.80 MB → ~1.2 MB**, and three worker realms
-never spawn. That is the first change in this whole investigation whose size
+never spawn.  (Measured after slices 1–3: **1.63 MB**.) That is the first change in this whole investigation whose size
 is comparable to the demand it has to make room for.
 
 ---
@@ -182,17 +183,38 @@ that can't rot.
 Each lands on its own, each is measurable, and the first two are worth doing
 even if the boot still fails afterwards.
 
-| # | change | measure |
-|---|---|---|
-| **1** | Lazy the agent + verify imports: `src/tools` / `src/api` / `src/verify` reachable only via `await import()`. Pure de-eagering, both surfaces. | eager JS drops by the compiler's share of `index-*.js` |
-| **2** | Mobile source editor + file viewer without Monaco (`<textarea>` + read-only viewer). Monaco reachable only from the desktop subgraph. | Monaco leaves mobile's eager graph |
-| **3** | Mobile problems from `generate` instead of the live LSP; `ddd-server.worker` not spawned on mobile. | one worker realm fewer |
-| **4** | Entry split in `main.tsx` (`DesktopApp` / `MobileApp` over a shared pipeline core); Builder / Modeller / Requirements unreachable from mobile. | mobile eager ≤ 2 MB |
-| **5** | Budget gate: `check-eager-chunks.mjs` fails over the mobile entry's byte total. Mutation-proved by re-adding a static Monaco import and watching it fail. | the gate fails when reverted |
+| # | change | measure | status |
+|---|---|---|---|
+| **1** | Lazy the agent imports: `src/tools` / `src/api` reachable only via `await import()`. | eager 12.80 → 11.23 MB | **done** |
+| **2** | Mobile source editor + file viewer + JSON body without Monaco; Monaco reachable only from `layout/lazy-panels.ts`. | eager 11.23 → 1.63 MB | **done** |
+| **3** | Mobile problems from `generate` instead of a live LSP; no `LoomLspClient`, no `ddd-server` worker on mobile. | one worker realm fewer | **done** (with 2) |
+| **4** | Entry split in `main.tsx` (`DesktopApp` / `MobileApp` over a shared pipeline core); Builder / Modeller / Requirements unreachable from mobile. | drops the last eager `xyflow` (0.18 MB) | **deferred** — see below |
+| **5** | Budget gate: `check-eager-chunks.mjs` fails over the eager byte total. | the gate fails when the budget is lowered | **done** |
 
-Slices 1–3 are independent; 4 depends on 2–3; 5 depends on 4.
+**Slice 4 is deferred, not dropped.** It was scoped to remove Monaco from
+mobile's graph; slices 1–3 did that without it, and eager JS (1.63 MB) is
+already under the budget slice 5 would have enforced. What remains for it is
+0.18 MB of `xyflow` — real, but no longer the difference between booting and
+not. Revisit if the phase marker says mobile is still short of headroom.
 
----
+### What slice 2 actually found
+
+Making every Monaco consumer lazy took eager JS from 12.80 MB to **11.23 MB** —
+i.e. **nothing**. The boundaries were all correct and the editor still shipped
+on first paint.
+
+The cause was `\0vite/preload-helper`, the helper every `await import(...)`
+compiles down to. Being a *virtual* module it matched no `manualChunks` rule,
+so rollup was free to place it — and it placed it in the `monaco` vendor
+chunk. The entry's static import of the helper was therefore a static import
+of 9.56 MB, `<link rel="modulepreload">` and all. Pinning the helper to its own
+chunk is what actually moved the number.
+
+This is the **fourth** instance of the same hazard (see the header comment in
+`check-eager-chunks.mjs`), and the first where the promoted chunk was reached
+through a module we don't own. The lesson for the next one: a correct
+`await import()` at every call site is not evidence that a chunk is lazy —
+only the emitted graph is.
 
 ## 5. How we'll know
 
@@ -214,7 +236,9 @@ three:
    own merits (a phone shouldn't download a 9.56 MB editor to read code).
 
 **No claim that this fixes the boot is made until a phase marker says so.**
-Four "this should help" fixes have already failed that test.
+Four "this should help" fixes have already failed that test — and slices 1–3,
+for all that they cut resident JS by 87%, are the fifth until a device says
+otherwise.
 
 ---
 

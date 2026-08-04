@@ -82,6 +82,18 @@ const FORBIDDEN_IN_EAGER = [
   },
 ];
 
+/** Hard ceiling on eagerly-reachable JS, in bytes.
+ *
+ *  The name and signature lists above catch the regressions we have already
+ *  seen; this catches the one we haven't.  Eager JS was 12.80 MB when the
+ *  playground could not boot on an iPhone and is 1.63 MB now — the budget sits
+ *  above that with room for ordinary growth, and well below anything that
+ *  would put the 128 MB PGlite allocation back in doubt.
+ *
+ *  Raising it is a decision, not a formality: say in the PR what got heavier
+ *  and why it has to be eager. */
+const EAGER_BUDGET_BYTES = 2_500_000;
+
 /** Static import edges only.  `from"./x.js"` and bare `import"./x.js"` are
  *  static; `import("./x.js")` is dynamic and is exactly what we want to see
  *  instead. */
@@ -202,7 +214,26 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
+if (eagerBytes > EAGER_BUDGET_BYTES) {
+  console.error(
+    `\ncheck-eager-chunks: eager JS is ${mb(eagerBytes)}, over the ` +
+      `${mb(EAGER_BUDGET_BYTES)} budget.\n`,
+  );
+  console.error("Eagerly-reachable chunks, largest first:\n");
+  for (const [file, importer] of [...via].sort((a, b) => bytes(b[0]) - bytes(a[0]))) {
+    if (!allJs.includes(file)) continue;
+    console.error(`  ${mb(bytes(file)).padStart(8)}  ${file}  <- ${importer}`);
+  }
+  console.error(
+    "\nEither move the new weight behind `await import(...)`, or raise " +
+      "\nEAGER_BUDGET_BYTES deliberately and say in the PR what got heavier " +
+      "\nand why it has to be eager.\n",
+  );
+  process.exit(1);
+}
+
 console.log(
   `check-eager-chunks: OK — ${MUST_BE_LAZY.length} lazy chunk(s) verified lazy, ` +
-    `${FORBIDDEN_IN_EAGER.length} signature(s) verified off the eager path`,
+    `${FORBIDDEN_IN_EAGER.length} signature(s) verified off the eager path, ` +
+    `${mb(eagerBytes)} of a ${mb(EAGER_BUDGET_BYTES)} eager budget`,
 );
