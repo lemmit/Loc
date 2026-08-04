@@ -269,10 +269,10 @@ describe("logDiagnostic — round-trip through storage", () => {
 // ---------------------------------------------------------------------------
 describe("phase markers", () => {
   it("writes synchronously — no await between mark and storage", () => {
-    markPhase("boot:pglite-init");
+    markPhase("boot:pglite-construct");
     // Read back with no `await` anywhere: this is the whole point.  If the
     // write ever moves behind a promise, a process kill loses it.
-    expect(localStorage.getItem("loom.diag.phase")).toMatch(/^\d+:boot:pglite-init$/);
+    expect(localStorage.getItem("loom.diag.phase")).toMatch(/^\d+:boot:pglite-construct$/);
   });
 
   it("reaps a leftover marker into the ring as an error-class entry", async () => {
@@ -305,6 +305,40 @@ describe("phase markers", () => {
     // record that a kill happened at all.
     expect(isCrashReason("died-in-phase")).toBe(true);
     expect(CRASH_REASONS).toContain("died-in-phase");
+  });
+
+  // The phase says WHERE it died; the note says how much work it was
+  // carrying.  A field report landed on `boot:ddl` with PGlite already
+  // initialised — the next one needs to distinguish "182 statements, 61KB"
+  // from "3 statements" before any fix is worth attempting.
+  it("round-trips a scale note alongside the phase", () => {
+    markPhase("boot:ddl-apply", "182 stmts, 61KB");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:ddl-apply");
+    expect(mark?.note).toBe("182 stmts, 61KB");
+  });
+
+  it("surfaces the note in the reaped message the report renders", async () => {
+    markPhase("boot:ddl-apply", "182 stmts, 61KB");
+    reapUnfinishedPhase();
+    await Promise.resolve();
+    const died = readDiagnostics().find((s) => s.reason === "died-in-phase");
+    expect(died?.detail?.message).toContain("182 stmts, 61KB");
+    // The phase still rides in `pane` on its own — the report renders that
+    // field verbatim and it must stay a clean phase name.
+    expect(died?.detail?.pane).toBe("boot:ddl-apply");
+  });
+
+  it("caps the note so a pathological one can't blow the storage budget", () => {
+    markPhase("boot:ddl-apply", "x".repeat(500));
+    expect((localStorage.getItem("loom.diag.phase") ?? "").length).toBeLessThan(200);
+  });
+
+  it("still parses a marker with no note", () => {
+    markPhase("boot:pglite-construct");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:pglite-construct");
+    expect(mark?.note).toBeUndefined();
   });
 
   it("never throws when storage is unavailable", () => {

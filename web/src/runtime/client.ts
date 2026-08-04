@@ -57,7 +57,7 @@ export class LoomRuntimeClient {
       // this is what makes a mid-boot renderer kill attributable to a step
       // rather than to "boot".  See diagnostics.ts → PHASE MARKERS.
       if ("phase" in ev.data) {
-        markPhase(`boot:${ev.data.phase}` as DiagPhase);
+        markPhase(`boot:${ev.data.phase}` as DiagPhase, ev.data.note);
         return;
       }
       const msg = ev.data;
