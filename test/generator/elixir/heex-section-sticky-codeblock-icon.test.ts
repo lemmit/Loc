@@ -124,7 +124,12 @@ describe("HEEx primitive — CodeBlock", () => {
     );
     const heex = findLandingHeex(files);
     expect(heex).toMatch(/<div class="loom-code-block"/);
-    expect(heex).toMatch(/<div class="loom-code-block-title">Setup<\/div>/);
+    // The caption is a user-visible slot (`codeBlockTitle`, M-T1.11) — authoring
+    // one makes the ui translatable, so it rides gettext.  The SOURCE beside it
+    // is code and stays verbatim.
+    expect(heex).toMatch(
+      /<div class="loom-code-block-title"><%= pgettext\("page\.\w+\.codeBlockTitle\.\w+", "Setup"\) %><\/div>/,
+    );
   });
 
   it("propagates testid:", async () => {
@@ -170,7 +175,12 @@ describe("HEEx primitive — Icon", () => {
       phoenixSystem(`Icon { svg: "<svg/>", label: "Search" }`),
     );
     const heex = findLandingHeex(files);
-    expect(heex).toMatch(/role="img" aria-label="Search"/);
+    // HEEx's ATTRIBUTE-position translation (`localizedHeexAttr`): the
+    // accessible name is a user-visible slot, so it binds as a `{…}` expression
+    // rather than shipping English at every locale.
+    expect(heex).toMatch(
+      /role="img" aria-label=\{pgettext\("page\.\w+\.iconLabel\.\w+", "Search"\)\}/,
+    );
     expect(heex).not.toContain('aria-hidden="true"');
   });
 

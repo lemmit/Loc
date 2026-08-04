@@ -163,6 +163,20 @@ const PROBES: readonly Probe[] = [
     state: `state { modalOpen: bool = false }`,
     sentinels: { modalTitle: "SlotModalTitle" },
   },
+  {
+    // A meaning-bearing icon opts out of decorative-by-default with `label:`,
+    // which becomes its accessible name — user-AUDIBLE text, extracted like any
+    // other slot.  `name:` must resolve in the builtin registry or the emitter
+    // renders a comment instead of the icon.
+    primitive: "Icon",
+    body: `Icon { name: "check", label: "SlotIconLabel" }`,
+    sentinels: { iconLabel: "SlotIconLabel" },
+  },
+  {
+    primitive: "CodeBlock",
+    body: `CodeBlock { "let x = 1", language: "typescript", title: "SlotCodeBlockTitle" }`,
+    sentinels: { codeBlockTitle: "SlotCodeBlockTitle" },
+  },
 ];
 
 // --- waivers ---------------------------------------------------------------

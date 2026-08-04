@@ -243,7 +243,7 @@ function primitiveCodeBlock(c: Ctx): string {
   const source = String(c.source ?? "");
   const pre = `Container(width: double.infinity, padding: const EdgeInsets.all(16), color: Theme.of(context).colorScheme.surfaceContainerHighest, child: Text('${dartStr(source)}', style: const TextStyle(fontFamily: 'monospace', fontSize: 13)))`;
   if (!c.hasTitle) return pre;
-  const title = `Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: ${styledText(String(c.title ?? ""), "Theme.of(context).textTheme.labelMedium")})`;
+  const title = `Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: ${styledText(String(c.titleText ?? ""), "Theme.of(context).textTheme.labelMedium")})`;
   return `Card(clipBehavior: Clip.antiAlias, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${title}, ${pre}]))`;
 }
 
@@ -460,9 +460,11 @@ function primitiveAvatar(c: Ctx): string {
 function primitiveIcon(c: Ctx): string {
   const size =
     c.size === "sm" ? "16.0" : c.size === "lg" ? "24.0" : c.size === "xl" ? "32.0" : "20.0";
-  const label = String(c.label ?? "").trim();
-  const decorative = c.decorative === true || String(c.decorative) === "true";
-  const semantics = label !== "" && !decorative ? `, semanticLabel: '${dartStr(label)}'` : "";
+  // The accessible name rides the walker's already-translated `ariaLabelExpr`
+  // value (D-I18N-ATTR); the walker has already applied decorative-by-default,
+  // so an empty expression means "no name" and the glyph stays unlabelled.
+  const name = ariaLabelExpr(c);
+  const semantics = name !== "" ? `, semanticLabel: ${name}` : "";
   return `Icon(Icons.circle, size: ${size}${semantics})`;
 }
 

@@ -216,4 +216,35 @@ describe("Flutter i18n runtime", () => {
     expect(dart).toContain("const Divider()");
     expect(dart).not.toContain("Expanded(child: Divider())");
   });
+  it("translates the Icon accessible name (iconLabel) as a semanticLabel", async () => {
+    const src = SYSTEM(`Icon { name: "check", label: "Verified" }`);
+    const dart = await homeDart(src);
+    const key = await keyFor(src, "Verified");
+    expect(dart).toContain(`semanticLabel: t('${key}', 'Verified')`);
+    // The English must not ALSO be spliced as a raw Dart literal.
+    expect(dart).not.toContain("semanticLabel: 'Verified'");
+  });
+
+  it("keeps a decorative Icon byte-identical (no semanticLabel at all)", async () => {
+    const dart = await homeDart(SYSTEM(`Stack { Heading { "Orders" }, Icon { name: "check" } }`));
+    expect(dart).toContain("Icon(Icons.circle, size: 20.0)");
+  });
+
+  it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
+    const src = SYSTEM(`CodeBlock { "let total = 1", language: "dart", title: "Example" }`);
+    const dart = await homeDart(src);
+    const key = await keyFor(src, "Example");
+    // The caption arrives as a rendered `Text(t(…))` widget, so the pack styles
+    // it through `DefaultTextStyle.merge` rather than re-wrapping it in a
+    // `Text('…')` literal (which would print the call).
+    expect(dart).toContain(`Text(t('${key}', 'Example'))`);
+    expect(dart).not.toContain("Text('Text(");
+    expect(dart).toContain("Text('let total = 1'");
+  });
+
+  it("leaves an UNTITLED CodeBlock string-less — the code is not a slot", async () => {
+    const files = await generateSystemFiles(SYSTEM(`CodeBlock { "let total = 1" }`));
+    expect(fileEndingWith(files, "lib/i18n.dart")).toBeUndefined();
+    expect(fileEndingWith(files, "home_page.dart")).toContain("Text('let total = 1'");
+  });
 });

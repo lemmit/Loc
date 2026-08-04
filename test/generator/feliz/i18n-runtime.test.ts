@@ -247,4 +247,40 @@ system Shop {
     const key = await keyFor(src, "Archive");
     expect(fs).toContain(`Html.text ((I18n.t "${key}" "Archive"))`);
   });
+  it("translates the Icon accessible name (iconLabel) as an F# prop", async () => {
+    // The Feliz pack used to build `prop.ariaLabel "<raw label>"` from the raw
+    // text, so a named icon announced itself in English at every locale.  It now
+    // reads the same already-translated VALUE `Button`/`Toolbar` do.
+    const src = SYS(`Icon { name: "check", label: "Verified" }`);
+    const fs = await appFs(src);
+    const key = await keyFor(src, "Verified");
+    expect(fs).toContain(`prop.role "img"; prop.ariaLabel (I18n.t "${key}" "Verified")`);
+    expect(fs).not.toContain(`prop.ariaLabel "Verified"`);
+  });
+
+  it("keeps a decorative Icon byte-identical (hidden, nothing to translate)", async () => {
+    const fs = await appFs(SYS(`Stack { Heading { "Orders" }, Icon { name: "check" } }`));
+    expect(fs).toContain("prop.ariaHidden true");
+    expect(fs).not.toContain("iconLabel");
+  });
+
+  it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
+    // The caption arrives as an already-rendered element under i18n, so the pack
+    // has to take it through `prop.children` — splicing it into `prop.text "…"`
+    // would print the whole `I18n.t` call as visible text.
+    const src = SYS(`CodeBlock { "let total = 1", language: "fsharp", title: "Example" }`);
+    const fs = await appFs(src);
+    const key = await keyFor(src, "Example");
+    expect(fs).toContain(`prop.children [ Html.text ((I18n.t "${key}" "Example")) ]`);
+    expect(fs).toContain(`prop.text "let total = 1"`);
+  });
+
+  it("leaves an UNTITLED CodeBlock string-less — the code is not a slot", async () => {
+    // A caption IS translatable prose and so flips i18n on by itself, exactly as
+    // a `Heading` does.  The code SOURCE is not: an untitled block leaves the app
+    // with nothing to translate, byte-identical to pre-i18n.
+    const fs = await appFs(SYS(`CodeBlock { "let total = 1", language: "fsharp" }`));
+    expect(fs).not.toContain("module I18n");
+    expect(fs).toContain(`prop.text "let total = 1"`);
+  });
 });

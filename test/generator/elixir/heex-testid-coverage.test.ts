@@ -138,7 +138,12 @@ describe("HEEx Button — label: → aria-label (a11y accessible name)", () => {
       phoenixSystem(`Button { icon: "trash", label: "Delete doc" }`),
     );
     const heex = findLandingHeex(files);
-    expect(heex).toMatch(/<\.button [^>]*aria-label="Delete doc"/);
+    // The accessible name is a user-visible slot (`buttonAria`, M-T1.11), so on
+    // a translatable ui it binds through gettext in HEEx's `{…}` attribute form
+    // (`localizedHeexAttr`) rather than baking the English into the attribute.
+    expect(heex).toMatch(
+      /<\.button [^>]*aria-label=\{pgettext\("page\.\w+\.buttonAria\.\w+", "Delete doc"\)\}/,
+    );
     // The generic renderPrimitive path must NOT leak a literal `label="…"`.
     expect(heex).not.toMatch(/[^-]label="Delete doc"/);
   });

@@ -109,8 +109,11 @@ describe("flutter a11y — author-hint facts (Image / Avatar / Icon / Button)", 
   });
 
   it("a labelled Icon maps label: to semanticLabel", async () => {
+    // The name is a user-visible slot (`iconLabel`, M-T1.11), so authoring one
+    // makes the ui translatable and the `semanticLabel:` binds through `t()`
+    // instead of baking the English in.
     const dart = await pageDart(`Icon { name: "check", label: "Done" }`);
-    expect(dart).toContain("semanticLabel: 'Done'");
+    expect(dart).toMatch(/semanticLabel: t\('page\.\w+\.iconLabel\.\w+', 'Done'\)/);
   });
 
   it("a Button label: becomes a Semantics accessible name", async () => {

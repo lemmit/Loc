@@ -239,4 +239,22 @@ describe("Angular i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`Toolbar { Heading { "Orders" } }`));
     expect(homeOf(files)).toContain(`role="toolbar" aria-label="Actions"`);
   });
+  it("translates the Icon accessible name (iconLabel) through [attr.aria-label]", async () => {
+    // The aria spelling divergence again: Angular binds a plain HTML attribute
+    // as `[attr.aria-label]`, never `[aria-label]` (a non-existent property, and
+    // an `ng build` error).  The name rides the same D-I18N-ATTR fragment.
+    const files = await generateSystemFiles(SYSTEM(`Icon { name: "check", label: "Verified" }`));
+    expect(homeOf(files)).toMatch(
+      /role="img" \[attr\.aria-label\]='t\("page\.Home\.iconLabel\.\w+", "Verified"\)'/,
+    );
+  });
+
+  it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
+    const files = await generateSystemFiles(
+      SYSTEM(`CodeBlock { "let total = 1", language: "typescript", title: "Example" }`),
+    );
+    const home = homeOf(files);
+    expect(home).toMatch(/t\("page\.Home\.codeBlockTitle\.\w+", "Example"\)/);
+    expect(home).toContain("let total = 1");
+  });
 });

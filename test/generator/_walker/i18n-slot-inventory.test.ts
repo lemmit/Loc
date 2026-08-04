@@ -27,14 +27,9 @@ const primitivesDir = path.resolve(here, "../../../src/generator/_walker/primiti
 const NO_SLOT_YET: Readonly<Record<string, string>> = {
   "table.ts":
     '`Column("Name", …)` headers — a per-column slot needs a role shape the current table (role, hash) key can\'t express (the header repeats per page)',
-  "icon.ts":
-    "`Icon(label:)` is an ACCESSIBLE NAME (role=img), so it belongs with the aria slots rather than the text ones",
-  "code-block.ts": "`CodeBlock(title:)` — a caption above a code sample",
   "chart.ts":
     'the derived accessible name ("Line chart of <projection>: <y> by <x>", a11y `role="img"` + needsName) is EMITTER-built from model identifiers, so it belongs with the `chrome.*` sentence-frame keys rather than a per-call catalog slot',
-  "file-link.ts": "the download affordance's label text",
   "provenance-info.ts": "the disclosure's summary text (pack chrome, not authored)",
-  "for.ts": "`For(empty:)` renders authored markup, whose own primitives localize",
 };
 
 /** Modules that emit NO user-visible prose — nothing to translate, as opposed
@@ -47,6 +42,10 @@ const NO_TEXT: Readonly<Record<string, string>> = {
     "a ctx-free PREDICATE leaf (is any column filterable?) shared by the emitter and the chrome extractor — it renders nothing",
   "timeline.ts":
     "emits native `<ol>/<li>/<time>/<dl>` over audit DATA plus typographic placeholders (`—`, `→`); the words come from the record, not the emitter",
+  "file-link.ts":
+    "the anchor's text is the file's own `.key` (wire DATA, never authored) and the null arm is a typographic em-dash — no prose of its own",
+  "for.ts":
+    "`For(empty:)` is authored MARKUP walked in the parent context, so its own primitives localize; `For` contributes no text itself",
 };
 
 describe("i18n slot inventory — untranslatable primitive text is listed, not silent", () => {

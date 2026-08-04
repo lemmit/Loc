@@ -613,6 +613,14 @@ both produced by `src/generator/_walker/i18n-emit.ts` from the same
   props procedurally rather than markup: Feliz (F# `prop.ariaLabel …`)
   and Flutter (Dart `Semantics(label: …)`).
 
+Phoenix/HEEx is a third spelling of the SAME rule rather than an
+exception: its markup is HTML-ish, but its runtime is gettext, so
+`localizedHeexAttr` emits HEEx's `{…}` expression form
+(`aria-label={pgettext("<key>", "<English>")}`) — which is why
+`elixirI18nString` escapes `{`/`}` in the message. Until it existed
+HEEx translated every TEXT slot and no ATTRIBUTE one, so an accessible
+name shipped in English at every locale beside a caption that did not.
+
 The rejected alternative is handing the pack the **key** and letting it
 call the runtime: that duplicates the "is this app i18n-enabled at all"
 decision into every pack, and one pack forgetting the check emits a
@@ -623,6 +631,13 @@ i18n-OFF path byte-identical by construction, and keeps
 **Corollary.** A pack that *drops* a user-visible slot is a bug, not a
 style choice — the string still reaches the catalog, so a translator
 translates text the app never renders.
+
+**Corollary 2.** A slot the helper owns is a slot no pack re-decides.
+When `Icon`'s accessible name joined the table, the walker took over the
+decorative-vs-named decision as well — a pack now receives a name or
+nothing, instead of re-implementing "`label:` and not `decorative:`"
+from raw args in its own language. Two copies of that predicate (Feliz,
+Flutter) and one HTML round-trip disappeared with it.
 
 **Affects.** `i18n.md`, `accessibility.md`; `_walker/i18n-emit.ts`,
 `_walker/a11y-emit.ts`, `_walker/target.ts`; every `primitive-*.hbs`
