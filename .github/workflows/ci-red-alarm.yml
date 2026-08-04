@@ -21,6 +21,8 @@ on:
       - "Behavioral e2e — Java (Spring Boot + JPA)"
       - "Behavioral e2e — Python (FastAPI)"
       - "Behavioral e2e — Elixir (plain Ecto/Phoenix)"
+      - "API call (typed in-system call runtime e2e)"
+      - "Channels (broker runtime e2e)"
       - "Deploy landing page + playground to GitHub Pages"
     types: [completed]
 
