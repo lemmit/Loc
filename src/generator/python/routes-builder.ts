@@ -1207,7 +1207,18 @@ function findRoute(
             ];
           })();
     return lines(
-      `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}", responses={${absentStatus}: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(absentStatus))}}})`,
+      // A `requires`-gated union find declares 403 alongside its absent
+      // status.  This decorator is hand-built rather than routed through
+      // `errorResponsesKwarg`, so it needs the rung explicitly — the absence
+      // union is a SEPARATE emitter path from the plain optional find, and
+      // patching only the latter left `Order option` still publishing [404]
+      // while its sibling `Order[]` published [403].
+      `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}", responses={${[
+        ...(find.requires
+          ? [`403: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(403))}}`]
+          : []),
+        `${absentStatus}: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(absentStatus))}}`,
+      ].join(", ")}})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
       userBind,
       gateLines,
@@ -1257,7 +1268,7 @@ function findRoute(
   }
   if (isList) {
     return lines(
-      `@router.get("/${findSnake}", response_model=${agg.name}ListResponse, operation_id="${opId}")`,
+      `@router.get("/${findSnake}", response_model=${agg.name}ListResponse, operation_id="${opId}"${errorResponsesKwarg("findList", !!find.requires)})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
       userBind,
       gateLines,
@@ -1266,7 +1277,7 @@ function findRoute(
     );
   }
   return lines(
-    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}"${errorResponsesKwarg("findOptional")})`,
+    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}"${errorResponsesKwarg("findOptional", !!find.requires)})`,
     `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
     userBind,
     gateLines,
