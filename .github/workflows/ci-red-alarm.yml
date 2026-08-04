@@ -8,22 +8,75 @@ name: main-red alarm
 #
 # `workflow_run` fires after the monitored workflow completes, on the default
 # branch, with the repo's own token — no external secret, no Slack webhook.
-# Add a workflow name below when you add a new main gate worth alarming on.
+#
+# THE LIST BELOW IS EVERY WORKFLOW THAT RUNS ON `push: main`, and that is the
+# whole rule: if a gate runs on main, its failure alarms. A hand-curated
+# subset is what let `api-call-e2e` sit red on 100% of its main pushes for two
+# days — it was never watched, so nothing said so. `workflows:` takes literal
+# names (no expressions), so the list is spelled out here and
+# `test/system/main-red-alarm-coverage.test.ts` fails the fast suite the
+# moment it drifts from the workflow directory. Adding a main gate therefore
+# means adding its name here; the test tells you so.
+#
+# Noise is bounded by design: every failure lands as a comment on the ONE
+# issue labelled `ci-red`, not as a new issue per gate.
 
 on:
   workflow_run:
     workflows:
-      - "Tests + coverage"
-      - "Tenancy isolation (runtime e2e)"
+      - ".NET OIDC auth (runtime e2e)"
+      - ".NET build verification"
+      - ".NET observability events (runtime e2e)"
+      - "API call (typed in-system call runtime e2e)"
+      - "Behavioral UI e2e (headless, no docker)"
       - "Behavioral e2e (headless, no docker)"
       - "Behavioral e2e — .NET (ASP.NET + EF Core)"
       - "Behavioral e2e — .NET (persistence: dapper)"
+      - "Behavioral e2e — Elixir (plain Ecto/Phoenix)"
       - "Behavioral e2e — Java (Spring Boot + JPA)"
       - "Behavioral e2e — Python (FastAPI)"
-      - "Behavioral e2e — Elixir (plain Ecto/Phoenix)"
-      - "API call (typed in-system call runtime e2e)"
+      - "Behavioral e2e — node/Hono (MikroORM)"
       - "Channels (broker runtime e2e)"
+      - "Conformance parity (per-PR)"
+      - "Context integration (runtime e2e)"
+      - "Corpus compile gate (Elixir)"
+      - "Corpus compile gates"
       - "Deploy landing page + playground to GitHub Pages"
+      - "Elixir / Vanilla VO wire round-trip (runtime e2e)"
+      - "Elixir / Vanilla build verification"
+      - "Elixir / Vanilla runtime e2e (observability)"
+      - "Generated Angular build"
+      - "Generated Angular e2e"
+      - "Generated Feliz build"
+      - "Generated Flutter build"
+      - "Generated React TSX build"
+      - "Generated React e2e"
+      - "Generated Svelte build"
+      - "Generated Svelte e2e"
+      - "Generated Vue build"
+      - "Generated Vue e2e"
+      - "Hono OIDC auth (runtime e2e)"
+      - "Hono observability events (runtime e2e)"
+      - "Java OIDC auth (runtime e2e)"
+      - "Java build verification"
+      - "Java observability e2e"
+      - "Kubernetes/Helm validation"
+      - "Langium generated files in sync"
+      - "Lint GitHub Actions workflows"
+      - "Mailer smtp (runtime e2e)"
+      - "Migration evolution (runtime e2e)"
+      - "OIDC auth (full-compose runtime e2e)"
+      - "OIDC auth — Elixir/Phoenix (full-compose runtime e2e)"
+      - "Phoenix / LiveView UI smoke (runtime e2e)"
+      - "Playground e2e"
+      - "Playground worker-realm check"
+      - "Python OIDC auth (runtime e2e)"
+      - "Python build verification"
+      - "Python observability e2e"
+      - "Schema load (emitted DDL)"
+      - "Tenancy isolation (runtime e2e)"
+      - "Tests + coverage"
+      - "TypeScript (Hono) build verification"
     types: [completed]
 
 permissions:
