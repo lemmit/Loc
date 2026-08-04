@@ -180,10 +180,19 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx, nameSuffix = ""): string[] {
  *  deployable is compatible with this test only if every collected
  *  slug's owning module is in `deployable.contextNames`. */
 function collectReferencedAggregateSlugs(statements: readonly TestStmtIR[]): Set<string> {
-  const slugs = new Set<string>();
+  return new Set(collectApiCallShapes(statements).map((c) => c.aggregateSlug));
+}
+
+/** Every `api.<slug>.<method>(...)` call an e2e test body makes, in visit
+ *  order.  The renderer needs only the slugs (above); the CALLER CENSUS
+ *  (`test/ir/api-caller-census.test.ts`) needs the whole shape, and must see
+ *  exactly the calls this renderer sees — a second copy of the match would let
+ *  the census credit a caller the emitter never emits. */
+export function collectApiCallShapes(statements: readonly TestStmtIR[]): ApiCallShape[] {
+  const calls: ApiCallShape[] = [];
   const visit = (e: ExprIR): void => {
     const call = matchApiCall(e);
-    if (call) slugs.add(call.aggregateSlug);
+    if (call) calls.push(call);
     // Recurse regardless — the api call's args may carry further
     // api.* receivers (`api.x.op(api.y.create(...).id)` etc.).
     if (e.kind === "member") visit(e.receiver);
@@ -213,7 +222,7 @@ function collectReferencedAggregateSlugs(statements: readonly TestStmtIR[]): Set
     else if (s.kind === "expression") visit(s.expr);
     else if (s.kind === "call") for (const a of s.args) visit(a);
   }
-  return slugs;
+  return calls;
 }
 
 /** A backend platform serves a queryable HTTP API.  Consults the
@@ -585,7 +594,7 @@ export const E2E_COLLECTION_RENDERERS: Record<string, E2ECollectionRenderer> = {
 // API call resolution
 // ---------------------------------------------------------------------------
 
-interface ApiCallShape {
+export interface ApiCallShape {
   aggregateSlug: string; // e.g. "orders"
   method: string; // e.g. "create" / "getById" / "addLine" / "byCustomer"
   args: ExprIR[];
