@@ -33,12 +33,20 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/generator/elixir/**'
-      - 'src/generator/_expr/**'
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
       - 'src/ir/**'
       - 'src/system/**'
+      - 'src/util/**'
+      - 'src/generator/elixir/**'
+      - 'src/generator/_expr/**'
       - 'src/platform/elixir.ts'
-      - 'src/language/validators/deployable.ts'
       - 'test/fixtures/corpus/**'
       - 'test/e2e/corpus-elixir-build.test.ts'
       - 'test/e2e/support/hex-mirror.ts'
@@ -47,12 +55,20 @@ on:
       - '.github/workflows/corpus-elixir-build.yml'
   pull_request:
     paths:
-      - 'src/generator/elixir/**'
-      - 'src/generator/_expr/**'
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
       - 'src/ir/**'
       - 'src/system/**'
+      - 'src/util/**'
+      - 'src/generator/elixir/**'
+      - 'src/generator/_expr/**'
       - 'src/platform/elixir.ts'
-      - 'src/language/validators/deployable.ts'
       - 'test/fixtures/corpus/**'
       - 'test/e2e/corpus-elixir-build.test.ts'
       - 'test/e2e/support/hex-mirror.ts'

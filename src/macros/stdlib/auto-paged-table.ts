@@ -230,7 +230,7 @@ function upgradeQueryView(model: Model, page: Page, qv: BuilderCall): boolean {
   const dataEntry = entry(qv, "data");
   if (!ofEntry || !dataEntry) return false;
   const read = bareRead(ofEntry.value);
-  if (!read || read.operation !== "all") return false;
+  if (read?.operation !== "all") return false;
   if (!allIsPaged(model, read.aggregate)) return false;
   if (!isLambda(dataEntry.value)) return false;
   const lambda = dataEntry.value as Lambda;
