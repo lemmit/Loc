@@ -1552,7 +1552,15 @@ const channelTransports = createChannelTransports();
             ? "createApp(db, createOutboxDispatcher(db, inProcessEvents))"
             : "createApp(db)"
       };
-${hasChannelConsumers ? "const stopChannelConsumers = startChannelConsumers(channelTransports, inProcessEvents);\n" : ""}${
+${
+  hasChannelConsumers
+    ? // Awaited BEFORE `serve()`: the port opens — and /ready answers 200 —
+      // only once every binding is subscribed.  An envelope published into
+      // the gap is dropped by the broker on an ephemeral channel and never
+      // redelivered (java: #2350, elixir/dotnet/python: #2386).
+      "const stopChannelConsumers = await startChannelConsumers(channelTransports, inProcessEvents);\n"
+    : ""
+}${
   outboxRelay
     ? hasChannels
       ? `// The relay's dispatcher rides the publish tee in RELAY mode: drained

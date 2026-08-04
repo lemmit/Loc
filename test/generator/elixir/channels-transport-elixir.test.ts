@@ -126,4 +126,36 @@ system Bare {
     expect(files.get("api/lib/api/channel_consumer.ex")).toBeUndefined();
     expect(files.get("api/mix.exs")).not.toContain("redix");
   });
+
+  // The consumer must be supervised BEFORE the Phoenix Endpoint.
+  //
+  // `renderApplication` appends `schedulerChildren` AFTER the Endpoint and
+  // `preEndpointChildren` before it.  With the consumer in the former, the
+  // port accepts traffic — and `/ready` answers 200 — while the subscriptions
+  // are still being established.  Redis pub/sub on an ephemeral channel is
+  // fire-and-forget, so an envelope published into that window is dropped by
+  // the broker and never redelivered: no consumer-side timeout can recover
+  // it.  The Java backend had the identical defect, measured at ~667ms of
+  // ready-but-not-subscribed (#2350).
+  //
+  // Asserting on ORDER, not presence.  A `toContain("ChannelConsumer")` check
+  // passes in both arrangements — which is precisely why this survived a
+  // review that only looked at whether the child was registered.
+  it("supervises the channel consumer BEFORE the Endpoint", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const app = files.get("ship_api/lib/ship_api/application.ex") ?? "";
+    // Scope to the supervision list: `ShipApiWeb.Endpoint` also appears in the
+    // `Application.get_env(...)` port lookup ABOVE it, so a whole-file indexOf
+    // compares against the wrong occurrence and reports a false failure.
+    const children = /children = \[([\s\S]*?)\n\s*\]/.exec(app)?.[1] ?? "";
+    expect(children, "supervision children list is present").not.toBe("");
+    const consumerAt = children.indexOf("ShipApi.ChannelConsumer");
+    const endpointAt = children.indexOf("ShipApiWeb.Endpoint");
+    expect(consumerAt, "ChannelConsumer is supervised").toBeGreaterThan(-1);
+    expect(endpointAt, "Endpoint is supervised").toBeGreaterThan(-1);
+    expect(
+      consumerAt,
+      "the consumer must be subscribed before the Endpoint opens the port",
+    ).toBeLessThan(endpointAt);
+  });
 });

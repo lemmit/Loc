@@ -728,6 +728,7 @@ export function buildPyChannelsFile(
                 ]),
           ...(hasRedis
             ? [
+                "    _subscribed.set()",
                 "    while True:",
                 "        for transport in transports:",
                 "            message = await transport.get_message(timeout=0.25)",
@@ -747,19 +748,40 @@ export function buildPyChannelsFile(
               ]
             : hasKafka && !hasRabbit
               ? [
+                  "    _subscribed.set()",
                   "    # aiokafka consumption runs in per-consumer tasks; keep this task",
                   "    # alive so cancellation on shutdown tears the group down with it.",
                   "    await asyncio.Event().wait()",
                 ]
               : [
+                  "    _subscribed.set()",
                   "    # aio-pika consumption is callback-driven; keep the task alive so",
                   "    # cancellation on shutdown tears the subscriptions down with it.",
                   "    await asyncio.Event().wait()",
                 ]),
           "",
           "",
-          'def start_channel_consumers() -> "asyncio.Task[None]":',
-          "    return asyncio.create_task(_run_channel_consumers())",
+          // Readiness ordering: the lifespan must not reach `yield` — which is
+          // what makes uvicorn start accepting requests — until every binding is
+          // actually subscribed.  A bare `create_task` only SCHEDULES the
+          // coroutine, so the port could open with no consumer attached, and an
+          // ephemeral pub/sub envelope published into that window is dropped by
+          // the broker and never redelivered (java: #2350, elixir/dotnet: #2386).
+          "_subscribed = asyncio.Event()",
+          "",
+          "",
+          'async def start_channel_consumers() -> "asyncio.Task[None]":',
+          "    task = asyncio.create_task(_run_channel_consumers())",
+          "    waiter = asyncio.create_task(_subscribed.wait())",
+          "    done, _pending = await asyncio.wait(",
+          "        {task, waiter}, return_when=asyncio.FIRST_COMPLETED",
+          "    )",
+          "    if task in done:",
+          "        # Subscribing failed (or returned early); surface it at boot",
+          "        # rather than waiting on an event that will never be set.",
+          "        waiter.cancel()",
+          "        task.result()",
+          "    return task",
         ]
       : []),
     "",

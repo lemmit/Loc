@@ -744,9 +744,17 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     // via Plug.Static and the router adds the `/app/*` deep-link fallback
     // + a `/` → `/app` redirect (the SpaController).
     embedReact && !!deployable.uiName,
-    [...schedulerChildren, ...channelChildren],
+    schedulerChildren,
     usesOban,
-    authChildren,
+    // Channel consumers start BEFORE the Endpoint, alongside the OIDC signer
+    // cache and for the same reason.  `renderApplication` appends
+    // `schedulerChildren` AFTER the Endpoint, so a consumer listed there is
+    // still subscribing while the port already accepts traffic and `/ready`
+    // answers 200.  An ephemeral pub/sub envelope published into that window
+    // is dropped by the broker and never redelivered, so no consumer-side
+    // timeout can recover it — measured at ~667ms on the Java backend, which
+    // had the identical defect (#2350).
+    [...authChildren, ...channelChildren],
     // i18n (M-T1.11): the mounted ui, but only when it has extractable
     // user-visible strings — that is the single gate for the Gettext backend,
     // the `priv/gettext` catalog, the hex dep and the `html_helpers` import.

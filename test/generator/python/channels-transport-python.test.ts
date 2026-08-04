@@ -87,11 +87,39 @@ describe("redis broker transport — python leg (M-T4.4 slice 2b)", () => {
     // shipApi hosts the Fulfil reactor: the consumer loop starts at boot and
     // dispatches into the same in-process dispatcher local reactors use.
     expect(files.get("ship_api/app/main.py")).toContain(
-      "_channel_consumers = start_channel_consumers()",
+      "_channel_consumers = await start_channel_consumers()",
     );
     expect(files.get("ship_api/app/channels.py")).toContain(
       "InProcessDispatcher(session).dispatch(event)",
     );
+  });
+
+  it("finishes subscribing before the lifespan starts serving", async () => {
+    // The readiness race: uvicorn starts accepting requests — and /ready
+    // answers 200 — the moment the lifespan reaches `yield`.  A consumer
+    // still subscribing at that point silently drops every envelope
+    // published into the window, and redis pub/sub cannot replay them, so
+    // no consumer-side timeout recovers the loss.  The starter must
+    // therefore be awaitable and must not return until every binding is
+    // subscribed.
+    const files = await generateSystemFiles(FIXTURE);
+    const channels = files.get("ship_api/app/channels.py") ?? "";
+    const main = files.get("ship_api/app/main.py") ?? "";
+
+    expect(channels).toContain('async def start_channel_consumers() -> "asyncio.Task[None]":');
+    expect(main).toContain("await start_channel_consumers()");
+
+    // The gate itself: the subscribe loop sets the event, and the starter
+    // blocks on it before handing the task back.
+    const subscribeAt = channels.indexOf("await transport.subscribe(");
+    const setAt = channels.indexOf("_subscribed.set()");
+    expect(subscribeAt, "the subscribe call must precede the readiness signal").toBeGreaterThan(-1);
+    expect(setAt).toBeGreaterThan(subscribeAt);
+    expect(channels).toContain("_subscribed.wait()");
+    expect(channels).toContain("return_when=asyncio.FIRST_COMPLETED");
+    // A subscribe that raises must surface at boot rather than hanging the
+    // lifespan on an event nothing will ever set.
+    expect(channels).toContain("task.result()");
   });
 
   it("gives the consumer the foreign event vocabulary and reactor routing", async () => {

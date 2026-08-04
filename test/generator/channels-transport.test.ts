@@ -86,8 +86,33 @@ describe("redis broker transport (M-T4.4 slice 2)", () => {
     // shipApi hosts the Fulfil reactor: the consumer loop starts at boot and
     // its stop function (which closes the transports) runs at shutdown.
     const consumer = files.get("ship_api/index.ts") ?? "";
-    expect(consumer).toContain("startChannelConsumers(channelTransports, inProcessEvents)");
+    expect(consumer).toContain("await startChannelConsumers(channelTransports, inProcessEvents)");
     expect(consumer).toContain("stopChannelConsumers()");
+  });
+
+  it("finishes subscribing before the port opens", async () => {
+    // The readiness race: `serve()` opens the port — and /ready starts
+    // answering 200 — the instant it is called.  A consumer still
+    // subscribing at that point silently drops every envelope published
+    // into the window, and an ephemeral pub/sub channel cannot replay
+    // them, so no consumer-side timeout recovers the loss.  `subscribe`
+    // must therefore resolve on the broker's ACK, and boot must await it.
+    const files = await generateSystemFiles(FIXTURE);
+    const mod = files.get("ship_api/http/channels.ts") ?? "";
+    const index = files.get("ship_api/index.ts") ?? "";
+
+    // The seam is awaitable — a synchronous unsubscribe handle cannot
+    // carry "the broker has acknowledged me".
+    expect(mod).toContain("): Promise<() => void>;");
+    expect(mod).toContain("async subscribe(address");
+    expect(mod).toContain("export async function startChannelConsumers(");
+    expect(mod).toContain("await t.subscribe(b.address");
+
+    // ...and boot blocks on it BEFORE the port opens.
+    const startAt = index.indexOf("await startChannelConsumers(");
+    const serveAt = index.indexOf("const server = serve(");
+    expect(startAt, "the consumer must start at boot").toBeGreaterThan(-1);
+    expect(serveAt).toBeGreaterThan(startAt);
   });
 
   it("gives the consumer the foreign event vocabulary and reactor routing", async () => {

@@ -510,13 +510,19 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
     public async Task SubscribeAsync(string address, string? group, Func<LoomEventEnvelope, Task> handler)
     {
         await EnsureTopicAsync(address);
+        // Completed by the rebalance callback below — see the await at the
+        // end of this method for why the group JOIN, not the Subscribe call,
+        // is what "subscribed" has to mean on kafka.
+        var assigned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var consumer = new ConsumerBuilder<string, string>(ApplySasl(new ConsumerConfig
         {
             BootstrapServers = _bootstrap,
             GroupId = group ?? address,
             EnableAutoCommit = false,
             AutoOffsetReset = AutoOffsetReset.Latest,
-        })).Build();
+        }))
+            .SetPartitionsAssignedHandler((_, _parts) => assigned.TrySetResult())
+            .Build();
         consumer.Subscribe(address);
         _loops.Add(Task.Run(async () =>
         {
@@ -566,6 +572,19 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
             }
             consumer.Close();
         }));
+        // Block until the group has ASSIGNED us partitions, not merely until
+        // Subscribe returned.  Subscribe only records the intent; the join
+        // happens on the first Consume, inside the loop above.  A replica
+        // that reports ready before its join lands makes the group rebalance
+        // mid-flight, and a rebalance moves partitions between replicas —
+        // which splits a partition key's events across two consumers and
+        // breaks the same-replica ordering guarantee the key exists to give.
+        // Bounded: a broker that never assigns must not wedge boot forever;
+        // the loop keeps retrying and the failure is visible in the log.
+        if (await Task.WhenAny(assigned.Task, Task.Delay(TimeSpan.FromSeconds(30))) != assigned.Task)
+        {
+            _log.LogWarning("{Event} {Address} {Error}", "channel_subscribe_slow", address, "no partition assignment within 30s");
+        }
     }
 
     private async Task ParkAsync(string address, Message<string, string> message)
@@ -609,12 +628,12 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
   // must propagate so the driver's bounded-retry/park owns it.  Broadcast
   // (redis) subscriptions keep the logged handler (fire-and-forget contract).
   const strictSubscribe = `await transport.SubscribeAsync(binding.Address, binding.Group,
-                    envelope => ConsumeAsync(binding, envelope, stoppingToken));`;
+                    envelope => ConsumeAsync(binding, envelope, _stopping.Token));`;
   const loggedSubscribe = `await transport.SubscribeAsync(binding.Address, null, async envelope =>
                 {
                     try
                     {
-                        await ConsumeAsync(binding, envelope, stoppingToken);
+                        await ConsumeAsync(binding, envelope, _stopping.Token);
                     }
                     catch (Exception ex)
                     {
@@ -667,13 +686,39 @@ public sealed class ChannelConsumerService : BackgroundService
         _log = log;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private readonly CancellationTokenSource _stopping = new();
+
+    /// <summary>Establish every subscription BEFORE the host reports started.
+    ///
+    /// Deliberately overrides StartAsync rather than living in ExecuteAsync:
+    /// BackgroundService.StartAsync invokes ExecuteAsync and returns at its
+    /// FIRST await, so the host would go on to start Kestrel while the
+    /// subscribe calls are still in flight — the port accepts traffic and
+    /// /ready answers 200 with no consumer attached.  An ephemeral pub/sub
+    /// envelope published into that window is dropped by the broker and never
+    /// redelivered, so no consumer-side timeout can recover it (the Java
+    /// backend had the identical defect, measured at ~667ms — #2350).
+    ///
+    /// Safe to await here because every driver's SubscribeAsync registers and
+    /// returns: redis attaches a handler, rabbit declares + binds and hooks
+    /// ReceivedAsync, and kafka's consume loop is a detached Task.Run.  None
+    /// of them runs the poll loop inline, so this cannot stall boot.</summary>
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
         foreach (var binding in ChannelBindings.All)
         {
             var transport = _transports.For(binding.CsName);
             ${subscribeBody}
         }
+        await base.StartAsync(cancellationToken);
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _stopping.CancelAsync();
+        await base.StopAsync(cancellationToken);
     }
 
     private async Task ConsumeAsync(ChannelBinding binding, LoomEventEnvelope envelope, CancellationToken cancellationToken)

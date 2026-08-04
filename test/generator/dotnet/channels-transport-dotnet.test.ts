@@ -128,4 +128,36 @@ system Bare {
     expect(files.get("api/Api.csproj")).not.toContain("StackExchange.Redis");
     expect(files.get("api/Program.cs")).not.toContain("Channel");
   });
+
+  // Subscriptions must be established in StartAsync, not ExecuteAsync.
+  //
+  // BackgroundService.StartAsync invokes ExecuteAsync and returns at its FIRST
+  // await, so a subscribe living there leaves the host free to start Kestrel
+  // while the calls are still in flight: the port accepts traffic and /ready
+  // answers 200 with no consumer attached.  Redis pub/sub on an ephemeral
+  // channel is fire-and-forget, so an envelope published into that window is
+  // dropped by the broker and never redelivered — no consumer-side timeout can
+  // recover it.  The Java backend had the identical defect, measured at ~667ms
+  // (#2350); elixir the same (#2386).
+  //
+  // Asserting on WHICH METHOD holds the subscribe, because "the file contains
+  // SubscribeAsync" is true either way — that is the check that would have
+  // missed this.
+  it("subscribes in StartAsync so the host blocks before serving", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const mod = files.get("ship_api/Infrastructure/Channels/ChannelTransport.cs") ?? "";
+    const startAt = mod.indexOf("public override async Task StartAsync");
+    const execAt = mod.indexOf("protected override Task ExecuteAsync");
+    expect(startAt, "consumer overrides StartAsync").toBeGreaterThan(-1);
+    expect(execAt, "ExecuteAsync is present").toBeGreaterThan(-1);
+    // The consumer's own subscribe loop sits inside StartAsync's body, i.e.
+    // between the two members — not after ExecuteAsync's no-op body.
+    const consumerSubscribe = mod.indexOf("transport.SubscribeAsync", startAt);
+    expect(consumerSubscribe, "subscribe is inside StartAsync").toBeGreaterThan(startAt);
+    expect(consumerSubscribe, "subscribe precedes the ExecuteAsync no-op").toBeLessThan(execAt);
+    // ExecuteAsync must not carry the work any more.
+    expect(mod).toContain(
+      "protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;",
+    );
+  });
 });
