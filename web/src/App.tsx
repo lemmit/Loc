@@ -1450,12 +1450,7 @@ export default function App(): JSX.Element {
   // render made the three memos below — and the `ctx` memo — miss every render
   // for the entire pre-generate lifetime of the app.
   const files: VirtualFile[] = generateSuccess?.files ?? EMPTY_FILES;
-  // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
-  // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
-  const tree = useMemo(
-    () => buildTree(files.filter((f) => !f.path.endsWith(".c4.json"))),
-    [files],
-  );
+  const tree = useMemo(() => buildTree(files), [files]);
   const selectedFile = useMemo(
     () => files.find((f) => f.path === selectedPath) ?? null,
     [files, selectedPath],

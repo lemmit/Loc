@@ -22,7 +22,6 @@ consumption.
     ├── sequence.mmd
     ├── deployment.mmd
     ├── architecture.c4
-    ├── architecture.c4.json
     ├── datasources.md
     ├── traceability.md
     ├── traceability-matrix.md
@@ -71,7 +70,6 @@ traceability coverage, or migration baselines.
 | `sequence.mmd` | `src/system/mermaid.ts` → `renderSequenceDiagram` | Mermaid sequence diagram of an operation lifecycle (client → route → repository → DB → events). |
 | `deployment.mmd` | `src/system/mermaid.ts` → `renderDeploymentDiagram` | Mermaid deployment diagram of the system's deployables, their target backends, and their shared storage. |
 | `architecture.c4` | `src/system/likec4.ts` → `renderC4Model` | [LikeC4](https://likec4.dev/) model of the system at C4 levels 1–3 (context, container, component).  Renderable in the LikeC4 viewer / VS Code extension. |
-| `architecture.c4.json` | `src/system/likec4.ts` → `renderC4SpecJson` | Same model as `architecture.c4` but in JSON form for programmatic consumption. |
 
 ## Traceability
 

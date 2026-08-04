@@ -170,32 +170,15 @@ export default defineConfig({
           }
           // craft.js (page builder) — only reached via the lazy Builder tab.
           if (id.includes("/node_modules/@craftjs/")) return "craftjs";
-          // LikeC4 ecosystem (model/react/builder + xyflow + the
-          // Graphviz WASM layouter) is only reached via the dynamic
-          // import in the `.c4` viewer, so this stays a lazy chunk —
-          // grouping it gives one cacheable vendor bundle instead of a
-          // handful of hashed fragments that all load together anyway.
-          // `@xyflow` is SEPARATE from the likec4 group, and must stay that
-          // way.  The system-builder panes import it STATICALLY
-          // (SystemBuilderV2Pane, OverviewCanvas, ConstructNode, StmtNode), so
-          // grouping it with likec4 pulled that whole chunk — LikeC4 plus the
-          // Graphviz WASM layouter — onto the EAGER path, defeating the
-          // correctly-dynamic `import("likec4/react")` /
-          // `import("@likec4/layouts")` call sites and the "stays a lazy
-          // chunk" claim below.  Measured on the built output: the entry chunk
-          // statically imported the likec4 chunk, making it 3.25 MB of the
-          // 15.87 MB every page load had to parse.
-          //
-          // Same defect as the monaco-views-optional split above —
-          // `manualChunks` can undo a lazy boundary, and does so silently.
+          // `@xyflow` gets its own chunk: the system-builder canvases import
+          // it statically (SystemBuilderV2Pane, OverviewCanvas, ConstructNode,
+          // StmtNode), so it is genuinely eager and must not be able to drag
+          // anything else along.  It used to be grouped with LikeC4 and pulled
+          // that whole 3.25 MB chunk — plus the Graphviz WASM layouter — onto
+          // the eager path; LikeC4 is gone now, and this keeps the boundary
+          // explicit so the next grouping can't repeat it.
+          // `scripts/check-eager-chunks.mjs` gates exactly that.
           if (id.includes("/node_modules/@xyflow/")) return "xyflow";
-          if (
-            id.includes("/node_modules/likec4/") ||
-            id.includes("/node_modules/@likec4/") ||
-            id.includes("/node_modules/@hpcc-js/")
-          ) {
-            return "likec4";
-          }
           if (
             id.includes("/node_modules/@mantine/") ||
             id.includes("/node_modules/@floating-ui/")
