@@ -6,6 +6,7 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import { javaNotFoundThrow } from "./common.js";
 import type { JavaRepoCtx } from "./repository.js";
 import {
   declaredFinds,
@@ -201,7 +202,7 @@ export function renderJavaEventSourcedRepositoryImpl(
     // grep failed loads by (event="aggregate_loaded", found=false).
     `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
     `        return found.orElseThrow(() ->`,
-    `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
+    `            ${javaNotFoundThrow(agg.name)});`,
     `    }`,
     ``,
     `    @Override`,

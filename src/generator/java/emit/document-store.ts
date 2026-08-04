@@ -8,6 +8,7 @@ import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { bypassDrops, type FilterBypass } from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import { javaNotFoundThrow } from "./common.js";
 import type { JavaRepoCtx } from "./repository.js";
 import {
   declaredFinds,
@@ -286,7 +287,7 @@ export function renderJavaDocumentRepositoryImpl(
     // grep failed loads by (event="aggregate_loaded", found=false).
     `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
     `        return found.orElseThrow(() ->`,
-    `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
+    `            ${javaNotFoundThrow(agg.name)});`,
     `    }`,
     ``,
     `    @Override`,

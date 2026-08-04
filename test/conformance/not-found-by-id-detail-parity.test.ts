@@ -6,15 +6,22 @@
 // emitted source, so a regression fails in the fast suite instead of waiting for
 // a booted leg.
 //
-// WHY A SHARED FILE AND NOT TWO PER-BACKEND PINS.  The defect this rule names is
-// not "a backend has the wrong string" — it is "ONE ROUTE of a service answers
+// WHY A SHARED FILE AND NOT PER-BACKEND PINS.  The defect this rule names is not
+// "a backend has the wrong string" — it is "ONE ROUTE of a service answers
 // differently from the rest of that same service", which happens whenever a 404
-// is HAND-ROLLED at the route instead of raised by the shared producer.  Four
-// backends were already correct precisely because they had one producer; the two
-// that diverged each had exactly one bypass.  A pin that only looked at node, or
-// only at .NET, would not have said that — so the assertion is written across
-// all five at once, which is also the form that fails if a NEW backend arrives
-// with its own spelling.
+// is HAND-ROLLED at the route instead of raised by the shared producer.  THREE
+// of five had it (node, .NET, java), each on the by-id READ; python and elixir
+// were correct because their route reaches the producer.  A pin that looked at
+// one backend would not have said that — so the assertion is written across all
+// five at once, which is also the form that fails if a NEW backend arrives with
+// its own spelling.
+//
+// EVERY ASSERTION IS FILE-SCOPED, and that is the point of this file's own
+// history: its first java pin searched ALL `.java` for the message, which
+// `OrderRepositoryImpl` satisfies — so "java emits the sentence" was TRUE while
+// the controller answered an empty body, and the pin was green when the
+// behavioural-java leg failed.  A 404 is a property of the ROUTE; only a
+// route-scoped assertion can pin it.  Each backend's arm is mutation-proven.
 //
 // Deliberately NOT asserted here: an OPTIONAL FIND's 404, which keeps the
 // `"not_found"` token on node and python alike.  RS-27 is about reads addressed
@@ -102,10 +109,27 @@ const EXPECTED: Record<
     // catches) and the message.
     needles: ['.Domain.Common.AggregateNotFoundException($"Order {id} not found")'],
   },
+  // The by-id READ path — the one that bypassed.  Scoped to `Service.java` for
+  // the same reason node is scoped to `.routes.ts`: a `.java`-wide search is
+  // satisfied by `OrderRepositoryImpl`'s byte-identical line, so it would pass
+  // with the read path fully reverted.  (That weak form is exactly what shipped
+  // and let the java leg fail in CI — this file's first java pin asserted only
+  // the repository, and "java emits the sentence" was TRUE while the route
+  // answered an empty body.)
   java: {
     platform: "java",
     port: 3003,
-    exts: [".java"],
+    exts: ["Service.java"],
+    needles: [
+      "return repository.findById(id).map(OrderResponse::from)",
+      '.orElseThrow(() -> new AggregateNotFoundException("Order " + id + " not found"));',
+    ],
+  },
+  // The shared producer, on its own file.
+  javaRepository: {
+    platform: "java",
+    port: 3007,
+    exts: ["RepositoryImpl.java"],
     needles: ['new AggregateNotFoundException("Order " + id + " not found")'],
   },
   python: {
@@ -114,16 +138,22 @@ const EXPECTED: Record<
     exts: [".py"],
     needles: ['raise AggregateNotFoundError(f"Order {id} not found")'],
   },
+  // Phoenix never had the bypass: the CONTROLLER action itself calls the shared
+  // producer.  Pinned at the controller (not just at the helper) so that fact
+  // is asserted rather than assumed — reading only `problem-details-emit.ts` is
+  // what made the java bypass invisible on the first pass.
   elixir: {
     platform: "elixir",
     port: 3005,
-    exts: [".ex"],
-    // Phoenix reaches the same sentence through its shared helper, whose body
-    // IS the sentence — so both halves are pinned.
-    needles: [
-      'ProblemDetails.not_found_response(conn, "Order", id)',
-      'problem_response(conn, 404, "Not Found", "#{kind} #{id} not found")',
-    ],
+    exts: ["_controller.ex"],
+    needles: ['ProblemDetails.not_found_response(conn, "Order", id)'],
+  },
+  // …and the helper the controller reaches, whose body IS the sentence.
+  elixirProblemDetails: {
+    platform: "elixir",
+    port: 3008,
+    exts: ["problem_details.ex"],
+    needles: ['problem_response(conn, 404, "Not Found", "#{kind} #{id} not found")'],
   },
 };
 
@@ -155,5 +185,43 @@ describe("RS-27 — a 404-by-id detail is the same sentence on all five backends
     // and therefore outside RS-22's envelope too (no `instance`, an injected
     // `traceId`).  Nothing in the controller may answer it that way again.
     expect(src).not.toContain("return response is null ? NotFound() : Ok(response);");
+  });
+
+  it("java's getById route no longer answers Spring's own empty-bodied 404", async () => {
+    const files = await generateSystemFiles(systemFor("java", 3013));
+    const controller = sourceFor(files, "Controller.java");
+    // The CONTROLLER, not the repository.  `ResponseEntity.notFound().build()`
+    // is a 404 with an EMPTY BODY that never reaches the
+    // `@ExceptionHandler(AggregateNotFoundException)` arm in the
+    // `@RestControllerAdvice` — which is literally what the java behavioural leg
+    // read (`golden {…} ≠ java ""`).  The route hands the service's value
+    // straight back and lets the service throw.
+    expect(controller).toContain(
+      "return ResponseEntity.ok(service.getOrderById(new OrderId(id)));",
+    );
+    expect(controller).not.toContain("ResponseEntity.notFound().build()");
+    // The advice that renders it — `e.getMessage()` is what carries the sentence.
+    expect(sourceFor(files, ".java")).toContain(
+      'return respond(problem(404, "Not Found", e.getMessage(), request), 404);',
+    );
+  });
+
+  it("elixir's by-id route reaches the shared producer directly (no bypass to add)", async () => {
+    const controller = sourceFor(
+      await generateSystemFiles(systemFor("elixir", 3014)),
+      "_controller.ex",
+    );
+    // `show/2` IS the by-id route; asserting the producer call inside its clause
+    // — rather than anywhere in the file — is what makes "elixir was already
+    // correct" a checked claim instead of a reading.
+    const show = controller.slice(controller.indexOf('def show(conn, %{"id" => id})'));
+    expect(show.slice(0, show.indexOf("\n  end"))).toContain(
+      'ProblemDetails.not_found_response(conn, "Order", id)',
+    );
+    // Same for the history action, the OTHER by-id read.
+    const history = controller.slice(controller.indexOf('def history(conn, %{"id" => id})'));
+    expect(history.slice(0, history.indexOf("\n  end"))).toContain(
+      'ProblemDetails.not_found_response(conn, "Order", id)',
+    );
   });
 });

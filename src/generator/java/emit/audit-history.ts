@@ -42,6 +42,7 @@ import { maskedHistoryFields, unmaskedHistoryFields } from "../../../ir/util/aud
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderJavaExpr } from "../render-expr.js";
+import { javaNotFoundThrow } from "./common.js";
 
 /** The derived history read for this aggregate, or undefined when it serves
  *  none.  Read off the enrichment-derived `historyFind` (which sits BESIDE
@@ -249,7 +250,7 @@ export function renderJavaHistoryServiceMethod(
     // Reachability BEFORE the trail read — a row this caller cannot see must
     // 404 rather than yield a readable timeline.
     `        repository.findById(id).orElseThrow(() ->`,
-    `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
+    `            ${javaNotFoundThrow(agg.name)});`,
     `        return auditRecords.findByTargetTypeAndTargetIdOrderByAtAsc(${JSON.stringify(agg.name)}, id.value().toString())`,
     `            .stream().map(${agg.name}Service::${javaHistoryMapperName(agg)}).toList();`,
     `    }`,

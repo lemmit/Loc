@@ -26,6 +26,7 @@ import {
   renderJavaHistoryMapper,
   renderJavaHistoryServiceMethod,
 } from "./audit-history.js";
+import { javaNotFoundThrow } from "./common.js";
 import {
   declaredFinds,
   isPagedAutoAll,
@@ -187,7 +188,19 @@ export function renderJavaService(
   const readLines = [
     `    @Transactional(readOnly = true)`,
     `    public ${agg.name}Response get${agg.name}ById(${idClass} id) {`,
-    `        return repository.findById(id).map(${agg.name}Response::${respFrom}).orElse(null);`,
+    // RS-27 — this returned `null` and the controller turned that into
+    // `ResponseEntity.notFound().build()`: Spring's OWN bare 404, an EMPTY body
+    // that never reaches the `@ExceptionHandler(AggregateNotFoundException)`
+    // arm every other java 404 goes through.  So the one route that reads by id
+    // answered a different envelope from the rest of the same service — the
+    // identical bypass node and .NET had.
+    //
+    // Thrown HERE rather than at the controller so the read stays READ-SCOPED:
+    // `repository.getById` would have been the obvious shared producer, but it
+    // deliberately loads through `findByIdForWrite` when a write scope is
+    // narrower, which would 404 rows the caller may legitimately read.
+    `        return repository.findById(id).map(${agg.name}Response::${respFrom})`,
+    `            .orElseThrow(() -> ${javaNotFoundThrow(agg.name)});`,
     `    }`,
     ``,
     ...(isPagedAutoAll(repo)
@@ -221,9 +234,11 @@ export function renderJavaService(
   // so it needs the `User` / `CurrentUserAccessor` imports even when nothing
   // else on this service threads a principal.
   const historyMasks = !!historyFind && maskedHistoryFields(agg).length > 0;
+  // RS-27 — every service throws it from the by-id read now, so the import is
+  // unconditional rather than history-gated.
+  imports.add(`${ctx.basePkg}.domain.common.AggregateNotFoundException`);
   if (historyFind) {
     imports.add("java.util.ArrayList");
-    imports.add(`${ctx.basePkg}.domain.common.AggregateNotFoundException`);
   }
   const findLines = declaredFinds(repo)
     .map((f) => unionFindAsOptionalTwin(f, agg.name))

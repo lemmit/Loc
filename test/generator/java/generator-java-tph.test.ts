@@ -58,6 +58,12 @@ describe("java generator — TPH (sharedTable) inheritance", () => {
     const svc = files_.get(`${ROOT}/features/cars/CarService.java`)!;
     expect(svc).toContain("public VehicleId createCar(CreateCarRequest request) {");
     const c = files_.get(`${ROOT}/features/cars/CarsController.java`)!;
-    expect(c).toContain("service.getCarById(new VehicleId(id));");
+    // The needle lost its trailing `;` when the getById route stopped binding a
+    // nullable local (RS-27: `var response = service.getCarById(…);` →
+    // `return ResponseEntity.ok(service.getCarById(…));`).  What this test is
+    // ABOUT is unchanged — the controller passes the BASE id class through — so
+    // the assertion is re-anchored on the call itself rather than on the
+    // statement that used to wrap it.
+    expect(c).toContain("service.getCarById(new VehicleId(id))");
   });
 });

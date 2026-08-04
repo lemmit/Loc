@@ -70,6 +70,26 @@ export function renderAggregateNotFoundException(basePkg: string): string {
   );
 }
 
+/**
+ * The `new AggregateNotFoundException(...)` a 404-BY-ID raises, as ONE
+ * emitter-side expression (RS-27, docs/conformance-semantics.md).
+ *
+ * Java spells this at five sites — the relational / document / event-store
+ * repositories, the history read, and (since RS-27) the by-id READ in the
+ * service.  RS-27's whole finding is that a 404 must come from ONE producer,
+ * because the two backends that diverged were exactly the two that hand-rolled
+ * it at a route.  Five hand-written copies of the message inside a SINGLE
+ * backend is that same risk one level down, so the string is written once here
+ * and every site renders it.
+ *
+ * `idExpr` is the in-scope id variable; every java id record overrides
+ * `toString()` to `String.valueOf(value)` (`emit/ids.ts`), so the concatenation
+ * yields the bare id — byte-identical to what node/.NET/python/elixir send.
+ */
+export function javaNotFoundThrow(aggName: string, idExpr = "id"): string {
+  return `new AggregateNotFoundException("${aggName} " + ${idExpr} + " not found")`;
+}
+
 export function renderPagedRecord(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.common;`,
