@@ -7,6 +7,7 @@ import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
+import { skipsEntityHistoryRead } from "../history-read.js";
 import { localizedAriaLabelAttr, localizedAriaLabelValue, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { queryShape } from "../paged-query.js";
@@ -363,6 +364,13 @@ export function emitQueryView(
   const ofArg = namedArgValue(call, "of");
   if (!ofArg) {
     return ctx.target.renderComment(`QueryView: missing 'of:' query expression`);
+  }
+  // Entity-history read on a frontend that can't serve one — skip the WHOLE
+  // view (see `_walker/history-read.ts`).  Bail BEFORE `emitExpr` below, which
+  // is what registers the read: on Feliz/Flutter that registration is the
+  // damage (a Model field / provider nothing emits), not the rendering.
+  if (skipsEntityHistoryRead(ctx.target.framework, ofArg, ctx.aggregatesByName)) {
+    return ctx.target.renderComment(`entity history not yet supported on ${ctx.target.framework}`);
   }
   // Render the query expression; this triggers `tryDetectApiHook`
   // so the page-shell registers the matching `useAll<X>()` (or

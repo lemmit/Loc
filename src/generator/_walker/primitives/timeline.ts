@@ -39,7 +39,7 @@ export function emitTimeline(
 
   const entriesArg = namedArgValue(call, "of") ?? positionalArgs(call)[0];
   if (!entriesArg) return ctx.target.renderComment("Timeline: missing entries");
-  const entries = emitExpr(entriesArg, ctx);
+  const entries = guardedList(emitExpr(entriesArg, ctx));
   const testid = testidAttr(call, ctx);
 
   switch (ctx.target.framework) {
@@ -56,13 +56,26 @@ export function emitTimeline(
   }
 }
 
-/** React — `{(entries ?? []).map(...)}`.  The `?? []` matters: the history
- *  query is in flight on first render, so the binding is undefined before the
- *  response lands and an unguarded `.map` would throw. */
+/** `(expr ?? [])` — the in-flight guard.  It matters: the history query has
+ *  not resolved on first render, so the binding is undefined before the
+ *  response lands and an unguarded iteration would throw.
+ *
+ *  Applied ONCE.  A `QueryView`'s data-lambda binding arrives ALREADY guarded
+ *  on the targets whose read handle is nullable (`(orderHistory.data() ?? [])`
+ *  on Angular, `(orderHistory.data ?? [])` on the others), and re-guarding it
+ *  is not merely noisy — Angular's template typechecker rejects the second
+ *  `??` outright (TS2869, "right operand is unreachable"), so a scaffolded
+ *  History section would fail `ng build`. */
+function guardedList(entries: string): string {
+  const trimmed = entries.trim();
+  return /^\(.*\?\?\s*\[\]\)$/.test(trimmed) ? trimmed : `(${entries} ?? [])`;
+}
+
+/** React — `{(entries ?? []).map(...)}`. */
 function reactTimeline(entries: string, testid: string): string {
   return [
     `<ol className="loom-timeline"${testid}>`,
-    `  {(${entries} ?? []).map((__e) => (`,
+    `  {${entries}.map((__e) => (`,
     `    <li key={__e.auditId} className="loom-timeline-entry">`,
     `      <span className="loom-timeline-action">{__e.action}</span>`,
     `      <time dateTime={__e.at}>{new Date(__e.at).toLocaleString()}</time>`,
@@ -87,7 +100,7 @@ function reactTimeline(entries: string, testid: string): string {
 function vueTimeline(entries: string, testid: string): string {
   return [
     `<ol class="loom-timeline"${testid}>`,
-    `  <li v-for="__e in (${entries} ?? [])" :key="__e.auditId" class="loom-timeline-entry">`,
+    `  <li v-for="__e in ${entries}" :key="__e.auditId" class="loom-timeline-entry">`,
     `    <span class="loom-timeline-action">{{ __e.action }}</span>`,
     `    <time :datetime="__e.at">{{ new Date(__e.at).toLocaleString() }}</time>`,
     `    <span v-if="__e.actor != null" class="loom-timeline-actor">{{ String(__e.actor) }}</span>`,
@@ -106,7 +119,7 @@ function vueTimeline(entries: string, testid: string): string {
 function svelteTimeline(entries: string, testid: string): string {
   return [
     `<ol class="loom-timeline"${testid}>`,
-    `  {#each (${entries} ?? []) as __e (__e.auditId)}`,
+    `  {#each ${entries} as __e (__e.auditId)}`,
     `    <li class="loom-timeline-entry">`,
     `      <span class="loom-timeline-action">{__e.action}</span>`,
     `      <time datetime={__e.at}>{new Date(__e.at).toLocaleString()}</time>`,
@@ -124,19 +137,26 @@ function svelteTimeline(entries: string, testid: string): string {
   ].join("\n");
 }
 
-/** Angular — `@for` / `@if` control flow. */
+/** Angular — `@for` / `@if` control flow.
+ *
+ *  `actor` / `before` / `after` are `unknown` on the wire (an entry's snapshot
+ *  values are arbitrary JSON), and Angular's template typechecker rejects an
+ *  `unknown` in an interpolation — it has no `String(...)` to reach for, the
+ *  way the JSX targets do.  `$any(...)` is the template-language escape hatch
+ *  for exactly this, and the same one the `ProvenanceInfo` disclosure already
+ *  uses for its `computedValue`. */
 function angularTimeline(entries: string, testid: string): string {
   return [
     `<ol class="loom-timeline"${testid}>`,
-    `  @for (__e of (${entries} ?? []); track __e.auditId) {`,
+    `  @for (__e of ${entries}; track __e.auditId) {`,
     `    <li class="loom-timeline-entry">`,
     `      <span class="loom-timeline-action">{{ __e.action }}</span>`,
     `      <time [attr.datetime]="__e.at">{{ __e.at }}</time>`,
-    `      @if (__e.actor != null) { <span class="loom-timeline-actor">{{ __e.actor }}</span> }`,
+    `      @if (__e.actor != null) { <span class="loom-timeline-actor">{{ $any(__e.actor) }}</span> }`,
     `      @if (__e.changes.length > 0) {`,
     `        <dl class="loom-timeline-changes">`,
     `          @for (__c of __e.changes; track __c.field) {`,
-    `            <div><dt>{{ __c.field }}</dt><dd>{{ __c.before ?? "—" }} → {{ __c.after ?? "—" }}</dd></div>`,
+    `            <div><dt>{{ __c.field }}</dt><dd>{{ $any(__c.before) ?? "—" }} → {{ $any(__c.after) ?? "—" }}</dd></div>`,
     `          }`,
     `        </dl>`,
     `      }`,

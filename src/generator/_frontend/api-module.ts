@@ -29,12 +29,15 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
+import { AUDIT_HISTORY_FIND } from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { hookFnName } from "../_walker/js-target-helpers.js";
 import { chainSingleFieldNative, refineClauseFor, takeSingleFieldChain } from "../zod-refine.js";
 import { serverSourcedDefaultFields } from "./server-default.js";
+import { AUDIT_ENTRY_LIST_TYPE, emitAuditEntrySchemas } from "./zod-schemas.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + TanStack Query hooks.
@@ -64,6 +67,17 @@ export interface ApiModuleOptions {
    *  `ProvenanceInfo` primitive falls through to a comment).  Requires the
    *  shared lib to export `provLineageSchema` (`../lib/schemas`). */
   carryProvenance?: boolean;
+}
+
+/** The client read-hook name for an aggregate's entity-history trail.
+ *
+ *  Computed through the walker's OWN `hookFnName` formula rather than spelled
+ *  out, so the emitted `export function useHistoryOrder(...)` and the page-body
+ *  call site the walker generates for `<api>.Order.history(id)` agree by
+ *  construction.  A hand-written `useHistory${agg}` here would be a second
+ *  definition of the same rule, and the two would only disagree once. */
+export function historyHookName(aggName: string): string {
+  return hookFnName(aggName, AUDIT_HISTORY_FIND);
 }
 
 /** True iff the aggregate (root or a part) declares a `provenanced` field —
@@ -262,6 +276,15 @@ export function buildApiModule(
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
   }
+  // Entity-history entry DTOs (docs/audit.md) — emitted only when the
+  // enrichment derived a history read for this aggregate.  The gate is
+  // `repo.historyFind`, which sits BESIDE `finds` rather than in it (see
+  // `RepositoryIR.historyFind`): every generic `finds` consumer assumes a find
+  // reads the aggregate's own table at `/<name-snake>`, and this one reads
+  // `audit_records` at `/{id}/history`.  That is exactly why the client has to
+  // ask for it by name — iterating `finds` cannot see it.
+  if (repo?.historyFind) lines.push(...emitAuditEntrySchemas());
+
   // Single-success union finds emit no discriminated-union DTO: the client
   // parses the success variant's `<Agg>Response` at 200, with the error/absent
   // variant surfaced as a thrown non-2xx (exception-less.md §4).  A tagged
@@ -509,6 +532,25 @@ export function buildApiModule(
       lines.push(`}`);
       lines.push("");
     }
+  }
+
+  // use<Agg>History — the derived per-entity audit trail (`GET /<tag>/{id}/
+  // history`).  Its own hook rather than a `finds` arm above: those build a
+  // `?<param>=…` query string against `/<tag>/<find>`, and history is a
+  // path-nested read of a DIFFERENT table.  `enabled: !!id` matches `use<Agg>
+  // ById` — a detail page mounts before the route param resolves.
+  if (repo?.historyFind) {
+    lines.push(`export function ${historyHookName(agg.name)}(id: string | undefined) {`);
+    lines.push(`  return useQuery({`);
+    lines.push(`    queryKey: [...${detailKey}, "history"],`);
+    lines.push(`    enabled: !!id,`);
+    lines.push(`    queryFn: async () => {`);
+    lines.push(`      const r = await api.get(\`/${tag}/\${id}/history\`);`);
+    lines.push(`      return ${AUDIT_ENTRY_LIST_TYPE}.parse(r);`);
+    lines.push(`    },`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
   }
 
   return lines.join("\n");

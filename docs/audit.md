@@ -6,8 +6,11 @@ exposes those rows as an entity's change history.
 
 - Write side — `aggregate X audited { … }` / `operation f() audited`. Ships on
   all five backends.
-- Read side — `GET /<aggregates>/{id}/history`. **Under construction on this
-  branch** (see the checklist at the bottom).
+- Read side — `GET /<aggregates>/{id}/history`. Served by a subset of the
+  backends (§3 — the list lives in the corpus manifest, not in prose), and
+  consumed by the api clients and the scaffolded Detail page on the four
+  JS-family frontends ("Rendering it"). Every target that falls short is named
+  where it does, rather than left to be discovered.
 
 ---
 
@@ -113,13 +116,21 @@ Nothing is declared for it. Enrichment derives a `find history(id)` onto the
 aggregate's repository — the auto-`findAll` analog, in the same pure pass — and
 the backend serves it from `audit_records`.
 
-> **Backend support — all five.** The read endpoint ships on Hono/node,
-> FastAPI/python, Spring Boot/java, .NET and Phoenix/elixir, alongside the
-> write side. `test/fixtures/corpus/audit-history.ddd` is declared for every
-> backend, and each one's behavioral leg diffs its booted responses against
-> `test/behavioral/wire-golden/audit-history.json` — minted from node, the
-> oracle. A≡golden ∧ B≡golden ⇒ A≡B, so that is a real cross-backend
-> equality proof rather than five self-assertions.
+> **Backend support — all five, and don't take that from prose.** The
+> `audit-history` row in `test/fixtures/corpus/manifest.ts` names exactly the
+> backends that serve the endpoint, and widening that row *is* what "backend X
+> now serves history" means. It currently reads `ALL`, so the read side has
+> caught up with the write side; a hand-maintained list here would be one more
+> thing to forget, and it already had been once.
+>
+> That claim is proven, not asserted: each backend's behavioral leg diffs its
+> booted responses against `test/behavioral/wire-golden/audit-history.json`,
+> minted from node — the oracle. A≡golden ∧ B≡golden ⇒ A≡B, so the row being
+> `ALL` is a cross-backend equality rather than five self-assertions. The shape,
+> the diff boundary and the authorization rules below are platform-neutral
+> (`src/ir/util/audit-history.ts`), which is why the ports were emitter work.
+
+
 ### The entry shape
 
 ```jsonc
@@ -224,6 +235,62 @@ Two things it deliberately does not do:
 - **An entry with no changes still renders its header.** A command that touched
   only diff-excluded fields still happened, and "someone ran `recalc` at 14:02"
   is information even when nothing user-visible moved.
+
+#### Fetching it — `history(id)` on the api client
+
+Each frontend's per-aggregate api module gains a `history` read for an audited
+aggregate, over `GET /<aggregates>/{id}/history`:
+
+```ts
+// web/src/api/order.ts — React/Vue (svelte-query takes a thunk; Angular an
+// `injectQuery` factory over an `OrderService.history` method)
+export function useHistoryOrder(id: string | undefined) {
+  return useQuery({
+    queryKey: ["orders", id, "history"],
+    enabled: !!id,
+    queryFn: async () => {
+      const r = await api.get(`/orders/${id}/history`);
+      return AuditEntryListResponse.parse(r);
+    },
+  });
+}
+```
+
+The `AuditEntry` / `AuditFieldChange` DTOs beside it are derived from
+`auditEntryWireShape()` — the same platform-neutral field list the backends
+serve — so the client cannot drift from the wire by hand-transcription. The one
+narrowing: `changes` is `json[]` on the wire (the IR has no nested-record type
+to say "array of `AuditFieldChange`" with), and the client types the element
+precisely so `__c.field` resolves in the timeline.
+
+It is a read of its own rather than an arm of the generic find loop, because
+`historyFind` deliberately sits **beside** `finds` (§3): a find reads the
+aggregate's own table at `/<name>`, and this one reads `audit_records` at a
+path-nested `/{id}/history`. An aggregate with no audit trail emits neither the
+DTOs nor the hook.
+
+#### The scaffolded History section
+
+`with scaffold(...)` grows an audited aggregate's **Detail** page a History
+section — a framed `Timeline` over `history(id)`, wrapped in a `QueryView` so
+the trail gets the same loading / error / empty arms every other scaffolded read
+has (an audit trail that silently renders nothing while in flight reads as
+"this entity was never touched"). It is a page-level sibling of the record
+view, not a child of it: the trail is addressed by the route `id`, so it neither
+needs nor should wait for the entity read. A non-audited aggregate's scaffold is
+byte-identical.
+
+> **Frontend support is narrower than `Timeline`'s.** The primitive renders on
+> five targets, but only **React, Vue, Svelte and Angular** *collect* the derived
+> read. Feliz binds every non-`byId` operation to its `All<Plural>` Model field,
+> Flutter skips the read in `collectFlutterReads` while still referencing a
+> provider, and Phoenix/HEEx maps it onto `list_<aggregates>` — the list, not the
+> trail. That damage is in the read the surrounding `QueryView` registers, one
+> level above the primitive, so on those three the whole view is skipped with a
+> visible comment (`src/generator/_walker/history-read.ts`) rather than emitting
+> a dangling handle that only fails at `dotnet fable` / `flutter analyze` /
+> `mix compile` time. A frontend joins the set by collecting the read *and*
+> rendering `Timeline` — the same day, or not at all.
 
 ### What history does *not* answer
 

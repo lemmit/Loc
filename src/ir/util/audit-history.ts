@@ -31,15 +31,15 @@
 //
 // Platform-neutral and browser-safe: pure structural reads off the resolved IR.
 // -------------------------------------------------------------------------
+import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { forHistoryDiff, wireFieldsFor } from "../enrich/wire-projection.js";
 import type { AggregateIR, FindIR, TypeIR, WireField } from "../types/loom-ir.js";
 import { aggHasAuditedTarget } from "./audit-capability.js";
 
-/** Name of the derived per-entity history read.  A repository find of this
- *  name is compiler-synthesized onto every audited aggregate (the auto-`findAll`
- *  analog); an author-declared find of the same name wins, exactly as with
- *  `all`. */
-export const AUDIT_HISTORY_FIND = "history";
+/** Name of the derived per-entity history read — re-exported from `util/` so
+ *  the phase-② scaffold macro can name the same read without value-importing
+ *  `ir/` (see `src/util/audit-names.ts`).  This module's surface is unchanged. */
+export { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 
 /** Wire type name of one history entry — the DTO every backend emits. */
 export const AUDIT_ENTRY_TYPE = "AuditEntry";

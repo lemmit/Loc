@@ -16,10 +16,16 @@ import type {
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
+import {
+  AUDIT_ENTRY_TYPE,
+  AUDIT_FIELD_CHANGE_TYPE,
+  auditEntryWireShape,
+  auditFieldChangeWireShape,
+} from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
-import { aggregateHasProvenanced } from "../_frontend/api-module.js";
+import { aggregateHasProvenanced, historyHookName } from "../_frontend/api-module.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate Angular API module (`src/api/<agg>.ts`).
@@ -233,6 +239,31 @@ function emitAngularUnionResponseType(
   return [`export type ${name} =`, ...memberLines, ""];
 }
 
+/** Entity-history entry interfaces (docs/audit.md) — the Angular twin of the
+ *  zod DTOs the JS-family clients emit, derived from the SAME platform-neutral
+ *  `auditEntryWireShape()` so the two cannot drift.  As there, `changes` is
+ *  narrowed from the wire shape's `json[]` to `AuditFieldChange[]`: `TypeIR`
+ *  has no nested-record leaf to say that, and `unknown[]` would make
+ *  `__c.field` a template-type error in the `Timeline`. */
+function emitAngularAuditEntryTypes(): string[] {
+  return [
+    `export interface ${AUDIT_FIELD_CHANGE_TYPE} {`,
+    ...auditFieldChangeWireShape().map(
+      (f) => `  ${f.name}${f.optional ? "?" : ""}: ${wireTsType(f.type, true)};`,
+    ),
+    "}",
+    "",
+    `export interface ${AUDIT_ENTRY_TYPE} {`,
+    ...auditEntryWireShape().map((f) =>
+      f.name === "changes"
+        ? `  ${f.name}: ${AUDIT_FIELD_CHANGE_TYPE}[];`
+        : `  ${f.name}${f.optional ? "?" : ""}: ${wireTsType(f.type, true)};`,
+    ),
+    "}",
+    "",
+  ];
+}
+
 /** Emit the `src/api/<agg>.ts` module for one aggregate. */
 export function buildAngularApiModule(
   agg: EnrichedAggregateIR,
@@ -425,6 +456,38 @@ export function buildAngularApiModule(
     ];
   });
 
+  // The derived per-entity audit trail (`GET /<tag>/{id}/history`).  Gated on
+  // `repo.historyFind`, which sits BESIDE `finds` (see
+  // `RepositoryIR.historyFind`) — the `paramFinds(repo)` loop above cannot see
+  // it, and its route is path-nested over a different table, so it gets its own
+  // service method + factory rather than a `finds` arm.
+  const historyFind = repo?.historyFind;
+  const historyFn = historyHookName(single);
+  const historyMethod = historyFind
+    ? [
+        "",
+        `  history(id: string) {`,
+        `    return this.http.get<${AUDIT_ENTRY_TYPE}[]>(\`\${API_BASE_URL}/${tag}/\${id}/history\`);`,
+        "  }",
+      ]
+    : [];
+  const historyFactory = historyFind
+    ? [
+        "/** Entity-history query (TanStack `injectQuery`) — the audit trail the",
+        " *  `Timeline` primitive renders.  `enabled: !!id` keeps it idle until the",
+        " *  route param resolves, exactly like `findById`. */",
+        `export function ${historyFn}(id: string | undefined) {`,
+        `  const service = inject(${serviceName});`,
+        `  return injectQuery(() => ({`,
+        `    queryKey: ["${oneTag}", id, "history"] as const,`,
+        `    queryFn: () => firstValueFrom(service.history(id as string)),`,
+        `    enabled: !!id,`,
+        `  }));`,
+        "}",
+        "",
+      ]
+    : [];
+
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     'import { HttpClient } from "@angular/common/http";',
@@ -457,6 +520,7 @@ export function buildAngularApiModule(
     "",
     ...opRequests,
     ...opUnionTypes,
+    ...(historyFind ? emitAngularAuditEntryTypes() : []),
     ...findQueryInterfaces,
     // Paged-by-default findAll envelope + query input (M-T2.6).
     ...(allPaged
@@ -515,6 +579,7 @@ export function buildAngularApiModule(
       : []),
     ...opMethods,
     ...findMethods,
+    ...historyMethod,
     "}",
     "",
     "/** `findAll` query (TanStack `injectQuery`) — hoisted as a component field;",
@@ -586,6 +651,7 @@ export function buildAngularApiModule(
       : []),
     ...opFactories,
     ...findFactories,
+    ...historyFactory,
     // Reference the var names the page-shell will hoist so the naming stays
     // discoverable next to the factories.
     `// hoisted as: readonly ${allVar} = ${allFn}();`,

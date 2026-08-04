@@ -16,6 +16,7 @@ import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
+import { skipsEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
 import {
   escapeHeexAttr,
@@ -780,6 +781,14 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     return a?.kind === "literal" && a.value === "true";
   };
   const ofNode = expr.args[names.indexOf("of")];
+  // Entity-history read: Phoenix maps the read onto `list_<aggs>` (the LIST,
+  // not the trail), so the whole view is skipped with a visible comment until
+  // the LiveView read layer learns the derived `history(id)` find.  See
+  // `_walker/history-read.ts` — one predicate, shared with the JSX walker, so
+  // the two engines can't disagree about which targets serve this read.
+  if (skipsEntityHistoryRead("phoenixLiveView", ofNode, ctx.aggregatesByName)) {
+    return `<%!-- entity history not yet supported on phoenixLiveView --%>`;
+  }
   const shape = ofNode
     ? queryShape(ofNode, {
         apiParamNames: new Set(ctx.ui.apiParams.map((p) => p.name)),
