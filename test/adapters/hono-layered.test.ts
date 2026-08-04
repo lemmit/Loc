@@ -52,10 +52,11 @@ describe("layered StyleAdapter — hono (real)", () => {
     expect(resolved.name).toBe("layered");
   });
 
-  it("answers capability fields directly", () => {
-    expect(layeredStyleAdapter.supportedStrategies).toEqual(["state"]);
+  it("declares the layouts the validator gates against", () => {
     // Both layouts — style/layout are orthogonal (the layout adapter only
-    // remaps paths); `layered` emits identically into either.
+    // remaps paths); `layered` emits identically into either.  `supportedLayouts`
+    // is LIVE via the adapter-metadata mirror; the dead `supportedStrategies`
+    // that used to be asserted here is gone.
     expect(layeredStyleAdapter.supportedLayouts).toEqual(["byLayer", "byFeature"]);
   });
 

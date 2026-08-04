@@ -115,7 +115,6 @@ function hostOf(
 
 export const cqrsStyleAdapter: StyleAdapter = {
   name: "cqrs",
-  supportedStrategies: ["state", "eventLog"],
   supportedLayouts: ["byLayer", "byFeature"],
 
   emitEndpoint(op: OperationIR, ctx: EmitCtx): Lines {

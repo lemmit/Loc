@@ -59,7 +59,8 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
   it("is registered as a real persistence adapter", () => {
     expect(adaptersFor("node")!.persistence.mikroorm).toBe(mikroOrmPersistenceAdapter);
     expect(mikroOrmPersistenceAdapter.name).toBe("mikroorm");
-    expect(mikroOrmPersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
+    // (The `supportedStrategies` assertion that stood here read a declaration
+    // nothing consumed — removed with the field.)
   });
 
   it("emits an idiomatic MikroORM db/ layer instead of drizzle", async () => {

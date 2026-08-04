@@ -5,13 +5,14 @@
 // module: imports at the top, then one exported client handle per
 // resource the deployable wires.  No call-sites — domain logic reaches
 // these clients through a workflow-level surface designed later
-// (RFC §Phase 4).  `supports()` delegates to the sourceType registry so
-// kind/sourceType compatibility has one source of truth.
+// (RFC §Phase 4).  kind/sourceType compatibility is checked by
+// `checkDataSource` against the sourceType registry (`util/source-types.ts`),
+// the one source of truth; the unread `supports()` mirror that used to sit on
+// each adapter here has been removed.
 
 import type { Lines, ResourceAdapter } from "../../../../generator/_adapters/index.js";
 import type { DataSourceIR, StorageIR } from "../../../../ir/types/loom-ir.js";
 import { resourceEnvBase } from "../../../../util/resource-env.js";
-import { supportsSurfaceKind } from "../../../../util/source-types.js";
 
 /** Read a string `config` value from a storage by key. */
 function cfg(store: StorageIR | undefined, key: string): string | undefined {
@@ -37,8 +38,6 @@ function storeOf(resource: DataSourceIR, stores: readonly StorageIR[]): StorageI
 
 export const s3ResourceAdapter: ResourceAdapter = {
   name: "s3",
-  supportedKinds: ["objectStore"],
-  supports: (storageType, kind) => storageType === "s3" && supportsSurfaceKind("s3", kind),
   emitProjectDeps: () => ({
     "@aws-sdk/client-s3": "^3.700.0",
     "@aws-sdk/s3-request-presigner": "^3.700.0",
@@ -171,9 +170,6 @@ export const s3ResourceAdapter: ResourceAdapter = {
  *  without any cloud SDK. */
 export const localDiskResourceAdapter: ResourceAdapter = {
   name: "localDisk",
-  supportedKinds: ["objectStore"],
-  supports: (storageType, kind) =>
-    storageType === "localDisk" && supportsSurfaceKind("localDisk", kind),
   emitProjectDeps: () => ({}),
   emitClientModule(resources): Lines {
     const out: string[] = [
@@ -262,9 +258,6 @@ export const localDiskResourceAdapter: ResourceAdapter = {
 
 export const rabbitmqResourceAdapter: ResourceAdapter = {
   name: "rabbitmq",
-  supportedKinds: ["queue"],
-  supports: (storageType, kind) =>
-    storageType === "rabbitmq" && supportsSurfaceKind("rabbitmq", kind),
   // `amqplib` ships no bundled type declarations, so the queue client needs
   // `@types/amqplib` or the generated project fails strict tsc (TS7016).
   emitProjectDeps: () => ({ amqplib: "^0.10.4", "@types/amqplib": "^0.10.5" }),
@@ -311,9 +304,6 @@ export const rabbitmqResourceAdapter: ResourceAdapter = {
 
 export const restApiResourceAdapter: ResourceAdapter = {
   name: "restApi",
-  supportedKinds: ["api"],
-  supports: (storageType, kind) =>
-    storageType === "restApi" && supportsSurfaceKind("restApi", kind),
   emitProjectDeps: () => ({}),
   emitClientModule(resources, stores): Lines {
     const out: string[] = [];
@@ -360,8 +350,6 @@ function mailFromLine(r: DataSourceIR, stores: readonly StorageIR[]): string {
 
 export const smtpResourceAdapter: ResourceAdapter = {
   name: "smtp",
-  supportedKinds: ["mailer"],
-  supports: (storageType, kind) => storageType === "smtp" && supportsSurfaceKind("smtp", kind),
   // nodemailer ships no bundled type declarations.
   emitProjectDeps: () => ({ nodemailer: "^6.9.0", "@types/nodemailer": "^6.4.0" }),
   emitClientModule(resources, stores): Lines {
@@ -388,8 +376,6 @@ export const smtpResourceAdapter: ResourceAdapter = {
 
 export const sesResourceAdapter: ResourceAdapter = {
   name: "ses",
-  supportedKinds: ["mailer"],
-  supports: (storageType, kind) => storageType === "ses" && supportsSurfaceKind("ses", kind),
   emitProjectDeps: () => ({ "@aws-sdk/client-ses": "^3.700.0" }),
   emitClientModule(resources, stores): Lines {
     const out: string[] = [
@@ -423,9 +409,6 @@ export const sesResourceAdapter: ResourceAdapter = {
 
 export const sendgridResourceAdapter: ResourceAdapter = {
   name: "sendgrid",
-  supportedKinds: ["mailer"],
-  supports: (storageType, kind) =>
-    storageType === "sendgrid" && supportsSurfaceKind("sendgrid", kind),
   emitProjectDeps: () => ({ "@sendgrid/mail": "^8.1.0" }),
   emitClientModule(resources, stores): Lines {
     const out: string[] = [`import sgMail from "@sendgrid/mail";`, ``];

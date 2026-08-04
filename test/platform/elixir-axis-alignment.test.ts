@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   adaptersFor,
   availableAdapterNames,
+  defaultsFor,
   resolveStyle,
 } from "../../src/platform/resolve-adapters.js";
 
@@ -29,19 +30,24 @@ describe("elixir realization-axes alignment", () => {
 
   it("resolves the ecto persistence adapter (DB-agnostic: name is the library, not per-DB)", () => {
     const ecto = adaptersFor("elixir")!.persistence.ecto;
-    expect(ecto.name).toBe("ecto");
     // Per the naming principle (§3.1): Ecto is the data-access library; the DB
-    // rides `storage`.  It supports the state strategy on postgres.
-    expect(ecto.supports("postgres", "state", "state")).toBe(true);
+    // rides `storage`, so the adapter is `ecto` — never `ectoPostgres`.
+    expect(ecto.name).toBe("ecto");
+    expect(Object.keys(adaptersFor("elixir")!.persistence)).not.toContain("ectoPostgres");
   });
 
-  it("ecto hosts eventLog too — it's the elixir backend's ES adapter (DEBT-20)", () => {
-    const ecto = adaptersFor("elixir")!.persistence.ecto;
-    expect(ecto.name).toBe("ecto");
-    expect(ecto.supportedStrategies).toContain("eventLog");
-    // The elixir backend emits the full event-sourced store; ecto is its
-    // persistence adapter, so it must advertise `eventLog` on postgres.
-    expect(ecto.supports("postgres", "eventLog", "eventLog")).toBe(true);
+  it("ecto is elixir's eventLog default and a REAL adapter (DEBT-20)", () => {
+    // The elixir backend emits the full event-sourced store, so an
+    // event-sourced aggregate with no explicit `persistence:` must default to
+    // an adapter that actually emits it.  Asserted against the DEFAULTS +
+    // real-adapter menu, both of which the validator and lowering read.
+    //
+    // The old form asserted `ecto.supportedStrategies` contained "eventLog"
+    // and that `ecto.supports("postgres","eventLog","eventLog")` returned
+    // true.  Both read declarations on the adapter that nothing else in the
+    // toolchain consumed — they restated the fixture rather than testing it.
+    expect(defaultsFor("elixir")!.persistence.eventLog).toBe("ecto");
+    expect(availableAdapterNames("elixir", "persistence")).toContain("ecto");
   });
 
   it("resolves the layered (plain-Phoenix) style adapter; its DI block is empty", () => {

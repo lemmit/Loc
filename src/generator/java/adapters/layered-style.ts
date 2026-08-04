@@ -25,7 +25,6 @@ const realSiblings = (): readonly string[] => ["layered"];
 
 export const layeredStyleAdapter: StyleAdapter = {
   name: "layered",
-  supportedStrategies: ["state", "eventLog"],
   supportedLayouts: ["byLayer", "byFeature"],
 
   emitEndpoint(_op: OperationIR, _ctx: EmitCtx): Lines {

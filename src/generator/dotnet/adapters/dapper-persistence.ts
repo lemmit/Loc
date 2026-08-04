@@ -5,9 +5,13 @@
 // The orchestrator (`generator/dotnet/index.ts`) branches on the deployable's
 // `persistence` key and emits the Dapper Infrastructure directly (repository,
 // `DbSchema`, connection wiring, deps — see `../emit/dapper.ts`); this adapter
-// publishes the capability surface the validator reads to accept the selection
-// and gate it (`supports` / `supportedShapes`), and wraps the same emitters on
-// the formal contract for the eventual clean orchestrator dispatch.
+// carries the registry key + project deps and wraps the same emitters on the
+// formal contract for the eventual clean orchestrator dispatch.
+//
+// It used to also "publish the capability surface the validator reads to accept
+// the selection and gate it (`supports` / `supportedShapes`)".  The validator
+// never read either one, and `supportedShapes: ["relational"]` sat here stale
+// and false for the whole of the parity described below.
 //
 // CAPABILITY — at EF-Core parity since M-T6.9 (drained across 7 waves): every
 // relational / document / embedded / event-sourced / inheritance shape,
@@ -52,22 +56,6 @@ function _findRepoFor(ctx: EmitCtx, aggName: string) {
 
 export const dapperPersistenceAdapter: PersistenceAdapter = {
   name: "dapper",
-  // State + event-sourced (appliers, Dapper edition): the `<agg>_events`
-  // stream + fold reuse the persistence-agnostic domain/CQRS layer.
-  supportedStrategies: ["state", "eventLog"],
-  // Relational tables only; document / embedded are EF-owned in v1.
-  supportedShapes: ["relational"],
-
-  supports(storageType, kind, persistenceStrategy) {
-    if (persistenceStrategy === "eventLog") {
-      return storageType === "postgres" && kind === "eventLog";
-    }
-    return (
-      persistenceStrategy === "state" &&
-      ["postgres"].includes(storageType) &&
-      ["state", "replica"].includes(kind)
-    );
-  },
 
   emitProjectDeps(_ctx: EmitCtx): Lines {
     return DAPPER_PROJECT_DEPS;

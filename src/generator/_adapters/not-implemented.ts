@@ -9,10 +9,15 @@
 //
 // The split (capability declaration that lives forever vs. emit
 // implementation that lands per-stream) is the F3-of-the-micro-plan
-// contract.  The validator can already enforce capability rules (e.g.
-// `persistence: dapper` requires `stateBased`) against a stub's declared
-// `supportedStrategies` / `supports` — and the build still fails at
-// emit time with a clean message instead of a half-working artifact.
+// contract.  What a stub declares is now just its `name` (plus
+// `supportedLayouts` on a style) — enough for `availableAdapterNames` to
+// keep it OUT of the validator's menu, so selecting a stub is rejected at
+// validation rather than blowing up at emit time.
+//
+// This note used to say the validator enforces capability rules "against a
+// stub's declared `supportedStrategies` / `supports`".  It never did — those
+// fields were read by nothing and have been removed (see
+// `persistence-surface.ts`).
 // ---------------------------------------------------------------------------
 
 /** Adapter category — present in error messages and the registry entry
@@ -46,9 +51,10 @@ export class AdapterNotImplementedError extends Error {
 }
 
 /** Capability declaration fields a stub still answers at registration
- *  time — every `name` / `supportedStrategies` / `supports` / similar
- *  predicate the validator reads BEFORE emission.  Everything starting
- *  with `emit` is the implementation surface and throws when called.
+ *  time — `name`, and any other pure-data capability field a contract
+ *  still publishes (e.g. a style's `supportedLayouts`).  Everything
+ *  starting with `emit` is the implementation surface and throws when
+ *  called.
  *
  *  Constructed via `stubAdapter` (below) — see PersistenceAdapter /
  *  StyleAdapter / LayoutAdapter `Partial<T>` capability subsets each

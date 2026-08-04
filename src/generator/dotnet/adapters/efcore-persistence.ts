@@ -12,7 +12,6 @@
 
 import type { AggregateIR } from "../../../ir/types/loom-ir.js";
 import { dedupeByName } from "../../../util/dedupe.js";
-import { PLATFORM_SAVING_SHAPES } from "../../../util/platform-axes.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
 import { renderConfiguration, renderDbContext } from "../emit/efcore.js";
 
@@ -39,25 +38,6 @@ const splitLines = (s: string): Lines => s.split("\n");
 
 export const efcorePersistenceAdapter: PersistenceAdapter = {
   name: "efcore",
-  supportedStrategies: ["state", "eventLog"],
-  // D-DOCUMENT-AXIS: EF emits all three saving shapes — relational
-  // tables, `embedded` (owned-types `.ToJson()`), and the opaque
-  // `document` blob.  Sourced from the single capability map so the
-  // adapter advertisement and the validator never drift.
-  supportedShapes: PLATFORM_SAVING_SHAPES.dotnet,
-
-  supports(storageType, kind, persistenceStrategy) {
-    // Event-sourced streams (appliers A2.2b): an append-only `<agg>_events`
-    // table on the same relational store (no Marten), folded at load.
-    if (persistenceStrategy === "eventLog") {
-      return ["postgres", "mysql", "sqlite"].includes(storageType) && kind === "eventLog";
-    }
-    return (
-      persistenceStrategy === "state" &&
-      ["postgres", "mysql", "sqlite", "inMemory"].includes(storageType) &&
-      ["state", "snapshot", "replica"].includes(kind)
-    );
-  },
 
   emitProjectDeps(_ctx: EmitCtx): Lines {
     // EF Core + Npgsql package refs — identical to what `renderCsproj`
