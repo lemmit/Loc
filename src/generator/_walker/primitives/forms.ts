@@ -19,11 +19,11 @@ import {
 import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
 import {
-  localizedPageChromeText,
-  localizedPageChromeValue,
   localizedNamedAttr,
   localizedNamedText,
   localizedNamedValue,
+  localizedPageChromeText,
+  localizedPageChromeValue,
 } from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
