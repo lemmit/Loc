@@ -1,4 +1,8 @@
-import { emitsRestCreate, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import {
+  createOmissionValue,
+  emitsRestCreate,
+  forCreateInput,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -116,6 +120,14 @@ export function renderJavaService(
       // that the wire→domain conversion alone doesn't pull in.
       collectJavaExprImports(dflt, imports);
       return `        var ${f.name} = ${raw} != null ? ${wireToDomain(f.type, raw)} : ${renderJavaExpr(dflt)};`;
+    }
+    // A BARE `bool` has no `= expr`, but it is still omittable create input:
+    // the language defines its implicit default, which `createOmissionValue`
+    // reports as `false`.  Its component is boxed for the same reason a
+    // defaulted one is (dto.ts), so it arrives null on omission and needs the
+    // same coalesce — without it the boxed `Boolean` would unbox to an NPE.
+    if (!ctx.esCreateParams && createOmissionValue(f as FieldIR).kind === "false") {
+      return `        var ${f.name} = ${raw} != null ? ${raw} : false;`;
     }
     return `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), raw)};`;
   });

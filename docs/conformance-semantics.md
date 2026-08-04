@@ -741,6 +741,20 @@ the conforming backends, and the fix that established it.
   `undefined`". Body bools are now uncoerced `z.boolean()` (JSON carries real
   booleans; only query params, which are strings, keep the coercion), and the
   gate asks the behavioural question instead of the spelling one.
+- **A gate can read the wrong artifact.** The Elixir regression later the same
+  day is the twin lesson. `isRequiredUpdateInput` tested the implicit-`bool`
+  rule and never reached the explicit default, so `active: bool = true` came
+  back omittable and `@update_required` stopped listing it — while the
+  OpenApiSpex schema still advertised the field as required. Elixir **promised
+  what it did not enforce.** The gate missed it because its Elixir arm read
+  `update_item_request.ex` (the schema, which *documents*) and not
+  `item_changeset.ex` (`validate_required/2`, which *enforces*). Where a backend
+  splits "what the server says" from "what the server checks" across two files,
+  a conformance gate owes an assertion to each; otherwise it certifies the
+  promise, not the behaviour. The predicate is now `!isNullable(f)` — a default
+  of **either** kind is a construction rule, so neither relaxes a
+  full-replacement update — and the fixture gained a bare `flag: bool`, the case
+  that separates the create seam from the update seam.
 - **Provenance.** Found 2026-08-01 reconciling where `= default` belongs (domain
   vs wire boundary); node fixed by scoping the implicit-bool rule to a
   `create-body` context in `routes-builder.ts`, then by uncoercing body bools.

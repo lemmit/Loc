@@ -2,6 +2,7 @@ import {
   emitsRestCreate,
   forApiRead,
   forCreateInput,
+  isRequiredCreateInput,
   wireFieldsFor,
   wireFieldsForAggregate,
   wireFieldsForPart,
@@ -156,14 +157,23 @@ export function renderDtoFiles(
     const imports = new Set<string>();
     const components = (
       esCreateParams ??
-      // A field carrying a declared default (`field: T = <expr>`) is optional at
-      // the wire boundary: box the primitive so an OMITTED key deserializes to
-      // null instead of Jackson 400ing, and let the service materialize the
-      // declared default when it is absent (RS-6 / RST-10, parity with
-      // node/python).  A field WITHOUT a default keeps its required shape.
+      // Every OMITTABLE create input must be boxed, so an absent key
+      // deserializes to null instead of 400ing, and the service materializes
+      // the value (RS-6 / RST-10, parity with node/python).
+      //
+      // Driven by `isRequiredCreateInput` — the canonical rule — rather than
+      // re-derived.  The re-derived form here was `f.optional || f.default !=
+      // null`, which misses the third omittable arm: a BARE `bool`, whose
+      // implicit `false` is a language-defined default with no `= expr` to
+      // test for.  That left `boolean flag` primitive while this backend's own
+      // `RequiredSet` listed the create request as requiring only `name`, so
+      // Java advertised the field as omittable and then rejected the omission
+      // — Jackson 3 (Spring Boot 4) enables FAIL_ON_NULL_FOR_PRIMITIVES, so a
+      // missing primitive is a hard HttpMessageNotReadableException → 400
+      // "Malformed request body", not the silent `false` Jackson 2 supplied.
       createInputs.map((f) => ({
         name: f.name,
-        type: eff(f.type, f.optional || f.default != null),
+        type: eff(f.type, !isRequiredCreateInput(f)),
       }))
     ).map((f) => {
       collectWireImports(f.type, imports);
