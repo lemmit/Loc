@@ -141,7 +141,7 @@ Neither is reachable from a shared behavioural system today, which is why the pe
 
 Sources: found 2026-07-29 while landing RS-15 (#2300). Related: M-T6.20 (the `raise`-path half of the same protocol), M-T5.20 (routing the ladder through `resolveErrorStatus`).
 
-## M-T6.x — `= default` fields are optional input on node, still required on elixir — `landed` · **S** · P2
+## M-T6.x — `= default` fields are optional input on node, still required on elixir — `partial` (create landed; update seam open) · **S** · P2
 
 Surfaced 2026-08-01 by the `audited` corpus fixture in the behavioral tier, not
 by anything audit-specific.
@@ -170,8 +170,33 @@ java (`RequiredSet("CreateThingRequest", ["name"])`) and dotnet
 the explicit `= default` and the bare-`bool` implicit default, while the IR had
 already reified the rule as `CreateInputFieldIR.requiredInput`. Fixed by
 consuming it (`isRequiredCreateInput`, now exported alongside a new
-`isRequiredUpdateInput` for the PATCH seam, where an explicit default stays
-required and only the bool relaxation applies — matching the other four).
+`isRequiredUpdateInput` for the PATCH seam).
+
+> **Correction (2026-08-03).** The CREATE half of this is sound and
+> runtime-proven. The UPDATE half shipped defective and the sentence that used
+> to stand here — "an explicit default stays required and only the bool
+> relaxation applies" — described the intent, not the code: `isRequiredUpdateInput`
+> tested `hasImplicitDefault` (a *create*-input predicate) first, so it returned
+> `false` for **any** `bool`, explicit default or not. `active: bool = true` came
+> back omittable and Elixir's changeset stopped enforcing a field its own
+> OpenApiSpex schema still advertised. #2392 (landed) fixed the predicate to
+> `!isNullable(f)` — only optionality relaxes an update, which is RS-26 (#2329) —
+> and found a sibling Java create-seam defect on the way (`emit/dto.ts` re-derived
+> omittability as `f.optional || f.default != null`, missing the bare `bool`).
+> The docstring, this entry and #2377's PR description all stated the rule
+> correctly while one line of code did not; see `experience_gathered.md` §79.
+>
+> **Residual, still open** (re-verified on `main` after #2392 landed). It makes
+> the emitted artifacts agree, but the
+> cross-backend divergence survives it: `@update_required` is not enforcement on
+> the update seam. Ecto's `validate_required` resolves through `get_field`,
+> which falls back to the loaded row, so an omitted key is invisible — verified
+> against real Ecto (`omit active+flag against a stored row → valid?=true`).
+> Nothing upstream compensates (router is `plug :accepts, ["json"]`, no
+> `OpenApiSpex.Plug.CastAndValidate`; the controller passes raw params through).
+> A `PUT` omitting the field still answers **204 on Elixir, 422 on the other
+> four**. Closing it needs presence checked against the raw `attrs` before
+> `cast`, roughly where the create path already coalesces defaults.
 
 Two findings worth keeping:
 
