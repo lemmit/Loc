@@ -59,8 +59,7 @@ function declaredMembers(file: string): { iface: string; member: string; isEmit:
     .replace(/^\s*\/\/.*$/gm, "");
   const out: { iface: string; member: string; isEmit: boolean }[] = [];
   const ifaceRe = /export interface (\w+)\s*\{([\s\S]*?)\n\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = ifaceRe.exec(src)) !== null) {
+  for (const m of src.matchAll(ifaceRe)) {
     const [, iface, body] = m;
     for (const line of body!.split("\n")) {
       // `readonly foo: T;` | `foo(...)` | `foo?(...)` — top level of the body only
