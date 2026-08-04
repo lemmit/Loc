@@ -372,10 +372,18 @@ function primitiveDataGrid(c: Ctx): string {
 
   // `Math.max(pageCount, 1)` on the JSX packs — an empty grid still reads
   // "Page 1 of 1" rather than "of 0".
+  //
+  // Under i18n the counter arrives already bound (`localizedChromeIcuValue`, an
+  // `I18n.tf` call over `chrome.pageOf` whose locale may re-order the two
+  // numbers); with i18n off it is `undefined` and this concatenation — the
+  // sentence this pack has always spelled — stands unchanged.
+  const pageOf =
+    c.pageOfLabelValue ??
+    `("Page " + string (unbox<int> (table?getState()?pagination?pageIndex) + 1) + " of " + string (max (unbox<int> (table?getPageCount())) 1))`;
   const pager =
     `\n      Html.div [ prop.className "flex items-center justify-between"; prop.children [\n` +
     `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanPreviousPage()))); prop.onClick (fun _ -> loomInvoke (table?previousPage)); prop.text ${prevLabel} ]\n` +
-    `        Html.span [ prop.className "text-sm"; prop.custom("aria-live", "polite"); prop.text ("Page " + string (unbox<int> (table?getState()?pagination?pageIndex) + 1) + " of " + string (max (unbox<int> (table?getPageCount())) 1)) ]\n` +
+    `        Html.span [ prop.className "text-sm"; prop.custom("aria-live", "polite"); prop.text ${pageOf} ]\n` +
     `        Html.button [ prop.className "btn btn-xs"; prop.disabled (not (unbox<bool> (table?getCanNextPage()))); prop.onClick (fun _ -> loomInvoke (table?nextPage)); prop.text ${nextLabel} ]\n` +
     `      ] ]`;
 

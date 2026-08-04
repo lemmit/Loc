@@ -52,7 +52,7 @@
   </Table>
   <div class="flex items-center justify-between">
     <Button size="xs" color="alternative" disabled={!table.getCanPreviousPage()} onclick={() => table.previousPage()}>{{{prevLabel}}}</Button>
-    <span class="text-sm" aria-live="polite">Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}</span>
+    <span class="text-sm" aria-live="polite">{{{pageOfLabel}}}</span>
     <Button size="xs" color="alternative" disabled={!table.getCanNextPage()} onclick={() => table.nextPage()}>{{{nextLabel}}}</Button>
   </div>
 </div>

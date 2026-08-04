@@ -40,7 +40,12 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 
-import { localizedChromeAttr, localizedChromeText, localizedChromeValue } from "../i18n-emit.js";
+import {
+  localizedChromeAttr,
+  localizedChromeIcuText,
+  localizedChromeText,
+  localizedChromeValue,
+} from "../i18n-emit.js";
 import {
   boolNamed,
   namedArgValue,
@@ -143,6 +148,20 @@ export function emitDataGrid(
           prevLabel: localizedChromeText(ctx, "previous"),
           nextLabel: localizedChromeText(ctx, "next"),
           filterPlaceholderAttr: localizedChromeAttr(ctx, "placeholder", "filter"),
+          // The position counter — one ICU message, not a "Page " + n + " of "
+          // + m concatenation the packs used to spell inline, so a locale can
+          // re-order the two numbers.  The hole EXPRESSIONS come from here
+          // rather than staying in each template because the message around
+          // them now belongs to the catalog: leaving `Page …` in fifteen `.hbs`
+          // files and the holes here would be one sentence with two owners.
+          // They read `table`, the TanStack instance every one of those
+          // templates already binds, so this is the same vocabulary the pack
+          // markup around it uses.
+          pageOfLabel: localizedChromeIcuText(ctx, "pageOf", [
+            { name: "page", expr: "table.getState().pagination.pageIndex + 1" },
+            // `Math.max(…, 1)` so an empty grid reads "Page 1 of 1", not "of 0".
+            { name: "pages", expr: "Math.max(table.getPageCount(), 1)" },
+          ]),
           // The same three strings as bare EXPRESSIONS, for a pack that splices
           // them into its own language rather than into markup — Feliz's
           // `prop.text (…)` takes an F# value, not an HTML fragment.  Same split

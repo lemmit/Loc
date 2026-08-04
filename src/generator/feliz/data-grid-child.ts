@@ -56,6 +56,7 @@
 // should compare.
 
 import { lines } from "../../util/code-builder.js";
+import { localizedChromeIcuValue } from "../_walker/i18n-emit.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../_walker/target.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 
@@ -151,7 +152,7 @@ export function renderFelizDataGridChild(spec: DataGridSpec, ctx: WalkContext): 
   ctx.usesDataGrid = true;
 
   return {
-    moduleDecl: renderComponent(spec),
+    moduleDecl: renderComponent(spec, ctx),
     callSite: renderCallSite(spec),
   };
 }
@@ -205,7 +206,7 @@ function rowProjection(spec: DataGridSpec): string {
 // The child component
 // ---------------------------------------------------------------------------
 
-function renderComponent(spec: DataGridSpec): string {
+function renderComponent(spec: DataGridSpec, ctx: WalkContext): string {
   const { componentName, columns, multiSort, columnVisibility, anyFilterable, pageSize } = spec;
   const selection = spec.selection !== undefined;
 
@@ -216,6 +217,16 @@ function renderComponent(spec: DataGridSpec): string {
   const body = spec.renderBody({
     headerBody: headerBody(selection),
     cellBody: cellBody(columns, selection),
+    // The pager's ICU counter (M-T1.11).  Supplied HERE rather than in
+    // `emitDataGrid` alongside the other chrome tokens because its two hole
+    // expressions are Fable's dynamic-access dialect (`table?getState()?…`),
+    // not the JS member chain the `.hbs` packs read — the message is shared,
+    // the way each frontend reaches the numbers is not.  `undefined` with i18n
+    // off, and `pack.ts` then keeps its own hand-written sentence.
+    pageOfLabelValue: localizedChromeIcuValue(ctx, "pageOf", [
+      { name: "page", expr: "unbox<int> (table?getState()?pagination?pageIndex) + 1" },
+      { name: "pages", expr: "max (unbox<int> (table?getPageCount())) 1" },
+    ]),
   });
 
   return lines(

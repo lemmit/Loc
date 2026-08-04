@@ -57,7 +57,7 @@
       </table>
       <div class="loom-grid-pager">
         <button type="button" [disabled]="!table.getCanPreviousPage()" (click)="table.previousPage()">{{{prevLabel}}}</button>
-        <span aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
+        <span aria-live="polite">{{{pageOfLabel}}}</span>
         <button type="button" [disabled]="!table.getCanNextPage()" (click)="table.nextPage()">{{{nextLabel}}}</button>
       </div>
     </div>

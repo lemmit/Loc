@@ -41,7 +41,7 @@
       </Table>
       <div class="flex items-center justify-between">
         <Button size="sm" variant="outline" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">{{{prevLabel}}}</Button>
-        <span class="text-sm" aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
+        <span class="text-sm" aria-live="polite">{{{pageOfLabel}}}</span>
         <Button size="sm" variant="outline" :disabled="!table.getCanNextPage()" @click="table.nextPage()">{{{nextLabel}}}</Button>
       </div>
     </div>
