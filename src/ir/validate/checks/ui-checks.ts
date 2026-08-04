@@ -16,6 +16,12 @@
 //        (`src/generator/_walker/walker-core.ts`).  Reject the unresolved
 //        receiver so the sentinel can't be reached.
 //
+//   F4 — a free CALL in a render-tree position that resolves to nothing the
+//        walker can render.  In LAYOUT position it emits a visible
+//        `unknown layout component` comment; in a user-visible TEXT SLOT it
+//        emits NOTHING AT ALL — a typo'd name silently deletes the content.
+//        `loom.unknown-page-element`.
+//
 //   F3 — a stdlib COLLECTION OP on a collection receiver
 //        (`rows.count`, `rows.where(λ)`, `rows.sum(λ)`) renders VERBATIM.
 //        `loom.frontend-collection-op-unsupported`; see the block above
@@ -23,6 +29,7 @@
 // -------------------------------------------------------------------------
 
 import { isCollectionOp } from "../../../util/collection-ops.js";
+import { isWalkerPrimitive } from "../../../util/walker-primitive-names.js";
 import type {
   ActionIR,
   AggregateIR,
@@ -112,6 +119,19 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         if (slots.size > 0) componentActionParams.set(comp.name, slots);
       }
       const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
+      // F4 — the names a render-tree free call may carry, mirroring what the
+      // walker resolves at emit time (registry primitive → user component →
+      // value-object construction → extern function).
+      // Components resolve from TWO scopes, and the gate must mirror both or a
+      // shipped example fails on a name the walker resolves fine: the ui-local
+      // `component`s, PLUS the ROOT-level ones declared outside any `ui { … }`,
+      // which are ambient workspace-wide (`LoomModel.components`, the same
+      // global symbol space as `rootValueObjects`).
+      const callableNames: CallableNames = {
+        components: new Set([...loom.components, ...ui.components].map((c) => c.name)),
+        valueObjects: new Set(allContexts(loom).flatMap((c) => c.valueObjects.map((v) => v.name))),
+        functions: new Set((ui.functions ?? []).map((f) => f.name)),
+      };
       for (const page of ui.pages) {
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
@@ -132,6 +152,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
         checkFrontendCollectionOps(page, pageWhere(page), diags);
+        checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
         // (`<apiHandle>.<Projection>`) is the only shape that hoists the
@@ -170,6 +191,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(comp.body, ctx, diags);
         checkActionBodies(comp.actions, ctx, diags);
         checkFrontendCollectionOps(comp, `component '${comp.name}'`, diags);
+        checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkChartArgs(
           comp.body,
@@ -346,6 +368,78 @@ function walkerRenderedExprs(host: PageIR | ComponentIR): ExprIR[] {
   for (const d of host.derived as DerivedIR[]) push(d.expr);
   for (const s of host.state as StateFieldIR[]) push(s.init);
   return out;
+}
+
+// -------------------------------------------------------------------------
+// F4 — `loom.unknown-page-element`.
+//
+// A free call in a render-tree position (`Stack { Fooo { … } }`,
+// `Text(Fooo(x))`) resolves at emit time against a fixed set: the walker
+// primitive registry, the ui's declared components, a declared value object
+// (a VO construction is a plain wire record), a ui `extern` function, and the
+// view-effect builtins.  Anything else renders as one of two failures:
+//
+//   LAYOUT position → `{/* unknown layout component: Fooo */}`, a visible
+//                     comment — bad, but findable.
+//   TEXT SLOT       → NOTHING.  `Text(Fooo(x))` emits `<Text></Text>`; the
+//                     content is silently deleted.
+//
+// The second is reachable by an ordinary typo and was flagged at NO tier: the
+// brace form `Fooo { … }` has been rejected by the language validator
+// (`loom.unknown-builder-type`) all along, but the CALL form of the same
+// construct slipped through — one construct, two spellings, one gated.
+//
+// This check gates the call form at the IR tier, where the walker's acceptance
+// set is reproducible from the enriched model.
+// -------------------------------------------------------------------------
+
+/** Names a free call in a render-tree position may legitimately carry. */
+interface CallableNames {
+  components: ReadonlySet<string>;
+  valueObjects: ReadonlySet<string>;
+  functions: ReadonlySet<string>;
+}
+
+/** F4 — reject a render-tree call the walker cannot resolve.  One diagnostic
+ *  per (host, name): a body repeating the same typo is one mistake. */
+function checkUnknownPageElements(
+  host: PageIR | ComponentIR,
+  where: string,
+  names: CallableNames,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free") return;
+      const name = e.name;
+      if (flagged.has(name)) return;
+      if (
+        isWalkerPrimitive(name) ||
+        names.components.has(name) ||
+        names.valueObjects.has(name) ||
+        names.functions.has(name) ||
+        VIEW_EFFECT_BUILTINS.has(name) ||
+        // A sibling action referenced as a value (`onClick: bump`) lowers to an
+        // `action-ref`, not a call; a call to one only appears in an action
+        // BODY, which `loom.unresolved-action-ref` owns.
+        host.actions.some((a) => a.name === name)
+      ) {
+        return;
+      }
+      flagged.add(name);
+      diags.push({
+        severity: "error",
+        code: "loom.unknown-page-element",
+        message:
+          `${where}: \`${name}(…)\` names no walker primitive, component, value object, or ` +
+          `\`extern\` function, so the frontend renders nothing for it — in a text slot the ` +
+          `content is silently DROPPED (\`Text(${name}(…))\` emits an empty element).  Check the ` +
+          `spelling, declare a \`component ${name}(…)\`, or import it as an \`extern\` function.`,
+        source: where,
+      });
+    });
+  }
 }
 
 /** F3 — reject a stdlib collection op anywhere the frontend walker renders it.

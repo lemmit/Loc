@@ -2444,7 +2444,18 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     if (ctx.externFunctions?.has(expr.name)) {
       return ctx.target.renderInterpolation(emitExpr(expr, ctx));
     }
-    return undefined;
+    // A stdlib primitive / user component in text position is a CHILD, not a
+    // value — return undefined so the caller `walk`s it.  Any OTHER name
+    // resolves to nothing, and returning undefined here made the caller fall
+    // back to its empty-slot placeholder: `Text(Fooo(x))` emitted
+    // `<Text></Text>` and the content silently vanished.  Emit a visible
+    // comment instead (`loom.unknown-page-element` rejects it at IR-validate,
+    // so this is defence-in-depth for an unvalidated model).
+    if (WALKER_PRIMITIVES[expr.name] || ctx.userComponents.has(expr.name)) return undefined;
+    if (declaredValueObject(expr.name, ctx)) {
+      return ctx.target.renderInterpolation(emitExpr(expr, ctx));
+    }
+    return ctx.target.renderComment(`unknown page element: ${expr.name}`);
   }
   // A structurally-provable string (a bare literal, a Yes/No conditional of
   // string literals) lets a text-coercing target (Feliz) drop a redundant cast;
