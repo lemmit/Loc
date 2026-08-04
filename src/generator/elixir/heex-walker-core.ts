@@ -1303,8 +1303,12 @@ export function renderPrimitive(
         namedAttrs.push(`data-testid=${value}`);
       } else if (name === "label" && spec.labelAsAriaLabel) {
         // A command button's `label:` is its accessible name (aria-label),
-        // not a literal `label=` attribute.
-        const value = renderAttrValue(arg, ctx, true);
+        // not a literal `label=` attribute — and a user-visible slot, so a plain
+        // literal rides the translation runtime under i18n (M-T1.11) instead of
+        // shipping the name in English at every locale.
+        const value =
+          localizedHeexAttr(arg, ctx, namedRole(expr.name, "label")) ??
+          renderAttrValue(arg, ctx, true);
         namedAttrs.push(`aria-label=${value}`);
       } else {
         const value = renderAttrValue(arg, ctx, spec.staticAttrs?.includes(name) ?? false);
@@ -1414,10 +1418,53 @@ function localizedHeex(
   ctx: WalkContext,
   role: string | undefined,
 ): string | undefined {
+  const call = heexTranslateCall(arg, ctx, role);
+  return call === undefined ? undefined : `<%= ${call} %>`;
+}
+
+/** The bare `pgettext(<key>, <English>)` CALL for a literal user-visible slot,
+ *  with no positional wrapping — the shared half of {@link localizedHeex} (text
+ *  position, `<%= … %>`) and {@link localizedHeexAttr} (attribute position,
+ *  `{…}`).  Undefined on every path that keeps the pre-i18n raw output. */
+function heexTranslateCall(
+  arg: ExprIR,
+  ctx: WalkContext,
+  role: string | undefined,
+): string | undefined {
   if (!ctx.i18nPrefix || !role) return undefined;
   if (arg.kind !== "literal" || arg.lit !== "string") return undefined;
   const key = messageKey(ctx.i18nPrefix, role, arg.value);
-  return `<%= pgettext(${elixirI18nString(key)}, ${elixirI18nString(arg.value)}) %>`;
+  return `pgettext(${elixirI18nString(key)}, ${elixirI18nString(arg.value)})`;
+}
+
+/** A user-visible slot in ATTRIBUTE position — a `role="img"` icon's accessible
+ *  name, a command `Button`'s `aria-label` (M-T1.11, D-I18N-ATTR).
+ *
+ *  HEEx was the one frontend that translated every TEXT slot and no ATTRIBUTE
+ *  one: `renderInTemplate` carried a role, `renderAttrValue` had nowhere to put
+ *  it, so an accessible name shipped in English at every locale while the
+ *  visible caption beside it translated.  The attribute form is HEEx's `{…}`
+ *  expression syntax (`aria-label={pgettext("…", "Close")}`) — which is exactly
+ *  why `elixirI18nString` escapes `{`/`}` in the message.
+ *
+ *  Returns the QUOTED-OR-BRACED attribute value, or undefined when the caller
+ *  should fall back to `renderAttrValue` (i18n off, no role, a dynamic slot) —
+ *  keeping every non-i18n path byte-identical. */
+export function localizedHeexAttr(
+  arg: ExprIR,
+  ctx: WalkContext,
+  role: string | undefined,
+): string | undefined {
+  const call = heexTranslateCall(arg, ctx, role);
+  return call === undefined ? undefined : `{${call}}`;
+}
+
+/** The i18n catalog ROLE of a primitive's NAMED slot (`Button.label` →
+ *  `buttonAria`), from the shared `USER_VISIBLE_SLOTS` — the named twin of
+ *  {@link positionalRole}, and the same reason: reading the table the
+ *  extraction pass reads is what keeps the emitted key equal to the catalog's. */
+export function namedRole(primitive: string, name: string): string | undefined {
+  return USER_VISIBLE_SLOTS[primitive]?.find((s) => s.kind === "named" && s.name === name)?.role;
 }
 
 export function renderChild(child: ExprIR, ctx: WalkContext, role?: string): string {

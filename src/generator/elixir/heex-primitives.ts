@@ -22,6 +22,7 @@ import {
   escapeHeexAttr,
   escapeHeexText,
   indent,
+  localizedHeexAttr,
   type PrimitiveSpec,
   renderChild,
   renderExpr,
@@ -1733,10 +1734,7 @@ export function renderSticky(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *  title bar — matches the Mantine pack's `<pre>` + title pattern.
  *  Source content is HTML-escaped to keep markup safe (the source
  *  IS user code; entities are part of valid display). */
-export function renderCodeBlock(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  _ctx: WalkContext,
-): string {
+export function renderCodeBlock(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let source = "";
   let title: string | undefined;
   let language = "";
@@ -1747,8 +1745,11 @@ export function renderCodeBlock(
     const arg = expr.args[i]!;
     if (!name) {
       positional.push(arg);
-    } else if (name === "title" && arg.kind === "literal") {
-      title = arg.value;
+    } else if (name === "title") {
+      // The caption is a user-visible slot (`codeBlockTitle`) — translated
+      // under i18n, the raw escaped literal otherwise.  The code SOURCE below
+      // is deliberately not one.
+      title = renderInTemplate(arg, ctx, "codeBlockTitle");
     } else if (name === "language" && arg.kind === "literal") {
       language = arg.value;
     } else if (name === "testid" && arg.kind === "literal") {
@@ -1762,7 +1763,7 @@ export function renderCodeBlock(
   if (title) {
     return (
       `<div class="loom-code-block"${testidAttr}>\n` +
-      `  <div class="loom-code-block-title">${escapeHeexText(title)}</div>\n` +
+      `  <div class="loom-code-block-title">${title}</div>\n` +
       `  <pre><code${langClass}>${escaped}</code></pre>\n` +
       `</div>`
     );
@@ -1782,6 +1783,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   let size: string | undefined;
   let testid = "";
   let label: string | undefined;
+  let labelArg: ExprIR | undefined;
   let decorative = false;
   for (let i = 0; i < expr.args.length; i++) {
     const argName = expr.argNames?.[i];
@@ -1790,8 +1792,10 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     else if (argName === "svg" && arg.kind === "literal") customSvg = arg.value;
     else if (argName === "size" && arg.kind === "literal") size = arg.value;
     else if (argName === "testid" && arg.kind === "literal") testid = arg.value;
-    else if (argName === "label" && arg.kind === "literal") label = arg.value;
-    else if (argName === "decorative" && arg.kind === "literal")
+    else if (argName === "label") {
+      labelArg = arg;
+      if (arg.kind === "literal") label = arg.value;
+    } else if (argName === "decorative" && arg.kind === "literal")
       decorative = String(arg.value) === "true";
   }
   // User-supplied SVG wins; falls back to the builtin registry (same
@@ -1802,13 +1806,28 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   // and emit a `<!-- unknown icon: <name> -->` comment for unresolved
   // names matching the TSX shape.
   void name;
-  void ctx;
   const svg = customSvg ?? "";
   const sizeClass = size ? ` loom-icon-${size}` : "";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   // Decorative-by-default (icon a11y contract): hidden from assistive tech
-  // unless a `label:` gives it meaning.  Same fragment the JSX/markup packs
-  // render via `iconA11yAttr` — HEEx shares the HTML spelling.
-  const a11yAttr = iconA11yAttr({ label, decorative });
+  // unless a `label:` gives it meaning, in which case the glyph becomes a NAMED
+  // `role="img"`.  HEEx shares the HTML spelling with the JSX/markup packs
+  // (`iconA11yAttr`), so the shape below matches theirs arm for arm: a literal
+  // name is translated under i18n (HEEx's `{pgettext(…)}` attribute form),
+  // static otherwise; a DYNAMIC name binds the expression rather than folding
+  // the icon back to decorative and silently dropping the author's request.
+  //
+  // The STATIC arm still goes through the shared `iconA11yAttr` rather than
+  // being respelled here: it owns the escaping (`escapeHtmlAttr`, which covers
+  // `<`/`>` that HEEx's attribute funnel does not), so routing around it would
+  // change the i18n-OFF bytes on a hostile label.
+  const named = labelArg !== undefined && label !== "" && !decorative;
+  const bound = named
+    ? (localizedHeexAttr(labelArg!, ctx, "iconLabel") ??
+      (label === undefined
+        ? `{${renderExpr(labelArg!, { ...ctx, position: "template" })}}`
+        : undefined))
+    : undefined;
+  const a11yAttr = bound ? ` role="img" aria-label=${bound}` : iconA11yAttr({ label, decorative });
   return `<span class="loom-icon${sizeClass}"${testidAttr}${a11yAttr}>${svg}</span>`;
 }

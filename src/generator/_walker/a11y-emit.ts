@@ -39,7 +39,15 @@ export function ariaLabelAttr(label: string | undefined): string {
  *  or it double-announces.  A meaning-bearing standalone icon opts out with a
  *  `label:` hint, which turns it into a named `img` (accessibility.md open
  *  question 1 — derive-from-default, explicit `label:` for the exception).
- *  `decorative: true` forces hidden even when a stray `label:` is present. */
+ *  `decorative: true` forces hidden even when a stray `label:` is present.
+ *
+ *  The shared walker no longer routes through this for the NAMED arm: an
+ *  accessible name is a user-visible slot (`iconLabel`), so `primitives/icon.ts`
+ *  composes ` role="img"` with `localizedAriaLabelAttr` to get the translated
+ *  form (D-I18N-ATTR).  The two agree byte-for-byte with i18n off — the name
+ *  goes through `ariaLabelAttr` either way.  HEEx still calls this directly for
+ *  its static arm, where the `escapeHtmlAttr` above (which covers `<`/`>`) is
+ *  stricter than HEEx's own attribute funnel. */
 export function iconA11yAttr(opts: { label?: string; decorative?: boolean }): string {
   if (opts.label !== undefined && opts.label !== "" && !opts.decorative) {
     return ` role="img" aria-label="${escapeHtmlAttr(opts.label)}"`;

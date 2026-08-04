@@ -51,4 +51,14 @@ export const USER_VISIBLE_SLOTS: Record<string, readonly UserVisibleSlot[]> = {
   Toolbar: [{ role: "toolbarAria", kind: "named", name: "label" }],
   Divider: [{ role: "dividerLabel", kind: "named", name: "label" }],
   Modal: [{ role: "modalTitle", kind: "named", name: "title" }],
+  // `Icon`'s `label:` is an ACCESSIBLE NAME, not visible text — a
+  // meaning-bearing glyph opts out of decorative-by-default with it and becomes
+  // a named `role="img"`.  A user-AUDIBLE string is still a user-visible slot:
+  // shipping it in English at every locale is the same defect as an untranslated
+  // caption, which is why `buttonAria`/`toolbarAria` are already here.
+  Icon: [{ role: "iconLabel", kind: "named", name: "label" }],
+  // `CodeBlock`'s `title:` captions the sample ("orders.ddd", "Request body") —
+  // authored prose in text position.  The code SOURCE is deliberately not a
+  // slot: it is code, and translating it would break it.
+  CodeBlock: [{ role: "codeBlockTitle", kind: "named", name: "title" }],
 };

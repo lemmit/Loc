@@ -30,8 +30,9 @@
 // this case — arbitrary code text round-trips cleanly.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { localizedNamedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
-import { firstPositionalText, stringNamed } from "../shared/args.js";
+import { firstPositionalText, namedArgValue, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { testidAttr } from "../walker-core.js";
 
@@ -46,7 +47,14 @@ export function emitCodeBlock(
   // first positional string literal so the Phoenix-style call shape
   // (`CodeBlock { "...code...", language: "ts" }`) emits the same code.
   const sourceRaw = stringNamed(call, "source") ?? firstPositionalText(call) ?? "";
-  const title = stringNamed(call, "title");
+  // The caption is authored prose a reader reads ("orders.ddd", "Request body"),
+  // so it is a user-visible slot (`codeBlockTitle`) — a plain literal rides the
+  // translation runtime under i18n, and everything else stays byte-identical.
+  // The code SOURCE below deliberately is NOT one: translating code breaks it.
+  const hasTitle = namedArgValue(call, "title") !== undefined;
+  const titleText = hasTitle
+    ? localizedNamedText(call, ctx, "codeBlockTitle", "title", '""')
+    : undefined;
   // Flag the shell so it injects highlight.js once across the
   // deployable.  Pages without CodeBlock skip the CDN payload.
   ctx.usesCodeBlock = true;
@@ -57,8 +65,8 @@ export function emitCodeBlock(
   return renderPrimitive(ctx, "primitive-code-block", {
     language,
     source,
-    title,
-    hasTitle: title !== undefined,
+    titleText,
+    hasTitle,
     testidAttr: testidAttr(call, ctx),
   });
 }

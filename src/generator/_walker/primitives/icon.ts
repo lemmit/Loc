@@ -14,10 +14,10 @@
 // icon's intrinsic dimensions.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { iconA11yAttr } from "../a11y-emit.js";
+import { localizedAriaLabelAttr, localizedNamedValue } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
-import { boolNamed, stringNamed } from "../shared/args.js";
+import { boolNamed, namedArgValue, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { testidAttr } from "../walker-core.js";
 
@@ -39,16 +39,29 @@ export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     const hint = name ? `unknown icon name '${name}'` : `Icon needs name: or svg:`;
     return ctx.target.renderComment(`${hint}`);
   }
+  // Decorative-by-default (the `Icon` a11y contract): a glyph beside a labelled
+  // control conveys nothing and must be hidden, or it double-announces.  A
+  // `label:` opts out and turns the icon into a NAMED `role="img"`.
+  //
+  // Presence is read off the ARG, not off `stringNamed`'s literal: a dynamic
+  // `label: row.kind` is still the author asking for a named icon, and folding
+  // it back to `aria-hidden` would silently discard the request — the same
+  // dead-name class `localizedAriaLabelAttr` fixed on `Button`.  An EMPTY
+  // literal names nothing, so it stays decorative rather than becoming an
+  // unnamed `role="img"` (which is strictly worse than a hidden glyph).
+  const named = namedArgValue(call, "label") !== undefined && label !== "" && decorative !== true;
   return renderPrimitive(ctx, "primitive-icon", {
     svg,
     size,
     hasSize: size !== undefined,
     testidAttr: testidAttr(call, ctx),
-    // The HTML/markup packs (React/Vue/Svelte/Angular) consume the pre-rendered
-    // `a11yAttr` fragment; Feliz (non-HTML markup) reads the raw `label` /
-    // `decorative` to build its own F# `prop.*` props.
-    a11yAttr: iconA11yAttr({ label, decorative }),
-    label,
-    decorative,
+    // Two spellings of ONE accessible name (D-I18N-ATTR), both derived from the
+    // same `messageKey()` the extraction pass uses: the HTML-ish FRAGMENT the
+    // `.hbs` packs splice, and the target-native VALUE the procedural packs
+    // (Feliz's F# props, Flutter's `semanticLabel:`) build a prop from.
+    a11yAttr: named
+      ? ` role="img"${localizedAriaLabelAttr(call, ctx, "iconLabel")}`
+      : ` aria-hidden="true"`,
+    ariaLabelExpr: named ? localizedNamedValue(call, ctx, "iconLabel") : undefined,
   });
 }

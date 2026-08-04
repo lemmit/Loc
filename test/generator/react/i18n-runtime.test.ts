@@ -42,6 +42,14 @@ async function pageOf(files: Map<string, string>): Promise<string> {
   return entry[1];
 }
 
+/** The emitted app catalog (`src/locales/en.json`). */
+function catalogOf(files: Map<string, string>): Record<string, string> {
+  return JSON.parse([...files].find(([p]) => p.endsWith("src/locales/en.json"))![1]) as Record<
+    string,
+    string
+  >;
+}
+
 describe("React i18n runtime", () => {
   it("wraps a literal heading in a t() call keyed to the catalog", async () => {
     const files = await generateSystemFiles(SYSTEM(`Heading { "Welcome" }`));
@@ -264,5 +272,40 @@ describe("React i18n runtime", () => {
       expect(home, design).toMatch(/t\("page\.Home\.dividerLabel\.\w+", "Section break"\)/);
       expect(home, design).toContain("<HStack");
     }
+  });
+  // --- the two AUTHORED slots that had no catalog entry (M-T1.11) ----------
+
+  it("translates the Icon accessible name (iconLabel) at the attribute position", async () => {
+    // `Icon { label: … }` is how a meaning-bearing glyph opts out of
+    // decorative-by-default: the icon becomes a NAMED `role="img"`.  That name
+    // was extracted by nothing and shipped in English at every locale; it now
+    // binds through the same D-I18N-ATTR fragment `Button`/`Toolbar` use.
+    const files = await generateSystemFiles(SYSTEM(`Icon { name: "check", label: "Verified" }`));
+    const home = await pageOf(files);
+    expect(home).toMatch(/role="img" aria-label=\{t\("page\.Home\.iconLabel\.\w+", "Verified"\)\}/);
+    expect(Object.values(catalogOf(files))).toContain("Verified");
+  });
+
+  it("keeps a decorative Icon hidden — no name, no catalog entry", async () => {
+    // The decorative-by-default arm is byte-identical to pre-i18n: a glyph with
+    // no `label:` is `aria-hidden`, and there is nothing to translate.
+    const home = await pageOf(
+      await generateSystemFiles(SYSTEM(`Stack { Heading { "Orders" }, Icon { name: "check" } }`)),
+    );
+    expect(home).toContain(`aria-hidden="true"`);
+    expect(home).not.toContain("iconLabel");
+  });
+
+  it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
+    const files = await generateSystemFiles(
+      SYSTEM(`CodeBlock { "let total = 1", language: "typescript", title: "Example" }`),
+    );
+    const home = await pageOf(files);
+    expect(home).toMatch(/t\("page\.Home\.codeBlockTitle\.\w+", "Example"\)/);
+    // The SOURCE is code, not prose — translating it would break it.
+    expect(home).toContain("let total = 1");
+    const catalog = catalogOf(files);
+    expect(Object.values(catalog)).toContain("Example");
+    expect(Object.values(catalog)).not.toContain("let total = 1");
   });
 });

@@ -253,4 +253,20 @@ describe("Svelte i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`Toolbar { Heading { "Orders" } }`));
     expect(await homeOf(files)).toContain(`role="toolbar" aria-label="Actions"`);
   });
+  it("translates the Icon accessible name (iconLabel) as a bound attribute", async () => {
+    const home = await homeOf(
+      await generateSystemFiles(SYSTEM(`Icon { name: "check", label: "Verified" }`)),
+    );
+    expect(home).toMatch(/role="img" aria-label=\{t\("page\.Home\.iconLabel\.\w+", "Verified"\)\}/);
+  });
+
+  it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
+    const home = await homeOf(
+      await generateSystemFiles(
+        SYSTEM(`CodeBlock { "let total = 1", language: "typescript", title: "Example" }`),
+      ),
+    );
+    expect(home).toMatch(/t\("page\.Home\.codeBlockTitle\.\w+", "Example"\)/);
+    expect(home).toContain("let total = 1");
+  });
 });
