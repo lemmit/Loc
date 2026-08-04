@@ -311,7 +311,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                   )}
                   {secondaryDoc && (
                     <Box style={{ flex: 1, minHeight: 0, display: centerView === "secondary" ? "flex" : "none" }}>
-                      <FileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} files={ctx.files} />
+                      <FileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} />
                     </Box>
                   )}
                 </Box>

@@ -11,7 +11,8 @@
 //      top-level listeners then ran and rejected on every page load.
 //   2. @xyflow (the system-builder canvases import it statically) — grouped
 //      with likec4, dragging LikeC4 + the Graphviz WASM layouter eager:
-//      3.07 MB of a 15.87 MB eager total.
+//      3.07 MB of a 15.87 MB eager total.  (LikeC4 has since been removed
+//      outright; the grouping hazard it demonstrated has not.)
 //   3. …the next one, which is what this script exists to catch.
 //
 // Eager JS matters here beyond first paint: the playground boots
@@ -34,7 +35,6 @@ const ASSETS = path.join(DIST, "assets");
  *  entry.  Each is reached through a real `await import(...)` and is big
  *  enough that promoting it is a genuine regression, not a rounding error. */
 const MUST_BE_LAZY = [
-  "likec4", // LikeC4 model/react + @hpcc-js Graphviz WASM — the `.c4` viewer
   "mermaid", // diagram renderer — the mermaid viewer
   "craftjs", // page builder — the Builder tab
   "monaco-views-optional", // service overrides for a viewsConfig we never use

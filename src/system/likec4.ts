@@ -15,8 +15,7 @@ import { lines } from "../util/code-builder.js";
 //
 // Like the Mermaid artifacts this is a derived view, not a contract —
 // no DSL drives it.  The playground renders it in-browser by rebuilding
-// the model from the sibling `.c4.json` (see `buildC4Spec` below) and
-// laying it out with Graphviz WASM.  The `.c4` text also opens directly
+// The `.c4` text opens directly
 // in the LikeC4 CLI / VS Code extension.
 // ---------------------------------------------------------------------------
 
@@ -123,83 +122,4 @@ export function renderC4Model(sys: SystemIR): string {
 // projections derive from the IR so they stay in step.
 // ---------------------------------------------------------------------------
 
-export type C4Kind = "system" | "container" | "component" | "database";
-
-export interface C4SpecNode {
-  /** Id local to the parent; the full dotted FQN is rebuilt by nesting. */
-  localId: string;
-  kind: C4Kind;
-  title: string;
-  technology?: string;
-  children: C4SpecNode[];
-}
-
-export interface C4Relationship {
-  /** Full dotted FQNs, matching the nested element ids. */
-  source: string;
-  target: string;
-  label: string;
-}
-
-export interface C4Spec {
-  systemTitle: string;
-  /** The system element, with containers / components / database nested under it. */
-  root: C4SpecNode;
-  relationships: C4Relationship[];
-  /** Id of the view the playground renders, scoped to the system. */
-  viewId: string;
-  /** FQN the rendered view is `view of`. */
-  viewOf: string;
-  /** Human-readable title shown in the renderer's view panel. */
-  viewTitle: string;
-}
-
-export function buildC4Spec(sys: SystemIR): C4Spec {
-  const sysId = cid(sys.name);
-  const hasBackend = sys.deployables.some((d) => persists(d));
-  const known = new Set(sys.deployables.map((d) => d.name));
-
-  const children: C4SpecNode[] = sys.deployables.map((d) => ({
-    localId: cid(d.name),
-    kind: "container",
-    title: d.name,
-    technology: d.platform,
-    // Frontends contribute no context components (wire-scope, not ownership).
-    children: isFrontend(d)
-      ? []
-      : d.contextNames.map((m) => ({
-          localId: cid(m),
-          kind: "component" as const,
-          title: m,
-          children: [],
-        })),
-  }));
-  if (hasBackend) {
-    children.push({ localId: "db", kind: "database", title: "PostgreSQL", children: [] });
-  }
-
-  const relationships: C4Relationship[] = [];
-  for (const d of sys.deployables) {
-    const from = `${sysId}.${cid(d.name)}`;
-    if (d.targetName && known.has(d.targetName)) {
-      relationships.push({ source: from, target: `${sysId}.${cid(d.targetName)}`, label: "calls" });
-    }
-    if (persists(d) && hasBackend) {
-      relationships.push({ source: from, target: `${sysId}.db`, label: "reads / writes" });
-    }
-  }
-
-  return {
-    systemTitle: sys.name,
-    root: { localId: sysId, kind: "system", title: sys.name, children },
-    relationships,
-    viewId: "containers",
-    viewOf: sysId,
-    viewTitle: `${sys.name} — containers`,
-  };
-}
-
 /** Serialise the structured projection as pretty JSON with a trailing newline. */
-export function renderC4SpecJson(sys: SystemIR): string {
-  return JSON.stringify(buildC4Spec(sys), null, 2) + "\n";
-}

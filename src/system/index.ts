@@ -41,7 +41,7 @@ import { renderHelmChart } from "./helm.js";
 import { renderMessageCatalog } from "./i18n-catalog.js";
 import { renderKubernetesManifests } from "./kubernetes.js";
 import { renderVsCodeLaunchJson } from "./launch-config.js";
-import { renderC4Model, renderC4SpecJson } from "./likec4.js";
+import { renderC4Model } from "./likec4.js";
 import {
   renderDeploymentDiagram,
   renderDomainDiagram,
@@ -349,13 +349,13 @@ function emitSystem(
   out.set(".loom/er.mmd", renderErDiagram(sys));
   out.set(".loom/sequence.mmd", renderSequenceDiagram(sys));
   out.set(".loom/deployment.mmd", renderDeploymentDiagram(sys));
-  // LikeC4 architecture model (https://likec4.dev) — opens in the
-  // LikeC4 CLI / VS Code extension.  See `likec4.ts`.  The sibling
-  // `.c4.json` is the same model as structured data, which the playground
-  // rebuilds (it can't run the Langium parser in-browser) to render the
-  // diagram; hidden from the playground's file tree.
+  // LikeC4 architecture model (https://likec4.dev) — opens in the LikeC4 CLI
+  // / VS Code extension.  See `likec4.ts`.  The `.c4.json` sidecar that used
+  // to sit beside it existed ONLY so the playground could rebuild the model
+  // in-browser (it can't run LikeC4's Langium parser) and render a diagram.
+  // That renderer is gone, so the sidecar was pure weight in every generated
+  // project — a second serialisation of a model nothing reads.
   out.set(".loom/architecture.c4", renderC4Model(sys));
-  out.set(".loom/architecture.c4.json", renderC4SpecJson(sys));
   // DataSource routing — derived markdown view of how `dataSource`
   // declarations route domain contexts to physical storage.  Pairs
   // with the Phase B / C / D validators.  See `datasources.ts`.
