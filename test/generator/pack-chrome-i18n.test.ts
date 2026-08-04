@@ -77,6 +77,31 @@ function shellOf(files: Map<string, string>, suffix: string): string {
 }
 
 describe("pack-chrome i18n — React app-shell chrome", () => {
+  // EVERY React pack, not just the default one.  The skip-link slice wired 13
+  // packs and missed shadcn v3/v4 — they rendered `{{{notFoundText}}}` and
+  // `{{{primaryNavAria}}}` but kept the skip link as raw text, so the string was
+  // in the catalog and untranslatable on those two packs.  A per-pack loop is
+  // what catches a template that forgets a token; a single-pack assertion never
+  // could.
+  it.each([
+    "mantine",
+    "shadcn",
+    "mui",
+    "chakra",
+  ])("%s renders every shell-chrome token (no raw string left behind)", async (design) => {
+    const on = appOf(await generateSystemFiles(SYSTEM("react", design, `Heading { "Welcome" }`)));
+    for (const [key, english] of Object.entries(APP_SHELL_CHROME)) {
+      // A pack need not SPELL every chrome string (mui has no nav landmark
+      // label, only chakra says "Open menu") — but whatever it spells must be
+      // bound, never raw.  So: if the English appears at all, it appears
+      // inside a t() call for its own key.
+      if (!on.includes(english)) continue;
+      expect(on, `${design} left "${english}" unbound`).toContain(
+        `t(${JSON.stringify(key)}, ${JSON.stringify(english)})`,
+      );
+    }
+  });
+
   it("binds the 404 + skip-link text through t() and imports t into App.tsx", async () => {
     const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
     const app = appOf(files);
