@@ -1147,6 +1147,16 @@ export default function App(): JSX.Element {
       // don't survive a refresh.  A database that starts and forgets beats
       // one that never starts, and the badge already reports `persistent`
       // honestly rather than claiming persistence it doesn't have.
+      //
+      // DEAD END, recorded so it isn't retried: PGlite exposes an
+      // `initialMemory` option and defaults to 128 MB, which looks like the
+      // obvious knob.  It only goes UP.  `pglite.wasm` DECLARES an initial
+      // memory of 2048 pages, so anything smaller fails to link outright:
+      //   LinkError: memory import has 512 pages which is smaller than the
+      //   declared initial of 2048
+      // A 128 MB contiguous WASM heap is therefore structural at this
+      // version, not a setting — which is also why freeing memory elsewhere
+      // (#2420) could not buy enough headroom.
       const dataDir = isDesktop ? `opfs-ahp://loom-${sourceHash}` : ":memory:";
       const res = await engine.boot(hono.code, dataDir, { fresh: opts?.fresh });
       if (res.ok) {
