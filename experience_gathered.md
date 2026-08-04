@@ -3988,7 +3988,7 @@ output the emitters had been rendering correctly all along.
   tests assert the nodes it builds, and they stayed green through the entire
   breakage — the defect lived one phase later, where those nodes meet a
   validator. That gap is how this reached `main`.
-## 64. Three gates over one file, none of which ran the validator (2026-08-02)
+
 ## 71. Three gates over one file, none of which ran the validator (2026-08-02)
 
 `web/src/examples/acme.ddd` — shipped in the playground picker as "Acme
@@ -4034,3 +4034,101 @@ And a smaller one: a background-task wrapper reporting **"completed (exit code
 0)"** is reporting the WRAPPER's exit, not the command's. The suite underneath
 had exited **143** (SIGTERM — I had killed it after switching branches
 mid-run). Read the run's own tail before recording a green.
+
+## 72. A rebase conflict where both sides are right and the merge is wrong (2026-08-04)
+
+Two PRs edited the same .NET audit-snapshot emitter for unrelated reasons:
+
+- `main` (#2406) changed `JsonSerializer.Serialize(...)` → `SerializeToNode(...)` —
+  the object-shaped `jsonb` binding all five backends now share — and, in passing,
+  **hoisted the before/after projection into one `projectExpr` string used twice.**
+- The branch (#2412) threaded a shared `MaskNamer` through the same two call sites,
+  fixing CS0128: a fixed `__maskUser` pattern-variable name declared twice in one
+  handler body.
+
+Both sides are correct in isolation. Every mechanical resolution is wrong:
+
+| resolution | result |
+|---|---|
+| `--ours` | keeps `SerializeToNode`, drops the namer → CS0128 returns |
+| `--theirs` | keeps the namer, reverts the binding → the .NET snapshot is a string again |
+| take both textually | keeps the **hoist** — one identical string emitted twice, which *is* the duplicate declaration by another route |
+
+That third one is the trap, because it looks like the careful answer. A namer only
+helps if each wrap is **rendered once**; hoisting the render into a shared variable
+silently re-introduces the bug the namer exists to prevent. The correct resolution
+was to *un-hoist* — a line neither side wrote.
+
+> **When both sides of a conflict touched the same emitter for different reasons,
+> merge the OUTPUT, not the source text.** Ask what the merged emitter *emits*, then
+> write whatever produces that — which may be code on neither side of the diff.
+
+`tsc -b` and the emitter unit tests passed on the wrong merge: the defect is in
+generated C#, one language down. What caught it was generating the fixture and
+running the real compiler (`dotnet build /warnaserror` in `mcr.microsoft.com/dotnet/sdk:10.0`),
+plus grepping the emitted handler for the variable names (`__maskUser0..3` — four
+wraps, four distinct names). For an emitter conflict, **the diff is not the artifact;
+the emitted file is.** Same family as §65 (a shared shape only pays off where the
+emitter handles the whole shape).
+
+## 73. A stacked PR's own gate never runs (2026-08-04)
+
+#2411's entire content was **one new CI cell** — a `history × angularMaterial@v1`
+case added to `generated-angular-build`. It showed **24 green checks** while stacked
+on a feature branch, and not one of them was the Angular matrix.
+
+The mechanism: nearly every heavy workflow here is
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+```
+
+`branches:` filters the **base** branch, not the head. A PR targeting
+`claude/audit-history-frontend` therefore fires *no* `branches: [main]` workflow —
+the path filters never even get evaluated. The PR looks green because the checks
+that did run (`tests passed`, corpus, behavioral) genuinely passed; the one that
+mattered was never scheduled. Retargeting to `main` ran the new cell for the first
+time — and only then was there any evidence it worked.
+
+> **A stacked PR is gated by a strict subset of what it will be gated by on `main`.**
+> Its green is a statement about that subset, not about the change. This bites
+> hardest on the PR whose *whole purpose* is a gate: it is structurally the case
+> that such a PR cannot verify itself while stacked.
+
+Practically: before trusting a stacked PR's green, check whether the workflow you
+care about is in its check list **by name**. If it isn't, either retarget to `main`
+first or accept that the verification is deferred — and say so in the PR body rather
+than letting the green imply coverage. Yet another instance of §70's rule ("a check
+that never reaches the thing it names"), but with a new cause: not a weak assertion,
+a workflow that was never scheduled at all.
+
+**Corollary, on diagnosing a red rollup: probe with the command that actually failed.**
+When `elixir-vanilla-build` went red, the first instinct was to compare branch vs
+`main` with `ddd parse` — which printed `OK` on both, suggesting the failure was
+environmental. It was not: `parse` discards the phase-⑦ diagnostics it computes
+(§62), and the CI step runs `generate system`. Re-probing with `generate system`
+reproduced 2 errors on **both**, which is what identified it as pre-existing `main`
+breakage (bisected to #2353) rather than the PR's. A bisect is only as good as its
+probe, and the only trustworthy probe is the failing command itself.
+
+## 74. A one-word field name hides every name-transformation bug (2026-08-04)
+
+Python's `mask unless` never redacted a multi-word field. `to_wire` writes the wire
+key verbatim (`d[name]`), while `to_wire_masked` redacted `d[snake(name)]` — so a
+`homeAddress` field kept its full value on a caller that should have seen `None`.
+A read-side authorization hole, shipped.
+
+It survived because **every mask fixture used `salary`** — one word, where
+`snake("salary") == "salary"` and the two spellings coincide. The test population
+was structurally incapable of separating the correct key from the wrong one.
+
+> **Any fixture exercising a name-transforming path (`snake`/`camel`/`pascal`/
+> `plural`) must include at least one multi-word name.** A single-word fixture makes
+> the transform an identity function, and an identity function tests nothing.
+
+This is cheap to apply and worth making reflexive: wire keys, column names, route
+segments, hook names, DTO properties — anywhere `src/util/naming.ts` is in the path.
+The same session found the twin on the read side: the audit-history diff had to be
+checked against a multi-word field before its masking could be believed.
