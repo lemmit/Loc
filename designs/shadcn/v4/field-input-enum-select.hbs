@@ -7,7 +7,7 @@
               <Select onValueChange={field.onChange} value={(field.value as string) ?? ""}>
                 <FormControl>
                   <SelectTrigger data-testid="{{testId}}">
-                    <SelectValue placeholder="Select…" />
+                    <SelectValue {{{selectPlaceholderAttr}}} />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>

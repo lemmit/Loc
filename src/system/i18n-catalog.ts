@@ -1,4 +1,4 @@
-import { APP_SHELL_CHROME } from "../generator/_walker/i18n-chrome.js";
+import { chromeMergedWhenEnabled } from "../generator/_walker/i18n-chrome.js";
 import { collectUiMessages } from "../generator/_walker/i18n-extract.js";
 import type { EnrichedSystemIR } from "../ir/types/loom-ir.js";
 
@@ -31,7 +31,7 @@ export function buildMessageCatalog(sys: EnrichedSystemIR): Record<string, strin
   // system is already i18n-enabled by its authored strings (the shell emitters'
   // gate), so a string-less system stays `{}`.
   if (byKey.size > 0) {
-    for (const [key, message] of Object.entries(APP_SHELL_CHROME)) byKey.set(key, message);
+    for (const [key, message] of Object.entries(chromeMergedWhenEnabled())) byKey.set(key, message);
   }
   const out: Record<string, string> = {};
   for (const key of [...byKey.keys()].sort()) out[key] = byKey.get(key)!;

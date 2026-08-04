@@ -46,6 +46,7 @@ import {
   walk,
 } from "../walker-core.js";
 import { emitActionThen } from "./controls.js";
+import { selectPlaceholderAttr } from "./inputs.js";
 
 /** `CreateForm(of: <Agg>)` — the create-form primitive.  Delegates to
  *  `emitFormOfAggregate`, which builds the per-field view models and
@@ -333,7 +334,18 @@ function prepareFormFields(
     addImport(ctx, `../api/${lowerFirst(t.name)}`, `useAll${plural(t.name)}`);
   }
   for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
-  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
+  // Pack chrome the field templates share (M-T1.11): the id/enum picker's
+  // "Select…" placeholder.  Built once per form and handed to every field — a
+  // template that renders no picker simply ignores the key.
+  //
+  // Under i18n this is a `t("chrome.selectPlaceholder", …)` binding; the key
+  // reaches the catalog through `FORM_CHROME`, which is merged only for an
+  // ALREADY-i18n-enabled UI.  Both sides therefore answer the same question
+  // (`ctx.i18nPrefix` is set iff the UI is enabled), so a form can never emit a
+  // binding the catalog lacks — nor drag the runtime into an app that has
+  // nothing else to translate.
+  const fieldChrome = { selectPlaceholderAttr: selectPlaceholderAttr(ctx) };
+  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack, fieldChrome));
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   // Field-arrays (`X[]` of a value-object) → one `useFieldArray` per field.  The
   // hook needs `control`, so it forces the controller on; a `useFieldArray`
