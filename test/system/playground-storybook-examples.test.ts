@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
@@ -59,5 +62,19 @@ describe("playground storybook examples", () => {
     // docker-compose at the system root.
     expect(files.has("docker-compose.yml")).toBe(true);
     expect(files.size).toBeGreaterThan(0);
+  });
+
+  // Phase ⑦ — the cross-aggregate IR checks, which neither assertion above
+  // reaches (the first reads Langium AST diagnostics, the second only asserts
+  // codegen did not throw).  `acme.ddd` shipped in the picker with four
+  // `loom.persistence-mode-unsupported` errors behind exactly that gap; see the
+  // longer note in `playground-remaining-examples.test.ts`.
+  it.each(storybooks)("%s has no IR-level validation errors", async (file) => {
+    const doc = await buildDoc(file);
+    const model = doc.parseResult.value as Model;
+    const errors = validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.severity === "error")
+      .map((d) => `${d.code} | ${d.source} | ${d.message}`);
+    expect(errors).toEqual([]);
   });
 });

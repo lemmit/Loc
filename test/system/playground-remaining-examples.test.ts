@@ -5,6 +5,7 @@ import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerProject } from "../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { loadProject } from "../../src/language/project-loader.js";
@@ -73,5 +74,32 @@ describe("playground picker examples (remaining)", () => {
     const { files } = generateSystemsFromLoom(loom);
     expect(files.has("docker-compose.yml")).toBe(true);
     expect(files.size).toBeGreaterThan(0);
+  });
+
+  // Phase ⑦ — the cross-aggregate IR checks.  The two assertions above look
+  // like they cover an example end to end, and they do not: the first reads
+  // Langium's AST diagnostics (phase ④) and the second only asserts that
+  // codegen did not THROW.  Every `loom.*` diagnostic the IR validator
+  // produces fell between them.
+  //
+  // That is not theoretical.  `acme.ddd` — shipped in the picker as "Acme
+  // (multi-deployable system)" — declared three backend deployables with no
+  // `storage`/`resource` at all, so it raised four
+  // `loom.persistence-mode-unsupported` errors: a user opening the example in
+  // the playground saw them immediately, and this file said the example was
+  // fine.  It had drifted at the D-STORAGE-SPLIT rename and nothing looked
+  // again.
+  //
+  // Worth naming because it is the THIRD shape of the same failure in this
+  // area: `ddd parse` computes these diagnostics and filters all but the index
+  // hints away, and `conformance-parity` compares a dimension its only fixture
+  // never exercises.  A check that is present but never reaches the thing it
+  // names is indistinguishable from no check at all.
+  it.each(examples)("%s has no IR-level validation errors", async (file) => {
+    const { loom } = await loadExample(file);
+    const errors = validateLoomModel(loom)
+      .filter((d) => d.severity === "error")
+      .map((d) => `${d.code} | ${d.source} | ${d.message}`);
+    expect(errors).toEqual([]);
   });
 });

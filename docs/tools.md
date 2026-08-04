@@ -21,7 +21,7 @@ The `ddd` binary lives at `bin/cli.js` and exposes these sub-commands:
 
 ```bash
 ddd new <name> [--platform …] [--template …]      # scaffold a starter project
-ddd parse <file.ddd>                              # parse + validate
+ddd parse <file.ddd>                              # parse + validate (AST + IR), multi-file aware
 ddd generate ts <file.ddd> -o <outdir>            # emit a single TypeScript project (legacy)
 ddd generate dotnet <file.ddd> -o <outdir>        # emit a single .NET project (legacy)
 ddd generate system <file.ddd> -o <outdir>        # emit every deployable + docker-compose.yml
@@ -147,15 +147,27 @@ project the .NET namespace and `.csproj` keep the capitalised form.
 `ddd parse` exits non-zero if the source has errors.  `ddd generate`
 runs validation first and refuses to emit if there are any errors.
 
-**`parse` green ≠ model valid.**  `parse` runs the front of the pipeline
-— syntax + AST-level validation (phases ①–④).  A whole class of checks
-only runs during `generate`, which adds lowering, enrichment, and
-**IR-level validation** (phases ⑤–⑦): queryability of a `retrieval` /
-`view` `where`, cross-aggregate reference rules, wire-shape and
-migration checks.  So a source that `parse`s clean can still fail
-`generate`.  In an edit loop, treat **`generate`** (or, for the last
-mile, a `tsc` / compiler run on the emitted target) as the real gate —
-not `parse`.  See the pipeline phases in [`technical.md`](technical.md).
+**`parse` now runs the same validation `generate` does.**  It walks the
+import graph (so a multi-file entry resolves its siblings rather than
+reporting them as unresolved references) and runs BOTH validation
+tiers: syntax + AST-level (phases ①–④) *and* **IR-level** (phases ⑤–⑦)
+— queryability of a `retrieval` / `view` `where`, cross-aggregate
+reference rules, persistence-binding, wire-shape and migration checks.
+A source that `parse`s clean is one `generate` will accept; the only
+thing `parse` skips is the emission itself.
+
+This was not always true, and the old behaviour is worth knowing if you
+have scripts built on it: `parse` used to run phase ④ only — it
+*computed* the IR diagnostics and then discarded everything except the
+advisory `loom.index-suggestion` lint before printing `OK`.  A model
+`generate system` rejected with six errors parsed clean, which made
+`parse` useless as a pre-flight and actively misleading as a scan
+(`experience_gathered.md` §62).  Index suggestions remain advisory and
+never fail the parse.
+
+For the last mile a `tsc` / compiler run on the emitted target is still
+the stronger gate — it catches emitter bugs no model-level check can.
+See the pipeline phases in [`technical.md`](technical.md).
 
 ### `verify` and `snapshot`
 
