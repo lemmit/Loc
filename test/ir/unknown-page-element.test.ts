@@ -118,4 +118,21 @@ describe("loom.unknown-page-element — what the walker CAN resolve", () => {
                    page X { route: "/x"  body: Text(fmt("x")) }`),
     ).not.toContain(CODE);
   });
+
+  // Components resolve from TWO scopes.  A component declared at the top of a
+  // `.ddd` file, OUTSIDE any `ui { … }`, is ambient workspace-wide — the same
+  // global symbol space as `rootValueObjects` (`LoomModel.components`), and it
+  // is how `web/src/examples/erp` shares `SectionHeading` / `StatTile` /
+  // `CtaRow` between `ui/components.ddd` and the page in `deploy.ddd`.  A gate
+  // built from `ui.components` alone flags those as unknown, which is a FALSE
+  // POSITIVE on a shipped, compiling example.
+  it("a ROOT-level component (declared outside any ui) is fine", async () => {
+    const src = `
+component SectionHeading(title: string) { body: Text { title } }
+${wrap(`page X { route: "/x"  body: Stack { SectionHeading { title: "hi" } } }`)}`;
+    const { model, errors } = await parseString(src);
+    expect(errors).toEqual([]);
+    const found = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
+    expect(found).not.toContain(CODE);
+  });
 });

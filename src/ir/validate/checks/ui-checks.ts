@@ -122,8 +122,13 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
       // F4 — the names a render-tree free call may carry, mirroring what the
       // walker resolves at emit time (registry primitive → user component →
       // value-object construction → extern function).
+      // Components resolve from TWO scopes, and the gate must mirror both or a
+      // shipped example fails on a name the walker resolves fine: the ui-local
+      // `component`s, PLUS the ROOT-level ones declared outside any `ui { … }`,
+      // which are ambient workspace-wide (`LoomModel.components`, the same
+      // global symbol space as `rootValueObjects`).
       const callableNames: CallableNames = {
-        components: new Set(ui.components.map((c) => c.name)),
+        components: new Set([...loom.components, ...ui.components].map((c) => c.name)),
         valueObjects: new Set(allContexts(loom).flatMap((c) => c.valueObjects.map((v) => v.name))),
         functions: new Set((ui.functions ?? []).map((f) => f.name)),
       };
