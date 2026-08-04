@@ -27,9 +27,6 @@ const primitivesDir = path.resolve(here, "../../../src/generator/_walker/primiti
 const NO_SLOT_YET: Readonly<Record<string, string>> = {
   "table.ts":
     '`Column("Name", …)` headers — a per-column slot needs a role shape the current table (role, hash) key can\'t express (the header repeats per page)',
-  "data-grid.ts": "same as table.ts — the grid shares `Column` children",
-  "inputs.ts":
-    "field `label:`/`placeholder:` on Field/MultilineField/PasswordField/NumberField/SelectField/Toggle/FileUpload — the largest remaining slot family",
   "icon.ts":
     "`Icon(label:)` is an ACCESSIBLE NAME (role=img), so it belongs with the aria slots rather than the text ones",
   "code-block.ts": "`CodeBlock(title:)` — a caption above a code sample",
@@ -40,13 +37,22 @@ const NO_SLOT_YET: Readonly<Record<string, string>> = {
   "for.ts": "`For(empty:)` renders authored markup, whose own primitives localize",
 };
 
-/** Modules with no user-visible text at all — nothing to translate. */
-const NO_TEXT = new Set(["index.ts", "registry.ts"]);
+/** Modules that emit NO user-visible prose — nothing to translate, as opposed
+ *  to `NO_SLOT_YET`'s "prose we haven't wired yet".  Reasoned so the two lists
+ *  stay distinguishable to a reviewer. */
+const NO_TEXT: Readonly<Record<string, string>> = {
+  "index.ts": "re-exports only",
+  "registry.ts": "the dispatch table",
+  "data-grid-shape.ts":
+    "a ctx-free PREDICATE leaf (is any column filterable?) shared by the emitter and the chrome extractor — it renders nothing",
+  "timeline.ts":
+    "emits native `<ol>/<li>/<time>/<dl>` over audit DATA plus typographic placeholders (`—`, `→`); the words come from the record, not the emitter",
+};
 
 describe("i18n slot inventory — untranslatable primitive text is listed, not silent", () => {
   const modules = fs
     .readdirSync(primitivesDir)
-    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !NO_TEXT.has(f));
+    .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !NO_TEXT[f]);
 
   it("every primitive module either localizes its text or states why not", () => {
     const unlisted: string[] = [];
