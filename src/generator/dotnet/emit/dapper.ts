@@ -812,7 +812,11 @@ function dapperAuditSeam(
       ? [
           "        foreach (var __ar in _audit.Drain())",
           "        {",
-          `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO audit_records (audit_id, operation_id, action, target_type, target_id, actor, before, after, at, status, correlation_id, scope_id, parent_id) VALUES (@audit_id, @operation_id, @action, @target_type, @target_id, CAST(@actor AS jsonb), CAST(@before AS jsonb), CAST(@after AS jsonb), @at, @status, @correlation_id, @scope_id, @parent_id)", new { audit_id = __ar.AuditId, operation_id = __ar.OperationId, action = __ar.Action, target_type = __ar.TargetType, target_id = __ar.TargetId, actor = __ar.Actor, before = __ar.Before, after = __ar.After, at = __ar.At, status = __ar.Status, correlation_id = __ar.CorrelationId, scope_id = __ar.ScopeId, parent_id = __ar.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
+          "            // `Before`/`After` bind as `JsonNode?` on the POCO (uniform with the",
+          "            // other four backends); Dapper has no jsonb parameter for a node, so",
+          "            // they go over the wire as text and are CAST back — the same shape",
+          "            // `actor` already uses.",
+          `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO audit_records (audit_id, operation_id, action, target_type, target_id, actor, before, after, at, status, correlation_id, scope_id, parent_id) VALUES (@audit_id, @operation_id, @action, @target_type, @target_id, CAST(@actor AS jsonb), CAST(@before AS jsonb), CAST(@after AS jsonb), @at, @status, @correlation_id, @scope_id, @parent_id)", new { audit_id = __ar.AuditId, operation_id = __ar.OperationId, action = __ar.Action, target_type = __ar.TargetType, target_id = __ar.TargetId, actor = __ar.Actor, before = __ar.Before?.ToJsonString(), after = __ar.After?.ToJsonString(), at = __ar.At, status = __ar.Status, correlation_id = __ar.CorrelationId, scope_id = __ar.ScopeId, parent_id = __ar.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
           "        }",
         ]
       : [],

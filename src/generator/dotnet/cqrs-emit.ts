@@ -18,6 +18,7 @@ import {
   emitCanOpQueriesAndHandlers,
   emitFindQueriesAndHandlers,
   emitGetByIdQueryAndHandler,
+  emitHistoryQueryAndHandler,
 } from "./cqrs/queries.js";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +111,10 @@ export function emitCqrs(
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out, idClass);
   emitCanOpQueriesAndHandlers(agg, ns, aggFolder, out, idClass);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
+  // Entity history (docs/audit.md) — the enrichment-derived `historyFind` sits
+  // BESIDE `finds`, so it needs its own emission call; the generic find loop
+  // above never sees it.
+  emitHistoryQueryAndHandler(agg, repo, ns, aggFolder, out, idClass);
   emitController(
     agg,
     repo,

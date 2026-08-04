@@ -27,6 +27,7 @@ export function renderAuditRecord(ns: string): string {
     lines(
       "// Auto-generated.",
       "using System;",
+      "using System.Text.Json.Nodes;",
       "",
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
@@ -44,10 +45,19 @@ export function renderAuditRecord(ns: string): string {
       "    public string? Actor { get; set; }",
       // Nullable, matching `migrations-builder`: a `create` has no BEFORE
       // state and a `destroy` has no AFTER state.  A non-nullable reference
-      // type is REQUIRED by EF convention, so `string` here made EF build a
-      // NOT NULL column that the writer's own null contradicts.
-      "    public string? Before { get; set; }",
-      "    public string? After { get; set; }",
+      // type is REQUIRED by EF convention, so a non-nullable property here made
+      // EF build a NOT NULL column that the writer's own null contradicts.
+      //
+      // `JsonNode?`, not `string?`: the COLUMN is `jsonb` on every backend (one
+      // shared definition — `auditTableShape` in `src/system/migrations-builder.ts`),
+      // and every other backend binds it as an OBJECT (Python `Mapped[object |
+      // None]`, Elixir `:map`, Java `Object`).  A serialized `string` binding
+      // made .NET the odd one out: every reader of a snapshot had to parse
+      // before it could index into it.  `JsonNode` indexes directly
+      // (`node["Field"]`) and — unlike `JsonDocument` — is not `IDisposable`, so
+      // holding one on a POCO does not drag CA1001 in under `/warnaserror`.
+      "    public JsonNode? Before { get; set; }",
+      "    public JsonNode? After { get; set; }",
       "    public DateTime At { get; set; }",
       "    public string Status { get; set; } = default!;",
       "    public string? CorrelationId { get; set; }",

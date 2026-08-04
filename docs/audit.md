@@ -58,6 +58,34 @@ together. The table (`audit_records`, one per module, derived from
 Indexed on `(target_type, target_id)` — the per-entity history read — and on
 `correlation_id`, for tracing one command across aggregates.
 
+### How the snapshots are stored — one rule, all five backends
+
+`before` / `after` are **`jsonb`** everywhere. There is no per-backend DDL: the
+column comes from the single shared `auditTableShape` above (`{ kind: "json" }`),
+rendered once by `sql-pg.ts`.
+
+Every backend binds them as a **JSON object**, never as a serialized string. A
+porter indexes the snapshot directly; nobody parses.
+
+| Backend | CLR / runtime binding |
+|---|---|
+| node (drizzle, MikroORM) | `jsonb` column → plain object |
+| .NET (EF, Dapper) | `System.Text.Json.Nodes.JsonNode?` |
+| Python (SQLAlchemy) | `Mapped[object \| None]` (`JSONB`) |
+| Java (Hibernate) | `@JdbcTypeCode(SqlTypes.JSON) Object` (a `Map`) |
+| Elixir (Ecto) | `:map` |
+
+Two consequences worth stating outright:
+
+- **Both sides are genuinely nullable** — a `create` has no `before`, a
+  `destroy` has no `after` — and that absence is a real SQL `NULL`, never the
+  string `"null"`.
+- **Snapshots are not comparable byte-for-byte across backends.** Reading back
+  from `jsonb` yields Postgres-normalized values: keys sorted, whitespace
+  stripped, duplicate keys collapsed. The cross-backend contract is the
+  **derived `changes` output** (§3), pinned by
+  `test/behavioral/wire-golden/audit-history.json` — never the stored bytes.
+
 ### Only successful commands are recorded
 
 `status` is hardcoded `"ok"` and the insert rides the command's transaction. A
@@ -85,18 +113,13 @@ Nothing is declared for it. Enrichment derives a `find history(id)` onto the
 aggregate's repository — the auto-`findAll` analog, in the same pure pass — and
 the backend serves it from `audit_records`.
 
-> **Backend support — `node` only, today.** The write side ships on all five
-> backends (§1–2); the read endpoint currently ships on **Hono/node**. .NET,
-> Java, Python and Elixir still record the trail but expose no route over it.
->
-> This is a measured gap, not an assumption: the shape, the diff boundary and
-> the authorization rules below are all platform-neutral
-> (`src/ir/util/audit-history.ts`), and `test/fixtures/corpus/audit-history.ddd`
-> is declared `backends: ["node"]` in the corpus manifest with
-> `test/behavioral/wire-golden/audit-history.json` as the answer key. Adding a
-> backend to that manifest row is what "backend X serves history" means, and the
-> golden is what it has to match. Tracked under M-T3.9.
-
+> **Backend support — all five.** The read endpoint ships on Hono/node,
+> FastAPI/python, Spring Boot/java, .NET and Phoenix/elixir, alongside the
+> write side. `test/fixtures/corpus/audit-history.ddd` is declared for every
+> backend, and each one's behavioral leg diffs its booted responses against
+> `test/behavioral/wire-golden/audit-history.json` — minted from node, the
+> oracle. A≡golden ∧ B≡golden ⇒ A≡B, so that is a real cross-backend
+> equality proof rather than five self-assertions.
 ### The entry shape
 
 ```jsonc

@@ -1672,9 +1672,9 @@ export function csWorkflowStmtTarget(
         const before = `__wfAuditBefore${n}`;
         const after = `__wfAuditAfter${n}`;
         return [
-          `${indent}var ${before} = System.Text.Json.JsonSerializer.Serialize(${projectEntityExpr(st.target, agg, ctx)});`,
+          `${indent}var ${before} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx)});`,
           callLine,
-          `${indent}var ${after} = System.Text.Json.JsonSerializer.Serialize(${projectEntityExpr(st.target, agg, ctx)});`,
+          `${indent}var ${after} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx)});`,
           `${indent}_audit.Stage(new AuditRecord`,
           `${indent}{`,
           `${indent}    AuditId = Guid.NewGuid().ToString(),`,
