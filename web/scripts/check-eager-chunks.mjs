@@ -40,6 +40,38 @@ const MUST_BE_LAZY = [
   "monaco-views-optional", // service overrides for a viewsConfig we never use
 ];
 
+/** Code that must not be on the eager path, identified by a SIGNATURE rather
+ *  than a chunk name — because `manualChunks` only names vendor scopes, and
+ *  what got promoted here was our own `src/` toolchain, which rollup places
+ *  wherever the import graph says.  The name-based list above cannot see it.
+ *
+ *  Each signature is a string literal that survives minification (a package
+ *  identifier or a tool name), and each is checked BOTH ways:
+ *
+ *    - it must appear SOMEWHERE in `dist/assets` — otherwise the signature has
+ *      rotted and the check silently passes forever (the vacuous-gate failure
+ *      mode, `experience_gathered.md` §59/§63);
+ *    - it must NOT appear in any eagerly-reachable chunk.
+ *
+ *  History: `App.tsx` imported `runAgentDemo` from `./agent/demo`, which has a
+ *  value import of `src/tools` → `src/api` → `src/language` + `src/ir`.  One
+ *  symbol put Langium, chevrotain and the whole grammar into the eager entry
+ *  chunk (2.57 MB, of which ~1.5 MB was compiler) — a THIRD resident copy
+ *  alongside `build.worker` and `ddd-server.worker`, on the main thread.  See
+ *  M-T8.15. */
+const FORBIDDEN_IN_EAGER = [
+  {
+    needle: "chevrotain",
+    what: "the Langium parser / Loom grammar (src/language)",
+    fix: "reach it through `await import(...)`, or move the work into the build worker",
+  },
+  {
+    needle: "loom_validate",
+    what: "the agent tool catalog (src/tools → src/api → src/language + src/ir)",
+    fix: "import the agent modules type-only and `await import(...)` at the call site",
+  },
+];
+
 /** Static import edges only.  `from"./x.js"` and bare `import"./x.js"` are
  *  static; `import("./x.js")` is dynamic and is exactly what we want to see
  *  instead. */
@@ -91,13 +123,59 @@ for (const [file, importer] of via) {
   if (hit) violations.push({ file, importer, prefix: hit, size: bytes(file) });
 }
 
+const allJs = readdirSync(ASSETS).filter((f) => f.endsWith(".js"));
 const eagerBytes = [...via.keys()].reduce((a, f) => a + bytes(f), 0);
-const allBytes = readdirSync(ASSETS)
-  .filter((f) => f.endsWith(".js"))
-  .reduce((a, f) => a + bytes(f), 0);
+const allBytes = allJs.reduce((a, f) => a + bytes(f), 0);
 const mb = (n) => `${(n / 1e6).toFixed(2)} MB`;
 
 console.log(`eager JS: ${mb(eagerBytes)} of ${mb(allBytes)} total (${via.size} chunks)`);
+
+// --- signature check -------------------------------------------------------
+const read = (f) => {
+  try {
+    return readFileSync(path.join(ASSETS, f), "utf8");
+  } catch {
+    return "";
+  }
+};
+const eagerFiles = [...via.keys()].filter((f) => allJs.includes(f));
+const rotted = [];
+const leaked = [];
+for (const sig of FORBIDDEN_IN_EAGER) {
+  if (!allJs.some((f) => read(f).includes(sig.needle))) {
+    rotted.push(sig);
+    continue;
+  }
+  const hits = eagerFiles.filter((f) => read(f).includes(sig.needle));
+  if (hits.length > 0) leaked.push({ sig, hits });
+}
+
+if (rotted.length > 0) {
+  console.error("\ncheck-eager-chunks: signature(s) no longer present ANYWHERE in dist/:\n");
+  for (const s of rotted) console.error(`  "${s.needle}"  — meant to mark ${s.what}`);
+  console.error(
+    "\nThe check can no longer fail, which makes it worthless.  Either the code " +
+      "\ngenuinely left the bundle (delete the signature) or the minifier/dep " +
+      "\nrenamed it (pick a new one that survives).\n",
+  );
+  process.exit(1);
+}
+
+if (leaked.length > 0) {
+  console.error("\ncheck-eager-chunks: code that must stay lazy is on the eager path:\n");
+  for (const { sig, hits } of leaked) {
+    console.error(`  ${sig.what}`);
+    console.error(`    signature "${sig.needle}" found in: ${hits.join(", ")}`);
+    console.error(`    importer chain starts at: ${hits.map((h) => via.get(h)).join(", ")}`);
+    console.error(`    fix: ${sig.fix}`);
+  }
+  console.error(
+    "\nOn iOS the main thread and every worker share ONE process memory budget, " +
+      "\nand the playground has to find 128 MB contiguous for Postgres-in-WASM on " +
+      "\ntop of whatever is resident.  See M-T8.15.\n",
+  );
+  process.exit(1);
+}
 
 if (violations.length > 0) {
   console.error("\ncheck-eager-chunks: LAZY chunk(s) promoted to the eager path:\n");
@@ -114,4 +192,7 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`check-eager-chunks: OK — ${MUST_BE_LAZY.length} lazy chunk(s) verified lazy`);
+console.log(
+  `check-eager-chunks: OK — ${MUST_BE_LAZY.length} lazy chunk(s) verified lazy, ` +
+    `${FORBIDDEN_IN_EAGER.length} signature(s) verified off the eager path`,
+);

@@ -6,8 +6,21 @@ import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { monacoModelHost } from "./lsp/model-host";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
-import { type AgentMessage, runAgentDemo as playAgentDemo } from "./agent/demo";
-import { runLiveAgent } from "./agent/live";
+// `agent/demo`, `agent/live` and `agent/system-prompt` are imported TYPE-ONLY
+// on purpose, and their functions are reached through `await import(...)` at
+// the call sites below.  Each of them has a VALUE import of `src/tools`, which
+// re-exports `src/api`, which pulls `src/language` + `src/ir` — i.e. Langium,
+// chevrotain and the whole grammar.  A single static import here put the entire
+// Loom compiler front-end into the eager entry chunk (`chevrotain` ×25 in the
+// built `index-*.js`), on the main thread, for one `runAgentDemo` symbol —
+// a THIRD resident copy alongside `build.worker` and `ddd-server.worker`.
+//
+// That matters beyond first paint: the playground boots Postgres-in-WASM, which
+// demands a 128 MB contiguous heap, and on iOS the main thread and every worker
+// share one process memory budget.  See M-T8.15.
+import type { AgentMessage } from "./agent/demo";
+// Type-only from `src/tools` too (`Complete` etc.) — no runtime edge; this
+// module's own body is small and provider-shaped.
 import { createOpenAiCompatibleComplete } from "./agent/openai-transport";
 import {
   type AgentSettings,
@@ -16,7 +29,6 @@ import {
   saveAgentSettings,
   settingsReady,
 } from "./agent/provider";
-import { buildSystemPrompt } from "./agent/system-prompt";
 import type { Complete, Message as AgentTranscriptMessage } from "../../src/tools/index.js";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
@@ -1620,6 +1632,7 @@ export default function App(): JSX.Element {
     agentSignalRef.current = { cancelled: false };
     setAgentRunning(true);
     try {
+      const { runAgentDemo: playAgentDemo } = await import("./agent/demo");
       await playAgentDemo({
         setMessages: setAgentMessages,
         applySource: applyAgentSource,
@@ -1664,6 +1677,10 @@ export default function App(): JSX.Element {
         stream: true,
       });
     try {
+      const [{ runLiveAgent }, { buildSystemPrompt }] = await Promise.all([
+        import("./agent/live"),
+        import("./agent/system-prompt"),
+      ]);
       agentTranscriptRef.current = await runLiveAgent({
         complete,
         prompt: text,
