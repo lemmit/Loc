@@ -256,13 +256,21 @@ export const flutterTarget: WalkerTarget = {
     const p = `state.${spec.page.name}`;
     const setP = setterName(spec.page.name);
     const total = spec.totalPagesExpr;
+    // `const Text('Prev')` only stays const while the label is a literal — a
+    // `t(...)` call is not, and Dart rejects `const` over it.  So constness
+    // follows the label, which keeps the i18n-off output byte-identical.
+    const label = (text: string) =>
+      text.startsWith("'") ? `const Text(${text})` : `Text(${text})`;
+    // The counter under i18n is one `t()` call whose locale may reorder the two
+    // numbers; off, it is the Dart interpolation this target has always emitted.
+    const counter = spec.chrome.pageOfValue(p, total) ?? `'Page \${${p}} of \${${total}}'`;
     return (
       `Row(mainAxisAlignment: MainAxisAlignment.end, children: <Widget>[` +
       `TextButton(onPressed: ${p} <= 1 ? null : () => notifier.${setP}(${p} - 1), ` +
-      `child: const Text('Prev')), ` +
-      `Semantics(liveRegion: true, child: Text('Page \${${p}} of \${${total}}')), ` +
+      `child: ${label(spec.chrome.prevValue)}), ` +
+      `Semantics(liveRegion: true, child: Text(${counter})), ` +
       `TextButton(onPressed: ${p} >= ${total} ? null : () => notifier.${setP}(${p} + 1), ` +
-      `child: const Text('Next'))])`
+      `child: ${label(spec.chrome.nextValue)})])`
     );
   },
 
