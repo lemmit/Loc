@@ -451,7 +451,13 @@ export function renderVuePage(input: VuePageShellInput): string {
         openVar: `${opCamel}Open`,
         formVar: `${opCamel}Form`,
         mutVar: opCamel,
-        title: humanize(state.op.name),
+        // The authored `Modal { title: … }` (already translated — the
+        // `modalTitle` catalog slot), else the humanized op name, which is what
+        // this template hardcoded.  `title` is the TEXT spelling (shadcnVue's
+        // `<DialogTitle>`), `titleExpr` the bound-attribute expression
+        // (vuetify's `:title`) — D-I18N-ATTR's two spellings of one name.
+        title: state.modalTitle || humanize(state.op.name),
+        titleExpr: state.modalTitleExpr ?? JSON.stringify(humanize(state.op.name)),
         submitLabel: humanize(state.op.name),
         ns,
         fieldsHtml: fields,
@@ -1125,7 +1131,11 @@ export function renderVueComponentFile(
         openVar: `${opCamel}Open`,
         formVar: `${opCamel}Form`,
         mutVar: opCamel,
-        title: humanize(st.op.name),
+        // Same two title spellings as the page-level call site above — this is
+        // the COMPONENT path (`component X { … }` bodies), and a template var
+        // only one caller passes throws on the strict-Handlebars packs.
+        title: st.modalTitle || humanize(st.op.name),
+        titleExpr: st.modalTitleExpr ?? JSON.stringify(humanize(st.op.name)),
         submitLabel: humanize(st.op.name),
         ns: st.testidNamespace,
         fieldsHtml: fields,

@@ -1,5 +1,5 @@
   <v-dialog v-model="{{openVar}}" max-width="560">
-    <v-card title="{{title}}">
+    <v-card :title='{{{titleExpr}}}'>
       <v-card-text>
         <v-form data-testid="{{ns}}-form" @submit.prevent='{{formVar}}.handleSubmit(async (vals) => { await {{mutVar}}.mutateAsync(vals); {{openVar}} = false; })($event)'>
           <div class="d-flex flex-column ga-4">

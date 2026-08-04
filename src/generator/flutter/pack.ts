@@ -265,6 +265,30 @@ function primitiveBadge(c: Ctx): string {
   return `Chip(label: ${asText(label)}, visualDensity: VisualDensity.compact)`;
 }
 
+/** `Modal { …, open: <state bool> }` → `LoomModalHost(...)` (lib/modal.dart).
+ *
+ *  Flutter's dialogs are imperative (`showDialog` pushes a route), so there is
+ *  no widget to conditionally render — which is why this primitive had no Dart
+ *  renderer and a controlled Modal silently degraded to a comment, dropping the
+ *  dialog AND its content.  `LoomModalHost` is the standard declarative bridge;
+ *  see `modal-runtime.ts` for why it latches and why it reports dismissal back.
+ *
+ *  `opened` is the state field and `setter` its Notifier setter, so the flag is
+ *  read through the projected `state.<field>` and released through
+ *  `notifier.set<Field>(false)` — the same two seams every other Flutter state
+ *  binding uses. */
+function primitiveModalControlled(c: Ctx): string {
+  const opened = String(c.opened ?? "");
+  const setter = String(c.setter ?? "");
+  const title = c.hasTitle ? `title: ${asText(String(c.title ?? ""))}, ` : "";
+  const body = childrenList(c);
+  return (
+    `LoomModalHost(open: state.${opened}, ${title}` +
+    `onClose: () => notifier.${setter}(false), ` +
+    `child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: ${body}))`
+  );
+}
+
 /** Divider — a Material rule.  An optional `label:` splits it into rule-text-rule
  *  (Flutter has no labelled `Divider`, so the label sits between two `Expanded`
  *  rules).  Without this the slot was extracted into `.loom/messages.en.json` but
@@ -661,6 +685,7 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-card": primitiveCard,
   "primitive-badge": primitiveBadge,
   "primitive-divider": primitiveDivider,
+  "primitive-modal-controlled": primitiveModalControlled,
   "primitive-alert": primitiveAlert,
   "primitive-empty": primitiveEmpty,
   "primitive-skeleton": primitiveSkeleton,
@@ -713,7 +738,15 @@ export function flutterPack(): LoadedPack {
       imports: {},
     },
     rootDir: "<flutter-procedural>",
-    templates: new Map() as unknown as LoadedPack["templates"],
+    // `templates` is otherwise unused (this pack renders via `RENDERERS`, not
+    // compiled `.hbs`), but `emitControlledModal` gates the state-controlled
+    // Modal on `pack.templates.has("primitive-modal-controlled")` — a capability
+    // PROBE, never a render call.  Seed that one key so the procedural renderer
+    // above is recognised, exactly as the Feliz pack does; the sentinel value is
+    // never invoked.
+    templates: new Map([
+      ["primitive-modal-controlled", { fn: () => "", filePath: "<flutter-procedural>" }],
+    ]) as unknown as LoadedPack["templates"],
     render(name: string, context: unknown): string {
       const fn = RENDERERS[name];
       if (!fn) return `// flutter pack: no renderer for "${name}"`;

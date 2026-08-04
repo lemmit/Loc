@@ -13,7 +13,7 @@ import { Controller, useForm } from "react-hook-form";
 import { useOrderById } from "../../api/order";
 function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
   modals.open({
-    title: "Add Line",
+    title: t("page.Detail.modalTitle.uhabr2", "Add Line"),
     children: <AddLineForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -60,7 +60,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
         />
 
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-addLine-submit">Add Line</Button>
         </Group>
       </Stack>
@@ -69,7 +69,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
 }
 function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
   modals.open({
-    title: "Confirm",
+    title: t("page.Detail.modalTitle.8tbqwf", "Confirm"),
     children: <ConfirmForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -100,7 +100,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
       <Stack>
         <Text c="dimmed">This operation has no parameters.</Text>
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-confirm-submit">Confirm</Button>
         </Group>
       </Stack>
@@ -109,7 +109,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
 }
 function openUpdateModal(mut: ReturnType<typeof useUpdateOrder>): void {
   modals.open({
-    title: "Update",
+    title: t("page.Detail.modalTitle.uk4kus", "Update"),
     children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -151,7 +151,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
         <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-op-update-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
 
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-update-submit">Update</Button>
         </Group>
       </Stack>

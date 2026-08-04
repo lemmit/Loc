@@ -30,6 +30,7 @@
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
 import { DART_LEAVES, dartString, dartZeroValue } from "./dart-expr.js";
@@ -446,8 +447,9 @@ export const flutterTarget: WalkerTarget = {
   // route on submit success, which dismisses the dialog — so no extra close
   // wiring is needed.  Only the trigger + `OperationForm(of:, op:)` shape is
   // emitted (the same flat shape `scaffoldOperations(of:)` builds); the
-  // state-controlled `open:` shape falls to a diagnostic comment (never broken
-  // Dart).  The nested op-form widget is emitted into `lib/forms.dart` by
+  // state-controlled `open:` shape falls through to the shared `emitModal`,
+  // which routes it to this pack's `primitive-modal-controlled` renderer.  The
+  // nested op-form widget is emitted into `lib/forms.dart` by
   // `collectFlutterForms` scanning the page body independently of this render.
   renderModal: (call, ctx) => {
     if (call.kind !== "call") return null;
@@ -458,11 +460,14 @@ export const flutterTarget: WalkerTarget = {
         a.kind === "call" && a.name === "OperationForm",
     );
     const trigger = namedArg(call, "trigger");
-    if (!formChild || trigger?.kind !== "call") {
-      return flutterTarget.renderComment(
-        "Modal: expects trigger: Button(...) and an OperationForm(of:, op:) child",
-      );
-    }
+    // Not the op-dialog shape → return null so the shared `emitModal` can try
+    // the STATE-CONTROLLED one (`Modal { …, open: <state bool> }`), which
+    // Flutter now renders through `LoomModalHost`.  Claiming the primitive with
+    // a comment here is what made a controlled Modal degrade to `/* … */`,
+    // silently dropping the dialog AND its content — and the comment described a
+    // shape the author hadn't written.  `emitModal` still emits its own
+    // explanatory comment when neither shape matches.
+    if (!formChild || trigger?.kind !== "call") return null;
     const ofArg = namedArg(formChild, "of");
     const opArg = namedArg(formChild, "op");
     const agg = ofArg?.kind === "ref" ? ctx.aggregatesByName.get(ofArg.name) : undefined;
@@ -484,9 +489,15 @@ export const flutterTarget: WalkerTarget = {
       firstPositional?.kind === "literal" && firstPositional.lit === "string"
         ? firstPositional.value
         : humanize(op.name);
+    // The dialog title: the authored `Modal { title: … }` (already translated —
+    // the `modalTitle` catalog slot, D-I18N-ATTR), else the humanized op name,
+    // which is what this renderer hardcoded.  `localizedNamedValue` yields a
+    // Dart EXPRESSION either way, so it drops straight into `Text(…)`.
+    const title =
+      localizedNamedValue(call, ctx, "modalTitle", "title") ?? dartString(humanize(op.name));
     return (
       `ElevatedButton(onPressed: () => showDialog(context: context, ` +
-      `builder: (dialogContext) => AlertDialog(title: Text(${dartString(humanize(op.name))}), ` +
+      `builder: (dialogContext) => AlertDialog(title: Text(${title}), ` +
       `content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ${widget}(id: id))))), ` +
       `child: Text(${dartString(label)}))`
     );
@@ -558,7 +569,7 @@ export const flutterTarget: WalkerTarget = {
   // name so a hyphenated source attr stays a legal Dart identifier).
   renderAttrBinding: (name: string, jsExpr: string) => ` ${dartIdent(name)}: ${jsExpr}`,
   // A Dart string literal — how a user-visible string reaching the pack as a
-  // VALUE (`localizedAriaLabelValue`, D-I18N-ATTR) is spelled with i18n off.
+  // VALUE (`localizedNamedValue`, D-I18N-ATTR) is spelled with i18n off.
   // The same single-quoted escaping the translation runtime uses for its keys.
   renderStringLiteral: dartStringLit,
 

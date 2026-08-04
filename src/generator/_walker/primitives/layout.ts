@@ -4,7 +4,7 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedAriaLabelAttr, localizedAriaLabelValue, localizedText } from "../i18n-emit.js";
+import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   namedArgValue,
@@ -295,7 +295,7 @@ export function emitToolbar(
     // accessible name, already translated, as a target-native expression
     // (D-I18N-ATTR).
     a11yAttr: ` role="toolbar"${localizedAriaLabelAttr(call, ctx, "toolbarAria", "label", "Actions")}`,
-    ariaLabelExpr: localizedAriaLabelValue(call, ctx, "toolbarAria", "label", "Actions"),
+    ariaLabelExpr: localizedNamedValue(call, ctx, "toolbarAria", "label", "Actions"),
   });
 }
 

@@ -358,11 +358,12 @@ defmodule {{webModule}}.CoreComponents do
 
   @doc "Empty-state placeholder rendered when a list is empty."
   attr :class, :string, default: nil
+  slot :inner_block
 
   def empty(assigns) do
     ~H"""
     <div class={["text-center text-sm text-zinc-500 py-8", @class]}>
-      No items.
+      <%= if @inner_block == [] do %>No items.<% else %>{render_slot(@inner_block)}<% end %>
     </div>
     """
   end

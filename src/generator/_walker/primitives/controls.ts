@@ -8,7 +8,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
 import { skipsEntityHistoryRead } from "../history-read.js";
-import { localizedAriaLabelAttr, localizedAriaLabelValue, localizedText } from "../i18n-emit.js";
+import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { queryShape } from "../paged-query.js";
 import { renderPrimitive } from "../render-primitive.js";
@@ -169,7 +169,7 @@ export function emitButton(
     // HTML build a prop from `ariaLabelExpr` instead: the SAME accessible name,
     // already translated, as a target-native expression (D-I18N-ATTR).
     a11yAttr: localizedAriaLabelAttr(call, ctx, "buttonAria"),
-    ariaLabelExpr: localizedAriaLabelValue(call, ctx, "buttonAria"),
+    ariaLabelExpr: localizedNamedValue(call, ctx, "buttonAria"),
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

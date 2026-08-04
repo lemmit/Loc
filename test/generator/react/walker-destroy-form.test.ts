@@ -39,11 +39,32 @@ describe("DestroyForm — canonical destroy confirmation", () => {
     expect(page).toContain('import { useParams, useNavigate } from "react-router";');
     expect(page).toContain("const { id } = useParams<{ id: string }>();");
     expect(page).toContain("const deleteOrder = useDeleteOrder();");
+    // This page authors NO strings of its own, so the ui is not i18n-enabled —
+    // and a FORM primitive must not flip it on (`FORM_CHROME`).  The prompt and
+    // label therefore render as plain literals, byte-identical to pre-i18n.
     expect(page).toContain(
-      'if (window.confirm("Delete this order?")) void deleteOrder.mutateAsync(id ?? "").then(() => { navigate("/orders"); });',
+      'if (window.confirm("Delete this order?")) ' +
+        'void deleteOrder.mutateAsync(id ?? "").then(() => { navigate("/orders"); });',
     );
+    expect(page).toContain(">Delete Order</Button>");
     expect(page).toContain('data-testid="orders-destroy"');
     expect(page).toContain("loading={deleteOrder.isPending}");
+  });
+
+  it("…and DOES translate once the ui has authored strings", async () => {
+    // The other half of the FORM_CHROME rule: form chrome must not FLIP i18n on,
+    // but it must ride the catalog once the ui is enabled by an authored string.
+    // Otherwise the destroy button and its prompt would be the one English
+    // island left in a fully translated app — which is how they shipped before
+    // `chrome.deleteEntity`/`deleteConfirm` existed.
+    const files = await generateSystemFiles(
+      sys(`Stack { Heading { "Danger zone" }, DestroyForm { of: Order } }`),
+    );
+    const page = files.get("web/src/pages/order_admin.tsx")!;
+    expect(page).toContain(
+      't("chrome.deleteConfirm", "Delete this {entity}?", { entity: "order" })',
+    );
+    expect(page).toContain('t("chrome.deleteEntity", "Delete {entity}", { entity: "Order" })');
   });
 
   it("renders a visible placeholder for an aggregate without a canonical destroy", async () => {

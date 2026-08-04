@@ -608,7 +608,7 @@ both produced by `src/generator/_walker/i18n-emit.ts` from the same
   `localizedNamedAttr`) — spliced verbatim by the four JSX/markup
   frontends, whose packs are `.hbs` templates that can only interpolate
   text;
-- a target-native **VALUE** (`localizedAriaLabelValue`, via the optional
+- a target-native **VALUE** (`localizedNamedValue`, via the optional
   `WalkerTarget.renderStringLiteral` seam) — for the packs that build
   props procedurally rather than markup: Feliz (F# `prop.ariaLabel …`)
   and Flutter (Dart `Semantics(label: …)`).

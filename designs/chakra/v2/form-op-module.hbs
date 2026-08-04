@@ -13,7 +13,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
       <Modal isOpen={isOpen} onClose={onClose}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{{humanOp}}</ModalHeader>
+          <ModalHeader>{{{modalTitle}}}</ModalHeader>
           <ModalCloseButton />
           <form
             data-testid="{{slug}}-op-{{opName}}-form"
@@ -39,7 +39,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
                 {{/if}}</VStack>
             </ModalBody>
             <ModalFooter gap={2}>
-              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button type="button" variant="ghost" onClick={onClose}>{{{cancelLabel}}}</Button>
               <Button type="submit" colorScheme="brand" isLoading={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
             </ModalFooter>
           </form>

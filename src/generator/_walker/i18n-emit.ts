@@ -210,8 +210,16 @@ export function localizedNamedAttr(
   name: string,
   attrName: string,
 ): string {
-  const literal = literalString(namedArgValue(call, name));
-  if (literal === undefined) return "";
+  const arg = namedArgValue(call, name);
+  const literal = literalString(arg);
+  if (literal === undefined) {
+    // DYNAMIC (`title: order.status`) — no stable source string, so nothing to
+    // translate, but the value is still the author's user-visible text.  Bind
+    // the expression rather than dropping the attribute: silently rendering a
+    // titled Alert with no title is the same dead-slot bug a missing template
+    // branch causes.  Absent slot → still the empty fragment.
+    return arg ? ctx.target.renderAttrBinding(attrName, emitExpr(arg, ctx)) : "";
+  }
   if (ctx.i18nPrefix) {
     const key = messageKey(ctx.i18nPrefix, role, literal);
     return ctx.target.renderAttrBinding(attrName, translateCall(ctx, key, literal));
@@ -242,18 +250,31 @@ export function localizedAriaLabelAttr(
   name = "label",
   defaultLabel?: string,
 ): string {
-  const literal = literalString(namedArgValue(call, name));
+  const arg = namedArgValue(call, name);
+  const literal = literalString(arg);
+  const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
   if (literal !== undefined && ctx.i18nPrefix) {
     const key = messageKey(ctx.i18nPrefix, role, literal);
-    const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
     return ctx.target.renderAttrBinding(attrName, translateCall(ctx, key, literal));
+  }
+  // DYNAMIC (`label: row.name`) — no stable source string to translate, but
+  // dropping it left an icon-only Button with NO accessible name at all, on a
+  // control whose a11y contract says `needsName` (WCAG 4.1.2).  The
+  // `loom.a11y-icon-only-no-name` validator stays quiet precisely because a
+  // `label:` IS present, so nothing else catches it.  Bind the expression.
+  if (literal === undefined && arg) {
+    return ctx.target.renderAttrBinding(attrName, emitExpr(arg, ctx));
   }
   return ariaLabelAttr(literal ?? defaultLabel);
 }
 
-/** The accessible name of a NAMED user-visible slot as a TARGET-NATIVE
- *  EXPRESSION — the value-position twin of {@link localizedAriaLabelAttr}, and
- *  the seam for the two frontends whose markup is NOT HTML.
+/** A NAMED user-visible slot as a TARGET-NATIVE EXPRESSION — the value-position
+ *  twin of {@link localizedAriaLabelAttr}.
+ *
+ *  Two kinds of caller need a value rather than markup: the frontends whose
+ *  markup is NOT HTML (Feliz's F# props, Flutter's Dart args), and any pack slot
+ *  that is a plain JS EXPRESSION rather than an element (Mantine's
+ *  `modals.open({ title: … })`).
  *
  *  D-I18N-ATTR (M-T1.11): **the a11y helper emits an already-TRANSLATED value;
  *  a pack never resolves a key.**  One accessible name, two renderings, both
@@ -262,7 +283,7 @@ export function localizedAriaLabelAttr(
  *   - the HTML-ish attribute FRAGMENT (`localizedAriaLabelAttr`) — spliced
  *     verbatim by the four JSX/markup frontends, whose packs are `.hbs`
  *     templates that can only interpolate text;
- *   - this VALUE (`localizedAriaLabelValue`) — an expression in the target's own
+ *   - this VALUE (`localizedNamedValue`) — an expression in the target's own
  *     language, for the procedural packs that build props rather than markup
  *     (Feliz `prop.ariaLabel <expr>`, Flutter `Semantics(label: <expr>)`).
  *
@@ -272,22 +293,24 @@ export function localizedAriaLabelAttr(
  *  with no runtime.  Deciding once here keeps the i18n-OFF path byte-identical
  *  by construction.
  *
- *  Returns `undefined` when the slot carries no name at all (no literal, no
+ *  Returns `undefined` only when the slot carries no name AT ALL (no arg, no
  *  `defaultLabel`) — the caller omits the prop, matching the empty-string
- *  fragment `ariaLabelAttr` yields.  A DYNAMIC (non-literal) label is likewise
- *  `undefined`: it has no stable source string, exactly as in the attribute
- *  path. */
-export function localizedAriaLabelValue(
+ *  fragment `ariaLabelAttr` yields.  A DYNAMIC (non-literal) slot has no stable
+ *  source string to translate, but it is still the author's user-visible text,
+ *  so it renders as the target's own expression rather than vanishing. */
+export function localizedNamedValue(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
   role: string,
   name = "label",
   defaultLabel?: string,
 ): string | undefined {
-  const literal = literalString(namedArgValue(call, name));
+  const arg = namedArgValue(call, name);
+  const literal = literalString(arg);
   if (literal !== undefined && ctx.i18nPrefix) {
     return translateCall(ctx, messageKey(ctx.i18nPrefix, role, literal), literal);
   }
+  if (literal === undefined && arg) return emitExpr(arg, ctx);
   const text = literal ?? defaultLabel;
   if (text === undefined || text === "") return undefined;
   return stringLiteral(ctx, text);
@@ -321,6 +344,65 @@ export function localizedChromeAria(ctx: WalkContext, name: string, english: str
     return ctx.target.renderAttrBinding(attrName, translateCall(ctx, chromeKey(name), english));
   }
   return ` aria-label="${escapeHtmlAttr(english)}"`;
+}
+
+/** A pack-chrome string the WALKER builds, rendered INTO THE PAGE, as a
+ *  markup-TEXT token — `{t("chrome.<name>", "<english>", { … })}` under i18n,
+ *  the escaped literal otherwise (byte-identical).
+ *
+ *  Chrome the emitter constructs from model data — the destroy button's
+ *  `Delete <Aggregate>`, its `window.confirm` prompt, an op dialog's Cancel —
+ *  reached NO catalog: the content-hash extraction pass only sees literals in
+ *  the `.ddd` body, and the pack-chrome slice only covers `.hbs` templates.
+ *
+ *  `values` carries the ICU holes (`{entity}`), whose values are DSL
+ *  identifiers: they stay as authored while the sentence around them
+ *  translates.  Unlike the hoisted-child helpers below this DOES register the
+ *  `t` import — the markup lands in the page itself. */
+export function localizedPageChromeText(
+  ctx: WalkContext,
+  name: string,
+  values?: ReadonlyArray<{ name: string; expr: string }>,
+): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) {
+    return unwrapTextLiteral(
+      ctx.target.renderInterpolation(
+        translateCall(ctx, chromeKey(name), english, values),
+        TRANSLATED,
+      ),
+      ctx.target.escapeText,
+    );
+  }
+  return fillHoles(english, values);
+}
+
+/** {@link localizedPageChromeText} as a target-native EXPRESSION — for a slot
+ *  that is a JS/Dart/F# value rather than markup (a `window.confirm(…)`
+ *  argument). */
+export function localizedPageChromeValue(
+  ctx: WalkContext,
+  name: string,
+  values?: ReadonlyArray<{ name: string; expr: string }>,
+): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) return translateCall(ctx, chromeKey(name), english, values);
+  return JSON.stringify(fillHoles(english, values));
+}
+
+/** Substitute ICU `{hole}`s with their rendered values — the i18n-OFF spelling,
+ *  where the sentence is a plain string rather than a runtime `t()` call.  Only
+ *  QUOTED literal values are inlined (chrome holes are model-derived names). */
+function fillHoles(
+  english: string,
+  values?: ReadonlyArray<{ name: string; expr: string }>,
+): string {
+  let out = english;
+  for (const v of values ?? []) {
+    const literal = /^"(.*)"$/.exec(v.expr);
+    out = out.replace(`{${v.name}}`, literal ? literal[1]! : v.expr);
+  }
+  return out;
 }
 
 // --- Chrome that lands in a HOISTED CHILD file -----------------------------

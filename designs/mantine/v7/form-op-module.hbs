@@ -1,6 +1,6 @@
 function open{{opPascal}}Modal(mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>{{#if recordVar}}, record: {{recordType}}{{/if}}): void {
   modals.open({
-    title: "{{humanOp}}",
+    title: {{{modalTitleExpr}}},
     children: <{{opPascal}}Form mut={mut}{{#if recordVar}} record={record}{{/if}} onClose={() => modals.closeAll()} />,
   });
 }
@@ -34,7 +34,7 @@ function {{opPascal}}Form({ mut,{{#if recordVar}} record,{{/if}} onClose }: { mu
         {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
         {{/each}}{{else}}<Text c="dimmed">This operation has no parameters.</Text>
         {{/if}}<Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{{{cancelLabel}}}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
         </Group>
       </Stack>

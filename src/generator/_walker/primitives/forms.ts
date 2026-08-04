@@ -18,7 +18,13 @@ import {
 } from "../../_frontend/form-helpers.js";
 import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
-import { localizedNamedAttr, localizedNamedText } from "../i18n-emit.js";
+import {
+  localizedNamedAttr,
+  localizedNamedText,
+  localizedNamedValue,
+  localizedPageChromeText,
+  localizedPageChromeValue,
+} from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
   addImport,
@@ -164,12 +170,19 @@ export function emitDestroyForm(
     ctx.usesNavigate = true;
     thenJs = `navigate(${JSON.stringify(`/${snake(plural(agg.name))}`)})`;
   }
-  const confirmMsg = JSON.stringify(`Delete this ${humanize(agg.name).toLowerCase()}?`);
+  // Both the prompt and the button label are user-visible English the EMITTER
+  // builds from the aggregate name, so neither the content-hash extraction pass
+  // (literals in the .ddd body) nor the pack-chrome slice (.hbs templates) ever
+  // saw them — they shipped untranslated on every frontend.  Now stable
+  // `chrome.*` keys with the entity name as an ICU hole.
+  const entityLower = { name: "entity", expr: JSON.stringify(humanize(agg.name).toLowerCase()) };
+  const entity = { name: "entity", expr: JSON.stringify(humanize(agg.name)) };
+  const confirmMsg = localizedPageChromeValue(ctx, "deleteConfirm", [entityLower]);
   const onClick = `() => { if (window.confirm(${confirmMsg})) void ${localVar}.mutateAsync(id ?? "").then(() => { ${thenJs}; }); }`;
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-destroy`;
   ctx.collectedTestids.add(testidNamespace);
   return renderPrimitive(ctx, "primitive-button", {
-    label: `Delete ${humanize(agg.name)}`,
+    label: localizedPageChromeText(ctx, "deleteEntity", [entity]),
     onClick,
     hasOnClick: true,
     disabled: undefined,
@@ -243,6 +256,10 @@ function emitFormOfOperationByName(
   if (opFormStateType) addImport(ctx, `../api/${lowerFirst(agg.name)}`, opFormStateType);
   ctx.formOfs.push({
     kind: "operation",
+    // Pack chrome the op-module TEMPLATE bakes in — resolved HERE because this
+    // is where a WalkContext exists (the page-shell that renders the template
+    // has only the state + pack).
+    cancelLabel: localizedPageChromeText(ctx, "cancel"),
     agg,
     op,
     bc,
@@ -731,6 +748,10 @@ function emitFormOfOperation(
   if (opFormStateType) addImport(ctx, `../api/${lowerFirst(agg.name)}`, opFormStateType);
   ctx.formOfs.push({
     kind: "operation",
+    // Pack chrome the op-module TEMPLATE bakes in — resolved HERE because this
+    // is where a WalkContext exists (the page-shell that renders the template
+    // has only the state + pack).
+    cancelLabel: localizedPageChromeText(ctx, "cancel"),
     agg,
     op,
     bc,
@@ -808,18 +829,26 @@ function emitControlledModal(
   const setter = `set${stateName[0]!.toUpperCase()}${stateName.slice(1)}`;
   // `hasTitle` gates the title block exactly as before — true only for a literal
   // `title:` (a dynamic/absent title is byte-identical to the pre-i18n path).
-  const hasTitle = stringNamed(call, "title") !== undefined;
+  // Presence is the ARG, not a literal — a dynamic `title:` still has text.
+  const hasTitle = namedArgValue(call, "title") !== undefined;
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   // Children = the modal body (every positional except the op-form, which this
-  // shape doesn't have).
-  const childrenJsx = positionalArgs(call)
-    .map((c) => walk(c, ctx, depth + 1))
-    .join(`\n${indent}`);
+  // shape doesn't have).  Joined with the target's `interChildSeparator`, like
+  // every other container primitive: JSX children juxtapose (empty separator),
+  // but a Dart `<Widget>[…]` list needs the commas, and this emitter was the one
+  // container that hardcoded the JSX assumption.
+  const children = positionalArgs(call).map((c) => walk(c, ctx, depth + 1));
+  const childrenJsx = children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`);
   return renderPrimitive(ctx, "primitive-modal-controlled", {
     opened: stateName,
     setter,
     hasTitle,
+    // `childrenBlock`/`hasChildren` are the names the procedural packs' shared
+    // container helpers read (`childrenList` on Flutter); `childrenJsx` is what
+    // the `.hbs` templates already interpolate.  Same content, both spellings.
+    childrenBlock: childrenJsx,
+    hasChildren: children.length > 0,
     // The `title` named slot is user-visible text: a plain literal translates
     // through `t()` under i18n (keyed to the `modalTitle` catalog slot), else
     // byte-identical.  `title` is the text-children form (shadcn/chakra/mui/…),
@@ -900,6 +929,13 @@ export function emitModal(
     if (st.kind === "operation" && st.op.name === opName) {
       st.triggerLabel = label;
       st.triggerPrimary = triggerPrimary;
+      // `title:` is the `modalTitle` user-visible slot — extracted into the
+      // catalog whether or not a pack renders it.  Every pack hardcoded the
+      // humanized op name instead, so an authored title was silently dropped
+      // AND its catalog entry was dead.  Both spellings are stashed here (the
+      // page-shell falls back to `humanOp` when there is no authored title).
+      st.modalTitle = localizedNamedText(call, ctx, "modalTitle", "title", "");
+      st.modalTitleExpr = localizedNamedValue(call, ctx, "modalTitle", "title");
       // When a this-relative default was seeded, the op state carries the
       // in-scope instance var the trigger must pass as the `record` prop.
       recordVar = st.recordVar;

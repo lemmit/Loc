@@ -12,7 +12,7 @@ import { Controller, useForm } from "react-hook-form";
 import { useCustomerById } from "../../api/customer";
 function openUpdateModal(mut: ReturnType<typeof useUpdateCustomer>): void {
   modals.open({
-    title: "Update",
+    title: t("page.Detail.modalTitle.uk4kus", "Update"),
     children: <UpdateForm mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -54,7 +54,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateCustomer
         />
 
         <Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="customers-op-update-submit">Update</Button>
         </Group>
       </Stack>

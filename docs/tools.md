@@ -787,3 +787,69 @@ Why framework-native rather than emitting OpenAPI from the IR:
 For the full dimension reference, how to read a divergence report,
 and the checklist for adding a tenth dimension, see
 [`conformance.md`](conformance.md).
+
+## Compiling generated FRONTENDS locally
+
+The generated-frontend build gates (`generated-{react,vue,svelte,angular}-build`,
+`generated-feliz-build`, `generated-flutter-build`) run in CI, but all six can
+be reproduced by hand — generate a system, then run that frontend's real build
+in the emitted project:
+
+```bash
+node bin/cli.js generate system <f.ddd> -o out
+cd out/web && npm install && npx tsc --noEmit        # React (+ any static-bundle host)
+cd out/web && npm install && npx vue-tsc --noEmit    # Vue
+cd out/web && npm install && npx svelte-check        # Svelte
+cd out/web && npm install && npx ng build            # Angular  ← see the Node floor below
+```
+
+**The Angular CLI has a Node floor the sandbox image sits just under.** It
+requires **Node ≥ 22.22.3** (or 24.15 / 26.0); the container ships 22.22.2, so
+`ng build` refuses to start with a version message and it looks as though
+Angular simply can't be verified here. It can — fetch a newer Node into the
+scratchpad and put it first on `PATH` for that build only:
+
+```bash
+curl -fsSL -o node.tar.xz https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-x64.tar.xz
+tar xf node.tar.xz && export PATH="$PWD/node-v24.15.0-linux-x64/bin:$PATH"
+npx ng build          # in the emitted out/web
+```
+
+Feliz needs the .NET SDK (`dotnet fable`), which is not on the sandbox host, so
+that one stays CI's to answer. Everything else, including all three Angular
+design packs, builds locally in a couple of minutes and is far cheaper than a CI
+round-trip.
+
+### Flutter: the pub.dev TLS wrinkle, and how to analyze anyway
+
+Flutter runs in `ghcr.io/cirruslabs/flutter:stable`, but `flutter pub get` fails
+with `Got TLS error trying to find package … at https://pub.dev`. It is the SAME
+fingerprint wrinkle documented above for Erlang/hex: the egress proxy allowlists
+by TLS fingerprint, so system OpenSSL passes and the language's own TLS stack
+does not. The proof is one command — inside the container, `curl https://pub.dev/api/packages/vector_math`
+returns **200** while Dart's fetch of the same package is refused.
+
+So seed the pub cache with `curl` and resolve **offline**. Flutter pins its
+runtime deps to exact versions in the SDK's own pubspec, so fetch those:
+
+```bash
+# inside the container, with -v /root/.ccr:/root/.ccr:ro -e CURL_CA_BUNDLE=/root/.ccr/ca-bundle.crt
+CACHE=~/.pub-cache/hosted/pub.dev
+grep -oP '^  \K[a-z_0-9]+(?=:\s*[0-9])' /sdks/flutter/packages/flutter/pubspec.yaml | while read -r n; do
+  v=$(grep -oP "^  $n:\s*\K[0-9][0-9.]*" /sdks/flutter/packages/flutter/pubspec.yaml)
+  mkdir -p "$CACHE/$n-$v"
+  curl -sL "https://pub.dev/api/archives/$n-$v.tar.gz" | tar xz -C "$CACHE/$n-$v"
+done
+flutter pub get --offline && flutter analyze
+```
+
+That is enough to `flutter analyze` any generated file whose imports are
+SDK-only — which covers the hand-written runtime widgets (`lib/modal.dart`).
+Analyzing a full generated app additionally needs its pub deps
+(`flutter_riverpod`, `http`, `intl` + transitives) at constraint-satisfying
+versions, which is a version-solve the seeding trick doesn't do; a proper
+pub.dev mirror (the `scripts/hex-mirror.py` equivalent) is the durable fix, and
+`generated-flutter-build` remains the authority until it exists.
+
+> `vitest --reporter=basic` no longer exists in vitest 4 — it fails at startup
+> with "Failed to load custom Reporter from basic". Use the default reporter.

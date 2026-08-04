@@ -51,6 +51,7 @@ import {
 } from "./forms-emit.js";
 import { flutterI18nEnabled, renderFlutterI18nModule } from "./i18n.js";
 import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
+import { renderFlutterModalRuntime } from "./modal-runtime.js";
 import { flutterPack, usesIntl } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
@@ -182,6 +183,11 @@ export function generateFlutterForContexts(
   const usesActionHttp = rendered.some((r) => r.source.includes("apiUri("));
   if (reads.length > 0 || forms.length > 0 || usesActionHttp) {
     out.set("lib/config.dart", renderAppConfig());
+  }
+  // The controlled-Modal bridge — emitted only when a page opens one, matched to
+  // the same marker the per-page import sniffs so neither can dangle.
+  if (rendered.some((r) => r.source.includes("LoomModalHost("))) {
+    out.set("lib/modal.dart", renderFlutterModalRuntime());
   }
 
   if (rendered.length > 0) {
@@ -419,6 +425,10 @@ function renderStatelessPage(
 ): string {
   const imports = ["import 'package:flutter/material.dart';"];
   if (opts.hostsForm) imports.push("import '../forms.dart';");
+  // The controlled-Modal bridge, imported only where a page actually opens one
+  // (an unused Dart import is an analyzer warning, and `flutter analyze` is a
+  // per-PR gate).  Same content-sniff as `apiUri(` below.
+  if (bodyWidget.includes("LoomModalHost(")) imports.push("import '../modal.dart';");
   if (opts.usesComponent) imports.push("import '../components.dart';");
   // An `Action(<instance>.<op>)` button POSTs inline via `apiUri(` — the only
   // page-body reference to it — so import http + the base-URL helper on demand.
@@ -542,6 +552,10 @@ function renderConsumerPage(
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
   if (b.usesComponent) imports.push("import '../components.dart';");
+  // The controlled-Modal bridge (the state-bearing page path — its stateless
+  // sibling above sniffs the same marker).  A controlled Modal only exists on a
+  // page WITH state, so this is the branch that actually fires.
+  if (bodyWidget.includes("LoomModalHost(")) imports.push("import '../modal.dart';");
   // Content scan over BOTH the Notifier projection AND the rendered body: a
   // `match await` method (projSource) decodes JSON + reifies wire models, and a
   // `FileUpload` (bodyWidget) does the same inline plus references `FileRef` in

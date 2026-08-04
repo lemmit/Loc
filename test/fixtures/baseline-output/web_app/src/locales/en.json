@@ -1,5 +1,8 @@
 {
   "chrome.backToHome": "Back to home",
+  "chrome.cancel": "Cancel",
+  "chrome.deleteConfirm": "Delete this {entity}?",
+  "chrome.deleteEntity": "Delete {entity}",
   "chrome.notFound": "Not found",
   "chrome.openMenu": "Open menu",
   "chrome.primaryNav": "Primary navigation",
