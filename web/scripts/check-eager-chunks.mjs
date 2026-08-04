@@ -13,7 +13,12 @@
 //      with likec4, dragging LikeC4 + the Graphviz WASM layouter eager:
 //      3.07 MB of a 15.87 MB eager total.  (LikeC4 has since been removed
 //      outright; the grouping hazard it demonstrated has not.)
-//   3. …the next one, which is what this script exists to catch.
+//   3. `\0vite/preload-helper` — the helper EVERY `await import(...)` routes
+//      through.  Being a VIRTUAL module it matched no `manualChunks` rule, so
+//      rollup put it in the `monaco` chunk, and the entry's static import of
+//      the helper became a static import of 9.56 MB.  Every lazy boundary in
+//      the app was correct and Monaco still shipped on first paint.
+//   4. …the next one, which is what this script exists to catch.
 //
 // Eager JS matters here beyond first paint: the playground boots
 // Postgres-in-WASM, which demands a 128 MB CONTIGUOUS heap (declared by
@@ -38,6 +43,11 @@ const MUST_BE_LAZY = [
   "mermaid", // diagram renderer — the mermaid viewer
   "craftjs", // page builder — the Builder tab
   "monaco-views-optional", // service overrides for a viewsConfig we never use
+  // The editor itself.  Desktop fetches it immediately after first paint (it
+  // renders the editor), which is fine — what must not happen is it being a
+  // STATIC dependency of the entry, because then mobile downloads and parses
+  // 9.56 MB it will never show.  Reached only via `layout/lazy-panels.ts`.
+  "monaco",
 ];
 
 /** Code that must not be on the eager path, identified by a SIGNATURE rather

@@ -1,5 +1,7 @@
-import { Box } from "@mantine/core";
-import { LoomEditor } from "../editor/LoomEditor";
+import { Suspense } from "react";
+import { Box, Center, Loader } from "@mantine/core";
+import { PlainEditor } from "../editor/PlainEditor";
+import { LazyLoomEditor } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
 import type { LayoutCtx } from "./ctx";
 
@@ -47,7 +49,11 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     clearSourceError,
     workspace,
   } = ctx;
-  if (!lspClient) return null;
+  // Desktop wants the full editor and therefore the language client; mobile
+  // has neither, and `lspClient` is `null` there by construction (App.tsx
+  // never constructs one).  A missing client on DESKTOP means the LSP is
+  // still coming up — render nothing rather than an editor with no model.
+  if (isDesktop && !lspClient) return null;
 
   // Mobile only: a collapsible source-file tree above the editor.  On
   // desktop the single file explorer lives in the left Explorer panel
@@ -72,24 +78,46 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     />
   );
 
+  // `key` semantics are identical on both editors: remount on a project
+  // change so the editor reseeds from `initialSource` — the active workspace
+  // (switch), whether its content has finished loading, the last-imported
+  // example, the active file path, and `sourceEpoch`, which covers the
+  // changes identity alone can't see (a history restore or another writer
+  // replacing the active file's CONTENT under the same path).
+  const remountKey = `${workspace.activeId}:${workspace.loaded ? 1 : 0}:${exampleId}:${sourceEpoch}:${activeSourcePath}`;
+
   const editor = (
     <Box style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
-      <LoomEditor
-        // Remount on a project change so the editor reseeds from
-        // `initialSource`: the active workspace (switch), whether its
-        // content has finished loading, the last-imported example, the
-        // active file path — and `sourceEpoch`, which covers the changes
-        // identity alone can't see (a history restore or another writer
-        // replacing the active file's CONTENT under the same path).
-        key={`${workspace.activeId}:${workspace.loaded ? 1 : 0}:${exampleId}:${sourceEpoch}:${activeSourcePath}`}
-        client={lspClient}
-        initialValue={initialSource}
-        isMobile={!isDesktop}
-        handleRef={editorHandleRef}
-        onChange={(v) => onSourceChange(v, "editor")}
-        onDiagnosticsChange={onDiagnosticsChange}
-        activePath={activeSourcePath}
-      />
+      {isDesktop && lspClient ? (
+        <Suspense
+          fallback={
+            <Center h="100%">
+              <Loader size="sm" />
+            </Center>
+          }
+        >
+          <LazyLoomEditor
+            key={remountKey}
+            client={lspClient}
+            initialValue={initialSource}
+            isMobile={false}
+            handleRef={editorHandleRef}
+            onChange={(v) => onSourceChange(v, "editor")}
+            onDiagnosticsChange={onDiagnosticsChange}
+            activePath={activeSourcePath}
+          />
+        </Suspense>
+      ) : (
+        // Mobile: a textarea, no Monaco, no language client.  Diagnostics on
+        // this surface come from `generate` (the build worker already computes
+        // them) rather than from a live LSP — see M-T8.15.
+        <PlainEditor
+          key={remountKey}
+          initialValue={initialSource}
+          handleRef={editorHandleRef}
+          onChange={(v) => onSourceChange(v, "editor")}
+        />
+      )}
     </Box>
   );
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import {
   Badge,
   Box,
@@ -12,7 +12,8 @@ import {
   TextInput,
 } from "@mantine/core";
 import type { LayoutCtx } from "./ctx";
-import { JsonBodyEditor } from "../backend/JsonBodyEditor";
+import { PlainJsonBody } from "../backend/PlainJsonBody";
+import { LazyJsonBodyEditor } from "./lazy-panels";
 import { SqlConsole } from "../backend/SqlConsole";
 import { CUSTOM_ENDPOINT, groupEndpointsByTag } from "../backend/openapi";
 
@@ -249,11 +250,19 @@ export function BackendBody({ ctx }: Props): JSX.Element {
                   </Button>
                 )}
               </Group>
-              <JsonBodyEditor
-                value={reqBody}
-                onChange={setReqBody}
-                isDesktop={isDesktop}
-              />
+              {/* Monaco on desktop (lazy — it is not on the eager path);
+                  a textarea on mobile, which never fetches it at all. */}
+              {isDesktop ? (
+                <Suspense fallback={<Text size="xs" c="dimmed">Loading editor…</Text>}>
+                  <LazyJsonBodyEditor
+                    value={reqBody}
+                    onChange={setReqBody}
+                    isDesktop={isDesktop}
+                  />
+                </Suspense>
+              ) : (
+                <PlainJsonBody value={reqBody} onChange={setReqBody} isDesktop={isDesktop} />
+              )}
             </Stack>
           )}
           {dispatchSlot && (

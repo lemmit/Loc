@@ -4,6 +4,9 @@ import * as monaco from "monaco-editor";
 import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic } from "../lsp/protocol";
 import { modelUriFor } from "../lsp/workspace-lsp-sync";
+import type { EditorHandle } from "./editor-handle";
+
+export type { EditorHandle };
 
 const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
 
@@ -82,12 +85,6 @@ function markersToDiagnostics(markers: monaco.editor.IMarker[]): Diagnostic[] {
     message: m.message,
     source: m.source ?? "loom",
   }));
-}
-
-/** Imperative handle for pushing source into the live editor model from a
- *  non-editor origin (the visual Builder). */
-export interface EditorHandle {
-  setSource: (text: string) => void;
 }
 
 export interface LoomEditorProps {
