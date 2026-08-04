@@ -397,7 +397,18 @@ export function renderController(
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${idClass}(id)));`,
-      "        return response is null ? NotFound() : Ok(response);",
+      // RS-27 — `NotFound()` produced ASP.NET's OWN bare 404, bypassing
+      // `DomainExceptionFilter`'s `AggregateNotFoundException` arm that every
+      // OTHER .NET 404 goes through (the operation commands, the Can<Op> probe,
+      // the history read all `?? throw new AggregateNotFoundException($"…")`).
+      // That made this ONE route answer a different problem body than the rest
+      // of the same service.  Throwing routes it back through the shared filter,
+      // which renders `detail` from the message — the same sentence the other
+      // four backends emit.  `id` is the raw route value; the id record's
+      // `ToString()` is overridden to the raw value, so both spellings of this
+      // message interpolate identically.
+      `        if (response is null) throw new global::${ns}.Domain.Common.AggregateNotFoundException($"${agg.name} {id} not found");`,
+      "        return Ok(response);",
       "    }",
       "",
       // Entity history — GET /{id}/history (docs/audit.md).  Emitted off the

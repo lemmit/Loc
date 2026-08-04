@@ -493,6 +493,28 @@
         "fixed (java): BOTH halves were wrong — the record used primitives (`int qty`, `boolean active`), so Jackson silently supplied 0/false for an omitted key while RequiredSet claimed qty required; operation components are now boxed + @NotNull (emit/dto.ts) and requiredParams no longer drops bare bools (emit/openapi-customizer.ts)"
       ],
       "tier": "static"
+    },
+    {
+      "id": "RS-27",
+      "title": "A 404-BY-ID carries the sentence `\"<Aggregate> <id> not found\"` in `detail`",
+      "trigger": "`GET /api/<aggs>/{id}` (or `GET /api/<aggs>/{id}/history`) for an id that does not exist",
+      "observable": "the RFC 9457 body's `detail` is the sentence `\"<Aggregate> <id> not found\"` — the aggregate's PascalCase name, the requested id, and the words \"not found\" — on every backend. Not a machine token, not a framework default. The 404 an OPTIONAL FIND answers is a DIFFERENT class and keeps the `\"not_found\"` token; the rule is about reads addressed BY ID.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-04 by the api-caller-census drain: adding `api.orders.destroy(id)` + `expect(api.orders.getById(id)).toThrow(404)` to corpus/core-domain made the python leg diverge from the node golden at $.detail — golden \"not_found\" vs python \"Order <uuid> not found\"",
+        "surveyed the emitters: python/java/elixir + .NET's own operation/history/canOp 404s all emit the sentence; node's getById+history and .NET's getById were the only two sites that bypassed it",
+        "fixed (node): the getById and history routes raise `new AggregateNotFoundError(`<Agg> ${id} not found`)` — the message `repo.getById` would have thrown — src/platform/hono/v4/routes-builder.ts",
+        "fixed (dotnet): the getById action throws AggregateNotFoundException instead of returning `NotFound()`, so it routes through DomainExceptionFilter like every other .NET 404 (which also puts it back inside RS-22) — src/generator/dotnet/emit/api.ts",
+        "java/elixir/python needed NO change — verified by reading emit/repository.ts, problem-details-emit.ts and repository-builder.ts respectively",
+        "enabler: WIRE_NORMALIZE now templates a uuid embedded ANYWHERE in a string value, not only in a path — without it no golden can hold a 404-by-id body — test/_helpers/wire-record.ts"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

@@ -117,14 +117,36 @@ export function templatePath(url: string, opts: NormalizeOpts = DEFAULT_NORMALIZ
   return params.length ? `${templated}?${params.join("&")}` : templated;
 }
 
-/** The wire gate's normalization: the shared defaults PLUS a rule for
- *  path-shaped strings.  An RFC 7807 problem body carries
- *  `instance: "/api/listings/<uuid>/discontinue"` — a per-run value embedded in
- *  a ROUTE.  The default value-shape rules don't fire (it isn't a bare uuid), so
- *  without this the error golden could never match twice; collapsing the whole
- *  string to one token would instead discard the route, which is the part a
- *  divergence actually shows up in.  Templating keeps the route and drops the
- *  id, exactly as the request `path` is templated. */
+/** A uuid appearing ANYWHERE inside a longer string — not anchored, unlike the
+ *  `UUID_SEG` / `UUID_RE` whole-value forms.  Two spellings of one pattern: a
+ *  STATELESS one to detect with (a `g` regex carries `lastIndex` across `.test`
+ *  calls, which makes every other call answer wrong) and a global one to
+ *  replace every occurrence with. */
+const UUID_INSIDE_SRC = String.raw`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`;
+const UUID_INSIDE = new RegExp(UUID_INSIDE_SRC, "i");
+const UUID_INSIDE_ALL = new RegExp(UUID_INSIDE_SRC, "gi");
+
+/** The wire gate's normalization: the shared defaults PLUS two rewrite rules
+ *  for strings that are PARTLY volatile and partly contract.
+ *
+ *  1. PATH-shaped — an RFC 9457 problem body carries
+ *     `instance: "/api/listings/<uuid>/discontinue"`, a per-run value embedded
+ *     in a ROUTE.  The default value-shape rules don't fire (it isn't a bare
+ *     uuid), so without this the error golden could never match twice;
+ *     collapsing the whole string to one token would instead discard the route,
+ *     which is the part a divergence actually shows up in.
+ *
+ *  2. PROSE with an embedded id — the RS-27 `detail` sentence
+ *     `"Order <uuid> not found"`.  Same structure as (1) and the same reason:
+ *     the SENTENCE is the contract (a client reads it, and the five backends
+ *     must agree on it), the uuid inside is per-run noise.  Before this rule
+ *     that field was unbaselinable — every run produced a different `detail`, so
+ *     a 404-by-id could not be held by a golden on ANY backend, which is exactly
+ *     why the four-way divergence RS-27 names went unnoticed until a test
+ *     finally drove the route.  Templating to `{id}` keeps the wording under
+ *     gate and drops only the id.
+ *
+ *  Both rewrite rather than tokenize; the `token` is just the rule's label. */
 export const WIRE_NORMALIZE: NormalizeOpts = {
   ...DEFAULT_NORMALIZE,
   volatileValue: [
@@ -137,6 +159,15 @@ export const WIRE_NORMALIZE: NormalizeOpts = {
           .split("/")
           .map((seg) => (isVolatileSegment(seg) ? "{id}" : seg))
           .join("/"),
+    },
+    {
+      // Ordered AFTER `<path>` so a path-shaped string keeps its segment-wise
+      // templating (which also collapses INT / OPAQUE segments, not just uuids).
+      // A WHOLE-value uuid never reaches here — `DEFAULT_NORMALIZE`'s `<uuid>`
+      // rule is earlier in the list and wins.
+      token: "<embedded-id>",
+      test: (s) => UUID_INSIDE.test(s),
+      rewrite: (s) => s.replace(UUID_INSIDE_ALL, "{id}"),
     },
   ],
 };

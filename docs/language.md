@@ -921,10 +921,18 @@ surface.  Member-access chains describe the call shape:
 | --- | --- |
 | `api.<aggregate>.create({ … })` | `POST /<plural>` with the body. |
 | `api.<aggregate>.getById(idExpr)` | `GET /<plural>/{id}`. |
+| `api.<aggregate>.destroy(idExpr)` | `DELETE /<plural>/{id}` — the canonical destroy, asserted to answer `204` with an empty body. Available only on an aggregate that declares one (an unnamed `destroy { }`, e.g. via `crudish`). |
+| `api.<aggregate>.all(args?)` | `GET /<plural>` — the auto-`findAll` at the **bare collection root**, not `/<plural>/all`. Args ride as the query string (`page`, `pageSize`, `sort`, `dir`). |
 | `api.<aggregate>.<operation>(idExpr, body?)` | `POST /<plural>/{id}/<op_snake>` with the body (or `{}` if absent). |
 | `api.<aggregate>.<find>(args)` | `GET /<plural>/<find_snake>?…` with args as query string. |
 | `api.<projection>.byKey(keyExpr)` | `GET /projections/<proj_snake>/{key}` — one folded read-model row by its correlation key. |
 | `api.<projection>.list()` | `GET /projections/<proj_snake>` — every folded read-model row. |
+
+`all` returns whatever the aggregate's `all` find returns, unwrapped by
+nobody: the paged envelope (`{ items, page, pageSize, total, totalPages }`)
+for a relational aggregate, a bare JSON array where `all` is typed `T[]`
+— exactly like a declared collection find, so `expect(xs.items.length)`
+reads the same as it does for `find … paged`.
 
 The projection verbs read a folded `projection`'s read model (see
 [`projection.md`](old/proposals/projection.md)), so a `test e2e` can

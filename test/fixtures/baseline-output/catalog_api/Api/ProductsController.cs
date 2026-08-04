@@ -49,7 +49,8 @@ public sealed class ProductsController : ControllerBase
     public async Task<ActionResult<ProductResponse>> GetProductById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetProductByIdQuery(new ProductId(id)));
-        return response is null ? NotFound() : Ok(response);
+        if (response is null) throw new global::CatalogApi.Domain.Common.AggregateNotFoundException($"Product {id} not found");
+        return Ok(response);
     }
 
     [HttpDelete("{id}")]
