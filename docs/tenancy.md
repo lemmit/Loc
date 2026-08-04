@@ -62,6 +62,18 @@ system Billder {
   never pass them); the filter is AND-ed into **every** generated read on all
   five backends; the stamp copies the claim at create.
 
+  **The two `tenantId`s are different things.** The one on the row is the
+  COLUMN this capability provides — always spelled `tenantId`, not the
+  author's to rename. The one it is compared against is the **declared
+  claim**, whatever `tenancy by user.<claim>` named. They coincide in the
+  examples here only because those declare the claim as `tenantId`. Under
+  `tenancy by user.orgId`, node emits
+  `eq(t.tenantId, requireCurrentUser().orgId)` and stamps
+  `tenantId: currentUser.orgId`. The capability itself cannot see the
+  declaration (a prelude definition has no system in scope), so enrichment
+  binds the principal side in phase ⑥ — the same pass that derives the
+  registry self-scope, which is why both halves now agree on one claim.
+
   **`dataKey`** (multi-tenancy Phase 2, plan P2.3) is the materialized
   DataKey path, stamped unconditionally from `currentUser.orgPath` — the
   **same** claim-copy stamp mechanism as `tenantId`, riding the identical
@@ -186,6 +198,10 @@ capability the aggregate *wrote* carries the fields (unfoldable, reviewable).
 
 The filter and stamp ride the standard capability-filter/stamp pipeline —
 tenancy adds **no bespoke backend code**:
+
+The principal-side spellings below assume the common `tenancy by
+user.tenantId` declaration; under any other claim name the `currentUser.…`
+half follows the declaration while the row column stays `tenantId`.
 
 | Backend | Read scope | Create stamp (`tenantId` + `dataKey`) |
 |---|---|---|

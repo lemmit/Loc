@@ -11,6 +11,7 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
+  deepScopeTenantClaim,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -182,7 +183,7 @@ function lower(
           const tenantCol = `${row}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
           // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
           const org = `${principalAccessor}.${snake(deepScopeAnchorClaim(e))}`;
-          const tenant = `${principalAccessor}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+          const tenant = `${principalAccessor}.${snake(deepScopeTenantClaim(e))}`;
           ops.add("or_");
           ops.add("and_");
           return (

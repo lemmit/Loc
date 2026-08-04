@@ -23,6 +23,7 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
+  deepScopeTenantClaim,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -150,7 +151,10 @@ export function lowerToDrizzle(
           const tenantCol = `schema.${tableName}.${TENANT_OWNED_TENANT_ID_FIELD}`;
           // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
           const org = `${principal}.${deepScopeAnchorClaim(e)}`;
-          const tenant = `${principal}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+          // Tenant claim: the system's declared `tenancy by user.<claim>` —
+          // NOT the row column above, which only coincides when the author
+          // happened to name the claim `tenantId`.
+          const tenant = `${principal}.${deepScopeTenantClaim(e)}`;
           for (const op of ["or", "and", "eq", "isNull", "isNotNull", "like"]) ops.add(op);
           return (
             `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
