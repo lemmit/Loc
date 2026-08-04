@@ -333,7 +333,21 @@ function validateQueryComprehension(
       // name (`sum(total)`) has no rendering and used to CRASH codegen with an
       // internal error from a model that validated clean.  Gate it honestly.
       const arg = s.aggregate.arg;
-      if (arg && !(arg.kind === "member" && arg.receiver.kind === "this")) {
+      // The test is `member`, NOT `member on this` — deliberately, and the
+      // difference is not cosmetic.  Every backend's `aggregateColumn` renders
+      // the arg by reading `.member` alone (`${sourceTable}.${arg.member}`),
+      // so `member` is exactly the set they can emit; requiring a `this`
+      // receiver on top of that rejected a shape they render perfectly well.
+      // It regressed `scaffoldDashboard`: a MACRO-built `sum(o.total)` does not
+      // lower to the same `this`-rooted member a PARSED one does, so every
+      // `with scaffoldDashboard` context stopped generating — the macro's own
+      // output failed the gate meant to protect it.
+      //
+      // What this still catches is the crash class it was written for: a
+      // computed arg (`sum(o.total + o.tax)` — a `binary`) and a bare
+      // unqualified name (`sum(total)` — a `ref`), both of which threw an
+      // internal error from a model that validated clean.
+      if (arg && arg.kind !== "member") {
         diags.push({
           severity: "error",
           code: "loom.projection-aggregate-arg-not-columnar",
