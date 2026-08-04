@@ -88,7 +88,12 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
       // External links — sentinel `__external:<url>` written by menu-emitter.
       // They map to no page, so they are never gated.
       if (entry.to.startsWith("__external:")) {
-        return { ...base, external: true, url: escapeHeex(entry.to.slice("__external:".length)), to: "" };
+        return {
+          ...base,
+          external: true,
+          url: escapeHeex(entry.to.slice("__external:".length)),
+          to: "",
+        };
       }
       return { ...base, external: false, to: escapeHeex(entry.to), url: "" };
     }),
