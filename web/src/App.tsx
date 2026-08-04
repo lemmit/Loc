@@ -445,6 +445,16 @@ export default function App(): JSX.Element {
   // page-builder subscribes to this for its debounced text→canvas live
   // re-seed; bumping on builder edits would echo-loop, so we don't.
   const [editorSourceTick, setEditorSourceTick] = useState(0);
+  // `null` until an editor mounts.  A non-editor write in that window (a
+  // Builder "Apply", an agent edit, a history restore) does NOT lose its text:
+  // every such path writes the workspace store first and only then calls
+  // `editorHandleRef.current?.setSource(...)` to sync the live model, and both
+  // editors seed from `initialSource` — which follows the store — when they do
+  // mount.  The window widened on desktop when the language client moved to
+  // `await import(...)`, which is why this is worth stating rather than
+  // assuming.  (`LoomEditor` additionally queues for its own "client ready but
+  // Monaco not created yet" window, where the editor IS mounted and a frozen
+  // seed would otherwise revert the write.)
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const engineRef = useRef<RuntimeEngine | null>(null);
