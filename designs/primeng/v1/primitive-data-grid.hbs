@@ -33,7 +33,7 @@
                       class="loom-grid-filter"
                       type="search"
                       {{{filterPlaceholderAttr}}}
-                      [attr.aria-label]="'Filter by ' + String(h.column.columnDef.header ?? h.id)"
+                      {{{filterByAria}}}
                       [value]="String(h.column.getFilterValue() ?? '')"
                       (input)="h.column.setFilterValue($any($event.target).value)"
                     />

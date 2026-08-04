@@ -24,7 +24,7 @@
                   {h.column.getCanSort() ? (
                     <UnstyledButton
                       onClick={h.column.getToggleSortingHandler()}
-                      aria-label={`Sort by ${String(h.column.columnDef.header ?? h.id)}`}
+                      {{{sortByAria}}}
                     >
                       {flexRender(h.column.columnDef.header, h.getContext())}
                       {h.column.getIsSorted() === "asc" ? " ↑" : h.column.getIsSorted() === "desc" ? " ↓" : ""}
@@ -37,7 +37,7 @@
                       size="xs"
                       mt={4}
                       {{{filterPlaceholderAttr}}}
-                      aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
+                      {{{filterByAria}}}
                       value={String(h.column.getFilterValue() ?? "")}
                       onChange={(e) => h.column.setFilterValue(e.currentTarget.value)}
                     />
