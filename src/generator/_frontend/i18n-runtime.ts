@@ -25,7 +25,7 @@
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";
-import { APP_SHELL_CHROME } from "../_walker/i18n-chrome.js";
+import { chromeMergedWhenEnabled } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 
 /** Build the flat, key-sorted `{ key: message }` catalog for one UI.  Pack-chrome
@@ -39,7 +39,7 @@ export function buildUiCatalog(ui: UiIR): Record<string, string> {
   // Same key ⇒ same content hash ⇒ same message; collapses repeats.
   for (const { key, message } of collectUiMessages(ui)) byKey.set(key, message);
   if (byKey.size > 0) {
-    for (const [key, message] of Object.entries(APP_SHELL_CHROME)) byKey.set(key, message);
+    for (const [key, message] of Object.entries(chromeMergedWhenEnabled())) byKey.set(key, message);
   }
   const out: Record<string, string> = {};
   for (const key of [...byKey.keys()].sort()) out[key] = byKey.get(key)!;

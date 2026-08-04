@@ -193,7 +193,7 @@ export function emitSelectField(
  *
  *  Registers the `t` import — unlike the DataGrid chrome, this markup renders
  *  into the PAGE, so `t` resolves against the page's own import block. */
-function selectPlaceholderAttr(ctx: WalkContext): string {
+export function selectPlaceholderAttr(ctx: WalkContext): string {
   if (ctx.i18nPrefix) registerI18nImport(ctx);
   return localizedChromeAttr(ctx, "placeholder", "selectPlaceholder");
 }

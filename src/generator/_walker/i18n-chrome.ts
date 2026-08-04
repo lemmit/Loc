@@ -94,23 +94,8 @@ export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
   // A `SelectField` ALWAYS renders the picker, so this is exact — the primitive
   // is the only thing that renders `primitive-select-field`.
   //
-  // The form-built pickers (`field-input-id-select` / `-enum-select`, for an
-  // `X id` field whose target has a `derived display`, or an enum field) are
-  // NOT here, and deliberately still ship English.  Contributing from
-  // `CreateForm`/`OperationForm`/`WorkflowForm` would be the obvious move and
-  // is wrong twice over: a form of plain strings would carry a key nothing
-  // renders, and — measured, not assumed — it would turn the whole i18n runtime
-  // ON for such an app, shipping `src/i18n.ts`, `locales/en.json` and the
-  // `intl-messageformat` dependency to a UI with nothing to translate.
-  //
-  // Gating it exactly is not cheap: unlike `DataGrid`'s `filterable:` (readable
-  // straight off the call node, hence one shared ctx-free helper), the answer
-  // needs the aggregate/enum tables the extraction pass deliberately lacks
-  // (`collectUiMessages(ui)` is ctx-free so `ddd i18n extract` runs without
-  // codegen) AND it would have to re-derive THREE different field sources — the
-  // create-input projection, an operation's params, a workflow's params — each
-  // a fresh chance to drift from the code that actually emits.  That belongs in
-  // its own slice with a shared predicate, not smuggled in here.
+  // The form-built pickers spell the SAME placeholder, but they are not here —
+  // a form primitive must not FLIP i18n on (see `FORM_CHROME`).
   SelectField: [entry("selectPlaceholder")],
 };
 
@@ -154,3 +139,40 @@ export const APP_SHELL_CHROME: Record<string, string> = {
   // "← Back to home" while translators see one clean phrase.
   [chromeKey("backToHome")]: "Back to home",
 };
+
+/** Chrome a FORM renders — currently the id/enum picker's "Select…".
+ *
+ *  Not in `CHROME_BY_PRIMITIVE`, and the distinction is the whole design.  A
+ *  contribution there FLIPS i18n ON for a UI that has nothing else to translate
+ *  (that is the point for `Loader`, `DataGrid`, `SelectField` — each always
+ *  renders its chrome, so it earns the runtime).  A form does NOT always render
+ *  a picker: only an `X id` field whose target has a `derived display`, or an
+ *  enum field, does.  Contributing from `CreateForm`/`OperationForm`/
+ *  `WorkflowForm` was measured to ship `src/i18n.ts`, `locales/en.json` and the
+ *  `intl-messageformat` dependency into a plain-string form app that needs none.
+ *
+ *  Merged instead under the ALREADY-ENABLED gate, exactly like the app-shell
+ *  chrome below.  That makes key and binding agree precisely, because both sides
+ *  now answer the same question: `localizedChromeAttr` emits the `t()` form iff
+ *  `ctx.i18nPrefix` is set, and `ctx.i18nPrefix` is set iff the UI is
+ *  i18n-enabled — the same condition this table is merged under.
+ *
+ *  The residue is one over-merged key: an i18n-enabled app whose forms happen to
+ *  have no picker carries "Select…" unused.  That is the trade `APP_SHELL_CHROME`
+ *  already makes (a pack renders `openMenu` OR `toggleNavigation`, never both),
+ *  and it is the cheap side of the asymmetry — an unused key costs a translator
+ *  one phrase, while a missing one is a binding no locale can ever reach. */
+export const FORM_CHROME: Record<string, string> = {
+  [chromeKey("selectPlaceholder")]: "Select…",
+};
+
+/** Every chrome table merged into a catalog ONLY when the UI is already
+ *  i18n-enabled — never flipping the runtime on by itself.
+ *
+ *  One helper rather than a list at each merge site, so a future table joins by
+ *  editing this function instead of by remembering both callers
+ *  (`system/i18n-catalog.ts` for `.loom/messages.en.json`, and
+ *  `_frontend/i18n-runtime.ts` for each app's `locales/en.json`). */
+export function chromeMergedWhenEnabled(): Record<string, string> {
+  return { ...APP_SHELL_CHROME, ...FORM_CHROME };
+}
