@@ -57,12 +57,21 @@ export function isCrashReason(reason: string): boolean {
   return (CRASH_REASONS as readonly string[]).includes(reason);
 }
 
-/** The subset of error classes that took visible UI down — a React boundary
- *  actually caught a render throw.  Only these arm the next-boot "crashed
- *  last session" notice: a stray `unhandledrejection` or a worker hiccup is
- *  ring-worthy detail but not a crash the user experienced, and nagging on
- *  those would train users to dismiss the notice unread. */
-export const FATAL_CRASH_REASONS = ["react-error", "react-error-pane"] as const;
+/** The subset of error classes the USER actually experienced — the UI went
+ *  away.  Only these arm the next-boot "crashed last session" notice: a stray
+ *  `unhandledrejection` or a worker hiccup is ring-worthy detail but not
+ *  something they saw, and nagging on those would train users to dismiss the
+ *  notice unread. */
+export const FATAL_CRASH_REASONS = [
+  "react-error",
+  "react-error-pane",
+  // A process kill passes the "did the user experience it?" test better than
+  // anything else here: the page vanished and came back.  Without the notice
+  // it is the ONLY crash class that is completely invisible — no error, no
+  // console line, nothing on screen — so the user just taps Run again and
+  // gets killed again.  Two field reports arrived that way.
+  "died-in-phase",
+] as const;
 
 /** Should this reason arm the next-boot notice? */
 export function isFatalCrashReason(reason: string): boolean {
