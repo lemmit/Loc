@@ -32,6 +32,11 @@ import type { AggregateIR, BoundedContextIR } from "../../../ir/types/loom-ir.js
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import {
+  contextsServeHistory,
+  renderVanillaAuditHistoryModule,
+  vanillaHistoryModulePath,
+} from "./audit-history-emit.js";
 
 /** True iff any aggregate in the given contexts carries an audited command
  *  action — gates the runtime helper module + the per-action capture. */
@@ -53,6 +58,14 @@ export function emitVanillaAudit(
   // backends derive it from one place — Hono emitted none at all, which made
   // every audited command fail at runtime there.
   out.set(`lib/${appName}/audit.ex`, renderAuditModule(appModule));
+  // The READ side (docs/audit.md) — the shared shape module behind
+  // `GET /<aggs>/{id}/history`.  Gated on the enrichment-derived `historyFind`
+  // rather than on "has audit" alone: an aggregate whose every field is
+  // managed/secret records a trail but serves no timeline, and emitting an
+  // unused module would trip `--warnings-as-errors` on nothing useful.
+  if (contextsServeHistory(contexts)) {
+    out.set(vanillaHistoryModulePath(appName), renderVanillaAuditHistoryModule(appModule));
+  }
 }
 
 /** `<App>.Audit.Record` schema + the `<App>.Audit` insert helper. */

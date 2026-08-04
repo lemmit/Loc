@@ -32,6 +32,7 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../../ir/types/wire-types.js";
+import { AUDIT_ENTRY_TYPE, auditEntryWireShape } from "../../../ir/util/audit-history.js";
 import {
   errorStatuses,
   type OpErrorKind,
@@ -55,7 +56,7 @@ import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defa
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
-import { emitsRestCreate } from "./api-emit.js";
+import { emitsRestCreate, servesHistory } from "./api-emit.js";
 
 // ---------------------------------------------------------------------------
 // OpenApiSpex emission for Phoenix LiveView / Ash.
@@ -276,6 +277,15 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
         renderOperationUnionSchema(unionName, op.returnType.variants, ctx, webModule),
       );
     }
+  }
+
+  // Entity history (docs/audit.md) — the `AuditEntry` body of
+  // `GET /<plural>/{id}/history`.  One shared schema built from the SAME
+  // platform-neutral wire shape the mapper emits, so spec and runtime cannot
+  // describe different keys.  Emitted only when some served aggregate actually
+  // has the route.
+  if (allAggregates.some(({ ctx, agg }) => servesHistory(ctx, agg))) {
+    files.set(`${schemaDir}/${snake(AUDIT_ENTRY_TYPE)}.ex`, renderAuditEntrySchema(webModule));
   }
 
   // CanResponse `{ allowed }` — the side-effect-free `can_<op>` companion of a
@@ -574,6 +584,34 @@ ${pagingQueryParams()}
         }
       }`,
     );
+
+    // Entity history (docs/audit.md) — `GET /<plural>/{id}/history`, declared
+    // off the SAME `servesHistory` predicate that mounts the route, so this
+    // backend cannot ship a third route its own spec disagrees with.  The 403
+    // is declared only when the inherited read gate exists to produce one.
+    const historyFind = servesHistory(ctx, agg)
+      ? (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.historyFind
+      : undefined;
+    if (historyFind) {
+      pathEntries.push(
+        `      "/${aggSlug}/{id}/history" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          summary: "History of ${agg.name}",
+          operationId: "${camelId(opFind(agg.name, "history"))}",
+          tags: ["${aggSlug}"],
+          parameters: [
+            %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
+          ],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "OK",
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :array, items: ${schemasModule}.${AUDIT_ENTRY_TYPE}}}}
+            }${statusResponseEntries(historyFind.requires ? [403, 404] : [404], schemasModule)}
+          }
+        }
+      }`,
+      );
+    }
 
     // Per-operation paths: POST /<plural>/{id}/<op>
     for (const op of agg.operations.filter((o) => o.visibility === "public")) {
@@ -1108,6 +1146,24 @@ defmodule ${webModule}.Api.Schemas.CanResponse do
   })
 end
 `;
+}
+
+/** `AuditEntry` — one entry in an entity's history (docs/audit.md).
+ *
+ *  Built from the platform-neutral `auditEntryWireShape()`, the same list the
+ *  controller's mapper projects, so the published contract and the emitted
+ *  bytes cannot describe different keys.  `changes` stays `array of json`
+ *  because the shape says so: `before`/`after` hold whatever the aggregate's
+ *  wire DTO held for that key, and a typed element would need one schema per
+ *  field per aggregate — which is exactly what lets ONE `Timeline` render the
+ *  history of ANY audited aggregate. */
+function renderAuditEntrySchema(webModule: string): string {
+  return renderSchemaModule(
+    `${webModule}.Api.Schemas.${AUDIT_ENTRY_TYPE}`,
+    AUDIT_ENTRY_TYPE,
+    wireFieldsToProps(auditEntryWireShape()),
+    `${webModule}.Api.Schemas`,
+  );
 }
 
 function renderCreateResponseSchema(agg: AggregateIR, webModule: string): string {

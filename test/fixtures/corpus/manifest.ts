@@ -101,15 +101,11 @@ export const CORPUS: readonly CorpusFeature[] = [
     id: "audit-history",
     title: "entity history — the derived `GET /<agg>/{id}/history` read over audit_records",
     doc: "audit",
-    // A DELIBERATELY NARROW row.  Only the backends that actually serve the
-    // history endpoint are listed; the rest still write the trail (see the
-    // `audited` row above, ALL) but expose no route over it.  Listing one that
-    // does not would run this fixture's e2e block against a route it lacks — a
-    // broken gate, not a measured gap.  Widening this row IS the definition of
-    // "backend X now serves history", and the wire golden is the answer key it
-    // must match.
-    backends: ["node", "python", "java", "dotnet"],
-    note: "read path ships on node + python + java + dotnet; elixir writes audit_records but exposes no history endpoint (M-T3.9)",
+    // ALL FIVE now serve the endpoint (M-T3.9 read path complete).  Each
+    // backend's behavioral leg diffs its booted responses against the wire
+    // golden minted from node — A≡golden ∧ B≡golden ⇒ A≡B, so this row being
+    // ALL is a proven cross-backend equality, not five self-assertions.
+    backends: ALL,
   },
   {
     id: "criterion-filter",
