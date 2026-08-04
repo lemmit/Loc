@@ -179,4 +179,48 @@ describe("Phoenix HEEx i18n runtime", () => {
       'msgid "Shop banner"',
     );
   });
+  // --- ATTRIBUTE position — the seam HEEx was missing entirely --------------
+  //
+  // HEEx translated every TEXT slot and no ATTRIBUTE one: `renderInTemplate`
+  // carried a catalog role, `renderAttrValue` had nowhere to put one.  So a
+  // control's accessible name shipped in English at every locale while the
+  // visible caption beside it translated.  `localizedHeexAttr` is that missing
+  // half — HEEx's `{…}` expression syntax rather than `<%= … %>`, which is
+  // exactly why `elixirI18nString` escapes `{`/`}` in the message.
+
+  it("translates a command Button's aria-label (buttonAria)", async () => {
+    const src = SYSTEM(`Button { "+", label: "Add order", to: "/new" }`);
+    const live = await homeLive(src);
+    const key = await keyFor(src, "Add order");
+    expect(live).toContain(`aria-label={pgettext("${key}", "Add order")}`);
+    expect(live).not.toContain(`aria-label="Add order"`);
+  });
+
+  it("translates the Icon accessible name (iconLabel) and keeps role=img", async () => {
+    const src = SYSTEM(`Icon { svg: "<svg/>", label: "Verified" }`);
+    const live = await homeLive(src);
+    const key = await keyFor(src, "Verified");
+    expect(live).toContain(`role="img" aria-label={pgettext("${key}", "Verified")}`);
+  });
+
+  it("keeps a decorative Icon hidden and byte-identical", async () => {
+    const live = await homeLive(SYSTEM(`Stack { Heading { "Orders" }, Icon { svg: "<svg/>" } }`));
+    expect(live).toContain(`aria-hidden="true"`);
+  });
+
+  it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
+    const src = SYSTEM(`CodeBlock { "let total = 1", language: "elixir", title: "Example" }`);
+    const live = await homeLive(src);
+    const key = await keyFor(src, "Example");
+    expect(live).toContain(
+      `<div class="loom-code-block-title"><%= pgettext("${key}", "Example") %></div>`,
+    );
+    expect(live).toContain("let total = 1");
+  });
+
+  it("leaves an UNTITLED CodeBlock string-less — the code is not a slot", async () => {
+    const files = await generateSystemFiles(SYSTEM(`CodeBlock { "let total = 1" }`));
+    expect(fileEndingWith(files, "_web/gettext.ex")).toBeUndefined();
+    expect(fileEndingWith(files, "live/home_live.ex")).toContain("let total = 1");
+  });
 });

@@ -500,12 +500,17 @@ function primitiveInlineCode(c: Ctx): string {
   return `Html.code [ prop.className "rounded bg-base-200 px-1 text-sm"; prop.children [ ${asChild(String(c.text ?? ""))} ] ]`;
 }
 /** CodeBlock(source, language?, title?) — a `<pre><code>` block.  The F# string
- *  literal can't span lines, so real newlines in the source escape to `\n`. */
+ *  literal can't span lines, so real newlines in the source escape to `\n`.
+ *
+ *  The `title:` caption is a user-visible slot, so under i18n it arrives as an
+ *  already-rendered `Html.text (I18n.t …)` element rather than raw text — hence
+ *  `textOrChildren` rather than a spliced `prop.text "…"`.  The code SOURCE is
+ *  not a slot and stays a literal. */
 function primitiveCodeBlock(c: Ctx): string {
   const source = String(c.source ?? "").replace(/\n/g, "\\n");
   const pre = `Html.pre [ prop.className "overflow-x-auto rounded-md border border-base-300 bg-base-200 p-4 text-sm"; prop.children [ Html.code [ prop.text "${source}" ] ] ]`;
   if (!c.hasTitle) return pre;
-  const title = `Html.div [ prop.className "border-b border-base-300 px-4 py-2 text-xs font-medium text-base-content/70"; prop.text "${String(c.title ?? "")}" ]`;
+  const title = `Html.div [ prop.className "border-b border-base-300 px-4 py-2 text-xs font-medium text-base-content/70"; ${textOrChildren(String(c.titleText ?? ""))} ]`;
   return `Html.div [ prop.className "overflow-hidden rounded-md border border-base-300 bg-base-200"; prop.children [ ${title}; ${pre} ] ]`;
 }
 
@@ -574,13 +579,14 @@ function primitiveIcon(c: Ctx): string {
   const cls = `loom-icon inline-flex ${size} [&>svg]:h-full [&>svg]:w-full`;
   // Decorative-by-default (icon a11y contract): hide the glyph from assistive
   // tech unless a `label:` gives it meaning, in which case it becomes a named
-  // `img`.  Feliz emits F# `prop.*` props rather than the HTML `a11yAttr`.
-  const label = String(c.label ?? "").trim();
-  const decorative = c.decorative === true || String(c.decorative) === "true";
+  // `img`.  Feliz emits F# `prop.*` props rather than the HTML `a11yAttr`, so
+  // the name arrives as the already-translated VALUE (D-I18N-ATTR) — the walker
+  // has already decided decorative-vs-named, and hands `ariaLabelExpr` only for
+  // the named case.  It used to read the RAW `label:`, shipping the accessible
+  // name in English at every locale.
+  const name = ariaLabelExpr(c);
   const a11yProps =
-    label !== "" && !decorative
-      ? `prop.role "img"; prop.ariaLabel "${label.replace(/"/g, '\\"')}"; `
-      : `prop.ariaHidden true; `;
+    name !== undefined ? `prop.role "img"; prop.ariaLabel ${name}; ` : `prop.ariaHidden true; `;
   return `Html.span [ prop.className "${cls}"; ${a11yProps}prop.dangerouslySetInnerHTML """${svg}""" ]`;
 }
 

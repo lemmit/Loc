@@ -4257,3 +4257,51 @@ the loop is registered and before the caller is released — rather than the
 presence of the handler. Same discipline as §64's elixir order assertion:
 `toContain("ChannelConsumer")` passes in both the broken and fixed arrangement,
 so it tests nothing.
+
+## 77. A gap that spans one axis is invisible to per-target tests (2026-08-04)
+
+Wiring `Icon(label:)` and `CodeBlock(title:)` into the message catalog turned
+up something neither the slot-coverage gate nor any per-frontend test could see:
+**Phoenix/HEEx translated every TEXT slot and zero ATTRIBUTE ones.**
+
+The reason it hid so well is that both axes were individually covered.
+Per-frontend tests asked *"does HEEx translate?"* — yes, headings, badges, stat
+labels, all of it. The cross-target slot-coverage gate asked *"does every pack
+RENDER every slot?"* — yes, HEEx rendered `buttonAria` and rendered it
+correctly. What nobody asked was the intersection: *does HEEx translate the
+slots that live in attribute position?* One frontend × one position, and the
+whole cell was empty.
+
+The mechanical cause was a missing parameter. `renderInTemplate(arg, ctx, role)`
+took a catalog role; `renderAttrValue(arg, ctx, isStatic)` had nowhere to put
+one. Every text emit site therefore passed a role and every attribute site
+structurally could not — the omission was in the *shape of the helper*, not in
+any call site a reviewer could look at and find wrong.
+
+Two things made it findable at all:
+
+- **A ratchet with reasons.** `NO_SLOT_YET` forced each unwired primitive to
+  carry a written justification. Writing `"Icon(label:) is an ACCESSIBLE NAME,
+  so it belongs with the aria slots"` is what made "…and what happens to aria
+  slots on HEEx?" a question anyone would ask.
+- **The escaping comment answered it.** `elixirI18nString` already escaped `{`
+  and `}` with the note *"the attribute form (`aria-label={pgettext(…)}`) is a
+  HEEx `{…}` expression"*. The code was written for a seam that had never been
+  built. A defensive escape for a form nothing emits is a strong signal that
+  the form was planned and dropped — worth grepping for deliberately.
+
+**Lesson.** When a capability has two independent axes (here: frontend ×
+markup position), coverage on each axis separately is not coverage of the
+grid. Ask which cell nobody has a test for, and prefer a gate whose waivers
+carry *reasons* — the reason is what turns "not done yet" into a question with
+a next step.
+
+### And the corollary: a slot the helper owns is a slot no pack re-decides
+
+Feliz and Flutter each carried a private copy of "`label:` present and not
+`decorative:`", reading raw args in their own language. Adding the catalog slot
+meant the walker had to make that call anyway — so both copies deleted, and the
+packs now receive a name or nothing. Same shape as the `ariaLabelExpr` seam
+that retired Flutter's parse-the-name-back-out-of-the-HTML regex (§ D-I18N-ATTR):
+every time the shared layer takes over a decision, a per-target reimplementation
+of it stops being able to drift.

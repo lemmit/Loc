@@ -99,8 +99,11 @@ describe("walker primitives — Icon", () => {
   });
 
   it("a labelled Icon becomes a named img (role=img + aria-label), not aria-hidden", async () => {
+    // The name is a user-visible slot (`iconLabel`, M-T1.11), so authoring one
+    // is itself enough to make the ui translatable — the accessible name binds
+    // through `t()` rather than shipping English at every locale.
     const tsx = await emit(`Icon { svg: "<svg/>", label: "Search" }`);
-    expect(tsx).toMatch(/role="img" aria-label="Search"/);
+    expect(tsx).toMatch(/role="img" aria-label=\{t\("page\.\w+\.iconLabel\.\w+", "Search"\)\}/);
     expect(tsx).not.toContain('aria-hidden="true"');
   });
 
@@ -139,8 +142,12 @@ describe("walker primitives — CodeBlock", () => {
   });
 
   it("CodeBlock title: emits a wrapping <div> with the title header", async () => {
+    // The caption is a user-visible slot (`codeBlockTitle`, M-T1.11) and so
+    // translates; the SOURCE beside it is code and stays verbatim.
     const tsx = await emit(`CodeBlock { source: "npm i", title: "Install", language: "bash" }`);
-    expect(tsx).toMatch(/<div className="loom-code-block-title">Install<\/div>/);
+    expect(tsx).toMatch(
+      /<div className="loom-code-block-title">\{t\("page\.\w+\.codeBlockTitle\.\w+", "Install"\)\}<\/div>/,
+    );
     expect(tsx).toMatch(/<code className="language-bash">npm i<\/code>/);
   });
 
