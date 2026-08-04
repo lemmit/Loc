@@ -559,44 +559,57 @@ describe("pack-chrome i18n — select placeholder", () => {
     expect(catalogOf(files)["chrome.selectPlaceholder"]).toBe("Select…");
   });
 
-  it("a form's OWN pickers stay English — and must not drag the runtime in", async () => {
-    // A `CreateForm` whose aggregate has an `X id` (with `derived display`) and
-    // an enum field renders two pickers from `field-input-*-select`, which this
-    // slice leaves hardcoded.  The temptation is to contribute
-    // `chrome.selectPlaceholder` from `CreateForm` — that would key those
-    // bindings, but it also turns i18n ON for any app with a form, shipping
-    // `src/i18n.ts`, `locales/en.json` and the `intl-messageformat` dependency
-    // to a UI with nothing to translate.  This pins BOTH halves of that trade so
-    // the tempting change fails loudly rather than silently regressing.
-    const files = await generateSystemFiles(`
-      system Shop {
-        subdomain Sales {
-          context Orders {
-            enum Tier { Bronze, Silver }
-            aggregate Customer with crudish {
-              name: string
-              derived display: string = this.name
-            }
-            aggregate Order with crudish { customer: Customer id  tier: Tier }
-            repository Orders for Order { }
+  /** A form whose aggregate has an `X id` (with `derived display`) and an enum
+   *  field — so it renders two pickers from `field-input-*-select`. */
+  const PICKER_FORM = (body: string) => `
+    system Shop {
+      subdomain Sales {
+        context Orders {
+          enum Tier { Bronze, Silver }
+          aggregate Customer with crudish {
+            name: string
+            derived display: string = this.name
           }
+          aggregate Order with crudish { customer: Customer id  tier: Tier }
+          repository Orders for Order { }
         }
-        api SalesApi from Sales
-        ui Web {
-          api Sales: SalesApi
-          page Home { route: "/" body: CreateForm { of: Order } }
-        }
-        storage primary { type: postgres }
-        resource st { for: Orders, kind: state, use: primary }
-        deployable api { platform: node, contexts: [Orders], dataSources: [st], serves: SalesApi, port: 3000 }
-        deployable web { platform: static targets: api ui: Web { Sales: api } design: shadcn port: 3100 }
       }
-    `);
+      api SalesApi from Sales
+      ui Web {
+        api Sales: SalesApi
+        page Home { route: "/" body: ${body} }
+      }
+      storage primary { type: postgres }
+      resource st { for: Orders, kind: state, use: primary }
+      deployable api { platform: node, contexts: [Orders], dataSources: [st], serves: SalesApi, port: 3000 }
+      deployable web { platform: static targets: api ui: Web { Sales: api } design: shadcn port: 3100 }
+    }
+  `;
+
+  it("a form's pickers bind through t() once the UI is i18n-enabled", async () => {
+    // The form contributes NOTHING to the catalog itself; the key rides in via
+    // `FORM_CHROME`, merged because this UI is already translatable (the
+    // Heading).  Both halves answer the same question, so the binding can never
+    // outrun the key.
+    const files = await generateSystemFiles(
+      PICKER_FORM(`Stack { Heading { "New order" }, CreateForm { of: Order } }`),
+    );
     const page = pageOf(files, "home.tsx");
-    // The pickers are there, still English, and NOT bound to a key.
+    expect(page).toContain(`placeholder={t("chrome.selectPlaceholder", "Select…")}`);
+    expect(page).not.toContain(`placeholder="Select…"`);
+    expect(catalogOf(files)["chrome.selectPlaceholder"]).toBe("Select…");
+  });
+
+  it("the SAME form stays English — and runtime-free — with nothing to translate", async () => {
+    // The half that made the obvious design wrong.  Contributing the key from
+    // `CreateForm` would key the bindings above, but it also flips i18n ON here,
+    // shipping `src/i18n.ts`, `locales/en.json` and the `intl-messageformat`
+    // dependency into an app with nothing to translate.  `FORM_CHROME` is merged
+    // only for an ALREADY-enabled UI precisely so this case stays untouched.
+    const files = await generateSystemFiles(PICKER_FORM(`CreateForm { of: Order }`));
+    const page = pageOf(files, "home.tsx");
     expect(page).toContain(`placeholder="Select…"`);
     expect(page).not.toContain("chrome.selectPlaceholder");
-    // …and the app carries no translation runtime at all.
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
     expect([...files].some(([p]) => p.endsWith("src/i18n.ts"))).toBe(false);
   });
