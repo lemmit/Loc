@@ -166,6 +166,42 @@ export interface PagerSpec {
    *  Client mode passes `Math.max(1, Math.ceil(rows.length / pageSize))`;
    *  server mode passes the envelope's `totalPages`.  Always ≥ 1. */
   totalPagesExpr: string;
+  /** The pager's three user-visible strings, already resolved against the
+   *  active i18n decision (M-T1.11) — see {@link PagerChrome}. */
+  chrome: PagerChrome;
+}
+
+/** The pack chrome a pager renders, pre-resolved by `primitives/table.ts`.
+ *
+ *  A target used to spell "Prev" / "Next" / "Page N of M" as literals inside
+ *  its markup string, which made them the one class of user-visible text no
+ *  locale could reach.  They arrive here instead, already decided: under i18n a
+ *  `t()` binding keyed to the shared `chrome.*` catalog, otherwise the same raw
+ *  English as before — so an un-migrated target and a string-less app are both
+ *  byte-identical.
+ *
+ *  TWO forms of each, and the split is the one D-I18N-ATTR already draws: the
+ *  four JSX/markup targets splice a rendered FRAGMENT, while Feliz and Flutter
+ *  build props and need a VALUE in their own language.  The counter is a
+ *  FUNCTION of its two holes rather than a finished string, because only the
+ *  target knows how to spell the page read (`page` vs `page()` vs `model.Page`)
+ *  and, on Feliz, binds the page count to a local first. */
+export interface PagerChrome {
+  /** "Prev" in markup text position. */
+  prevText: string;
+  /** "Next" in markup text position. */
+  nextText: string;
+  /** "Page {n} of {m}" in markup text position, around the target's own
+   *  expressions for the current page and the page count. */
+  pageOfText(page: string, pages: string): string;
+  /** "Prev" as a target-native expression. */
+  prevValue: string;
+  /** "Next" as a target-native expression. */
+  nextValue: string;
+  /** The counter as a target-native expression, or `undefined` with i18n off —
+   *  no seam spells string CONCATENATION, so a procedural target keeps its own
+   *  sentence as the fallback rather than having one reconstructed for it. */
+  pageOfValue(page: string, pages: string): string | undefined;
 }
 
 /** What a target needs to build the CLIENT-side page window under a paged

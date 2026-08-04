@@ -155,9 +155,9 @@ export const tsxTarget: WalkerTarget = {
     const style = `{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }`;
     return (
       `<div style={${style}} data-testid="pager">` +
-      `<button type="button" disabled={${p} <= 1} onClick={() => ${setP}(${p} - 1)}>Prev</button>` +
-      `<span>Page {${p}} of {${pages}}</span>` +
-      `<button type="button" disabled={${p} >= ${pages}} onClick={() => ${setP}(${p} + 1)}>Next</button>` +
+      `<button type="button" disabled={${p} <= 1} onClick={() => ${setP}(${p} - 1)}>${spec.chrome.prevText}</button>` +
+      `<span>${spec.chrome.pageOfText(p, pages)}</span>` +
+      `<button type="button" disabled={${p} >= ${pages}} onClick={() => ${setP}(${p} + 1)}>${spec.chrome.nextText}</button>` +
       `</div>`
     );
   },

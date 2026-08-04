@@ -800,7 +800,7 @@ export const felizTarget: WalkerTarget = {
   /** Prev / "Page N of M" / Next.  `page` is an int state field, but the shared
    *  `Set<Field>` arm parses from a string (that is how every bound input
    *  dispatches), so the new page number is stringified on the way in. */
-  renderPager({ page, totalPagesExpr }) {
+  renderPager({ page, totalPagesExpr, chrome }) {
     const p = `model.${upperFirst(page.name)}`;
     const setP = `Set${upperFirst(page.name)}`;
     // The page count is read four times (label, Next's disabled, Next's target
@@ -811,11 +811,15 @@ export const felizTarget: WalkerTarget = {
     const go = (v: string) => `prop.onClick (fun _ -> dispatch (${setP} (string ${v})))`;
     const prev =
       `Html.button [ prop.className "btn btn-sm"; prop.type'.button; ` +
-      `prop.disabled (${p} <= 1); ${go(`(max 1 (${p} - 1))`)}; prop.text "Prev" ]`;
-    const label = `Html.span [ prop.text (sprintf "Page %d of %d" ${p} ${tp}) ]`;
+      `prop.disabled (${p} <= 1); ${go(`(max 1 (${p} - 1))`)}; prop.text ${chrome.prevValue} ]`;
+    // Under i18n the counter is an `I18n.tf` call over `chrome.pageOf`, whose
+    // locale may reorder the two numbers; with i18n off it is `undefined` and
+    // this `sprintf` — the sentence this target has always emitted — stands.
+    const counter = chrome.pageOfValue(p, tp) ?? `(sprintf "Page %d of %d" ${p} ${tp})`;
+    const label = `Html.span [ prop.text ${counter} ]`;
     const next =
       `Html.button [ prop.className "btn btn-sm"; prop.type'.button; ` +
-      `prop.disabled (${p} >= ${tp}); ${go(`(min ${tp} (${p} + 1))`)}; prop.text "Next" ]`;
+      `prop.disabled (${p} >= ${tp}); ${go(`(min ${tp} (${p} + 1))`)}; prop.text ${chrome.nextValue} ]`;
     return (
       `(let ${tp} = ${totalPagesExpr} in ` +
       `Html.div [ prop.className "flex items-center justify-end gap-2 mt-3"; ` +
