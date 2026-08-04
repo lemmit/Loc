@@ -9,7 +9,7 @@ making every push slower.
 
 Branch protection requires only **`tests-passed`** (the fast vitest rollup).
 Every heavy gate — the runtime/boot e2e suites, the deploy build — is a
-*non-required* check. Two consequences:
+*non-required* check. Three consequences:
 
 1. **Many heavy gates don't run on a PR by default.** `tenancy-e2e`, the five
    `*-obs-e2e`, the five `*-oidc-e2e`, `auth-oidc-compose-e2e`, and `pages`
@@ -22,6 +22,33 @@ Every heavy gate — the runtime/boot e2e suites, the deploy build — is a
    unquoted colon in its `name:`, was a permanent `startup_failure`, and stayed
    red across 100% of recent `main` pushes — unnoticed, because it was *never*
    green, so there was no red-transition to alert on.
+3. **A gate's `paths:` filter is a third, quieter switch.** Every heavy gate
+   narrows itself to the files it thinks can break it. That list is written
+   once, against whatever the test imported that day, and the test's
+   dependencies then grow without it. The gate stays green and stays listed —
+   and for a change confined to an unwatched dir it *never runs at all*, which
+   is worse than a vacuous assertion because there is no assertion to inspect.
+
+   Measured in #2397: **all 27 path-filtered gates omitted `src/macros/**` and
+   `src/util/**`**; 26 omitted `src/language/**`, 23 `src/system/**`, 19
+   `src/ir/**`. So a change to `src/macros/prelude.ts` — where the `auditable`,
+   `tenantOwned`, `versioned` and `tenantRegistry` capabilities are defined —
+   triggered none of them, as did a change to `src/util/naming.ts` or
+   `src/util/code-builder.ts`, both imported by every emitter on every backend.
+
+   The rule now: **a workflow that runs a test which generates a project must
+   watch every phase on the generation path** — `src/language/**` (parse),
+   `src/macros/**` (expand), `src/ir/**` (lower/enrich/validate),
+   `src/system/**` (compose) and `src/util/**` (the naming / code-builder /
+   platform-axes leaves every emitter imports). Those five run for *every*
+   backend, so no per-backend argument excuses one.
+   `test/system/workflow-path-coverage.test.ts` derives "runs a test that
+   generates a project" from the test's own transitive import closure (a
+   workflow cannot fall out of scope by rearranging imports) and fails the fast
+   suite on drift. The generator's shared seams (`_walker`, `_expr`,
+   `_frontend`) are deliberately *not* required — they are genuinely
+   per-target, and requiring them would produce the false positives that get a
+   gate like this weakened into theatre.
 
 `cancel-in-progress: true` on the `push:main` gates made it worse: a rapid
 follow-up merge cancels the previous commit's heavy jobs, so a real failure

@@ -30,10 +30,19 @@ on:
   push:
     branches: [main]
     paths:
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
       - 'src/generator/**'
       - 'src/platform/**'
-      - 'src/ir/resource-verbs.ts'
-      - 'src/util/source-types.ts'
       - 'test/e2e/mailer-smtp-e2e.test.ts'
       - 'test/e2e/mailer-smtp-python-e2e.test.ts'
       - 'test/e2e/mailer-smtp-dotnet-e2e.test.ts'
@@ -50,10 +59,19 @@ on:
   # (the push:main trigger above is the post-merge regression net).
   pull_request:
     paths:
+      # Every phase `generate system` walks, whatever the backend: parse ->
+      # macro expand -> lower -> enrich -> IR validate -> compose, plus the
+      # util/ leaves (naming, code-builder, platform-axes) every emitter
+      # imports.  A change confined to one of these reaches this gate's
+      # subject, so it has to be able to trigger it -- none of them could
+      # before #2397.  Pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
       - 'src/generator/*/adapters/resource-clients.ts'
       - 'src/platform/hono/*/adapters/resource-clients.ts'
-      - 'src/ir/resource-verbs.ts'
-      - 'src/util/source-types.ts'
       - 'test/e2e/mailer-smtp-*.test.ts'
       - 'test/e2e/support/mailpit-harness.ts'
       - 'test/e2e/fixtures/mailer-e2e.ddd'
