@@ -3783,9 +3783,32 @@ The rules this pays for:
   cases the emitted Elixir was identical to `main`, which ruled the PR out
   entirely and redirected the search to the runner.
 
-The same fire-and-forget pattern is still present in the dotnet / dapper /
-python / java / mikroorm runners. It has not surfaced there — those runtimes
-exit faster — but the fuse is the same length.
+The same fire-and-forget pattern was present in the dotnet / dapper / python /
+java / mikroorm runners, unfired only because .NET, the JVM, uvicorn and tsx shut
+down faster than the BEAM. All five are now on the shared
+`test/behavioral/proc.mjs`, which is the second half of the lesson:
+
+- **A bug that only one caller has FIRED is still a bug every caller HAS.** The
+  five green legs were green by runtime shutdown speed, not by correctness.
+  "It hasn't broken there" is a statement about luck, not about the code.
+- **Fixing it in six places would have been the same debt in six copies.** The
+  helpers went into one dependency-free module — dependency-free ON PURPOSE, so
+  the main vitest suite can import it (`cases.mjs` pulls `pg` + `esbuild` and
+  cannot be). That is what makes the gate possible at all.
+- **Gate a race where it can be FORCED, not where it happens to occur.** The
+  fix is pinned by `test/harness/behavioral-proc.test.ts`, which spawns a server
+  that deliberately ignores `SIGTERM` and asserts teardown does not return until
+  the port is free. Left to the booted legs, the property is only tested when
+  the race is lost — i.e. a gate that passes for the wrong reason almost always.
+  Mutation-checked: restoring the old teardown turns exactly three of its
+  assertions red.
+
+One thing the sweep found that the original fix had not: `run-python.mjs` was
+spawning NON-detached and signalling only the pid it owned — but `uv run uvicorn`
+holds the port in a CHILD, so its teardown could orphan the listener outright.
+The Elixir race needed a slow shutdown to lose; that one leaked whenever the
+signal was delivered at all. Generalising a fix is how you find the variants of
+it you had not looked for.
 
 ## 67. The assertion that could not fail, and the detector that found nothing (2026-08-03)
 
