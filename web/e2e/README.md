@@ -29,3 +29,31 @@ Runs cleanly on a developer laptop and on GitHub Actions.
 ## Underlying Node smoke
 
 `scripts/smoke-runtime.mjs` (run via `npm run e2e:smoke`) drives the full pipeline outside the browser using real `esbuild` + Node's `fetch`.  It applies the same `postProcessBundle` transform the production bundler ships, then pre-fetches PGlite's WASM/data and constructs the in-process app.  Useful as a network-connected sanity check that doesn't depend on a Chromium binary.
+
+## Running these locally in the agent sandbox
+
+The sandbox ships a Chromium build older than the one this Playwright version
+expects, so a bare `npx playwright test` dies with *"Executable doesn't exist
+at …/chromium_headless_shell-<n>"*. Point it at what is installed instead
+of downloading (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` is set for a reason):
+
+```ts
+// web/playwright.local.config.ts — local only, do not commit
+import { defineConfig } from "@playwright/test";
+import base from "./playwright.config";
+export default defineConfig({
+  ...base,
+  use: {
+    ...base.use,
+    launchOptions: { executablePath: "/opt/pw-browsers/chromium-<build>/chrome-linux/chrome" },
+  },
+});
+```
+
+then `npx playwright test -c playwright.local.config.ts --project=chromium <spec>`.
+`ls /opt/pw-browsers` gives the build number.
+
+**One known local-only failure:** `editor.spec.ts` → *"playground loads with
+Monaco editor and Langium LSP"* reports a bare `404 (Not Found)` console error
+in this sandbox. It reproduces on unmodified `main`, so it is an egress
+artifact, not a regression — verify that before spending time on it.

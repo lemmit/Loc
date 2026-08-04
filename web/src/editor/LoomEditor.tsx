@@ -4,9 +4,21 @@ import * as monaco from "monaco-editor";
 import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic } from "../lsp/protocol";
 import { modelUriFor } from "../lsp/workspace-lsp-sync";
+import { installMonacoEnvironment } from "./monaco-env";
 import type { EditorHandle } from "./editor-handle";
 
 export type { EditorHandle };
+
+// Monaco spawns workers by LABEL, and with no `MonacoEnvironment` it throws
+// the moment tokenization starts ("You must define a function
+// MonacoEnvironment.getWorkerUrl ... for the worker label: TextMateWorker").
+//
+// This used to be installed as a side effect of `FileViewer` being eagerly
+// imported — nothing said so, it just happened to evaluate first.  Making the
+// viewer lazy (M-T8.15) removed that accident, and whether the editor came up
+// became a race between two lazy chunks.  Every module that reaches
+// `monaco-editor` now installs it itself; the function is idempotent.
+installMonacoEnvironment();
 
 const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
 

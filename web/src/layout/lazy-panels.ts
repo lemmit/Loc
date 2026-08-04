@@ -23,6 +23,18 @@ export const LazyLoomEditor = lazy(() =>
   import("../editor/LoomEditor").then((m) => ({ default: m.LoomEditor })),
 );
 
+/** Start fetching the editor chunk without waiting to render it.
+ *
+ *  `EditorPane` renders `LazyLoomEditor` only once the language client exists,
+ *  and the client itself now arrives through `await import(...)` — so without
+ *  this the two fetches serialize and the editor appears a round-trip later
+ *  than it needs to.  They resolve from the same chunk, so kicking this off at
+ *  mount makes the second one free.  Desktop only; calling it on mobile would
+ *  fetch exactly what mobile exists to avoid. */
+export function preloadDesktopEditor(): void {
+  void import("../editor/LoomEditor");
+}
+
 export const LazyFileViewer = lazy(() =>
   import("../preview/FileViewer").then((m) => ({ default: m.FileViewer })),
 );

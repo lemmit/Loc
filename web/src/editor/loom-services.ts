@@ -45,6 +45,14 @@ import elixirGrammar from "./grammars/elixir.tmLanguage.json?raw";
 import tmGrammar from "../../../vscode/grammars/ddd.tmLanguage.json?raw";
 import langConfig from "../../../vscode/language-configuration.json?raw";
 import loomTheme from "../../../vscode/themes/loom-dark.json?raw";
+import { installMonacoEnvironment } from "./monaco-env";
+
+// Same reason as `LoomEditor.tsx`: this used to be installed as a side effect
+// of an eagerly-imported `FileViewer`, which nothing declared and nothing
+// checked.  Install it here too — at module scope, so it wins before the
+// codingame wrapper's own services boot, which is the order that worked when
+// it was accidental.  Idempotent.
+installMonacoEnvironment();
 
 let initPromise: Promise<void> | undefined;
 

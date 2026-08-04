@@ -1,7 +1,7 @@
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { Box, Center, Loader } from "@mantine/core";
 import { PlainEditor } from "../editor/PlainEditor";
-import { LazyLoomEditor } from "./lazy-panels";
+import { LazyLoomEditor, preloadDesktopEditor } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
 import type { LayoutCtx } from "./ctx";
 
@@ -49,6 +49,12 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     clearSourceError,
     workspace,
   } = ctx;
+  // Warm the editor chunk the moment a desktop pane exists, rather than when
+  // the language client finally resolves — the two would otherwise serialize.
+  useEffect(() => {
+    if (isDesktop) preloadDesktopEditor();
+  }, [isDesktop]);
+
   // Desktop wants the full editor and therefore the language client; mobile
   // has neither, and `lspClient` is `null` there by construction (App.tsx
   // never constructs one).  A missing client on DESKTOP means the LSP is

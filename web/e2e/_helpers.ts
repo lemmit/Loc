@@ -56,6 +56,39 @@ export async function waitForPlaygroundReady(page: Page): Promise<void> {
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }
 
+/** Wait until an editor has published the `__loomSetSource`/`__loomGetSource`
+ *  automation seam, then return the live source.
+ *
+ *  Both editors publish it — Monaco on desktop, `PlainEditor` on mobile — but
+ *  neither publishes it synchronously any more: Monaco now arrives through
+ *  `await import(...)` so it never ships to a phone (M-T8.15), which means a
+ *  spec that reads the hook the instant the page settles can beat it.  Waiting
+ *  for the seam is what the specs were implicitly relying on before; now it is
+ *  explicit. */
+export async function readEditorSource(page: Page): Promise<string> {
+  await page.waitForFunction(
+    () => typeof (window as unknown as { __loomGetSource?: unknown }).__loomGetSource === "function",
+    null,
+    { timeout: 45_000 },
+  );
+  return page.evaluate(
+    () => (window as unknown as { __loomGetSource: () => string }).__loomGetSource(),
+  );
+}
+
+/** Click into whichever source editor this viewport actually rendered.
+ *  Desktop gets Monaco; mobile gets the plain textarea. */
+export async function focusSourceEditor(page: Page): Promise<void> {
+  const monaco = page.locator(".monaco-editor").first();
+  const plain = page.locator('[data-testid="plain-editor"] textarea');
+  await expect(monaco.or(plain).first()).toBeVisible({ timeout: 45_000 });
+  if ((await plain.count()) > 0) {
+    await plain.click();
+  } else {
+    await monaco.click();
+  }
+}
+
 // Console / page-error messages that are known, non-fatal noise — they
 // signal neither a broken generated bundle nor a broken editor.  ONE
 // allow-list shared by every console-asserting e2e spec.  These filters
