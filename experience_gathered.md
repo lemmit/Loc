@@ -4132,3 +4132,41 @@ This is cheap to apply and worth making reflexive: wire keys, column names, rout
 segments, hook names, DTO properties — anywhere `src/util/naming.ts` is in the path.
 The same session found the twin on the read side: the audit-history diff had to be
 checked against a multi-word field before its masking could be believed.
+
+## 75. When a gate fails at CODEGEN, the fixture is as likely to have moved as the compiler (2026-08-04)
+
+`elixir-vanilla-build` was red on `main`. The failing leg, `vanilla-liveview-read`,
+died at the workflow's **"Pre-generate fixture"** step — before any Elixir
+compiler ran — with `unresolved receiver 'Sales'` on two pages.
+
+I set out to prove it was not my PR's doing, and reached for the obvious probe:
+check out `main`'s `src/` over my branch, regenerate, see whether it still fails.
+It did, so I reported the gate as broken on `main` and merged past it.
+
+**The probe was wrong, and it was wrong in a way that produced a confident false
+negative.** `git checkout origin/main -- src/` replaces the COMPILER and leaves
+everything else — including `test/e2e/fixtures/**` — at the current branch's
+revision. The fix had landed in the FIXTURE (`#2413` dropped an undeclared
+`Sales.` prefix: `of: Sales.Customer.all` → `of: Customer.all`), so the probe
+faithfully reproduced a failure that `main` no longer had. The CI evidence I
+cited alongside it — "the last *completed* run on `main` is a failure" — was
+true and equally stale: the fixing commit's run had not finished yet.
+
+- **Match the probe's blast radius to the failing PHASE.** A compile failure
+  implicates `src/`. A *codegen* failure implicates `src/` **and** the `.ddd`
+  input. Swapping only one half silently pins the other.
+  `git diff <base>..origin/main -- <the-fixture>` is one command and would have
+  shown the fix immediately.
+- **"Latest completed run" is not "current state" on a busy repo.** With a
+  saturated queue, the newest completed run can be hours behind `HEAD`; the run
+  that fixes things is still queued. Check whether a *newer* run exists in any
+  state before concluding a gate is still red.
+- **The cheapest correct probe was available and skipped:** generate the fixture
+  from a clean checkout of `origin/main` (worktree or fresh clone), changing
+  nothing. Cutting a corner on the reproduction cost more than the corner saved,
+  because the wrong answer got written into a PR comment and acted on.
+
+Also worth noting for the parallel-agent case: two agents fixed this same
+one-line defect independently (`#2413` and `#2419`). `#2413` landed first, so
+`#2419`'s change to that file squashed to nothing. Neither had claimed it with a
+draft PR — which is exactly what the claim-first convention exists to prevent.
