@@ -21,6 +21,7 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import { javaAuditApiPkg, javaHistoryFind, renderJavaHistoryRoute } from "./audit-history.js";
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 import { javaCommandValidatorNames } from "./validator.js";
@@ -101,7 +102,16 @@ export function renderJavaController(
   // ForbiddenException (→ 403 via ApiExceptionAdvice).  When the gate reads the
   // principal the controller injects a
   // `CurrentUserAccessor`; `requires true` needs neither.
-  const gatedFinds = declaredFinds(repo).filter((f) => !f.synthesized && f.requires);
+  // Entity history (docs/audit.md §3) — the derived `GET /{id}/history`.  Read
+  // off the enrichment-derived `historyFind` (which sits BESIDE `finds`), so
+  // the route's gate is the one enrichment copied from the aggregate's list
+  // read and cannot drift from it.  Its gate joins the find gates for the
+  // import / accessor-injection decisions below.
+  const historyFind = javaHistoryFind(repo);
+  const gatedFinds = [
+    ...declaredFinds(repo).filter((f) => !f.synthesized && f.requires),
+    ...(historyFind?.requires ? [historyFind] : []),
+  ];
   const anyFindGate = gatedFinds.length > 0;
   const anyFindGateUsesUser = gatedFinds.some((f) => exprUsesCurrentUser(f.requires));
   for (const f of gatedFinds) collectJavaExprImports(f.requires!, imports);
@@ -382,6 +392,9 @@ export function renderJavaController(
     `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`,
     `    }`,
     ``,
+    // Entity history — two path segments, so no collision with the `/{id}`
+    // pattern above.
+    ...(historyFind ? renderJavaHistoryRoute(agg, historyFind, idJava, idClass) : []),
     ...opRoutes,
     // Auto-findAll (M-T2.6): paged for a plain relational aggregate — the
     // `<Agg>Paged` envelope + page/pageSize/sort/dir controls, matching every
@@ -425,6 +438,12 @@ export function renderJavaController(
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     anyFindGate ? `import ${ctx.basePkg}.domain.common.ForbiddenException;` : null,
     anyFindGateUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
+    // Entity history — the shared `AuditEntry` wire record.  Under byLayer the
+    // controller already lives in `<base>.api`, so the import is emitted only
+    // when the layout routes it elsewhere (byFeature).
+    historyFind && ctx.pkg !== javaAuditApiPkg(ctx.basePkg)
+      ? `import ${javaAuditApiPkg(ctx.basePkg)}.AuditEntry;`
+      : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.config.CatalogLog;`,
