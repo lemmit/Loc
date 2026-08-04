@@ -92,12 +92,14 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   { dir: "designs/primeng/v1", label: "primeng@v1", format: "tsx" },
 ];
 
-// Phoenix testid emission is split between templates and the
-// `heex-walker.ts` code path; only a handful of primitives carry it
-// statically.  Lock in the currently observed set so a future
-// removal trips the wire, but DON'T enforce parity with TSX —
-// expanding the HEEx surface is a separate work item.
-const HEEX_TESTID_BASELINE = new Set<string>(["primitive-money", "primitive-query-view"]);
+// Phoenix testid emission lives entirely in the walker
+// (`testIdAttr`/`renderPrimitive` in heex-primitives.ts / heex-walker-core.ts)
+// — a HEEx pack ships NO call-site `primitive-*` templates at all (its design
+// surface is the shell: core-components / layouts / sidebar / theme / assets;
+// see `REQUIRED_PRIMITIVES.heex`).  The lock below pins that architectural
+// invariant: a `primitive-*.heex.hbs` reappearing in a HEEx pack would be dead
+// weight the walker never renders, which is exactly the inert-template debt
+// the pack wiring removed.
 
 /** List primitive template files in a pack, by their logical name
  *  (the file basename without the extension chain).  Handles both
@@ -135,20 +137,15 @@ describe("pack testid coverage — TSX + Svelte + Vue packs", () => {
   }
 });
 
-describe("pack testid coverage — HEEx packs (baseline lock)", () => {
+describe("pack testid coverage — HEEx packs (no call-site templates)", () => {
   for (const pack of BUILT_IN_PACKS) {
     if (pack.format !== "heex") continue;
-    it(`${pack.label}: every primitive in the baseline still emits a data-testid literal`, () => {
-      const present = new Set<string>();
-      for (const { name, file } of listPrimitives(pack.dir)) {
-        const source = fs.readFileSync(file, "utf-8");
-        if (source.includes("data-testid")) present.add(name);
-      }
-      const regressed = [...HEEX_TESTID_BASELINE].filter((n) => !present.has(n));
+    it(`${pack.label}: ships no primitive-* templates (walker owns call-site markup + testids)`, () => {
       expect(
-        regressed,
-        `${pack.label}: baseline primitives that USED to emit data-testid no longer do (regression). ` +
-          `If the removal was intentional, update HEEX_TESTID_BASELINE in this file.`,
+        listPrimitives(pack.dir).map((p) => p.name),
+        `${pack.label}: a primitive-*.heex.hbs template is dead weight — the HEEx walker never ` +
+          `dispatches call-site pack templates.  Put design vocabulary in the pack's shell surface ` +
+          `(core-components / assets-css / tailwind-config) instead.`,
       ).toEqual([]);
     });
   }

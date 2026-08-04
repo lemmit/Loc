@@ -1,6 +1,8 @@
 import type { DeployableIR, EnrichedBoundedContextIR, SystemIR } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { StyleAdapter } from "../_adapters/index.js";
+import type { LoadedPack } from "../_packs/loader.js";
+import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateVanillaElixirProject } from "./vanilla/index.js";
 
@@ -58,6 +60,20 @@ export interface GenerateElixirArgs {
   sourcemap?: SourceMapRecorder;
 }
 
+/** The args the vanilla orchestrator receives — `GenerateElixirArgs` plus the
+ *  loaded HEEx design pack.  The pack owns every design-vocabulary surface of
+ *  the emitted project (core_components.ex, layouts, sidebar markup, theme
+ *  tokens, and the assets pipeline: app.css / app.js / tailwind.config.js /
+ *  assets/package.json); the generator prepares the VMs and renders through
+ *  `pack.render(...)` — the same walker-prepares/pack-owns split the JSX-family
+ *  frontends use. */
+export type GenerateVanillaElixirArgs = GenerateElixirArgs & { pack: LoadedPack };
+
 export function generateElixirProject(args: GenerateElixirArgs): Map<string, string> {
-  return generateVanillaElixirProject(args);
+  // Resolve the deployable's `design:` to its HEEx pack — same two-line seam
+  // as the JSX-family generators (react/index.ts etc.).  Lowering qualifies
+  // and defaults the field (`coreComponents@v3`); the fallback here only
+  // covers IR built directly in tests.
+  const pack = loadPack(resolvePackDir(args.deployable.design ?? "coreComponents@v3"));
+  return generateVanillaElixirProject({ ...args, pack });
 }

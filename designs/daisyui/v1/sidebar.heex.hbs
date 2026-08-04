@@ -1,0 +1,40 @@
+# Auto-generated.
+defmodule {{webModule}}.Components.Sidebar do
+  @moduledoc """
+  Application sidebar navigation component for {{appName}}.
+  """
+  use {{webModule}}, :html
+
+  @doc "Renders the sidebar navigation."
+  attr :current_path, :string, default: "/"
+{{#if authEnabled}}
+  attr :current_user, :map, default: nil
+{{/if}}
+
+  def sidebar(assigns) do
+    ~H"""
+    <nav class="flex flex-col gap-6 p-4" data-testid="sidebar">
+      <ul class="space-y-1">
+{{#each sections}}
+{{#if labelled}}
+        <li class="pt-4 first:pt-0">
+          <h3 class="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-base-content/60">
+            {{{label}}}
+          </h3>
+          <ul class="space-y-0.5">
+{{#each entries}}
+            {{> sidebar-entry}}
+{{/each}}
+          </ul>
+        </li>
+{{else}}
+{{#each entries}}
+        {{> sidebar-entry}}
+{{/each}}
+{{/if}}
+{{/each}}
+      </ul>
+    </nav>
+    """
+  end
+end

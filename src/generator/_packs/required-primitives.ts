@@ -9,10 +9,10 @@
 // ---------------------------------
 // `loader.ts` is format-agnostic.  The required-set is paradigm-specific
 // — TSX packs MUST emit field-input-* / form-* (the React form pipeline),
-// HEEx packs MUST NOT (Phoenix uses `AshPhoenix.Form` which generates
-// inputs from the resource at compile time, so no Loom-side field-input
-// templates exist).  Splitting the manifest from the loader lets the
-// loader stay one switch-on-format below.
+// HEEx packs MUST NOT (the LiveView walker renders form inputs inline
+// through the pack-emitted CoreComponents `<.input>`, so no Loom-side
+// field-input templates exist).  Splitting the manifest from the loader
+// lets the loader stay one switch-on-format below.
 //
 // Policy: how to add a primitive
 // ------------------------------
@@ -147,7 +147,7 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
 // there once it gets a real Flutter renderer and both this required-surface
 // subtraction and the validator gate update together.
 
-// Shell-level templates every pack must emit, regardless of format.
+// Shell-level templates every JSX-family pack must emit.
 const SHARED_SHELL: readonly string[] = [
   "app-shell",
   "format-helpers",
@@ -156,6 +156,28 @@ const SHARED_SHELL: readonly string[] = [
   "theme",
   "tsconfig",
   "vite-config",
+];
+
+// Shell surface of a HEEx pack — every name here is rendered by the elixir
+// generator (vanilla/shell-emit.ts + vanilla/index.ts + sidebar-emit.ts), and
+// nothing else is: a template absent from this list and from the generator's
+// render calls does not belong in a HEEx pack.  Names shared with
+// SHARED_SHELL keep their meaning by analogy (`main` = the root document,
+// `app-shell` = the app chrome/layout, `theme` = the design-token stylesheet,
+// `package-json` = the assets build manifest); the TSX-only build-config names
+// (`tsconfig`/`vite-config`/`format-helpers`) have no Phoenix counterpart and
+// are deliberately NOT required.
+const HEEX_SHELL: readonly string[] = [
+  "app-shell",
+  "assets-css",
+  "assets-js",
+  "core-components",
+  "main",
+  "package-json",
+  "sidebar",
+  "sidebar-entry",
+  "tailwind-config",
+  "theme",
 ];
 
 const TSX_FIELD_INPUT: readonly string[] = [
@@ -236,9 +258,21 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     fieldInput: TSX_FIELD_INPUT,
     form: TSX_FORM,
   },
+  // HEEx packs own NO per-call-site primitive templates: LiveView has one
+  // component convention (CoreComponents), so the walker emits design-neutral
+  // markup + `<.button>`/`<.table>`/`<.input>`/`<.modal>`-style component
+  // calls inline, and the ENTIRE design vocabulary lives in the pack-emitted
+  // shell surface below — `core-components` (the function-component library
+  // every page renders through), the layouts (`main` = root.html.heex,
+  // `app-shell` = app.html.heex, `sidebar`(+`-entry`) = sidebar.ex), the
+  // `theme` token CSS, and the assets pipeline (`assets-css`/`assets-js`/
+  // `tailwind-config`/`package-json` → assets/, built into
+  // priv/static/assets).  That is where `coreComponents` and `daisyui`
+  // diverge; a HEEx pack with call-site primitive templates would be dead
+  // weight (the walker never dispatches into them).
   heex: {
-    core: SHARED_PRIMITIVES,
-    shell: SHARED_SHELL,
+    core: [],
+    shell: HEEX_SHELL,
   },
   // Svelte packs own forms + field inputs exactly the way TSX packs do
   // (hand-rolled runes + zod form helper; no AshPhoenix.Form analogue),
