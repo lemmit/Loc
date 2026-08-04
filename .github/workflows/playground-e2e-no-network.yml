@@ -140,6 +140,18 @@ jobs:
         working-directory: web
         run: npx playwright test --project=chromium $SPECS
 
+      # The Playwright step above ran `vite build` via its webServer, so
+      # `web/dist/` exists here.  Assert that the chunks reached only through
+      # `await import(...)` are still LAZY: `manualChunks` groups by package
+      # scope, and one static import anywhere in that scope silently promotes
+      # the whole group onto the eager path.  That has happened three times
+      # (monaco service overrides; @xyflow dragging LikeC4 + Graphviz WASM —
+      # 3.07 MB of a 15.87 MB eager total).  Chunk-size output looks identical
+      # either way, so nothing else notices.  Cheap: pure file analysis.
+      - name: Lazy chunks are still lazy
+        working-directory: web
+        run: node scripts/check-eager-chunks.mjs
+
       - name: Upload Playwright report on failure or timeout
         if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@v7

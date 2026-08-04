@@ -175,10 +175,23 @@ export default defineConfig({
           // import in the `.c4` viewer, so this stays a lazy chunk —
           // grouping it gives one cacheable vendor bundle instead of a
           // handful of hashed fragments that all load together anyway.
+          // `@xyflow` is SEPARATE from the likec4 group, and must stay that
+          // way.  The system-builder panes import it STATICALLY
+          // (SystemBuilderV2Pane, OverviewCanvas, ConstructNode, StmtNode), so
+          // grouping it with likec4 pulled that whole chunk — LikeC4 plus the
+          // Graphviz WASM layouter — onto the EAGER path, defeating the
+          // correctly-dynamic `import("likec4/react")` /
+          // `import("@likec4/layouts")` call sites and the "stays a lazy
+          // chunk" claim below.  Measured on the built output: the entry chunk
+          // statically imported the likec4 chunk, making it 3.25 MB of the
+          // 15.87 MB every page load had to parse.
+          //
+          // Same defect as the monaco-views-optional split above —
+          // `manualChunks` can undo a lazy boundary, and does so silently.
+          if (id.includes("/node_modules/@xyflow/")) return "xyflow";
           if (
             id.includes("/node_modules/likec4/") ||
             id.includes("/node_modules/@likec4/") ||
-            id.includes("/node_modules/@xyflow/") ||
             id.includes("/node_modules/@hpcc-js/")
           ) {
             return "likec4";
