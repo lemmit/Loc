@@ -1,0 +1,62 @@
+// `tenancy by user.<claim>` where the claim is NOT named `tenantId`.
+//
+// Every other tenancy fixture (tenancy-owned, tenancy-filter,
+// tenancy-hierarchy) declares the claim as `tenantId`, which happens to be
+// the exact name the `tenantOwned` prelude capability hardcodes on the
+// principal side of its stamp and filter — so the five backends' compile
+// gates could never observe the two names coming apart.  This fixture pulls
+// them apart: the claim is `orgId`, while the capability-provided ROW column
+// stays `tenantId` (the capability owns that name, and it is not the
+// author's to choose).
+//
+// The binding that must hold: stamp `this.tenantId := currentUser.orgId`,
+// read filter `this.tenantId == currentUser.orgId`, and the registry
+// self-scope `this.id == currentUser.orgId`.  A backend that reads
+// `currentUser.tenantId` here is referencing a claim the principal does not
+// have — which the typed backends catch at compile time and the dynamic ones
+// only at request time.
+system TenantClaimName {
+  user { id: guid  orgId: string }
+
+  tenancy by user.orgId of Organization
+
+  subdomain Core {
+    context Billing {
+      aggregate Invoice with tenantOwned, crudish {
+        number: string
+        amountDue: int
+      }
+      repository Invoices for Invoice {
+        find byNumber(n: string): Invoice[] where this.number == n
+      }
+    }
+    context Accounts {
+      aggregate Organization with crudish {
+        name: string
+      }
+    }
+  }
+  api BillingApi from Core
+  storage primary { type: postgres }
+  resource billingState { for: Billing, kind: state, use: primary }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Billing, Accounts]
+    dataSources: [billingState, accountsState]
+    serves: BillingApi
+    port: 4000
+    auth: required
+  }
+
+  // Same round-trip assertion as tenancy-owned, against a principal whose
+  // tenant claim is `orgId` (`cases.mjs` DEV_CLAIMS carries both names).  The
+  // create stamps `tenantId` from `currentUser.orgId`; the read filter
+  // compares the same pair.  A backend that stamped from a missing claim
+  // writes NULL and the filtered read returns 0.
+  test e2e "the tenant claim binds by its declared name, not by `tenantId`" against d {
+    api.invoices.create({ number: "INV-1", amountDue: 100 })
+    let mine = api.invoices.byNumber({ n: "INV-1" })
+    expect(mine.length).toBe(1)
+  }
+}

@@ -104,8 +104,12 @@ export async function featureCases(backendKey, platformClause, workDir) {
  *  strings keyed by the declared `user` field name.  Inert for auth-less systems
  *  (no middleware reads it).  Fixtures in the tenancy/auth cluster assert against
  *  THIS principal — an in-tenant row uses `tenantId: "acme"`, an out-of-tenant
- *  row any other value; a `requires currentUser.role == "agent"` op is satisfied. */
-export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", role: "agent" });
+ *  row any other value; a `requires currentUser.role == "agent"` op is satisfied.
+ *  `orgId` carries the same value under a second name, for the fixture whose
+ *  tenancy claim is deliberately NOT called `tenantId` (tenancy-claim-name):
+ *  each backend maps only the claims its own `user { … }` block declares, so an
+ *  extra key is inert everywhere else. */
+export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", orgId: "acme", role: "agent" });
 
 /** Reset a shared Postgres to a pristine state before a case boots.  The backend
  *  runners (java/dotnet/python/elixir) boot against ONE external DB and each
