@@ -343,6 +343,28 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     restoreItem: R.domainOp,
     allItem: R.autoFindAll,
   },
+  // ── fixtures added on main 2026-08-03 (post-census; pinned at rebase) ──
+  "corpus/tenancy-claim-name": {
+    getInvoiceById: R.getById,
+    destroyInvoice: R.destroy,
+    updateInvoice: R.crudishUpdate,
+    allInvoice: R.autoFindAll,
+    createOrganization: R.create,
+    getOrganizationById: R.getById,
+    destroyOrganization: R.destroy,
+    updateOrganization: R.crudishUpdate,
+    allOrganization: R.autoFindAll,
+  },
+  "corpus/field-defaults": {
+    destroyItem: R.destroy,
+    updateItem: R.crudishUpdate,
+    allItem: R.autoFindAll,
+  },
+  "corpus/audit-history": {
+    byReferenceOrder: R.declaredFind,
+    getOrderById: R.getById,
+    allOrder: R.autoFindAll,
+  },
 };
 
 /**
@@ -360,6 +382,11 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
   // lists under `apiSurfaceCoverage.notLifted`.  Lifting projection queries into
   // the derivation would make this attributable — and this entry stale.
   "corpus/projection": ["api.orderBoard.byKey (no such aggregate)"],
+  // `api.orders.history(...)` reads the entity-history endpoint over
+  // `audit_records` (#2378) — a machinery read `deriveContextOperations` does
+  // not lift (same class as projection reads).  Lifting it would make this
+  // attributable — and this entry stale.
+  "corpus/audit-history": ["api.orders.history (no derived operation)"],
 };
 
 /**
@@ -378,6 +405,7 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   "channels-broker",
   "extern",
   "extern-handlers",
+  "field-mask",
   "outbox",
   "projection-aggregation",
   "projection-groupby",
