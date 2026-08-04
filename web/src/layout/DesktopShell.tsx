@@ -18,7 +18,7 @@ import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
 import { DevToolsDock } from "./DevToolsDock";
 import { ExplorerTree } from "../preview/ExplorerTree";
-import { FileViewer } from "../preview/FileViewer";
+import { LazyFileViewer } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
 import { usePersistedState } from "../util/usePersistedState";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
@@ -311,7 +311,9 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                   )}
                   {secondaryDoc && (
                     <Box style={{ flex: 1, minHeight: 0, display: centerView === "secondary" ? "flex" : "none" }}>
-                      <FileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} />
+                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading viewer…</Text></Box>}>
+                        <LazyFileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} />
+                      </Suspense>
                     </Box>
                   )}
                 </Box>

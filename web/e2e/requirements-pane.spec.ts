@@ -1,7 +1,7 @@
 // Requirements tab — read-only browse + form-driven edit flow.
 
 import { expect, test } from "@playwright/test";
-import { waitForPlaygroundReady } from "./_helpers";
+import { readEditorSource, waitForPlaygroundReady } from "./_helpers";
 
 test("Requirements tab renders the requirement tree and shows detail on selection", async ({
   page,
@@ -52,9 +52,7 @@ test("New Requirement wizard creates a fresh block and selects it", async ({ pag
   // the end of the file — outside Monaco's virtualised viewport — so we read
   // the editor model via the `__loomGetSource` test hook rather than relying
   // on DOM text search, which only sees the lines currently rendered.
-  const source = await page.evaluate(
-    () => (window as unknown as { __loomGetSource: () => string }).__loomGetSource(),
-  );
+  const source = await readEditorSource(page);
   expect(source).toContain("requirement US-999 {");
 });
 

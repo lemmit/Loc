@@ -1,6 +1,8 @@
-import { Box, Button, Group, ScrollArea, Stack, Text } from "@mantine/core";
+import { Suspense } from "react";
+import { Box, Button, Center, Group, Loader, ScrollArea, Stack, Text } from "@mantine/core";
 import { FileTree } from "../preview/FileTree";
-import { FileViewer } from "../preview/FileViewer";
+import { PlainFileViewer } from "../preview/PlainFileViewer";
+import { LazyFileViewer } from "./lazy-panels";
 import type { LayoutCtx } from "./ctx";
 
 interface Props {
@@ -123,11 +125,28 @@ export function FilesPane({ ctx }: Props): JSX.Element {
             item, same as the LoomEditor wrapper. */}
         <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
           {selectedFile ? (
-            <FileViewer
-              key={selectedFile.path}
-              path={selectedFile.path}
-              content={selectedFile.content}
-            />
+            // Monaco viewer on desktop (lazy), plain monospace on mobile.
+            isDesktop ? (
+              <Suspense
+                fallback={
+                  <Center h="100%">
+                    <Loader size="sm" />
+                  </Center>
+                }
+              >
+                <LazyFileViewer
+                  key={selectedFile.path}
+                  path={selectedFile.path}
+                  content={selectedFile.content}
+                />
+              </Suspense>
+            ) : (
+              <PlainFileViewer
+                key={selectedFile.path}
+                path={selectedFile.path}
+                content={selectedFile.content}
+              />
+            )
           ) : (
             <Box p="md">
               <Text size="sm" c="dimmed">

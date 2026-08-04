@@ -7,7 +7,7 @@
 // Pure client-side (git store over LightningFS + IndexedDB) — no network.
 
 import { expect, test } from "@playwright/test";
-import { waitForPlaygroundReady } from "./_helpers";
+import { focusSourceEditor, waitForPlaygroundReady } from "./_helpers";
 
 /** Wipe the playground's IndexedDB so each test starts clean (mirrors
  *  workspace-persistence.spec.ts). */
@@ -46,8 +46,10 @@ async function editAndCommit(
   page: import("@playwright/test").Page,
   marker: string,
 ): Promise<void> {
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
+  // Desktop edits in Monaco, mobile in the plain textarea — mobile ships no
+  // editor at all now (M-T8.15).  The history behaviour under test is the
+  // same on both, so target whichever this viewport rendered.
+  await focusSourceEditor(page);
   await page.keyboard.press("Control+Home");
   await page.keyboard.type(`${marker}\n`);
   await page.waitForTimeout(2200);

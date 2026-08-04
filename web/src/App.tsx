@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AppShell } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import type { EditorHandle } from "./editor/LoomEditor";
-import { LoomLspClient } from "./lsp/client";
+import type { EditorHandle } from "./editor/editor-handle";
+// Type-only.  `lsp/client.ts` imports `monaco-languageclient` and
+// `editor/loom-services`, i.e. Monaco — 9.56 MB and three worker realms.  The
+// client is constructed through `await import(...)` below, and only on the
+// desktop surface.  See M-T8.15.
+import type { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
-import { monacoModelHost } from "./lsp/model-host";
 import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
-import { type AgentMessage, runAgentDemo as playAgentDemo } from "./agent/demo";
-import { runLiveAgent } from "./agent/live";
+import { buildDiagnosticsToLsp } from "./lsp/build-diagnostics";
+// `agent/demo`, `agent/live` and `agent/system-prompt` are imported TYPE-ONLY
+// on purpose, and their functions are reached through `await import(...)` at
+// the call sites below.  Each of them has a VALUE import of `src/tools`, which
+// re-exports `src/api`, which pulls `src/language` + `src/ir` — i.e. Langium,
+// chevrotain and the whole grammar.  A single static import here put the entire
+// Loom compiler front-end into the eager entry chunk (`chevrotain` ×25 in the
+// built `index-*.js`), on the main thread, for one `runAgentDemo` symbol —
+// a THIRD resident copy alongside `build.worker` and `ddd-server.worker`.
+//
+// That matters beyond first paint: the playground boots Postgres-in-WASM, which
+// demands a 128 MB contiguous heap, and on iOS the main thread and every worker
+// share one process memory budget.  See M-T8.15.
+import type { AgentMessage } from "./agent/demo";
+// Type-only from `src/tools` too (`Complete` etc.) — no runtime edge; this
+// module's own body is small and provider-shaped.
 import { createOpenAiCompatibleComplete } from "./agent/openai-transport";
 import {
   type AgentSettings,
@@ -16,7 +33,6 @@ import {
   saveAgentSettings,
   settingsReady,
 } from "./agent/provider";
-import { buildSystemPrompt } from "./agent/system-prompt";
 import type { Complete, Message as AgentTranscriptMessage } from "../../src/tools/index.js";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
@@ -280,7 +296,7 @@ export default function App(): JSX.Element {
 
   const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
 
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [lspDiagnostics, setLspDiagnostics] = useState<Diagnostic[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [reqMethod, setReqMethod] = useState<string>("GET");
   // Generated backends mount domain routes under `/api` (`app.route("/api/products", …)`),
@@ -429,6 +445,16 @@ export default function App(): JSX.Element {
   // page-builder subscribes to this for its debounced text→canvas live
   // re-seed; bumping on builder edits would echo-loop, so we don't.
   const [editorSourceTick, setEditorSourceTick] = useState(0);
+  // `null` until an editor mounts.  A non-editor write in that window (a
+  // Builder "Apply", an agent edit, a history restore) does NOT lose its text:
+  // every such path writes the workspace store first and only then calls
+  // `editorHandleRef.current?.setSource(...)` to sync the live model, and both
+  // editors seed from `initialSource` — which follows the store — when they do
+  // mount.  The window widened on desktop when the language client moved to
+  // `await import(...)`, which is why this is worth stating rather than
+  // assuming.  (`LoomEditor` additionally queues for its own "client ready but
+  // Monaco not created yet" window, where the editor IS mounted and a frozen
+  // seed would otherwise revert the write.)
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const engineRef = useRef<RuntimeEngine | null>(null);
@@ -450,10 +476,27 @@ export default function App(): JSX.Element {
     }),
     [],
   );
+  // The language client is a DESKTOP-only facility.  Mobile edits in a
+  // textarea and takes its diagnostics from `generate` (the build worker
+  // already computes them), so it never constructs one — which is what keeps
+  // Monaco, `monaco-languageclient` and the `ddd-server` worker off the phone
+  // entirely.  `null` here is a supported state, not a transient one:
+  // `EditorPane` renders `PlainEditor` when there is no client.
   const lspClientRef = useRef<LoomLspClient | null>(null);
-  if (lspClientRef.current === null) {
-    lspClientRef.current = new LoomLspClient();
-  }
+  const [lspClient, setLspClient] = useState<LoomLspClient | null>(null);
+  useEffect(() => {
+    if (!isDesktop || lspClientRef.current) return;
+    let disposed = false;
+    void import("./lsp/client").then(({ LoomLspClient }) => {
+      if (disposed) return;
+      const client = new LoomLspClient();
+      lspClientRef.current = client;
+      setLspClient(client);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [isDesktop]);
 
   // Resident `VfsEntry[]` projection of `/workspace`, kept fresh from
   // the async git store.  The build-worker seed callback is sync (it
@@ -504,12 +547,24 @@ export default function App(): JSX.Element {
   const activePathRef = useRef(sources.activePath);
   activePathRef.current = sources.activePath;
   useEffect(() => {
-    const dispose = syncWorkspaceToLsp(sources.controller, {
-      getActivePath: () => activePathRef.current,
-      host: monacoModelHost,
+    // No language client (mobile) → no Monaco models to sync into.  The host
+    // is imported dynamically because it is the module that touches
+    // `monaco-editor` directly.
+    if (!lspClient) return;
+    let dispose: (() => void) | null = null;
+    let cancelled = false;
+    void import("./lsp/model-host").then(({ monacoModelHost }) => {
+      if (cancelled) return;
+      dispose = syncWorkspaceToLsp(sources.controller, {
+        getActivePath: () => activePathRef.current,
+        host: monacoModelHost,
+      });
     });
-    return dispose;
-  }, [sources.controller]);
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, [sources.controller, lspClient]);
 
   // Crash reports carry the workspace as a FINGERPRINT (path + byte length +
   // truncated hash), never as content — see `util/crash-report.ts`.  The
@@ -563,6 +618,7 @@ export default function App(): JSX.Element {
       engine.dispose();
       lspClientRef.current?.dispose();
       lspClientRef.current = null;
+      setLspClient(null);
     };
   }, []);
 
@@ -668,7 +724,7 @@ export default function App(): JSX.Element {
     dispatch({ type: "RESET" });
     lastBundleReadyRef.current = null;
     lastMappedGenerateRef.current = null;
-    setDiagnostics([]);
+    setLspDiagnostics([]);
     setSelectedPath(null);
     setPreviewBundle(null);
     setPreviewBooted(false);
@@ -901,11 +957,20 @@ export default function App(): JSX.Element {
     }
   }
 
+  const generateResult = pipeline.generate.kind === "result" ? pipeline.generate.result : null;
+
+  // Where Problems gets its content.  Desktop: the live language client, via
+  // Monaco markers.  Mobile: `generate` — same compiler, same validators, same
+  // `file:line`, just reported when you Run instead of as you type.  Mobile
+  // has no LSP at all (M-T8.15), so without this the panel would be silently
+  // empty rather than late.
+  const diagnostics = isDesktop
+    ? lspDiagnostics
+    : buildDiagnosticsToLsp(generateResult?.diagnostics ?? []);
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
   errorCountRef.current = errorCount;
 
-  const generateResult = pipeline.generate.kind === "result" ? pipeline.generate.result : null;
   const generateSuccess = selGenerateOk(pipeline);
   const honoBundleResult = pipeline.bundle.kind === "result" ? pipeline.bundle.hono : null;
   const reactBundleResult = pipeline.bundle.kind === "result" ? pipeline.bundle.react : null;
@@ -1620,6 +1685,7 @@ export default function App(): JSX.Element {
     agentSignalRef.current = { cancelled: false };
     setAgentRunning(true);
     try {
+      const { runAgentDemo: playAgentDemo } = await import("./agent/demo");
       await playAgentDemo({
         setMessages: setAgentMessages,
         applySource: applyAgentSource,
@@ -1664,6 +1730,10 @@ export default function App(): JSX.Element {
         stream: true,
       });
     try {
+      const [{ runLiveAgent }, { buildSystemPrompt }] = await Promise.all([
+        import("./agent/live"),
+        import("./agent/system-prompt"),
+      ]);
       agentTranscriptRef.current = await runLiveAgent({
         complete,
         prompt: text,
@@ -1772,7 +1842,7 @@ export default function App(): JSX.Element {
       // LSP — keeping the source tab and Problems panel in sync.
       if (origin !== "editor") editorHandleRef.current?.setSource(text);
     },
-    onDiagnosticsChange: setDiagnostics,
+    onDiagnosticsChange: setLspDiagnostics,
     scheduleAutoGenerate,
     setSelectedPath,
     setReqMethod,
@@ -1811,7 +1881,6 @@ export default function App(): JSX.Element {
     runDownloadZip,
   });
 
-  const lspClient = lspClientRef.current;
   const buildClient = buildClientRef.current;
   const engine = engineRef.current;
   const unsupportedDeployables = deployableAnalysis.unsupported;

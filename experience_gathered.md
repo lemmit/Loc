@@ -4305,3 +4305,95 @@ packs now receive a name or nothing. Same shape as the `ariaLabelExpr` seam
 that retired Flutter's parse-the-name-back-out-of-the-HTML regex (§ D-I18N-ATTR):
 every time the shared layer takes over a decision, a per-target reimplementation
 of it stops being able to drift.
+
+## 78. A correct `await import()` at every call site is not evidence a chunk is lazy (2026-08-04)
+
+The playground could not boot on an iPhone. The phase marker — the one
+instrument that survives a renderer kill — landed on `boot:ddl-meta` four times
+across four different builds: PGlite's first `exec()`, where Postgres-in-WASM
+starts and demands a **128 MB contiguous heap** declared by `pglite.wasm`. Four
+fixes had already shipped against it (OPFS GC, `:memory:` dataDir, bundler
+release, un-eager LikeC4), each freeing single-digit megabytes against a 128 MB
+demand, and **none of them moved the failure**.
+
+So the target became the two biggest resident things: Monaco (9.56 MB) and the
+Loom compiler, which turned out to be sitting on the **main thread, eagerly**.
+
+### The compiler got there through a feature nobody connected to it
+
+`App.tsx` imported `runAgentDemo` from `./agent/demo` — one symbol, for the
+chat tab. That module has a *value* import of `src/tools`, which re-exports
+`src/api`, which pulls `src/language` + `src/ir`. Langium, chevrotain and the
+whole grammar therefore lived in the eager entry chunk: a **third** resident
+copy, alongside `build.worker` and `ddd-server.worker`, on the thread that
+also has to leave room for a 128 MB WASM allocation.
+
+Nothing in the source reads as a mistake. `import { runAgentDemo } from
+"./agent/demo"` is an ordinary import of an ordinary feature. The cost is two
+re-export hops away and invisible at the call site.
+
+### Then the lazy boundaries did nothing
+
+Making every Monaco consumer lazy — `LoomEditor`, `FileViewer`,
+`JsonBodyEditor`, `LoomLspClient`, `monacoModelHost`, all five behind a single
+`layout/lazy-panels.ts` — moved eager JS from **12.80 MB to 11.23 MB**. Monaco
+was still there, still `<link rel="modulepreload">`ed, still parsed on first
+paint. Every boundary was correct.
+
+The cause was `\0vite/preload-helper` — the helper *every* `await import(...)`
+compiles down to. It is a **virtual** module, so it matched no `manualChunks`
+rule (`if (!id.includes("/node_modules/")) return undefined` skipped it), and
+rollup was free to place it wherever it liked. It liked the `monaco` vendor
+chunk. The entry's static import of the helper was therefore a static import of
+9.56 MB. Pinning the helper to its own chunk took eager JS to **1.63 MB**.
+
+That is the fourth instance of the same hazard in this repo (workbench service
+override → `monaco`; `@xyflow` → LikeC4; and now the preload helper), and the
+first where the promoted chunk was reached through a module we don't own.
+
+**The lesson: laziness is a property of the emitted graph, not of the source.**
+`await import()` at the call site is a necessary condition and not a sufficient
+one. The only trustworthy check walks the built `dist/` and follows static
+edges — which is what `web/scripts/check-eager-chunks.mjs` does.
+
+### A gate that can only pass is worse than no gate
+
+That script's original form matched chunk *names* (`mermaid`, `craftjs`). It
+could not see the compiler regression at all, because `manualChunks` names
+vendor scopes and the promoted code was our own `src/`, which rollup places
+wherever the import graph says. So the gate grew a second axis — source
+**signatures** (`chevrotain`, `loom_validate`) — and the signature check is
+verified **both ways**:
+
+- the signature must be absent from every eagerly-reachable chunk, **and**
+- it must be present *somewhere* in `dist/`.
+
+Without the second half, a minifier rename or a dependency swap turns the
+check into a permanent pass and nobody ever learns. Same failure mode as §59
+and §63: the check that never reaches the thing it names. A third axis — a hard
+byte budget on the eager total — catches the regression the other two can't
+enumerate in advance.
+
+All three were mutation-proved before the PR: restore the static agent import
+→ 12.79 MB and two named signatures; remove the preload-helper pin → 11.19 MB
+and `monaco-*.js ← <entry>`; lower the budget → the eager graph printed
+largest-first. A green first run proves nothing.
+
+### iOS gives one memory budget to the tab and all its workers
+
+Worth stating plainly because it inverts a reflex: on iOS the main thread and
+every `Worker` live in one WebContent process against one budget. **Moving work
+into a worker buys no headroom** — only deleting it does. The playground was
+running four workers (build, bundle, runtime, LSP) plus Monaco's three, and two
+of them held their own copy of the compiler.
+
+### And the honest part
+
+None of this is yet known to fix the boot. The oracle is a phase marker moving
+past `boot:ddl-meta`, and only a device produces one. An 87% cut in resident JS
+is the *fifth* "this should help" fix in a row until a phone says otherwise —
+so the mission stayed `partial`, and the design doc committed in advance to
+what it would mean if the marker doesn't move (128 MB is more than iOS will
+give a web page → the answer is a server-side runtime, not more trimming).
+Writing down the falsifier before the measurement is what stops the next fix
+from being reported as a success on the strength of its bundle graph.

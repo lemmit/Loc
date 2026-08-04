@@ -135,6 +135,18 @@ export default defineConfig({
         // is small).  We come out ahead on every subsequent
         // deploy because the vendor chunks stay cached.
         manualChunks(id) {
+          // `__vite__preload` — the helper EVERY `await import(...)` call site
+          // routes through.  It is a virtual module (`\0vite/preload-helper`),
+          // so it never matched the `/node_modules/` guard below and rollup was
+          // free to place it wherever it liked.  It picked the `monaco` vendor
+          // chunk, which gave the entry a STATIC import edge into 9.56 MB and a
+          // `<link rel="modulepreload">` for it in `index.html` — every lazy
+          // boundary in the app was correct and the editor still downloaded on
+          // first paint, on every device.  Pinning the helper to its own chunk
+          // makes lazy actually mean lazy.  (Fourth instance of the
+          // chunk-grouping hazard; `scripts/check-eager-chunks.mjs` now gates
+          // `monaco` too.)
+          if (id.includes("vite/preload-helper")) return "vite-preload";
           if (!id.includes("/node_modules/")) return undefined;
           // The two service overrides monaco-languageclient reaches ONLY
           // through `await import(...)`, for `viewsConfig.$type` values the
@@ -196,12 +208,11 @@ export default defineConfig({
         },
       },
     },
-    // The app's own entry chunk sits well under this; the limit is
-    // raised only to mute the warning for the two intentional, lazily
-    // loaded vendor bundles — Monaco (~9.6 MB — the codingame editor-api
-    // plus the standard-language grammars the generated-file viewer needs
-    // for TS/C#/YAML/JSON/… highlighting) and LikeC4 — both of which are
-    // cached after first use and never block initial paint.
+    // The app's own entry chunk sits well under this; the limit is raised
+    // only to mute the warning for Monaco (~9.6 MB — the codingame editor-api
+    // plus the standard-language grammars the generated-file viewer needs for
+    // TS/C#/YAML/JSON/… highlighting), which is reached exclusively through
+    // `layout/lazy-panels.ts` and never blocks initial paint.
     chunkSizeWarningLimit: 10000,
   },
   worker: {
