@@ -28,6 +28,7 @@ import {
   type RepositoryIR,
   type TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { maskedHistoryFields } from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { errorStatuses, type OpErrorKind, problemTitle } from "../../ir/util/openapi-errors.js";
 import {
@@ -278,6 +279,15 @@ export function buildPyRoutesFile(
             exprUsesCurrentUser(f.default),
         ))
       ? "from app.auth.user import User"
+      : null,
+    // The history mapper's masked-field blocks read the ambient principal
+    // through `current_user()` (the non-raising getter — an unauthenticated
+    // caller drops every masked entry).  Imported only when the aggregate
+    // actually serves history AND masks something, else ruff flags F401.
+    // Emitted separately from the `User` line above because the two conditions
+    // are independent: a masked history needs the accessor but not the type.
+    historyFind && maskedHistoryFields(agg).length > 0
+      ? "from app.auth.user import current_user"
       : null,
     historyFind
       ? "from app.audit.history import AuditEntryListResponse, audit_snapshot_value, audit_value_changed"

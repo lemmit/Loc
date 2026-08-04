@@ -474,6 +474,15 @@ redacts). The masked field is nullable in the response schema. Internal
 audit/provenance snapshots stay unmasked (they record the real value). A
 mask-free aggregate is byte-identical.
 
+> **Known divergence — .NET audit snapshots.** node, Java, Python and Elixir all
+> project audit `before`/`after` through the UNMASKED serializer, as the previous
+> paragraph says. .NET does not: its audited command handlers reuse the ordinary
+> (masked) wire projection, so a masked field is recorded as `null` whenever the
+> acting principal fails the predicate — the stored trail then depends on *who*
+> performed the write, and the entity-history read has nothing left to redact.
+> Not fixed here (it changes what .NET writes, and overlaps the in-flight
+> history-read work); tracked as a follow-up.
+
 ```ts
 // generated (Hono) — the aggregate's read serializer
 toWireMasked(root: Person, currentUser: User | null): unknown {
@@ -507,6 +516,27 @@ public static PersonResponse fromMasked(Person value) {
         (__maskUser != null && (__maskUser.permissions().contains("hr.salaryUnmask"))) ? value.salary() : null);
 }
 ```
+
+On **.NET** the redaction is inlined into the wire projection itself, guarded by
+a C# pattern match on the ambient `RequestContext.Current` — no separate masked
+mapper.
+
+```csharp
+// generated (.NET) — the read handler's projection, two masked fields
+return found is null ? null : new PersonResponse(found.Id.Value, found.Name,
+    (RequestContext.Current?.CurrentUser is { } __maskUser0 && ((__maskUser0.Permissions).Contains("hr.salaryUnmask"))) ? (decimal?)(found.Salary) : null,
+    (RequestContext.Current?.CurrentUser is { } __maskUser1 && ((__maskUser1.Permissions).Contains("hr.salaryUnmask"))) ? (string?)(found.NationalId) : null);
+```
+
+The pattern variable is **numbered** (`__maskUser0`, `__maskUser1`, …) rather
+than fixed. `x is { } n` declares `n` in the enclosing BLOCK, not in the
+conditional expression that tests it, so a second wrap in the same C# scope
+would redeclare the same local — `CS0128`. Two masked fields on one aggregate
+(above) hit that inside a single projection; an `audited` command hits it across
+two, because its handler renders the projection once per before/after snapshot.
+Names are allocated per C# scope in field order (`MaskNamer`,
+`generator/dotnet/dto-mapping.ts`), so an emitter that renders more than one
+projection into one method body threads a single allocator through all of them.
 
 On **Elixir** (vanilla Phoenix) the aggregate REST/ES controller's `serialize/1`
 becomes the redacting serializer — it delegates to `serialize_unmasked/1` (the

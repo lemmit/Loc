@@ -108,6 +108,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     backends: ALL,
   },
   {
+    id: "field-mask",
+    title:
+      "field read-redaction — `mask unless` crossed with `audited` (two masked fields + a masked contained part, projected twice in one scope)",
+    doc: "auth",
+    backends: ALL,
+    note: "the CROSSING is the point: an audited op renders the masked projection twice into one method body, which is where a fixed principal-variable name collides (.NET CS0128)",
+  },
+  {
     id: "criterion-filter",
     title: "reusable criterion (criterion.md) used as `filter <Criterion>`",
     doc: "criterion",

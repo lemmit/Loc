@@ -22,18 +22,60 @@ import { snake, upperFirst } from "../../util/naming.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { renderCsExpr } from "./render-expr.js";
 
+/** Allocator for the C# pattern-variable names `maskWrap` binds.
+ *
+ *  `x is { } name` declares `name` in the ENCLOSING BLOCK, not in the
+ *  conditional expression that tests it — so a fixed name collides (CS0128
+ *  "a local variable named '…' is already defined in this scope") the moment
+ *  ONE method body renders two masked projections.  That happens routinely:
+ *  two `mask unless` fields on one aggregate (two wraps in one `new
+ *  <Agg>Response(...)`), and — the case this allocator was introduced for — an
+ *  `audited` operation, whose handler serializes the wire projection TWICE (the
+ *  `__before` and `__after` snapshots) into the same handler body.  A lambda
+ *  body would be no escape either, so the nested containment projections share
+ *  the namer: C# forbids shadowing an enclosing local (CS0136).  (A contained
+ *  PART cannot carry a mask today — `wireFieldsForPart` drops `maskUnless` —
+ *  but threading it costs nothing and removes the trap if that changes.)
+ *
+ *  So the name is allocated, never hard-coded.  One namer spans one C# SCOPE:
+ *  every emitter that renders more than one projection into a single method
+ *  body threads ONE namer through all of them (see `cqrs/commands.ts`'s
+ *  audited-operation handler and `workflow-emit.ts`'s inline audited op-call);
+ *  an emitter with a single projection lets `projectEntityArgs` default one.
+ *  Names are handed out in field order, so output stays deterministic. */
+export interface MaskNamer {
+  /** The next unused pattern-variable name in this scope. */
+  next(): string;
+}
+
+/** A fresh `MaskNamer` — one per C# scope that renders masked projections. */
+export function maskNamer(): MaskNamer {
+  let n = 0;
+  return {
+    next: () => `__maskUser${n++}`,
+  };
+}
+
 /** Wrap a masked field's projected value in a fail-closed read redaction
  *  (`mask unless`, authorization.md §5): the value is shown only when the
  *  caller's ambient principal satisfies the predicate, else `null`.  Reads the
  *  request-scoped principal via `RequestContext.Current` (the same ambient
  *  accessor the read-side filter uses — no DI threading), so an unauthenticated
- *  request (`CurrentUser` null) redacts.  `wf.maskUnless` absent ⇒ unchanged. */
-function maskWrap(valueExpr: string, wf: WireField, ctx: EnrichedBoundedContextIR): string {
+ *  request (`CurrentUser` null) redacts.  `wf.maskUnless` absent ⇒ unchanged.
+ *  The pattern variable is drawn from `names` — see `MaskNamer` for why it
+ *  cannot be a fixed identifier. */
+function maskWrap(
+  valueExpr: string,
+  wf: WireField,
+  ctx: EnrichedBoundedContextIR,
+  names: MaskNamer,
+): string {
   if (!wf.maskUnless) return valueExpr;
   let t = wireType(wf.type, ctx, "response");
   if (!t.endsWith("?")) t = `${t}?`;
-  const pred = renderCsExpr(wf.maskUnless, { thisName: "this", currentUserExpr: "__maskUser" });
-  return `(RequestContext.Current?.CurrentUser is { } __maskUser && (${pred})) ? (${t})(${valueExpr}) : null`;
+  const maskUser = names.next();
+  const pred = renderCsExpr(wf.maskUnless, { thisName: "this", currentUserExpr: maskUser });
+  return `(RequestContext.Current?.CurrentUser is { } ${maskUser} && (${pred})) ? (${t})(${valueExpr}) : null`;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,11 +356,15 @@ export function collectWireUsings(
   return into;
 }
 
-/** Project a domain expression to its wire-shape Response. */
+/** Project a domain expression to its wire-shape Response.  `names` is the
+ *  enclosing scope's mask-variable allocator, threaded so an entity nested in
+ *  the projected value gets collision-free pattern variables (see
+ *  `MaskNamer`); omitted, a scope-local one is allocated on demand. */
 export function projectToResponse(
   domainExpr: string,
   t: TypeIR,
   ctx: EnrichedBoundedContextIR,
+  names?: MaskNamer,
 ): string {
   const info = wireTypeInfo(t, "response");
   if (info.isNullable) {
@@ -326,10 +372,10 @@ export function projectToResponse(
     // explicitly: value types use `.Value`, reference types use `!`.
     const innerT = peelNullable(t);
     const unwrap = csIsValueType(innerT) ? `${domainExpr}.Value` : `${domainExpr}!`;
-    return `(${domainExpr} is null ? null : ${projectToResponse(unwrap, innerT, ctx)})`;
+    return `(${domainExpr} is null ? null : ${projectToResponse(unwrap, innerT, ctx, names)})`;
   }
   if (info.isCollection) {
-    return `${domainExpr}.Select(__e => ${projectToResponse("__e", peelCollection(t), ctx)}).ToList()`;
+    return `${domainExpr}.Select(__e => ${projectToResponse("__e", peelCollection(t), ctx, names)}).ToList()`;
   }
   switch (info.refKind) {
     case "primitive":
@@ -357,7 +403,7 @@ export function projectToResponse(
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return domainExpr;
       const args = vo.fields
-        .map((f) => projectToResponse(`${domainExpr}.${upperFirst(f.name)}`, f.type, ctx))
+        .map((f) => projectToResponse(`${domainExpr}.${upperFirst(f.name)}`, f.type, ctx, names))
         .join(", ");
       return `new ${info.base}Response(${args})`;
     }
@@ -376,7 +422,7 @@ export function projectToResponse(
           .map((a): Resolved => ({ part: a, agg: a }))
           .find((x) => x.part.name === info.base);
       if (!part) return domainExpr;
-      return projectEntityExpr(domainExpr, part.part, ctx);
+      return projectEntityExpr(domainExpr, part.part, ctx, { maskNames: names });
     }
   }
 }
@@ -454,7 +500,14 @@ export function projectEntityArgs(
    *  record + projection in lockstep.  A discriminated-union variant record
    *  (`<Union>_<Tag>`, params from `unionMembers`) does NOT carry the provenance
    *  params, so that one call site sets `unionVariant` to suppress them. */
-  opts?: { unionVariant?: boolean },
+  opts?: {
+    unionVariant?: boolean;
+    /** The enclosing C# SCOPE's mask-variable allocator.  Pass one shared namer
+     *  when a single method body renders more than one projection (an `audited`
+     *  operation's before/after snapshots); omit it and this projection gets a
+     *  private one.  See `MaskNamer`. */
+    maskNames?: MaskNamer;
+  },
 ): string {
   // `wireFieldsFor` recomputes the wire shape from the enriched node's fields.
   // Each wire field maps to one positional argument on `new <Ent>Response(...)`,
@@ -463,6 +516,7 @@ export function projectEntityArgs(
   // shape (not a hand-diverged contract record).  `forApiRead` strips `internal`
   // and `secret` fields.
   const fields = forApiRead(wireFieldsFor(entity));
+  const names = opts?.maskNames ?? maskNamer();
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -478,16 +532,25 @@ export function projectEntityArgs(
       // NullReferenceException.  A collection never nulls; a required single
       // containment is defaulted, so both project unguarded.
       const single = !wireTypeInfo(wf.type, "response").isCollection;
+      // The nested projection shares this scope's namer.  A C# lambda body is
+      // not an escape hatch (shadowing an enclosing local is CS0136), so were a
+      // contained part ever to carry a mask it must not reuse an outer name.
+      const nested = { maskNames: names };
       args.push(
         wireTypeInfo(wf.type, "response").isCollection
-          ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx)}).ToList()`
+          ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx, nested)}).ToList()`
           : single && wf.optional
-            ? `${accessor} is null ? null : ${projectEntityExpr(accessor, part, ctx)}`
-            : projectEntityExpr(accessor, part, ctx),
+            ? `${accessor} is null ? null : ${projectEntityExpr(accessor, part, ctx, nested)}`
+            : projectEntityExpr(accessor, part, ctx, nested),
       );
     } else {
       args.push(
-        maskWrap(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx), wf, ctx),
+        maskWrap(
+          projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx, names),
+          wf,
+          ctx,
+          names,
+        ),
       );
     }
   }
@@ -505,7 +568,7 @@ export function projectEntityExpr(
   domainExpr: string,
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: EnrichedBoundedContextIR,
-  opts?: { unionVariant?: boolean },
+  opts?: { unionVariant?: boolean; maskNames?: MaskNamer },
 ): string {
   return `new ${entity.name}Response(${projectEntityArgs(domainExpr, entity, ctx, opts)})`;
 }
