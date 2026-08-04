@@ -88,6 +88,12 @@ Flutter page bodies do not translate them yet.
 | `floor` | `(): money` | yes |
 | `ceil` | `(): money` | yes |
 
+#### `datetime`
+
+| op | signature | queryable |
+| --- | --- | --- |
+| `startOfDay` | `(): datetime` | yes |
+
 ## Collection operations
 
 Operations on a collection receiver `T[]`.  These render in-memory on every

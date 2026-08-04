@@ -924,6 +924,14 @@ export interface WalkerTarget {
    *  forks `Html.a`. */
   renderProvenanceInfo?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
 
+  /** OPTIONAL — whole-primitive override for `Timeline(of: <entries>)`, the
+   *  entity audit trail (docs/audit.md).  Same contract as
+   *  `renderProvenanceInfo`: the shared `emitTimeline` delegates here first and
+   *  uses a non-null return verbatim.  The JSX family renders from
+   *  `emitTimeline`'s per-framework branch; Feliz/Flutter fork here when they
+   *  port it, and everything else falls through to a visible comment. */
+  renderTimeline?(call: ExprIR, ctx: WalkContext, depth: number): string | null;
+
   /** OPTIONAL — whole-primitive override for `DestroyForm(of: <Agg>)`.  The
    *  shared `emitDestroyForm` delegates here first; a non-null return is used
    *  verbatim and the shared path (which records an `actionMutations` sink +

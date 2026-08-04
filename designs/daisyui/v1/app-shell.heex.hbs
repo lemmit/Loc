@@ -1,60 +1,36 @@
-<%!-- Auto-generated. Root layout shell with sidebar. Rendered as the app layout template. --%>
-<%!-- This file maps to lib/<app>_web/components/layouts/app.html.heex --%>
-<div class="flex h-screen overflow-hidden bg-base-200">
-  <%!-- Sidebar --%>
-  <aside id="sidebar"
-         class="flex w-64 flex-col border-r border-base-300 bg-base-100"
-         data-testid="nav-sidebar"
-         aria-label="Primary navigation">
-    <%!-- Brand header --%>
-    <div class="flex h-14 flex-shrink-0 items-center border-b border-base-300 px-4">
-      <.link navigate="/" class="flex items-center gap-2 no-underline text-inherit">
-        <div class="h-7 w-7 rounded-md" style="background-color: var(--color-primary)" aria-hidden="true"></div>
-        <span class="text-base font-semibold tracking-tight">{{systemNameHuman}}</span>
-      </.link>
-    </div>
-
-    <%!-- Nav sections --%>
-    <nav class="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-      {{#each navSections}}
-      <div class="mb-3">
-        <p class="mb-1 px-2 text-xs font-semibold uppercase tracking-wider text-base-content/60">{{label}}</p>
-        {{#each entries}}
-        <.link navigate="{{to}}"
-               data-testid="{{testId}}"
-               class={["flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        if @current_path == "{{to}}" || String.starts_with?(@current_path || "", "{{to}}/") do
-                          "bg-base-200 text-primary"
-                        else
-                          "text-base-content/70 hover:bg-base-200 hover:text-base-content"
-                        end]}>
-          {{label}}
-        </.link>
-        {{/each}}
-      </div>
-      {{/each}}
-    </nav>
-  </aside>
-
-  <%!-- Main content area --%>
-  <div class="flex flex-1 flex-col overflow-hidden">
-    <%!-- Top bar (mobile burger lives here) --%>
-    <header class="flex h-14 flex-shrink-0 items-center border-b border-base-300 bg-base-100 px-4 lg:hidden">
-      <button type="button"
-              class="rounded-md p-2 text-base-content/70 hover:bg-base-200"
-              data-testid="nav-burger"
-              aria-label="Open sidebar"
-              phx-click={JS.toggle(to: "#sidebar")}>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-        </svg>
-      </button>
-      <span class="ml-3 text-sm font-semibold">{{systemNameHuman}}</span>
-    </header>
-
-    <main class="flex-1 overflow-y-auto p-6">
+{{!-- app.html.heex — the LiveView app layout.  Two variants: the sidebar
+     chrome (a LiveView app with a `ui:` block) and the minimal header
+     (embedded-SPA hosts / no sidebar).  `skipToContent` / `primaryNavAria`
+     arrive pre-rendered by the generator (raw English, or the pgettext
+     call under i18n) — the template only places them. --}}
+{{#if hasSidebar}}
+<div class="flex min-h-screen">
+  <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-base-100 focus:px-4 focus:py-2 focus:text-sm focus:font-medium">{{{skipToContent}}}</a>
+  <nav aria-label={{{primaryNavAria}}} class="w-64 flex-shrink-0 border-r border-base-300 bg-base-100">
+    <{{webModule}}.Components.Sidebar.sidebar current_path={@current_path}{{#if currentUser}} current_user={@current_user}{{/if}} />
+  </nav>
+  <main id="main-content" class="flex-1 px-4 py-8 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-4xl">
       <.flash_group flash={@flash} />
       <%= @inner_content %>
-    </main>
-  </div>
+    </div>
+  </main>
 </div>
+{{else}}
+<a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-base-100 focus:px-4 focus:py-2 focus:text-sm focus:font-medium">{{{skipToContent}}}</a>
+<header class="px-4 sm:px-6 lg:px-8">
+  <div class="flex items-center justify-between border-b border-base-300 py-3 text-sm">
+    <div class="flex items-center gap-4">
+      <nav aria-label={{{primaryNavAria}}} class="flex items-center gap-4 font-semibold leading-6 text-base-content">
+        <a href="/">Home</a>
+      </nav>
+    </div>
+  </div>
+</header>
+<main id="main-content" class="px-4 py-20 sm:px-6 lg:px-8">
+  <div class="mx-auto max-w-2xl">
+    <.flash_group flash={@flash} />
+    <%= @inner_content %>
+  </div>
+</main>
+{{/if}}

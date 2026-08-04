@@ -16,6 +16,7 @@ import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
+import { skipsEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
 import {
   escapeHeexAttr,
@@ -780,6 +781,14 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     return a?.kind === "literal" && a.value === "true";
   };
   const ofNode = expr.args[names.indexOf("of")];
+  // Entity-history read: Phoenix maps the read onto `list_<aggs>` (the LIST,
+  // not the trail), so the whole view is skipped with a visible comment until
+  // the LiveView read layer learns the derived `history(id)` find.  See
+  // `_walker/history-read.ts` — one predicate, shared with the JSX walker, so
+  // the two engines can't disagree about which targets serve this read.
+  if (skipsEntityHistoryRead("phoenixLiveView", ofNode, ctx.aggregatesByName)) {
+    return `<%!-- entity history not yet supported on phoenixLiveView --%>`;
+  }
   const shape = ofNode
     ? queryShape(ofNode, {
         apiParamNames: new Set(ctx.ui.apiParams.map((p) => p.name)),
@@ -1052,6 +1061,46 @@ export function renderProvenanceInfo(
     `    </dl>`,
     `  </details>`,
     `<% end %>`,
+  ].join("\n");
+}
+
+/** `Timeline(of: <entries>)` → the entity's audit trail as an ordered list
+ *  (docs/audit.md).  The HEEx twin of the JSX renderers: same markup, same
+ *  semantics, so a Phoenix app shows the history a React one does.
+ *
+ *  Written rather than pinned as a parity gap because Phoenix is one of the
+ *  backends that serves `/history` — a TSX-only Timeline would be exactly the
+ *  silent LiveView degradation `heex-parity.test.ts` exists to catch.
+ *
+ *  Entries cross the wire as string-keyed maps, hence `e["action"]` rather than
+ *  `e.action`. */
+export function renderTimeline(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const entriesArg = namedArg(expr, "of") ?? expr.args.find((_, i) => !expr.argNames?.[i]);
+  if (!entriesArg) return "<!-- Timeline: missing entries -->";
+  const entries = renderExpr(entriesArg, { ...ctx, position: "template" });
+  const testid = testIdAttr(expr, ctx);
+  return [
+    `<ol class="loom-timeline"${testid}>`,
+    `  <%= for e <- ${entries} || [] do %>`,
+    `    <li class="loom-timeline-entry">`,
+    `      <span class="loom-timeline-action"><%= e["action"] %></span>`,
+    `      <time datetime={to_string(e["at"])}><%= e["at"] %></time>`,
+    `      <%= if e["actor"] do %>`,
+    `        <span class="loom-timeline-actor"><%= e["actor"] %></span>`,
+    `      <% end %>`,
+    `      <%= if (e["changes"] || []) != [] do %>`,
+    `        <dl class="loom-timeline-changes">`,
+    `          <%= for c <- e["changes"] || [] do %>`,
+    `            <div>`,
+    `              <dt><%= c["field"] %></dt>`,
+    `              <dd><%= c["before"] || "\u2014" %> \u2192 <%= c["after"] || "\u2014" %></dd>`,
+    `            </div>`,
+    `          <% end %>`,
+    `        </dl>`,
+    `      <% end %>`,
+    `    </li>`,
+    `  <% end %>`,
+    `</ol>`,
   ].join("\n");
 }
 

@@ -7,10 +7,19 @@ name: Generated Angular build
 # the per-PR `ng build` verification from the Slice-4 batches.
 #
 # Matrix policy:
-#   - pull_request    → showcase (read + create-form + byId + action surface)
-#                       and store (shared signal-store surface) × the packs.
-#   - push: main /    → full sweep ({minimal, scaffold, showcase, store}).
-#     workflow_dispatch
+#   - pull_request    → showcase (read + create-form + byId + action surface),
+#                       store (shared signal-store surface) and grid × the
+#                       packs.  `grid` is in the PR slice because the
+#                       DataGrid's markup lands in a HOISTED SIBLING component
+#                       whose template — strictTemplates-checked, and resolving
+#                       every name against the CLASS — no other case reaches.
+#   - push: main /    → full sweep
+#     workflow_dispatch  ({minimal, scaffold, showcase, store, file, grid,
+#                        history}).
+#   - ALWAYS (both)   → `history × angularMaterial@v1`, added through
+#                       `include:` rather than by widening CASES, so it costs
+#                       ONE cell instead of one-per-pack.  See the `include`
+#                       block below for why one Angular cell is the whole gate.
 #
 # Cell names MUST match the case labels in
 # test/e2e/generated-angular-build.test.ts (`<case>:<pack>`).
@@ -77,13 +86,27 @@ jobs:
             # representative packs (Material + PrimeNG).  spartanNg, the
             # `minimal`/`scaffold`/`file` cases, and full pack drift are
             # caught by the push:main sweep below one merge later.
-            CASES='["showcase","store"]'
+            CASES='["showcase","store","grid"]'
             PACKS='["angularMaterial@v1", "primeng@v1"]'
           else
-            CASES='["minimal","scaffold","showcase","store","file"]'
+            CASES='["minimal","scaffold","showcase","store","file","grid"]'
             PACKS='["angularMaterial@v1", "primeng@v1", "spartanNg@v1"]'
           fi
-          echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
+          # `history` (an `audited` aggregate + a scaffolded ui → the
+          # scaffolded History section) rides in through `include:`, NOT by
+          # being added to CASES.  A CASES entry is multiplied by every pack —
+          # 2 cells per PR, 3 post-merge.  An include entry whose keys collide
+          # with the matrix dimensions cannot be folded into an existing
+          # combination, so GitHub appends it as exactly ONE new cell.
+          #
+          # One cell is the whole gate, and one FRONTEND is too:  the section's
+          # payload is a template over an `AuditEntry[]` typed `unknown` at the
+          # leaves, and `ng build` is the only per-PR gate that runs
+          # `strictTemplates` over generated markup.  The defect this exists to
+          # catch — a double `?? []` guard, TS2869 — fails here.  The pack is
+          # irrelevant to it (`Timeline` emits native `<ol>`/`<li>`/`<dl>`, no
+          # pack components), hence one pack, the default.
+          echo "matrix={\"case\":$CASES,\"pack\":$PACKS,\"include\":[{\"case\":\"history\",\"pack\":\"angularMaterial@v1\"}]}" >> "$GITHUB_OUTPUT"
 
   matrix:
     needs: configure

@@ -269,6 +269,24 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   respawn(): void {
     this.runtime?.respawn();
   }
+  /** Drop the bundler worker, releasing everything it holds.
+   *
+   *  That worker caches an esbuild context per build key, and each context
+   *  keeps the ENTIRE installed npm VFS alive (≈8.8k files for a backend
+   *  bundle) so incremental rebuilds stay fast — plus esbuild-wasm itself.
+   *  Excellent on desktop, and exactly the wrong thing to be holding on a
+   *  phone at boot time: PGlite's real startup (WASM instantiation + initdb,
+   *  measured at ~5.5s and deferred to the first SQL statement) needs that
+   *  headroom, and iOS kills the tab rather than paging.
+   *
+   *  Costs the next bundle a cold context and a re-install — the latter is
+   *  mostly served by the IDB install cache.  A slower second Run beats a
+   *  first Run that never completes.  The worker is recreated lazily by
+   *  `esbuildRun()`, so callers need do nothing else. */
+  releaseBundler(): void {
+    this.vfsBundler?.dispose();
+    this.vfsBundler = null;
+  }
   // Tab-suspension recovery: re-boot the retained bundle into a fresh
   // worker; OPFS data reattaches.
   async snapshot(): Promise<EngineSnapshot | null> {

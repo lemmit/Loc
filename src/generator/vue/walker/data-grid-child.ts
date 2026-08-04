@@ -31,6 +31,7 @@
 
 import { lines } from "../../../util/code-builder.js";
 import { FORMAT_MODULE_EXPORTS } from "../../_frontend/format-helpers.js";
+import { CHROME_T_CALL } from "../../_walker/i18n-emit.js";
 import { mergedImports } from "../../_walker/shared/imports.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../../_walker/target.js";
 import type { WalkContext } from "../../_walker/walker-core.js";
@@ -126,6 +127,18 @@ function renderSfc(spec: DataGridSpec): string {
     (i) => `import { ${i.named.join(", ")} } from "${i.from}";`,
   );
 
+  // Pack-chrome i18n (M-T1.11).  The pack's grid markup carries the pager's
+  // `{{ t("chrome.previous", …) }}` labels under i18n — and unlike React, whose
+  // child shares the page's file (and therefore the page's `t` import), this SFC
+  // is its OWN module.  Nothing else would import `t` here, so the chrome would
+  // resolve against undefined and blow up at render time.  Hence the import,
+  // gated on the RENDERED body so a pack that bakes in no chrome gets none.
+  //
+  // The runtime is at `src/i18n.ts` and this file at `src/components/<Name>.vue`,
+  // so the specifier is the plain one-hop `../i18n` — no depth rewrite, unlike
+  // the page shell's (pages nest, `src/components/` does not).
+  const i18nImportLine = body.includes(CHROME_T_CALL) ? [`import { t } from "../i18n";`] : [];
+
   // Format helpers, on the same terms the page shell imports them: a Vue pack
   // template may call `formatDateTime(...)` / `formatMoney(...)` from its
   // markup with no import-registration channel, so the whole set comes in
@@ -143,6 +156,7 @@ function renderSfc(spec: DataGridSpec): string {
     ...[...valueImports, ...typeImports].map((n) => `  ${n},`),
     `} from "@tanstack/vue-table";`,
     formatImport,
+    ...i18nImportLine,
     ...packImportLines,
     ``,
     `const props = defineProps<{ rows: readonly T[] }>();`,

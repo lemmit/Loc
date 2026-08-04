@@ -26,13 +26,51 @@ const SRC = `system S {
   }
 }`;
 
-async function files(): Promise<Map<string, string>> {
+// Same masked aggregate, crossed with command audit: two masked fields (two
+// wraps inside ONE projection), an `audited` operation (that projection
+// rendered TWICE into one handler body), and a contained collection whose
+// nested projection is inlined into the parent's, inside a lambda.  Each is a
+// place C# would otherwise see the same pattern variable declared twice in one
+// scope.  (A masked field ON the contained part is deliberately absent —
+// `wireFieldsForPart` drops `maskUnless`, so no backend redacts one today.)
+const AUDITED_SRC = `system S {
+  user { id: string  role: string  permissions: string[] }
+  subdomain M {
+    permissions { unmask }
+    context C {
+      aggregate P audited with crudish {
+        name: string
+        salary: decimal mask unless currentUser.permissions.contains(permissions.unmask)
+        nationalId: string mask unless currentUser.permissions.contains(permissions.unmask)
+        grade: int = 1
+        contains reviews: Review[]
+        entity Review {
+          period: string
+          score: int
+        }
+        operation promote(newGrade: int) audited {
+          precondition newGrade > 0
+          grade := newGrade
+        }
+      }
+    }
+  }
+}`;
+
+async function filesFrom(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
   const helper = parseHelper<Model>(services.Ddd);
-  const doc = await helper(SRC, { validation: true });
+  const doc = await helper(src, { validation: true });
   const loom = enrichLoomModel(lowerModel(doc.parseResult.value));
   const contexts = loom.systems.flatMap((s) => s.subdomains.flatMap((sd) => sd.contexts));
   return generateDotnetForContexts(contexts, "S");
+}
+
+const files = (): Promise<Map<string, string>> => filesFrom(SRC);
+
+/** Every `is { } <name>` pattern variable the emitted C# binds, in order. */
+function maskPatternVars(cs: string): string[] {
+  return [...cs.matchAll(/is \{ \} (__maskUser\w*)/g)].map((m) => m[1]);
 }
 
 describe("mask unless — .NET read redaction", () => {
@@ -48,10 +86,61 @@ describe("mask unless — .NET read redaction", () => {
     const out = await files();
     const handler = [...out.entries()].find(([k]) => k.endsWith("GetPByIdHandler.cs"))?.[1] ?? "";
     // fail-closed: null caller OR failed predicate → null.
-    expect(handler).toContain("RequestContext.Current?.CurrentUser is { } __maskUser");
-    expect(handler).toContain('(__maskUser.Permissions).Contains("m.unmask")');
+    expect(handler).toMatch(/RequestContext\.Current\?\.CurrentUser is \{ \} __maskUser\d+/);
+    expect(handler).toMatch(/\(__maskUser\d+\.Permissions\)\.Contains\("m\.unmask"\)/);
     expect(handler).toMatch(/\?\s*\(decimal\?\)\(found\.Salary\)\s*:\s*null/);
     // the handler imports where RequestContext lives.
     expect(handler).toContain("using S.Domain.Common;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `mask unless` × `audited` — the combination, which is where a FIXED pattern-
+// variable name stops compiling.
+//
+// `x is { } name` declares `name` in the ENCLOSING BLOCK, so two masked
+// projections in one method body are two declarations of the same local:
+// CS0128, "a local variable named '__maskUser' is already defined in this
+// scope".  An `audited` operation's handler renders the projection twice (the
+// before and after snapshots), which made this the DEFAULT outcome for the
+// feature's central case — a sensitive field is exactly the one you audit.
+// These pin that every wrap in one scope binds its own name.
+// ---------------------------------------------------------------------------
+describe("mask unless × audited — no duplicate pattern variable in one scope", () => {
+  it("the audited operation's before/after snapshots bind distinct mask variables", async () => {
+    const out = await filesFrom(AUDITED_SRC);
+    const handler = [...out.entries()].find(([k]) => k.endsWith("PromoteHandler.cs"))?.[1] ?? "";
+    // Sanity: this really is the audited handler with both snapshots.
+    expect(handler).toContain("var __before = ");
+    expect(handler).toContain("var __after = ");
+    const vars = maskPatternVars(handler);
+    // Two masked fields, projected twice — four wraps in one method body.
+    expect(vars.length).toBe(4);
+    expect(new Set(vars).size, `duplicate mask pattern variables: ${vars.join(", ")}`).toBe(
+      vars.length,
+    );
+  });
+
+  it("two masked fields in ONE projection bind distinct mask variables", async () => {
+    const out = await filesFrom(AUDITED_SRC);
+    const handler = [...out.entries()].find(([k]) => k.endsWith("GetPByIdHandler.cs"))?.[1] ?? "";
+    const vars = maskPatternVars(handler);
+    expect(vars.length).toBe(2);
+    expect(new Set(vars).size, `duplicate mask pattern variables: ${vars.join(", ")}`).toBe(
+      vars.length,
+    );
+  });
+
+  it("no emitted C# file redeclares a mask pattern variable in one scope", async () => {
+    const out = await filesFrom(AUDITED_SRC);
+    const offenders = [...out.entries()]
+      .filter(([k]) => k.endsWith(".cs"))
+      .map(([k, v]) => [k, maskPatternVars(v)] as const)
+      .filter(([, vars]) => new Set(vars).size !== vars.length)
+      .map(([k, vars]) => `${k}: ${vars.join(", ")}`);
+    expect(
+      offenders,
+      `files redeclaring a mask pattern variable: ${offenders.join(" | ")}`,
+    ).toEqual([]);
   });
 });

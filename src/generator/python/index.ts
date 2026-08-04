@@ -8,7 +8,6 @@ import type {
   EventIR,
   SystemIR,
   TimerSourceIR,
-  TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { isMaterializedProjection, isQueryTimeProjection } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";

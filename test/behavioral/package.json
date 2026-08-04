@@ -6,7 +6,8 @@
   "scripts": {
     "behavioral": "node run.mjs",
     "behavioral:ui": "node run-ui.mjs",
-    "behavioral:pagination": "node pagination.mjs"
+    "behavioral:pagination": "node pagination.mjs",
+    "behavioral:paged-ui": "node paged-ui.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.4.5",

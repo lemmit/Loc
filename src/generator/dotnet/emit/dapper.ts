@@ -764,6 +764,66 @@ function renderParams(params: ParamIR[], extra: readonly string[] = [], usesUser
   ].join(", ");
 }
 
+/** The Dapper audit staging seam (audit-and-logging.md).
+ *
+ *  The command handlers stage an `AuditRecord` for an audited aggregate
+ *  REGARDLESS of its persistence shape, so every Dapper repository emitter —
+ *  relational, document AND event-sourced — has to drain that buffer.  Wiring
+ *  only the relational one is what made document- and event-sourced-shaped
+ *  audited aggregates compile clean and then silently drop their audit rows;
+ *  this seam exists so the three emitters cannot drift apart again.
+ *
+ *  The drain runs on the repository's OPEN transaction, so the audit rows and
+ *  the state change commit or roll back together — the Dapper mirror of the EF
+ *  writer's `_db.AuditRecords.Add` riding the shared `SaveChangesAsync`.
+ *  `before`/`after` arrive as already-serialized JSON strings (the handler
+ *  serializes the wire snapshots), so they CAST to jsonb.
+ *
+ *  `begin`/`commit` are supplied for the emitters whose save/delete paths are
+ *  otherwise a single un-transacted statement (document, event-sourced); the
+ *  relational path already opens `__tx` unconditionally in `SaveAsync` and uses
+ *  only `flush` there. */
+function dapperAuditSeam(
+  agg: EnrichedAggregateIR,
+  ns?: string,
+): {
+  on: boolean;
+  usingLine: string | null;
+  field: string | null;
+  ctorParam: string;
+  ctorAssign: string | null;
+  txArg: string;
+  begin: string | null;
+  flush: string[];
+  commit: string | null;
+} {
+  const on = aggHasAuditedTarget(agg);
+  return {
+    on,
+    usingLine: on && ns ? `using ${ns}.Application.Common;` : null,
+    field: on ? "    private readonly IAuditWriter _audit;" : null,
+    ctorParam: on ? ", IAuditWriter audit" : "",
+    ctorAssign: on ? "        _audit = audit;" : null,
+    txArg: on ? "transaction: __tx, " : "",
+    begin: on
+      ? "        await using var __tx = await conn.BeginTransactionAsync(cancellationToken);"
+      : null,
+    flush: on
+      ? [
+          "        foreach (var __ar in _audit.Drain())",
+          "        {",
+          "            // `Before`/`After` bind as `JsonNode?` on the POCO (uniform with the",
+          "            // other four backends); Dapper has no jsonb parameter for a node, so",
+          "            // they go over the wire as text and are CAST back — the same shape",
+          "            // `actor` already uses.",
+          `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO audit_records (audit_id, operation_id, action, target_type, target_id, actor, before, after, at, status, correlation_id, scope_id, parent_id) VALUES (@audit_id, @operation_id, @action, @target_type, @target_id, CAST(@actor AS jsonb), CAST(@before AS jsonb), CAST(@after AS jsonb), @at, @status, @correlation_id, @scope_id, @parent_id)", new { audit_id = __ar.AuditId, operation_id = __ar.OperationId, action = __ar.Action, target_type = __ar.TargetType, target_id = __ar.TargetId, actor = __ar.Actor, before = __ar.Before?.ToJsonString(), after = __ar.After?.ToJsonString(), at = __ar.At, status = __ar.Status, correlation_id = __ar.CorrelationId, scope_id = __ar.ScopeId, parent_id = __ar.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
+          "        }",
+        ]
+      : [],
+    commit: on ? "        await __tx.CommitAsync(cancellationToken);" : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Per-aggregate Dapper repository.
 // ---------------------------------------------------------------------------
@@ -1013,16 +1073,6 @@ export function renderDapperRepository(
       "        }",
     ];
   });
-  // `destroy audited` makes DeleteAsync TRANSACTIONAL: the handler stages the
-  // audit row before calling it, and that row has to commit with the delete or
-  // roll back with it.  Every statement in the method then rides `__tx`.  An
-  // un-audited aggregate keeps the transaction-free emit byte-identical.
-  const delTx = aggHasAuditedTarget(agg) ? "transaction: __tx, " : "";
-  const assocDeleteLines = associations.map(
-    (a) =>
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
-  );
-
   // Nested entity parts (`contains lineItems: LineItem[]`).  Reads funnel every
   // root through `HydrateAsync` (loads each child table + reconstructs the root
   // with its children in State); saves full-list-replace each child table;
@@ -1076,6 +1126,26 @@ export function renderDapperRepository(
     `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
     ...saveInsert(pc, "aggregate.Id.Value", `aggregate.${upperFirst(pc.cont.name)}`),
   ]);
+  // DeleteAsync is TRANSACTIONAL whenever it issues more than one statement, or
+  // when the aggregate is audited.
+  //
+  //   - multi-statement: a `contains`/`X id[]` aggregate deletes its child and
+  //     join tables before the root.  Autocommitting those separately means a
+  //     crash mid-delete leaves the root alive with its children already gone —
+  //     the same data-loss class `SaveAsync` was made transactional for
+  //     (docs/audits/repo-code-review-2026-07.md T3), which fixed the save path
+  //     and left the delete path behind.
+  //   - audited: the handler stages the audit row before calling in, and it has
+  //     to commit with the delete or roll back with it.
+  //
+  // A single-statement delete (no children, no associations, not audited) keeps
+  // the transaction-free emit byte-identical.
+  const delMultiStatement = associations.length > 0 || partChildren.length > 0;
+  const delTx = aggHasAuditedTarget(agg) || delMultiStatement ? "transaction: __tx, " : "";
+  const assocDeleteLines = associations.map(
+    (a) =>
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
+  );
   // Delete only the root-level child tables by owner id; their FK ON DELETE
   // CASCADE removes every nested grandchild row.
   const containDeleteLines = partChildren.map(
@@ -1098,20 +1168,7 @@ export function renderDapperRepository(
       ]
     : [];
 
-  // Audit flush (audit-and-logging.md): drain the request-scoped IAuditWriter
-  // buffer the command handler staged onto, and append one `audit_records` row
-  // per staged record on the SAME transaction as the aggregate upsert — the
-  // Dapper mirror of the EF writer's `_db.AuditRecords.Add` + shared
-  // SaveChangesAsync.  `before`/`after` are already-serialized JSON strings
-  // (the handler serializes the wire snapshots), so they CAST to jsonb.
-  const auditFlushLines = aggHasAuditedTarget(agg)
-    ? [
-        "        foreach (var __ar in _audit.Drain())",
-        "        {",
-        `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO audit_records (audit_id, operation_id, action, target_type, target_id, actor, before, after, at, status, correlation_id, scope_id, parent_id) VALUES (@audit_id, @operation_id, @action, @target_type, @target_id, CAST(@actor AS jsonb), CAST(@before AS jsonb), CAST(@after AS jsonb), @at, @status, @correlation_id, @scope_id, @parent_id)", new { audit_id = __ar.AuditId, operation_id = __ar.OperationId, action = __ar.Action, target_type = __ar.TargetType, target_id = __ar.TargetId, actor = __ar.Actor, before = __ar.Before, after = __ar.After, at = __ar.At, status = __ar.Status, correlation_id = __ar.CorrelationId, scope_id = __ar.ScopeId, parent_id = __ar.ParentId }, transaction: __tx, cancellationToken: cancellationToken));`,
-        "        }",
-      ]
-    : [];
+  const auditFlushLines = dapperAuditSeam(agg).flush;
 
   // A `currentUser`-referencing find takes a `User currentUser` param (named
   // type ⇒ needs `using <ns>.Auth`).  Principal stamps/filters use only the
@@ -1320,7 +1377,9 @@ export function renderDapperRepository(
         ...containDeleteLines,
         `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
         // Drain the staged `destroy audited` row onto the same transaction.
-        ...(delTx ? auditFlushLines : []),
+        // Gated on the AUDIT seam, not on `delTx` — `delTx` is now also set for
+        // an un-audited multi-statement delete, which has nothing to drain.
+        ...auditFlushLines,
         delTx ? "        await __tx.CommitAsync(cancellationToken);" : null,
         `    }`,
       )
@@ -1508,6 +1567,12 @@ export function renderDapperDocumentRepository(
     : `System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.data, __json)!`;
   const deser = `${agg.name}.FromSnapshot(${deserSnap})`;
 
+  // Audit staging seam — shared with the relational + event-sourced emitters.
+  // An audited document aggregate opens a transaction here (the un-audited emit
+  // is a single un-transacted upsert and stays byte-identical), so the drained
+  // audit rows commit with the snapshot write.
+  const audit = dapperAuditSeam(agg, ns);
+
   // SaveAsync upsert — CAS-guarded on `version` when the aggregate is
   // `versioned` (the same optimistic-concurrency shape the relational Dapper
   // repository uses), a blind version-bumping upsert otherwise.
@@ -1515,15 +1580,21 @@ export function renderDapperDocumentRepository(
     ? [
         "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+        audit.begin,
         "        var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
-        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1 WHERE ${table}.version = @ExpectedVersion", new { id = aggregate.Id.Value, data = __data, ExpectedVersion = __expected }, cancellationToken: cancellationToken));`,
+        `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1 WHERE ${table}.version = @ExpectedVersion", new { id = aggregate.Id.Value, data = __data, ExpectedVersion = __expected }, ${audit.txArg}cancellationToken: cancellationToken));`,
         `        if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");`,
-      ]
+        ...audit.flush,
+        audit.commit,
+      ].filter((l): l is string => l !== null)
     : [
         "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1", new { id = aggregate.Id.Value, data = __data }, cancellationToken: cancellationToken));`,
-      ];
+        audit.begin,
+        `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1", new { id = aggregate.Id.Value, data = __data }, ${audit.txArg}cancellationToken: cancellationToken));`,
+        ...audit.flush,
+        audit.commit,
+      ].filter((l): l is string => l !== null);
 
   const findMethods = finds.map((f) => {
     const body = findBodies.find((b) => b.name === f.name);
@@ -1551,7 +1622,12 @@ export function renderDapperDocumentRepository(
         `    public async Task DeleteAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
         "    {",
         "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
+        // A `destroy audited` stages its row before the delete, so both ride one
+        // transaction; the un-audited emit stays a single un-transacted DELETE.
+        audit.begin,
+        `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, ${audit.txArg}cancellationToken: cancellationToken));`,
+        ...audit.flush,
+        audit.commit,
         "    }",
       )
     : "";
@@ -1572,6 +1648,7 @@ export function renderDapperDocumentRepository(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Common;`,
       anyFindUsesUser ? `using ${ns}.Auth;` : null,
+      audit.usingLine,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
@@ -1579,13 +1656,15 @@ export function renderDapperDocumentRepository(
       "{",
       "    private readonly NpgsqlDataSource _db;",
       "    private readonly IDomainEventDispatcher _events;",
+      audit.field,
       "    private static readonly System.Text.Json.JsonSerializerOptions __json =",
       "        new(System.Text.Json.JsonSerializerDefaults.Web);",
       "",
-      `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events)`,
+      `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events${audit.ctorParam})`,
       "    {",
       "        _db = db;",
       "        _events = events;",
+      audit.ctorAssign,
       "    }",
       "",
       "    private sealed class Row",
@@ -1650,6 +1729,8 @@ export function renderDapperEventSourcedRepository(
   // sibling stream sharing the `<ctx>_events` table is never folded in.
   const table = `${snake(ctxName)}_events`;
   const streamType = agg.name;
+  // Audit staging seam — shared with the relational + document emitters.
+  const audit = dapperAuditSeam(agg, ns);
   const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
   const idValue = csValueTypeForId(agg.idValueType);
   const parseId =
@@ -1698,6 +1779,7 @@ export function renderDapperEventSourcedRepository(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Common;`,
       `using ${ns}.Domain.Events;`,
+      audit.usingLine,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
@@ -1705,13 +1787,15 @@ export function renderDapperEventSourcedRepository(
       "{",
       "    private readonly NpgsqlDataSource _db;",
       "    private readonly IDomainEventDispatcher _events;",
+      audit.field,
       "    private static readonly System.Text.Json.JsonSerializerOptions __json =",
       "        new(System.Text.Json.JsonSerializerDefaults.Web);",
       "",
-      `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events)`,
+      `    public ${agg.name}Repository(NpgsqlDataSource db, IDomainEventDispatcher events${audit.ctorParam})`,
       "    {",
       "        _db = db;",
       "        _events = events;",
+      audit.ctorAssign,
       "    }",
       "",
       "    private sealed class EvRow",
@@ -1745,18 +1829,30 @@ export function renderDapperEventSourcedRepository(
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __pending = aggregate.PullEvents();",
+      // Audited: the connection + transaction are hoisted out of the append
+      // block, because the staged audit row must be drained and committed even
+      // on a save that appends no events.  Un-audited keeps `conn` scoped
+      // inside the block, byte-identical to the pre-audit emit.
+      audit.on
+        ? "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);"
+        : null,
+      audit.begin,
       "        if (__pending.Count > 0)",
       "        {",
       "            var __sid = aggregate.Id.Value.ToString();",
-      "            await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_type = @st AND stream_id = @sid", new { st = "${streamType}", sid = __sid }, cancellationToken: cancellationToken)) ?? 0;`,
+      audit.on
+        ? null
+        : "            await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_type = @st AND stream_id = @sid", new { st = "${streamType}", sid = __sid }, ${audit.txArg}cancellationToken: cancellationToken)) ?? 0;`,
       "            foreach (var __ev in __pending)",
       "            {",
       "                __version++;",
       "                var __data = System.Text.Json.JsonSerializer.Serialize((object)__ev, __json);",
-      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_type, stream_id, version, type, data, occurred_at) VALUES (@st, @sid, @version, @type, CAST(@data AS jsonb), now())", new { st = "${streamType}", sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, cancellationToken: cancellationToken));`,
+      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_type, stream_id, version, type, data, occurred_at) VALUES (@st, @sid, @version, @type, CAST(@data AS jsonb), now())", new { st = "${streamType}", sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, ${audit.txArg}cancellationToken: cancellationToken));`,
       "            }",
       "        }",
+      ...audit.flush,
+      audit.commit,
       "        foreach (var ev in __pending) await _events.DispatchAsync(ev, cancellationToken);",
       "    }",
       "",

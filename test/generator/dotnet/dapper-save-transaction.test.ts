@@ -89,4 +89,41 @@ describe("Dapper SaveAsync is transactional", () => {
     expect(commitIdx).toBeGreaterThan(0);
     expect(commitIdx).toBeLessThan(eventsIdx);
   });
+
+  // T3 fixed the SAVE path and left the DELETE path behind: `DeleteAsync` drops
+  // the join table, then the child tables, then the root — three autocommitted
+  // statements, so a crash between them left the root alive with its children
+  // already gone.  Same data-loss class, same fix.
+  it("DeleteAsync is transactional too when it issues more than one statement", async () => {
+    const files = generateSystems(await build(SOURCE)).files;
+    const repo = files.get("api/Infrastructure/Repositories/OrderRepository.cs")!;
+    const del = repo.slice(repo.indexOf("public async Task DeleteAsync"));
+    const body = del.slice(0, del.indexOf("\n    }"));
+
+    expect(body).toContain(
+      "await using var __tx = await conn.BeginTransactionAsync(cancellationToken);",
+    );
+    // The join table, the child table and the root all ride the transaction.
+    expect(body).toContain("DELETE FROM order_tags");
+    expect(body).toContain("DELETE FROM line_items");
+    expect(body).toContain("DELETE FROM orders");
+    const execs = body.match(/ExecuteAsync\(/g) ?? [];
+    const withTx = body.match(/transaction: __tx, cancellationToken/g) ?? [];
+    expect(execs.length).toBeGreaterThan(1);
+    expect(withTx.length).toBe(execs.length);
+    expect(body).toContain("__tx.CommitAsync(cancellationToken)");
+  });
+
+  // Strict additivity: an aggregate with no children and no associations still
+  // deletes in ONE statement, so it must not grow a transaction it can't use.
+  it("a single-statement delete stays transaction-free", async () => {
+    const files = generateSystems(await build(SOURCE)).files;
+    const repo = files.get("api/Infrastructure/Repositories/TagRepository.cs")!;
+    const del = repo.slice(repo.indexOf("public async Task DeleteAsync"));
+    const body = del.slice(0, del.indexOf("\n    }"));
+
+    expect(body).toContain("DELETE FROM tags");
+    expect(body).not.toContain("BeginTransactionAsync");
+    expect(body).not.toContain("transaction: __tx");
+  });
 });

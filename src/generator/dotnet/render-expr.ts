@@ -5,6 +5,7 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
+  deepScopeTenantClaim,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -369,7 +370,10 @@ function renderCsAuthzFilter(
       const principal = ctx.currentUserExpr ?? "currentUser";
       // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
       const org = `${principal}.${upperFirst(deepScopeAnchorClaim(e))}`;
-      const tenant = `${principal}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
+      // Tenant claim: the system's declared `tenancy by user.<claim>` — NOT
+      // the row column above, which only coincides when the author happened to
+      // name the claim `tenantId`.
+      const tenant = `${principal}.${upperFirst(deepScopeTenantClaim(e))}`;
       const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
       return (
         `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +
@@ -719,6 +723,12 @@ export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "money.floor": (recv) => `Math.Floor(${recv})`,
   "decimal.ceil": (recv) => `Math.Ceiling(${recv})`,
   "money.ceil": (recv) => `Math.Ceiling(${recv})`,
+  // ---- datetime — midnight of the receiver's day.  Every DateTime on this
+  // backend is UTC (`DateTime.UtcNow` binds, `timestamptz` columns read back
+  // Kind=Utc through Npgsql), so `.Date` IS the midnight-UTC bucket, and EF
+  // Core translates the `DateTime.Date` member to SQL `date_trunc('day', …)`
+  // — the query position rides the same LINQ path (hence no SQL-table row).
+  "datetime.startOfDay": (recv) => `${recv}.Date`,
 };
 
 // EF-query-position overrides (sparse).  EF Core translates ONLY the

@@ -200,6 +200,10 @@ describe("Vue i18n runtime", () => {
     ) as Record<string, string>;
     expect(catalog["chrome.skipToContent"]).toBe("Skip to content");
     expect(catalog["chrome.primaryNav"]).toBe("Primary navigation");
+    // The error boundary's heading is a `title=` PROP on vuetify's `<v-alert>`
+    // (a text child on shadcnVue) — the attribute form binds as `:title='t(…)'`.
+    expect(app).toContain(`:title='t("chrome.somethingWentWrong", "Something went wrong")'`);
+    expect(catalog["chrome.somethingWentWrong"]).toBe("Something went wrong");
   });
 
   it("leaves the app-shell skip link byte-identical for a string-less app", async () => {
@@ -208,6 +212,7 @@ describe("Vue i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`Text { status }`));
     const app = [...files].find(([p]) => p.endsWith("src/App.vue"))![1];
     expect(app).toContain(`>Skip to content<`);
+    expect(app).toContain(`title="Something went wrong"`);
     expect(app).not.toContain("import { t }");
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
   });

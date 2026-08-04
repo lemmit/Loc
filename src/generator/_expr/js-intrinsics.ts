@@ -71,6 +71,13 @@ export const JS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "decimal.ceil": (recv) => `Math.ceil(${recv})`,
   "money.floor": (recv) => `${recv}.floor()`,
   "money.ceil": (recv) => `${recv}.ceil()`,
+  // ---- datetime ------------------------------------------------------------
+  // Midnight UTC of the receiver's day (catalogue contract) — built from the
+  // UTC field readers so the bucket boundary never follows the host's local
+  // zone (`setHours(0,…)` would).  Loom expressions are pure, so mentioning
+  // `recv` three times is safe.
+  "datetime.startOfDay": (recv) =>
+    `new Date(Date.UTC((${recv}).getUTCFullYear(), (${recv}).getUTCMonth(), (${recv}).getUTCDate()))`,
 };
 
 /** Snippets that reference the bare `Decimal` CONSTRUCTOR (as opposed to

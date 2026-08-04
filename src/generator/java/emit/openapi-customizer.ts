@@ -354,11 +354,14 @@ export function buildJavaOpenApiContract(
           // 200 is the SUCCESS variant directly (`<Agg>Response`); the union
           // controller returns `ResponseEntity<?>` so springdoc infers nothing,
           // hence the explicit ref.  Error/absent variant → `status`.
+          // A `requires`-gated union find declares 403 alongside its absent
+          // status — the absence union is a SEPARATE arm from the plain
+          // optional find below, so it needs the rung explicitly.
           routes.push({
             method: "get",
             path: findPath,
             successRef: `${agg.name}Response`,
-            errors: err([status]),
+            errors: err(f.requires !== undefined ? [403, status].sort((a, b) => a - b) : [status]),
           });
           continue;
         }
@@ -371,13 +374,19 @@ export function buildJavaOpenApiContract(
           // paged auto-findAll leaves it unregistered, so the route can't rely
           // on that).  `wrappers.set` is idempotent for the non-paged case.
           wrappers.set(listWrapper, `${agg.name}Response`);
-          routes.push({ method: "get", path: findPath, listWrapper, errors: [] });
-        } else {
-          // Single optional find → 404.
           routes.push({
             method: "get",
             path: findPath,
-            errors: err(errorStatuses("findOptional")),
+            listWrapper,
+            errors: err(errorStatuses("findList", f.requires !== undefined)),
+          });
+        } else {
+          // Single optional find → 404, plus 403 when the find carries a
+          // `requires` guard (the runtime already answers it).
+          routes.push({
+            method: "get",
+            path: findPath,
+            errors: err(errorStatuses("findOptional", f.requires !== undefined)),
           });
         }
       }

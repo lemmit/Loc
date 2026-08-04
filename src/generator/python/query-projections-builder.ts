@@ -10,10 +10,11 @@ import { tableOwnerName } from "../../ir/util/inheritance.js";
 import {
   type AggregateSelect,
   aggregateCoercion,
+  GROUP_KEY_TRANSFORM_INTRINSIC,
   type GroupedSelects,
   type GroupKeySelect,
   groupedAggregates,
-  groupKeyColumn,
+  groupKeyOf,
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
 import { lines } from "../../util/code-builder.js";
@@ -24,6 +25,7 @@ import {
   lowerToSqlAlchemy,
   lowerWorkflowFilterToSqlAlchemy,
   type PyPredicate,
+  SQLALCHEMY_INTRINSIC_SQL,
 } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
@@ -164,6 +166,9 @@ export function buildPyQueryProjectionsFile(
     rowSourcedProjections.length + aggregatingProjections.length > 0 ? ["select"] : [],
   );
   if (aggregatingProjections.length > 0) saOps.add("func");
+  // A computed grouping key renders `literal_column("'day'")` (see
+  // SQLALCHEMY_INTRINSIC_SQL); `refersTo` drops the import when unused.
+  saOps.add("literal_column");
   for (const pred of rowLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
   for (const pred of aggLowered.values()) for (const op of pred?.ops ?? []) saOps.add(op);
   const saNames = [...saOps].filter(refersTo).sort();
@@ -189,6 +194,9 @@ export function buildPyQueryProjectionsFile(
     // failing gate raises `ForbiddenError` (→ 403) before the query runs.
     refersTo("User") ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
+    // `iso()` — a `datetime` grouping key crosses the wire as its ISO-8601
+    // string (see `pyKeyCoerce`); `refersTo` drops the import when unused.
+    refersTo("iso") ? "from app.db.wire import iso" : null,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
     refersTo("ForbiddenError") ? "from app.domain.errors import ForbiddenError" : null,
@@ -405,14 +413,27 @@ function groupedProjectionRoute(
   const gate = proj.query!.requires;
   const needsUser = queryProjectionUsesCurrentUser(proj) || !!gate;
   const sig = [...(needsUser ? ["request: Request"] : []), "session: SessionDep"].join(", ");
-  // Validation pins every grouping expr (and every key select's expr) to a bare
-  // source column by emit time — a null here is an internal invariant break.
+  // ONE renderer for every key position (the `select`, the `group_by` and the
+  // `order_by` below) so the three can never disagree — Postgres matches a
+  // grouped select against the GROUP BY expression syntactically, so a bare
+  // column selected against a truncated column grouped is a hard SQL error.
+  // Validation pins the shape by emit time — a null here is an internal
+  // invariant break.  A COMPUTED key (M-T4.2 date bucket) reuses the SAME
+  // SQLAlchemy call the `where` position emits for that intrinsic.
   const keyCol = (e: ExprIR): string => {
-    const col = groupKeyColumn(e);
-    if (!col) {
+    const key = groupKeyOf(e);
+    if (!key) {
       throw new Error("internal: a grouped projection's grouping expr must name a source column");
     }
-    return `${row}.${snake(col)}`;
+    const col = `${row}.${snake(key.column)}`;
+    if (key.transform === undefined) return col;
+    const sql = SQLALCHEMY_INTRINSIC_SQL[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
+    if (!sql) {
+      throw new Error(
+        `internal: no SQLAlchemy rendering for grouping-key transform '${key.transform}'`,
+      );
+    }
+    return sql(col, []);
   };
   const cols = [
     ...grouped.keys.map((k) => keyCol(k.expr)),
@@ -469,7 +490,14 @@ function pyKeyCoerce(k: GroupKeySelect, expr: string): string {
       ? "str"
       : inner.kind === "primitive" && inner.name === "decimal"
         ? "float"
-        : null;
+        : // A `datetime` key reads back as an aware `datetime` off the driver,
+          // but the row declares it as the ISO-8601 wire STRING — the same
+          // `iso()` every other datetime crosses the wire through, so the day
+          // bucket serialises `2026-08-01T00:00:00Z` like the four other
+          // backends instead of failing FastAPI's response validation.
+          inner.kind === "primitive" && inner.name === "datetime"
+          ? "iso"
+          : null;
   if (!conv) return expr;
   return optional ? `None if ${expr} is None else ${conv}(${expr})` : `${conv}(${expr})`;
 }

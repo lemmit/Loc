@@ -30,7 +30,7 @@ class AppErrorBoundary extends React.Component<
     if (this.state.error) {
       return (
         <Stack data-testid="app-error" p="md">
-          <Alert color="red" title="Something went wrong">
+          <Alert color="red" {{{errorTitleAttr}}}>
             {this.state.error.message}
           </Alert>
           <Group>
@@ -41,7 +41,7 @@ class AppErrorBoundary extends React.Component<
                 window.location.assign("/");
               }}
             >
-              Back to home
+              {{{backToHomeText}}}
             </Button>
           </Group>
         </Stack>
@@ -55,7 +55,7 @@ function NotFound() {
   return (
     <Stack data-testid="not-found" p="md">
       <Title order={2}>{{{notFoundText}}}</Title>
-      <Anchor component={RouterLink} to="/">← Back to home</Anchor>
+      <Anchor component={RouterLink} to="/">← {{{backToHomeText}}}</Anchor>
     </Stack>
   );
 }

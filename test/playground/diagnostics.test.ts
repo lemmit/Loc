@@ -4,6 +4,7 @@ import {
   capRing,
   clearDiagnostics,
   clearLastCrash,
+  clearPhase,
   DETAIL_COMPONENT_FRAMES,
   DETAIL_MESSAGE_MAX,
   DETAIL_STACK_FRAMES,
@@ -11,8 +12,10 @@ import {
   errorDetail,
   isCrashReason,
   logDiagnostic,
+  markPhase,
   readDiagnostics,
   readLastCrash,
+  reapUnfinishedPhase,
   truncateDetail,
 } from "../../web/src/util/diagnostics.js";
 
@@ -248,5 +251,110 @@ describe("logDiagnostic — round-trip through storage", () => {
   it("ignores a malformed lastCrash flag", () => {
     localStorage.setItem("loom.diag.lastCrash", '{"reason":42}');
     expect(readLastCrash()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase markers — the tombstone that survives a renderer kill.
+//
+// Every other capture point in this module is reactive: it needs an event
+// (`error` / `unhandledrejection` / `pagehide`) and then an ASYNC `capture()`
+// that awaits `navigator.storage.estimate()` before anything is written.  When
+// iOS terminates the renderer for memory there is no event and no microtask,
+// so the ring records nothing at all — which is why the field reports of
+// "bundles, then the whole page refreshes" arrived with an empty ring.
+//
+// A phase marker is written SYNCHRONOUSLY before each risky step, so a kill
+// leaves it behind and the next load can name the step that died.
+// ---------------------------------------------------------------------------
+describe("phase markers", () => {
+  it("writes synchronously — no await between mark and storage", () => {
+    markPhase("boot:pglite-construct");
+    // Read back with no `await` anywhere: this is the whole point.  If the
+    // write ever moves behind a promise, a process kill loses it.
+    expect(localStorage.getItem("loom.diag.phase")).toMatch(/^\d+:boot:pglite-construct$/);
+  });
+
+  it("reaps a leftover marker into the ring as an error-class entry", async () => {
+    markPhase("boot:import-bundle");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:import-bundle");
+    await Promise.resolve();
+    const ring = readDiagnostics();
+    const died = ring.find((s) => s.reason === "died-in-phase");
+    expect(died).toBeDefined();
+    // The phase rides in `pane`, which the crash report renders verbatim.
+    expect(died?.detail?.pane).toBe("boot:import-bundle");
+    expect(died?.detail?.message).toContain("boot:import-bundle");
+  });
+
+  it("consumes the marker so one kill is reported once", () => {
+    markPhase("bundle");
+    expect(reapUnfinishedPhase()?.phase).toBe("bundle");
+    expect(reapUnfinishedPhase()).toBeNull();
+  });
+
+  it("reports nothing when the phase completed cleanly", () => {
+    markPhase("generate");
+    clearPhase();
+    expect(reapUnfinishedPhase()).toBeNull();
+  });
+
+  it("counts `died-in-phase` as an error class, not a pressure breadcrumb", () => {
+    // It must sort into the report's "Crashes" section — it is the only
+    // record that a kill happened at all.
+    expect(isCrashReason("died-in-phase")).toBe(true);
+    expect(CRASH_REASONS).toContain("died-in-phase");
+  });
+
+  // The phase says WHERE it died; the note says how much work it was
+  // carrying.  A field report landed on `boot:ddl` with PGlite already
+  // initialised — the next one needs to distinguish "182 statements, 61KB"
+  // from "3 statements" before any fix is worth attempting.
+  it("round-trips a scale note alongside the phase", () => {
+    markPhase("boot:ddl-apply", "182 stmts, 61KB");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:ddl-apply");
+    expect(mark?.note).toBe("182 stmts, 61KB");
+  });
+
+  it("surfaces the note in the reaped message the report renders", async () => {
+    markPhase("boot:ddl-apply", "182 stmts, 61KB");
+    reapUnfinishedPhase();
+    await Promise.resolve();
+    const died = readDiagnostics().find((s) => s.reason === "died-in-phase");
+    expect(died?.detail?.message).toContain("182 stmts, 61KB");
+    // The phase still rides in `pane` on its own — the report renders that
+    // field verbatim and it must stay a clean phase name.
+    expect(died?.detail?.pane).toBe("boot:ddl-apply");
+  });
+
+  it("caps the note so a pathological one can't blow the storage budget", () => {
+    markPhase("boot:ddl-apply", "x".repeat(500));
+    expect((localStorage.getItem("loom.diag.phase") ?? "").length).toBeLessThan(200);
+  });
+
+  it("still parses a marker with no note", () => {
+    markPhase("boot:pglite-construct");
+    const mark = reapUnfinishedPhase();
+    expect(mark?.phase).toBe("boot:pglite-construct");
+    expect(mark?.note).toBeUndefined();
+  });
+
+  it("never throws when storage is unavailable", () => {
+    vi.stubGlobal("localStorage", {
+      getItem() {
+        throw new Error("denied");
+      },
+      setItem() {
+        throw new Error("denied");
+      },
+      removeItem() {
+        throw new Error("denied");
+      },
+    });
+    expect(() => markPhase("bundle")).not.toThrow();
+    expect(() => clearPhase()).not.toThrow();
+    expect(() => reapUnfinishedPhase()).not.toThrow();
   });
 });

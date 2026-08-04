@@ -35,6 +35,11 @@ describe("angular pack format groundwork", () => {
     // `realtime-toast` is the exception among the TSX `form` set: Angular DOES
     // require it (each pack renders the live-event toast into the
     // RealtimeHandlersComponent — channels.md Part I), so it is NOT inline.
+    // `primitive-chart` is TSX-ONLY (M-T1.3 Phase 5): each react pack binds its
+    // own charting library, and no angular pack ships a chart template — so
+    // `Chart` stays an honest `loom.chart-unsupported-target` gap here rather
+    // than a required template angular would fail to load without.
+    tsx.delete("primitive-chart");
     const angularRendersInline = (name: string): boolean =>
       name === "primitive-form-of" ||
       name === "primitive-modal" ||

@@ -48,9 +48,16 @@ export interface RepoPortSpec {
 // A public async class method at exactly 4-space indent:
 //   `    async def find_by_id(self, id: AccountId) -> Account | None:`
 // Excludes: `def to_wire` (not async), `async def _hydrate*` (underscore),
-// and `record_audit` (an internal audit helper, denylisted below).
+// and the audit pair (`record_audit` / `history`), denylisted below.
 const PORT_HEADER_RE = /^ {4}async def ([A-Za-z0-9_]+)\((.*)\)\s*->\s*(.+):$/;
-const EXCLUDED_METHODS = new Set(["record_audit"]);
+// The audit trail is INFRASTRUCTURE, on both sides.  `record_audit` writes a
+// machinery row and `history` (docs/audit.md) reads one back; neither traffics
+// in the aggregate, and no domain code calls either — only the route layer
+// does.  Putting them on the domain-facing Protocol would also drag
+// `AuditRecordRow` into `app/domain/`, which is a layering inversion the port
+// exists to prevent (and which `mypy --strict` catches as an undefined name,
+// since the port pool deliberately imports only domain types).
+const EXCLUDED_METHODS = new Set(["record_audit", "history"]);
 
 /** Derive Protocol member signatures by scanning a concrete repository file's
  *  source for its public `async def` method headers — appends `: ...` (an

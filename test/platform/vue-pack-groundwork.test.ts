@@ -26,6 +26,10 @@ describe("vue pack format groundwork", () => {
   it("vue required set mirrors TSX plus the op-dialog wrapper", () => {
     const vue = new Set(flattenRequired(REQUIRED_PRIMITIVES.vue));
     const tsx = new Set(flattenRequired(REQUIRED_PRIMITIVES.tsx));
+    // `primitive-chart` is TSX-ONLY (M-T1.3 Phase 5): each react pack binds its
+    // own charting library, and no vue pack ships a chart template — `Chart`
+    // stays an honest `loom.chart-unsupported-target` gap here.
+    tsx.delete("primitive-chart");
     for (const name of tsx) {
       expect(vue.has(name), `vue set missing tsx-required "${name}"`).toBe(true);
     }

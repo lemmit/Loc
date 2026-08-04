@@ -119,8 +119,10 @@ describe(".NET in-process event dispatch emission", () => {
     // The reactor injects the audit writer and stages a record bracketed by
     // before/after wire snapshots, mirroring the per-operation handler.
     expect(onH).toContain("private readonly IAuditWriter _audit;");
-    expect(onH).toContain("var __wfAuditBefore0 = System.Text.Json.JsonSerializer.Serialize(");
-    expect(onH).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.Serialize(");
+    expect(onH).toContain(
+      "var __wfAuditBefore0 = System.Text.Json.JsonSerializer.SerializeToNode(",
+    );
+    expect(onH).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.SerializeToNode(");
     expect(onH).toContain("_audit.Stage(new AuditRecord");
     expect(onH).toContain('Action = "markTracked",');
     expect(onH).toContain('TargetType = "Shipment",');

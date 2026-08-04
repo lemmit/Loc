@@ -89,6 +89,10 @@ export function renderProgram(
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on
      *  to stage audit rows onto the request unit of work. */
     hasAudit?: boolean;
+    /** Entity history (docs/audit.md): registers the scoped
+     *  `IAuditHistoryReader` → `AuditHistoryReader` the derived
+     *  `Get<Agg>HistoryQuery` handlers read the trail through. */
+    hasHistory?: boolean;
     /** OIDC turnkey auth (D-AUTH-OIDC): the system declares an `auth { oidc }`
      *  block, so register the generated `OidcUserVerifier` (last-wins over the
      *  dev stub).  Implies `authRequired`. */
@@ -378,6 +382,13 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Per-operation audit — stages audit_records onto the request unit of work.\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditWriter, ${ns}.Infrastructure.Persistence.AuditWriter>();`
     : "";
 
+  // Entity history (docs/audit.md) — the READ port over the same table.  Its
+  // own flag, not `hasAudit`: an audited aggregate can serve no history at all
+  // (every diffable field excluded), and then no reader is emitted to bind.
+  const historyDi = options?.hasHistory
+    ? `\n// Entity history — the read port over audit_records (GET /<agg>/{id}/history).\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditHistoryReader, ${ns}.Infrastructure.Persistence.AuditHistoryReader>();`
+    : "";
+
   // Domain persistence-port adapters (audit S7 Slice C): the orchestration
   // handlers (transactional workflow command, saga reactors, projection fold)
   // depend on IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
@@ -651,7 +662,7 @@ builder.Services.AddScoped(
 }
 ${dispatcherRegistration}${realtimeHubRegistration}${timerRegistrations}${hangfireDiBlock}
 
-${repoRegistrations}${readingServicesDi}${auditDi}${portsDi}
+${repoRegistrations}${readingServicesDi}${auditDi}${historyDi}${portsDi}
 ${authDi}
 ${externScan}
 

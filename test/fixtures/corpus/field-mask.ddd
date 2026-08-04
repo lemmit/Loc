@@ -1,0 +1,79 @@
+// Field read-redaction (`mask unless`, docs/auth.md §"mask unless") crossed
+// with command audit (`audited`) — the combination, not either half alone.
+//
+// Why the CROSSING is the fixture and not two separate ones: a field is masked
+// because it is sensitive, and a sensitive field is exactly the one whose
+// changes you want audited, so `mask unless` + `audited` is the CENTRAL case of
+// the feature rather than an exotic corner.  It is also the one that breaks:
+// an audited operation's handler renders the aggregate's wire projection TWICE
+// into a single method body (the `before` and `after` snapshots), and a masked
+// field's projection binds a principal variable in the enclosing scope — so a
+// backend that names that variable with a FIXED identifier emits a duplicate
+// declaration and fails to compile.  .NET did exactly that (CS0128, "a local
+// variable named '__maskUser' is already defined in this scope").
+//
+// The shape below is chosen so a single compile pins every way one scope can
+// hold more than one mask:
+//   - TWO masked fields on one aggregate → two wraps inside ONE
+//     `new <Agg>Response(...)` projection.
+//   - `audited` operation → that projection rendered twice in one handler body.
+//   - aggregate-wide `audited` → the create (after-only) and destroy
+//     (before-only) audit handlers project the masked shape too.
+//   - a CONTAINED collection → a nested projection inlined into the parent's,
+//     inside a `Select(...)` lambda, sitting next to the parent's own wraps.
+//     (A C# lambda body is no escape from the collision either: shadowing an
+//     enclosing local is CS0136.)
+//
+// NOT covered here, deliberately: `mask unless` on a contained PART's own field
+// is silently dropped today — `wireFieldsForPart` does not propagate the
+// predicate, so no backend redacts it and the response param stays required.
+// That is a separate pre-existing gap, not this fixture's subject; declaring it
+// here would assert a redaction nothing emits.
+//
+// This is a COMPILE-tier fixture: the emitted redaction is ordinary target
+// code, so only the real compilers (dotnet build /warnaserror, tsc, mypy
+// --strict, gradle, mix compile --warnings-as-errors) can tell whether the
+// masked projections a single scope holds actually agree with each other.
+system MaskedAudit {
+  user { id: string  role: string  permissions: string[] }
+  subdomain People {
+    permissions { unmask }
+    context Staff {
+      aggregate Employee audited with crudish {
+        name: string
+        // Two masked fields: both wraps land in the SAME projection expression.
+        salary: decimal mask unless currentUser.permissions.contains(permissions.unmask)
+        nationalId: string mask unless currentUser.permissions.contains(permissions.unmask)
+        grade: int = 1
+        // A contained collection: its projection is inlined into the parent's,
+        // inside a lambda, right beside the parent's own mask wraps.
+        contains reviews: Review[]
+        entity Review {
+          period: string
+          score: int
+        }
+
+        // The audited mutation — its handler snapshots the wire shape before
+        // AND after the state change, in one method body.
+        operation promote(newGrade: int) audited {
+          precondition newGrade > 0
+          grade := newGrade
+        }
+      }
+      repository Employees for Employee {
+        find byName(name: string): Employee? where this.name == name
+      }
+    }
+  }
+  api StaffApi from People
+  storage primary { type: postgres }
+  resource staffState { for: Staff, kind: state, use: primary, index: [Employee.name] }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Staff]
+    dataSources: [staffState]
+    serves: StaffApi
+    port: 4000
+    auth: required
+  }
+}

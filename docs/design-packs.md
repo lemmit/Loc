@@ -103,7 +103,7 @@ template directories the loader pulls in:
 | Format | Shared dirs read |
 |---|---|
 | `tsx` (default) | `vite/`, `api/`, `docker/` |
-| `heex` | `phoenix/` (future; empty in v0 — `coreComponents`/`daisyui` ship their shell files directly) |
+| `heex` | `phoenix/` (empty today — `coreComponents`/`daisyui` ship their shell files directly) |
 | `svelte` | `sveltekit/` (api client + logger + root layout + the SvelteKit dockerfile) |
 | `vue` | `vue/`, `api/`, `docker/` (the `api/` fetch-client layer is framework-neutral TS) |
 
@@ -610,6 +610,36 @@ the loader still resolves the named stack from the repo's
 `stacks/` directory.  Custom packs whose `format` is `heex` go
 through the same path but bind against `designs/coreComponents/`'s
 emit set (the baseline HEEx pack).
+
+**HEEx packs own a different surface than the JSX packs.**  LiveView
+has one component convention (CoreComponents), so the HEEx walker
+emits design-neutral markup + `<.button>`/`<.table>`/`<.input>`-style
+component calls inline and never dispatches call-site `primitive-*`
+templates.  A HEEx pack instead owns the SHELL, rendered by the
+elixir generator via `pack.render`:
+
+| Logical name | Output | VM |
+|---|---|---|
+| `core-components` | `lib/<app>_web/components/core_components.ex` | `{ webModule }` |
+| `main` | `lib/<app>_web/components/layouts/root.html.heex` | `{ appName }` |
+| `app-shell` | `lib/<app>_web/components/layouts/app.html.heex` | `{ hasSidebar, webModule, currentUser, skipToContent, primaryNavAria }` |
+| `sidebar` (+ `sidebar-entry` partial) | `lib/<app>_web/components/sidebar.ex` | `{ webModule, appName, authEnabled, sections }` |
+| `theme` | `priv/static/assets/theme.css` | the shared `ThemeVM` |
+| `assets-css` | `assets/css/app.css` | `{}` |
+| `assets-js` | `assets/js/app.js` | `{}` |
+| `tailwind-config` | `assets/tailwind.config.js` | `{ appName }` |
+| `package-json` | `assets/package.json` | `{ appName }` |
+
+The assets files build into `priv/static/assets/app.{css,js}` via the
+generated `assets/package.json` (tailwind + esbuild) — the Dockerfile's
+`assets-build` stage runs it for images, `mix assets.build` for host
+dev.  The tailwind config is where a pack's plugin lands (`daisyui`
+does exactly that), which is what makes its component-class vocabulary
+actually render.  The required set is `REQUIRED_PRIMITIVES.heex` =
+`{core: [], shell: HEEX_SHELL}` in
+`src/generator/_packs/required-primitives.ts`; divergence between the
+two built-in packs is gated by
+`test/generator/elixir/heex-design-pack.test.ts`.
 
 ## 11. Worked example — minimal pack skeleton
 

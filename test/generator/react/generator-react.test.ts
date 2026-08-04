@@ -279,6 +279,11 @@ describe("react generator", () => {
       );
       expect(app).toMatch(/data-testid="nav-sidebar"/);
       expect(app).toMatch(/from "@mantine\/core"[\s\S]*?NavLink/);
+      // The error boundary's heading is pack-chrome too — Mantine spells it as a
+      // `title=` PROP on <Alert>, so it binds in ATTRIBUTE form (M-T1.11).
+      expect(app).toContain(
+        `<Alert color="red" title={t("chrome.somethingWentWrong", "Something went wrong")}>`,
+      );
     });
 
     // accessibility.md Phase 2 — bypass-blocks skip link + named landmarks.

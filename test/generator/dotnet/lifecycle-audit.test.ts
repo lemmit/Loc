@@ -3,11 +3,13 @@
 // per-operation audit sink (IAuditWriter staging → AppDbContext, flushed in the
 // command handler's save transaction), adapting the before/after pair to the
 // lifecycle asymmetry:
-//   - create → Before = "null" (JSON null literal), After = wire(created),
-//     keyed by the generated id; STAGED before _repo.SaveAsync.
-//   - destroy → Before = wire(loaded), After = "null"; STAGED before
+//   - create → Before = null, After = wire(created), keyed by the generated id;
+//     STAGED before _repo.SaveAsync.
+//   - destroy → Before = wire(loaded), After = null; STAGED before
 //     _repo.DeleteAsync (the single SaveChangesAsync flushes both atomically).
-// The before/after columns are NOT NULL jsonb; the "null" literal satisfies them.
+// The before/after columns are NULLABLE jsonb, bound as `JsonNode?` — the same
+// object binding the other four backends use — so the absent side is a real SQL
+// NULL, not the string "null" (docs/audit.md §2).
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
@@ -60,8 +62,10 @@ describe("dotnet generator — audited lifecycle actions", () => {
     expect(h).toContain('Action = "create",');
     expect(h).toContain('TargetType = "Invoice",');
     expect(h).toContain("TargetId = aggregate.Id.Value.ToString(),");
-    expect(h).toContain('Before = "null",');
-    expect(h).toContain("After = System.Text.Json.JsonSerializer.Serialize(new InvoiceResponse(");
+    expect(h).toContain("Before = null,");
+    expect(h).toContain(
+      "After = System.Text.Json.JsonSerializer.SerializeToNode(new InvoiceResponse(",
+    );
     expect(h).toContain("CorrelationId = RequestContext.Current?.CorrelationId,");
     // Staged BEFORE the save, so the single SaveAsync flushes both atomically.
     const stageIdx = h.indexOf("_audit.Stage(new AuditRecord");
@@ -75,8 +79,10 @@ describe("dotnet generator — audited lifecycle actions", () => {
     expect(h).toContain("_audit.Stage(new AuditRecord");
     expect(h).toContain('OperationId = "destroyInvoice",');
     expect(h).toContain('Action = "destroy",');
-    expect(h).toContain("Before = System.Text.Json.JsonSerializer.Serialize(new InvoiceResponse(");
-    expect(h).toContain('After = "null",');
+    expect(h).toContain(
+      "Before = System.Text.Json.JsonSerializer.SerializeToNode(new InvoiceResponse(",
+    );
+    expect(h).toContain("After = null,");
     // The audit row is staged BEFORE the hard delete.
     const stageIdx = h.indexOf("_audit.Stage(new AuditRecord");
     const deleteIdx = h.indexOf("await _repo.DeleteAsync(aggregate, cancellationToken);");

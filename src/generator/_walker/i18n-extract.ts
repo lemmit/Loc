@@ -31,7 +31,7 @@ import type { ExprIR, UiIR } from "../../ir/types/loom-ir.js";
 import { walkExprDeep } from "../../ir/util/walk.js";
 import { contentHash } from "../../util/content-hash.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
-import { CHROME_BY_PRIMITIVE } from "./i18n-chrome.js";
+import { chromeEntriesFor } from "./i18n-chrome.js";
 import { namedArgValue, positionalArgs } from "./shared/args.js";
 
 /** One source-language catalog entry: a stable key and its English text. */
@@ -126,7 +126,7 @@ function peelHole(expr: ExprIR): { value: ExprIR; name: string | undefined } {
  *  Shared by the catalog builder and the React runtime so the emitted key +
  *  default line up with the catalog entry. */
 export function icuFromConcat(expr: ExprIR | undefined): IcuMessage | undefined {
-  if (!expr || expr.kind !== "binary" || expr.op !== "+") return undefined;
+  if (expr?.kind !== "binary" || expr.op !== "+") return undefined;
   const pieces = flattenConcatChain(expr);
   let display = "";
   let positional = "";
@@ -177,11 +177,12 @@ function collectBody(body: ExprIR | undefined, prefix: string, out: MessageEntry
   walkExprDeep(body, (e) => {
     if (e.kind !== "call") return;
     // Pack-chrome: a primitive that renders design-pack-baked user-visible text
-    // (a `Loader()`'s `aria-label="Loading"`) contributes its stable
-    // `chrome.<name>` catalog entries wherever it appears — used-only, keyed
-    // IDENTICALLY to what `localizedChromeAria` emits (M-T1.11).
-    const chrome = CHROME_BY_PRIMITIVE[e.name];
-    if (chrome) out.push(...chrome);
+    // (a `Loader()`'s `aria-label="Loading"`, a `DataGrid()`'s pager) contributes
+    // its stable `chrome.<name>` catalog entries wherever it appears —
+    // used-only, keyed IDENTICALLY to what the `localizedChrome*` helpers emit
+    // (M-T1.11).  Resolved against the CALL NODE, because a grid's per-column
+    // "Filter" placeholder depends on whether a column is filterable.
+    out.push(...chromeEntriesFor(e));
     const slots = USER_VISIBLE_SLOTS[e.name];
     if (!slots) return;
     const positionals = positionalArgs(e);

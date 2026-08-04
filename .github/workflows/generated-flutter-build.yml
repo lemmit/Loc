@@ -107,7 +107,9 @@ jobs:
                   operation restock(): Product or OutOfStock { inStock := true }
                 }
                 repository Categories for Category { }
-                repository Products for Product { }
+                repository Products for Product {
+                  find byName(term: string): Product[] where this.name == term
+                }
               }
             }
             storage db { type: postgres }
@@ -148,6 +150,11 @@ jobs:
                     of: Shop.Product.all,
                     loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No products yet." },
                     data: rows => Stack { For { each: rows, p => Card { p.name, Text { p.price } } } }
+                  },
+                  QueryView {
+                    of: Shop.Product.byName("widget"),
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No matches." },
+                    data: hits => Stack { For { each: hits, h => Text { h.name } } }
                   },
                   Button { "Add product", to: "/products/new" }
                 }

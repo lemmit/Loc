@@ -2,8 +2,8 @@
 // Pack-chrome message catalog (M-T1.11, i18n.md — "pack-chrome catalogs").
 //
 // The design packs bake their own user-visible strings into `.hbs` templates —
-// a spinner's `aria-label="Loading"`, a grid pager's "Previous"/"Next", a
-// form's "Remove" button.  These are NOT authored in the `.ddd` source, so the
+// a spinner's `aria-label="Loading"`, a grid pager's "Previous"/"Next", its
+// per-column "Filter" placeholder, a form's "Remove" button.  These are NOT authored in the `.ddd` source, so the
 // content-hash extraction pass (`i18n-extract.ts`, which keys `page.<P>.<role>.
 // <hash>` off literals in the page body) never sees them and the per-app
 // `t()` runtime can't translate them.
@@ -26,7 +26,9 @@
 // entry per chrome string as the pack-chrome slices land.
 // ---------------------------------------------------------------------------
 
+import type { ExprIR } from "../../ir/types/loom-ir.js";
 import type { MessageEntry } from "./i18n-extract.js";
+import { gridHasFilterableColumn } from "./primitives/data-grid-shape.js";
 
 /** Stable key for a pack-chrome string: `chrome.<name>`. */
 export function chromeKey(name: string): string {
@@ -38,16 +40,87 @@ export function chromeKey(name: string): string {
  *  rides into `t(key, default)` and renders verbatim when no locale overrides. */
 export const CHROME_MESSAGES: Record<string, string> = {
   [chromeKey("loading")]: "Loading",
+  [chromeKey("previous")]: "Previous",
+  [chromeKey("next")]: "Next",
+  [chromeKey("filter")]: "Filter",
+  // The empty-state text of a `<select>` picker.  One key rather than one per
+  // call site: it is the same sentence to a translator, and every pack that
+  // spells it spells it identically (unlike the nav-toggle pair, which packs
+  // genuinely word differently and therefore keeps two keys).
+  [chromeKey("selectPlaceholder")]: "Select…",
 };
+
+/** The source-language text for a chrome key, for an emitter building the
+ *  `t(key, default)` binding.  Throws on an unknown name rather than emitting a
+ *  `t(key, undefined)` the runtime would render as the literal string
+ *  "undefined" — the emitted default MUST equal the catalog entry, so the two
+ *  read the same table instead of repeating the English by hand. */
+export function chromeMessage(name: string): string {
+  const message = CHROME_MESSAGES[chromeKey(name)];
+  if (message === undefined) throw new Error(`i18n-chrome: unknown chrome string "${name}"`);
+  return message;
+}
+
+/** One catalog entry for a chrome name. */
+function entry(name: string): MessageEntry {
+  return { key: chromeKey(name), message: chromeMessage(name) };
+}
+
+/** The chrome a primitive contributes: a fixed list, or — when it depends on
+ *  HOW the primitive was called — a function of the call node.  A `DataGrid`
+ *  renders its per-column "Filter" placeholder only when a column asked to be
+ *  filtered, so its entries are computed rather than declared. */
+export type ChromeContribution =
+  | readonly MessageEntry[]
+  | ((call: ExprIR & { kind: "call" }) => readonly MessageEntry[]);
 
 /** Walker-primitive call name → the chrome catalog entries it renders.  The
  *  extraction pass consults this per call node so the catalog carries exactly
  *  the chrome a UI actually emits (used-only), and a chrome-only page still
  *  counts as translatable (turns the runtime on).  Keyed by the primitive's
- *  DSL call name (`Loader`, …), the same name `registry.ts` dispatches. */
-export const CHROME_BY_PRIMITIVE: Record<string, readonly MessageEntry[]> = {
-  Loader: [{ key: chromeKey("loading"), message: CHROME_MESSAGES[chromeKey("loading")]! }],
+ *  DSL call name (`Loader`, `DataGrid`, …), the same name `registry.ts`
+ *  dispatches. */
+export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
+  Loader: [entry("loading")],
+  // Every shipped pack's grid renders the pager unconditionally; the per-column
+  // filter input rides `hasFilters`, so the placeholder is contributed only when
+  // a column is actually filterable — the SAME predicate the emitter gates that
+  // input on (`data-grid-shape.ts`), so key and binding cannot drift.
+  DataGrid: (call) => [
+    entry("previous"),
+    entry("next"),
+    ...(gridHasFilterableColumn(call) ? [entry("filter")] : []),
+  ],
+  // A `SelectField` ALWAYS renders the picker, so this is exact — the primitive
+  // is the only thing that renders `primitive-select-field`.
+  //
+  // The form-built pickers (`field-input-id-select` / `-enum-select`, for an
+  // `X id` field whose target has a `derived display`, or an enum field) are
+  // NOT here, and deliberately still ship English.  Contributing from
+  // `CreateForm`/`OperationForm`/`WorkflowForm` would be the obvious move and
+  // is wrong twice over: a form of plain strings would carry a key nothing
+  // renders, and — measured, not assumed — it would turn the whole i18n runtime
+  // ON for such an app, shipping `src/i18n.ts`, `locales/en.json` and the
+  // `intl-messageformat` dependency to a UI with nothing to translate.
+  //
+  // Gating it exactly is not cheap: unlike `DataGrid`'s `filterable:` (readable
+  // straight off the call node, hence one shared ctx-free helper), the answer
+  // needs the aggregate/enum tables the extraction pass deliberately lacks
+  // (`collectUiMessages(ui)` is ctx-free so `ddd i18n extract` runs without
+  // codegen) AND it would have to re-derive THREE different field sources — the
+  // create-input projection, an operation's params, a workflow's params — each
+  // a fresh chance to drift from the code that actually emits.  That belongs in
+  // its own slice with a shared predicate, not smuggled in here.
+  SelectField: [entry("selectPlaceholder")],
 };
+
+/** Resolve a primitive's chrome contribution against the call node that
+ *  produced it.  Undefined for a primitive that bakes in no chrome. */
+export function chromeEntriesFor(call: ExprIR & { kind: "call" }): readonly MessageEntry[] {
+  const contribution = CHROME_BY_PRIMITIVE[call.name];
+  if (contribution === undefined) return [];
+  return typeof contribution === "function" ? contribution(call) : contribution;
+}
 
 /** App-shell chrome — strings the design packs bake into the application shell
  *  (`app-shell.hbs`: the 404 route text, the skip-to-content link).  Unlike
@@ -61,4 +134,23 @@ export const APP_SHELL_CHROME: Record<string, string> = {
   [chromeKey("notFound")]: "Not found",
   [chromeKey("skipToContent")]: "Skip to content",
   [chromeKey("primaryNav")]: "Primary navigation",
+  [chromeKey("somethingWentWrong")]: "Something went wrong",
+  // The ROOT error boundary (`src/ErrorBoundary.tsx`, mounted by every React
+  // pack's `main.tsx` outside the provider chain) spells the same idea WITH a
+  // full stop.  Its own key rather than a re-use, because the two raw strings
+  // differ and re-wording either would break the i18n-off byte-identical
+  // guarantee — and rather than hoisting the "." out of the message, because
+  // sentence-final punctuation is not universal (CJK uses 。).
+  [chromeKey("rootErrorTitle")]: "Something went wrong.",
+  // The mobile nav toggle: two keys, not one, because the packs genuinely spell
+  // it differently (chakra "Open menu" vs the shadcn/flowbite family "Toggle
+  // navigation").  Collapsing them onto one canonical English would silently
+  // re-word a pack and break the i18n-off byte-identical guarantee.
+  [chromeKey("openMenu")]: "Open menu",
+  [chromeKey("toggleNavigation")]: "Toggle navigation",
+  // The error boundary's / 404's recovery link.  ONE key for both, even though
+  // the 404 renders it as "← Back to home": the arrow is decoration the template
+  // keeps OUTSIDE the token, so i18n-off still concatenates to the byte-identical
+  // "← Back to home" while translators see one clean phrase.
+  [chromeKey("backToHome")]: "Back to home",
 };

@@ -24,11 +24,11 @@
 import { build } from "esbuild";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEV_CLAIMS, featureCases, parseTrx, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -79,26 +79,6 @@ function findDotnetDeployable(genDir) {
     throw new Error(`expected exactly one dotnet deployable, found ${dirs.length}: ${dirs.join(", ")}`);
   }
   return dirs[0];
-}
-
-/** Resolve when TCP :PORT accepts, or reject after the deadline. */
-function waitForPort(port, timeoutMs = 180_000) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((res, rej) => {
-    const tick = () => {
-      const sock = net.connect(port, "127.0.0.1");
-      sock.once("connect", () => {
-        sock.destroy();
-        res();
-      });
-      sock.once("error", () => {
-        sock.destroy();
-        if (Date.now() > deadline) rej(new Error(`port ${port} never listened`));
-        else setTimeout(tick, 300);
-      });
-    };
-    tick();
-  });
 }
 
 /** Poll GET /ready until it 200s (DB reachable + schema migrated), or give up
@@ -212,6 +192,11 @@ async function runCase(c) {
       // Restore then boot the app. Migrations auto-apply at startup (before
       // app.Run()), so a listening port already implies a migrated schema.
       execFileSync("dotnet", ["restore"], { cwd: deplDir, stdio: "pipe" });
+      // Nothing may still be listening on PORT: `waitForPort` below cannot tell
+      // this case's server from a previous case's leftover, and answering with
+      // the wrong app against a freshly-dropped schema is exactly the 500 this
+      // guards (see proc.mjs).
+      await waitForPortFree(PORT);
       server = spawn("dotnet", ["run", "--no-restore", "--no-launch-profile"], {
         cwd: deplDir,
         stdio: "pipe",
@@ -240,14 +225,9 @@ async function runCase(c) {
     const api = await run();
     return { results: [...unitResults, ...api.results], wire: api.wire };
   } finally {
-    if (server?.pid && !server.killed) {
-      // Kill the whole process group (dotnet run spawns the app as a child).
-      try {
-        process.kill(-server.pid, "SIGTERM");
-      } catch {
-        server.kill("SIGTERM");
-      }
-    }
+    // AWAIT the exit — firing SIGTERM and moving on leaves the port occupied
+    // into the next case, which then talks to the wrong app (see proc.mjs).
+    await stopServer(server);
     rmSync(genDir, { recursive: true, force: true });
   }
 }

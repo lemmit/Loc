@@ -58,6 +58,24 @@ export function forCreateInput<T extends WithAccess>(items: readonly T[]): T[] {
   );
 }
 
+/** Fields that participate in an **entity-history field diff** (docs/audit.md).
+ * An audit row stores whole `before`/`after` wire snapshots; the timeline
+ * derives the per-field changes from them at READ time.  This is the boundary
+ * that decides which keys that derivation may look at.  Excludes:
+ *   - `internal` / `secret` — never disclosed on an API read (`forApiRead`).
+ *   - `managed`  — server-lifecycle stamps.  `after` is captured POST-save, so
+ *                  `updatedAt` / `updatedBy` differ on EVERY entry; leaving
+ *                  them in makes stamp churn most of the timeline and buries
+ *                  the change the reader came for.
+ *   - `token`    — `id` never changes, and `version` (the `versioned`
+ *                  capability's counter) increments on every command, so it is
+ *                  stamp churn by another name.
+ * What survives is exactly the set a caller can influence — which is what
+ * "what changed" means. */
+export function forHistoryDiff<T extends WithAccess>(items: readonly T[]): T[] {
+  return forApiRead(items).filter((f) => f.access !== "managed" && f.access !== "token");
+}
+
 /** The fields that make up an aggregate's **create input** — the single
  * source of truth every create surface (wire DTO, domain factory,
  * page-object fill, parity) derives from.  Centralising it here means the

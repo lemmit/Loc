@@ -120,6 +120,36 @@ export type RuntimeRpcRequest =
   | { id: number; method: "reset"; params: Record<string, never> }
   | { id: number; method: "wipe"; params: Record<string, never> };
 
+/** Fire-and-forget progress note pushed by the worker DURING an RPC (it
+ *  carries no `id` and expects no reply, so the client tells it apart from a
+ *  response by the presence of `phase`).
+ *
+ *  Boot is one long RPC whose expensive interior — importing a ~2.5 MB bundle,
+ *  fetching and compiling PGlite's WASM, materialising its data dir — is where
+ *  a memory-constrained device actually dies.  Without this the main thread
+ *  sees a single opaque call and, if the renderer is killed mid-boot, cannot
+ *  say which step it was in.  The client turns each note into a synchronous
+ *  `markPhase` (workers have no localStorage), so the tombstone the next page
+ *  load finds is specific instead of just "boot". */
+export interface RuntimeProgress {
+  phase:
+    | "import-bundle"
+    | "pglite-assets"
+    | "pglite-construct"
+    // `ddl` was one phase over four different operations, and a field report
+    // landed on it.  These say which — and note that the FIRST of them is
+    // also where PGlite really starts up (see `pglite-construct`).
+    | "ddl-synth"
+    | "ddl-meta"
+    | "ddl-drop"
+    | "ddl-apply"
+    | "create-app";
+  /** Optional scale note (e.g. `"182 stmts, 61KB"`).  The phase says where it
+   *  died; this says how much work it was carrying, which is the difference
+   *  between "inherently heavy on this device" and "should have been cheap". */
+  note?: string;
+}
+
 export interface RuntimeRpcResponse {
   id: number;
   result?: BootResult | DispatchResult | QueryResult | WipeResult | { ok: true };

@@ -40,7 +40,7 @@
                       <Input
                         size="xs"
                         mt="1"
-                        placeholder="Filter"
+                        {{{filterPlaceholderAttr}}}
                         aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
                         value={String(h.column.getFilterValue() ?? "")}
                         onChange={(e) => h.column.setFilterValue(e.target.value)}
@@ -64,13 +64,13 @@
       </TableContainer>
       <HStack justify="space-between">
         <Button size="xs" variant="outline" onClick={() => table.previousPage()} isDisabled={!table.getCanPreviousPage()}>
-          Previous
+          {{{prevLabel}}}
         </Button>
         <Text fontSize="sm" aria-live="polite">
           Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
         </Text>
         <Button size="xs" variant="outline" onClick={() => table.nextPage()} isDisabled={!table.getCanNextPage()}>
-          Next
+          {{{nextLabel}}}
         </Button>
       </HStack>
     </Stack>

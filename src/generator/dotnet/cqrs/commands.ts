@@ -7,7 +7,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
-import { projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
+import { maskNamer, projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
@@ -85,8 +85,8 @@ export function emitCreateCommandAndHandler(
       `            TargetType = ${JSON.stringify(agg.name)},\n` +
       `            TargetId = aggregate.Id.Value.ToString(),\n` +
       `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
-      `            Before = "null",\n` +
-      `            After = System.Text.Json.JsonSerializer.Serialize(${createAfterExpr}),\n` +
+      `            Before = null,\n` +
+      `            After = System.Text.Json.JsonSerializer.SerializeToNode(${createAfterExpr}),\n` +
       `            At = DateTime.UtcNow,\n` +
       `            Status = "ok",\n` +
       `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
@@ -190,8 +190,8 @@ export function emitDestroyCommandAndHandler(
       `            TargetType = ${JSON.stringify(agg.name)},\n` +
       `            TargetId = command.Id.Value.ToString(),\n` +
       `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
-      `            Before = System.Text.Json.JsonSerializer.Serialize(${destroyBeforeExpr}),\n` +
-      `            After = "null",\n` +
+      `            Before = System.Text.Json.JsonSerializer.SerializeToNode(${destroyBeforeExpr}),\n` +
+      `            After = null,\n` +
       `            At = DateTime.UtcNow,\n` +
       `            Status = "ok",\n` +
       `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
@@ -337,14 +337,30 @@ export function emitOperationCommandAndHandler(
     // transaction as the state change.  The actor (principal), correlation id,
     // and scope id are stamped from the ambient RequestContext (M3 consumer).
     const audited = op.audited;
-    const projectExpr = audited
-      ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, ctx)
-      : "";
+    // The before/after snapshots are TWO projections rendered into ONE handler
+    // body, so they must not reuse the same `is { } __maskUser…` pattern
+    // variable — that is CS0128 on any aggregate carrying a `mask unless`
+    // field.  One shared namer spans the whole method scope and hands each
+    // wrap its own name (see `MaskNamer` in dto-mapping.ts).  This is also why
+    // the two projections are rendered SEPARATELY rather than hoisted into one
+    // shared string: an identical string emitted twice is exactly the duplicate
+    // declaration, and the namer only helps if each wrap is rendered once.
+    const maskNames = maskNamer();
     const auditBefore = audited
-      ? `        var __before = System.Text.Json.JsonSerializer.Serialize(${projectExpr});\n`
+      ? `        var __before = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(
+          "aggregate",
+          agg as EnrichedAggregateIR,
+          ctx,
+          { maskNames },
+        )});\n`
       : "";
     const auditStage = audited
-      ? `        var __after = System.Text.Json.JsonSerializer.Serialize(${projectExpr});\n` +
+      ? `        var __after = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(
+          "aggregate",
+          agg as EnrichedAggregateIR,
+          ctx,
+          { maskNames },
+        )});\n` +
         `        _audit.Stage(new AuditRecord\n` +
         `        {\n` +
         `            AuditId = Guid.NewGuid().ToString(),\n` +

@@ -78,6 +78,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "IdLink",
   "FileLink",
   "ProvenanceInfo",
+  "Timeline",
   "Skeleton",
   "Alert",
   "QueryView",

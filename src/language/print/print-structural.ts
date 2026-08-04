@@ -552,9 +552,16 @@ function printTestE2E(node: TestE2E): string {
 // ---------------------------------------------------------------------------
 
 function printUi(node: Ui): string {
-  return declBlock(`ui ${node.name}${printWithClause(node.withClause)}`, () =>
-    node.members.map(printStructural),
-  );
+  return declBlock(`ui ${node.name}${printWithClause(node.withClause)}`, () => [
+    // `framework:` is a direct property of the `ui` node, not a member, so the
+    // members-only walk below dropped it — a printed ui silently lost its
+    // framework and reverted to the default on re-parse (so the LSP
+    // "unfold macro" action could change which frontend a ui renders as).
+    // Invisible until now because the examples that declare it explicitly are
+    // rare: most bind the framework through the `deployable … ui: X` sugar.
+    ...(node.framework ? [`framework: ${node.framework}`] : []),
+    ...node.members.map(printStructural),
+  ]);
 }
 
 /** `area <Name> { …pages / sub-areas… }` — members are Pages and nested

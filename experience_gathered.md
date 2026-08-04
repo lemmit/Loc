@@ -3783,11 +3783,263 @@ The rules this pays for:
   cases the emitted Elixir was identical to `main`, which ruled the PR out
   entirely and redirected the search to the runner.
 
+The same fire-and-forget pattern was present in the dotnet / dapper / python /
+java / mikroorm runners, unfired only because .NET, the JVM, uvicorn and tsx shut
+down faster than the BEAM. All five are now on the shared
+`test/behavioral/proc.mjs`, which is the second half of the lesson:
+
+- **A bug that only one caller has FIRED is still a bug every caller HAS.** The
+  five green legs were green by runtime shutdown speed, not by correctness.
+  "It hasn't broken there" is a statement about luck, not about the code.
+- **Fixing it in six places would have been the same debt in six copies.** The
+  helpers went into one dependency-free module — dependency-free ON PURPOSE, so
+  the main vitest suite can import it (`cases.mjs` pulls `pg` + `esbuild` and
+  cannot be). That is what makes the gate possible at all.
+- **Gate a race where it can be FORCED, not where it happens to occur.** The
+  fix is pinned by `test/harness/behavioral-proc.test.ts`, which spawns a server
+  that deliberately ignores `SIGTERM` and asserts teardown does not return until
+  the port is free. Left to the booted legs, the property is only tested when
+  the race is lost — i.e. a gate that passes for the wrong reason almost always.
+  Mutation-checked: restoring the old teardown turns exactly three of its
+  assertions red.
+
+One thing the sweep found that the original fix had not: `run-python.mjs` was
+spawning NON-detached and signalling only the pid it owned — but `uv run uvicorn`
+holds the port in a CHILD, so its teardown could orphan the listener outright.
+The Elixir race needed a slow shutdown to lose; that one leaked whenever the
+signal was delivered at all. Generalising a fix is how you find the variants of
+it you had not looked for.
+
+## 67. The assertion that could not fail, and the detector that found nothing (2026-08-03)
+
+`paged-envelope-members.test.ts` carried this, and it passed for its entire life:
+
+```ts
+const reads = files.get("web/lib/reads.dart") ?? "";
+expect(reads).not.toContain("class LoomPage<T>");
+```
+
+Flutter emits no `lib/reads.dart` for that fixture. `?? ""` turned the miss into
+an empty string, and a `.not.toContain` on an empty string is true for free. The
+assertion was not weak — it was *incapable of failing*. Underneath it sat a real
+bug: a parameterized find made the page walker emit `import '../reads.dart'` and
+`ref.watch(productByNameProvider(...))` for a provider the collector never
+produced, so the generated project would not pass `flutter analyze`.
+
+The detail that makes this worth writing down: **the same file already carried
+the warning.** `pageSource`, forty lines above, is documented as locating pages
+by content rather than path precisely because "a path guess that silently misses
+returns '' — which passes a `not.toContain` assertion for the wrong reason." One
+call site in the same file did it anyway. The knowledge was present, written,
+and adjacent, and it still did not prevent the bug.
+
+Then, building the gate for it, the first detector reported **zero offenders**
+across the whole tree — and I nearly shipped that as "the tree is clean". It was
+a broken regex. Running it against the known positive from the bug that started
+the search is the only reason it surfaced. A gate reporting zero and a gate that
+cannot report anything are indistinguishable from the outside.
+
+Measurement discipline mattered more than the fix here. Three counts, same
+question:
+
+| method | offenders |
+|---|---|
+| grep `?? ""` near `not.toContain` | 47 — almost all fine |
+| negative assertions on `?? ""` bindings | 66 |
+| …with nothing proving the file exists | **2** |
+
+Both survivors were probed by temporarily asserting non-emptiness: **neither was
+actually vacuous**, the files are emitted. The tree was at zero, which is what
+made a zero-tolerance gate possible instead of a ratcheting allowlist.
+
+The rules this pays for:
+
+- **A comment is not a gate.** Adjacent, correct, explicit prose did not stop the
+  identical mistake one screen below it. If a trap is worth documenting, it is
+  worth a test that fails on it.
+- **Never trust a green test you have not watched go red.** Every gate added this
+  session was run against the pre-fix code first. Twice that caught something a
+  passing run would have hidden: this detector, and a Flutter provider decoding
+  `body['items']` where the route emits a bare array.
+- **`?? ""` on a file lookup converts "absent" into "vacuously satisfied".** Use
+  `expectEmitted` (test/_helpers/emitted.ts) when a test asserts on content, or
+  pair the negative with a positive assertion that proves the file exists. To
+  assert genuine ABSENCE, say `expect(files.has(p)).toBe(false)` — which means
+  it, and which no detector needs to guess about.
+- **A crude count and a precise one differ by an order of magnitude.** 47 → 2.
+  Acting on the crude number would have meant 45 pointless edits and a
+  ratcheting allowlist nobody could ever drain.
+
+## 68. The gate that cannot see the failure mode it is named for (2026-08-03)
+
+Four bugs in one session, one shape. In each case a gate existed, looked like it
+covered the area, was green, and was structurally incapable of observing the
+defect:
+
+- **`corpus × dotnet` ran only EF Core.** An emitter referencing EF from a code
+  path Dapper also takes is invisible to it. That is how `IAuditWriter` shipped
+  as a dangling `CS0246` under `persistence: dapper` with the gate green — and
+  how the folded projection read controller shipped the same coupling before it,
+  and how two query-time projection handlers are *still* broken today.
+- **The Flutter CI showcase only used `.all`.** `flutter analyze` + `flutter
+  build web` both ran, both passed, and neither ever emitted a parameterized
+  find — the one shape that was broken.
+- **A `.not.toContain` on a missing file** (§67).
+- **Heavy gates do not run pre-merge.** Three merge-order collisions in one
+  session: two PRs each green alone and red together, plus a duplicate fix
+  written by a parallel agent while I was writing mine.
+
+The corrective is not a better assertion inside the existing gate — it is
+widening what the gate *sees*. `corpus × dotnet (Dapper)` runs the same corpus
+through the second persistence adapter; the Flutter showcase now declares a
+`find` and a `QueryView` over it. Both are cheap. Neither existed because the
+original gate looked adequate.
+
+The measurement is worth keeping: forcing the whole corpus through
+`persistence: dapper` and compiling gave **36 features → 35 generate → 33
+compile**, one honest `loom.dapper-unsupported` rejection, and two real silent
+gaps. An emit-only sweep would have reported 35/35 and missed both, because the
+audit bug also *generated* fine and failed only at `dotnet build`.
+
+The rules this pays for:
+
+- **Ask what a gate cannot see, not whether it is green.** "corpus × dotnet"
+  reads like full .NET coverage and is half of one axis.
+- **A second axis over an existing matrix is usually cheap.** The Dapper corpus
+  gate reuses the same fixtures, harness and compiler; the only new code is a
+  persistence override and a skip map.
+- **Emit ≠ compile ≠ run.** Each tier catches a class the one before it cannot.
+  The audit gap cleared parse and generate and died at compile; a wrong JSON
+  shape clears compile and dies at runtime.
+- **A gate that runs but gates nothing is worth nothing.** The new corpus job had
+  to be added to the `corpus-build-passed` rollup's `needs:`, or it would have
+  reported failures nobody's branch protection consulted.
+
+## 69. A stale `out/` is a lie the toolchain tells you twice (2026-08-03)
+
+Chasing "main is red", I found `generate ts` emitting 32 files where the test
+expected 33, with `obs/tracing.ts` missing. I diffed emitters, built a worktree
+at an older commit to compare, and confirmed the tracing sources were
+byte-identical across both — an impossible result that should have stopped me
+sooner. The cause was that `out/` in my checkout predated `HEAD`. Rebuilding
+emitted 33 files and the suite passed.
+
+It bit a second time in the same session: a `Handlebars: "errorTitleAttr" not
+defined` crash on a fixture that had nothing to do with i18n, immediately after
+a branch switch. Same cause, different disguise.
+
+The SessionStart hook skips `npm install` when `node_modules/.bin/biome` and
+`src/language/generated/` already exist — correct for a fresh container, wrong
+after any `git checkout` that moves `src/`.
+
+The rules this pays for:
+
+- **Rebuild after switching branches, before generating anything.** `out/` is not
+  tracked and nothing warns you it is behind.
+- **"The source is identical but the output differs" means the binary is not the
+  source.** Treat that contradiction as a build-staleness signal immediately,
+  not as a deep emitter mystery.
+- **Never run a long background suite across a branch switch.** One did, and
+  reported 713 failures that were pure artefact of the tree changing underneath
+  it — a phantom regression that cost a full re-verification to disprove.
+
+## 70. A macro's AST does not lower like the parser's — and a gate written against one rejects the other (2026-08-04)
+
+`scaffoldDashboard` stopped generating on `main`. Every `with scaffoldDashboard`
+context died on the macro's OWN emitted projection:
+
+    projection 'OrderTotals': 'select totalSum = sum(…)' aggregates a computed
+    expression. An aggregation argument must be a plain column …
+
+The gate (`loom.projection-aggregate-arg-not-columnar`) was added a few days
+earlier with the grouped read model, to close a real crash: `sum(o.total +
+o.tax)` validated clean and then threw an internal error inside every emitter.
+It tested `arg.kind === "member" && arg.receiver.kind === "this"`, which is
+precisely what a PARSED `sum(o.total)` lowers to.
+
+A **macro-built** `sum(o.total)` does not lower to that shape. Same source
+spelling, same intent, different IR — so the gate rejected the scaffold whose
+output the emitters had been rendering correctly all along.
+
+- **Write a shape gate against what the EMITTERS accept, not against what the
+  parser happens to produce.** Every backend's `aggregateColumn` reads
+  `.member` alone (`${sourceTable}.${arg.member}`) — it never looks at the
+  receiver. That set, `member`, was the correct test; the extra `receiver.kind
+  === "this"` clause was an accident of the one example in front of me. The
+  fix rejects exactly the same crash class (`binary`, bare `ref`) and nothing
+  else.
+- **Two sources produce IR: the parser and the macro layer.** A validator arm
+  exercised only through `parseString` fixtures has seen half its input. When
+  a gate constrains expression SHAPE, test it against a macro-built expression
+  too — the stdlib macros (`scaffold*`, `crudish`, `softDelete`) are a
+  second, equally real front end.
+- **`git checkout <commit-before-the-gate>` settles authorship in one command.**
+  "Did I break this, or was it always broken?" is answerable, not arguable: the
+  pre-gate commit generated the same model clean and emitted
+  `sum(schema.orders.total)`. That single check turned "the macro looks wrong"
+  into "my gate is wrong" and pointed straight at the fix.
+- **A generate-only regression test can pass WITH the bug still in.** The first
+  version of the test called `generateSystemFiles` and went green against the
+  broken gate — the toolkit helper does not run phase ⑦ validation. Only
+  reverting the fix and watching the test stay green exposed that. **Always run
+  a new regression test against the unfixed code**; a test you have never seen
+  fail is a test you have not written yet.
+- **Green AST-level tests are not coverage of the pipeline.** The macro's own
+  tests assert the nodes it builds, and they stayed green through the entire
+  breakage — the defect lived one phase later, where those nodes meet a
+  validator. That gap is how this reached `main`.
+## 64. Three gates over one file, none of which ran the validator (2026-08-02)
+## 71. Three gates over one file, none of which ran the validator (2026-08-02)
+
+`web/src/examples/acme.ddd` — shipped in the playground picker as "Acme
+(multi-deployable system)" — declared three backend deployables and **no
+`storage` or `resource` at all**. Opening it in the playground surfaced four
+`loom.persistence-mode-unsupported` errors. It had drifted at the
+D-STORAGE-SPLIT rename and nothing looked again.
+
+What makes it worth writing down is not the drift, it is **how much
+verification the file already had**:
+
+| looked at it | what it actually checked |
+|---|---|
+| `playground-remaining-examples.test.ts` | Langium AST diagnostics (phase ④) + "codegen didn't throw" |
+| `ddd parse` | computes every IR diagnostic, then filters to `loom.index-suggestion` and prints `OK` |
+| `generated-react-build.yml` | the TOP-LEVEL `examples/acme.ddd`, a different file that is correctly wired |
+
+Three things named after checking, and **phase ⑦ fell between all of them.**
+The generate assertion is the sharpest instance: `generateSystemsFromLoom`
+doesn't validate, so an invalid model generates a docker-compose perfectly
+happily, and asserting `files.has("docker-compose.yml")` reads like end-to-end
+coverage while proving almost nothing about the model.
+
+The fix is three lines of assertion in each of the three picker gates. The
+lesson is the recurring one, now at its fourth sighting this week:
+
+> **A check that never reaches the thing it names is indistinguishable from no
+> check.** §62's `ddd parse` (computes diagnostics, discards them), the
+> `errorResponses` conformance dimension (compares a rung its only fixture never
+> exercises), `api-surface.test.ts`'s old `|| "/"` (collapses the two path forms
+> before comparing), and now this. In every case the *name* of the check
+> described the coverage and the *body* did not, and in every case the reason it
+> stayed hidden is that nobody re-derived what the assertion could physically
+> observe.
+
+Practical follow-through, cheap and worth repeating: before trusting any gate,
+**run the scan that the gate claims to run, standalone, over the whole
+population.** Doing that here took one throwaway test over all 43 picker
+examples and gave the real blast radius (exactly one file) before a single fix
+— which is also what proved the other 42 were fine rather than merely unchecked.
+
+And a smaller one: a background-task wrapper reporting **"completed (exit code
+0)"** is reporting the WRAPPER's exit, not the command's. The suite underneath
+had exited **143** (SIGTERM — I had killed it after switching branches
+mid-run). Read the run's own tail before recording a green.
+
 The same fire-and-forget pattern is still present in the dotnet / dapper /
 python / java / mikroorm runners. It has not surfaced there — those runtimes
 exit faster — but the fuse is the same length.
 
-## 67. "Subscribed" is not one fact — it is two, and every broker client splits them differently (2026-08-03)
+## 72. "Subscribed" is not one fact — it is two, and every broker client splits them differently (2026-08-03)
 
 The §64 readiness defect turned out to have a second level underneath it, and
 finding the second level only became possible after fixing the first.

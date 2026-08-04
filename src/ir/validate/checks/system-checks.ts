@@ -12,7 +12,7 @@ import {
 import { descriptorFor } from "../../../platform/metadata.js";
 import { SHIPPED_COMBOS } from "../../../util/channels.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
-import { lowerFirst, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
   configSchemaFor,
@@ -336,21 +336,18 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
 
 /** `Chart` on a target that can't render it (M-T1.3 Phase 4).
  *
- *  Unlike `validateDataGridFramework` above, the membership rule is per-PACK,
- *  not per-framework: `Chart` renders through the active design pack's
- *  `primitive-chart` template plus a pack-specific chart dependency, and only
- *  mantine v9 (the lead pack) ships both today.  Every other pack — shadcn,
- *  mui, chakra, and every non-react framework — would crash codegen on the
- *  missing template, so the gate keys on the deployable's fully-qualified
- *  `design` (lowering resolves bareword `design: mantine` to `mantine@v9`).
- *  Each pack backfill widens the set; the `REQUIRED_PRIMITIVES` flip retires
- *  it (required-primitives.ts's staged policy). */
-const CHART_DESIGNS = new Set<string>(["mantine@v9"]);
-
+ *  The gate was per-PACK during the staged rollout (mantine v9 was the only
+ *  pack shipping a `primitive-chart` template + a chart dependency).  The
+ *  backfill is complete — all EIGHT tsx packs ship both — so `primitive-chart`
+ *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
+ *  it a pack-LOAD failure rather than something to re-check here.  What remains
+ *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`: vue,
+ *  svelte, angular, feliz, flutter and HEEx have no chart template and would
+ *  crash codegen, so they stay honest gaps. */
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.uiName) continue;
-    if (d.uiFramework === "react" && CHART_DESIGNS.has(d.design ?? "")) continue;
+    if (d.uiFramework === "react") continue;
     const ui = sys.uis.find((u) => u.name === d.uiName);
     if (!ui) continue;
     // Components render into pages, so a chart moved into one must not slip
@@ -366,10 +363,9 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
         code: "loom.chart-unsupported-target",
         message:
           `${what} uses 'Chart', which deployable '${d.name}' can't render ` +
-          `(frontend '${d.uiFramework ?? "unknown"}', design '${d.design ?? "none"}'). Chart ` +
-          `ships on react with the mantine@v9 design pack only for now (the staged pack ` +
-          `rollout). Host this ui there, or bind the grouped projection to 'Table' — it ` +
-          `renders the same rows on every frontend.`,
+          `(frontend '${d.uiFramework ?? "unknown"}'). Chart ships on react — on every ` +
+          `react design pack. Host this ui on a react deployable, or bind the grouped ` +
+          `projection to 'Table' — it renders the same rows on every frontend.`,
         source: `${ui.name}/${what}`,
       });
     }
@@ -668,6 +664,22 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
               source: `find/${repo.name}.${find.name}`,
             });
           }
+        }
+        // Entity history (docs/audit.md): `GET /<agg>/{id}/history` replays the
+        // `before`/`after` snapshots of every successful command on a row.  It
+        // is compiler-synthesized like `find all` — but unlike `find all` the
+        // author HAS a surface to gate it from, because history copies the list
+        // read's gate at enrichment.  So an ungated one is actionable, and
+        // under denyByDefault an ungated CHANGE HISTORY is a worse default than
+        // an ungated current-state read: it discloses who changed what and
+        // when, over the row's whole lifetime, in one request.
+        if (repo.historyFind && !repo.historyFind.requires) {
+          diags.push({
+            severity: "error",
+            code: "loom.audit-history-ungated",
+            message: `denyByDefault: '${repo.aggregateName}' is \`audited\`, so it serves \`GET /${snake(plural(repo.aggregateName))}/{id}/history\`, but its list read declares no \`requires\` gate — the change history is reachable by any authenticated caller. Declare \`find all(): ${repo.aggregateName}[] requires <expr>\` on '${repo.name}'; history inherits that gate (use \`requires true\` to allow anonymous access).`,
+            source: `find/${repo.name}.history`,
+          });
         }
       }
     }

@@ -219,6 +219,12 @@ export function emitController(
       idClrType: csIdValueClrType(agg.idValueType),
       createAction: createActionOverride ?? emitsRestCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
+      // Entity history (docs/audit.md): the derived read sits BESIDE `finds`
+      // (see `RepositoryIR.historyFind`), so it drives its own action rather
+      // than riding the `exposedFinds` loop.  `guarded` is the gate the find
+      // inherited from the aggregate's list read — declared so the action's
+      // OpenAPI 403 matches what the handler can actually throw.
+      historyAction: repo?.historyFind ? { guarded: !!repo.historyFind.requires } : undefined,
       createRequestValidator:
         requestVoValidatorName(
           `Create${agg.name}Request`,
@@ -304,6 +310,7 @@ export function emitController(
             ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),
             ...(paged ? ["page", "pageSize", "sort", "dir"] : []),
           ].join(", "),
+          guarded: find.requires !== undefined,
           returnShape: (paged
             ? "paged"
             : isUnion

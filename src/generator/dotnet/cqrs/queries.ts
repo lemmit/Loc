@@ -8,8 +8,15 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findGateUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
 import { upperFirst } from "../../../util/naming.js";
 import { projectEntityExpr } from "../dto-mapping.js";
+import {
+  HISTORY_RETURN_TYPE,
+  historyHandlerName,
+  historyQueryName,
+  renderHistoryEntryMapperLines,
+} from "../emit/audit-history.js";
 import { renderQuery, renderQueryHandler } from "../emit.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 
@@ -105,6 +112,115 @@ export function emitGetByIdQueryAndHandler(
       body:
         `        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);\n` +
         `        return found is null ? null : ${projectEntityExpr("found", agg, ctx)};\n`,
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Entity history — `GET /<agg>/{id}/history` (docs/audit.md)
+// ---------------------------------------------------------------------------
+
+/** The per-entity history read, as a Mediator query + handler.
+ *
+ *  Driven by the enrichment-derived `repo.historyFind`, which sits BESIDE
+ *  `finds` (see `RepositoryIR.historyFind`) — so the generic find loop above
+ *  never sees it and this is the one place it is emitted.
+ *
+ *  Three things make it safe, in order:
+ *
+ *  1. **The gate.** `historyFind.requires` is the aggregate's own list-read
+ *     gate, copied at enrichment — so history is never easier to reach than the
+ *     entity read it replays.  Fails → `ForbiddenException` → 403, BEFORE any
+ *     query runs.
+ *
+ *  2. **Entity reachability.** `audit_records` is a cross-context machinery
+ *     table: it carries `target_type`/`target_id` and NO tenant column, so
+ *     there is nothing on it for a capability query-filter to scope.  Scoping
+ *     is therefore done on the ENTITY: the handler resolves the row through
+ *     `_repo.GetByIdAsync`, which already carries every capability predicate
+ *     (EF applies the read query-filter automatically; the Dapper repository
+ *     inlines it).  A row the caller cannot read yields 404 here — the same
+ *     answer the entity read gives, so history discloses nothing about rows in
+ *     another tenant, not even their existence.
+ *
+ *  3. **The mask.** The row → entry mapper drops each `mask unless` field's
+ *     change entry for a caller who fails the predicate.
+ *
+ *  All three are needed: the gate alone leaks across tenants, reachability
+ *  alone leaks masked fields to legitimate readers, and the mask alone leaves
+ *  the endpoint open. */
+export function emitHistoryQueryAndHandler(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  ns: string,
+  aggFolder: string,
+  out: Map<string, string>,
+  idClass: string = `${agg.name}Id`,
+): void {
+  const find = repo?.historyFind;
+  if (!find) return;
+  const gateUsesUser = findGateUsesCurrentUser(find);
+  const masked = maskedHistoryFields(agg);
+  // `Application.Common` carries AuditEntry / AuditFieldChange / AuditSnapshot /
+  // IAuditHistoryReader; `Domain.Common` carries AggregateNotFoundException, the
+  // gate's ForbiddenException and (for the mask pass) RequestContext.
+  const usings = new Set<string>([`${ns}.Application.Common`, `${ns}.Domain.Common`]);
+  if (gateUsesUser) usings.add(`${ns}.Auth`);
+  if (find.requires) collectCsExprUsings(find.requires, usings);
+  for (const f of masked) collectCsExprUsings(f.maskUnless!, usings);
+  out.set(
+    `Application/${aggFolder}/Queries/${historyQueryName(agg)}.cs`,
+    renderQuery({
+      ns,
+      aggName: agg.name,
+      queryName: historyQueryName(agg),
+      queryParams: `${idClass} Id`,
+      returnType: HISTORY_RETURN_TYPE,
+      extraUsings: [`${ns}.Application.Common`],
+    }),
+  );
+  const body: string[] = [];
+  if (find.requires) {
+    // (1) — the inherited read gate, before the audit table is touched.
+    if (gateUsesUser) body.push(`        var currentUser = _currentUser.User;`);
+    body.push(
+      `        if (!(${renderCsExpr(find.requires)}))`,
+      `        {`,
+      `            throw new ForbiddenException(${JSON.stringify(`Forbidden: find ${find.name}`)});`,
+      `        }`,
+    );
+  }
+  // (2) — capability scoping rides the ENTITY read, because the audit table has
+  // no tenant column of its own to filter on.
+  body.push(
+    `        var __target = await _repo.GetByIdAsync(query.Id, cancellationToken);`,
+    `        if (__target is null)`,
+    `        {`,
+    `            throw new AggregateNotFoundException($"${agg.name} {query.Id} not found");`,
+    `        }`,
+    `        var __rows = await _history.ReadAsync(${JSON.stringify(agg.name)}, query.Id.Value.ToString(), cancellationToken);`,
+    `        var __entries = new List<AuditEntry>(__rows.Count);`,
+    `        foreach (var row in __rows)`,
+    `        {`,
+    // (3) — the mask pass lives in the mapper, the only place a caller enters.
+    ...renderHistoryEntryMapperLines(agg, "            "),
+    `        }`,
+    `        return __entries;`,
+  );
+  out.set(
+    `Application/${aggFolder}/Queries/${historyHandlerName(agg)}.cs`,
+    renderQueryHandler({
+      ns,
+      aggName: agg.name,
+      handlerName: historyHandlerName(agg),
+      queryName: historyQueryName(agg),
+      returnType: HISTORY_RETURN_TYPE,
+      body: `${body.join("\n")}\n`,
+      extraDeps: [
+        { type: "IAuditHistoryReader", field: "_history" },
+        ...(gateUsesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : []),
+      ],
+      extraUsings: [...usings],
     }),
   );
 }

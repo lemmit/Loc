@@ -586,6 +586,11 @@ export const JAVA_INTRINSIC_RENDERERS: Record<string, (recv: string, args: strin
   "money.floor": (recv) => `${recv}.setScale(0, java.math.RoundingMode.FLOOR)`,
   "decimal.ceil": (recv) => `${recv}.setScale(0, java.math.RoundingMode.CEILING)`,
   "money.ceil": (recv) => `${recv}.setScale(0, java.math.RoundingMode.CEILING)`,
+  // ---- datetime — Loom `datetime` is `java.time.Instant` here, and
+  // `truncatedTo(DAYS)` cuts at the UTC day boundary (Instant has no zone),
+  // exactly the catalogue's midnight-UTC contract.  Fully-qualified
+  // ChronoUnit avoids import wiring (same trick as string.split above).
+  "datetime.startOfDay": (recv) => `${recv}.truncatedTo(java.time.temporal.ChronoUnit.DAYS)`,
 };
 
 function renderMethodCall(

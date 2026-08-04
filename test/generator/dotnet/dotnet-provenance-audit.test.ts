@@ -191,8 +191,8 @@ describe("dotnet per-operation audit runtime", () => {
 
   it("stages a before/after audit record in the audited command handler", async () => {
     const handler = (await files()).get("api/Application/Orders/Commands/CancelHandler.cs")!;
-    expect(handler).toContain("var __before = System.Text.Json.JsonSerializer.Serialize(");
-    expect(handler).toContain("var __after = System.Text.Json.JsonSerializer.Serialize(");
+    expect(handler).toContain("var __before = System.Text.Json.JsonSerializer.SerializeToNode(");
+    expect(handler).toContain("var __after = System.Text.Json.JsonSerializer.SerializeToNode(");
     expect(handler).toContain("_audit.Stage(new AuditRecord");
     expect(handler).toContain('Action = "cancel"');
     expect(handler).toContain('TargetType = "Order"');
@@ -331,8 +331,8 @@ describe("dotnet workflow audit", () => {
     expect(h).toContain(
       "public BuildCartHandler(ICartRepository carts, ILogger<BuildCartHandler> log, IAuditWriter audit)",
     );
-    expect(h).toContain("var __wfAuditBefore0 = System.Text.Json.JsonSerializer.Serialize(");
-    expect(h).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.Serialize(");
+    expect(h).toContain("var __wfAuditBefore0 = System.Text.Json.JsonSerializer.SerializeToNode(");
+    expect(h).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.SerializeToNode(");
     expect(h).toContain("_audit.Stage(new AuditRecord");
     expect(h).toContain('Action = "close",');
     expect(h).toContain('TargetType = "Cart",');

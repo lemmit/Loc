@@ -33,6 +33,10 @@ import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
+import {
+  vueChromeAttr as shellChromeAttr,
+  vueChromeText as shellChromeText,
+} from "../_frontend/shell-chrome.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
@@ -41,7 +45,6 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
-import { APP_SHELL_CHROME, chromeKey } from "../_walker/i18n-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral pieces that live react-side today (same sharing
@@ -555,20 +558,12 @@ export function generateVueForContexts(
   // and the `t` import is gated on `i18nEnabled` with a per-render-site
   // relative path (App.vue → `./i18n`; the one-level-deeper DefaultLayout.vue →
   // `../i18n`).
-  const skipToContentText = i18nEnabled
-    ? `{{ t(${JSON.stringify(chromeKey("skipToContent"))}, ${JSON.stringify(
-        APP_SHELL_CHROME[chromeKey("skipToContent")],
-      )}) }}`
-    : APP_SHELL_CHROME[chromeKey("skipToContent")]!;
+  const skipToContentText = shellChromeText("skipToContent", i18nEnabled);
   // The primary-navigation landmark's `aria-label` — an attribute fragment (NO
   // leading space; the template keeps the surrounding whitespace): Vue's bound
   // `:aria-label='t(…)'` (single-quoted, the `t()` call holds double quotes)
   // under i18n, else the static `aria-label="…"`.
-  const primaryNavAria = i18nEnabled
-    ? `:aria-label='t(${JSON.stringify(chromeKey("primaryNav"))}, ${JSON.stringify(
-        APP_SHELL_CHROME[chromeKey("primaryNav")],
-      )})'`
-    : `aria-label="${APP_SHELL_CHROME[chromeKey("primaryNav")]}"`;
+  const primaryNavAria = shellChromeAttr("aria-label", "primaryNav", i18nEnabled);
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
     navSections,
@@ -578,6 +573,15 @@ export function generateVueForContexts(
     i18nEnabled,
     skipToContentText,
     primaryNavAria,
+    // The error boundary's "Something went wrong" heading — a TEXT child on
+    // shadcnVue's `<AlertTitle>`, a `title=` prop on vuetify's `<v-alert>`.
+    errorTitleText: shellChromeText("somethingWentWrong", i18nEnabled),
+    errorTitleAttr: shellChromeAttr("title", "somethingWentWrong", i18nEnabled),
+    // The mobile nav toggle's aria — "Toggle navigation" (shadcnVue; vuetify's
+    // drawer toggle carries no label, so it stays untouched).
+    toggleNavAria: shellChromeAttr("aria-label", "toggleNavigation", i18nEnabled),
+    // The error boundary's "Back to home" recovery button (both Vue packs).
+    backToHomeText: shellChromeText("backToHome", i18nEnabled),
   };
   if (useLayouts) {
     // The chrome (and its toast/realtime hosts) move OUT of App.vue into

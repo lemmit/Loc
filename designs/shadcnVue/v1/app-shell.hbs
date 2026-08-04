@@ -46,7 +46,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
   <div class="flex min-h-screen flex-col">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium">{{{skipToContentText}}}</a>
     <header class="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
-      <Button variant="ghost" size="icon" class="sm:hidden" data-testid="nav-burger" aria-label="Toggle navigation" @click="opened = !opened">
+      <Button variant="ghost" size="icon" class="sm:hidden" data-testid="nav-burger" {{{toggleNavAria}}} @click="opened = !opened">
         <Menu class="h-5 w-5" />
       </Button>
       <router-link to="/" class="flex items-center gap-2">
@@ -66,11 +66,11 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
       <main id="main-content" class="flex-1 p-4 lg:p-6">
         <div v-if="appError" data-testid="app-error" class="flex flex-col gap-4">
           <Alert variant="destructive">
-            <AlertTitle>Something went wrong</AlertTitle>
+            <AlertTitle>{{{errorTitleText}}}</AlertTitle>
             <AlertDescription>\{{ appError.message }}</AlertDescription>
           </Alert>
           <div>
-            <Button variant="outline" @click="resetError">Back to home</Button>
+            <Button variant="outline" @click="resetError">{{{backToHomeText}}}</Button>
           </div>
         </div>
         <router-view v-else />

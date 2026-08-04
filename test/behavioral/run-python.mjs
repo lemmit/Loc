@@ -32,11 +32,11 @@
 import { build, transform } from "esbuild";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -121,26 +121,6 @@ function runPytestUnit(deplDir) {
     results.push({ tier: "unit", name: "pytest", status: "fail", error: `pytest exited ${exit}` });
   }
   return results;
-}
-
-/** Resolve when TCP :PORT accepts, or reject after the deadline. */
-function waitForPort(port, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((res, rej) => {
-    const tick = () => {
-      const sock = net.connect(port, "127.0.0.1");
-      sock.once("connect", () => {
-        sock.destroy();
-        res();
-      });
-      sock.once("error", () => {
-        sock.destroy();
-        if (Date.now() > deadline) rej(new Error(`port ${port} never listened`));
-        else setTimeout(tick, 300);
-      });
-    };
-    tick();
-  });
 }
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
@@ -234,16 +214,22 @@ async function runCase(c) {
       if (!EXTERNAL_BASE) {
         // Clean DB per case (context-named schemas), else the 2nd case collides.
         await resetDatabase(DATABASE_URL.replace("+asyncpg", ""));
+        // Nothing may still be listening on PORT: `waitForPort` below cannot tell
+        // this case's server from a previous case's leftover, and answering with
+        // the wrong app against a freshly-dropped schema is exactly the 500 this
+        // guards (see proc.mjs).
+        await waitForPortFree(PORT);
         server = spawn("uv", ["run", "uvicorn", "app.main:app", "--port", String(PORT)], {
           cwd: deplDir,
           stdio: "pipe",
+          detached: true, // own process group: `uv run` holds the port in a CHILD uvicorn
           env: { ...process.env, DATABASE_URL, PORT: String(PORT), ...oidcEnv },
         });
         let serverLog = "";
         server.stdout.on("data", (d) => { serverLog += d; });
         server.stderr.on("data", (d) => { serverLog += d; });
         const exited = new Promise((_, rej) => server.on("exit", (code) => rej(new Error(`uvicorn exited early (code ${code})\n${serverLog.slice(-2000)}`))));
-        await Promise.race([waitForPort(PORT), exited]);
+        await Promise.race([waitForPort(PORT, 60_000), exited]);
       }
 
       const entry = join(workDir, "entry.mts");
@@ -258,7 +244,9 @@ async function runCase(c) {
       return { results: out, error: apiErr?.message ?? String(apiErr) };
     }
   } finally {
-    if (server && !server.killed) server.kill("SIGTERM");
+    // AWAIT the exit — firing SIGTERM and moving on leaves the port occupied
+    // into the next case, which then talks to the wrong app (see proc.mjs).
+    await stopServer(server);
     rmSync(genDir, { recursive: true, force: true });
   }
 }

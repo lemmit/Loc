@@ -59,6 +59,7 @@ import type {
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { isShorthandProjection } from "../types/loom-ir.js";
+import { AUDIT_HISTORY_FIND, aggServesHistory, buildHistoryFind } from "../util/audit-history.js";
 import {
   buildDeepScopeFilter,
   buildDenyFilter,
@@ -69,6 +70,7 @@ import {
   hierarchyRegistry,
   TENANCY_SELF_SCOPE_ORIGIN,
   TENANT_OWNED_CAPABILITY,
+  TENANT_OWNED_TENANT_ID_FIELD,
   tenancyClaimBinding,
 } from "../util/tenant-stance.js";
 import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
@@ -202,6 +204,10 @@ function enrichSystem(
   // `applyRegistrySelfScope` below.
   const subdomainsScoped = subdomains
     .map((m) => applyRegistrySelfScope(m, sys))
+    // Bind the `tenantOwned` capability's hardcoded principal claim to the
+    // system's declared one.  BEFORE the read-level passes, so they see (and
+    // rebuild from) a correctly-bound floor.  See `bindTenancyClaim`.
+    .map((m) => bindTenancyClaim(m, sys))
     .map((m) => applyPolicyReadLevels(m, sys))
     .map((m) => applyPolicyWriteLevels(m, sys))
     // Phase 4 — DENY WINS: runs AFTER the allow read/write-level passes, so an
@@ -425,6 +431,97 @@ function applyRegistrySelfScope(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
   };
 }
 
+// ---------------------------------------------------------------------------
+// Tenancy claim binding — the principal side of the `tenantOwned` capability.
+//
+// `tenancy by user.<claim> of <Registry>` lets the author name the claim that
+// carries the tenant.  The registry half honours it (`applyRegistrySelfScope`
+// passes `tenancy.claimField` straight into the derived self-scope filter).
+// The `tenantOwned` half could not: the capability is a PRELUDE definition
+// (`src/macros/prelude.ts`), built once at language-module init with no system
+// in scope — so it hardcodes `currentUser.tenantId` in both its read filter and
+// its create stamp.
+//
+// That is the right place for the macro to give up and the right place for
+// enrichment to take over: phase ⑥ is where per-system facts get bound onto
+// otherwise system-agnostic IR, exactly as the registry self-scope already is.
+// This pass rewrites the capability's two principal references to the declared
+// claim.
+//
+// It rewrites ONLY capability-derived nodes — the `tenantOwned`-origin
+// `contextFilters` entry (its RHS; the LHS is the row column the capability
+// owns), and a stamp assignment whose TARGET is that same column and whose
+// SOURCE is `currentUser.tenantId`.  An author's own `currentUser.tenantId` —
+// in a `requires`, a hand-written filter, a `find … where` — is left alone:
+// under a system whose claim is `orgId`, a principal may still legitimately
+// carry an unrelated `tenantId` field.
+//
+// Byte-neutral for every model that declares no tenancy, or declares the claim
+// as `tenantId` — which is every fixture that predates `tenancy-claim-name`.
+// ---------------------------------------------------------------------------
+
+/** The principal member the tenant floor compares against: the system's
+ *  declared tenancy claim, falling back to the capability's own column name
+ *  when the system declares no `tenancy by` (the status-quo shape — a
+ *  `tenantOwned` aggregate without a tenancy declaration is a phase-⑦
+ *  diagnostic, not something to silently re-point here). */
+function tenancyClaimField(sys: Pick<SystemIR, "tenancy">): string {
+  return sys.tenancy?.claimField ?? TENANT_OWNED_TENANT_ID_FIELD;
+}
+
+/** True when `e` reads `currentUser.<TENANT_OWNED_TENANT_ID_FIELD>` — the
+ *  capability's hardcoded principal reference, and the only thing this pass
+ *  rebinds. */
+function isHardcodedTenantClaimRead(e: ExprIR): boolean {
+  return (
+    e.kind === "member" &&
+    e.member === TENANT_OWNED_TENANT_ID_FIELD &&
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "current-user"
+  );
+}
+
+function bindTenancyClaim(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
+  const claim = tenancyClaimField(sys);
+  if (claim === TENANT_OWNED_TENANT_ID_FIELD) return m;
+  const rebind = (e: ExprIR): ExprIR => (e.kind === "member" ? { ...e, member: claim } : e);
+  return {
+    ...m,
+    contexts: m.contexts.map((ctx) => ({
+      ...ctx,
+      aggregates: ctx.aggregates.map((agg) => {
+        if (!hasTenantOwned(agg)) return agg;
+        // (1) the read filter — the `tenantOwned`-origin entry, RHS only.
+        const filters = agg.contextFilters ?? [];
+        const origins = agg.contextFilterOrigins ?? filters.map(() => undefined);
+        const i = origins.indexOf(TENANT_OWNED_CAPABILITY);
+        const floor = i >= 0 ? filters[i] : undefined;
+        let nextFilters = filters;
+        if (floor?.kind === "binary" && isHardcodedTenantClaimRead(floor.right)) {
+          nextFilters = [...filters];
+          nextFilters[i] = { ...floor, right: rebind(floor.right) };
+        }
+        // (2) the create stamp — `this.tenantId := currentUser.tenantId`.
+        const stamps = agg.contextStamps;
+        const nextStamps = stamps?.map((s) => ({
+          ...s,
+          assignments: s.assignments.map((a) =>
+            a.field === TENANT_OWNED_TENANT_ID_FIELD && isHardcodedTenantClaimRead(a.value)
+              ? { ...a, value: rebind(a.value) }
+              : a,
+          ),
+        }));
+        return {
+          ...agg,
+          ...(nextFilters === filters ? {} : { contextFilters: nextFilters }),
+          ...(nextStamps ? { contextStamps: nextStamps } : {}),
+        };
+      }),
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Policy read-reachability levels — multi-tenancy Phase 2 P2.4 / P2.5.
 //
 // A `policy { allow <level> on <Agg> }` block selects an aggregate's read
@@ -454,11 +551,12 @@ function applyRegistrySelfScope(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
 function applyPolicyReadLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
   const hierarchy = hierarchyRegistry(sys) !== undefined;
   // Which subtree filter (if any) a level rewrites the tenant floor to.
+  const claim = tenancyClaimField(sys);
   const filterFor = (agg: AggregateIR, level: string): ExprIR | undefined => {
-    if (level === "deep") return buildDeepScopeFilter(agg);
+    if (level === "deep") return buildDeepScopeFilter(agg, claim);
     // `global` widens to the root subtree only under a hierarchy; otherwise it
     // stays the flat floor (fail-closed).
-    if (level === "global" && hierarchy) return buildGlobalScopeFilter(agg);
+    if (level === "global" && hierarchy) return buildGlobalScopeFilter(agg, claim);
     return undefined;
   };
   const anyWidened = m.contexts.some((c) =>
@@ -508,6 +606,7 @@ const SCOPE_RANK: Record<string, number> = { local: 0, deep: 1, global: 2 };
 
 function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
   const hierarchy = hierarchyRegistry(sys) !== undefined;
+  const claim = tenancyClaimField(sys);
   // The write scope is derived whenever a tenant-owned aggregate's command load
   // (which reuses the read filter on every backend) could be WIDER than the
   // caller's write scope: either an explicit `allow write` rule, OR a widened
@@ -548,8 +647,8 @@ function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
           if (writeRank >= readRank) return agg;
           const filter =
             writeLevel === "deep" && hierarchy
-              ? buildDeepScopeFilter(agg)
-              : buildTenantFloorFilter(agg);
+              ? buildDeepScopeFilter(agg, claim)
+              : buildTenantFloorFilter(agg, claim);
           return { ...agg, writeScopeFilter: filter };
         }),
       };
@@ -695,7 +794,9 @@ export function enrichContext(
   // so the aggregate router does NOT auto-expose it (the queryHandler's own
   // route is the exposure).
   const repositories = synthesizePagedQueryHandlerFinds(
-    ensureFindAll(aggregates, ctx.repositories),
+    // `ensureHistoryFind` layers on top of `ensureFindAll` — it reads the `all`
+    // find's gate + `ignoring` stance, so the implicit `all` must exist first.
+    ensureHistoryFind(aggregates, ensureFindAll(aggregates, ctx.repositories)),
     ctx.queryHandlers,
     ctx.criteria,
   );
@@ -1739,6 +1840,56 @@ function ensureFindAll(
       };
       repo.finds = [all, ...repo.finds];
     }
+  }
+  return out;
+}
+
+/** Every AUDITED aggregate additionally gets an implicit `find history(id):
+ *  AuditEntry[]` — the per-entity read over the module's `audit_records` rows
+ *  (docs/audit.md).  Same slot and same rule as the auto-`findAll` above: a
+ *  synthesized addition in the one pure pass, and an author-declared find named
+ *  `history` wins.
+ *
+ *  ── The gate it inherits ────────────────────────────────────────────────
+ *  History is a read of the SAME rows the entity read covers, only replayed
+ *  over time, so it must be no easier to reach than that read.  It therefore
+ *  copies the aggregate's canonical list read (`all`) wholesale:
+ *
+ *    - `requires`   — the read gate, evaluated pre-query → 403.
+ *    - `bypassAll` / `bypassCaps` — the `ignoring` stance, so every capability
+ *      query-filter (`tenantOwned`'s tenant floor included) scopes history
+ *      exactly as it scopes the list, and an `ignoring` that widens the list
+ *      widens history identically rather than diverging silently.
+ *
+ *  Copying `all` rather than deriving a gate of its own is what keeps the two
+ *  surfaces from drifting: there is one place an author writes the aggregate's
+ *  read gate, and history is downstream of it by construction.  When `all`
+ *  carries NO gate, history carries none either — and under `denyByDefault`
+ *  that combination is a phase-⑦ error (`loom.audit-history-ungated`) rather
+ *  than a quietly-open timeline. */
+function ensureHistoryFind(
+  aggregates: EnrichedAggregateIR[],
+  existing: RepositoryIR[],
+): RepositoryIR[] {
+  const out = existing.map((r) => ({ ...r, finds: [...r.finds] }));
+  for (const agg of aggregates) {
+    // Abstract bases own no repository and emit no table (see `ensureFindAll`);
+    // they also carry no audited command of their own to trail.
+    if (agg.isAbstract) continue;
+    if (!aggServesHistory(agg)) continue;
+    const repo = out.find((r) => r.aggregateName === agg.name);
+    // `ensureFindAll` runs first and creates a repository for every concrete
+    // aggregate, so this is defensive rather than reachable.
+    if (!repo) continue;
+    // An author-declared `find history(...)` wins — same rule as `all`.  Their
+    // find keeps its own route; no `historyFind` is derived beside it, so the
+    // aggregate serves exactly one `history` read and it is theirs.
+    if (repo.finds.some((f) => f.name === AUDIT_HISTORY_FIND)) continue;
+    const listRead = repo.finds.find((f) => f.name === "all");
+    const history = buildHistoryFind(agg, listRead?.requires);
+    if (listRead?.bypassAll) history.bypassAll = true;
+    if (listRead?.bypassCaps) history.bypassCaps = [...listRead.bypassCaps];
+    repo.historyFind = history;
   }
   return out;
 }

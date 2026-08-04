@@ -42,8 +42,12 @@ describe("python per-operation audit runtime", () => {
     expect(f).toContain('Index("audit_records_correlation_idx", "correlation_id")');
     expect(f).toContain("audit_id: Mapped[str] = mapped_column(Text, primary_key=True)");
     expect(f).toContain("actor: Mapped[object | None] = mapped_column(JSONB)");
-    expect(f).toContain("before: Mapped[object] = mapped_column(JSONB)");
-    expect(f).toContain("after: Mapped[object] = mapped_column(JSONB)");
+    // Nullable, matching the shared `auditTableShape` — a lifecycle action has
+    // one side only (a `create` has no `before`, a `destroy` no `after`).  The
+    // writer stores a JSON `null` literal today, but the entity-history READ
+    // (docs/audit.md) has to be able to type the side as absent.
+    expect(f).toContain("before: Mapped[object | None] = mapped_column(JSONB)");
+    expect(f).toContain("after: Mapped[object | None] = mapped_column(JSONB)");
   });
 
   it("emits the record_audit repository helper staged in the request session", async () => {

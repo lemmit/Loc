@@ -1323,10 +1323,11 @@ export function renderJavaOutboxDelivery(basePkg: string): string {
  *  events ride a broker-bound channel.  The envelope carries the row id as the
  *  consumer-side idempotency key — the ChannelConsumerService parks it on
  *  `OutboxDelivery` so a saga handler no-ops on a redelivery of the same id. */
-export function renderJavaOutboxFiles(
-  basePkg: string,
-  pkgs: { configPkg: string; entityPkg: string; repoPkg: string },
-): {
+export function renderJavaOutboxFiles(pkgs: {
+  configPkg: string;
+  entityPkg: string;
+  repoPkg: string;
+}): {
   name: string;
   category: "infra-persistence" | "spring-data-repository" | "config";
   content: string;

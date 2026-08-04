@@ -7,9 +7,14 @@ name: Generated Vue build
 # Slice 9).
 #
 # Matrix policy:
-#   - pull_request    → 4 cells: the showcase + store cases × both packs.
-#   - push: main /    → full 8-cell Cartesian
-#     workflow_dispatch  ({minimal, scaffold, showcase, store} × packs).
+#   - pull_request    → 6 cells: the showcase, store and grid cases ×
+#                       both packs.  `grid` is in the PR slice because the
+#                       DataGrid's markup lands in a HOISTED SIBLING SFC
+#                       (src/components/<Name>.vue) that no other case
+#                       type-checks at all.
+#   - push: main /    → full 12-cell Cartesian
+#     workflow_dispatch  ({minimal, scaffold, showcase, store, file, grid}
+#                        × packs).
 #
 # Cell names MUST match the case labels in
 # test/e2e/generated-vue-build.test.ts (`<case>:<pack>`).
@@ -84,9 +89,9 @@ jobs:
             # showcase + the shared signal-store surface) × both packs.
             # `minimal`/`scaffold`/`file` drift is caught by the push:main
             # sweep below one merge later.
-            CASES='["showcase","store"]'
+            CASES='["showcase","store","grid"]'
           else
-            CASES='["minimal","scaffold","showcase","store","file"]'
+            CASES='["minimal","scaffold","showcase","store","file","grid"]'
           fi
           echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 

@@ -727,6 +727,48 @@ metadata deliberately, through the `renderPagedEnvelopeMember` seam:
 | **feliz** | the Elmish decoder splits it — rows into the read's `Remote<'T list>` field, metadata into a sibling `PageMeta` record — so `rows.total` resolves to `model.<Read>PageMeta.Total`. The list field stays a plain `'T list` because `View.idOptions` (FK selects) and the realtime refetch both read it |
 | **flutter** | the Riverpod provider yields `Paged<T>` rather than a bare `List<T>`, so `rows.total` is a field of the loaded value |
 
+### A bare `Table` over a paged read pages itself
+
+The simplest list page you can write is complete:
+
+```ddd
+page TaskList {
+  route: "/tasks"
+  body: QueryView { of: Api.Task.all, data: rows => Table { rows: rows,
+    Column { "Title", o => Text { o.title } } } }
+}
+```
+
+`.all` is paged, so this used to render the backend's default first page — 20
+rows, no pager, rows 21+ unreachable and nothing on screen saying so. A macro
+now rewrites it into the shape the **scaffold** already emits, so "a working
+paged table" has one definition rather than two:
+
+```ddd
+state { pageNum: int = 1  sortKey: string = ""  sortDir: string = "asc" }
+QueryView { of: Api.Task.all(pageNum, 20, sortKey, sortDir), paged: true,
+  data: rows => Table { rows: rows.items, page: pageNum, sortKey: sortKey,
+    sortDir: sortDir, serverPaged: true, totalPages: rows.totalPages,
+    Column { "Title", o => Text { o.title }, sortable: true, field: "title" } } }
+```
+
+It runs at the **macro layer**, so `unfold` ejects that as real `.ddd` source
+you can edit — the rewrite is a starting point, not a black box.
+
+**Taking control is the opt-out.** Any of these is left exactly as written:
+
+| You wrote | Why it's left alone |
+|---|---|
+| `paged: true` on the `QueryView` | you're binding the envelope and driving it yourself |
+| arguments on the read (`X.all(p, n, k, d)`) | you're threading your own controls |
+| `page:` or `serverPaged:` on the `Table` | you own the pager |
+| a table over a plain array find | nothing to page — one response is the whole set |
+
+A column is made sortable only when its accessor is a **simple member read**
+(`o => o.name`, `o => Text { o.name }`). A computed column has no aggregate
+field behind it, and the backend's `sort` parameter is whitelisted per field —
+so leaving it unsortable is the correct answer, not a degradation.
+
 ### The flags are opt-ins; the shape is derived
 
 `paged:` and `single:` look like they *declare* what a read returns. They do

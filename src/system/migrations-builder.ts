@@ -57,6 +57,12 @@ import {
   valueCollectionsFor,
 } from "../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../ir/util/versioned-capability.js";
+import {
+  AUDIT_RECORD_COLUMNS,
+  AUDIT_RECORD_INDEXES,
+  AUDIT_RECORDS_PK,
+  AUDIT_RECORDS_TABLE,
+} from "../util/audit-records-table.js";
 import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "./snapshot.js";
 
@@ -383,48 +389,28 @@ function outboxTableShape(ownerModule: string): TableShape {
  *  the per-entity history read — and on `correlation_id` for tracing one
  *  command across aggregates. */
 function auditTableShape(ownerModule: string): TableShape {
+  // Derived from the SHARED descriptor (`util/audit-records-table.ts`) rather
+  // than transcribed here.  The comment above used to promise "the DDL and the
+  // writers can no longer disagree" — but only this DDL derived, and the
+  // per-backend writers each kept their own copy.  They drifted on `before` /
+  // `after` nullability and broke two behavioral legs; the descriptor is now
+  // the single source both sides read.
   return {
-    name: "audit_records",
+    name: AUDIT_RECORDS_TABLE,
     ownerModule,
-    columns: [
-      { name: "audit_id", type: { kind: "text" }, nullable: false },
-      { name: "operation_id", type: { kind: "text" }, nullable: false },
-      { name: "action", type: { kind: "text" }, nullable: false },
-      { name: "target_type", type: { kind: "text" }, nullable: false },
-      { name: "target_id", type: { kind: "text" }, nullable: false },
-      { name: "actor", type: { kind: "json" }, nullable: true },
-      // NULLABLE, deliberately — and this is a fix, not a transcription of the
-      // hand-written DDL.  A lifecycle action only has one side: `create` has no
-      // `before`, `destroy` has no `after`.  The .NET/Java/Python copies declared
-      // both `NOT NULL` while their writers pass null on exactly those paths, so
-      // an audited create hit a not-null violation — and because the audit insert
-      // rides the action's transaction, it rolled the state change back with it.
-      // Elixir's copy already had it right (`add :before, :map`, and its Json
-      // Ecto type exists specifically to let `nil` through); this adopts that.
-      { name: "before", type: { kind: "json" }, nullable: true },
-      { name: "after", type: { kind: "json" }, nullable: true },
-      { name: "at", type: { kind: "datetime" }, nullable: false },
-      { name: "status", type: { kind: "text" }, nullable: false },
-      { name: "correlation_id", type: { kind: "text" }, nullable: true },
-      { name: "scope_id", type: { kind: "text" }, nullable: true },
-      { name: "parent_id", type: { kind: "text" }, nullable: true },
-    ],
-    primaryKey: ["audit_id"],
+    columns: AUDIT_RECORD_COLUMNS.map((c) => ({
+      name: c.column,
+      type: { kind: c.type } as ColumnShape["type"],
+      nullable: c.nullable,
+    })),
+    primaryKey: [AUDIT_RECORDS_PK],
     foreignKeys: [],
-    indexes: [
-      {
-        name: "audit_records_target_idx",
-        table: "audit_records",
-        columns: ["target_type", "target_id"],
-        unique: false,
-      },
-      {
-        name: "audit_records_correlation_idx",
-        table: "audit_records",
-        columns: ["correlation_id"],
-        unique: false,
-      },
-    ],
+    indexes: AUDIT_RECORD_INDEXES.map((i) => ({
+      name: i.name,
+      table: AUDIT_RECORDS_TABLE,
+      columns: [...i.columns],
+      unique: false,
+    })),
   };
 }
 

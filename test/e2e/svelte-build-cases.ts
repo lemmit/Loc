@@ -17,6 +17,12 @@ export const svelteBuildExamples = [
   // (`field-input-file`) + a standalone `FileUpload(bind:)`
   // (`primitive-file-upload`) against real SvelteKit/svelte-check.
   "web/src/examples/svelte-file-upload.ddd",
+  // DataGrid (M-T1.1 slice 10): the grid's markup lands in a HOISTED SIBLING
+  // component, not the page — with its own pack / `$lib/format` / `$lib/i18n`
+  // imports and the walker-built header+cell fragments.  No other case reaches
+  // that file, and an unimported name there is a runtime `ReferenceError` on
+  // Svelte rather than a build failure, so svelte-check over it is the gate.
+  "web/src/examples/svelte-data-grid.ddd",
 ] as const;
 
 export const sveltePacks = ["shadcnSvelte@v1", "flowbite@v1"] as const;

@@ -3,12 +3,14 @@ import type {
   BootResult,
   DispatchResult,
   QueryResult,
+  RuntimeProgress,
   RuntimeRpcRequest,
   RuntimeRpcResponse,
   SerializedRequest,
   WipeResult,
 } from "./protocol.js";
 import type { LogLine } from "../util/log-line.js";
+import { type DiagPhase, markPhase } from "../util/diagnostics.js";
 
 export interface LoomRuntimeClientOptions {
   /** Optional callback fired every time `respawn` terminates the
@@ -49,7 +51,15 @@ export class LoomRuntimeClient {
     this.worker = new Worker(new URL("./runtime.worker.ts", import.meta.url), {
       type: "module",
     });
-    this.worker.onmessage = (ev: MessageEvent<RuntimeRpcResponse>) => {
+    this.worker.onmessage = (ev: MessageEvent<RuntimeRpcResponse | RuntimeProgress>) => {
+      // Progress note, not a response: no `id`, carries `phase`.  Written
+      // through synchronously here because a worker has no localStorage —
+      // this is what makes a mid-boot renderer kill attributable to a step
+      // rather than to "boot".  See diagnostics.ts → PHASE MARKERS.
+      if ("phase" in ev.data) {
+        markPhase(`boot:${ev.data.phase}` as DiagPhase, ev.data.note);
+        return;
+      }
       const msg = ev.data;
       if (msg.logs && msg.logs.length > 0) this.onLog?.(msg.logs);
       const slot = this.pending.get(msg.id);

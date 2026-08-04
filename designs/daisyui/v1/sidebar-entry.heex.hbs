@@ -1,0 +1,27 @@
+{{!-- One sidebar nav link.  `gate` (when present) is a pre-rendered
+     Elixir predicate over @current_user — the link is hidden server-side
+     when it fails.  External entries open in a new tab. --}}
+{{#if gate}}
+<%= if ({{{gate}}}) do %>
+{{/if}}
+{{#if external}}
+<li>
+  <a href="{{{url}}}" target="_blank" rel="noopener noreferrer"
+     class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-base-content hover:bg-base-200"
+     data-testid="{{{testId}}}">
+    {{{label}}}
+    <span class="text-xs text-base-content/60" aria-hidden="true">↗</span>
+  </a>
+</li>
+{{else}}
+<li>
+  <.link navigate={~p"{{{to}}}"}
+         class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-base-content hover:bg-base-200"
+         data-testid="{{{testId}}}">
+    {{{label}}}
+  </.link>
+</li>
+{{/if}}
+{{#if gate}}
+<% end %>
+{{/if}}

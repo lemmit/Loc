@@ -50,6 +50,7 @@
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
+    "primitive-chart": "primitive-chart.hbs",
     "primitive-data-grid": "primitive-data-grid.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
@@ -280,6 +281,28 @@
         "from": "@chakra-ui/react",
         "named": [
           "Table"
+        ]
+      }
+    ],
+    "primitive-chart": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box"
+        ]
+      },
+      {
+        "from": "recharts",
+        "named": [
+          "Bar",
+          "BarChart",
+          "CartesianGrid",
+          "Line",
+          "LineChart",
+          "ResponsiveContainer",
+          "Tooltip",
+          "XAxis",
+          "YAxis"
         ]
       }
     ],

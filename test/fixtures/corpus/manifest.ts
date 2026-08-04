@@ -73,6 +73,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "tenancy-filter", title: "principal-referencing (tenancy) capability filter", doc: "capabilities", backends: ALL },
   { id: "tenancy-owned", title: "first-class tenancy — `tenancy by` + tenantOwned + crossTenant", doc: "tenancy", backends: ALL },
   { id: "tenancy-hierarchy", title: "tenancy hierarchy — `implements tenantRegistry` + `policy` deep/global/local read ladder", doc: "tenancy", backends: ALL },
+  { id: "tenancy-claim-name", title: "tenancy claim not named `tenantId` — the declared claim binds the tenantOwned stamp/filter", doc: "tenancy", backends: ALL },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
@@ -94,7 +95,26 @@ export const CORPUS: readonly CorpusFeature[] = [
   {
     id: "audited",
     title: "command audit — aggregate-wide `audited` + per-command `audited`, transactional audit_records rows",
+    doc: "audit",
     backends: ALL,
+  },
+  {
+    id: "audit-history",
+    title: "entity history — the derived `GET /<agg>/{id}/history` read over audit_records",
+    doc: "audit",
+    // ALL FIVE now serve the endpoint (M-T3.9 read path complete).  Each
+    // backend's behavioral leg diffs its booted responses against the wire
+    // golden minted from node — A≡golden ∧ B≡golden ⇒ A≡B, so this row being
+    // ALL is a proven cross-backend equality, not five self-assertions.
+    backends: ALL,
+  },
+  {
+    id: "field-mask",
+    title:
+      "field read-redaction — `mask unless` crossed with `audited` (two masked fields + a masked contained part, projected twice in one scope)",
+    doc: "auth",
+    backends: ALL,
+    note: "the CROSSING is the point: an audited op renders the masked projection twice into one method body, which is where a fixed principal-variable name collides (.NET CS0128)",
   },
   {
     id: "criterion-filter",

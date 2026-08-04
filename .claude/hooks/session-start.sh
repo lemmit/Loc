@@ -37,6 +37,39 @@ check_staleness() {
 }
 check_staleness || true
 
+# Build-staleness guard — warn (never fail) when `out/` is older than `src/`.
+#
+# `out/` is gitignored and nothing rebuilds it on a checkout, so any `git
+# switch` / `git checkout` that moves `src/` leaves the compiled toolchain
+# behind while `bin/cli.js` keeps happily running the OLD emitters.  The failure
+# is worse than a plain error because the output looks plausible: a generate
+# that silently omits a file the current emitters do produce, or a Handlebars
+# crash in a template unrelated to whatever you are working on.  Both happened
+# (experience_gathered.md §69), and the first one cost a full investigation —
+# emitter sources compared byte-identical across two commits while their OUTPUT
+# differed, which is impossible unless the binary is not the source.
+#
+# Warn only: a rebuild can take minutes and the session may not need one.
+check_build_staleness() {
+  [ -d out ] || return 0
+  [ -d src ] || return 0
+  local newest_out newer
+  # Newest compiled artefact; if out/ is empty there is nothing to compare.
+  newest_out="$(find out -name '*.js' -type f -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | head -1 | cut -d' ' -f2-)" || return 0
+  [ -n "$newest_out" ] || return 0
+  # Any TypeScript source newer than that artefact means out/ is behind.
+  newer="$(find src -name '*.ts' -type f -newer "$newest_out" -print -quit 2>/dev/null)" || return 0
+  if [ -n "$newer" ]; then
+    echo "⚠ out/ is older than src/ — the compiled toolchain is STALE."
+    echo "  \`bin/cli.js\` will run the previous emitters, so generated output"
+    echo "  can silently disagree with the sources you are reading."
+    echo "      npx tsc -b"
+    echo "  (See experience_gathered.md §69.)"
+  fi
+}
+check_build_staleness || true
+
 # Idempotent + cache-friendly: the container state is cached after the hook
 # completes, so if Biome and the generated Langium sources are already present
 # there is nothing to do. `src/language/generated/` is gitignored and produced

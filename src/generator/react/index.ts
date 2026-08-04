@@ -22,6 +22,7 @@ import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
+import { jsxChromeText as shellChromeText } from "../_frontend/shell-chrome.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import {
   allWorkflows,
@@ -293,7 +294,21 @@ export function generateReactForContexts(
   // logger.  Output flows through console.* so the playground App-log
   // stream and Playwright console capture pick it up.
   out.set("src/logger.ts", renderShellFile("logger", {}, pack));
-  out.set("src/ErrorBoundary.tsx", renderShellFile("error-boundary", {}, pack));
+  // The ROOT boundary sits OUTSIDE App.tsx, so it can't reuse the app-shell's
+  // chrome tokens — it takes its own `chrome.rootErrorTitle` (its raw string
+  // carries a full stop that the in-shell heading doesn't) and its own gated
+  // `t` import, since it is a separate module.
+  out.set(
+    "src/ErrorBoundary.tsx",
+    renderShellFile(
+      "error-boundary",
+      {
+        i18nEnabled,
+        errorTitleText: shellChromeText("rootErrorTitle", i18nEnabled),
+      },
+      pack,
+    ),
+  );
   out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
   // Frontend ACL shared utilities — pack-agnostic, emitted into every
   // React project.  `strict-field-map.ts` is type-only (zero runtime

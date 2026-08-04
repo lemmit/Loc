@@ -86,11 +86,21 @@ system Acme {
         }
     }
 
+    // One postgres instance; each context binds to it through a typed
+    // `resource` (D-STORAGE-SPLIT).  Every deployable must list a
+    // matching `dataSources:` entry for each aggregate it hosts —
+    // `loom.persistence-mode-unsupported` rejects a backend that hosts
+    // a state-persisted aggregate with nothing to persist it in.
+    storage primarySql { type: postgres }
+    resource productsState { for: Products, kind: state, use: primarySql }
+    resource ordersState   { for: Orders, kind: state, use: primarySql }
+
     // Public API on .NET — hosts both bounded contexts behind one EF
     // DbContext, exposes the full HTTP surface for the platform.
     deployable api {
         platform: dotnet
         contexts: [Products, Orders]
+        dataSources: [productsState, ordersState]
         port: 8080
     }
 
@@ -98,6 +108,7 @@ system Acme {
     deployable catalogWeb {
         platform: node
         contexts: [Products]
+        dataSources: [productsState]
         port: 3000
     }
 
@@ -107,6 +118,7 @@ system Acme {
     deployable catalogApi {
         platform: dotnet
         contexts: [Products]
+        dataSources: [productsState]
         port: 8081
     }
 

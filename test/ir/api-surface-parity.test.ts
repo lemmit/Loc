@@ -50,7 +50,14 @@ import { buildLoomModel } from "../_helpers/ir.js";
  *  job boots — has no `when`-gated operation anywhere (every op there uses
  *  `requires` + `precondition`), which is precisely why that gate compares the
  *  `errorResponses` dimension and still saw nothing. A fixture that does not
- *  exercise a feature cannot gate it. */
+ *  exercise a feature cannot gate it.
+ *
+ *  `byCode` is `requires`-GATED for the same reason, and it is deliberately an
+ *  ABSENCE UNION (`Order option`) rather than a plain list: python and java
+ *  serve the union shape from a SEPARATE emitter arm that hand-builds its
+ *  declared statuses, so a gated `Order[]` and a gated `Order option` can
+ *  disagree — and did, until both arms were fixed. Covering only one shape
+ *  would gate only one arm. */
 const SOURCE = (platform: string): string => `
 system P {
   subdomain D {
@@ -61,7 +68,7 @@ system P {
         operation cancel() when status == "Open" { status := "Cancelled" }
       }
       repository Orders for Order {
-        find byCode(code: string): Order option
+        find byCode(code: string): Order option requires currentUser.role == "admin"
       }
     }
   }

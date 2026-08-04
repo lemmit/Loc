@@ -13,12 +13,15 @@
 
 import type { UiIR } from "../../../ir/types/loom-ir.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
+import type { LoadedPack } from "../../_packs/loader.js";
 import type { ApiRoute } from "../api-emit.js";
 import {
   GETTEXT_DEP,
   GETTEXT_DOMAIN,
   renderGettextBackend,
   renderGettextCatalog,
+  shellChromeAria,
+  shellChromeText,
 } from "../i18n.js";
 import type { LiveRoute } from "../liveview-emit.js";
 import {
@@ -27,18 +30,18 @@ import {
   renderLogFormatter,
   renderRequestContext,
 } from "../shell/runtime.js";
-import {
-  renderAppLayout,
-  renderCoreComponents,
-  renderLayouts,
-  renderRootLayout,
-} from "../shell/web.js";
+import { renderLayouts } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
 import { renderObanConfig } from "./scheduler-emit.js";
 
 export function emitVanillaShellFiles(
   appName: string,
   appModule: string,
+  // The deployable's loaded HEEx design pack — owns the design-vocabulary
+  // shell surface (core_components.ex, root/app layouts).  The emitter
+  // prepares the VMs; the pack's templates own the markup, so
+  // `design: coreComponents` vs `design: daisyui` genuinely diverge.
+  pack: LoadedPack,
   out: Map<string, string>,
   apiRoutes: ApiRoute[] = [],
   extraHexDeps: Record<string, string> = {},
@@ -146,12 +149,26 @@ export function emitVanillaShellFiles(
   // on_mount hook reuse the shared shell renderers.  Omitted on a
   // JSON-API-only deployable (no LiveView dep to support them).
   if (hasLiveView) {
-    out.set(`lib/${appName}_web/components/core_components.ex`, renderCoreComponents(appModule));
+    out.set(
+      `lib/${appName}_web/components/core_components.ex`,
+      pack.render("core-components", { webModule: `${appModule}Web` }),
+    );
     out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
-    out.set(`lib/${appName}_web/components/layouts/root.html.heex`, renderRootLayout(appName));
+    out.set(
+      `lib/${appName}_web/components/layouts/root.html.heex`,
+      pack.render("main", { appName }),
+    );
+    // The app layout's chrome strings arrive pre-rendered (raw English, or
+    // the pgettext call under i18n) so the pack template only places them.
     out.set(
       `lib/${appName}_web/components/layouts/app.html.heex`,
-      renderAppLayout(appModule, hasSidebar, authEnabled, i18nEnabled),
+      pack.render("app-shell", {
+        hasSidebar,
+        webModule: `${appModule}Web`,
+        currentUser: authEnabled,
+        skipToContent: shellChromeText("skipToContent", i18nEnabled),
+        primaryNavAria: shellChromeAria("primaryNav", i18nEnabled),
+      }),
     );
     out.set(`lib/${appName}_web/nav.ex`, renderLiveNav(appModule));
     // Translation runtime (M-T1.11) — the Gettext backend every `~H` template
@@ -202,6 +219,13 @@ function renderVanillaMixExs(
   // `phoenix_html` is already in the base set; LiveView adds
   // `phoenix_live_view` (the `~H`/`live` runtime).  Pinned to `~> 1.0`.
   const liveViewDep = hasLiveView ? `,\n      {:phoenix_live_view, "~> 1.0"}` : "";
+  // Dev convenience for the pack-emitted assets pipeline: `mix assets.build`
+  // compiles assets/ (tailwind + esbuild via npm) into priv/static/assets —
+  // the same step the Dockerfile's assets-build stage runs for the image.
+  // Only LiveView deployables ship assets/, so only they get the alias.
+  const assetsAlias = hasLiveView
+    ? `,\n      "assets.build": [\n        "cmd --cd assets npm install --no-audit --no-fund",\n        "cmd --cd assets npm run build"\n      ]`
+    : "";
   // Translation runtime (M-T1.11) — only when the ui has strings to translate.
   const gettextDep = i18nEnabled ? `,\n      ${GETTEXT_DEP}` : "";
   // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
@@ -272,7 +296,7 @@ defmodule ${appModule}.MixProject do
     [
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"]
+      "ecto.reset": ["ecto.drop", "ecto.setup"]${assetsAlias}
     ]
   end
 end

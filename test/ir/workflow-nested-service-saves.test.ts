@@ -47,7 +47,7 @@ async function forEachStmt() {
   const wf = ctx.workflows.find((w) => w.name === "BatchCharge")!;
   const create = wf.creates.find((c) => c.name === null)!;
   const forEach = create.statements.find((s) => s.kind === "for-each");
-  if (!forEach || forEach.kind !== "for-each") throw new Error("for-each not lowered");
+  if (forEach?.kind !== "for-each") throw new Error("for-each not lowered");
   return forEach;
 }
 

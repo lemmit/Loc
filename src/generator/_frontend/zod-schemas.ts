@@ -28,6 +28,12 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
+import {
+  AUDIT_ENTRY_TYPE,
+  AUDIT_FIELD_CHANGE_TYPE,
+  auditEntryWireShape,
+  auditFieldChangeWireShape,
+} from "../../ir/util/audit-history.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import {
@@ -159,6 +165,49 @@ export function emitResponseSchema(
   lines.push(`});`);
   lines.push(`export type ${name} = z.infer<typeof ${name}>;`);
   return lines;
+}
+
+/** The zod name of the entity-history LIST response — what `history(id)`
+ *  parses.  Exported so every client emitter names the same symbol. */
+export const AUDIT_ENTRY_LIST_TYPE = `${AUDIT_ENTRY_TYPE}ListResponse`;
+
+/** Client-side DTOs for the entity-history read (`GET /<agg>/{id}/history`,
+ *  docs/audit.md).
+ *
+ *  Derived from `auditEntryWireShape()` / `auditFieldChangeWireShape()` — the
+ *  same platform-neutral field list the backends serve — so the client cannot
+ *  drift from the wire by hand-transcription.  ONE exception, and it is a
+ *  narrowing not a divergence: the entry's `changes` is typed `json[]` in the
+ *  wire shape because `TypeIR` has no nested-record leaf to say
+ *  "array of AuditFieldChange" with, and a `z.array(z.unknown())` here would
+ *  make `__c.field` an error in every frontend's `Timeline`.  The client
+ *  substitutes the field-change schema for that one element type; the KEY SET
+ *  is still the wire shape's.
+ *
+ *  Emitted per aggregate module (like every other DTO here) rather than into
+ *  the shared lib: the modules are separate files, so the duplicate export
+ *  costs nothing, and an aggregate with no audit trail emits neither schema. */
+export function emitAuditEntrySchemas(): string[] {
+  const out: string[] = [];
+  out.push(`export const ${AUDIT_FIELD_CHANGE_TYPE} = z.object({`);
+  for (const f of auditFieldChangeWireShape()) {
+    out.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
+  }
+  out.push(`});`);
+  out.push(`export type ${AUDIT_FIELD_CHANGE_TYPE} = z.infer<typeof ${AUDIT_FIELD_CHANGE_TYPE}>;`);
+  out.push(`export const ${AUDIT_ENTRY_TYPE} = z.object({`);
+  for (const f of auditEntryWireShape()) {
+    const zod =
+      f.name === "changes"
+        ? `z.array(${AUDIT_FIELD_CHANGE_TYPE})`
+        : zodForResponse(f.type, f.optional);
+    out.push(`  ${f.name}: ${zod},`);
+  }
+  out.push(`});`);
+  out.push(`export type ${AUDIT_ENTRY_TYPE} = z.infer<typeof ${AUDIT_ENTRY_TYPE}>;`);
+  out.push(`export const ${AUDIT_ENTRY_LIST_TYPE} = z.array(${AUDIT_ENTRY_TYPE});`);
+  out.push(`export type ${AUDIT_ENTRY_LIST_TYPE} = z.infer<typeof ${AUDIT_ENTRY_LIST_TYPE}>;`);
+  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -894,12 +894,41 @@ export interface FindIR {
    *  the aggregate router skips this find (route + query schema + paged DTO).
    *  The repository builder still emits the method. */
   synthesized?: boolean;
+  /** The compiler-synthesized per-entity history read (`docs/audit.md`) —
+   *  `GET /<agg>/{id}/history`, served from the module's `audit_records` table
+   *  rather than from the aggregate's own table.  Injected by enrichment onto
+   *  every audited aggregate, the auto-`findAll` analog.
+   *
+   *  It rides `FindIR` (rather than a field of its own on `AggregateIR`) so it
+   *  inherits the read pipeline wholesale: `requires` carries the aggregate's
+   *  read gate, and `bypassAll` / `bypassCaps` carry its `ignoring` stance, so
+   *  every capability query-filter scopes history exactly as it scopes the
+   *  entity read.  The flag exists because the SOURCE diverges: the generic
+   *  find-route + repository builders skip it and each backend's audit emitter
+   *  serves it instead. */
+  auditHistory?: boolean;
 }
 
 export interface RepositoryIR {
   name: string;
   aggregateName: string;
   finds: FindIR[];
+  /** The compiler-synthesized per-entity history read (`docs/audit.md`), set by
+   *  enrichment on every audited aggregate — the auto-`findAll` analog, derived
+   *  in the same pure pass.
+   *
+   *  It is a real `FindIR` (so it carries the read gate and `ignoring` stance
+   *  in the same vocabulary every other read uses) but deliberately sits BESIDE
+   *  `finds` rather than inside it.  `finds` has ~120 generic consumers across
+   *  the five backends — route emitters, repository builders, OpenAPI, the
+   *  frontend API clients — and every one of them assumes a find reads the
+   *  AGGREGATE's table at `/<name-snake>`.  History reads `audit_records` at
+   *  `/{id}/history`, so each of those sites would need a skip-guard, and a
+   *  site that forgot one would silently emit a broken route rather than fail.
+   *  That is the same "flag read at ~30 uncoordinated sites" hazard M-T3.9
+   *  resolved for `op.audited`; a separate field makes consumption OPT-IN, so
+   *  a backend that has not ported history emits nothing instead of garbage. */
+  historyFind?: FindIR;
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
