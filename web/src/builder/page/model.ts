@@ -138,6 +138,10 @@ export const SPECS = {
   // The "?" lineage disclosure over a `provenanced` field: the record
   // expression plus the field name it reads `<field>_provenance` from.
   ProvenanceInfo: { kind: "leaf", named: [{ key: "of", kind: "expr" }, { key: "field", kind: "string" }] },
+  // The entity audit trail (docs/audit.md) — one `of:` expression bound to the
+  // `AuditEntry[]` a backend serves at `GET /<agg>/{id}/history`.  A leaf: it
+  // renders its own `<ol>`/`<li>` markup and takes no children.
+  Timeline: { kind: "leaf", named: [{ key: "of", kind: "expr" }] },
   // Syntax-highlighted code.  Two admissible shapes (like OperationForm): a
   // positional source literal (`CodeBlock { "const x = 1" }`) or the named
   // `source:` arg — distinct prop keys so each re-emits in the shape it was
