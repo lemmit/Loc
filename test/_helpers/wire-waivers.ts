@@ -89,4 +89,27 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     reason:
       "RS-20 — java double-bumps version when a create also writes a value collection (same bug as $.version, via the root list read)",
   },
+  // A THIRD face of the same RS-20 error, and the plainest statement of it yet:
+  // an IDEMPOTENT command.  `corpus/saga`'s workflow already ran
+  // `ship.markTracked()` in-process, so when the caller-census drain gave that
+  // operation its first HTTP caller the route re-assigned `status := "Tracked"`
+  // over the value it already held.  A command RAN and answered 204, so the
+  // `versioned` capability (`version: int token = 1`, incremented per command)
+  // says 3 — which node, python, dotnet and elixir all send.  Java sends 2,
+  // because Hibernate's dirty check sees no column change and skips the
+  // `@Version` bump: the counter tracks ROW DIRTINESS, not commands, which is
+  // exactly what RS-20 already names.
+  //
+  // Kept as its own narrow entry rather than widening the pair above, for the
+  // same ratchet reason: `$.version` on `saga` retires independently of the two
+  // list-read faces, and a broad `**.version` pattern would swallow a genuinely
+  // new divergence.
+  {
+    backends: ["java"],
+    cases: ["saga"],
+    path: "$.version",
+    kinds: ["value"],
+    reason:
+      "RS-20 — java skips the version bump on an IDEMPOTENT command (re-assigning the value a field already holds leaves the row un-dirty, so @Version never increments)",
+  },
 ];

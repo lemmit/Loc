@@ -85,6 +85,22 @@ system Payments {
     // subtype-scoped query on this system, and previously uncalled.
     let byNet = api.creditCards.byNetwork({ network: "Mastercard" })
     expect(byNet.length).toBe(1)
+
+    // The LIST and DELETE routes on a TPH subtype.  `all` is a bare ARRAY here
+    // (a subtype's list stays unbounded so the polymorphic base reader can
+    // concatenate the subtypes), and it must answer 1 — the other subtype's
+    // rows live in the SAME `payment_methods` table, so a list that lost the
+    // `kind` predicate would count them too.  The DELETE has the same exposure
+    // in reverse: an id-only delete on a shared table is one predicate away
+    // from being a delete of the wrong subtype's row.
+    let cards = api.creditCards.all()
+    expect(cards.length).toBe(1)
+    api.creditCards.destroy(c)
+    expect(api.creditCards.getById(c)).toThrow(404)
+    let noCards = api.creditCards.all()
+    expect(noCards.length).toBe(0)
+    let noneByNet = api.creditCards.byNetwork({ network: "Mastercard" })
+    expect(noneByNet.length).toBe(0)
   }
 
   // RS-1 (`holderName`/`routingNumber`) + RS-3. The second subtype of the
@@ -106,5 +122,16 @@ system Payments {
     expect(updated.routingNumber).toBe("011000015")
     expect(updated.holderName).toBe("Grace Hopper")
     expect(updated.last4).toBe("0007")
+
+    // The second subtype's LIST and DELETE — the other half of the pair above.
+    // The credit-card block ran first and deleted its own row, so a list here
+    // answering anything but 1 means the discriminator leaked in one direction
+    // or the other.
+    let accounts = api.bankAccounts.all()
+    expect(accounts.length).toBe(1)
+    api.bankAccounts.destroy(b)
+    expect(api.bankAccounts.getById(b)).toThrow(404)
+    let noAccounts = api.bankAccounts.all()
+    expect(noAccounts.length).toBe(0)
   }
 }

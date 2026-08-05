@@ -76,6 +76,121 @@
         "name": "Acme",
         "version": 3
       }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": [
+        {
+          "creditLimit": 300,
+          "email": "a@x.com",
+          "id": "<volatile:key>",
+          "name": "Acme",
+          "version": 3
+        }
+      ]
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/vendors",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/machines",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/vehicles",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/vendors/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Vendor {id} not found",
+        "instance": "/api/vendors/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/machines/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Machine {id} not found",
+        "instance": "/api/machines/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/vehicles/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Vehicle {id} not found",
+        "instance": "/api/vehicles/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "DELETE",
+      "path": "/api/customers/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Customer {id} not found",
+        "instance": "/api/customers/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/api/customers/by_email?email=a@x.com",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/customers/by_email",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": []
     }
   ]
 }

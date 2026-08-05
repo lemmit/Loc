@@ -36,7 +36,7 @@ system Tenancy {
   // filter returns 2 (cross-tenant leak); the correct answer is 1.
   test e2e "capability filter scopes reads to the authenticated principal's tenant" against d {
     let mineAcct = api.accounts.create({ tenantId: "acme", balance: 100 })
-    api.accounts.create({ tenantId: "other", balance: 200 })
+    let theirAcct = api.accounts.create({ tenantId: "other", balance: 200 })
     let mine = api.accounts.byMinBalance({ min: 0 })
     expect(mine.length).toBe(1)
 
@@ -51,5 +51,31 @@ system Tenancy {
     let read = api.accounts.getById(mineAcct)
     expect(read.balance).toBe(150)
     expect(read.tenantId).toBe("acme")
+
+    // The ROOT LIST route under the same filter.  Two rows exist; the filter
+    // must make exactly one of them visible — and `total`, which a backend
+    // computes with a SECOND query (the count beside the page), has to be
+    // filtered too.  A count that forgot the tenant predicate reports `total: 2`
+    // over a one-row page: a cross-tenant COUNT leak that every existing
+    // assertion (all of them on `items`) is blind to.
+    let listed = api.accounts.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // DELETE ACROSS THE TENANT BOUNDARY — the destructive route, never driven
+    // under a capability filter on any backend.  The out-of-tenant row is
+    // invisible to this principal, so its delete must be refused exactly the
+    // way its read is (404, not 204-and-gone): the filter has to narrow the
+    // load-before-delete, not just the read path.
+    expect(api.accounts.destroy(theirAcct)).toThrow(404)
+
+    // …and the in-tenant delete succeeds.  The list is then empty even though
+    // the other tenant's row is still in the table — the filter reading zero,
+    // which is the shape a filter dropped on the empty path would break.
+    api.accounts.destroy(mineAcct)
+    expect(api.accounts.getById(mineAcct)).toThrow(404)
+    let empty = api.accounts.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

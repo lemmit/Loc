@@ -50,5 +50,31 @@ system EmbSys {
     // The declared find reads the root column the update just moved.
     let byCustomer = api.orders.byCustomer({ name: "beta" })
     expect(byCustomer.length).toBe(1)
+
+    // The last uncalled op on this aggregate: `retotal` writes the `money`
+    // root column through an OPERATION route rather than the crudish update,
+    // so the decimal round-trip is proven on both write paths.
+    api.orders.retotal(o, { amount: "7.25" })
+    let retotalled = api.orders.getById(o)
+    expect(retotalled.total).toBe("7.2500")
+    expect(retotalled.lines.length).toBe(1)
+
+    // The root LIST route — a BARE ARRAY on `shape: embedded` (the backends
+    // diverge on paging its queryable root, so the derivation keeps it
+    // unbounded).  This is the bulk path: `getById` rehydrates one jsonb blob,
+    // `all` rehydrates every row's blob through a different loader, so a
+    // containment dropped only in bulk shows here and nowhere above.
+    let listed = api.orders.all()
+    expect(listed.length).toBe(1)
+
+    // DELETE — the root row and its folded `lines` go together (one row, no
+    // child table), and the declared find over the root column must stop
+    // answering too.
+    api.orders.destroy(o)
+    expect(api.orders.getById(o)).toThrow(404)
+    let empty = api.orders.all()
+    expect(empty.length).toBe(0)
+    let gone = api.orders.byCustomer({ name: "beta" })
+    expect(gone.length).toBe(0)
   }
 }

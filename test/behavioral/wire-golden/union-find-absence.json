@@ -68,6 +68,109 @@
     {
       "seq": 6,
       "method": "GET",
+      "path": "/api/orders/maybe_first?code=C1B",
+      "status": 200,
+      "body": {
+        "code": "C1B",
+        "id": "<volatile:key>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders/maybe_first?code=C1",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/orders/maybe_first",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "C1B",
+            "id": "<volatile:key>",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/orders/by_code?code=C1B",
+      "status": 404,
+      "body": {
+        "detail": "Not Found",
+        "instance": "/api/orders/by_code",
+        "resource": "Order",
+        "status": 404,
+        "title": "Not Found",
+        "type": "/errors/not-found"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/orders/maybe_first?code=C1B",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/orders/maybe_first",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 14,
+      "method": "GET",
       "path": "/api/orders/by_code?code=NOPE",
       "status": 404,
       "body": {

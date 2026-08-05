@@ -85,6 +85,46 @@
         "version": 2,
         "widgetId": "<volatile:key>"
       }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/gadgets/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/gadgets/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Gadget {id} not found",
+        "instance": "/api/gadgets/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "DELETE",
+      "path": "/api/widgets/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/widgets/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Widget {id} not found",
+        "instance": "/api/widgets/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
     }
   ]
 }

@@ -84,6 +84,105 @@
         "total": 1,
         "totalPages": 1
       }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders?dir=asc&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "P1",
+            "id": "<volatile:key>",
+            "region": "EU",
+            "version": 2
+          },
+          {
+            "code": "P2",
+            "id": "<volatile:key>",
+            "region": "NA",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders?dir=asc&page=1&pageSize=1&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "P1",
+            "id": "<volatile:key>",
+            "region": "EU",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 1,
+        "total": 2,
+        "totalPages": 2
+      }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/orders/in_region?region=EU",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "P2",
+            "id": "<volatile:key>",
+            "region": "NA",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
     }
   ]
 }

@@ -230,6 +230,20 @@ system StorefrontSystem {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
     expect(read.sku).toBe("WIDGET-1")
+
+    // The collection root and the canonical DELETE — the two derived routes of
+    // this aggregate that had no caller.  This block runs first, so its row is
+    // the whole table, and the product is the one no order line points at
+    // (`OrderLine.productId` is a real foreign key, so a referenced product is
+    // not deletable on a backend running the emitted migration chain).
+    let listed = api.products.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.products.destroy(p)
+    expect(api.products.getById(p)).toThrow(404)
+    let empty = api.products.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 
   // Static named find (`GET /customers/by_email`) must NOT be shadowed by
@@ -242,6 +256,23 @@ system StorefrontSystem {
     let found = api.customers.byEmail({ email: "lookup@acme.test" })
     expect(found.id).toBe(cust.id)
     expect(found.name).toBe("Email Lookup")
+
+    // The collection ROOT, read right beside the static named find this block
+    // exists to protect.  Both are `GET` under `/api/customers` — one at
+    // `/by_email`, one at the bare root — and the root is registered LAST on
+    // every backend precisely so `/{id}` cannot shadow it.  Reading the two in
+    // one block is what makes the registration order observable at runtime.
+    let listed = api.customers.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // …and the DELETE, on the one customer no wallet or order references.
+    api.customers.destroy(cust)
+    expect(api.customers.getById(cust)).toThrow(404)
+    expect(api.customers.byEmail({ email: "lookup@acme.test" })).toThrow(404)
+    let empty = api.customers.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 
   test e2e "top up a wallet then check out an order" against api verifies TC-002 {
@@ -327,6 +358,42 @@ system StorefrontSystem {
     expect(shipped.status).toBe("Shipped")
     expect(shipped.lines.length).toBe(1)
     expect(shipped.lineCount).toBe(1)
+
+    // ── the LIST and DELETE routes of the two remaining aggregates ────────
+    //
+    // Wallets: two rows exist by now (this block's and the checkout block's),
+    // and the pair proves the collection projection carries the `Money` value
+    // object and the UNSET optional (`closedAt`) the by-id reads above assert
+    // one row at a time.  Sorted by the TIMESTAMP rather than by the `status`
+    // enum that separates them: an enum column sorts by declaration order under
+    // a native pg enum type and lexicographically under `TEXT`, and the two
+    // schema sources of the node backend disagree about which it is — see the
+    // note in `test/behavioral/systems/sales.ddd`.
+    let wallets = api.wallets.all({ sort: "openedAt", dir: "asc" })
+    expect(wallets.items.length).toBe(2)
+    expect(wallets.total).toBe(2)
+    api.wallets.destroy(wallet)
+    expect(api.wallets.getById(wallet)).toThrow(404)
+    let walletsLeft = api.wallets.all()
+    expect(walletsLeft.items.length).toBe(1)
+    expect(walletsLeft.total).toBe(1)
+    // The owner-scoped find must lose the deleted wallet too — a delete that
+    // only stopped the by-id read would keep answering here.
+    let ownedAfter = api.wallets.byOwner({ owner: cust.id })
+    expect(ownedAfter.length).toBe(0)
+
+    // Orders: the aggregate with a CONTAINMENT, so its delete has to cascade
+    // the `order_lines` child (containment FKs are ON DELETE CASCADE, unlike
+    // the RESTRICT a cross-aggregate reference gets) — and the derived
+    // `lineCount` above is what makes the child's presence observable at all.
+    let orders = api.orders.all()
+    expect(orders.items.length).toBe(1)
+    expect(orders.total).toBe(1)
+    api.orders.destroy(ord)
+    expect(api.orders.getById(ord)).toThrow(404)
+    let noOrders = api.orders.all()
+    expect(noOrders.items.length).toBe(0)
+    expect(noOrders.total).toBe(0)
   }
 }
 

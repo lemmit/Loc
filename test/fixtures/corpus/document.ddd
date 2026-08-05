@@ -53,5 +53,22 @@ system DocSys {
     expect(bumped.viewCount).toBe(6)
     let popular = api.articles.popular({ min: 6 })
     expect(popular.length).toBe(1)
+
+    // The root LIST route.  On `shape: document` the auto-`findAll` is a BARE
+    // ARRAY, not the paged envelope (there is no queryable column to page over
+    // — the whole tree is one opaque jsonb blob), so this drives the array arm
+    // of a derivation every other fixture exercises paged.
+    let listed = api.articles.all()
+    expect(listed.length).toBe(1)
+
+    // DELETE takes the whole document — root scalars AND the contained sections
+    // that live inside the same jsonb column, with no child table to cascade
+    // from.  Both the by-id read and the declared find must stop answering.
+    api.articles.destroy(a)
+    expect(api.articles.getById(a)).toThrow(404)
+    let empty = api.articles.all()
+    expect(empty.length).toBe(0)
+    let gone = api.articles.popular({ min: 0 })
+    expect(gone.length).toBe(0)
   }
 }

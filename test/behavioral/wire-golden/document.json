@@ -109,6 +109,61 @@
           "viewCount": 6
         }
       ]
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/articles",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "sections": [
+            {
+              "body": "B",
+              "heading": "H",
+              "id": "<volatile:key>"
+            }
+          ],
+          "title": "T2",
+          "version": 4,
+          "viewCount": 6
+        }
+      ]
+    },
+    {
+      "seq": 9,
+      "method": "DELETE",
+      "path": "/api/articles/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/articles/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Article {id} not found",
+        "instance": "/api/articles/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/articles",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/articles/popular?min=0",
+      "status": 200,
+      "body": []
     }
   ]
 }

@@ -115,6 +115,25 @@ system Shapes {
     let read = api.carts.getById(cart)
     expect(read.status).toBe("Open")
     expect(read.items.length).toBe(1)
+
+    // The by-id read of the RELATIONAL aggregate in the same system — the one
+    // shape here that is neither document nor embedded, and the reference point
+    // the other two are contrasted against.  It had no caller.
+    let readCust = api.customers.getById(cust)
+    expect(readCust.name).toBe("Buyer")
+
+    // The two LIST routes, and the contrast is the point: `Customer` is
+    // relational so its `all` is the PAGED envelope, while `Cart` is
+    // `shape: document` so its `all` is a bare ARRAY (there is no queryable
+    // column to page over — the aggregate is one opaque jsonb blob).  Both
+    // derive from the same enrichment rule, and this is the only place the two
+    // arms of it are driven side by side.  For the cart the read is also the
+    // bulk rehydration of the blob, a different loader from `getById`.
+    let customers = api.customers.all()
+    expect(customers.items.length).toBe(1)
+    expect(customers.total).toBe(1)
+    let carts = api.carts.all()
+    expect(carts.length).toBe(1)
   }
 
   // RS-8 (embedded-shape contained WishItem folds into the jsonb column and
@@ -126,5 +145,12 @@ system Shapes {
     let read = api.wishlists.getById(wl)
     expect(read.label).toBe("Birthday")
     expect(read.items.length).toBe(1)
+
+    // The third `all` arm: `shape: embedded` keeps a queryable root row but
+    // still lists as a bare ARRAY (backends diverge on paging an embedded
+    // root, so the derivation keeps it uniform).  The bulk read has to fold
+    // each row's jsonb `items` column — the path `getById` does not take.
+    let wishlists = api.wishlists.all()
+    expect(wishlists.length).toBe(1)
   }
 }

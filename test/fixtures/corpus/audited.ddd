@@ -99,6 +99,26 @@ system AuditingSystem {
     // The declared find over the column the audited create wrote.
     let byRef = api.orders.byReference({ reference: "R1" })
     expect(byRef.status).toBe(3)
+
+    // The LIST route — an ordinary read, and audit writes only on COMMANDS, so
+    // it must not add a row to `audit_records` either.
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // The AUDITED DESTROY.  `destroy { }` is a public command on an
+    // aggregate-wide `audited` aggregate, so it writes an audit row in the same
+    // transaction as the row removal — the only command whose audit snapshot
+    // has a `before` and no `after`, and the one command of the three that no
+    // test had ever driven.  A backend that wrote the audit row AFTER the
+    // delete (or outside the transaction) has an FK-less orphan or a lost row
+    // here; a backend that failed the audit insert fails the delete with it.
+    api.orders.destroy(o)
+    expect(api.orders.getById(o)).toThrow(404)
+    expect(api.orders.byReference({ reference: "R1" })).toThrow(404)
+    let empty = api.orders.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 
   // The PER-COMMAND half of this fixture had no runtime caller at all: nothing
@@ -129,5 +149,20 @@ system AuditingSystem {
     expect(updated.dispatched).toBe(true)
     let found = api.shipments.byCode({ code: "SH-3" })
     expect(found.dispatched).toBe(true)
+    // The list route on the per-command form: `Shipment` is NOT aggregate-wide
+    // audited, so nothing on this read touches `audit_records` at all.
+    let listed = api.shipments.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    // …and its canonical destroy, which — unlike `Order`'s — is UNAUDITED,
+    // because on this aggregate only `dispatch` carries the marker.  The pair
+    // of destroys across the two blocks is the audited/unaudited contrast on
+    // the one command that removes its own subject.
+    api.shipments.destroy(s)
+    expect(api.shipments.getById(s)).toThrow(404)
+    expect(api.shipments.byCode({ code: "SH-3" })).toThrow(404)
+    let empty = api.shipments.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

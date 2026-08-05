@@ -44,5 +44,20 @@ system WhenShop {
     let revised = api.orders.getById(shipped)
     expect(revised.code).toBe("A2-REV")
     expect(revised.status).toBe("Shipped")
+
+    // The LIST and DELETE routes, on the aggregate whose whole point is a
+    // CLOSED state gate.  `shipped` is the row `cancel` was refused for above,
+    // and it is the row deleted here: the canonical `DELETE` carries no `when`,
+    // so a backend that widened the gate onto the lifecycle routes (the mirror
+    // of the `update` case just above) answers 409 instead of 204 — and the
+    // list read afterwards would still show two rows.
+    let both = api.orders.all({ sort: "code", dir: "asc" })
+    expect(both.items.length).toBe(2)
+    expect(both.total).toBe(2)
+    api.orders.destroy(shipped)
+    expect(api.orders.getById(shipped)).toThrow(404)
+    let left = api.orders.all()
+    expect(left.items.length).toBe(1)
+    expect(left.total).toBe(1)
   }
 }

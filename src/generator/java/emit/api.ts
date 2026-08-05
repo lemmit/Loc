@@ -22,6 +22,7 @@ import {
   renderJavaType,
 } from "../render-expr.js";
 import { javaAuditApiPkg, javaHistoryFind, renderJavaHistoryRoute } from "./audit-history.js";
+import { JAVA_FIND_ABSENCE_THROW } from "./common.js";
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 import { javaCommandValidatorNames } from "./validator.js";
@@ -132,6 +133,9 @@ export function renderJavaController(
 
   const unionImports = new Set<string>();
   let anyUnionProblem = false;
+  /** Set when a find arm throws the shared find-absence 404 (RS-22/RS-27), so
+   *  the controller imports `AggregateNotFoundException` only where it uses it. */
+  let anyFindAbsenceThrow = false;
   const anyReturnUnion =
     !!ctx.boundedContext &&
     agg.operations.some(
@@ -291,9 +295,19 @@ export function renderJavaController(
         ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
         : null;
       if (spec) {
+        if (spec.absent.kind === "none") anyFindAbsenceThrow = true;
         const absent =
           spec.absent.kind === "none"
-            ? [`            return ResponseEntity.notFound().build();`]
+            ? // RS-22/RS-27 — THROW, so the `@RestControllerAdvice` renders the
+              // five-member envelope.  This used to be
+              // `ResponseEntity.notFound().build()`: Spring's own bare 404 with
+              // an EMPTY BODY, which never reaches the advice — the identical
+              // defect RS-27 fixed on the by-id read, at the arm that reads
+              // `null` and answers locally.  It also made this controller emit
+              // two different wires for shapes `payloads.md` declares
+              // wire-identical, since the `error`-variant branch below builds a
+              // real ProblemDetail.
+              [`            throw ${JAVA_FIND_ABSENCE_THROW};`]
             : (() => {
                 const tag = spec.absent.tag;
                 const status =
@@ -342,6 +356,7 @@ export function renderJavaController(
         ];
       }
       const single = f.returnType.kind !== "array";
+      if (single) anyFindAbsenceThrow = true;
       const retType = single ? `ResponseEntity<${agg.name}Response>` : `List<${agg.name}Response>`;
       return [
         `    @GetMapping("/${snake(f.name)}")`,
@@ -351,7 +366,11 @@ export function renderJavaController(
           ? `        var response = service.${f.name}(${args});`
           : `        return service.${f.name}(${args});`,
         single
-          ? `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`
+          ? // RS-22/RS-27 — same repair as the `option` arm above: an OPTIONAL
+            // find (`find byEmail(...): Customer?`) is wire-identical to
+            // `Customer option`, so its miss must carry the same five-member
+            // envelope rather than Spring's bare empty 404.
+            `        if (response == null) throw ${JAVA_FIND_ABSENCE_THROW};\n        return ResponseEntity.ok(response);`
           : null,
         `    }`,
         ``,
@@ -442,6 +461,7 @@ export function renderJavaController(
     ...[...unionImports].sort().map((i) => `import ${i};`),
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     anyFindGate ? `import ${ctx.basePkg}.domain.common.ForbiddenException;` : null,
+    anyFindAbsenceThrow ? `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;` : null,
     anyFindGateUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     // Entity history — the shared `AuditEntry` wire record.  Under byLayer the
     // controller already lives in `<base>.api`, so the import is emitted only

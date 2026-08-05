@@ -124,5 +124,30 @@ system DomainSvc {
     expect(read.holder).toBe("alice2")
     let moved = api.accounts.byHolder({ holder: "alice2" })
     expect(moved.holder).toBe("alice2")
+
+    // The two DOMAIN OPERATIONS over the HTTP routes.  Their arithmetic is
+    // already gated in the pure unit test above; what had never run is the same
+    // arithmetic across the WIRE, where the `Money` value object is a nested
+    // JSON object on the way in and a decimal on the way back.  Deposit then
+    // withdraw so the balance returns to its starting value — a coercion that
+    // rounds or string-widens on one leg shows as an inequality here.
+    api.accounts.deposit(a, { amount: { amount: 25, currency: "USD" } })
+    let deposited = api.accounts.getById(a)
+    expect(deposited.balance.amount).toBe(125)
+    api.accounts.withdraw(a, { amount: { amount: 25, currency: "USD" } })
+    let withdrawn = api.accounts.getById(a)
+    expect(withdrawn.balance.amount).toBe(100)
+
+    // The LIST route carries the same nested value object in bulk.
+    let listed = api.accounts.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    api.accounts.destroy(a)
+    expect(api.accounts.getById(a)).toThrow(404)
+    expect(api.accounts.byHolder({ holder: "alice2" })).toThrow(404)
+    let empty = api.accounts.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

@@ -64,5 +64,26 @@ system Seeding {
     api.gadgets.update(g, { widgetId: w.id, label: "g2" })
     let updatedGadget = api.gadgets.getById(g)
     expect(updatedGadget.label).toBe("g2")
+
+    // NO `api.widgets.all()` / `api.gadgets.all()` here, and that absence is a
+    // finding rather than an omission — see `R.unseededListRead` in
+    // `test/ir/api-caller-census-pins.ts`.  This is the one fixture whose table
+    // does not start empty, and the behavioural legs disagree about that: the
+    // node leg composes `createApp` directly and never reaches `runSeeds`,
+    // which the generated entrypoints (`index.ts` / `app/main.py` / …) call at
+    // boot, so the other four legs start with the `default` dataset's rows and
+    // node starts with none.  A collection read is the first thing that can
+    // see the difference, and the wire golden compares whole bodies — so
+    // writing one here would encode a harness gap as a wire divergence on four
+    // backends at once.  The by-id routes below are seed-independent.
+
+    // DELETE, child BEFORE parent.  `Gadget.widgetId: Widget id` is emitted as
+    // a real foreign key with ON DELETE RESTRICT, so this order is not
+    // stylistic — the reverse is refused by any backend that runs the emitted
+    // migration chain.
+    api.gadgets.destroy(g)
+    expect(api.gadgets.getById(g)).toThrow(404)
+    api.widgets.destroy(w)
+    expect(api.widgets.getById(w)).toThrow(404)
   }
 }

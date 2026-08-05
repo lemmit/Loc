@@ -75,5 +75,33 @@ system TenantOwned {
     let updatedPlan = api.plans.getById(p)
     expect(updatedPlan.code).toBe("PRO-PLUS")
     expect(updatedPlan.monthlyPrice).toBe(60)
+
+    // The ROOT LIST route on BOTH stances, side by side — the read where the
+    // capability's filter and the `crossTenant` marker's ABSENCE are the same
+    // question asked twice.  `total` matters as much as `items`: it is a second
+    // query, and a count that skipped the tenant predicate is a cross-tenant
+    // COUNT leak no `items`-only assertion can see.
+    let invoices = api.invoices.all()
+    expect(invoices.items.length).toBe(1)
+    expect(invoices.total).toBe(1)
+    let plans = api.plans.all()
+    expect(plans.items.length).toBe(1)
+    expect(plans.total).toBe(1)
+
+    // DELETE on both stances.  The tenant-owned delete must load through the
+    // tenant scope before removing (the same narrowing the update above proved
+    // on the write path); the `crossTenant` one has no scope to narrow.
+    api.invoices.destroy(inv)
+    expect(api.invoices.getById(inv)).toThrow(404)
+    let noInvoices = api.invoices.all()
+    expect(noInvoices.items.length).toBe(0)
+    expect(noInvoices.total).toBe(0)
+    let goneFromFind = api.invoices.byNumber({ n: "INV-1B" })
+    expect(goneFromFind.length).toBe(0)
+    api.plans.destroy(p)
+    expect(api.plans.getById(p)).toThrow(404)
+    let noPlans = api.plans.all()
+    expect(noPlans.items.length).toBe(0)
+    expect(noPlans.total).toBe(0)
   }
 }

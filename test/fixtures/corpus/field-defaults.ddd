@@ -85,5 +85,27 @@ system Defaults {
     expect(updated.active).toBe(false)
     expect(updated.archived).toBe(true)
     expect(updated.flag).toBe(true)
+
+    // A SECOND row that keeps every default, read back through the LIST route
+    // beside the fully-overwritten one.  The list DTO is a separate projection
+    // from the by-id one on every backend, and defaults are exactly the fields
+    // a bulk projection can silently re-zero — so this is the read that shows a
+    // declared `true` arriving as `false` in a collection while `GET /{id}`
+    // stays correct.  Sorted by the one field neither row shares.
+    let defaulted = api.items.create({ name: "Widget-3" })
+    let listed = api.items.all({ sort: "name", dir: "asc" })
+    expect(listed.items.length).toBe(2)
+    expect(listed.total).toBe(2)
+
+    api.items.destroy(defaulted)
+    expect(api.items.getById(defaulted)).toThrow(404)
+    let left = api.items.all()
+    expect(left.items.length).toBe(1)
+    expect(left.total).toBe(1)
+    api.items.destroy(i)
+    expect(api.items.getById(i)).toThrow(404)
+    let empty = api.items.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

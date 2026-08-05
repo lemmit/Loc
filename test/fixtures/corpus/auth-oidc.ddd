@@ -65,5 +65,20 @@ system Helpdesk {
     let reopened = api.tickets.getById(t)
     expect(reopened.subject).toBe("SSO fixed")
     expect(reopened.open).toBe(true)
+
+    // The LIST and DELETE routes, behind the same verified bearer token.  A
+    // collection READ and a DELETE are the two route shapes the auth middleware
+    // is easiest to mis-mount on (the list sits at the bare collection root,
+    // which several backends register last so `/{id}` cannot shadow it, and the
+    // DELETE is the only verb on its path) — so this is where a middleware
+    // ordering slip shows as a 401 for a token that just worked twice.
+    let listed = api.tickets.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.tickets.destroy(t)
+    expect(api.tickets.getById(t)).toThrow(404)
+    let empty = api.tickets.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

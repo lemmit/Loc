@@ -126,6 +126,15 @@ system WireContract {
     api.listings.addTag(l, { label: "clearance" })
     let read = api.listings.getById(l)
     expect(read.tags.length).toBe(1)
+
+    // DELETE the listing that OWNS a contained child.  The `tags` row hangs off
+    // a containment foreign key (`ON DELETE CASCADE`), so the parent delete has
+    // to take it with it — the one delete shape in this system where the row
+    // count and the child count differ.  The previous block's listing survives
+    // and is counted in the next one.
+    api.listings.destroy(l)
+    expect(api.listings.getById(l)).toThrow(404)
+    expect(api.listings.bySku({ sku: "SKU-2" })).toThrow(404)
   }
 
   // (3) RS-15 — the DOMAIN FLOOR.  The first `discontinue` succeeds; the second
@@ -139,6 +148,18 @@ system WireContract {
     let l = api.listings.create({ sku: "SKU-3", price: "1", availability: "InStock" })
     api.listings.discontinue(l)
     expect(api.listings.discontinue(l)).toThrow(422)
+
+    // The root LIST route, reading BOTH surviving listings — the first block's
+    // (SKU-1B, `note` populated, `tags` empty) and this one's (SKU-3, `note`
+    // never set, now Discontinued).  That pairing is what makes the read worth
+    // making: this system exists to pin the `[]`-vs-`null` and money-scale
+    // axes, and the collection projection is a second, independently written
+    // serializer on every backend — an empty containment that reads `[]` by id
+    // and `null` in a list is exactly the divergence RS-8 names, and nothing
+    // had ever looked at the list side.  Sorted, since two rows come back.
+    let listed = api.listings.all({ sort: "sku", dir: "asc" })
+    expect(listed.items.length).toBe(2)
+    expect(listed.total).toBe(2)
   }
 
 }

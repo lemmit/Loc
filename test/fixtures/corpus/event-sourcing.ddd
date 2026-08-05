@@ -52,6 +52,19 @@ system Ledger {
     let read = api.accounts.getById(a)
     expect(read.owner).toBe("alice")
     expect(read.balance).toBe(70)
+
+    // The root LIST route — `all` on an event-sourced aggregate is a bare
+    // ARRAY, not the paged envelope, because it FOLDS every stream rather than
+    // slicing one queryable table.  So this is the only caller in the repo that
+    // runs the fold in BULK instead of per-id: a backend that replays streams
+    // correctly by id but reconstitutes the collection read from a stale
+    // snapshot table answers a wrong balance here and nowhere else.
+    //
+    // Read here, in the FIRST block, while exactly ONE stream exists — the
+    // second block opens another account, and a multi-stream fold has no
+    // declared order to record.
+    let listed = api.accounts.all()
+    expect(listed.length).toBe(1)
   }
 
   // The same fold reconstructed through a non-getById reader (the `byOwner`

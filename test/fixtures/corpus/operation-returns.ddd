@@ -39,6 +39,19 @@ system RU {
     expect(read.code).toBe("OR2")
     expect(read.reserved).toBe(false)
 
+    // The LIST and DELETE routes — also BEFORE the error variant, for the same
+    // reason: a list read is a full-body read, so it would inherit the open
+    // question below verbatim (`version` diverges after a rolled-back 404).
+    let second = api.orders.create({ code: "OR3", reserved: false })
+    let both = api.orders.all({ sort: "code", dir: "asc" })
+    expect(both.items.length).toBe(2)
+    expect(both.total).toBe(2)
+    api.orders.destroy(second)
+    expect(api.orders.getById(second)).toThrow(404)
+    let left = api.orders.all()
+    expect(left.items.length).toBe(1)
+    expect(left.total).toBe(1)
+
     // …and only THEN the error variant, with no read after it.
     //
     // OPEN QUESTION, deliberately not pinned (found by this drain): does the

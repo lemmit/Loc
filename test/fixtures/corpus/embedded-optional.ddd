@@ -41,5 +41,20 @@ system EmbOpt {
     let updated = api.orders.getById(o)
     expect(updated.customer).toBe("beta")
     expect(updated.lines.length).toBe(1)
+
+    // The root LIST route carries the SAME unset-optional cell — and through a
+    // different loader than `getById`.  This fixture exists to pin the absence
+    // shape of `note`, and until now it pinned it only on the by-id read; the
+    // golden now records what the BULK read makes of the same null cell.
+    let listed = api.orders.all()
+    expect(listed.length).toBe(1)
+
+    // DELETE, then the by-id 404 and an empty list — with an unset optional
+    // containment in the row being deleted (the shape a backend that walked
+    // containments to cascade would trip on).
+    api.orders.destroy(o)
+    expect(api.orders.getById(o)).toThrow(404)
+    let empty = api.orders.all()
+    expect(empty.length).toBe(0)
   }
 }

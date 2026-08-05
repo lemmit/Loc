@@ -55,9 +55,27 @@ describe("java generator — union finds", () => {
     expect(c).toContain("return ResponseEntity.ok(r);");
   });
 
-  it("`none` absence → the bare optional-find 404", async () => {
+  it("`none` absence → the shared 404 producer, not a bare Spring 404", async () => {
+    // INVERTED 2026-08-05.  This test used to assert the exact defect as
+    // intent:
+    //
+    //     expect(c).toContain("            return ResponseEntity.notFound().build();");
+    //
+    // — Spring's own bare 404, which carries an EMPTY BODY because it never
+    // reaches the `@RestControllerAdvice`.  That violates RS-22 (the five-member
+    // envelope is required on ANY error response) and it made this ONE
+    // controller answer two different wires for shapes `docs/payloads.md`
+    // declares wire-identical: the `error`-variant find in the test above
+    // builds a real ProblemDetail, this one built nothing.
+    //
+    // Invisible for as long as it shipped because no test called an `option`
+    // find at runtime — the caller census (#2380) named `maybeFirstOrder` as a
+    // zero-caller route, and the first caller read `golden {…} ≠ java ""` on
+    // the behavioural java leg.  Same class as RS-27, same repair: throw, so
+    // the shared producer answers.
     const c = (await files()).get(`${ROOT}/features/orders/OrdersController.java`)!;
     expect(c).toContain("public ResponseEntity<?> maybeFirstOrder(@RequestParam String code) {");
-    expect(c).toContain("            return ResponseEntity.notFound().build();");
+    expect(c).toContain('            throw new AggregateNotFoundException("not_found");');
+    expect(c).not.toContain("ResponseEntity.notFound().build()");
   });
 });

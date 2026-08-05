@@ -38,6 +38,19 @@
     },
     {
       "seq": 4,
+      "method": "GET",
+      "path": "/api/accounts",
+      "status": 200,
+      "body": [
+        {
+          "balance": 70,
+          "id": "<volatile:key>",
+          "owner": "alice"
+        }
+      ]
+    },
+    {
+      "seq": 5,
       "method": "POST",
       "path": "/api/accounts",
       "status": 201,
@@ -46,14 +59,14 @@
       }
     },
     {
-      "seq": 5,
+      "seq": 6,
       "method": "POST",
       "path": "/api/accounts/{id}/deposit",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 6,
+      "seq": 7,
       "method": "GET",
       "path": "/api/accounts/by_owner?owner=bob",
       "status": 200,

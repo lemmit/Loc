@@ -48,5 +48,26 @@ system Crit {
     expect(updated.region).toBe("EU")
     let stillOne = api.orders.recent()
     expect(stillOne.length).toBe(1)
+
+    // The ROOT LIST route under the SAME two capability criteria.  Two rows are
+    // in the table; `Active` excludes the archived one, so the page must carry
+    // one — and so must `total`, which is a separate count query and therefore
+    // a separate place to forget the criteria.  Nothing had ever asked the
+    // auto-`findAll` whether it obeys a `filter <Criterion>` at all.
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // DELETE through the same criterion regime: the row is inside both criteria
+    // so its delete lands, and the criterion-filtered reads empty out.  (The
+    // archived row stays in the table and stays invisible — which is why `all`
+    // reads 0 afterwards, not 1.)
+    api.orders.destroy(a)
+    expect(api.orders.getById(a)).toThrow(404)
+    let gone = api.orders.recent()
+    expect(gone.length).toBe(0)
+    let empty = api.orders.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

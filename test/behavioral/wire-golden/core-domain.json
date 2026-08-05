@@ -184,6 +184,39 @@
         "total": 1,
         "totalPages": 1
       }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/orders/by_status?s=Placed",
+      "status": 200,
+      "body": [
+        {
+          "code": "CD2",
+          "id": "<volatile:key>",
+          "isDraft": false,
+          "lines": [
+            {
+              "id": "<volatile:key>",
+              "qty": 2,
+              "sku": "S1"
+            }
+          ],
+          "status": "Placed",
+          "total": {
+            "amount": 12,
+            "currency": "USD"
+          },
+          "version": 4
+        }
+      ]
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/orders/by_status?s=Draft",
+      "status": 200,
+      "body": []
     }
   ]
 }

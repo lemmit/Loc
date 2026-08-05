@@ -52,6 +52,63 @@
     },
     {
       "seq": 4,
+      "method": "GET",
+      "path": "/api/products",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "display": "WIDGET-1B",
+            "id": "<volatile:key>",
+            "price": {
+              "amount": 12.5,
+              "currency": "EUR"
+            },
+            "sku": "WIDGET-1B",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 5,
+      "method": "DELETE",
+      "path": "/api/products/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/products/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Product {id} not found",
+        "instance": "/api/products/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/products",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 8,
       "method": "POST",
       "path": "/api/customers",
       "status": 201,
@@ -60,7 +117,7 @@
       }
     },
     {
-      "seq": 5,
+      "seq": 9,
       "method": "GET",
       "path": "/api/customers/{id}",
       "status": 200,
@@ -75,14 +132,14 @@
       }
     },
     {
-      "seq": 6,
+      "seq": 10,
       "method": "POST",
       "path": "/api/customers/{id}/update",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 7,
+      "seq": 11,
       "method": "GET",
       "path": "/api/customers/{id}",
       "status": 200,
@@ -97,7 +154,63 @@
       }
     },
     {
-      "seq": 8,
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "active": false,
+            "display": "Defaulter II",
+            "email": "def2@acme.test",
+            "externalRef": "ext-43",
+            "id": "<volatile:key>",
+            "name": "Defaulter II",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 13,
+      "method": "DELETE",
+      "path": "/api/customers/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Customer {id} not found",
+        "instance": "/api/customers/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 16,
       "method": "POST",
       "path": "/api/customers",
       "status": 201,
@@ -106,7 +219,7 @@
       }
     },
     {
-      "seq": 9,
+      "seq": 17,
       "method": "POST",
       "path": "/api/orders",
       "status": 201,
@@ -115,7 +228,7 @@
       }
     },
     {
-      "seq": 10,
+      "seq": 18,
       "method": "GET",
       "path": "/api/orders/{id}",
       "status": 200,
@@ -129,14 +242,14 @@
       }
     },
     {
-      "seq": 11,
+      "seq": 19,
       "method": "POST",
       "path": "/api/orders/{id}/update",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 12,
+      "seq": 20,
       "method": "GET",
       "path": "/api/orders/{id}",
       "status": 200,
@@ -150,7 +263,7 @@
       }
     },
     {
-      "seq": 13,
+      "seq": 21,
       "method": "POST",
       "path": "/api/products",
       "status": 201,
@@ -159,7 +272,7 @@
       }
     },
     {
-      "seq": 14,
+      "seq": 22,
       "method": "POST",
       "path": "/api/customers",
       "status": 201,
@@ -168,7 +281,7 @@
       }
     },
     {
-      "seq": 15,
+      "seq": 23,
       "method": "POST",
       "path": "/api/orders",
       "status": 201,
@@ -177,21 +290,21 @@
       }
     },
     {
-      "seq": 16,
+      "seq": 24,
       "method": "POST",
       "path": "/api/orders/{id}/add_line",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 17,
+      "seq": 25,
       "method": "POST",
       "path": "/api/orders/{id}/confirm",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 18,
+      "seq": 26,
       "method": "GET",
       "path": "/api/orders/{id}",
       "status": 200,
@@ -208,6 +321,84 @@
         "placedAt": "<timestamp>",
         "status": "Confirmed",
         "version": 3
+      }
+    },
+    {
+      "seq": 27,
+      "method": "GET",
+      "path": "/api/orders?dir=asc&sort=placedAt",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "customerId": "<volatile:key>",
+            "id": "<volatile:key>",
+            "lines": [
+              {
+                "id": "<volatile:key>",
+                "productId": "<volatile:key>",
+                "quantity": 3
+              }
+            ],
+            "placedAt": "<timestamp>",
+            "status": "Confirmed",
+            "version": 3
+          },
+          {
+            "customerId": "<volatile:key>",
+            "id": "<volatile:key>",
+            "lines": [],
+            "placedAt": "<timestamp>",
+            "status": "Cancelled",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 28,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 29,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 30,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "customerId": "<volatile:key>",
+            "id": "<volatile:key>",
+            "lines": [],
+            "placedAt": "<timestamp>",
+            "status": "Cancelled",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
       }
     }
   ]

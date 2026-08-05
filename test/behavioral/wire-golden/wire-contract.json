@@ -105,6 +105,39 @@
     },
     {
       "seq": 8,
+      "method": "DELETE",
+      "path": "/api/listings/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/listings/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Listing {id} not found",
+        "instance": "/api/listings/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/listings/by_sku?sku=SKU-2",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/listings/by_sku",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
       "method": "POST",
       "path": "/api/listings",
       "status": 201,
@@ -113,14 +146,14 @@
       }
     },
     {
-      "seq": 9,
+      "seq": 12,
       "method": "POST",
       "path": "/api/listings/{id}/discontinue",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 10,
+      "seq": 13,
       "method": "POST",
       "path": "/api/listings/{id}/discontinue",
       "status": 422,
@@ -130,6 +163,40 @@
         "status": 422,
         "title": "Unprocessable Entity",
         "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/api/listings?dir=asc&sort=sku",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "availability": "BackOrdered",
+            "floorPrice": "0.0000",
+            "id": "<volatile:key>",
+            "note": "clearance",
+            "price": "24.7500",
+            "sku": "SKU-1B",
+            "tags": [],
+            "version": 2
+          },
+          {
+            "availability": "Discontinued",
+            "floorPrice": "0.0000",
+            "id": "<volatile:key>",
+            "note": null,
+            "price": "1.0000",
+            "sku": "SKU-3",
+            "tags": [],
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
       }
     }
   ]

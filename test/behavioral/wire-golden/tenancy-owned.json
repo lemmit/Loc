@@ -83,6 +83,119 @@
         "monthlyPrice": 60,
         "version": 2
       }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/invoices",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "amountDue": 250,
+            "id": "<volatile:key>",
+            "number": "INV-1B",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/plans",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "PRO-PLUS",
+            "id": "<volatile:key>",
+            "monthlyPrice": 60,
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 10,
+      "method": "DELETE",
+      "path": "/api/invoices/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Invoice {id} not found",
+        "instance": "/api/invoices/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/invoices",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/invoices/by_number?n=INV-1B",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 14,
+      "method": "DELETE",
+      "path": "/api/plans/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/api/plans/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Plan {id} not found",
+        "instance": "/api/plans/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/api/plans",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
     }
   ]
 }

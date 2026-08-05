@@ -58,6 +58,72 @@
         "status": "Shipped",
         "version": 2
       }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders?dir=asc&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "A1",
+            "id": "<volatile:key>",
+            "status": "Cancelled",
+            "version": 2
+          },
+          {
+            "code": "A2-REV",
+            "id": "<volatile:key>",
+            "status": "Shipped",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 7,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "A1",
+            "id": "<volatile:key>",
+            "status": "Cancelled",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
     }
   ]
 }

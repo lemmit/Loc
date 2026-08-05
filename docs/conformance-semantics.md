@@ -793,7 +793,22 @@ the conforming backends, and the fix that established it.
 - **Scope.** *By id.* The 404 an **optional find** answers
   (`find byCode(...): Order option` with no match) is a different class and
   keeps the `"not_found"` token — node and python already agree there, and the
-  rule deliberately does not touch it.
+  rule deliberately does not touch its `detail`.
+  > **Correction (2026-08-05).** "node and python already agree there" was read,
+  > at the time, as *everyone* agreeing there — and no test drove that path, so
+  > nothing checked. The caller census drain wrote the first callers for an
+  > `option` find (`corpus/union-find-absence`'s `maybeFirst`) and an optional
+  > find (`corpus/inheritance`'s `byEmail`), and **java answered an EMPTY body**
+  > on both: `ResponseEntity.notFound().build()`, Spring's own bare 404, which
+  > never reaches the `@RestControllerAdvice`. That is not an RS-27 `detail`
+  > question — it is a straight [RS-22](#rs-22--the-rfc-7807-envelope-is-exactly-five-members-plus-declared-extensions)
+  > violation (no envelope at all), and it is *this rule's own lesson* — "don't
+  > hand-roll a 404" — at two arms nobody had converted, in the very controller
+  > whose `error`-variant branch built a real ProblemDetail three lines away.
+  > Fixed by throwing `AggregateNotFoundException("not_found")` so both arms land
+  > in the shared producer (`emit/common.ts` → `JAVA_FIND_ABSENCE_THROW`);
+  > `generator-java-api.test.ts` pins it, mutation-proven, with a list-find
+  > scope guard. The `detail` token itself is unchanged and still out of scope.
 - **The real rule: don't hand-roll a 404.** This was not five backends inventing
   five strings. **Two agreed out of the box**, because on each the message comes
   from one shared producer — the repository's `getById`
