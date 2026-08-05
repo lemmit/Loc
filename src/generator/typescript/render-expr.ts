@@ -61,6 +61,16 @@ export interface TsRenderContext {
    *  attribute (`requireCurrentUser().role`) rather than collapsing to the
    *  actor id. */
   principalExpr?: string;
+  /** Text an operation-PARAMETER ref renders as, overriding the default bare
+   *  parameter name.  A hoisted `requires` gate (op-gates.ts) is evaluated by
+   *  the CALLER, where the operation's arguments are not yet bound to locals —
+   *  they live at whatever the call site reads them from (`body.<name>` on an
+   *  HTTP route, a workflow's own expression at an inline op-call).  The gate
+   *  renderer supplies that mapping so `requires amount > 0` resolves to the
+   *  same value the subsequent call passes.  Unset everywhere the parameters
+   *  really are in scope (i.e. inside the method), which keeps every existing
+   *  render byte-identical. */
+  paramExpr?: (name: string) => string | undefined;
 }
 
 const DEFAULT: TsRenderContext = { thisName: "this" };
@@ -239,7 +249,7 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
       // use matches the (also-escaped) binding (`let new` → `new_`).
       return escapeTsIdent(e.name);
     case "param":
-      return e.name;
+      return ctx.paramExpr?.(e.name) ?? e.name;
     case "this-prop":
       // Inside the aggregate class: read the private backing field.
       // Outside (projection reads, e.g. row `r`): use the public

@@ -57,6 +57,7 @@ import {
   aggregateUsesMoneyDeep,
   findGateUsesCurrentUser,
   findUsesCurrentUser,
+  operationIsGuarded,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import {
@@ -74,6 +75,11 @@ import {
 } from "../../../ir/util/api-surface.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import {
+  operationBodyUsesCurrentUser,
+  operationGates,
+  operationGatesUseCurrentUser,
+} from "../../../ir/util/op-gates.js";
 import {
   camelId,
   opCreate,
@@ -1288,6 +1294,38 @@ export function buildRoutesFile(
  *  which the shared onError maps to a 409 ProblemDetails.  Throwing
  *  (rather than an inline `return c.json`) keeps one shape across the
  *  plain, returning, and transactional (audit/prov) paths. */
+/** The hoisted authorization gate — the leading run of `requires` statements,
+ *  evaluated by the HANDLER rather than the aggregate (`src/ir/util/op-gates.ts`).
+ *
+ *  Emitted post-load (so `this` resolves against the loaded `aggregate`, exactly
+ *  as it did when the check ran inside the method) and BEFORE the `when` state
+ *  gate: an unauthorized caller must not learn whether the operation would have
+ *  been allowed in the row's current state.  403 precedes 409. */
+function requiresGateLines(
+  op: OperationIR,
+  pad: string,
+  ctx: BoundedContextIR,
+  argExpr?: (name: string) => string | undefined,
+): string[] {
+  return operationGates(op).map((g) => {
+    const pred = renderTsExpr(g.expr, {
+      thisName: "aggregate",
+      // Operation params are NOT locals here — the handler holds them at the
+      // wire-read expression the call is about to pass (`body.<name>`), so an
+      // arg-aware gate (`requires amount <= limit`) must read the same thing.
+      paramExpr:
+        argExpr ??
+        ((name) => {
+          const p = op.params.find((q) => q.name === name);
+          return p ? wireToDomainExpr(`body.${p.name}`, p.type, ctx) : undefined;
+        }),
+    });
+    return `${pad}if (!(${pred})) throw new ForbiddenError(${JSON.stringify(
+      `Forbidden: ${g.source}`,
+    )});`;
+  });
+}
+
 function whenGateLine(agg: AggregateIR, op: OperationIR, pad: string): string[] {
   if (!op.when) return [];
   const pred = renderTsExpr(op.when, { thisName: "aggregate" });
@@ -1408,16 +1446,21 @@ function emitOperationRoute(
   out.push(`    recordDomainOperation("${agg.name}", "${op.name}");`);
   // When the operation body references `currentUser`, the aggregate
   // method's signature picks up a trailing `currentUser: User`
-  // parameter (see operationUsesCurrentUser).  The route reads the
+  // parameter (see operationBodyUsesCurrentUser).  The route reads the
   // user from the request scope where the auth middleware stashed it
   // earlier in the pipeline; without `auth: required` on the
   // deployable, the validator already prevents currentUser from
   // appearing in operation bodies, so this branch is dead.
-  const usesUser = operationUsesCurrentUser(op);
+  //
+  // The hoisted authorization gate needs the same binding even when the
+  // remaining body doesn't — the gate is evaluated HERE now, not inside the
+  // method — so the principal is bound for either reason and passed on only
+  // when the method still declares the parameter.
+  const usesUser = operationBodyUsesCurrentUser(op);
   // The operation body reads the typed `currentUser` only when it references
   // it directly; lifecycle stamps no longer thread the principal through the
   // handler (stamped persist-time in the drizzle save()).
-  if (usesUser) {
+  if (usesUser || operationGatesUseCurrentUser(op)) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
@@ -1447,6 +1490,7 @@ function emitOperationRoute(
         `    const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
       );
     }
+    out.push(...requiresGateLines(op, "    ", ctx));
     out.push(...whenGateLine(agg, op, "    "));
     out.push(...mutation("    "));
     out.push(
@@ -1481,6 +1525,7 @@ function emitOperationRoute(
         `      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
       );
     }
+    out.push(...requiresGateLines(op, "      ", ctx));
     out.push(...whenGateLine(agg, op, "      "));
     if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
@@ -1638,8 +1683,8 @@ function emitReturningOperationRoute(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
   out.push(`    recordDomainOperation("${agg.name}", "${op.name}");`);
-  const usesUser = operationUsesCurrentUser(op);
-  if (usesUser) {
+  const usesUser = operationBodyUsesCurrentUser(op);
+  if (usesUser || operationGatesUseCurrentUser(op)) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
@@ -1647,6 +1692,7 @@ function emitReturningOperationRoute(
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+  out.push(...requiresGateLines(op, "    ", ctx));
   out.push(...whenGateLine(agg, op, "    "));
   // Lifecycle stamps are applied persist-time in the drizzle save()
   // (node-persist-time-auditing) — the handler no longer stamps.

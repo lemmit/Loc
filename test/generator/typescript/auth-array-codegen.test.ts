@@ -29,9 +29,14 @@ system AuthArray {
           requires currentUser.role == "admin"
           active := false
         }
-        test "deactivating requires admin" {
+        // A DOMAIN-tier test can no longer assert the authorization gate: the
+        // gate is hoisted to the caller (op-gates.ts), so the entity method
+        // just runs.  Authorization is asserted at the api tier, where the 403
+        // actually happens.  This test asserts the state change instead.
+        test "deactivating clears the active flag" {
           let i = Item.create({ name: "x", active: true })
-          expect(i.deactivate()).toThrow()
+          i.deactivate()
+          expect(i.active).toBe(false)
         }
       }
       repository Items for Item { }
@@ -63,22 +68,25 @@ describe("hono backend codegen — showcase regressions", () => {
     expect(schema).not.toMatch(/arrays not supported as inline columns/);
   });
 
-  it("a workflow calling a currentUser-gated op threads currentUser", async () => {
+  it("a workflow calling a gated op evaluates the gate rather than threading a principal", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const wf = findFile(files, /http\/workflows\.ts$/);
-    // The binding is read via the context cast, then threaded into the call.
+    // The binding is still read via the context cast — the gate needs it — but
+    // it is consumed HERE now (op-gates.ts) instead of being handed to the
+    // entity, so the call itself is argument-free.
     expect(wf).toMatch(/const currentUser = \(httpCtx as unknown as \{ get\(k: "currentUser"\)/);
-    expect(wf).toMatch(/item\.deactivate\(currentUser\)/);
+    expect(wf).toMatch(/if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\(/);
+    expect(wf).toMatch(/item\.deactivate\(\);/);
+    expect(wf).not.toMatch(/item\.deactivate\(currentUser\)/);
   });
 
-  it("a domain test calling a currentUser-gated op supplies a synthetic actor", async () => {
+  it("a domain test calls the gated op with no synthetic actor — there is no gate left to satisfy", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const test = findFile(files, /item\.test\.ts$/);
-    // The op's signature gained a trailing `currentUser`; the test has no
-    // auth context, so a full-access actor is passed (cast through unknown so
-    // it stays valid regardless of the system's `user { ... }` shape).
-    expect(test).toMatch(
-      /i\.deactivate\(\{[^}]*role: "admin"[^}]*\} as unknown as import\("\.\.\/auth\/user-types"\)\.User\)/,
-    );
+    // The op's signature no longer takes a principal, so the emitted unit test
+    // stops fabricating one.  Passing the old actor would now be an excess
+    // argument and fail `tsc --noEmit`.
+    expect(test).toMatch(/i\.deactivate\(\)/);
+    expect(test).not.toMatch(/as unknown as import\("\.\.\/auth\/user-types"\)\.User/);
   });
 });

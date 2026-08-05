@@ -16,7 +16,6 @@ import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
   type ExprIR,
-  operationUsesCurrentUser,
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
@@ -29,6 +28,11 @@ import {
   readPortsForOperation,
 } from "../../../ir/util/domain-service-read-ports.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import {
+  operationBodyUsesCurrentUser,
+  operationGates,
+  operationGatesUseCurrentUser,
+} from "../../../ir/util/op-gates.js";
 import {
   camelId,
   opOperation,
@@ -666,7 +670,10 @@ function emitWorkflowRoute(
     sts.some((s) => {
       if (s.kind === "op-call") {
         const o = lookupOp(ctx, s.aggName, s.op);
-        return !!o && operationUsesCurrentUser(o);
+        // Either half can need the binding now: the remaining body (which
+        // still takes the trailing argument) or the hoisted gate rendered at
+        // this call site.
+        return !!o && (operationBodyUsesCurrentUser(o) || operationGatesUseCurrentUser(o));
       }
       if (s.kind === "for-each") return callsUserGatedOp(s.body);
       return false;
@@ -1597,7 +1604,8 @@ export function honoWorkflowStmtTarget(
       ];
     },
     opCall: (st, indent) => {
-      const args = st.args.map(renderArg).join(", ");
+      const renderedArgs = st.args.map(renderArg);
+      const args = renderedArgs.join(", ");
       const op = lookupOp(ctx, st.aggName, st.op);
       // Extern operations (extern (b) Phase 2) re-home to an aggregate-owned
       // hook, so a workflow calls `<target>.<op>(...)` like any other op — the
@@ -1605,9 +1613,27 @@ export function honoWorkflowStmtTarget(
       // A currentUser-gated op takes a trailing `currentUser` argument
       // (appended to the method signature); thread the in-scope binding.
       const callArgs =
-        op && operationUsesCurrentUser(op)
+        op && operationBodyUsesCurrentUser(op)
           ? [args, "currentUser"].filter(Boolean).join(", ")
           : args;
+      // The operation's authorization gate is hoisted out of the entity
+      // (op-gates.ts), so EVERY caller owns it — an inline workflow / explicit
+      // handler op-call included.  Emitting it here is what keeps the hoist
+      // enforcement-neutral instead of silently dropping the check on the
+      // non-HTTP path.  `this` binds to the loaded aggregate var, and a param
+      // ref resolves to the argument expression this very call passes.
+      const gateLines = (op ? operationGates(op) : []).map((g) => {
+        const pred = renderTsExpr(g.expr, {
+          thisName: st.target,
+          paramExpr: (name) => {
+            const i = op!.params.findIndex((q) => q.name === name);
+            return i >= 0 ? renderedArgs[i] : undefined;
+          },
+        });
+        return `${indent}if (!(${pred})) throw new ForbiddenError(${JSON.stringify(
+          `Forbidden: ${g.source}`,
+        )});`;
+      });
       const callLine = `${indent}${st.target}.${lowerFirst(st.op)}(${callArgs});`;
       // Audited op invoked inline → stage an audit_records row bracketing the
       // call with before/after wire snapshots, mirroring the per-operation
@@ -1621,6 +1647,7 @@ export function honoWorkflowStmtTarget(
         const after = `__auditAfter${n}`;
         const c = `__auditCtx${n}`;
         return [
+          ...gateLines,
           `${indent}const ${before} = ${repoVar}.toWire(${st.target});`,
           callLine,
           `${indent}const ${after} = ${repoVar}.toWire(${st.target});`,
@@ -1642,7 +1669,7 @@ export function honoWorkflowStmtTarget(
           `${indent}});`,
         ];
       }
-      return [callLine];
+      return [...gateLines, callLine];
     },
     repoDelete: (st, indent) => {
       // `<Repo>.delete(o)` → `await <repo>.delete(<entity>.id)`.  The generated
