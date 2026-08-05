@@ -43,6 +43,7 @@ on:
       - 'scripts/flutter-table-controls-test.dart'
       - '.github/workflows/generated-flutter-build.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
       # Every phase `generate system` walks, whatever the backend: parse ->
@@ -73,6 +74,10 @@ concurrency:
 
 jobs:
   flutter-build:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

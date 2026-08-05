@@ -43,6 +43,7 @@ on:
       - 'test/e2e/generated-dotnet-build.test.ts'
       - 'test/e2e/fixtures/dotnet-build/**'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       # Every phase `generate system` walks, whatever the backend: parse ->
       # macro expand -> lower -> enrich -> IR validate -> compose, plus the
@@ -76,6 +77,10 @@ concurrency:
 
 jobs:
   build-generated-dotnet:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     # First-run cold restore is ~2min (NuGet pulls EF Core, Mediator,
     # Swashbuckle, FluentValidation).  Warm runs with the NuGet cache

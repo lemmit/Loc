@@ -21,7 +21,9 @@ name: PR gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    # `ready_for_review` re-arms the gate when a draft flips ready — that flip
+    # is what fires the draft-gated fan-out, and pr-gate must wait for it.
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
 
 permissions:
   checks: read

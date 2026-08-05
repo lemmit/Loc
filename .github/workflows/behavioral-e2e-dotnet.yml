@@ -34,6 +34,7 @@ on:
       - 'package.json'
       - '.github/workflows/behavioral-e2e-dotnet.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'src/ir/**'
       - 'src/generator/dotnet/**'
@@ -59,6 +60,10 @@ concurrency:
 
 jobs:
   behavioral-dotnet:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

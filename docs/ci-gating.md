@@ -119,6 +119,46 @@ list and follow the merge-queue runbook below instead — the queue subsumes
 it and adds what pr-gate cannot: gating the *rebased combination* of
 concurrent PRs.
 
+## Draft PRs and the runner queue
+
+The account's GitHub-hosted runner pool allows ~20 concurrent jobs
+(Free plan), and a substantive PR push fires 30–50 jobs across the fan-out.
+With this repo's claim-first culture — every PR *starts* as a draft and
+pushes repeatedly while in progress — draft pushes were the bulk of the
+queue load, and the queue was the bulk of CI latency (jobs have sat queued
+for an hour before starting).
+
+So the fan-out is **draft-gated**: on a draft PR only the fast lane runs —
+`test.yml` (the required floor), `langium-generated`, `workflow-lint`, and
+`pr-gate` (which waits on whatever ran). Every other per-PR workflow carries
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+jobs:
+  <entry-job>:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+```
+
+Marking the PR **ready for review** fires the full fan-out (that's what the
+`ready_for_review` type is for), and every push after that runs it too. The
+`if` sits only on entry jobs — `needs:`-chained jobs cascade-skip, and the
+`<stem>-passed` rollups treat skipped needs as OK, exactly as in the merge
+queue. `pr-gate` also triggers on `ready_for_review`, so its verdict always
+covers the full set. Drafts can't merge anyway, so nothing is lost — a
+draft gets fast feedback, and "ready" means "now spend the fleet on me."
+
+The label-gated heavy workflows (`run-obs`, `run-oidc`, …) are deliberately
+NOT draft-gated: applying the label to a draft is an explicit request and
+still works.
+
+One deliberate side effect of the slot economy: `test.yml`'s `web-tsc` job
+was folded into its `lint` job (`lint + web-tsc`) — each half was ~1 minute
+of mostly-install, and a runner slot is the scarce resource here, not
+wall-clock. The playground typecheck + DDL guard thereby joined the
+`tests passed` rollup, which only makes the floor stricter.
+
 ## Enabling the merge queue (the structural fix)
 
 A merge queue runs the required checks on the **rebased** merge candidate
