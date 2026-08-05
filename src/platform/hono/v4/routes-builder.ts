@@ -55,8 +55,10 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoneyDeep,
+  exprUsesCurrentUser,
   findGateUsesCurrentUser,
   findUsesCurrentUser,
+  lifecycleRouteGuards,
   operationIsGuarded,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
@@ -432,6 +434,11 @@ export function buildRoutesFile(
   // action (validator-enforced); without one it exposes no POST route (rather
   // than calling the suppressed field-based factory).
   const emitCreate = emitsRestCreate(agg);
+  // The canonical create's authorization gate.  Empty on an EVENT-SOURCED
+  // aggregate by construction (`canonicalCreate` is null there and the create
+  // action's body is rendered into the domain `_init` instead) — so the ES arm
+  // keeps today's bytes and its guard is not run twice.
+  const createGuards = lifecycleRouteGuards(agg, agg.canonicalCreate);
   // Unified create-input shape: `{ name, type, optional, default }`.  ES
   // takes the create action's params (no defaults); state takes the
   // create-input field set (server-controlled fields excluded).
@@ -698,6 +705,13 @@ export function buildRoutesFile(
     lines.push(
       `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
+    // The canonical create's `requires` gate — 403, in ascending order with
+    // the rest.  Kept in lockstep with `errorStatuses("create", guarded)`.
+    if (createGuards.length > 0) {
+      lines.push(
+        `        403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      );
+    }
     lines.push(
       `        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
@@ -714,12 +728,24 @@ export function buildRoutesFile(
     const serverDefaulted = requiredFields.filter(
       (f) => f.default !== undefined && isServerSourcedDefault(f.default),
     );
-    // A `currentUser.*` default needs the ambient principal bound (a bare
-    // `now()` does not) — the same accessor the `/prepare` route uses.
-    if (serverDefaulted.some((f) => !(f.default!.kind === "literal" && f.default!.lit === "now"))) {
+    // The ambient principal — bound ONCE for whichever of the two consumers
+    // needs it: a `currentUser.*` default (a bare `now()` does not), or the
+    // create's `requires` gate.  Two separate `const currentUser` pushes would
+    // be a redeclaration (TS2451) on an aggregate that has both.
+    if (
+      serverDefaulted.some((f) => !(f.default!.kind === "literal" && f.default!.lit === "now")) ||
+      createGuards.some(exprUsesCurrentUser)
+    ) {
       lines.push(
         `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
       );
+    }
+    // The gate runs BEFORE the factory: a create guard has no `this` to read
+    // (there is no instance yet), so it sees the principal only — the
+    // validator rejects a create guard reading a create param, which the
+    // field-derived body has no slot for.  ForbiddenError → 403 via onError.
+    for (const g of createGuards) {
+      lines.push(`      if (!(${renderTsExpr(g)})) throw new ForbiddenError("Forbidden");`);
     }
     // Wrap each wire-shape field into the typed factory argument (brand
     // ids, instantiate value objects).  Avoids `as never` and lets
@@ -922,6 +948,7 @@ export function buildRoutesFile(
   // unchanged.  crudish's destroy is empty-bodied — load (404 guard),
   // then hard-delete (children/join rows cascade via FK).
   if (agg.canonicalDestroy) {
+    const destroyGuards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
     // FK-restrict conflict status resolved through the `httpStatus` mapper
     // (M-T3.4a) — `ReferencedInUse`, 409 by default. Drives both the OpenAPI
     // declaration and the runtime arm below so they can't drift.
@@ -938,6 +965,13 @@ export function buildRoutesFile(
     lines.push(`      request: { params: z.object({ id: z.string().uuid() }) },`);
     lines.push(`      responses: {`);
     lines.push(`        204: { description: "No Content" },`);
+    // The canonical destroy's `requires` gate — 403.  Kept in lockstep with
+    // `errorStatuses("destroy", guarded)`.
+    if (destroyGuards.length > 0) {
+      lines.push(
+        `        403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      );
+    }
     lines.push(
       `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
@@ -951,7 +985,25 @@ export function buildRoutesFile(
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const { id } = c.req.valid("param");`);
-    if (!auditDestroy) {
+    if (destroyGuards.length > 0) {
+      // Guarded destroy: the row loads FIRST — unlike a create guard, a
+      // destroy guard may read `this`, and the route already loads for the
+      // 404 probe, so the same read feeds the gate.  404 (unreachable)
+      // therefore wins over 403 (unauthorized).  The load sits outside the
+      // FK-violation try, and outside the audit transaction, so the gate runs
+      // before any audit row is staged.
+      lines.push(`      const __loaded = await repo.getById(Ids.${agg.name}Id(id));`);
+      if (destroyGuards.some(exprUsesCurrentUser)) {
+        lines.push(
+          `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+        );
+      }
+      for (const g of destroyGuards) {
+        lines.push(
+          `      if (!(${renderTsExpr(g, { thisName: "__loaded" })})) throw new ForbiddenError("Forbidden");`,
+        );
+      }
+    } else if (!auditDestroy) {
       // Non-audited: the not-found probe stays OUTSIDE the FK-violation
       // try, byte-identical to the pre-audit baseline.  getById throws
       // AggregateNotFoundError (→ 404) when absent.

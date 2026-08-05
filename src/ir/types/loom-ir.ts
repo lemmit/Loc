@@ -3997,6 +3997,44 @@ export function operationIsGuarded(op: OperationIR): boolean {
   return op.statements.some((s) => s.kind === "requires");
 }
 
+/** The `requires` guard expressions of a canonical lifecycle action
+ *  (`create` / `destroy`), in declaration order; empty when the action is
+ *  absent or unguarded.
+ *
+ *  Lifecycle guards render in the ROUTE, not the domain layer — the
+ *  precedent is the find gate every backend already emits.  A `create`
+ *  guard has no `this` to read (there is no instance until the factory
+ *  runs; lowering resolves its refs to `current-user` / `param` only), and
+ *  a `destroy` has no domain method at all — but both routes already have
+ *  the request principal, and the destroy route already loads the row, so
+ *  the route is the one place that can evaluate either.  Wire-identical to
+ *  the operation path: both end at 403. */
+export function lifecycleGuards(action: OperationIR | null | undefined): ExprIR[] {
+  return (action?.statements ?? []).flatMap((s) => (s.kind === "requires" ? [s.expr] : []));
+}
+
+/** The lifecycle guards a ROUTE must render, which is `lifecycleGuards` minus
+ *  the event-sourced case.
+ *
+ *  An `eventLog` aggregate's create body IS rendered — into the domain factory
+ *  (`_init` / the fold), the documented exemption from `loom.lifecycle-body-
+ *  dropped` — so its `requires` already raises there.  `canonicalCreate` is
+ *  populated for an ES aggregate too (any unnamed `create` sets it), so a
+ *  backend reading `lifecycleGuards` directly would evaluate the predicate a
+ *  SECOND time in the route.
+ *
+ *  Declarations use this too, not `lifecycleGuards`: whether the ES domain-side
+ *  guard is reachable at all (it has no principal in scope) is a separate,
+ *  pre-existing question, and publishing a 403 no backend has been shown to
+ *  answer is the declared-vs-actual drift the shared table exists to remove. */
+export function lifecycleRouteGuards(
+  agg: Pick<AggregateIR, "persistedAs">,
+  action: OperationIR | null | undefined,
+): ExprIR[] {
+  if (agg.persistedAs === "eventLog") return [];
+  return lifecycleGuards(action);
+}
+
 /** True when the workflow has at least one `requires` guard — same 403
  *  contract as a guarded operation. */
 export function workflowIsGuarded(wf: WorkflowIR): boolean {

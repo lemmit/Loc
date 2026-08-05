@@ -29,7 +29,11 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  type ExprIR,
+  exprUsesCurrentUser,
+  lifecycleRouteGuards,
+} from "../../../ir/types/loom-ir.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
@@ -310,6 +314,14 @@ function renderController(
   // which the validator requires when a principal filter is present) and threads
   // it into the context reads.  Non-principal aggregates stay byte-identical.
   const principal = aggregateUsesPrincipalContextFilter(agg);
+  // The canonical `create` / `destroy` authorization gates.  Both render in the
+  // CONTROLLER: this backend's context `create_<agg>` / `delete_<agg>` are bare
+  // `defdelegate`s to the repository with no guard seam, and the controller is
+  // where `conn.assigns.current_user` lives.  The action keeps its existing body
+  // verbatim inside a private `__<verb>_authorized/2`, so the gate is a wrapper
+  // rather than a re-indent of every arm.
+  const createGuards = lifecycleRouteGuards(agg, agg.canonicalCreate);
+  const destroyGuards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
   const cuBind = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const listArg = principal ? "current_user" : "";
   const getActor = principal ? ", current_user" : "";
@@ -508,7 +520,7 @@ ${cuBind}    case ${ctxModule}.${cmdGet}(id${getActor}) do
   // M-T9.11 wire-golden differential to surface it.  The string-keyed map
   // matches the serializer's own `"id" => …` entry, so the id's wire form is
   // identical on the create and read paths.
-  const createAction = !emitsRestCreate(agg)
+  const createActionBody = !emitsRestCreate(agg)
     ? ""
     : auditCreate
       ? `  def create(conn, params) do
@@ -568,6 +580,25 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
     end
   end`;
 
+  // The create gate: principal-only (no instance exists yet), so it is a plain
+  // wrapper around the action above, which is renamed to a private fn.
+  const createAction =
+    createGuards.length === 0
+      ? createActionBody
+      : `  def create(conn, params) do
+${createGuards.some(exprUsesCurrentUser) ? "    current_user = Map.get(conn.assigns, :current_user)\n" : ""}    if ${createGuards
+          .map((g: ExprIR) => `(${renderElixirExpr(g)})`)
+          .join(" and ")} do
+      __create_authorized(conn, params)
+    else
+      ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+        `Forbidden: create ${aggPascal}`,
+      )})
+    end
+  end
+
+${createActionBody.replace("  def create(conn, params) do", "  defp __create_authorized(conn, params) do")}`;
+
   // FK-restrict destroy conflict (M-T3.4a) — deleting a still-referenced
   // aggregate trips a Postgres foreign_key_violation (23503; a cross-aggregate
   // `X id` FK is ON DELETE RESTRICT), which `Repo.delete/1` raises as
@@ -598,7 +629,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
   // dead code the router never routed to (audit: dead hard-`delete`).  Gated on
   // the SAME `emitsRestDelete` predicate the router (above) and the context /
   // repository seams use.
-  const deleteAction = !emitsRestDelete(agg)
+  const deleteActionBody = !emitsRestDelete(agg)
     ? ""
     : auditDestroy
       ? `  def delete(conn, %{"id" => id}) do
@@ -642,6 +673,31 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
         ProblemDetails.validation_error_response(conn, changeset)
     end${fkRestrictRescue}
   end`;
+
+  // The destroy gate loads FIRST — unlike a create guard it may read `this` —
+  // so an unreachable row still 404s before the 403.  The authorized body
+  // reloads inside its own `with`; one extra by-id read buys a wrapper that
+  // leaves every existing arm (audit transaction, FK rescue) untouched.
+  const deleteAction =
+    destroyGuards.length === 0
+      ? deleteActionBody
+      : `  def delete(conn, %{"id" => id}) do
+${destroyGuards.some(exprUsesCurrentUser) && !principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : cuBind}    case ${ctxModule}.${cmdGet}(id${getActor}) do
+      {:ok, record} ->
+        if ${destroyGuards.map((g: ExprIR) => `(${renderElixirExpr(g, { thisName: "record", contextModule: ctxModule })})`).join(" and ")} do
+          __delete_authorized(conn, %{"id" => id})
+        else
+          ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
+            `Forbidden: destroy ${aggPascal}`,
+          )})
+        end
+
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+    end
+  end
+
+${deleteActionBody.replace('  def delete(conn, %{"id" => id}) do', '  defp __delete_authorized(conn, %{"id" => id}) do')}`;
 
   // Optimistic concurrency (`versioned` capability, D-VERSIONED).  The update
   // reads the client's expected version from the `if-match` request header

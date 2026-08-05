@@ -21,6 +21,7 @@ import {
   findGateUsesCurrentUser,
   findUsesCurrentUser,
   type InvariantIR,
+  lifecycleRouteGuards,
   type OperationIR,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -267,6 +268,9 @@ export function buildPyRoutesFile(
       emittableFinds(repo).some(findUsesCurrentUser) ||
       // A find `requires` gate that reads currentUser binds `current_user: User`.
       emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
+      // …and so does a lifecycle (`create` / `destroy`) `requires` gate.
+      lifecycleRouteGuards(agg, agg.canonicalCreate).some(exprUsesCurrentUser) ||
+      lifecycleRouteGuards(agg, agg.canonicalDestroy).some(exprUsesCurrentUser) ||
       (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
       (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
       // A `currentUser.*` create-field default binds `current_user: User` in
@@ -749,6 +753,13 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     const args = esCreate.params
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
+    // The ES arm is untouched, declaration included.  An event-sourced create's
+    // body IS rendered (into the domain `_init`) — the documented exemption
+    // from `loom.lifecycle-body-dropped` — so a route gate here would run the
+    // predicate a SECOND time.  Whether that domain-side guard is reachable at
+    // all (it has no principal in scope) is a separate, pre-existing question,
+    // and declaring a 403 nothing has been shown to answer is exactly the
+    // declared-vs-actual drift this table exists to remove.
     return lines(
       `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
@@ -787,15 +798,26 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       !(f.default.kind === "literal" && f.default.lit === "now"),
   );
   const stampUsesPrincipal = stampUsesUser(agg, "create") || defaultUsesPrincipal;
+  // The canonical `create`'s `requires` gates the POST BEFORE the factory runs
+  // — there is no instance to read yet, so the guard sees only the principal
+  // (the validator rejects a create guard reading a create param, which the
+  // field-derived request body has no slot for).  Denial → ForbiddenError → 403,
+  // the same rung the find gate and the operation gate land on.
+  const guards = lifecycleRouteGuards(agg, agg.canonicalCreate);
+  const needsUser = stampUsesPrincipal || guards.some(exprUsesCurrentUser);
   const sig = [
     `body: Create${agg.name}Request`,
-    ...(stampUsesPrincipal ? ["request: Request"] : []),
+    ...(needsUser ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", guards.length > 0)})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
-    stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
+    needsUser ? "    current_user: User = request.state.current_user" : null,
+    ...guards.flatMap((g) => [
+      `    if ${renderPyNegatedGuard(g)}:`,
+      `        raise ForbiddenError(${JSON.stringify(`Forbidden: create ${agg.name}`)})`,
+    ]),
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
     auditCreate ? "    repo = _repo(session)" : null,
@@ -902,13 +924,26 @@ function destroyRoute(agg: EnrichedAggregateIR, resolve: (name: string) => numbe
         "    )",
       ]
     : [];
+  // The canonical `destroy`'s `requires` gates the DELETE after the row loads —
+  // unlike a create guard it may read `this`, and the route already loads the
+  // aggregate (reachability), so `__loaded` is the receiver.  404 (unreachable)
+  // therefore wins over 403 (unauthorized), matching the operation routes.
+  const guards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
+  const guarded = guards.length > 0;
+  const bindLoaded = auditDestroy || guarded;
+  const gateUsesUser = guards.some(exprUsesCurrentUser);
   return lines(
-    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy", false, [], resolve)})`,
+    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy", guarded, [], resolve)})`,
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
-    auditDestroy
+    bindLoaded
       ? `    __loaded = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`
       : `    await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
+    gateUsesUser ? "    current_user: User = request.state.current_user" : null,
+    ...guards.flatMap((g) => [
+      `    if ${renderPyNegatedGuard(g, { thisName: "__loaded" })}:`,
+      `        raise ForbiddenError(${JSON.stringify(`Forbidden: destroy ${agg.name}`)})`,
+    ]),
     auditDestroy ? "    __before = repo.to_wire(__loaded)" : null,
     ...destroyAuditCall,
     "    try:",

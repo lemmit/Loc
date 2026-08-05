@@ -17,8 +17,9 @@
 // runtime).  `guarded` is the same predicate on every backend
 // (`operationIsGuarded` / `workflowIsGuarded`), so the three emitters stay
 // in lockstep.
-//   create  (POST /<aggs>)            → 400, 422  (domain / validation)
+//   create  (POST /<aggs>)            → 400, [403 if guarded], 422
 //   getById (GET  /<aggs>/{id})       → 404  (not found)
+//   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409
 //   operation (POST /<aggs>/{id}/op)  → 400, [403 if guarded], 404, 422
 //   find (optional return)            → 404
 //   workflow (POST /workflows/<wf>)   → 400, [403 if guarded], 422
@@ -79,15 +80,20 @@ export function errorStatuses(
 ): number[] {
   const referencedInUse = resolve?.("ReferencedInUse") ?? 409;
   switch (kind) {
+    // A `requires` in the canonical `create` gates the POST before the
+    // factory runs (there is no instance to read yet, so the guard sees
+    // only `currentUser` + the create params) — 403 on denial.
     case "create":
-      return [400, 422];
+      return guarded ? [400, 403, 422] : [400, 422];
     case "getById":
       return [404];
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
     // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
     // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
+    // A `requires` in the canonical `destroy` gates it after the row loads
+    // (the guard may read `this`), so 403 lands between the two.
     case "destroy":
-      return [404, referencedInUse];
+      return guarded ? [403, 404, referencedInUse] : [404, referencedInUse];
     case "operation":
       return guarded ? [400, 403, 404, 422] : [400, 404, 422];
     case "workflow":

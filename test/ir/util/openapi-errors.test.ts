@@ -42,21 +42,25 @@ describe("errorStatuses — shared error matrix", () => {
     expect(errorStatuses("findSingle", true)).toEqual([403]);
   });
 
+  it("a guarded lifecycle action declares 403 too", () => {
+    // The open question this assertion used to record is settled: the answer
+    // was the WORSE of the two options.  A `requires` inside a canonical
+    // `create` / `destroy` parsed, lowered, and then reached no emitter at all
+    // — the guard did not run, and the route was left open while the source
+    // said the opposite.  All five backends now render it (create: before the
+    // factory, principal-only; destroy: after the row loads, so it may read
+    // `this`), so the declaration follows.
+    expect(errorStatuses("create", true)).toEqual([400, 403, 422]);
+    expect(errorStatuses("destroy", true)).toEqual([403, 404, 409]);
+  });
+
   it("guarded stays inert for the remaining kinds", () => {
     // `list` is the auto-`findAll` — synthesized, so it has no `requires` of
-    // its own.  `getById` is a canonical route with no guard clause.
-    //
-    // `create` / `destroy` are NOT settled.  The grammar accepts a `requires`
-    // STATEMENT inside a canonical `create(...)` body (it parses), but the
-    // emitted create route neither renders the guard nor declares 403 — so
-    // either the guard is enforced in the domain layer (making this the same
-    // under-declaration the find kinds just had) or it is silently dropped
-    // (worse).  Not investigated here, and deliberately not asserted as
-    // "can't carry a guard": that phrasing is what let the find case sit in
-    // this list for so long.  Whoever settles it changes THIS assertion.
-    expect(errorStatuses("create", true)).toEqual([400, 422]);
+    // its own.  `getById` is a canonical route with no guard clause.  Stated
+    // as an observation about these two ROUTES, not as a claim that a guard is
+    // inexpressible — that phrasing is what let the find case (and then the
+    // lifecycle case) sit in this list unexamined.
     expect(errorStatuses("getById", true)).toEqual([404]);
-    expect(errorStatuses("destroy", true)).toEqual([404, 409]);
     expect(errorStatuses("list", true)).toEqual([]);
   });
 

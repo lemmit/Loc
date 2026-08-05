@@ -601,6 +601,72 @@ if (!(currentUser.role === "agent")) throw new ForbiddenError("Forbidden");
 const result = await repo.openOnes();
 ```
 
+### Lifecycle `requires` gates — canonical `create` / `destroy`
+
+The two lifecycle actions take the same clause, and the two halves are **not**
+the same gate — they run in different places because they have different things
+to read:
+
+```ddd
+aggregate Shipment {
+  reference: string
+  quantity: int = 0
+
+  // No `this` exists yet — principal-only.
+  create(reference: string) {
+    requires currentUser.permissions.contains(permissions.manage)
+  }
+
+  // The row is loaded first, so the guard may read it.
+  destroy {
+    requires currentUser.permissions.contains(permissions.manage) && quantity == 0
+  }
+}
+```
+
+- **`create`** — evaluated **before** the factory runs, so it sees the request
+  principal and nothing else.  A create guard that reads a create **parameter**
+  is rejected (`loom.lifecycle-body-dropped`): the emitted `POST /<aggs>` takes
+  the field-derived create input, not the declared parameter list, so there is
+  no wire slot to read the value from, and half-rendering an authorization
+  predicate is worse than refusing it.  A value check belongs in a
+  `precondition` on a named `operation`.
+- **`destroy`** — evaluated **after** the by-id load the route already does for
+  its 404 probe, against **that** row.  So an unreachable id still answers 404
+  rather than 403, matching the operation routes.
+
+Both emit `403` on all five backends, and `errorStatuses("create"/"destroy",
+true)` declares it, so a generated client types the denial instead of treating
+its own callee's authorization decision as an unexpected throw.
+
+```py
+# generated (FastAPI) — create: gate, then construct
+async def create_shipment(body: CreateShipmentRequest, request: Request, session: SessionDep):
+    current_user: User = request.state.current_user
+    if "ops.manage" not in current_user.permissions:
+        raise ForbiddenError("Forbidden: create Shipment")
+    created = Shipment.create(reference=body.reference, quantity=body.quantity)
+```
+
+```py
+# generated (FastAPI) — destroy: load, then gate against the loaded row
+async def destroy_shipment(id: ..., request: Request, session: SessionDep):
+    repo = _repo(session)
+    __loaded = await repo.get_by_id(ShipmentId(id))
+    current_user: User = request.state.current_user
+    if not ("ops.manage" in current_user.permissions and __loaded.quantity == 0):
+        raise ForbiddenError("Forbidden: destroy Shipment")
+```
+
+An **event-sourced** create is the one exception to the placement rule: its body
+already renders into the domain factory (`_init` / the fold), so the guard runs
+there and the route does not re-run it.
+
+The rest of the canonical body — `precondition`, `emit`, and an `assign` whose
+value the field-derived input does not already supply — is **still dropped** on
+a state-based aggregate, and `loom.lifecycle-body-dropped` says so rather than
+letting it vanish.
+
 ### UI gate — `page { requires <expr> }`
 
 A `page` carries the same `requires <expr>` clause (page-metamodel §4).  On a

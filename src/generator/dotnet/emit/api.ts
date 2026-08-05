@@ -70,6 +70,13 @@ export interface ControllerShape {
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
+  /** The canonical `create` / `destroy` carries a `requires` guard → the
+   *  action declares 403.  The gate itself lives in the command HANDLER
+   *  (`lifecycleGate` in cqrs/commands.ts), which is where the principal and
+   *  (for destroy) the loaded aggregate both are; only the DECLARATION is
+   *  here, kept in lockstep with `errorStatuses(<kind>, guarded)`. */
+  createGuarded?: boolean;
+  destroyGuarded?: boolean;
   publicOps: Array<{
     name: string;
     routeSlug?: string;
@@ -364,7 +371,7 @@ export function renderController(
         ? [
             "    [HttpPost]",
             `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
-            ...producesProblem("create"),
+            ...producesProblem("create", shape.createGuarded === true),
             `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
             "    {",
             // VO-invariant → 422: validate the wire request (safe DTO) BEFORE
@@ -439,7 +446,7 @@ export function renderController(
         ? [
             '    [HttpDelete("{id}")]',
             "    [ProducesResponseType(204)]",
-            ...producesProblem("destroy", false, "    ", resolveStruct),
+            ...producesProblem("destroy", shape.destroyGuarded === true, "    ", resolveStruct),
             `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
             // EF wraps a Postgres foreign_key_violation in DbUpdateException
