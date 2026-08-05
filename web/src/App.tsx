@@ -1067,17 +1067,27 @@ export default function App(): JSX.Element {
    *  Both close the same way: a click waits out the pass that is already
    *  running, so it always bundles the BEST available input instead of
    *  whichever one happened to be published when it arrived. */
-  const generateInFlightRef = useRef<Promise<GenerateResult | null> | null>(null);
+  const generateInFlightRef = useRef<Promise<unknown> | null>(null);
 
-  function runGenerateStep(): Promise<GenerateResult | null> {
-    const p = runGenerateStepInner().finally(() => {
-      if (generateInFlightRef.current === p) generateInFlightRef.current = null;
+  /** Register `p` as the generate CYCLE currently in flight.
+   *
+   *  The scope matters and I got it wrong once: tracking `runGenerateStep`
+   *  alone is not enough.  `btn-generate` runs `runGenerate(true)`, and the
+   *  map-carrying tree a boot bundle needs is only assembled AFTER that step
+   *  resolves — `persistGeneratedTree` merges the workspace and
+   *  `overlaySourcemapArtifacts` re-attaches the `.ts.map` sidecars, then
+   *  `publishBundleInput` records the result.  Awaiting the step stops one
+   *  stage early and hands `runBundle` the un-overlaid tree every time, which
+   *  turned `devtools-sourcemap`'s "-1" from intermittent into certain. */
+  function trackGenerate<T>(p: Promise<T>): Promise<T> {
+    const tracked = p.finally(() => {
+      if (generateInFlightRef.current === tracked) generateInFlightRef.current = null;
     });
-    generateInFlightRef.current = p;
-    return p;
+    generateInFlightRef.current = tracked;
+    return tracked;
   }
 
-  async function runGenerateStepInner(): Promise<GenerateResult | null> {
+  async function runGenerateStep(): Promise<GenerateResult | null> {
     const client = buildClientRef.current;
     if (!client) return null;
     // Wait out any in-flight workspace seed so the multi-file example's
@@ -1366,7 +1376,11 @@ export default function App(): JSX.Element {
     }
   }
 
-  async function runGenerate(persist = false): Promise<void> {
+  function runGenerate(persist = false): Promise<void> {
+    return trackGenerate(runGenerateInner(persist));
+  }
+
+  async function runGenerateInner(persist = false): Promise<void> {
     const epoch = generationEpochRef.current;
     const result = await runGenerateStep();
     let bundleGen: GenerateResult | null = result;
@@ -1399,21 +1413,25 @@ export default function App(): JSX.Element {
   runGenerateRef.current = () => runGenerate();
 
   async function runBundle(): Promise<void> {
-    // The button is enabled off `generateSuccess`, so this must never
-    // disagree with it.  `lastBundleReadyRef` is the PREFERRED input — it
-    // carries the sourcemapped / merged tree — but falling back to the
-    // pipeline's own successful generate is what makes "the button is
-    // enabled" and "the click does something" the same condition, instead of
-    // two that have to be kept in sync by hand.  They drifted once already;
-    // see `publishBundleInput`.
-    // Wait out a generate that is still running its sourcemap pass, so the
-    // boot bundle gets the map-carrying tree rather than the provisional one
-    // published at `GENERATE_DONE`.  Typically ~0.7s; the provisional value
-    // remains the floor if the generate rejects (a build-worker respawn), so
-    // this can delay a bundle but can never prevent one.
+    // Wait out the generate CYCLE that is still running, so the boot bundle
+    // is built from the map-carrying tree that cycle is about to publish
+    // rather than from whatever happened to be in the ref when the click
+    // arrived.  `GENERATE_DONE` — which paints "generated N file(s)" and
+    // enables this button — lands well before the cycle finishes: it is
+    // followed by a second, sourcemap-carrying generate and (on the persist
+    // path) `persistGeneratedTree`'s merge + overlay.  Measured at ~0.7s on
+    // an idle machine and seconds on a loaded CI runner; a click inside that
+    // window used to read `null` and do NOTHING AT ALL, which is what hung
+    // every `heavy-preview` spec for its full 600s ceiling.
+    //
+    // Deliberately NO fallback to `generateSuccess` if the ref is still
+    // empty: that is the flag-off tree with no inline `.ddd` maps, so
+    // bundling it yields a boot bundle whose map stops at the generated
+    // `.ts` — `devtools-sourcemap.spec.ts`'s "-1".  Substituting a worse
+    // input for a wait we have already done buys nothing.
     const inFlight = generateInFlightRef.current;
     if (inFlight) await inFlight.catch(() => undefined);
-    const gen = lastBundleReadyRef.current ?? generateSuccess;
+    const gen = lastBundleReadyRef.current;
     if (!gen?.ok || gen.files.length === 0) return;
     const result = await runBundleStep(gen);
     if (liveModeRef.current && result?.hono.ok) {
@@ -1440,7 +1458,11 @@ export default function App(): JSX.Element {
   // Preview (or Backend when there's no React deployable to render).
   // On any failure the user is left on their current tab; the
   // Problems tab carries a red-dot indicator for errors.
-  async function runFull(): Promise<void> {
+  function runFull(): Promise<void> {
+    return trackGenerate(runFullInner());
+  }
+
+  async function runFullInner(): Promise<void> {
     // Phase markers bracket the whole cascade.  They are the ONLY record that
     // survives a renderer kill — no error fires, no `pagehide`, so the ring's
     // async capture never runs.  `runBundleStep`/`runBootStep` narrow the
