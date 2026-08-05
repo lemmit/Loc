@@ -123,7 +123,10 @@ Sources: found 2026-07-30 auditing the archived proposal corpus for unmapped wor
 
 ## M-T6.22 — Drain the M-T9.11 differential findings (RS-11/RS-12) — `done` (2026-07-28) · **M** · P2
 
-## M-T6.24 — Elixir: the two remaining untyped denial edges — `open` · **S** · P3 ⭐ one is an info leak
+## M-T6.24 — Elixir: the two remaining untyped denial edges — `done` · **S** · P3 ⭐ one is an info leak
+**DONE (2026-08-01).** Both residues closed. (1) the untyped `{:error, reason}` tail now answers a sanitized **500 + `"internal"`** instead of 400 + `inspect(reason)`, via a shared `respondErrorTail` in `denial.ts`; `_reason` is bound underscore-prefixed because a plain `reason` is an unused variable under `--warnings-as-errors`. (2) `dispatch-emit.ts`'s `requires` no longer throws a bare `:forbidden` atom — **the catch site was checked first and there isn't one** (the throw propagates out of the reactor's `handle/1`, which the Dispatcher calls untrapped), so neither the atom nor its `precondition` sibling's bare string was ever matched on, and both could be unified onto `denialTerm`. Minted as **RS-26**, gated by `test/conformance/internal-fault-parity.test.ts` on all five. Verified by `mix compile --warnings-as-errors` on ten fixtures.
+
+A **second, larger divergence** surfaced while writing that gate — filed as M-T6.25 below.
 Two small, independent residues left after #2300 centralised the vanilla Phoenix denial protocol in `src/generator/elixir/vanilla/denial.ts`. Both are cases the tuple reshape did **not** reach, found by grepping the protocol's edges rather than by a failing test — so nothing currently gates either.
 
 **(1) The untyped `{:error, reason}` fallback answers 400 and `inspect/1`s the term.** The generated `respond/2` renderers (`explicit-handlers-emit.ts`, `workflow-execution-emit.ts`) end with
@@ -276,3 +279,91 @@ projection-sourced shapes first, so their port has a gate. `dotnet build
 
 **Sources:** #2394 (the gate that found it), `corpus-dotnet-dapper-build.test.ts`,
 `dapper-projection-emission.test.ts` (the folded-read precedent this follows).
+Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
+explicitly, with a comment pointing here — deliberately NOT worked around in the
+compiler.
+
+## M-T6.25 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
+Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
+
+The four non-elixir backends install an **app-global** unhandled-exception handler — `app.onError` (hono), `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so *any* unmodelled fault, on any route, in any system, answers the RFC 7807 envelope.
+
+Vanilla Phoenix's sanitized arm exists **only** in the `respond/2` dispatchers that `workflow-execution-emit` / `explicit-handlers-emit` render. **A plain CRUD system emits none at all**, and an unhandled exception falls through to Phoenix's stock `ErrorJSON`:
+
+```elixir
+%{errors: %{detail: Phoenix.Controller.status_message_from_template(template)}}
+```
+
+That is a **different SHAPE, not a different detail**: `{"errors":{"detail":"Internal Server Error"}}` against the other four's `{"type","title","status","detail","instance"}`. A client that parses 7807 gets nothing it can read — so this is a contract break, not a cosmetic one, and it applies to the *most common* system shape (CRUD with no workflow).
+
+**Why no gate sees it.** The M-T9.11 wire golden can't: no shared fixture reaches an unmodelled fault (every error they produce is modelled). `conformance-parity` can't: the spec-diff compares *declared* responses, and this is a runtime fallback nobody declares. RS-26's static gate deliberately shapes its fixture *around* the gap (it carries a workflow) rather than failing on it, with the reason written at the bottom of `test/conformance/internal-fault-parity.test.ts`.
+
+**The work:** give the generated Phoenix app a 7807-shaped error view + `application/problem+json` content-type at the shell level (`src/generator/elixir/vanilla/shell-emit.ts`, `renderVanillaErrorJson`), so the app-global fallback matches the four. Check the `404`/`400` templates at the same time — `ErrorJSON` handles every un-rescued status, not just 500, so the same shape divergence likely applies to a bare unmatched route.
+
+**Verification:** extend `internal-fault-parity.test.ts` to the plain-CRUD fixture (drop the workflow) once closed — the test is written so that is a one-line change. A booted check is better still: hit a route that raises on the generated Phoenix app and read the body.
+
+Sources: found while landing M-T6.24 / RS-26. Relates to RS-22 (the 7807 envelope's exact membership) and M-T9.11 (which is blind here).
+
+## M-T6.26 — The absent-read 404 is three different envelopes — `open` · **M** · P1 ⭐ the RS-28 companion, and the half a string fix can't reach
+Found 2026-08-02 by the M-T9.25 casing/absence census sweep, and it is the **structural** half of what RS-28 fixed as a string.
+
+RS-28 made every backend's 404 `detail` name its resource. That is necessary and not sufficient, because two backends don't emit the envelope RS-28 assumes on their READ paths at all:
+
+| backend | absent `GET /<agg>/{id}` (and `T?` / `T option` / projection show / workflow-instance show) |
+|---|---|
+| node, python, elixir | full RFC 7807 — `type` `title` `status` `detail` `instance` |
+| **dotnet** | `NotFound()` → ASP.NET's `ProblemDetailsFactory` shape: rfc9110 `type`, **no `detail`, no `instance`**, plus a `traceId` extension no other backend sends |
+| **java** | `ResponseEntity.notFound().build()` → **404 with an EMPTY body and no content-type** |
+
+**Both are also intra-backend splits**, which is what makes this M-T9.25's class rather than an ordinary parity gap — each of those two backends already emits the *correct* envelope on its command path, from a hand-built handler, and then contradicts itself on five read sites:
+
+- **.NET** — `Api/DomainExceptionFilter.cs` builds the problem by hand, and `src/generator/dotnet/emit/api.ts` carries a comment explaining that `ControllerBase.Problem(...)` is deliberately avoided *because* the factory "leaves `instance` null and injects a `traceId` extension no other backend sends". That reasoning was applied to one arm. Five siblings still call `NotFound()` and route straight through the factory it names. Nothing in `Program.cs` sets `SuppressMapClientErrors`.
+- **Java** — `ApiExceptionAdvice.onNotFound` emits `application/problem+json` with the full envelope; five sibling read sites return `ResponseEntity.notFound().build()`.
+
+**Corroborating evidence this is real and was never reviewed:** `test/behavioral/response-diff.ts` already carries a normalizer rule for a `traceId` key — and **no backend but .NET can produce one**. A normalizer exists for a divergence no waiver records, because no golden reaches a plain 404.
+
+**The work.** Make the read paths raise the same carrier the command path does (`AggregateNotFoundException` on both), so the one hand-built handler answers every 404 in the app — rather than adding a second construction site. ~5 sites per backend; the carrier and the handler arm both already exist.
+
+**Verification.** The cheap gate is a fixture-level assertion that no read site emits `NotFound()` / `notFound().build()`. The real one is a **golden that exercises `GET /<agg>/{id}` against a missing id** — the wire-golden set has 31 entries and not one reaches a plain 404 (all four of its error entries are declared-error variants ×2, a 409 and a 422), which is precisely why this survived. That golden would gate RS-28's string *and* this envelope forever at zero new CI boot cost.
+
+Sources: M-T9.25 census sweep 3 (casing/absence). Relates to RS-28 (the string half, already fixed), M-T6.25 (the same "one backend, two envelope shapes" defect on elixir's 500), M-T9.11 (blind here for the coverage reason above).
+
+## M-T6.27 — Elixir's named-operation path has no optimistic lock — `open` · **M** · P1 ⭐ silent lost update, not a wire-string divergence
+Found 2026-08-02 by the M-T9.25 409/500 census sweep. **The most severe finding of the three sweeps, and the only one that is a data-correctness bug rather than a contract one.**
+
+On a `versioned` aggregate, four backends answer **409** when two writers race a named operation:
+
+| backend | mechanism |
+|---|---|
+| node | guarded `UPDATE … WHERE version = <expected>` |
+| python | `repo.save(expected_version=…)` |
+| java | `ifMatch` check + Hibernate `@Version` |
+| dotnet | EF concurrency token |
+| **elixir** | **none — the write lands** |
+
+`src/generator/elixir/vanilla/changeset-emit.ts` attaches `optimistic_lock(:version)` only to `update_changeset`, the generic `PUT` seam. The named-operation path does `Ecto.Changeset.change(%{version: record.version + 1})` and calls `persist_change/1`, a bare `Repo.update` with **no `optimistic_lock` and no `StaleEntryError` rescue** — and `src/generator/elixir/vanilla/context-emit.ts` comments this deliberately ("a plain bump, not `optimistic_lock/2`").
+
+So `POST /orders/{id}/cancel` under contention is a **silent lost update** on elixir, where the other four 409. It is also an intra-backend split: the *same aggregate* CAS-guards on `PUT /orders/{id}` and does not on its own operation route.
+
+**Why no gate sees it.** Every existing gate compares emitted *strings* or single-writer responses. A lost update needs two concurrent writers, which no tier runs — the behavioural runners drive one client serially. `conformance-parity` compares declared responses, and elixir declares a 409 it cannot produce, which makes the spec-diff green and is arguably worse than not declaring it.
+
+**The work.** Route the named-operation persist through `optimistic_lock(:version)` and rescue `Ecto.StaleEntryError` into the existing `conflict_response/1`. Read the deliberate comment in `context-emit.ts` first — it may be guarding an ordering constraint the fix has to preserve.
+
+**Verification.** A two-writer concurrency case in the behavioural tier is the only honest gate (fetch version, fire two operation calls, assert exactly one 409). Until that exists, a static assertion that the operation persist path carries `optimistic_lock` on a `versioned` aggregate is the cheap stand-in.
+
+Sources: M-T9.25 census sweep 3 (409/500). Relates to RS-20 (`$.version` on the wire, already waived on java) and M-T9.3 (per-PR runtime boot gates — a concurrency case belongs there).
+
+## M-T6.28 — Node's error ladder reaches three of its five sub-apps — `open` · **M** · P2 ⭐ the node twin of M-T6.25
+Found 2026-08-02 by the M-T9.25 409/500 census sweep.
+
+Node does not install an app-global handler. `api/http/index.ts` mounts five sub-apps with `app.route(...)` and defines **no `onError`**; each router carries its own copy of the ladder. Three consequences, all in one generated app:
+
+1. **Two sub-apps have no ladder at all** — `projections.ts` (built on a bare `new OpenAPIHono()`, not `newApp()`) and `realtime.ts`. A fault there escapes to hono's default handler: **`500`, `content-type: text/plain`, body `Internal Server Error`** — not 7807, wrong content type. A missing projection row therefore answers **500 where the other four answer 404**.
+2. **The two ladders that exist are not the same ladder.** `order.routes.ts` carries eight rungs; `a-routes.ts` (the api-route/extern-handler router — a **write** path, `POST /place`) and `workflows.ts` carry five, and their `problem` signature is literally typed `400 | 403 | 404 | 422 | 500`, so **no 409 is expressible**. They don't even import `DisallowedError` / `ConcurrencyError`. An extern `commandHandler` that saves a versioned aggregate, trips a `unique (…)` index, or invokes a `when`-gated operation answers **`500 / "internal"`** on `/api/place` and **`409`** on `/api/orders/…` — same wire concept, same app, two answers. Reachable exactly as `docs/extern.md` describes the surface.
+3. It is the same root cause as M-T6.25 on elixir — per-router error handling with no app-level floor — so the two should probably be fixed with the same shape of change on both backends.
+
+**The work.** Give the root app in `index.ts` an `onError` carrying the full ladder, so every sub-app inherits a floor whether or not it declares one; then the per-router handlers become refinements rather than the only line of defence. Check whether the narrow `problem` signatures on `a-routes.ts` / `workflows.ts` are load-bearing (they look like a hand-maintained union that drifted from the eight-rung one).
+
+**Verification.** A per-FILE assertion — the `denial-ladder-override-parity` / `problem-arm-census` shape — that every emitted `http/*.ts` router either declares the full ladder or is provably covered by the root one. Joined-output `toContain` cannot see this: a sibling router always satisfies it, which is the trap already documented in both those suites.
+
+Sources: M-T9.25 census sweep 3 (409/500). Twin of M-T6.25; relates to M-T6.26 (the same "read paths answer a different shape from write paths" defect on dotnet/java).

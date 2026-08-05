@@ -759,6 +759,156 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     ],
     tier: "behavioral",
   },
+  {
+    id: "RS-28",
+    title: "An unrecognised error term is a sanitized 500, never a 400 that echoes it",
+    trigger:
+      "an `{:error, <term>}` / thrown fault that no declared error variant, wire-validation failure, or denial rung matches — e.g. a hand-written `extern` handler returning an unmodelled error, or an unexpected fault escaping a workflow's run",
+    observable:
+      'the response is 500 "Internal Server Error" and its RFC 7807 `detail` is the fixed string "internal". TWO claims, both wire-visible. STATUS: an error the server did not model is a SERVER fault, so 4xx is wrong on its face — 400 tells the caller to fix a request that was never the problem. DETAIL: the term is never rendered into the body; a serialized internal value leaks struct names, module paths and sometimes the failing value itself to an unauthenticated caller. MODELLED faults are unaffected — a declared `error` payload, a wire-validation failure, and each denial rung keep their own status and occurrence-specific `detail`; this rule governs only the arm none of them matched.',
+    // Elixir answered 400 and `inspect/1`d the term into `detail`:
+    //
+    //   def respond(conn, {:error, reason}),
+    //     do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
+    //
+    // It survived RS-15's 400 → 422 sweep precisely because it is NOT the
+    // domain floor: RS-15 moved the rejections the domain MAKES, and this is
+    // the rejection nobody made.  Fixed via the shared `respondErrorTail` in
+    // `denial.ts`; `_reason` is bound underscore-prefixed so nothing reads it.
+    //
+    // PYTHON WAS A SECOND, SMALLER DIVERGENCE ON THE SAME ARM, and the way it
+    // was found is the point.  The elixir fix's own report proposed this rule as
+    // all-five-conforming.  That list was INFERRED — checking it showed
+    // node/.NET/java emit the literal `"internal"` while python emitted
+    // `"An unexpected error occurred."`.  Python had no leak (its string was
+    // fixed and reflected nothing), so it was not the defect this rule was
+    // minted for; it simply was not byte-identical, and byte-identity is the
+    // whole premise of the M-T9.11 golden.  Fixed in the same change.
+    //
+    // This was the THIRD time in this rule family that an all-five `conforms`
+    // was asserted from reading rather than checking (RS-18 twice, RS-19 once).
+    // The habit the registry needs is: enumerate the other backends' emitted
+    // literal before writing the list, every time.
+    //
+    // AND IT HAPPENED AGAIN TO THIS VERY RULE — the fourth time, and the most
+    // instructive, because the `conforms` list was corrected once and was STILL
+    // wrong.  The 2026-08-01 pass checked the arm each backend falls through to
+    // and found python's string.  It did not check the arm named in this rule's
+    // own `trigger`: the hand-written `extern` handler.  Node and .NET wrap that
+    // throw in an ExternHandlerError/Exception whose `message` INTERPOLATES the
+    // inner exception, then send the whole thing as `detail`:
+    //
+    //   problem(500, "Internal Server Error", err.message)
+    //   → "Extern handler 'place' on 'Order' threw: <whatever user code threw>"
+    //
+    // In practice that inner message is a driver or HTTP-client exception
+    // carrying SQL text, URLs, host names or connection strings — the precise
+    // leak this rule's DETAIL claim forbids, on the precise trigger it names.
+    // Java, python and elixir emit no such arm and were already correct.
+    //
+    // The lesson is sharper than "check the list": a rule's `trigger` enumerates
+    // the paths that must be checked, and checking the DEFAULT fall-through arm
+    // is not checking the trigger.  Found by the M-T9.25 census sweep 3, which
+    // enumerated every 500 site per backend rather than one site per backend.
+    //
+    // Not caught by the M-T9.11 wire golden: no system in the shared corpus
+    // reaches this arm, so all five legs were green with the divergence in
+    // place — which is exactly why it needs a NAME.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-07-29 while landing RS-15 (#2300) by grepping the vanilla Phoenix denial protocol's edges; tracked as M-T6.24 (1)",
+      'fixed (elixir): the shared respondErrorTail in src/generator/elixir/vanilla/denial.ts emits problem_response(conn, 500, "Internal Server Error", "internal")',
+      'python divergence found 2026-08-01 by verifying the proposed conforms list instead of accepting it; fixed the same day — src/generator/python/index.ts now sends the literal "internal"',
+      'node + dotnet EXTERN-HANDLER divergence found 2026-08-02 by the M-T9.25 census sweep 3 — the rule\'s own named trigger, missed by the 08-01 correction because that pass checked the fall-through arm rather than every 500 site. Fixed: hono routes-builder / explicit-handlers-builder / projection-query-routes-builder / workflow-builder and dotnet emit/api.ts now send "internal"; aggregate + op + the inner exception still reach the extern_handler_threw catalog event',
+      "pinned by test/conformance/internal-fault-parity.test.ts, which asserts the arm on all five, and by its extern-arm sibling assertion",
+    ],
+    // STATIC: assertable against the emitted handler source on all five without
+    // a boot.  Promote to `behavioral` when a corpus fixture reaches the arm —
+    // an `extern` stub returning an unmodelled error would do it in one case.
+    tier: "static",
+  },
+  {
+    id: "RS-29",
+    title: "The wire-validation rung is `Validation failed`, distinct from the domain floor",
+    trigger:
+      "a POST whose body fails wire validation — a missing required field, a wrong type, a tripped `invariant` expressible at the boundary",
+    observable:
+      'the 422 body carries title "Validation failed" and detail "One or more fields are invalid.", plus the `errors[]` pointer array. This is DELIBERATELY not the status reason phrase, because the DOMAIN FLOOR also answers 422 (RS-15) with title "Unprocessable Entity". Both rungs are 422; `title` plus `errors[]` is the only thing that tells a client "your JSON is malformed" from "your request was understood and refused". A backend that titles the validation rung with the reason phrase collapses the two.',
+    // 4-vs-1, python the outlier: `"Unprocessable Entity"` / `"Request
+    // validation failed."` against the other four's `"Validation failed"` /
+    // `"One or more fields are invalid."`.  Both halves of the body differed.
+    //
+    // WHERE IT SAT is what makes it worth naming: wire validation is the
+    // highest-traffic error path in any API — every malformed request hits it —
+    // and it was invisible to every gate.  The M-T9.11 golden cannot see it
+    // because only FOUR of the 31 goldens record an error body at all, and the
+    // one 422 among them (`wire-contract`) is the DOMAIN FLOOR, not this rung.
+    // conformance-parity is no help either: it compares declared response
+    // SHAPES, not the values inside them.
+    //
+    // Found by the M-T9.25 census probe on its first run: enumerate every 7807
+    // arm each backend emits and diff them.  That probe exists because the two
+    // bugs before it (a router that ignored an override, and mergeContexts
+    // dropping the override maps) were both INTRA-backend — a backend
+    // disagreeing with itself, which no comparison-to-another-backend gate can
+    // see.  This one turned out to be cross-backend, found by the same sweep.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-08-01 by the M-T9.25 7807-arm census, first run; confirmed by generating all five and reading the emitted arm, not by grepping the emitter",
+      "fixed (python): src/generator/python/index.ts RequestValidationError handler",
+      "pinned by test/conformance/problem-arm-census.test.ts, verified to FAIL on all three assertions with the fix reverted",
+    ],
+    // STATIC: assertable on emitted source.  Promote to `behavioral` the moment
+    // a golden records a 4xx — that coverage hole is the larger finding here and
+    // is tracked in M-T9.11's follow-on.
+    tier: "static",
+  },
+  {
+    id: "RS-30",
+    title: "A declared error's fields are camelCase extension members on the problem body",
+    trigger:
+      "an operation or find declared `T or SomeError` returning the error variant, where `SomeError` is a `payload`/`error` record with multi-word field names",
+    observable:
+      "the RFC 7807 body carries each of the error record's fields as an RFC 7807 \u00a73.2 extension member, spelled in camelCase \u2014 the same casing every other wire key uses. snake_case there is a wire break: a client reading `minAmount` off four backends gets `undefined` from the fifth.",
+    // The ONE casing divergence in the entire M-T9.25 casing sweep.  At the six
+    // mainstream wire sites \u2014 read DTO, create input, paged carrier, projection
+    // read, workflow-instance read, nested parts/VOs \u2014 all five backends agree,
+    // camelCase, in identical `wireShape` order.  That is `wireShape` doing
+    // exactly what it exists for.
+    //
+    // This site does not go through `wireShape`.  Elixir built the extension map
+    // by rendering the error record through the shared `object` expression leaf,
+    // which snakes names \u2014 correctly, because every OTHER object literal in
+    // elixir is a domain-side Ecto map.  The fix keys the map off the DECLARED
+    // field names and renders only the VALUES through the leaf.
+    //
+    // Two structural reasons it was invisible, and the first is the more useful
+    // lesson: the only golden recording a declared-error body
+    // (`operation-returns.json`) uses `error NotFound { resource: string }` \u2014 a
+    // SINGLE-WORD field, where snake and camel are the same string.  A fixture
+    // with one-word names cannot test a casing rule, no matter how many backends
+    // it runs on.  (The second: conformance-parity compares declared response
+    // SHAPES, and extension members are not in the declared ProblemDetails
+    // component.)
+    //
+    // It was also INTRA-backend, the sharper half: elixir's own emitted
+    // OpenApiSpex schema declares `minAmount`/`offeredAmount`/`currencyCode`, so
+    // the spec the app published and the body it sent disagreed with each other
+    // inside one generated project.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: [
+      "found 2026-08-02 by the M-T9.25 casing/absence census sweep, which censused every wire-key site per backend rather than one site per backend",
+      "confirmed by generating all five from a deliberately MULTI-WORD error record and reading the emitted body",
+      "fixed (elixir): src/generator/elixir/vanilla/operation-returns-emit.ts keys the extension map off the declared field names; atom keys, matching the base map problem_variant/5 merges into, so a field named `type` cannot duplicate in the JSON",
+      "pinned by test/conformance/error-extension-casing.test.ts, verified to fail two of its three assertions with the fix reverted",
+    ],
+    // STATIC until a golden carries a MULTI-WORD error field.  Widening
+    // `union-find-absence.ddd`'s error payload to one would promote this rule at
+    // no new CI boot cost \u2014 the highest-yield single golden change available,
+    // since it also starts covering RS-22's extension-member rule with a name
+    // that can actually diverge.
+    tier: "static",
+  },
 ];
 
 // ---------------------------------------------------------------------------

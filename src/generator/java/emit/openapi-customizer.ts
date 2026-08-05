@@ -223,7 +223,11 @@ export function buildJavaOpenApiContract(
 
       // POST /<plural>  (create) → 400, 422
       if (emitsRestCreate(agg)) {
-        routes.push({ method: "post", path: route, errors: err(errorStatuses("create")) });
+        routes.push({
+          method: "post",
+          path: route,
+          errors: err(errorStatuses("create", false, resolveStructural)),
+        });
         const createInput = agg.createInput ?? [];
         for (const c of createInput) noteEnumRefs(c.field.type, c.field.name);
         setRequired(
@@ -249,7 +253,11 @@ export function buildJavaOpenApiContract(
       }
 
       // GET /<plural>/{id} (getById) → 404
-      routes.push({ method: "get", path: `${route}/{id}`, errors: err(errorStatuses("getById")) });
+      routes.push({
+        method: "get",
+        path: `${route}/{id}`,
+        errors: err(errorStatuses("getById", false, resolveStructural)),
+      });
 
       // DELETE /<plural>/{id} (destroy) → 404, 409
       if ((agg.destroys?.length ?? 0) > 0) {
@@ -310,7 +318,9 @@ export function buildJavaOpenApiContract(
           // Hono / .NET (showcase's `reserve` surfaced both gaps live).
           const unionName = unionInstanceName(op.returnType.variants);
           unions.set(unionName, JSON.stringify(unionJsonSchema(op.returnType.variants, ctx)));
-          const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
+          const statuses = new Set<number>(
+            errorStatuses("operation", operationIsGuarded(op), resolveStructural),
+          );
           for (const a of spec.arms) if (a.isError) statuses.add(a.status);
           for (const s of conflictStatuses()) statuses.add(s);
           routes.push({
@@ -320,7 +330,15 @@ export function buildJavaOpenApiContract(
             errors: err([...statuses].sort((x, y) => x - y)),
           });
         } else {
-          const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
+          // Both sides of this merge: main's `conflictStatuses()` helper
+          // subsumes the `versionedUpdate → ConcurrencyConflict` line this
+          // branch added (and also contributes `Disallowed` for a `when`
+          // gate), while M-T5.20's `resolveStructural` threading is what makes
+          // every one of those statuses honour an `httpStatus` override.
+          // Identical to the sibling branch a few lines above.
+          const statuses = new Set<number>(
+            errorStatuses("operation", operationIsGuarded(op), resolveStructural),
+          );
           for (const s of conflictStatuses()) statuses.add(s);
           routes.push({
             method: "post",
@@ -378,7 +396,10 @@ export function buildJavaOpenApiContract(
             method: "get",
             path: findPath,
             listWrapper,
-            errors: err(errorStatuses("findList", f.requires !== undefined)),
+            // Both sides: main's guarded-find 403 (`f.requires`) and M-T5.20's
+            // `resolveStructural`, so the declared statuses move with an
+            // `httpStatus` override instead of being literals.
+            errors: err(errorStatuses("findList", f.requires !== undefined, resolveStructural)),
           });
         } else {
           // Single optional find → 404, plus 403 when the find carries a
@@ -386,7 +407,7 @@ export function buildJavaOpenApiContract(
           routes.push({
             method: "get",
             path: findPath,
-            errors: err(errorStatuses("findOptional", f.requires !== undefined)),
+            errors: err(errorStatuses("findOptional", f.requires !== undefined, resolveStructural)),
           });
         }
       }
@@ -413,7 +434,7 @@ export function buildJavaOpenApiContract(
         routes.push({
           method: "get",
           path: `${instancesPath}/{id}`,
-          errors: err(errorStatuses("getById")),
+          errors: err(errorStatuses("getById", false, resolveStructural)),
         });
         for (const f of wf.instanceWireShape) noteEnumRefs(f.type, f.name);
         setRequired(`${T}InstanceResponse`, requiredWireFields(wf.instanceWireShape));
@@ -422,7 +443,7 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "post",
         path: `${routePrefix}/workflows/${snake(wf.name)}`,
-        errors: err(errorStatuses("workflow", workflowIsGuarded(wf))),
+        errors: err(errorStatuses("workflow", workflowIsGuarded(wf), resolveStructural)),
         // Workflow command operationId carries a `Workflow` suffix on the other
         // backends (`registerProjectWorkflow`); springdoc derives the bare name.
         operationId: `${lowerFirst(wf.name)}Workflow`,
@@ -454,7 +475,7 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "get",
         path: `${instancesPath}/{id}`,
-        errors: err(errorStatuses("getById")),
+        errors: err(errorStatuses("getById", false, resolveStructural)),
       });
       for (const w of wf.instanceWireShape) noteEnumRefs(w.type, w.name);
       setRequired(

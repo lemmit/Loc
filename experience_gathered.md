@@ -4397,3 +4397,114 @@ what it would mean if the marker doesn't move (128 MB is more than iOS will
 give a web page → the answer is a server-side runtime, not more trimming).
 Writing down the falsifier before the measurement is what stops the next fix
 from being reported as a success on the strength of its bundle graph.
+## 70. A verification that cannot fail, and four other ways this session lied to itself (2026-08-03)
+
+Five gates and four RS-rules landed. Three of the defects fixed were **in this
+session's own gates**, and every one of them was invisible for a different
+structural reason. Collected because the failure modes generalize past the bugs.
+
+### The revert-test that proved nothing
+
+To show a new gate actually bites, the reflex is `git stash` → run → `git stash
+pop`. That is only valid while the fix is **uncommitted**:
+
+```bash
+git stash push -q -- src/     # fix was already committed → stashes NOTHING
+npx vitest run …              # green, and the greenness means nothing
+```
+
+The stash succeeded (it had other files), the test passed, and the run *looked*
+like proof the gate was verified. It proved only that a correct tree passes.
+
+**Revert the emitter line, not the working tree.** Patch the one string the fix
+changed, run, restore. That is unambiguous no matter what is committed. Same
+family as §67 (`?? ""` making an assertion unfalsifiable) and §69 (a stale
+`out/` making a capture meaningless): *an artefact you did not force to fail is
+not evidence.*
+
+### A rule's `trigger` enumerates the paths that must be checked
+
+RS-27's `conforms` list said all five backends. It had **already been corrected
+once** after a first pass found python diverging — and it was still wrong. The
+correction checked the arm each backend *falls through to*. The rule's own
+`trigger` names a different path first: "a hand-written `extern` handler
+returning an unmodelled error", where node and .NET sent the wrapper's message —
+carrying the inner exception the user's handler threw — as a public 7807
+`detail`.
+
+**Checking the default arm is not checking the trigger.** When verifying a rule
+holds, enumerate the paths its own `trigger` sentence names and check each one.
+Four wrong `conforms` claims in this family (RS-18 ×2, RS-19, RS-27) all came
+from reading emitters instead of generating output and diffing it.
+
+### A one-word fixture cannot test a casing rule
+
+RS-30 (declared-error extension members must be camelCase) was invisible because
+the only golden recording a declared-error body used
+`error NotFound { resource: string }`. **`resource` is the same string in snake
+and camel.** No number of backends, goldens, or booted round-trips fixes a
+fixture whose data cannot express the difference.
+
+Generalizes: before trusting a gate, ask what its fixture would have to look
+like for the rule to be *falsifiable*. Multi-word field for casing; a value that
+differs from its own default for a defaulting rule; a non-default override for
+"does this honour the override" (the trap the denial-ladder and 7807-census
+suites both document in-file).
+
+### The RS registry has a monotonic counter and no reservation
+
+Two agents minted `RS-26` concurrently. Main's landed first, so this branch's
+four rules renumbered to RS-27..30 across 23 files. The registry's contract says
+ids are **never renumbered**, which resolves *who* moves — but nothing prevents
+the collision.
+
+CLAUDE.md tells agents to claim work with a draft PR before building; there is
+no equivalent for claiming a rule NUMBER, and any two agents minting rules in
+parallel will collide every time. Worth a convention (reserve the id in the
+draft PR title, or allocate from the PR number) — noted in
+`docs/conformance-semantics.md` § "Adding a rule".
+
+**And the renumber itself is not a blind sed.** Applying `26→27, 27→28, 28→29`
+left-to-right double-bumps anything already advanced during conflict resolution.
+Verify with a uniqueness check over the emitted `id:` lines, not by reading the
+diff:
+
+```bash
+grep -o 'id: "RS-[0-9]*"' test/conformance/semantics-rules.ts | sort | uniq -d
+```
+
+### Re-verifying where you expect breakage misses the class
+
+`#2354` ("assert .ddd fixtures actually PARSE") turned four suites red at once:
+their inline fixtures had syntax errors, Langium error-recovered, and the
+emitters produced output plausible enough that every assertion passed. Three
+were found, fixed, and re-verified by running `test/conformance`,
+`test/generator/elixir`, `test/ir` — the directories where the failures had
+been. The fourth lived in `test/generator/` and shipped; CI found it.
+
+Worse, this session had *already* hit the same trap on its own fixture two
+commits earlier and fixed **the instance** — adding a parse assertion to that
+one file — instead of the class. #2354 fixed the class from the other direction
+and caught what was left behind.
+
+**After fixing N instances of a class, sweep for the class, then run the whole
+suite.** The three syntax facts that caused it, all repeated more than once:
+
+- `user { … }` fields are **space**-separated (`user { id: string  level: int }`)
+- `extern` is a **top-level declaration** + a `route` in the api block, never an
+  operation modifier
+- a declared `create(a: T)` needs a body — `create(a: T) { }`
+
+### Reading a red CI leg: exit code first
+
+Three elixir legs went red across this branch and **none was a compile error**:
+
+| symptom | cause |
+|---|---|
+| `status: 125` | `docker run` never started — Docker Hub pull timeout |
+| `mix local.hex` printing a `powershell … DownloadFile` hint | hex.pm unreachable from the runner |
+| an actual `warning:` / `error:` block above the failure | a real compile failure |
+
+`status: 125` and a hex-install banner are infrastructure. A real failure prints
+Elixir diagnostics *before* the harness error. Check which before rebasing,
+re-running, or — worst — "fixing" emitted code that was never broken.

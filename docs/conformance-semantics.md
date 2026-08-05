@@ -761,6 +761,45 @@ the conforming backends, and the fix that established it.
   Tier: **static** — `create-input-default-parity.test.ts` asserts the rule on
   all five, and keeps an empty `UPDATE_BOOL_WAIVED` map as the ratchet so a
   regression is recorded rather than the assertion relaxed.
+### RS-28 · An unrecognised error term is a sanitized **500**, never a 400 that echoes it
+- **Guarantee.** A fault that matches no declared `error` variant, no
+  wire-validation failure and no denial rung answers **500 "Internal Server
+  Error"** with `detail` = the fixed string `"internal"`. Two claims, both
+  wire-visible:
+  - **Status.** An error the server did not model is a *server* fault. 4xx tells
+    the caller to fix a request that was never the problem.
+  - **Detail.** The term is **never** rendered into the body. A serialized
+    internal value leaks struct names, module paths, and sometimes the failing
+    value itself, to an unauthenticated caller.
+- **Modelled faults are unaffected.** A declared `error` payload, a
+  wire-validation failure, and each denial rung (403 / 409 / 422) keep their own
+  status and their occurrence-specific `detail`. This rule governs only the arm
+  none of them matched.
+- **Trigger.** A hand-written `extern` handler returning an unmodelled error, or
+  an unexpected fault escaping a workflow's `run`.
+- **Why it hid.** Elixir answered `400` and `inspect/1`'d the term straight into
+  `detail`. It survived RS-15's 400 → 422 sweep *precisely because it is not the
+  domain floor*: RS-15 moved the rejections the domain **makes**, and this is the
+  rejection **nobody made**. And no system in the shared behavioural corpus
+  reaches this arm — every error those fixtures produce is modelled — so all five
+  M-T9.11 legs were green with the divergence in place. An arm no fixture reaches
+  is exactly the arm that needs a *name*.
+- **A second, smaller divergence on the same arm — and how it was found.** The
+  fix's own report proposed this rule as all-five-conforming. That list was
+  **inferred**. Checking it showed node/.NET/java emit the literal `"internal"`
+  while **python** emits `"An unexpected error occurred."`. Python has no *leak*
+  — its string is fixed and reflects nothing — so it isn't the defect the rule
+  was minted for; it simply isn't byte-identical, and byte-identity is the entire
+  premise of the M-T9.11 golden. Listed as a **target** until python moves.
+- **The habit this rule family keeps failing at.** This is the **third** time an
+  all-five `conforms` was asserted from reading rather than checking (RS-18
+  twice, RS-19 once). Enumerate the other backends' emitted literal *before*
+  writing the list, every time.
+- **Conforms.** node, dotnet, java, elixir. **Targets:** python.
+- **Provenance.** Found 2026-07-29 by grepping the vanilla Phoenix denial
+  protocol's edges after #2300 centralised it (M-T6.24). Python divergence found
+  2026-08-01 by verifying the proposed `conforms` list instead of accepting it.
+  Tier: **static** — promote to behavioral once a fixture reaches the arm.
 
 ### RS-27 · A 404-**by-id** carries the sentence `"<Aggregate> <id> not found"`
 - **Guarantee.** When a read addressed **by id** finds nothing, the RFC 9457
@@ -834,6 +873,41 @@ the conforming backends, and the fix that established it.
   byte-for-byte on `core-domain`.
   Tier: **behavioral** — the wire golden now holds `"Order {id} not found"`, so
   every behavioral leg gates it per-PR.
+### RS-29 · The wire-validation rung is `Validation failed`, distinct from the domain floor
+- **Guarantee.** A 422 raised by **wire validation** — a malformed body, a
+  missing required field, a boundary-expressible `invariant` — carries title
+  **`"Validation failed"`**, detail **`"One or more fields are invalid."`**, and
+  the `errors[]` pointer array.
+- **Why the title is deliberately *not* the reason phrase.** The **domain floor**
+  also answers 422 ([RS-15](#rs-15--the-domain-floor-is-422-not-400)), and its
+  title *is* `"Unprocessable Entity"`. Both rungs are 422, so status alone cannot
+  separate them: `title` plus `errors[]` is the only thing telling a client
+  *"your JSON is malformed"* from *"your request was understood and refused"*.
+  A backend that titles the validation rung with the status reason phrase
+  **collapses the two rungs into one**.
+- **Trigger.** Any `POST` with a body the wire schema rejects.
+- **The split.** 4-vs-1, python the outlier — `"Unprocessable Entity"` /
+  `"Request validation failed."` against the other four's `"Validation failed"` /
+  `"One or more fields are invalid."`. **Both halves of the body differed.**
+- **Where it sat is the point.** Wire validation is the **highest-traffic error
+  path in any API** — every malformed request hits it — and it was invisible to
+  every gate. The M-T9.11 golden cannot see it because only **4 of the 31
+  goldens record an error body at all** — and the single 422 among them
+  (`wire-contract`) is the **domain floor**, i.e. the *other* rung.
+  `conformance-parity` is no help either: it compares declared response
+  *shapes*, not the values inside them.
+- **How it was found.** The M-T9.25 census probe, on its **first run**:
+  enumerate every 7807 arm each backend emits, then diff them. That probe exists
+  because the two bugs before it were both *intra*-backend — a router that
+  ignored an override, and `mergeContexts` dropping the override maps — a backend
+  disagreeing with **itself**, which no compare-to-another-backend gate can see.
+  This one turned out to be cross-backend, surfaced by the same sweep.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-08-01; confirmed by **generating all five and
+  reading the emitted arm**, not by grepping the emitter. Pinned by
+  `test/conformance/problem-arm-census.test.ts`, verified to fail on all three
+  assertions with the fix reverted. Tier: **static** — promote to behavioral the
+  moment a golden records a 4xx.
 
 ---
 
@@ -856,6 +930,47 @@ When a cross-backend runtime bug is fixed:
    `UPDATE_SEMANTICS_SPEC=1 npx vitest run test/conformance/semantics-spec-sync.test.ts`
    and commit `test/conformance/semantics-spec.json` — `semantics-spec-sync.test.ts`
    gates the drift.
+
+### Claim the NUMBER before you build
+
+The registry is append-only with a monotonic counter and **no reservation
+mechanism**, so two agents minting rules in parallel collide every time — and
+`RS-26` was minted twice on 2026-08-03 by two branches that were both correct.
+The `id` contract ("never renumbered") settles *who* moves — whichever landed
+on `main` first keeps the number — but the loser then renames across every
+citing file, which on that occasion was 23 of them.
+
+**So: state the id you are taking in your draft PR title/body before you write
+the rule**, the same way CLAUDE.md has you claim the work itself. Read the open
+drafts first; if one already claims your number, take the next.
+
+If you do have to renumber, note that applying `26→27, 27→28, 28→29` as a
+left-to-right sweep **double-bumps** anything already advanced during conflict
+resolution. Verify with a uniqueness check over the emitted ids rather than by
+reading the diff:
+
+```bash
+grep -o 'id: "RS-[0-9]*"' test/conformance/semantics-rules.ts | sort | uniq -d
+```
+
+### Make the fixture able to falsify the rule
+
+A rule is only as good as the data its fixture carries. **RS-30** (declared-error
+extension members are camelCase) sat undetected because the one golden recording
+a declared-error body used `error NotFound { resource: string }` — and
+`resource` is the same string in snake_case and camelCase. Before trusting a new
+gate, ask what its fixture would have to look like for the rule to *fail*:
+
+| rule about | fixture must carry |
+|---|---|
+| casing | a **multi-word** field name |
+| defaults | a value that differs from the type's zero value |
+| an override being honoured | a **non-default** override — default emission cannot distinguish "resolved to the default" from "hardcoded" |
+| an error arm | the path the rule's own `trigger` sentence names, not just the fall-through arm |
+
+And verify the gate by reverting **the emitter line**, not by stashing the
+working tree: if the fix is already committed, `git stash push -- src/` reverts
+nothing and the test passes vacuously.
 
 ## Roadmap
 
@@ -891,3 +1006,48 @@ When a cross-backend runtime bug is fixed:
   `UPDATE_SEMANTICS_SPEC=1 npx vitest run test/conformance/semantics-spec-sync.test.ts`
   and commit the result. Still open: wire each RS-rule to a live round-trip
   assertion in the harness.
+
+### RS-30 · A declared error's fields are camelCase extension members on the problem body
+- **Guarantee.** When an operation or find declared `T or SomeError` returns the
+  error variant, each field of `SomeError` reaches the RFC 7807 body as a §3.2
+  extension member spelled in **camelCase** — the same casing every other wire
+  key uses. snake_case there is a wire break: a client reading `minAmount` off
+  four backends gets `undefined` from the fifth.
+- **Trigger.** `error PriceTooLow { minAmount: int, … }` returned from an
+  exception-less operation. **Multi-word field names are the trigger** — with
+  one-word names the rule is untestable.
+- **The split.** 4-vs-1, elixir the outlier: `%{min_amount:, offered_amount:,
+  currency_code:}` against the other four's `minAmount` / `offeredAmount` /
+  `currencyCode`. Elixir built the extension map by rendering the error record
+  through the shared `object` expression leaf, which snakes names — *correctly*,
+  because every other object literal in elixir is a domain-side Ecto map. The
+  fix keys the map off the declared field names and renders only the **values**
+  through the leaf.
+- **The one casing divergence in the whole sweep.** At the six mainstream wire
+  sites — read DTO, create input, paged carrier, projection read,
+  workflow-instance read, nested parts and value objects — all five backends
+  agree, camelCase, in identical `wireShape` order. That is `wireShape` doing
+  exactly what it exists for. This site is the one that doesn't consult it.
+- **Why it was invisible, and the transferable half.** The only golden recording
+  a declared-error body (`operation-returns.json`) uses
+  `error NotFound { resource: string }` — a **single-word** field, where snake
+  and camel are the same string. **A fixture with one-word names cannot test a
+  casing rule**, however many backends it runs on. (Secondarily:
+  `conformance-parity` compares declared response *shapes*, and extension
+  members aren't in the declared `ProblemDetails` component.)
+- **It was also intra-backend**, which is the sharper half — elixir's own
+  emitted OpenApiSpex schema declares `minAmount`/`offeredAmount`/`currencyCode`,
+  so the spec the app published and the body it sent disagreed with each other
+  inside one generated project.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Found 2026-08-02 by the M-T9.25 casing/absence census sweep;
+  confirmed by generating all five from a deliberately multi-word error record
+  and reading the emitted body. Fixed in
+  `src/generator/elixir/vanilla/operation-returns-emit.ts` (atom keys, matching
+  the base map `problem_variant/5` merges into, so a field named `type` cannot
+  duplicate in the JSON). Pinned by
+  `test/conformance/error-extension-casing.test.ts`, verified to fail two of its
+  three assertions with the fix reverted. Tier: **static** — widening
+  `union-find-absence.ddd`'s error payload to a multi-word field would promote
+  it at no new CI boot cost, and is the highest-yield single golden change
+  available.

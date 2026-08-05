@@ -222,7 +222,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     }
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
-      return problem(500, "Internal Server Error", err.message);
+      return problem(500, "Internal Server Error", "internal");
     }
     (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
     return problem(500, "Internal Server Error", "internal");

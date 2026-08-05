@@ -1,0 +1,92 @@
+{
+  "case": "sales-system",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/products",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/products/{id}",
+      "status": 200,
+      "body": {
+        "display": "WIDGET-1",
+        "id": "<volatile:key>",
+        "price": {
+          "amount": 9.99,
+          "currency": "USD"
+        },
+        "sku": "WIDGET-1",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/products",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/orders/{id}/add_line",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/orders/{id}/confirm",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "customerId": "<volatile:key>",
+        "id": "<volatile:key>",
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "productId": "<volatile:key>",
+            "quantity": 3
+          }
+        ],
+        "placedAt": "<timestamp>",
+        "status": "Confirmed",
+        "version": 3
+      }
+    }
+  ]
+}
