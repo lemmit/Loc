@@ -229,9 +229,18 @@ export function renderPySchema(
   if (durable) models.push(renderOutboxModel());
   const body = models.join("\n\n\n");
 
-  // Import narrowing — every SQLAlchemy helper is invoked by name, so a
-  // word-boundary scan is exact (same trick as the other emitters).
-  const uses = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(body);
+  // Import narrowing — every SQLAlchemy helper is referenced by name, so a
+  // word-boundary scan is exact (same trick as the other emitters) for the
+  // CLASS names: they are capitalized, and a Loom field lowers to a snake_case
+  // attribute, so `\bInteger\b` can never match a column.
+  //
+  // `text` is the exception and the only lowercase entry: an aggregate with a
+  // field NAMED `text` emits `text: Mapped[str] = mapped_column(Text)`, which
+  // `\btext\b` matches — so the import was added, nothing invoked it, and ruff
+  // failed the whole python build on `F401 imported but unused`.  It is always
+  // invoked as a CALL (`text("now()")`), so match that form instead.
+  const uses = (n: string): boolean =>
+    new RegExp(n === "text" ? "\\btext\\(" : `\\b${n}\\b`).test(body);
   const saNames = [
     "BigInteger",
     "Boolean",
