@@ -16,18 +16,17 @@
 //
 // This spec is the fastest possible statement of the invariant: it clicks
 // Bundle the instant the generated text appears — exactly what the heavy
-// specs do — and asserts only that the pipeline entered the bundling state.
+// specs do — and asserts that the pipeline reached a settled bundle outcome.
 // It never waits for an npm install, so it needs no network and finishes in
 // seconds, which is what lets it gate every PR while the specs it protects
 // only run post-merge.
 //
 // It does NOT cover the neighbouring failure in `devtools-sourcemap.spec.ts`
-// ("a .ddd entry in map.sources … Received: -1"), which needs a real bundle to
-// observe and so stays in the post-merge heavy lane.  That one is a separate,
-// pre-existing defect: it means the map-carrying generate did not land for
-// that cycle, leaving the persisted tree without its sourcemap overlay.  The
-// `runBundle` wait here keeps a click from bundling BEFORE that tree is
-// published; it does not make the tree carry maps in the first place.
+// ("a .ddd entry in map.sources … Received: -1") — seeing a missing `.ddd`
+// map needs a real bundle, so that stays in the post-merge heavy lane.  That
+// was a second defect of the same shape (the per-cycle mapped generate living
+// in one shared ref, so overlapping cycles clobbered each other); it is fixed
+// alongside this one, but nothing here proves it.
 
 import { expect, test } from "@playwright/test";
 import { clickWorkspaceCreate, waitForPlaygroundReady } from "./_helpers";
