@@ -1052,7 +1052,32 @@ export default function App(): JSX.Element {
   // follow-up call execute in the same microtask, so the follow-up
   // saw the *previous* render's stale value and bailed out.
 
-  async function runGenerateStep(): Promise<GenerateResult | null> {
+  /** The generate currently in flight, INCLUDING its sourcemap pass.
+   *
+   *  `runGenerateStep` does two generates: the flag-off one that drives the
+   *  UI (and dispatches `GENERATE_DONE`), then a map-carrying one that only
+   *  the boot bundle consumes.  A manual Bundle click can land between them,
+   *  and the two ways that used to go wrong are the same race seen from
+   *  either side: read `lastBundleReadyRef` too early and it was `null` (the
+   *  click did NOTHING — the 600s `waitForBundle` hangs), or read the
+   *  provisional value published at `GENERATE_DONE` and the boot bundle
+   *  carries no `.ddd` mapping (`devtools-sourcemap.spec.ts` fails with
+   *  "a .ddd entry in map.sources … Received: -1").
+   *
+   *  Both close the same way: a click waits out the pass that is already
+   *  running, so it always bundles the BEST available input instead of
+   *  whichever one happened to be published when it arrived. */
+  const generateInFlightRef = useRef<Promise<GenerateResult | null> | null>(null);
+
+  function runGenerateStep(): Promise<GenerateResult | null> {
+    const p = runGenerateStepInner().finally(() => {
+      if (generateInFlightRef.current === p) generateInFlightRef.current = null;
+    });
+    generateInFlightRef.current = p;
+    return p;
+  }
+
+  async function runGenerateStepInner(): Promise<GenerateResult | null> {
     const client = buildClientRef.current;
     if (!client) return null;
     // Wait out any in-flight workspace seed so the multi-file example's
@@ -1381,6 +1406,13 @@ export default function App(): JSX.Element {
     // enabled" and "the click does something" the same condition, instead of
     // two that have to be kept in sync by hand.  They drifted once already;
     // see `publishBundleInput`.
+    // Wait out a generate that is still running its sourcemap pass, so the
+    // boot bundle gets the map-carrying tree rather than the provisional one
+    // published at `GENERATE_DONE`.  Typically ~0.7s; the provisional value
+    // remains the floor if the generate rejects (a build-worker respawn), so
+    // this can delay a bundle but can never prevent one.
+    const inFlight = generateInFlightRef.current;
+    if (inFlight) await inFlight.catch(() => undefined);
     const gen = lastBundleReadyRef.current ?? generateSuccess;
     if (!gen?.ok || gen.files.length === 0) return;
     const result = await runBundleStep(gen);

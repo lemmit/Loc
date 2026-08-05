@@ -20,6 +20,12 @@
 // It never waits for an npm install, so it needs no network and finishes in
 // seconds, which is what lets it gate every PR while the specs it protects
 // only run post-merge.
+//
+// The SIBLING failure mode of the same race — a click that lands in the window
+// and bundles the provisional, map-less tree, so the boot bundle's inline map
+// never reaches `.ddd` — cannot be asserted without a real bundle, so it stays
+// covered by `devtools-sourcemap.spec.ts` in the post-merge heavy lane.  Both
+// are closed by the same `runBundle` change (see `generateInFlightRef`).
 
 import { expect, test } from "@playwright/test";
 import { clickWorkspaceCreate, waitForPlaygroundReady } from "./_helpers";
