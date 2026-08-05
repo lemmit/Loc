@@ -519,7 +519,67 @@
         "enabler: WIRE_NORMALIZE now templates a uuid embedded ANYWHERE in a string value, not only in a path — without it no golden can hold a 404-by-id body — test/_helpers/wire-record.ts",
         "runtime-verified on node (PGlite), python (uvicorn + postgres) and java (gradle:9-jdk25 boot + postgres): all three match the golden byte-for-byte on core-domain, 0 divergences"
       ],
-      "tier": "behavioral"
+      "tier": "static"
+    },
+    {
+      "id": "RS-28",
+      "title": "An unrecognised error term is a sanitized 500, never a 400 that echoes it",
+      "trigger": "an `{:error, <term>}` / thrown fault that no declared error variant, wire-validation failure, or denial rung matches — e.g. a hand-written `extern` handler returning an unmodelled error, or an unexpected fault escaping a workflow's run",
+      "observable": "the response is 500 \"Internal Server Error\" and its RFC 7807 `detail` is the fixed string \"internal\". TWO claims, both wire-visible. STATUS: an error the server did not model is a SERVER fault, so 4xx is wrong on its face — 400 tells the caller to fix a request that was never the problem. DETAIL: the term is never rendered into the body; a serialized internal value leaks struct names, module paths and sometimes the failing value itself to an unauthenticated caller. MODELLED faults are unaffected — a declared `error` payload, a wire-validation failure, and each denial rung keep their own status and occurrence-specific `detail`; this rule governs only the arm none of them matched.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-07-29 while landing RS-15 (#2300) by grepping the vanilla Phoenix denial protocol's edges; tracked as M-T6.24 (1)",
+        "fixed (elixir): the shared respondErrorTail in src/generator/elixir/vanilla/denial.ts emits problem_response(conn, 500, \"Internal Server Error\", \"internal\")",
+        "python divergence found 2026-08-01 by verifying the proposed conforms list instead of accepting it; fixed the same day — src/generator/python/index.ts now sends the literal \"internal\"",
+        "node + dotnet EXTERN-HANDLER divergence found 2026-08-02 by the M-T9.25 census sweep 3 — the rule's own named trigger, missed by the 08-01 correction because that pass checked the fall-through arm rather than every 500 site. Fixed: hono routes-builder / explicit-handlers-builder / projection-query-routes-builder / workflow-builder and dotnet emit/api.ts now send \"internal\"; aggregate + op + the inner exception still reach the extern_handler_threw catalog event",
+        "pinned by test/conformance/internal-fault-parity.test.ts, which asserts the arm on all five, and by its extern-arm sibling assertion"
+      ],
+      "tier": "static"
+    },
+    {
+      "id": "RS-29",
+      "title": "The wire-validation rung is `Validation failed`, distinct from the domain floor",
+      "trigger": "a POST whose body fails wire validation — a missing required field, a wrong type, a tripped `invariant` expressible at the boundary",
+      "observable": "the 422 body carries title \"Validation failed\" and detail \"One or more fields are invalid.\", plus the `errors[]` pointer array. This is DELIBERATELY not the status reason phrase, because the DOMAIN FLOOR also answers 422 (RS-15) with title \"Unprocessable Entity\". Both rungs are 422; `title` plus `errors[]` is the only thing that tells a client \"your JSON is malformed\" from \"your request was understood and refused\". A backend that titles the validation rung with the reason phrase collapses the two.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-01 by the M-T9.25 7807-arm census, first run; confirmed by generating all five and reading the emitted arm, not by grepping the emitter",
+        "fixed (python): src/generator/python/index.ts RequestValidationError handler",
+        "pinned by test/conformance/problem-arm-census.test.ts, verified to FAIL on all three assertions with the fix reverted"
+      ],
+      "tier": "static"
+    },
+    {
+      "id": "RS-30",
+      "title": "A declared error's fields are camelCase extension members on the problem body",
+      "trigger": "an operation or find declared `T or SomeError` returning the error variant, where `SomeError` is a `payload`/`error` record with multi-word field names",
+      "observable": "the RFC 7807 body carries each of the error record's fields as an RFC 7807 §3.2 extension member, spelled in camelCase — the same casing every other wire key uses. snake_case there is a wire break: a client reading `minAmount` off four backends gets `undefined` from the fifth.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-02 by the M-T9.25 casing/absence census sweep, which censused every wire-key site per backend rather than one site per backend",
+        "confirmed by generating all five from a deliberately MULTI-WORD error record and reading the emitted body",
+        "fixed (elixir): src/generator/elixir/vanilla/operation-returns-emit.ts keys the extension map off the declared field names; atom keys, matching the base map problem_variant/5 merges into, so a field named `type` cannot duplicate in the JSON",
+        "pinned by test/conformance/error-extension-casing.test.ts, verified to fail two of its three assertions with the fix reverted"
+      ],
+      "tier": "static"
     }
   ]
 }

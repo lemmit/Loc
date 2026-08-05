@@ -269,7 +269,7 @@ export function buildWorkflowsFile(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    // RS-26 — sanitized; the inner exception reaches the log, not the wire.
+    // RS-28 — sanitized; the inner exception reaches the log, not the wire.
     `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
   body.push(`    console.error(err);`);
@@ -887,17 +887,23 @@ function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
     // Single-stream load + fold for the given correlation id; an empty stream
     // means no such instance.
     out.push(`    const __stream = await ${helpers.load}(db, ${idAsKey});`);
-    out.push(`    if (__stream.length === 0) throw new AggregateNotFoundError("not_found");`);
+    // RS-27 extends here: a workflow INSTANCE read is addressed by id, so its
+    // 404 carries the same sentence the aggregate getById route does.  Main's
+    // fix covered the aggregate routes; these two surfaces were left on the
+    // machine token.
+    out.push(
+      `    if (__stream.length === 0) throw new AggregateNotFoundError(\`${T} \${id} not found\`);`,
+    );
     out.push(`    const row = ${helpers.fold}(${idAsKey}, __stream);`);
   } else if (usingMikro) {
     out.push(`    const row = await db.findOne(${rowClass}, { ${corr}: id });`);
-    out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+    out.push(`    if (!row) throw new AggregateNotFoundError(\`${T} \${id} not found\`);`);
   } else {
     out.push(
       `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,
     );
     out.push(`    const row = rows[0];`);
-    out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+    out.push(`    if (!row) throw new AggregateNotFoundError(\`${T} \${id} not found\`);`);
   }
   out.push(`    return httpCtx.json(row as unknown as z.infer<typeof ${T}InstanceResponse>, 200);`);
   out.push(`  },`);

@@ -829,7 +829,7 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     tier: "static",
   },
   {
-    id: "RS-27",
+    id: "RS-29",
     title: "The wire-validation rung is `Validation failed`, distinct from the domain floor",
     trigger:
       "a POST whose body fails wire validation — a missing required field, a wrong type, a tripped `invariant` expressible at the boundary",
@@ -865,48 +865,7 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     tier: "static",
   },
   {
-    id: "RS-28",
-    title: "A 404 `detail` names the resource — never a bare machine token",
-    trigger:
-      "any GET that addresses one thing and finds nothing: `getById`, a projection row by key, a workflow instance by id, an optional/union find that comes back empty",
-    observable:
-      'the 404 body\'s `detail` is `"<Resource> <id> not found"` when an id addresses the resource, and `"<Resource> not found"` when the lookup is by criteria and no id exists to name. It is never the machine token — `"not_found"`, `"not found"` — which is what `type` and `title` already carry; repeating it in `detail` tells the client nothing it did not already have from the status line.',
-    // The reason this is a rule and not a style note: it was THREE different
-    // strings inside a SINGLE generated node app.  `item-repository.ts` threw
-    // the descriptive form, the criteria-find path threw `"not found"`, and
-    // `item.routes.ts` — the one a client actually reaches on `GET /items/{id}`
-    // — threw `"not_found"`.  Python had two of the three.  dotnet, java and
-    // elixir each had exactly one, the descriptive form.
-    //
-    // So the wire divergence was 2-vs-3 on the rung a client hits most, AND an
-    // intra-backend split on the oracle.  That second half is what makes it
-    // dangerous rather than cosmetic: node is the M-T9.11 golden's oracle, so
-    // the first golden to record an id-addressed 404 would have BAKED IN
-    // `"not_found"` as the cross-backend answer key — and then the four
-    // backends that were already right would have been the ones failing.
-    //
-    // Two shapes, not one, is deliberate.  A criteria find (`find byName(...)`)
-    // has no id to name, and inventing one — echoing a filter value, or
-    // reusing the resource id field that isn't in scope — is worse than saying
-    // less.  Both shapes lead with the resource, which is the invariant.
-    conforms: ["node", "dotnet", "java", "python", "elixir"],
-    provenance: [
-      "found 2026-08-02 by the M-T9.25 census probe, second sweep (the 7807 arm census generalized from 422 to the whole ladder)",
-      "confirmed by generating all five from one fixture and diffing the emitted throw arguments — NOT by grepping the emitters, which is what made the earlier RS-18/19/26 `conforms` claims wrong three times",
-      "fixed (node): routes-builder.ts x3, projection-builder.ts, workflow-builder.ts x3, typescript/repository-find-builder.ts",
-      "fixed (python): routes-builder.ts x2, projections-builder.ts, workflows-builder.ts x2",
-      "pinned by test/conformance/not-found-detail-parity.test.ts",
-    ],
-    // STATIC for the same reason as RS-27: no golden records an id-addressed
-    // 404 body.  The four goldens that DO carry a 4xx are `operation-returns`
-    // and `union-find-absence` (404), `state-gate` (409) and `wire-contract`
-    // (422) — and both 404s come from the declared-error-variant path, whose
-    // detail is the variant title, not this arm.  Promote when a golden
-    // exercises `GET /<agg>/{id}` against a missing id.
-    tier: "static",
-  },
-  {
-    id: "RS-29",
+    id: "RS-30",
     title: "A declared error's fields are camelCase extension members on the problem body",
     trigger:
       "an operation or find declared `T or SomeError` returning the error variant, where `SomeError` is a `payload`/`error` record with multi-word field names",

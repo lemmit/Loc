@@ -1686,7 +1686,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
             if code.startswith("msg."):
                 entry["code"] = code
             errors.append(entry)
-        # RS-27 — the WIRE-VALIDATION rung's title/detail, byte-identical to the
+        # RS-29 — the WIRE-VALIDATION rung's title/detail, byte-identical to the
         # other four backends.  Deliberately NOT the status reason phrase: the
         # domain floor above already answers 422 with "Unprocessable Entity", and
         # a client that sees only a status + reason phrase cannot tell a malformed
@@ -1703,7 +1703,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # wire.  The specific handlers above still win via the exception MRO
         # (Starlette looks each exception's type up most-specific-first).
         #
-        # The detail is the literal "internal" (RS-26), not a prose sentence:
+        # The detail is the literal "internal" (RS-28), not a prose sentence:
         # this arm's body must be byte-identical to the other four backends'
         # for the M-T9.11 wire golden, and python was the one sending its own
         # wording.  Nothing about the fault may reach the wire, so the string

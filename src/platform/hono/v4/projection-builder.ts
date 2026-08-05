@@ -309,7 +309,9 @@ function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): 
       );
       out.push(`      const row = rows[0];`);
     }
-    out.push(`      if (!row) throw new AggregateNotFoundError("not_found");`);
+    // RS-27 extends here — a projection row read by its correlation KEY is a
+    // by-id read.
+    out.push(`      if (!row) throw new AggregateNotFoundError(\`${T} \${key} not found\`);`);
     out.push(`      return httpCtx.json(row as unknown as z.infer<typeof ${T}Response>, 200);`);
     out.push(`    },`);
     out.push(`  );`);

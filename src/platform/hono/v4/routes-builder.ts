@@ -1209,7 +1209,7 @@ export function buildRoutesFile(
   lines.push(
     `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
   );
-  // RS-26 — sanitized.  The log call above already carries aggregate + op +
+  // RS-28 — sanitized.  The log call above already carries aggregate + op +
   // the inner message for the operator; the wire gets the same "internal" every
   // other 500 arm sends, on every backend.
   lines.push(`      return problem(500, "Internal Server Error", "internal");`);

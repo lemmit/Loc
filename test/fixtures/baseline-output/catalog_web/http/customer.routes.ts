@@ -87,7 +87,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     async (c) => {
       const params = c.req.valid("query");
       const result = await repo.byEmail(params.email);
-      if (result == null) throw new AggregateNotFoundError("Customer not found");
+      if (result == null) throw new AggregateNotFoundError("not_found");
       return c.json(repo.toWire(result) as z.infer<typeof CustomerResponse>, 200);
     },
   );

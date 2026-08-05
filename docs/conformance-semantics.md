@@ -782,7 +782,7 @@ the conforming backends, and the fix that established it.
   Tier: **static** — `create-input-default-parity.test.ts` asserts the rule on
   all five, and keeps an empty `UPDATE_BOOL_WAIVED` map as the ratchet so a
   regression is recorded rather than the assertion relaxed.
-### RS-26 · An unrecognised error term is a sanitized **500**, never a 400 that echoes it
+### RS-28 · An unrecognised error term is a sanitized **500**, never a 400 that echoes it
 - **Guarantee.** A fault that matches no declared `error` variant, no
   wire-validation failure and no denial rung answers **500 "Internal Server
   Error"** with `detail` = the fixed string `"internal"`. Two claims, both
@@ -947,7 +947,7 @@ the conforming backends, and the fix that established it.
   byte-for-byte on `core-domain`.
   Tier: **behavioral** — the wire golden now holds `"Order {id} not found"`, so
   every behavioral leg gates it per-PR.
-### RS-27 · The wire-validation rung is `Validation failed`, distinct from the domain floor
+### RS-29 · The wire-validation rung is `Validation failed`, distinct from the domain floor
 - **Guarantee.** A 422 raised by **wire validation** — a malformed body, a
   missing required field, a boundary-expressible `invariant` — carries title
   **`"Validation failed"`**, detail **`"One or more fields are invalid."`**, and
@@ -1081,7 +1081,7 @@ nothing and the test passes vacuously.
   and commit the result. Still open: wire each RS-rule to a live round-trip
   assertion in the harness.
 
-### RS-29 · A declared error's fields are camelCase extension members on the problem body
+### RS-30 · A declared error's fields are camelCase extension members on the problem body
 - **Guarantee.** When an operation or find declared `T or SomeError` returns the
   error variant, each field of `SomeError` reaches the RFC 7807 body as a §3.2
   extension member spelled in **camelCase** — the same casing every other wire

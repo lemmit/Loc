@@ -30,7 +30,7 @@
 //   * the domain floor (a rejected OPERATION) → 422 "Unprocessable Entity"
 // Both are 422.  A client seeing only status + reason phrase cannot tell them
 // apart; `title` plus the `errors[]` pointer array is what distinguishes them.
-// Python collapsed the two until RS-27 — it answered the *reason phrase* for a
+// Python collapsed the two until RS-29 — it answered the *reason phrase* for a
 // validation failure, which reads as a domain rejection.
 
 import { describe, expect, it } from "vitest";
@@ -96,7 +96,7 @@ async function joined(platform: string): Promise<string> {
 
 describe("M-T9.25 — the 7807 arm census", () => {
   it("cross-backend: the wire-validation rung is identical on all five", async () => {
-    // RS-27.  Python answered `"Unprocessable Entity"` / `"Request validation
+    // RS-29.  Python answered `"Unprocessable Entity"` / `"Request validation
     // failed."` where the other four say `"Validation failed"` / `"One or more
     // fields are invalid."` — the highest-traffic error path in any API, and
     // invisible to every gate: the only 422 any golden records is

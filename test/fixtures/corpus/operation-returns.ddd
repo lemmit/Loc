@@ -2,7 +2,7 @@
 system RU {
   subdomain D {
     context Shop {
-      // `attemptedCode` is deliberately MULTI-WORD (RS-29).  A declared error's
+      // `attemptedCode` is deliberately MULTI-WORD (RS-30).  A declared error's
       // fields become RFC 7807 §3.2 extension members, and the single-word
       // `resource` cannot test their CASING — snake and camel are the same
       // string.  Elixir shipped `%{attempted_code: …}` against the other four's

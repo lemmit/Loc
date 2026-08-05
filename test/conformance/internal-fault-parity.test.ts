@@ -1,4 +1,4 @@
-// RS-26 — the unmodelled-fault arm is a sanitized 500 with the literal detail
+// RS-28 — the unmodelled-fault arm is a sanitized 500 with the literal detail
 // `"internal"`, on all five backends.
 //
 // This is a STATIC gate on purpose, and the reason is the interesting part: no
@@ -92,7 +92,7 @@ async function emit(platform: string): Promise<string> {
   return [...files.values()].join("\n");
 }
 
-describe("RS-26 — an unmodelled fault is a sanitized 500 on every backend", () => {
+describe("RS-28 — an unmodelled fault is a sanitized 500 on every backend", () => {
   for (const platform of PLATFORMS) {
     it(`${platform}: emits 500 "Internal Server Error" with detail "internal"`, async () => {
       expect(await emit(platform)).toMatch(SANITIZED_ARM[platform]!);
@@ -126,11 +126,11 @@ describe("RS-26 — an unmodelled fault is a sanitized 500 on every backend", ()
     });
   });
 
-  it("the EXTERN-handler 500 is sanitized too — RS-26's own named trigger", async () => {
-    // The assertion that was missing, and the reason RS-26's `conforms` list was
+  it("the EXTERN-handler 500 is sanitized too — RS-28's own named trigger", async () => {
+    // The assertion that was missing, and the reason RS-28's `conforms` list was
     // wrong for a second time.
     //
-    // The gate above checks the arm each backend FALLS THROUGH to. RS-26's
+    // The gate above checks the arm each backend FALLS THROUGH to. RS-28's
     // `trigger` names a different path first: "a hand-written `extern` handler
     // returning an unmodelled error". Node and .NET wrap that throw in an
     // `ExternHandlerError` / `ExternHandlerException` whose `message`
@@ -140,7 +140,7 @@ describe("RS-26 — an unmodelled fault is a sanitized 500 on every backend", ()
     //
     // In practice that inner message is a driver or HTTP-client exception
     // carrying SQL text, URLs, host names or connection strings — the exact leak
-    // RS-26's DETAIL claim forbids, on the exact trigger it names. Java, python
+    // RS-28's DETAIL claim forbids, on the exact trigger it names. Java, python
     // and elixir emit no such arm and were always correct.
     //
     // The generalizable lesson: a rule's `trigger` enumerates the paths that
@@ -186,7 +186,7 @@ system Ext {
 });
 
 // ---------------------------------------------------------------------------
-// FINDING, not covered by RS-26 — vanilla Phoenix has no app-global 7807 arm.
+// FINDING, not covered by RS-28 — vanilla Phoenix has no app-global 7807 arm.
 //
 // Writing the gate above surfaced a divergence larger than the one the rule was
 // minted for, and it is recorded here rather than quietly designed around.
