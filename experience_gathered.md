@@ -4397,3 +4397,100 @@ what it would mean if the marker doesn't move (128 MB is more than iOS will
 give a web page → the answer is a server-side runtime, not more trimming).
 Writing down the falsifier before the measurement is what stops the next fix
 from being reported as a success on the strength of its bundle graph.
+
+## 79. A compile gate proves the code is well-formed, not that the value binds (2026-08-05)
+
+M-T3.7(c) taught this the expensive way. Under `tenancy by user.<claim> of
+<Registry>` with a `guid` registry id and a `string` claim, the derived
+self-scope bound raw token text against the id, so a malformed claim
+(`tenantId: "not-a-guid"`) died in the uuid parser — a 500 for an ordinary bad
+token. The Elixir fix cast the claim in Elixir and pinned the result through a
+`fragment`, so nil binds NULL and matches nothing:
+
+```elixir
+# WRONG — cast/1 returns the hyphenated string
+fragment("? = ?", record.id, ^(case Ecto.UUID.cast(v) do {:ok, u} -> u; :error -> nil end))
+# RIGHT — dump/1 returns the raw 16-byte binary Postgrex encodes a uuid param as
+fragment("? = ?", record.id, ^(case Ecto.UUID.dump(v) do {:ok, u} -> u; :error -> nil end))
+```
+
+The `cast/1` version was **green on `mix compile --warnings-as-errors` and green
+on the byte-level codegen pins**, and it broke *every well-formed claim* —
+`DBConnection.EncodeError: Postgrex expected a binary of 16 bytes`. It fixed the
+malformed case and destroyed the normal one. Nothing in the fast tier or the
+compile tier could see it, because the code was perfectly well-formed; the
+defect lived one layer down, in how the parameter *binds*.
+
+### The rule
+
+**When a fix changes how a value is BOUND rather than what source is emitted,
+the proving gate has to execute a query, not compile one.** Emitted-source
+assertions and `--warnings-as-errors` both stop at the syntax/type boundary; a
+bind is a runtime contract between the driver and the column type, and only
+running it tests it.
+
+This is the sibling of §59/§63 ("a gate that never reaches the thing it names")
+with a twist worth naming separately: here the gate reached the right *file* and
+the right *line*. It was at the wrong **layer**. "Did my gate touch this code?"
+is the wrong question; "could my gate observe this failure mode?" is the right
+one.
+
+### The cheap oracle when the host toolchain is missing
+
+The sandbox has no host `mix`, so the committed Elixir tenancy e2e could not
+run. A ~40-line throwaway probe — start a postgres container, `mix ecto.migrate`
+in the elixir image, then `Repo.all` each candidate query shape and print
+ok/raised — was decisive in minutes and produced the whole truth table at once:
+
+```
+PROBE new/malformed OK rows=0            PROBE old/malformed RAISED Ecto.Query.CastError
+PROBE new/valid     OK rows=0            PROBE old/nil       RAISED ArgumentError
+PROBE new/nil       OK rows=0                (comparing `record.id` with `nil` is forbidden)
+```
+
+Two findings for the price of one: it caught the `cast`/`dump` bug *and*
+reproduced both defects the PR claimed to fix, which is the mutation proof. When
+a backend's real harness can't run locally, do not fall back to reasoning about
+the framework's semantics — build the smallest thing that executes them. The
+`old/nil` row also exposed an adjacent bug: `capability-filter.ts` documented
+`^(current_user && …)` as fail-closed for a missing actor, but Ecto rejects a
+nil in a comparison outright, so the "fail-closed" path had always raised.
+
+### And a corollary for reading trackers
+
+Three separate claims in `docs/new-plan/` and `docs/tenancy.md` were stale in
+one session: M-T3.7(b) ("extend to elixir" — already a 10-cell matrix),
+`tenancy.md` ("500s on every backend" — .NET never did), and M-T3.3 (`open` —
+fully shipped, missing only a fixture). All three were checkable in under two
+minutes against fresh `main`. The plan's own rule ("statuses rot — verify") is
+not boilerplate; budget the two minutes per claim you are about to build on.
+
+### Postscript — the fixture found a second bug before it was committed
+
+Written up here because it is the same lesson from the other end.  The
+`policy-deny` corpus fixture added in the follow-up PR gained a `crossTenant`
+aggregate whose field is named `text`, purely to exercise a denied aggregate
+with no tenant filter.  `ruff` immediately failed the emitted python project:
+
+```
+F401 [*] `sqlalchemy.text` imported but unused
+```
+
+The python schema emitter narrows its imports with a word-boundary scan over
+the emitted module.  That is exact for the CLASS names — they are capitalized
+and a Loom field lowers to a snake_case attribute — but `text` is the one
+LOWERCASE helper in the list, so a column named `text` matched it, pulled in an
+import nothing invoked, and failed the whole python build.  One field name, a
+dead gate, for every model that happens to have a `text` column.
+
+Two things worth keeping:
+
+- **The fixture kept the name.** Renaming the field to `body` would have made
+  the build green and the bug invisible — which is precisely how
+  `tenancy-claim-name.ddd` came to exist (every earlier fixture used the one
+  claim name that made a hardcode accidentally correct).  The field carries a
+  `do not tidy this` comment for the same reason.
+- **The bug was only reachable through a build.** No generator test asserts an
+  import line, and `mypy --strict` passes an unused import happily — it is
+  `ruff` in the compile tier that rejects it.  A fixture that never compiles
+  cannot find this class at all, which is the whole argument for adding one.
