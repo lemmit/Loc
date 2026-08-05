@@ -20,8 +20,23 @@
 // Leaf discipline (pipeline-layering): imports only sibling leaves, never the
 // `lower.ts` orchestrator.
 
-import type { Projection, ProjectionOn } from "../../language/generated/ast.js";
-import { isAggregate, isProjection, isProperty, isWorkflow } from "../../language/generated/ast.js";
+import type {
+  Aggregate,
+  Projection,
+  ProjectionOn,
+  Workflow,
+} from "../../language/generated/ast.js";
+import {
+  isAggregate,
+  isBoundedContext,
+  isProjection,
+  isProperty,
+  isWorkflow,
+} from "../../language/generated/ast.js";
+
+/** What a projection's `from` may name. */
+type ProjectionSourceDecl = Aggregate | Workflow | Projection;
+
 import type {
   ExprIR,
   FieldIR,
@@ -86,6 +101,38 @@ function hasQueryClauses(p: Projection): boolean {
   );
 }
 
+/** The `from` source declaration, resolving a MACRO-BUILT reference by name.
+ *
+ *  The macro expander runs at the IndexedContent phase, BEFORE Langium's
+ *  linker, and its `makeRef` deliberately produces a lenient reference — a
+ *  `$refText` with no resolution machinery — on the documented contract that
+ *  "lowering reads `$refText` directly" (expander.ts).  This function is that
+ *  read for the projection source.
+ *
+ *  Without it a scaffolded projection lowers DIFFERENTLY from the identical
+ *  hand-written one: `sourceRef` stays undefined, so `candidateAlias` is never
+ *  bound, so a bare `o` never becomes `this` and `o.total` lowers to a member
+ *  on an UNRESOLVED ref instead of a member on `this`.  Every consumer that
+ *  reasons about source-column shape then disagrees with the emitters —
+ *  which is precisely how `loom.projection-aggregate-arg-not-columnar` came to
+ *  reject `scaffoldDashboard`'s own `sum(o.total)` (experience_gathered §70).
+ *
+ *  Resolving here fixes the divergence at its origin, so macro-built and
+ *  parsed projections produce the SAME IR and every downstream detector sees
+ *  one shape instead of two. */
+function resolveProjectionSource(p: Projection): ProjectionSourceDecl | undefined {
+  const linked = p.source?.ref;
+  if (linked) return linked;
+  const name = p.source?.$refText;
+  if (!name) return undefined;
+  const ctx = p.$container;
+  if (!isBoundedContext(ctx)) return undefined;
+  const found = ctx.members.find((m) => "name" in m && m.name === name);
+  return found && (isAggregate(found) || isWorkflow(found) || isProjection(found))
+    ? found
+    : undefined;
+}
+
 /** Lower the query-time comprehension (`from`/`where`/`join`/`select`).
  *  The candidate scope is the `from` source (`inAggregate` + the author's alias,
  *  reusing the criterion `candidateAlias` binder) when present, else the
@@ -93,7 +140,7 @@ function hasQueryClauses(p: Projection): boolean {
  *  resolve stored id columns).  Params bind as locals; each join alias binds as
  *  an entity-typed local so `c.name` in `select`/`where` resolves. */
 function lowerProjectionQuery(p: Projection, env: Env): ProjectionQueryIR {
-  const sourceRef = p.source?.ref;
+  const sourceRef = resolveProjectionSource(p);
   const sourceName = sourceRef?.name ?? p.source?.$refText;
   const sourceIsWorkflow = !!sourceRef && isWorkflow(sourceRef);
   // A `from <Projection>` source — reads a projection's read-model row.  Distinct

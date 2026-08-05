@@ -411,6 +411,18 @@ export function memberAccess(
   callArgs.forEach((c, i) => {
     setContainer(c, suffix, "args", i);
   });
+  // CHAINING flattens.  The parser reads `o.placedAt.startOfDay()` as ONE
+  // `PostfixChain` — `head: NameRef(o)`, `suffixes: [.placedAt, .startOfDay()]`
+  // — so a macro nesting `memberAccess(memberAccess(o, "placedAt"), …)` must
+  // produce that shape, not a chain whose head is another chain.  A
+  // chain-headed chain is a shape the parser never emits, and nothing
+  // downstream reads it.
+  if (receiver.$type === "PostfixChain") {
+    const base = receiver as PostfixChain;
+    setContainer(suffix, base, "suffixes", base.suffixes.length);
+    base.suffixes.push(suffix);
+    return base;
+  }
   const chain: PostfixChain = tag(
     mkPostfixChain({
       $type: "PostfixChain",
@@ -590,9 +602,12 @@ export function singletonProjection(
   alias: string,
   members: ProjectionMember[],
   selects: Array<{ field: string; expr: Expression }>,
-  opts: { where?: Expression } = {},
+  opts: { where?: Expression; groupBys?: Expression[] } = {},
 ): Projection & ContextMember {
   const origin = currentOrigin();
+  // A `group by` turns the same node into the GROUPED read model (M-T4.2):
+  // one row per distinct key instead of one for the whole table.
+  const groupBys = opts.groupBys ?? [];
   const selectNodes = selects.map((s) =>
     tag(mkProjectionSelect({ $type: "ProjectionSelect", field: s.field, expr: s.expr }), origin),
   );
@@ -603,7 +618,7 @@ export function singletonProjection(
       params: [],
       members,
       joins: [],
-      groupBys: [],
+      groupBys,
       selects: selectNodes,
       bypass: [],
       bypassAll: false,
@@ -619,6 +634,9 @@ export function singletonProjection(
   selectNodes.forEach((sel, i) => {
     setContainer(sel, node, "selects", i);
     setContainer(sel.expr, sel, "expr");
+  });
+  groupBys.forEach((g, i) => {
+    setContainer(g, node, "groupBys", i);
   });
   if (opts.where) setContainer(opts.where, node, "filter");
   return node as Projection & ContextMember;

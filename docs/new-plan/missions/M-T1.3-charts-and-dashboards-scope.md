@@ -507,8 +507,34 @@ Gates tripped, each to be *addressed* rather than loosened: `heex-parity`,
 
 ### 3.6 Phase 5 and the leftovers
 
-- **`scaffoldDashboard` grows a chart** once 3 + 4 land: a created-per-day series
-  per aggregate, alongside the `Stat` row.
+- **`scaffoldDashboard` grows a per-day series** — ✅ landed. Each aggregate with
+  a non-optional `datetime` column gains `<Agg>PerDay { day, rowCount }`, a
+  GROUPED projection on the `startOfDay()` key, so the buckets are cut by
+  `date_trunc('day', …)` in SQL. `createdAt` wins when present; otherwise the
+  first non-optional datetime, so an aggregate modelling its own timestamp
+  still charts. No datetime ⇒ no series (and the ui side derives the same
+  answer, so it can never bind one that was not emitted).
+
+  Landing it required fixing the divergence underneath it: the macro expander
+  runs BEFORE Langium's linker and its `makeRef` is lenient, but projection
+  lowering read `p.source?.ref` only — so a scaffolded projection's source
+  never resolved, `candidateAlias` was never bound, and a bare `o` never became
+  `this`. Macro-built and parsed projections lowered to DIFFERENT IR from the
+  same source text. That is the root cause behind experience_gathered §70 (it
+  is why the aggregate-arg gate rejected `scaffoldDashboard`'s own
+  `sum(o.total)`), and `test/ir/macro-vs-parsed-projection-lowering.test.ts`
+  now pins the invariant.
+
+- **The `Chart` TILE on `scaffoldHome` is still open**, and blocked on a real
+  constraint rather than effort: `Chart` renders on **react only**, but a
+  scaffolded `ui` can be hosted by a deployable of any framework, and the
+  macro cannot see which — the `ui` declaration carries no framework, the
+  deployable binds it later. Adding the tile unconditionally would fail every
+  vue/svelte/angular/elixir scaffold with `loom.chart-unsupported-target`
+  (verified: a vue-hosted scaffold generates clean today). Unblocking it needs
+  one of — `Chart` on the remaining frontends, a framework-aware scaffold, or
+  a page-level "render only where supported" primitive. That is a design
+  decision, not a slice.
 - **Defect A** (§2.2) — no longer on the critical path. Recommend the cheap half:
   a validator gate `loom.frontend-collection-op-unsupported` so `rows.count`
   fails at parse time instead of at `tsc`. Map ops into the JSX walkers only if
