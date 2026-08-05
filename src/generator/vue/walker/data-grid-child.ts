@@ -68,7 +68,7 @@ function renderSfc(spec: DataGridSpec): string {
   // is likewise a walker-emitted `<button>` with inline reset styles
   // (`vueTarget.renderSortableHeader`), not pack markup.
   const body = spec.renderBody({
-    headerBody: headerBody(selection),
+    headerBody: headerBody(selection, spec.sortByAria),
     cellBody: cellBody(columns, selection),
   });
 
@@ -295,7 +295,7 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
 
 /** The full `<th>` content: the select-all checkbox (when selection is on), a
  *  sortable header button, or the plain header. */
-function headerBody(selection: boolean): string {
+function headerBody(selection: boolean, sortByAria: string): string {
   const style =
     "background: none; border: none; padding: 0; font: inherit; cursor: pointer; user-select: none;";
   const indicator =
@@ -317,7 +317,7 @@ function headerBody(selection: boolean): string {
     `  ${selection ? "v-else-if" : "v-if"}="h.column.getCanSort()"`,
     `  type="button"`,
     `  style="${style}"`,
-    `  :aria-label="\`Sort by \${String(h.column.columnDef.header ?? h.id)}\`"`,
+    `  ${sortByAria}`,
     `  @click="h.column.toggleSorting()"`,
     `>`,
     `  <FlexRender :render="h.column.columnDef.header" :props="h.getContext()" />`,

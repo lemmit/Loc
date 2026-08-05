@@ -580,6 +580,17 @@ export const flutterTarget: WalkerTarget = {
   // VALUE (`localizedNamedValue`, D-I18N-ATTR) is spelled with i18n off.
   // The same single-quoted escaping the translation runtime uses for its keys.
   renderStringLiteral: dartStringLit,
+  // A holed message as ONE Dart string with `${…}` interpolation, not a `+`
+  // chain — that is how Dart spells this, and how the sortable header's
+  // `'Sort by $header'` was already written.
+  renderStringConcat: (parts) =>
+    `'${parts
+      .map((p) =>
+        "expr" in p
+          ? `\${${p.expr}}`
+          : p.text.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\$/g, "\\$"),
+      )
+      .join("")}'`,
 
   // A call into the generated Dart translation runtime (M-T1.11).  The JS
   // frontends' `t(key, default, { name: expr })` is close but not Dart — the

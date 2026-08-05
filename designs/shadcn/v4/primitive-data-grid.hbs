@@ -27,7 +27,7 @@
                       type="button"
                       className="inline-flex items-center gap-1 font-medium"
                       onClick={h.column.getToggleSortingHandler()}
-                      aria-label={`Sort by ${String(h.column.columnDef.header ?? h.id)}`}
+                      {{{sortByAria}}}
                     >
                       {flexRender(h.column.columnDef.header, h.getContext())}
                       {h.column.getIsSorted() === "asc" ? " ↑" : h.column.getIsSorted() === "desc" ? " ↓" : ""}
@@ -39,7 +39,7 @@
                     <input
                       className="mt-1 w-full rounded border px-1 py-0.5 text-xs"
                       {{{filterPlaceholderAttr}}}
-                      aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
+                      {{{filterByAria}}}
                       value={String(h.column.getFilterValue() ?? "")}
                       onChange={(e) => h.column.setFilterValue(e.target.value)}
                     />

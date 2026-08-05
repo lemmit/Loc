@@ -24,7 +24,7 @@
                 class="mt-1 h-7 text-xs"
                 type="search"
                 {{{filterPlaceholderAttr}}}
-                :aria-label="`Filter by ${String(h.column.columnDef.header ?? h.id)}`"
+                {{{filterByAria}}}
                 :model-value="String(h.column.getFilterValue() ?? '')"
                 @update:model-value="(v: string | number | undefined) => h.column.setFilterValue(String(v ?? ''))"
               />

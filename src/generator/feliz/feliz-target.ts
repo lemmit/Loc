@@ -676,6 +676,14 @@ export const felizTarget: WalkerTarget = {
   // Same escaping as `escapeText`; both land in an F# `"…"` body.
   renderStringLiteral: (text: string) => `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
 
+  // A holed message as one F# string expression — `+` over `"…"` literals,
+  // paren-wrapped for the `prop.ariaLabel (…)` argument positions it lands in.
+  // Hole expressions arrive already string-typed (the seam concatenates, it does
+  // not coerce), which is what keeps `("Filter by " + loomText (…))` byte-
+  // identical to the sentence this pack spelled by hand.
+  renderStringConcat: (parts) =>
+    `(${parts.map((p) => ("expr" in p ? p.expr : fsString(p.text))).join(" + ")})`,
+
   // A call into the generated F# translation runtime (M-T1.11).  The JS
   // frontends' `t(key, default, values)` is not F#, so Feliz spells the same
   // call its own way — the key, the source default and the ICU hole values are
