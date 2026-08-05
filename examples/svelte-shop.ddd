@@ -24,6 +24,11 @@ system SvelteShop {
                 customerId: Customer id
                 status: OrderStatus
                 placedAt: datetime
+                // The `money` SCALAR — aggregation source for the
+                // `RevenueSnapshot` projection below, and the only thing in the
+                // Svelte build matrix that drives `moneySchema` through an
+                // emitted client module.
+                total: money?
                 operation confirm() {
                     precondition status == OrderStatus.Draft
                     status := OrderStatus.Confirmed
@@ -34,6 +39,21 @@ system SvelteShop {
             repository Customers for Customer { }
             repository Orders for Order {
                 find byStatus(status: OrderStatus): Order[] where this.status == status
+            }
+
+            criterion ConfirmedOrders of Order as o = o.status == OrderStatus.Confirmed
+
+            // A SINGLETON query-time projection — aggregated in SQL, one object
+            // out.  Read by the Welcome page below through
+            // `Sales.RevenueSnapshot` (M-T1.3 Phase 1), which is what makes the
+            // Svelte build gate compile `src/lib/api/projections.ts` + the
+            // single-record `QueryView` binding.
+            projection RevenueSnapshot {
+                confirmed: int
+                revenue: money
+                from Order as o
+                where ConfirmedOrders
+                select confirmed = count, revenue = sum(o.total)
             }
 
             workflow placeOrder {
@@ -91,7 +111,22 @@ system SvelteShop {
                     Tab { "Orders", Text { "Orders tab body." } },
                     testid: "home-tabs"
                 },
-                Anchor { "Go to customers", to: "/customers", testid: "go-customers" }
+                Anchor { "Go to customers", to: "/customers", testid: "go-customers" },
+                // Projection read (M-T1.3 Phase 1).  Single-record by
+                // construction — a singleton returns ONE object, so the walker
+                // must not apply collection semantics to it.  `Money { … }`
+                // wraps the decimal figure, which is a Decimal client-side.
+                QueryView {
+                    of: Sales.RevenueSnapshot,
+                    loading: Loader { },
+                    error: Alert { "Could not load revenue" },
+                    empty: Text { "No confirmed orders yet" },
+                    data: r => Group {
+                        Stat { "Confirmed orders", r.confirmed },
+                        Stat { "Revenue", Money { r.revenue } },
+                        testid: "revenue-snapshot"
+                    }
+                }
             }
         }
     }
