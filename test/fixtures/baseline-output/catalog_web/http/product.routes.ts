@@ -109,7 +109,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     async (c) => {
       const { id } = c.req.valid("param");
       const found = await repo.findById(Ids.ProductId(id));
-      if (!found) throw new AggregateNotFoundError("not_found");
+      if (!found) throw new AggregateNotFoundError(`Product ${id} not found`);
       return c.json(repo.toWire(found) as z.infer<typeof ProductResponse>, 200);
     },
   );

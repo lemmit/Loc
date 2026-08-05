@@ -79,6 +79,111 @@
         },
         "version": 4
       }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders?dir=asc&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "CD2",
+            "id": "<volatile:key>",
+            "isDraft": false,
+            "lines": [
+              {
+                "id": "<volatile:key>",
+                "qty": 2,
+                "sku": "S1"
+              }
+            ],
+            "status": "Placed",
+            "total": {
+              "amount": 12,
+              "currency": "USD"
+            },
+            "version": 4
+          },
+          {
+            "code": "CD3",
+            "id": "<volatile:key>",
+            "isDraft": true,
+            "lines": [],
+            "status": "Draft",
+            "total": {
+              "amount": 1,
+              "currency": "USD"
+            },
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "CD2",
+            "id": "<volatile:key>",
+            "isDraft": false,
+            "lines": [
+              {
+                "id": "<volatile:key>",
+                "qty": 2,
+                "sku": "S1"
+              }
+            ],
+            "status": "Placed",
+            "total": {
+              "amount": 12,
+              "currency": "USD"
+            },
+            "version": 4
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
     }
   ]
 }

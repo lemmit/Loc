@@ -41,5 +41,14 @@ system SC {
     api.orders.ship(o, { carrier: "UPS", tracking: "1Z999" })
     let read = api.orders.getById(o)
     expect(read.shipment.carrier).toBe("UPS")
+    // The root list read carries the single containment too — the shape a
+    // per-row `getById` alone never proves for the bulk-load path.
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    // …and the canonical DELETE actually removes it.
+    api.orders.destroy(o)
+    let empty = api.orders.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

@@ -59,4 +59,34 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     kinds: ["value"],
     reason: "RS-20 — java double-bumps version when a create also writes a value collection",
   },
+  // The SAME two RS-20 divergences, seen through a SECOND window.  The RS-27
+  // work added an `api.<aggs>.all()` caller to both fixtures, so each case now
+  // also reads the row through the root LIST route — and a wrong `version` on
+  // the entity is a wrong `version` on that row too.  Nothing new is wrong: the
+  // value, the direction and the cause are identical to the two waivers above
+  // (`golden 2 ≠ java 1` on single-containment, `golden 1 ≠ java 2` on
+  // value-collections), only the JSON path differs (`$.items[*].version`).
+  //
+  // Written as SEPARATE waivers rather than widening the existing pair to
+  // `**.version`, for the ratchet: the registry flags a waiver that stops
+  // matching, so four narrow entries record which windows are still affected
+  // and each disappears independently as RS-20 is fixed.  One broad pattern
+  // would go stale only when the LAST of them was fixed, and would also swallow
+  // a genuinely new `version` divergence at some other depth.
+  {
+    backends: ["java"],
+    cases: ["single-containment"],
+    path: "$.items[*].version",
+    kinds: ["value"],
+    reason:
+      "RS-20 — java misses the version bump when only a contained child mutates (same bug as $.version, via the root list read)",
+  },
+  {
+    backends: ["java"],
+    cases: ["value-collections"],
+    path: "$.items[*].version",
+    kinds: ["value"],
+    reason:
+      "RS-20 — java double-bumps version when a create also writes a value collection (same bug as $.version, via the root list read)",
+  },
 ];

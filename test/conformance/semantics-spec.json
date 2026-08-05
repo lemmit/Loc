@@ -495,6 +495,31 @@
         "the gate missed that regression because its elixir arm read update_item_request.ex (the OpenApiSpex SCHEMA) and not item_changeset.ex (validate_required, which ENFORCES); it now asserts both, and the fixture gained a bare `flag: bool` — the case that separates the create seam from the update seam"
       ],
       "tier": "static"
+    },
+    {
+      "id": "RS-27",
+      "title": "A 404-BY-ID carries the sentence `\"<Aggregate> <id> not found\"` in `detail`",
+      "trigger": "`GET /api/<aggs>/{id}` (or `GET /api/<aggs>/{id}/history`) for an id that does not exist",
+      "observable": "the RFC 9457 body's `detail` is the sentence `\"<Aggregate> <id> not found\"` — the aggregate's PascalCase name, the requested id, and the words \"not found\" — on every backend. Not a machine token, not a framework default. The 404 an OPTIONAL FIND answers is a DIFFERENT class and keeps the `\"not_found\"` token; the rule is about reads addressed BY ID.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-04 by the api-caller-census drain: adding `api.orders.destroy(id)` + `expect(api.orders.getById(id)).toThrow(404)` to corpus/core-domain made the python leg diverge from the node golden at $.detail — golden \"not_found\" vs python \"Order <uuid> not found\"",
+        "fixed (node): the getById and history routes raise `new AggregateNotFoundError(`<Agg> ${id} not found`)` — the message `repo.getById` would have thrown — src/platform/hono/v4/routes-builder.ts",
+        "fixed (dotnet): the getById action throws AggregateNotFoundException instead of returning `NotFound()`, so it routes through DomainExceptionFilter like every other .NET 404 (which also puts it back inside RS-22) — src/generator/dotnet/emit/api.ts",
+        "THIRD offender found 2026-08-04 by the behavioural-java leg on PR #2429 (NOT by the emitter survey, which had cleared java by reading the repository): core-domain #9 GET /api/orders/{id} — golden {…RFC-9457…} vs java \"\" (404, empty body)",
+        "fixed (java): the service read ends `.orElseThrow(() -> new AggregateNotFoundException(...))` instead of `.orElse(null)`, and the controller returns `ResponseEntity.ok(...)` instead of `notFound().build()`, so the @RestControllerAdvice renders the envelope — src/generator/java/emit/service.ts + emit/api.ts.  Thrown in the SERVICE (not the controller) so the read stays read-scoped: `repository.getById` loads through the WRITE scope when one is narrower.",
+        "hardening (java): the five sites that spell the message now render one emitter-side helper, `javaNotFoundThrow` — src/generator/java/emit/common.ts",
+        "elixir/python needed NO change, and this is now CHECKED at the route (not read): `show/2` and the history action call `ProblemDetails.not_found_response/3` directly; python's route calls `repo.get_by_id`, which raises",
+        "enabler: WIRE_NORMALIZE now templates a uuid embedded ANYWHERE in a string value, not only in a path — without it no golden can hold a 404-by-id body — test/_helpers/wire-record.ts",
+        "runtime-verified on node (PGlite), python (uvicorn + postgres) and java (gradle:9-jdk25 boot + postgres): all three match the golden byte-for-byte on core-domain, 0 divergences"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

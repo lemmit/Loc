@@ -8,37 +8,46 @@
 //   • a pin that stops matching (the op gained a caller, or the op / fixture was
 //     renamed or deleted) fails as STALE, so the drain deletes it in the same PR.
 //
-// The reasons are shared constants rather than 201 hand-written sentences —
+// The reasons are shared constants rather than 210 hand-written sentences —
 // the gaps fall into a handful of classes, and the class is the honest
-// explanation.  Three of them (`autoFindAll`, `destroy`, `gateProbe` — 98 of the
-// 201 pins) are NOT un-authored tests: those routes are **unreachable from the
-// `test e2e` surface today**, so they cannot be drained by writing a test.  That
-// distinction is the point of writing the reason down.
+// explanation.  ONE class (`gateProbe`, 1 pin) is still NOT an un-authored test:
+// that route is **unreachable from the `test e2e` surface**, so it cannot be
+// drained by writing a test.  That distinction is the point of writing the
+// reason down.
+//
+// `autoFindAll` and `destroy` USED to be in that unreachable class — 104 of the
+// 216 pins were those two routes, together the delete and list paths of every
+// generated system.  Both became reachable (`api.x.all()` → `GET /api/<aggs>`,
+// `api.x.destroy(id)` → `DELETE /api/<aggs>/{id}`), 6 were drained on the spot
+// across three corpus fixtures, and the remaining 98 are re-tagged as
+// UN-AUTHORED: an ordinary drain-list that shrinks by writing tests, exactly
+// like `crudishUpdate` / `getById` / `create`.
 
 /** Why an operation is pinned.  Grouped by CLASS — see the header. */
 export const R = {
   /**
-   * UNREACHABLE — the auto-`findAll` (`GET /api/<aggs>`).  The e2e DSL has no
-   * verb for it: `api.<aggs>.all(...)` lowers through `renderFindCall` to
-   * `GET /api/<aggs>/all` (`src/system/e2e-render.ts`), and no backend mounts
-   * that path — the derivation deliberately skips the `all` find in the
-   * declared-find loop and registers it at the bare `/api/<aggs>` root.  So a
-   * test written today would 404 rather than exercise the route.  Closing this
-   * needs an e2e verb that maps to the root list route, not a test.
+   * UN-AUTHORED — the auto-`findAll` (`GET /api/<aggs>`, the bare collection
+   * root; the paged envelope, or a bare array where `all` is typed `T[]` —
+   * event-sourced / document / subtype).  Reachable since this PR as
+   * `api.<aggs>.all()`, optionally `all({ page, pageSize, sort, dir })`:
+   * `renderFindCall` routes the `all` find to the root rather than to
+   * `/<aggs>/all`, which is the path no backend mounts and the reason this
+   * class was previously UNREACHABLE.
+   * Drained where written: `corpus/core-domain`, `corpus/single-containment`,
+   * `corpus/value-collections`.
    */
-  autoFindAll:
-    "unreachable: e2e has no verb for the root list route (api.x.all → GET /<aggs>/all, unmounted)",
+  autoFindAll: "un-authored: reachable as api.x.all() — the root list route GET /api/<aggs>",
   /**
-   * UNREACHABLE — the canonical destroy (`DELETE /api/<aggs>/{id}`).  The e2e
-   * renderer has no DELETE arm at all: `api.<aggs>.destroy(id)` resolves the
-   * canonical destroy as an ordinary operation and emits
-   * `POST /api/<aggs>/{id}/destroy`, which no backend mounts (the derivation
-   * routes canonical destroy to DELETE and skips it in the operation loop).
-   * The write-path-never-driven class of `experience_gathered.md` §59, one
-   * level deeper: here the test can't even be written.
+   * UN-AUTHORED — the canonical destroy (`DELETE /api/<aggs>/{id}`, 204 empty).
+   * Reachable since this PR as `api.<aggs>.destroy(id)`.  Previously
+   * UNREACHABLE for a subtler reason than a wrong path: the canonical destroy
+   * is not in `agg.operations` at all (lowering keeps it on
+   * `agg.canonicalDestroy`), so the verb was rejected as an unknown method and
+   * the test could not even be written.  The write-path-never-driven class of
+   * `experience_gathered.md` §59.  Drained where written: `corpus/core-domain`,
+   * `corpus/single-containment`, `corpus/value-collections`.
    */
-  destroy:
-    "unreachable: e2e renderer has no DELETE arm (api.x.destroy → POST /{id}/destroy, unmounted)",
+  destroy: "un-authored: reachable as api.x.destroy(id) — the canonical DELETE (204, no body)",
   /**
    * UNREACHABLE — the `when`-gate probe (`GET /api/<aggs>/{id}/can_<op>`).  The
    * e2e DSL exposes no `can*` verb; the gate itself IS exercised (the corpus
@@ -145,10 +154,10 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
+  // DRAINED: `destroyOrder` + `allOrder` now have callers (the list/delete
+  // block added to this fixture's `test e2e`).
   "corpus/core-domain": {
     byStatusOrder: R.declaredFind,
-    destroyOrder: R.destroy,
-    allOrder: R.autoFindAll,
   },
   "corpus/state-gate": {
     getOrderById: R.getById,
@@ -177,15 +186,13 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
+  // DRAINED: `destroy` + `all` (the two verbs this PR made reachable).
   "corpus/single-containment": {
-    destroyOrder: R.destroy,
     updateOrder: R.crudishUpdate,
-    allOrder: R.autoFindAll,
   },
+  // DRAINED: `destroy` + `all`.
   "corpus/value-collections": {
-    destroyInvoice: R.destroy,
     updateInvoice: R.crudishUpdate,
-    allInvoice: R.autoFindAll,
   },
   "corpus/document": {
     popularArticle: R.declaredFind,

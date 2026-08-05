@@ -388,8 +388,13 @@ export function renderJavaController(
     ...createRoute,
     `    @GetMapping("/{id}")`,
     `    public ResponseEntity<${agg.name}Response> get${agg.name}ById(@PathVariable ${idJava} id) {`,
-    `        var response = service.get${agg.name}ById(new ${idClass}(id));`,
-    `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`,
+    // RS-27 — the service THROWS AggregateNotFoundException on a miss now
+    // (never returns null), so the `@RestControllerAdvice` renders the RFC-9457
+    // envelope with the `"<Agg> <id> not found"` detail.  This route used to
+    // answer `ResponseEntity.notFound().build()` — Spring's own bare 404 with an
+    // EMPTY BODY — which is why the java behavioural leg read `golden {…} ≠
+    // java ""` on the first test that ever drove a 404-by-id.
+    `        return ResponseEntity.ok(service.get${agg.name}ById(new ${idClass}(id)));`,
     `    }`,
     ``,
     // Entity history — two path segments, so no collision with the `/{id}`

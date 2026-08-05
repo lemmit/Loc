@@ -118,7 +118,15 @@ describe("entity history — negative authz", () => {
     // first — `findById` already carries every capability predicate — and only
     // reads the trail for a row this caller can see.
     expect(handler).toContain("const __target = await repo.findById(Ids.EmployeeId(id));");
-    expect(handler).toContain('if (!__target) throw new AggregateNotFoundError("not_found");');
+    // RS-27 — the message was `"not_found"` until 2026-08-04.  It is now the
+    // sentence every other backend answers for a 404-BY-ID, because probing with
+    // `findById` bypasses `repo.getById`, whose throw already carries it.  The
+    // assertion moved rather than being deleted: what this test cares about is
+    // that the reachability probe still 404s, and the exact message is now a
+    // cross-backend contract (docs/conformance-semantics.md § RS-27).
+    expect(handler).toContain(
+      "if (!__target) throw new AggregateNotFoundError(`Employee ${id} not found`);",
+    );
     expect(handler.indexOf("repo.findById")).toBeLessThan(handler.indexOf("schema.auditRecords"));
   });
 

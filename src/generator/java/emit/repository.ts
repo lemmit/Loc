@@ -24,6 +24,7 @@ import {
   renderJavaType,
 } from "../render-expr.js";
 import { renderJpqlWhere } from "../render-jpql.js";
+import { javaNotFoundThrow } from "./common.js";
 
 // ---------------------------------------------------------------------------
 // Repository emission — three artifacts per aggregate:
@@ -764,7 +765,7 @@ export function renderJavaRepositoryImpl(
     // (event="aggregate_loaded", found=false).
     `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
     `        return found.orElseThrow(() ->`,
-    `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
+    `            ${javaNotFoundThrow(agg.name)});`,
     `    }`,
     ``,
     `    @Override`,

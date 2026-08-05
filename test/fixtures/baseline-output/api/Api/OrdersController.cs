@@ -49,7 +49,8 @@ public sealed class OrdersController : ControllerBase
     public async Task<ActionResult<OrderResponse>> GetOrderById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetOrderByIdQuery(new OrderId(id)));
-        return response is null ? NotFound() : Ok(response);
+        if (response is null) throw new global::Api.Domain.Common.AggregateNotFoundException($"Order {id} not found");
+        return Ok(response);
     }
 
     [HttpDelete("{id}")]

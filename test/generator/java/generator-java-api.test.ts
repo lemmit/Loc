@@ -87,10 +87,23 @@ describe("java generator — controller routes (S5)", () => {
     expect(ctrl).toContain("@ResponseStatus(HttpStatus.NO_CONTENT)");
   });
 
-  it("getById maps a miss to a bare 404", async () => {
+  // RS-27 — this test used to be named "getById maps a miss to a bare 404" and
+  // pinned `ResponseEntity.notFound().build()`.  That WAS the bug: Spring's own
+  // bare 404 carries an EMPTY BODY and never reaches the
+  // `@ExceptionHandler(AggregateNotFoundException)` arm in the
+  // `@RestControllerAdvice`, so this one route answered a different envelope
+  // from every other 404 in the same service — which the behavioural-java leg
+  // read as `golden {…RFC-9457…} ≠ java ""`.  The assertion is INVERTED rather
+  // than deleted so the old contract stays visible as the thing that changed.
+  // (docs/conformance-semantics.md § RS-27.)
+  it("getById maps a miss to the shared ProblemDetails 404, not a bare one", async () => {
     const ctrl = (await files()).get(`${ROOT}/features/orders/OrdersController.java`)!;
-    expect(ctrl).toContain(
-      "return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);",
+    expect(ctrl).toContain("return ResponseEntity.ok(service.getOrderById(new OrderId(id)));");
+    expect(ctrl).not.toContain("ResponseEntity.notFound().build()");
+    // The service is what raises it, so the read no longer answers `null`.
+    const svc = (await files()).get(`${ROOT}/features/orders/OrderService.java`)!;
+    expect(svc).toContain(
+      '.orElseThrow(() -> new AggregateNotFoundException("Order " + id + " not found"));',
     );
   });
 });

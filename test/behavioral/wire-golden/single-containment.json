@@ -33,6 +33,50 @@
         },
         "version": 2
       }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "SC1",
+            "id": "<volatile:key>",
+            "shipment": {
+              "carrier": "UPS",
+              "id": "<volatile:key>",
+              "trackingCode": "1Z999"
+            },
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 4,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
     }
   ]
 }

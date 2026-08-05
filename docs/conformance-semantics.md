@@ -762,6 +762,79 @@ the conforming backends, and the fix that established it.
   all five, and keeps an empty `UPDATE_BOOL_WAIVED` map as the ratchet so a
   regression is recorded rather than the assertion relaxed.
 
+### RS-27 · A 404-**by-id** carries the sentence `"<Aggregate> <id> not found"`
+- **Guarantee.** When a read addressed **by id** finds nothing, the RFC 9457
+  body's `detail` is the sentence `"<Aggregate> <id> not found"` — the
+  aggregate's PascalCase name, the requested id, the words "not found" — on
+  every backend. Not a machine token, not a framework default.
+- **Trigger.** `GET /api/<aggs>/{id}`, or `GET /api/<aggs>/{id}/history`, for an
+  id that does not exist.
+- **Scope.** *By id.* The 404 an **optional find** answers
+  (`find byCode(...): Order option` with no match) is a different class and
+  keeps the `"not_found"` token — node and python already agree there, and the
+  rule deliberately does not touch it.
+- **The real rule: don't hand-roll a 404.** This was not five backends inventing
+  five strings. **Two agreed out of the box**, because on each the message comes
+  from one shared producer — the repository's `getById`
+  (`python/repository-builder.ts`) or Phoenix's
+  `ProblemDetails.not_found_response/3`. The **three** outliers were precisely
+  the three routes that **bypassed** their own producer, and in every case it
+  was the by-id **READ** — the one place `findById` returns `null` and tempts a
+  local answer, while the writes were already correct:
+  - **node** probed with `repo.findById` and raised its own
+    `AggregateNotFoundError("not_found")` — no aggregate, no id. The *same
+    service's* `DELETE` route already answered the sentence, because it loads
+    through `repo.getById`. One service, two answers.
+  - **.NET** returned `NotFound()`, ASP.NET's own bare 404, so it never reached
+    `DomainExceptionFilter`'s `AggregateNotFoundException` arm that every other
+    .NET 404 goes through. That also put this one route outside
+    [RS-22](#rs-22--the-rfc-7807-envelope-is-exactly-five-members-plus-declared-extensions)
+    — the factory omits `instance` and injects `traceId` — an unmeasured hole in
+    an existing rule, closed by the same fix.
+  - **java** returned `ResponseEntity.notFound().build()` — Spring's own bare
+    404, an **empty body** — because the service read ended `.orElse(null)`
+    while every java write path loads through `repository.getById`, which
+    throws.
+- **Why it survived so long.** Two independent blind spots, both of which
+  generalize:
+  1. **No caller.** Nothing in the repo had *ever* driven a `GET /<aggs>/{id}`
+     404. It surfaced from the API-operation caller census
+     (`test/ir/api-caller-census.test.ts`): draining the `destroy`/`all` pins
+     needed a "the row is really gone" assertion, and that assertion was the
+     first request of its kind any wire golden ever recorded.
+  2. **Unbaselinable.** Even with a test, no golden could have held the field:
+     the sentence embeds a per-run uuid, and `WIRE_NORMALIZE` templated only
+     *path-shaped* strings — so `detail` differed on every run of every backend.
+     **A field that cannot be recorded cannot be gated.** Generalizing the
+     rewrite to a uuid embedded *anywhere* in a string
+     (`test/_helpers/wire-record.ts`) is what makes this rule enforceable at all.
+- **And a third, about the verification.** java's bypass was **missed on the
+  first pass**: the emitter survey read the *repository* (which emits the
+  sentence) and stopped there. The first parity pin then encoded the same
+  mistake — a `.java`-wide `toContain` of the message, which the repository
+  satisfies. So "java emits the sentence" was literally **true** while the route
+  answered `""`, and the pin stayed green until a booted leg failed. **A 404 is
+  a property of the route, so only a route-scoped assertion can pin it**; the
+  per-file scoping in `not-found-by-id-detail-parity.test.ts` exists for that
+  reason, and is mutation-proven per backend.
+- **Conforms.** node, dotnet, java, python, elixir. **python and elixir** needed
+  no change — and that is now *checked at the route*, not read: elixir's
+  `show/2` and history action call `ProblemDetails.not_found_response/3`
+  directly, python's route calls `repo.get_by_id`, which raises.
+- **Provenance.** Found 2026-08-04 by the M-T9.11 golden gate on the python leg
+  of `corpus/core-domain`, immediately after the caller-census drain added the
+  first-ever getById-404 caller: `$.detail` — golden `"not_found"` vs python
+  `"Order <uuid> not found"`. Fixed on node
+  (`src/platform/hono/v4/routes-builder.ts`, getById + history) and .NET
+  (`src/generator/dotnet/emit/api.ts`, throw instead of `NotFound()`); **java
+  followed on the behavioural-java leg of PR #2429** (`emit/service.ts`
+  `.orElseThrow(...)` + `emit/api.ts` `ResponseEntity.ok(...)`, with the five
+  message sites unified behind `javaNotFoundThrow` in `emit/common.ts`).
+  Runtime-verified on node, python and java — all three match the golden
+  byte-for-byte on `core-domain`.
+  Tier: **behavioral** — the wire golden now holds `"Order {id} not found"`, so
+  every behavioral leg gates it per-PR.
+
 ---
 
 ## Adding a rule

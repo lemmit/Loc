@@ -27,5 +27,15 @@ system Billing {
     let read = api.invoices.getById(inv)
     expect(read.reference).toBe("INV-1")
     expect(read.lineItems.length).toBe(2)
+    // The inline value-object array over the ROOT LIST route: findAll loads
+    // value collections through a separate bulk path from `getById`, so the
+    // list read is where a dropped/duplicated `Money[]` would show.
+    let listed = api.invoices.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    // Canonical DELETE — the child value rows go with the parent.
+    api.invoices.destroy(inv)
+    let empty = api.invoices.all()
+    expect(empty.items.length).toBe(0)
   }
 }

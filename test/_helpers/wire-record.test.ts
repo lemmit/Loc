@@ -367,3 +367,140 @@ describe("WIRE_NORMALIZE — path-shaped strings", () => {
     expect((e.body as Record<string, unknown>).href).toBe("/api/listings");
   });
 });
+
+// ---------------------------------------------------------------------------
+// WIRE_NORMALIZE — a uuid embedded in PROSE (RS-27).
+//
+// The 404-by-id `detail` is a sentence with the requested id inside it
+// (`"Order <uuid> not found"`).  The SENTENCE is the contract — all five
+// backends must agree on it — and the uuid is per-run noise.  Until this rule
+// the whole field was unbaselinable: every run produced a different `detail`, so
+// NO golden could hold a 404-by-id on ANY backend, which is precisely why the
+// divergence RS-27 names survived unnoticed until a `test e2e` finally drove the
+// route.  These cases pin the rewrite AND its limits — an over-eager rule would
+// erase real divergences instead of one id.
+// ---------------------------------------------------------------------------
+
+const detailOf = (body: unknown): unknown => (body as Record<string, unknown>).detail;
+
+describe("WIRE_NORMALIZE — a uuid embedded in prose (RS-27)", () => {
+  const problem = (detail: string): string =>
+    JSON.stringify({ type: "about:blank", title: "Not Found", status: 404, detail });
+
+  it("templates the id out of a 404 `detail` but keeps every word of the sentence", () => {
+    const e = toWireEntry(
+      0,
+      "GET",
+      "http://x/api/orders/3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+      404,
+      problem("Order 3f2504e0-4f89-11d3-9a0c-0305e82c3301 not found"),
+    );
+    expect(detailOf(e.body)).toBe("Order {id} not found");
+  });
+
+  it("makes two runs of the same backend agree — the property that was missing", () => {
+    const a = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      404,
+      problem("Order 3f2504e0-4f89-11d3-9a0c-0305e82c3301 not found"),
+    );
+    const b = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      404,
+      problem("Order 9c858901-8a57-4791-81fe-4c455b099bc9 not found"),
+    );
+    expect(detailOf(a.body)).toEqual(detailOf(b.body));
+  });
+
+  it("still SEES a real divergence — a different sentence does not normalize away", () => {
+    // The exact RS-27 finding: Hono's machine token vs the four-backend
+    // sentence.  If the rule swallowed this, the gate it exists to serve would
+    // be blind to the thing it was added for.
+    const token = toWireEntry(0, "GET", "/x", 404, problem("not_found"));
+    const sentence = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      404,
+      problem("Order 3f2504e0-4f89-11d3-9a0c-0305e82c3301 not found"),
+    );
+    expect(detailOf(token.body)).toBe("not_found");
+    expect(detailOf(sentence.body)).toBe("Order {id} not found");
+    expect(detailOf(token.body)).not.toEqual(detailOf(sentence.body));
+    // …and a different AGGREGATE name in the sentence is still a divergence.
+    const other = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      404,
+      problem("Invoice 3f2504e0-4f89-11d3-9a0c-0305e82c3301 not found"),
+    );
+    expect(detailOf(other.body)).toBe("Invoice {id} not found");
+    expect(detailOf(other.body)).not.toEqual(detailOf(sentence.body));
+  });
+
+  it("NEGATIVE — a string with no uuid in it is untouched", () => {
+    const e = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      422,
+      problem("Precondition failed: availability != Availability.Discontinued"),
+    );
+    expect(detailOf(e.body)).toBe("Precondition failed: availability != Availability.Discontinued");
+    // Not-quite-uuids must not be templated either: too few groups, wrong
+    // widths, and a non-hex character each stay verbatim.
+    for (const s of [
+      "Order 3f2504e0-4f89-11d3-9a0c not found",
+      "Order 3f2504e0-4f89-11d3-9a0c-0305e82c33 not found",
+      "Order 3f2504e0-4f89-11d3-9a0c-0305e82c330z not found",
+      "order 12345 not found",
+    ]) {
+      expect(detailOf(toWireEntry(0, "GET", "/x", 404, problem(s)).body)).toBe(s);
+    }
+  });
+
+  it("a WHOLE-value uuid still collapses to <uuid>, not {id} — the earlier rule wins", () => {
+    // Ordering matters: `DEFAULT_NORMALIZE`'s bare-uuid rule is first in the
+    // list, so a field that IS an id keeps its existing token and no golden
+    // churns. (`id`-named keys go to `<volatile:key>` earlier still.)
+    const e = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      200,
+      JSON.stringify({ owner: "3f2504e0-4f89-11d3-9a0c-0305e82c3301" }),
+    );
+    expect((e.body as Record<string, unknown>).owner).toBe("<uuid>");
+  });
+
+  it("a PATH-shaped string keeps segment templating — the path rule is ordered first", () => {
+    // `instance` carries both a uuid AND (potentially) an integer segment; the
+    // path rule collapses BOTH, the prose rule would only have caught the uuid.
+    const e = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      404,
+      JSON.stringify({ instance: "/api/orders/3f2504e0-4f89-11d3-9a0c-0305e82c3301/lines/42" }),
+    );
+    expect((e.body as Record<string, unknown>).instance).toBe("/api/orders/{id}/lines/{id}");
+  });
+
+  it("templates EVERY id in a sentence that names more than one", () => {
+    const e = toWireEntry(
+      0,
+      "GET",
+      "/x",
+      404,
+      problem(
+        "Line 3f2504e0-4f89-11d3-9a0c-0305e82c3301 of Order 9c858901-8a57-4791-81fe-4c455b099bc9 not found",
+      ),
+    );
+    expect(detailOf(e.body)).toBe("Line {id} of Order {id} not found");
+  });
+});

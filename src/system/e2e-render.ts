@@ -29,11 +29,26 @@ import { renderExpectStmt } from "./expect-stmt.js";
 // deployable's HTTP surface.  Member-access chains describe the call
 // shape:
 //
-//   api.orders.create({...})         → POST /orders          + JSON body
-//   api.orders.getById(id)           → GET  /orders/{id}
+//   api.orders.create({...})         → POST   /orders         + JSON body
+//   api.orders.getById(id)           → GET    /orders/{id}
+//   api.orders.destroy(id)           → DELETE /orders/{id}     (canonical destroy)
+//   api.orders.all(query?)           → GET    /orders          (the auto-findAll,
+//                                              at the bare collection ROOT)
 //   api.orders.<operationName>(id, body?)
-//                                    → POST /orders/{id}/<op_snake>
-//   api.orders.<findName>(args)      → GET  /orders/<find_snake>?...
+//                                    → POST   /orders/{id}/<op_snake>
+//   api.orders.<findName>(args)      → GET    /orders/<find_snake>?...
+//
+// `destroy` and `all` route to the shapes `deriveAggregateOperations`
+// (`src/ir/util/api-surface.ts`) says the backends MOUNT, not to the shapes the
+// generic operation/find arms would otherwise produce.  Both were reachable-
+// looking and unmounted before: `destroy` was rejected outright as an unknown
+// method (the canonical destroy is not in `agg.operations`), and `all` rendered
+// `GET /orders/all`, a path no backend registers — so the delete and list
+// routes of every generated system were untestable from the DSL.  The two
+// arms below are the exact inverse of the two special cases in the derivation
+// (`if (agg.canonicalDestroy) … DELETE /{id}` and `if (find.name === "all") …
+// at the bare base`), which is why they are written against the SAME
+// predicates rather than against the method name alone.
 //
 // A folded `projection`'s read surface (projection.md) is reachable too, so an
 // e2e body can assert the read model an operation's events fold into:
@@ -664,6 +679,21 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
     const idExpr = renderIdArg(args[0], ctx);
     return `await __get(\`\${base}${prefix}/${slug}/\${${idExpr}}/history\`)`;
   }
+  // Canonical destroy → `DELETE /api/<aggs>/{id}`.  Resolved HERE, before the
+  // operation lookup, for two reasons: the canonical destroy is not in
+  // `agg.operations` at all (lowering keeps lifecycle actions in `agg.destroys`
+  // / `agg.canonicalDestroy`), and the derivation routes it to DELETE rather
+  // than to `POST /{id}/<op>`.  Gated on `agg.canonicalDestroy` — the exact
+  // predicate `deriveAggregateOperations` gates the DELETE route on — so a
+  // NAMED destroy (`destroy archive { }`, no route of its own) and an operation
+  // whose name merely starts with "destroy" keep their ordinary handling.
+  if (call.method === "destroy" && agg.canonicalDestroy) {
+    if (args.length < 1) {
+      throw new Error(`e2e: api.${call.aggregateSlug}.destroy(id) requires an id argument`);
+    }
+    const idExpr = renderIdArg(args[0], ctx);
+    return `await __delete(\`\${base}${prefix}/${slug}/\${${idExpr}}\`)`;
+  }
 
   const op = agg.operations.find((o) => o.visibility === "public" && o.name === call.method);
   if (op) return renderOperationCall(op, slug, args, ctx);
@@ -681,7 +711,10 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
     .find((r) => r.aggregateName === agg.name)?.historyFind
     ? ["history"]
     : [];
-  const known = ["create", "getById", ...historyMethod, ...ops, ...finds].join(", ");
+  const destroyMethod = agg.canonicalDestroy ? ["destroy"] : [];
+  const known = ["create", "getById", ...destroyMethod, ...historyMethod, ...ops, ...finds].join(
+    ", ",
+  );
   throw new Error(
     `e2e: unknown method 'api.${call.aggregateSlug}.${call.method}'. ` + `Available: ${known}.`,
   );
@@ -707,6 +740,23 @@ function renderFindCall(find: FindIR, slug: string, args: ExprIR[], ctx: RenderC
   const findSnake = snake(find.name);
   const queryArg = args[0] ? renderE2EExpr(args[0], ctx) : "{}";
   const prefix = ctx.apiBasePath;
+  // The auto-`findAll` is NOT mounted at `/<aggs>/all` — the derivation skips
+  // `all` in the declared-find loop and registers it at the bare collection
+  // ROOT (`GET /api/<aggs>`), last, so `/{id}` cannot shadow it.  Rendering it
+  // like a declared find produced a path no backend serves, which is why the
+  // list route of every generated system had no caller.
+  //
+  // The RESPONSE is left exactly as the wire delivers it, the same as any other
+  // collection-returning find: the paged envelope (`{ items, page, pageSize,
+  // total, totalPages }`) for a relational aggregate, a bare JSON array for the
+  // shapes whose `all` returns `T[]` (event-sourced / document / subtype — see
+  // the `paged` branch in `enrichments.ts`).  So `let xs = api.orders.all()`
+  // reads `xs.items.length`, byte-for-byte how the `paged` corpus fixture
+  // already asserts a declared `find … paged`.  Unwrapping here would make the
+  // one verb that exists to prove the envelope the one verb that hides it.
+  if (find.name === "all") {
+    return `await __getQuery(\`\${base}${prefix}/${slug}\`, ${queryArg})`;
+  }
   return `await __getQuery(\`\${base}${prefix}/${slug}/${findSnake}\`, ${queryArg})`;
 }
 
@@ -826,6 +876,33 @@ function __count(v: unknown): unknown {
     src: `// Property-style \`distinct\` — same runtime dispatch as \`__count\`.
 function __distinct(v: unknown): unknown {
   return Array.isArray(v) ? [...new Set(v)] : (v as { distinct?: unknown })?.distinct;
+}`,
+  },
+  {
+    // Emitted on demand (like the wire helpers above) so a suite that never
+    // deletes carries no dead symbol for `test:biome-gen` to flag.
+    name: "__delete",
+    src: `// Canonical destroy — \`DELETE /api/<aggs>/{id}\`.
+//
+// Unlike \`__post\` / \`__get\` this asserts the SUCCESS status, not just \`r.ok\`.
+// The derivation declares destroy with NO response type, and
+// \`test/ir/api-surface-parity.test.ts\` reads shape "none" (204, empty body) off
+// all five backends' own routers — Hono's \`204: { description: "No Content" }\`,
+// FastAPI's \`status_code=204\` with no \`response_model\`, Spring's \`void\`,
+// ASP.NET's bare \`[ProducesResponseType(204)]\`, Phoenix's
+// \`send_resp(conn, 204, "")\`.  A backend that answers 200-with-a-body still
+// satisfies \`r.ok\`, which is exactly how the canonical \`update\` route shipped a
+// 200 against a declared 204 (#2342) with every spec-vs-spec gate green.  So the
+// declared contract is checked here, where a real request can see it.
+async function __delete(url: string): Promise<unknown> {
+  const r = await fetch(url, { method: "DELETE", headers: __authHeaders() });
+  const text = await r.text();
+  if (!r.ok) throw new Error(\`DELETE \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
+  if (r.status !== 204 || text !== "") {
+    throw new Error(\`DELETE \${url} → \${r.status}: expected 204 No Content with an empty body, got \${r.status} \${JSON.stringify(text.slice(0, 200))}\`);
+  }
+  // 204 carries no body; there is nothing to bind.
+  return null;
 }`,
   },
 ];

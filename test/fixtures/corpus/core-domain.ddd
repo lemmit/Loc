@@ -59,5 +59,30 @@ system CoreShop {
     api.orders.update(o, { code: "CD2", status: "Placed", total: { amount: 12.00, currency: "USD" } })
     let updated = api.orders.getById(o)
     expect(updated.code).toBe("CD2")
+
+    // The LIST and DELETE routes.  Both are derived on all five backends
+    // (`GET /api/orders` at the bare collection root, `DELETE /api/orders/{id}`)
+    // and neither had a caller anywhere in the repo until this block: the e2e
+    // surface rendered `all` at `/orders/all` (unmounted) and rejected
+    // `destroy` outright.  `sort`/`dir` are passed on the multi-row read so the
+    // recorded item order is the same on every backend regardless of how each
+    // one mints ids — the single-row read after the delete needs no sort.
+    let second = api.orders.create({ code: "CD3", status: "Draft", total: { amount: 1.00, currency: "USD" } })
+    let both = api.orders.all({ sort: "code", dir: "asc" })
+    expect(both.items.length).toBe(2)
+    expect(both.total).toBe(2)
+    api.orders.destroy(second)
+    // This is the first assertion in the repo that drives a
+    // `GET /api/<aggs>/{id}` 404, and it immediately found a cross-backend
+    // divergence no wire golden had ever recorded: the STATUS agreed everywhere
+    // (404) but the ProblemDetails `detail` did not — Hono answered the machine
+    // token `"not_found"` and .NET a bare ASP.NET `NotFound()`, against the
+    // sentence `"Order <id> not found"` python/java/elixir emit.  Both outliers
+    // were fixed rather than waived; the rule is now RS-27
+    // (docs/conformance-semantics.md), and this line is what gates it.
+    expect(api.orders.getById(second)).toThrow(404)
+    let left = api.orders.all()
+    expect(left.items.length).toBe(1)
+    expect(left.total).toBe(1)
   }
 }

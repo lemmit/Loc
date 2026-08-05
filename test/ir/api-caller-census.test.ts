@@ -27,7 +27,7 @@
 // Pure parse → lower → enrich.  No boot, no docker: it belongs in the fast
 // suite, and it answers a question no booted gate asks.
 //
-// RATCHET, not big-bang.  The uncovered set today is 201 operations; each is an
+// RATCHET, not big-bang.  The uncovered set today is 210 operations; each is an
 // explicit entry in `UNCALLED_PINS` (`api-caller-census-pins.ts`) with a reason.
 // The gate compares the two sets EXACTLY, so it fails when
 //   (1) a NEW derived operation has no caller and no pin, and
@@ -169,8 +169,8 @@ interface Census {
 }
 
 /** The e2e call a derived operation would answer.  Mirrors `renderApiCall`'s
- *  dispatch (`create` / `getById` / operation name / find name); `destroy` and
- *  `gateProbe` have NO e2e verb at all — see `R.destroy` / `R.gateProbe`. */
+ *  dispatch (`create` / `getById` / `destroy` / operation name / find name);
+ *  only `gateProbe` still has NO e2e verb at all — see `R.gateProbe`. */
 function callHint(op: { kind: string; idTokens: readonly string[]; aggregate: string }): string {
   const seg = aggregateSegment(op.aggregate);
   switch (op.kind) {
@@ -178,12 +178,16 @@ function callHint(op: { kind: string; idTokens: readonly string[]; aggregate: st
       return `api.${seg}.create({…})`;
     case "getById":
       return `api.${seg}.getById(id)`;
+    case "destroy":
+      return `api.${seg}.destroy(id)`;
     case "operation":
       return `api.${seg}.${op.idTokens[0]}(id, {…})`;
     case "find":
+      // The auto-`findAll` reads the bare collection root; its verb is `all`,
+      // which is `idTokens[0]` like any other find.
       return `api.${seg}.${op.idTokens[0]}({…})`;
     default:
-      // destroy / gateProbe — no verb reaches the route today.
+      // gateProbe — no `can_<op>` verb reaches the probe route today.
       return `(no e2e verb reaches api.${seg} ${op.kind})`;
   }
 }

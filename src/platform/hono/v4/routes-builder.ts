@@ -184,7 +184,14 @@ function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: bo
   // (2) above — capability scoping rides the entity read, because the audit
   // table has no tenant column of its own to filter on.
   out.push(`    const __target = await repo.findById(Ids.${agg.name}Id(id));`);
-  out.push(`    if (!__target) throw new AggregateNotFoundError("not_found");`);
+  // RS-27, same site class as the getById route above: history is a by-id read,
+  // so its 404 carries the same sentence.  python's history route reaches the
+  // message by CALLING `repo.get_by_id` for exactly this reachability probe
+  // (`python/routes-builder.ts` historyRoute); Hono probes with `findById`, so
+  // it has to spell the message itself.
+  out.push(
+    `    if (!__target) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+  );
   // Fail-closed principal for the mask pass: unauthenticated → null → every
   // masked field's change entry is dropped.  Bound only when there is a mask;
   // otherwise the mapper takes no principal (and the project need not carry an
@@ -879,7 +886,18 @@ export function buildRoutesFile(
   lines.push(`    async (c) => {`);
   lines.push(`      const { id } = c.req.valid("param");`);
   lines.push(`      const found = await repo.findById(Ids.${agg.name}Id(id));`);
-  lines.push(`      if (!found) throw new AggregateNotFoundError("not_found");`);
+  // RS-27 — the 404-BY-ID `detail` is the sentence `"<Agg> <id> not found"` on
+  // every backend, and this route was the one place Hono answered a machine
+  // token instead.  The cause is structural, not cosmetic: the route reads
+  // through `repo.findById` (returns null) and raises its OWN error, bypassing
+  // `repo.getById`, whose throw already carries exactly this message
+  // (`typescript/repository-builder.ts`).  So the message is spelled to match
+  // what the bypassed producer would have said, which is also what
+  // python/java/elixir/.NET emit.  (An OPTIONAL FIND's 404 keeps the
+  // `"not_found"` token — that class agrees across backends already.)
+  lines.push(
+    `      if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+  );
   lines.push(...maskUserBind(agg, "      "));
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between

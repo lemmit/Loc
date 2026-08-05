@@ -107,7 +107,7 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     async (c) => {
       const { id } = c.req.valid("param");
       const found = await repo.findById(Ids.CustomerId(id));
-      if (!found) throw new AggregateNotFoundError("not_found");
+      if (!found) throw new AggregateNotFoundError(`Customer ${id} not found`);
       return c.json(repo.toWire(found) as z.infer<typeof CustomerResponse>, 200);
     },
   );
