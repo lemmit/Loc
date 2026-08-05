@@ -8,6 +8,24 @@
 // `.ddd`, generates the Hono project, scrapes the `createRoute({ method, path })`
 // pairs out of the emitted routes file, and asserts the two sets agree.
 //
+// WHERE THE FOUR-BACKEND PARITY GATE WENT.  Until the route-builder
+// unification, `test/ir/api-surface-parity.test.ts` held python / java /
+// dotnet / elixir — four INDEPENDENT re-derivations — against this module on
+// three axes (mounted paths, success-body shape, declared error statuses).
+// Slice by slice each backend switched to RENDERING from the derivation,
+// which made its independence leg self-comparing; each drop moved the
+// coverage into a per-backend render-fidelity suite
+// (`test/generator/{dotnet,python,java,elixir}/api-surface-render.test.ts` —
+// same scrapers, held against the rendering).  When the elixir slice emptied
+// the registry the file was deleted.  Its one standing waiver — java's
+// `by_code` union find publishing `ResponseEntity<?>` (the 404 arm can't
+// unify with the success type) — is recorded at the java fidelity suite.
+// Hono is the last independent implementation, which is exactly why the
+// four others were unified FIRST: this file stays a real gate until the Hono
+// slice lands, and after it, it is the render-fidelity pin for Hono (the
+// scrape reads emitted bytes, so a render arm dropping or mangling a route
+// still fails here).
+//
 // The comparison is scoped to the route classes the lift covers
 // (`apiSurfaceCoverage.lifted`); the not-yet-lifted classes (workflow,
 // explicit handler, projection query, prepare) are excluded EXPLICITLY by

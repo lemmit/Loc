@@ -30,6 +30,13 @@ import type {
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  type ApiOperationIR,
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+  relativeOpPath,
+} from "../../../ir/util/api-surface.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
@@ -80,6 +87,45 @@ function memberOperations(agg: { operations: readonly OperationIR[] }): Operatio
 
 export interface VanillaApiEmitResult {
   routes: ApiRoute[];
+}
+
+/** The DERIVED operation/probe entries this backend actually serves — the
+ *  derivation minus two elixir-local stances, applied identically by the
+ *  router (below) and the OpenAPI spec (`openapi-emit.ts`), the same
+ *  "one predicate, both halves" pattern as `emitsRestCreate`:
+ *
+ *   1. a CRUD-verb-named op other than `update` has no controller action to
+ *      route to (the atom would collide with the Phoenix REST actions), so it
+ *      is not served — and, since this helper drives the spec too, no longer
+ *      DOCUMENTED either (the spec used to advertise every public op,
+ *      including these phantom routes);
+ *   2. an event-sourced aggregate has no generic `update` surface (its only
+ *      mutations are its per-op commands).
+ *
+ *  Everything else — membership, paths (routeSlug included), the private-op
+ *  and canonical exclusions — is the derivation's. */
+export function servedOperationEntries(
+  agg: AggregateIR,
+  derivedOps: readonly ApiOperationIR[],
+): { opEntries: ApiOperationIR[]; probeByOp: Map<OperationIR, ApiOperationIR> } {
+  const es = isEventSourced(agg);
+  const serves = (op: OperationIR): boolean => {
+    if (CRUD_RESERVED_NAMES.has(op.name) && op.name !== "update") return false;
+    if (es && op.name === "update") return false;
+    return true;
+  };
+  const opEntries = derivedOps.filter((o) => o.kind === "operation" && serves(o.operation!));
+  const probeByOp = new Map<OperationIR, ApiOperationIR>(
+    derivedOps
+      .filter((o) => o.kind === "gateProbe" && serves(o.operation!))
+      .map((o) => [o.operation!, o]),
+  );
+  return { opEntries, probeByOp };
+}
+
+/** `relativeOpPath` in the Plug router's param spelling (`{id}` → `:id`). */
+export function plugRelativePath(op: ApiOperationIR): string {
+  return relativeOpPath(op).replace(/\{(\w+)\}/g, ":$1");
 }
 
 /** Does this aggregate's controller serve `GET /<plural>/:id/history`?
@@ -145,6 +191,26 @@ export function emitVanillaApiControllers(
     const controllerName = `${aggPascal}Controller`;
     const memberOps = memberOperations(agg);
     const es = isEventSourced(agg);
+    // THE UNIFICATION SEAM (api-surface.ts): which routes exist and at which
+    // path comes from the shared derivation — the SAME list the OpenAPI spec
+    // (`openapi-emit.ts`) documents, so the router and the published contract
+    // can no longer diverge (they have, three separate times).  An abstract
+    // base derives nothing (the derivation's aggregate skip): its read-only
+    // index/show below stay an elixir-local extra, like the history route.
+    const derivedOps = isAbstractBase(agg)
+      ? []
+      : deriveAggregateOperations(
+          agg,
+          ctx.repositories.find((r) => r.aggregateName === agg.name),
+          apiStatusContext(ctx),
+        );
+    const abstract = isAbstractBase(agg);
+    const routeOf = (o: ApiOperationIR, action: string): ApiRoute => ({
+      method: o.method,
+      path: `/${aggsPath}${plugRelativePath(o)}`,
+      controller: controllerName,
+      action,
+    });
     const controllerPath = `lib/${appName}_web/controllers/${aggSnake}_controller.ex`;
     const controllerContent = es
       ? renderEsController(appModule, ctxModule, agg, ctx)
@@ -164,19 +230,29 @@ export function emitVanillaApiControllers(
     // Read path.  Custom-find routes (`GET /<plural>/<find>`) MUST precede the
     // `/:id` show route — Phoenix matches in registration order, so a literal
     // `/<find>` segment has to come first or `:id` would swallow it.
-    routes.push({
-      method: "get",
-      path: `/${aggsPath}`,
-      controller: controllerName,
-      action: ":index",
-    });
-    routes.push(...findRoutes(agg, ctx));
-    routes.push({
-      method: "get",
-      path: `/${aggsPath}/:id`,
-      controller: controllerName,
-      action: ":show",
-    });
+    const allEntry = derivedOps.find((o) => isAllFind(o));
+    if (allEntry) routes.push(routeOf(allEntry, ":index"));
+    else if (abstract) {
+      // Read-only polymorphic index over the subtype tables — not derived
+      // (abstract bases have no derived surface), served here on purpose.
+      routes.push({
+        method: "get",
+        path: `/${aggsPath}`,
+        controller: controllerName,
+        action: ":index",
+      });
+    }
+    routes.push(...findRoutes(agg, ctx, derivedOps));
+    const getByIdEntry = derivedOps.find((o) => o.kind === "getById");
+    if (getByIdEntry) routes.push(routeOf(getByIdEntry, ":show"));
+    else if (abstract) {
+      routes.push({
+        method: "get",
+        path: `/${aggsPath}/:id`,
+        controller: controllerName,
+        action: ":show",
+      });
+    }
     // Entity history (docs/audit.md) — the derived read over `audit_records`.
     // Two path segments, so no collision with the `/:id` show route above.
     // Driven by the enrichment-derived `historyFind` so the route and the gate
@@ -194,74 +270,34 @@ export function emitVanillaApiControllers(
     // route and the documented contract can never diverge (`generators.md`:
     // "POST / → create").  See `emitsRestCreate` for the constructibility
     // rationale.
-    if (emitsRestCreate(agg)) {
-      routes.push({
-        method: "post",
-        path: `/${aggsPath}`,
-        controller: controllerName,
-        action: ":create",
-      });
-    }
+    const createEntry = derivedOps.find((o) => o.kind === "create");
+    if (createEntry) routes.push(routeOf(createEntry, ":create"));
     // Event-sourced aggregates have no generic field-update / delete surface —
     // their only mutations are the per-operation member endpoints below.  The
     // generic PATCH is now gated on an EXPLICIT `update` operation (symmetric
     // with create/destroy), not merely on the aggregate having some operation.
-    if (!es && agg.operations.some((o) => o.name === "update")) {
-      // `POST /<plural>/:id/update`, NOT `PATCH /<plural>/:id`.
-      //
-      // This backend used to mount the explicit `update` operation as a generic
-      // PATCH on the collection member.  Its own emitted OpenAPI never said so:
-      // the `/orders/{id}` PathItem carries only `get` + `delete`, while
-      // `/orders/{id}/update` is advertised with `post` and `operationId:
-      // updateOrder`.  So the spec promised an endpoint the router did not
-      // serve, and any client built from that contract — including Loom's own
-      // typed in-system client, which derives its paths from exactly this
-      // operation set — got a 404.
-      //
-      // `conformance-parity` could not see it: it diffs the emitted SPECS, and
-      // this backend's spec agrees with the other four.  The router was the
-      // outlier (`experience_gathered.md` §57 RS-13 is the same class — a
-      // backend disagreeing with its own published contract).
-      routes.push({
-        method: "post",
-        path: `/${aggsPath}/:id/update`,
-        controller: controllerName,
-        action: ":update",
-      });
-    }
-    if (emitsRestDelete(agg)) {
-      routes.push({
-        method: "delete",
-        path: `/${aggsPath}/:id`,
-        controller: controllerName,
-        action: ":delete",
-      });
-    }
+    // (The canonical `update` route — `POST /:id/update`, `:update` action,
+    // NOT a member PATCH — now rides the served-operation loop below: the
+    // derivation lifts `update` as an ordinary operation entry, and
+    // `servedOperationEntries` keeps this backend's two local stances.  The
+    // 12-line PATCH-vs-POST history that used to sit here lives on in
+    // experience_gathered.md §57 / the servedOperationEntries doc.)
+    const destroyEntry = derivedOps.find((o) => o.kind === "destroy");
+    if (destroyEntry && emitsRestDelete(agg)) routes.push(routeOf(destroyEntry, ":delete"));
     // Per-operation member endpoints — `POST /<plural>/:id/<op>`, one per
     // public non-CRUD operation, matching the node/dotnet/python/java
     // backends.  The URL segment uses
     // `routeSlug` (D-URLSTYLE) while the action atom stays the op verb.
-    for (const op of memberOps) {
-      routes.push({
-        method: "post",
-        path: `/${aggsPath}/:id/${snake(op.routeSlug ?? op.name)}`,
-        controller: controllerName,
-        action: `:${snake(op.name)}`,
-      });
+    const served = servedOperationEntries(agg, derivedOps);
+    for (const entry of served.opEntries) {
+      const op = entry.operation!;
+      routes.push(routeOf(entry, `:${snake(op.name)}`));
       // The side-effect-free `GET /<plural>/:id/can_<op>` companion of a
-      // `when`-gated op (criterion.md, use site 2).  It was DECLARED in this
-      // backend's own OpenAPI (`openapi-emit.ts` emits the PathItem for every
-      // `op.when`) and never mounted, so the published probe 404'd — the same
-      // spec-vs-router split as the `update` route, and invisible for the same
-      // reason: `conformance-parity` diffs specs, and the spec was right.
-      if (op.when) {
-        routes.push({
-          method: "get",
-          path: `/${aggsPath}/:id/can_${snake(op.routeSlug ?? op.name)}`,
-          controller: controllerName,
-          action: `:can_${snake(op.name)}`,
-        });
-      }
+      // `when`-gated op (criterion.md, use site 2).  It was once DECLARED in
+      // this backend's own OpenAPI and never mounted (the published probe
+      // 404'd) — served and documented off the same derived entry now.
+      const probe = served.probeByOp.get(op);
+      if (probe) routes.push(routeOf(probe, `:can_${snake(op.name)}`));
     }
   }
 

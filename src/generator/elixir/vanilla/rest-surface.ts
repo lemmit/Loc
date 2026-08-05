@@ -14,6 +14,7 @@
 // context also needs cannot live there without a cycle.  This module depends
 // only on the leaf `isAbstractBase` / `isEventSourced` predicates.
 
+import { emitsRestDestroy } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR } from "../../../ir/types/loom-ir.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
@@ -39,5 +40,14 @@ import { isAbstractBase } from "./inheritance-emit.js";
  */
 export function emitsRestDelete(agg: AggregateIR): boolean {
   if (isAbstractBase(agg)) return false;
-  return !isEventSourced(agg) && (agg.destroys ?? []).length > 0;
+  // NAMED FIX (unification): the core gate is the shared `emitsRestDestroy`
+  // (canonical destroy) — this used to be `destroys.length > 0`, so a
+  // NAMED-only destroy (`destroy archive()`, a domain command) mounted a
+  // generic hard-DELETE that this backend's own OpenAPI spec refused to
+  // document (the spec always gated on `canonicalDestroy`).  The
+  // event-sourced exclusion stays an elixir-local stance on TOP of the
+  // shared predicate: an ES aggregate's only mutations are its per-op
+  // commands, and whether an ES canonical destroy should emit DELETE
+  // anywhere is unexercised by any fixture and undecided cross-backend.
+  return !isEventSourced(agg) && emitsRestDestroy(agg);
 }
