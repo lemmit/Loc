@@ -7,10 +7,10 @@ import type {
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { resolveToSource } from "../../../ir/types/origin.js";
 import { typeIsFile } from "../../../ir/util/file-field.js";
+import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { constructionSeededDefaults } from "../../_frontend/server-default.js";
@@ -401,9 +401,12 @@ export function renderEntity(
   // pull in the Auth namespace alongside the existing usings so the
   // `User` type resolves; per-op signatures append a `User currentUser`
   // parameter (and the Mediator handler passes _currentUser.User).
-  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
+  const anyOpUsesCurrentUser = operations.some(operationBodyUsesCurrentUser);
   for (const op of operations) {
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
+    // The leading `requires` gates are hoisted to the calling handler
+    // (op-gates.ts) — the entity renders only what remains.
+    const opBody = operationBody(op);
     const userParam = usesUser ? "User currentUser" : "";
     const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
@@ -427,7 +430,7 @@ export function renderEntity(
       const retType = op.returnType ? renderCsType(op.returnType) : "void";
       opLines.push(`    public ${retType} ${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
-      const body = renderCsStatements(op.statements, renderCtx, {
+      const body = renderCsStatements(opBody, renderCtx, {
         emitTrace,
         aggregate: entity.name,
         op: op.name,
@@ -466,7 +469,7 @@ export function renderEntity(
     // that owns the recorder + this file's final content (source-map
     // Milestone 3).
     const opRenderCtx = retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx;
-    const rawChunks = renderCsStatementChunks(op.statements, opRenderCtx, {
+    const rawChunks = renderCsStatementChunks(opBody, opRenderCtx, {
       emitTrace,
       aggregate: entity.name,
       op: op.name,
@@ -477,16 +480,14 @@ export function renderEntity(
     // all see the exact same (post-weave) text that lands in the file —
     // never post-process the joined `body`, that would desync
     // `content.indexOf(fragmentText)` in `SourceMapRecorder.fragment`.
-    const woven = sourceTexts
-      ? weaveLineDirectives(op.statements, rawChunks, sourceTexts)
-      : undefined;
+    const woven = sourceTexts ? weaveLineDirectives(opBody, rawChunks, sourceTexts) : undefined;
     const chunks = woven?.chunks ?? rawChunks;
     const body = chunks.join("\n");
     if (opFragments && chunks.length > 0) {
       opFragments.push({
         fragmentText: body,
         subRegions: statementSubRegions(
-          op.statements,
+          opBody,
           chunks,
           `${constructPrefix ?? entity.name}.${op.name}`,
         ),

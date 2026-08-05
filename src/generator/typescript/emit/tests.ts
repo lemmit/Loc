@@ -1,16 +1,16 @@
 import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
-import {
-  type AggregateIR,
-  type BoundedContextIR,
-  type ContainmentIR,
-  type DomainServiceIR,
-  type ExprIR,
-  operationUsesCurrentUser,
-  type TestIR,
-  type TestStmtIR,
-  type TypeIR,
-  type ValueObjectIR,
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ContainmentIR,
+  DomainServiceIR,
+  ExprIR,
+  TestIR,
+  TestStmtIR,
+  TypeIR,
+  ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { escapeTsIdent, lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 
@@ -158,7 +158,7 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
     const entityName = e.receiverType.name;
     const agg = ctx.aggregates.find((a) => a.name === entityName);
     const op = agg?.operations.find((o) => o.name === e.member);
-    if (op && operationUsesCurrentUser(op)) {
+    if (op && operationBodyUsesCurrentUser(op)) {
       const recv = renderTestExpr(e.receiver, ctx);
       const args = [...e.args.map((a) => renderTestExpr(a, ctx)), TEST_ACTOR];
       return `${recv}.${e.member}(${args.join(", ")})`;

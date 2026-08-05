@@ -13,10 +13,10 @@ import {
   type FunctionIR,
   type InvariantIR,
   type OperationIR,
-  operationUsesCurrentUser,
   type TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { directParentName, partsChildrenFirst } from "../../../ir/util/containment-parent.js";
+import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { constructionSeededDefaults } from "../../_frontend/server-default.js";
@@ -210,7 +210,9 @@ export function renderPyAggregate(
       s.operations.some((op) => op.statements.some((st) => st.kind === "precondition")),
     );
   const usesForbidden = shapes.some((s) =>
-    s.operations.some((op) => op.statements.some((st) => st.kind === "requires")),
+    // Only NON-leading `requires` statements still render here — the leading
+    // run is hoisted to the calling handler, which owns the 403 (op-gates.ts).
+    s.operations.some((op) => operationBody(op).some((st) => st.kind === "requires")),
   );
   const errorNames = [
     usesDomainError ? "DomainError" : null,
@@ -233,7 +235,7 @@ export function renderPyAggregate(
   const eventImports = ["DomainEvent", ...emittedEvents];
 
   const usesCurrentUser =
-    shapes.some((s) => s.operations.some(operationUsesCurrentUser)) ||
+    shapes.some((s) => s.operations.some(operationBodyUsesCurrentUser)) ||
     shapes.some((s) =>
       (s.contextStamps ?? []).some((r) => r.assignments.some((a) => exprUsesCurrentUser(a.value))),
     );
@@ -518,7 +520,7 @@ function renderEntity(
     const params = ["self", ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
     // currentUser-gated ops pick up a trailing actor parameter — the
     // route threads `request.state.current_user` into it.
-    if (operationUsesCurrentUser(op)) params.push("current_user: User");
+    if (operationBodyUsesCurrentUser(op)) params.push("current_user: User");
     const trace = emitTrace ? { aggregate: e.name, op: op.name } : undefined;
     // An extern op (extern (b) Phase 2, docs/extern.md) is a REAL method whose
     // DSL body carries only its preconditions: run them, delegate the mutation
@@ -527,7 +529,7 @@ function renderEntity(
     // invariants — the framework flow the proposal keeps (preconditions → hook
     // → invariants).  A missing hook impl raises `NotImplementedError` (500).
     if (op.extern) {
-      const preconditions = renderPyStatements(op.statements, undefined, {
+      const preconditions = renderPyStatements(operationBody(op), undefined, {
         eventSourced: e.eventSourced,
         trace,
         emitProvenance,
@@ -552,7 +554,8 @@ function renderEntity(
     // per-chunk list lets us surface per-statement sub-regions to the caller
     // that owns the recorder + this file's final content (source-map
     // Milestone 3, regular named-operation bodies only — see `OpFragment`).
-    const chunks = renderPyStatementChunks(op.statements, undefined, {
+    const opBody = operationBody(op);
+    const chunks = renderPyStatementChunks(opBody, undefined, {
       eventSourced: e.eventSourced,
       trace,
       emitProvenance,
@@ -561,7 +564,7 @@ function renderEntity(
     if (opFragments && chunks.length > 0) {
       opFragments.push({
         fragmentText: body,
-        subRegions: statementSubRegions(op.statements, chunks, `${ctxName}.${e.name}.${op.name}`),
+        subRegions: statementSubRegions(opBody, chunks, `${ctxName}.${e.name}.${op.name}`),
       });
     }
     return [

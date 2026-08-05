@@ -8,7 +8,8 @@ import type {
   StmtIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
@@ -282,7 +283,7 @@ export function renderJavaEntity(
     eventFields: options.eventFields,
     regexFields: regex.fields,
   };
-  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
+  const anyOpUsesCurrentUser = operations.some(operationBodyUsesCurrentUser);
   // A body that calls a domain service (`Pricing.quote(...)`) needs the
   // `domain.services.*` import so the generated static class resolves.
   const callsDomainService =
@@ -540,7 +541,10 @@ export function renderJavaEntity(
   // --- operations ------------------------------------------------------------
   const opLines: string[] = [];
   for (const op of operations) {
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
+    // The leading `requires` gates are hoisted to the calling service
+    // (op-gates.ts) — the entity renders only what remains.
+    const opBody = operationBody(op);
     const baseParams = op.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, usesUser ? "User currentUser" : ""].filter(Boolean).join(", ");
     const traceCtx = { emitTrace, aggregate: entity.name, op: op.name, eventSourced };
@@ -554,7 +558,7 @@ export function renderJavaEntity(
       // flow as before, only *what the hook is* changed (from an injected
       // application-layer handler to a domain-internal extension point).
       opLines.push(`    public void ${op.name}(${params}) {`);
-      const body = renderJavaStatements(op.statements, renderCtx, traceCtx);
+      const body = renderJavaStatements(opBody, renderCtx, traceCtx);
       if (body.length > 0) opLines.push(body);
       const hookArgs = [
         "this",
@@ -583,7 +587,7 @@ export function renderJavaEntity(
     // content (source-map Milestone 3 — see `OpFragment`).  Extern check
     // bodies and lifecycle appliers are out of scope for this slice.
     const chunks = renderJavaStatementChunks(
-      op.statements,
+      opBody,
       retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx,
       traceCtx,
     );
@@ -591,7 +595,7 @@ export function renderJavaEntity(
     if (options.opFragments && chunks.length > 0) {
       options.opFragments.push({
         fragmentText: body,
-        subRegions: statementSubRegions(op.statements, chunks, `${options.construct}.${op.name}`),
+        subRegions: statementSubRegions(opBody, chunks, `${options.construct}.${op.name}`),
       });
     }
     if (body.length > 0) opLines.push(body);

@@ -9,7 +9,7 @@ import type {
   TestStmtIR,
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { escapeJavaIdent, upperFirst } from "../../../util/naming.js";
@@ -126,7 +126,7 @@ function withTestUser(expr: ExprIR, rendered: string, state: TestEmitState): str
     (a) => a.name === (expr.receiverType as { name: string }).name,
   );
   const op = agg?.operations.find((o) => o.name === expr.member);
-  if (!op || !operationUsesCurrentUser(op) || !state.userFields) return rendered;
+  if (!op || !operationBodyUsesCurrentUser(op) || !state.userFields) return rendered;
   state.usesTestUser = true;
   return rendered.replace(/\)$/, expr.args.length > 0 ? ", __testUser)" : "__testUser)");
 }
