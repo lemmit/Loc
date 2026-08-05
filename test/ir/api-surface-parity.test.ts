@@ -98,22 +98,6 @@ function normalisePath(p: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
-/** Spring — class `@RequestMapping("<base>")` + method `@<M>Mapping[("<p>")]`.
- *  A BARE annotation (no parens) mounts at the class path itself, which is how
- *  create / findAll are declared. */
-function scrapeJava(files: Map<string, string>): Route[] {
-  const src =
-    [...files].find(
-      ([p, c]) => p.endsWith(".java") && /@RequestMapping\("\/api\/orders"\)/.test(c),
-    )?.[1] ?? "";
-  const base = src.match(/@RequestMapping\("([^"]*)"\)/)?.[1] ?? "";
-  const out: Route[] = [];
-  for (const m of src.matchAll(/@(Get|Post|Put|Patch|Delete)Mapping(?:\("([^"]*)"\))?/g)) {
-    out.push({ method: m[1]!, path: normalisePath(`${base}${m[2] ?? ""}`) });
-  }
-  return out;
-}
-
 /** Phoenix — `<m> "<path>", Controller, :action` inside `scope "/api"`. */
 function scrapeElixir(files: Map<string, string>): Route[] {
   const src = [...files].find(([p]) => p.endsWith("router.ex"))?.[1] ?? "";
@@ -174,46 +158,6 @@ function expectedShape(op: ApiOperationIR): Shape {
   return "entity";
 }
 
-/** Spring — the handler's declared return type, resolved through the emitted
- *  `record` for that type.  `void` (with `@ResponseStatus(NO_CONTENT)`) is a
- *  bodiless answer; `ResponseEntity<?>` states nothing and stays unresolved. */
-function shapesJava(files: Map<string, string>): Map<string, MaybeShape> {
-  const src =
-    [...files].find(
-      ([p, c]) => p.endsWith(".java") && /@RequestMapping\("\/api\/orders"\)/.test(c),
-    )?.[1] ?? "";
-  const base = src.match(/@RequestMapping\("([^"]*)"\)/)?.[1] ?? "";
-
-  const record = (name: string): MaybeShape => {
-    for (const [p, c] of files) {
-      if (!p.endsWith(`${name}.java`)) continue;
-      const params = c.match(new RegExp(`record ${name}\\(([^)]*)\\)`))?.[1] ?? "";
-      // `List<OrderResponse> items, int page, …` → the trailing identifier of
-      // each parameter, generics and annotations discarded.
-      const fields = params
-        .split(/,(?![^<]*>)/)
-        .map((s) => s.trim().split(/\s+/).pop() ?? "")
-        .filter(Boolean);
-      return shapeOfFields(fields);
-    }
-    return undefined;
-  };
-
-  const out = new Map<string, MaybeShape>();
-  const re =
-    /@(Get|Post|Put|Patch|Delete)Mapping(?:\("([^"]*)"\))?([\s\S]*?)public\s+([\w.<>?, ]+?)\s+\w+\(/g;
-  for (const m of src.matchAll(re)) {
-    const k = key({ method: m[1]!, path: normalisePath(`${base}${m[2] ?? ""}`) });
-    const ret = m[4]!.trim();
-    if (ret === "void") out.set(k, "none");
-    else {
-      const inner = ret.match(/^ResponseEntity<(.+)>$/)?.[1] ?? ret;
-      out.set(k, inner === "?" ? undefined : record(inner.replace(/<.*/, "")));
-    }
-  }
-  return out;
-}
-
 /** Phoenix — no DTOs to resolve, so the shape is read off the action's own
  *  success return: `send_resp(conn, 204, "")`, a literal `%{"id" => …}`, the
  *  shared `serialize/1`, or the paged struct update. */
@@ -261,30 +205,10 @@ function shapesElixir(files: Map<string, string>): Map<string, MaybeShape> {
 // has no `when` gate.  Hence this check, on a fixture that does.
 // ---------------------------------------------------------------------------
 
-/** Spring — springdoc infers nothing useful here, so the contract lives in the
- *  emitted `OpenApiContractCustomizer`'s `Route` table: `new Route(method, path,
- *  successRef, new int[] {…}, …)`. Reading the customizer IS reading what java
- *  publishes — the customizer is what edits the served document. */
-function errorsJava(files: Map<string, string>): Map<string, number[]> {
-  const src = [...files].find(([p]) => p.endsWith("OpenApiContractCustomizer.java"))?.[1] ?? "";
-  const out = new Map<string, number[]>();
-  for (const m of src.matchAll(
-    /new Route\("(\w+)",\s*"([^"]*)",\s*[^,]*,\s*new int\[\]\s*\{([^}]*)\}/g,
-  )) {
-    const codes = (m[3]!.match(/\d{3}/g) ?? []).map(Number).filter((c) => c >= 400);
-    out.set(key({ method: m[1]!, path: normalisePath(m[2]!) }), codes.sort());
-  }
-  return out;
-}
-
 /** Routes whose body type the backend's own source does not state, so this
  *  gate cannot read it.  Each needs a reason and an exit — the set is asserted
  *  exactly, so a backend that goes quiet on one MORE route fails here. */
 const UNRESOLVED: Record<string, readonly string[]> = {
-  // `byCodeOrder` returns `ResponseEntity<?>` because the 404 arm builds a
-  // `ResponseEntity<Void>` that cannot unify with the success type.  Widening
-  // it to a declared type is a Java-emitter change, not a test change.
-  "Java/Spring": ["get /api/orders/by_code"],
   "Elixir/Phoenix": [],
 };
 
@@ -304,7 +228,17 @@ const BACKENDS: Record<
   // derivation to itself.  Render fidelity is pinned by
   // `test/generator/python/api-surface-render.test.ts` (same scrapers, same
   // three axes, against the rendering instead of an independent copy).
-  "Java/Spring": { platform: "java", scrape: scrapeJava, shapes: shapesJava, errors: errorsJava },
+  // "Java/Spring" dropped: both its controller and its OpenAPI customizer
+  // render from `deriveAggregateOperations` (the unification's java slice) —
+  // an independence gate would compare the derivation to itself.  Render
+  // fidelity (controller mount set, customizer Route table paths + statuses,
+  // the routeSlug/named-destroy/single-find fixes) is pinned by
+  // `test/generator/java/api-surface-render.test.ts`.  The old UNRESOLVED
+  // `by_code` body-shape pin (`ResponseEntity<?>` — the 404 arm can't unify
+  // with the success type) documented a scraper blind spot, not a surface
+  // fact; the union controller still declares `ResponseEntity<?>`, which is a
+  // java-emitter wart tracked in that fidelity test's header, no longer a
+  // parity concern.
   // ".NET" dropped: its controller now RENDERS from `deriveAggregateOperations`
   // (the unification's dotnet slice), so holding it here would compare the
   // derivation to itself.  Render fidelity for it is pinned by
