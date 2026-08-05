@@ -16,11 +16,7 @@ export {
   AdapterNotImplementedError,
   stubAdapter,
 } from "./not-implemented.js";
-export type {
-  PersistenceAdapter,
-  PersistenceCapabilities,
-  SavingShape,
-} from "./persistence-surface.js";
+export type { PersistenceAdapter, PersistenceCapabilities } from "./persistence-surface.js";
 export type {
   ResourceAdapter,
   ResourceCapabilities,

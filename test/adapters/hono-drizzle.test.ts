@@ -15,7 +15,7 @@ import {
   drizzlePersistenceAdapter,
   emitDrizzleSchema,
 } from "../../src/platform/hono/v4/adapters/drizzle-persistence.js";
-import { adaptersFor } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor, availableAdapterNames } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -57,18 +57,11 @@ describe("drizzle PersistenceAdapter (real)", () => {
     expect(resolved.name).toBe("drizzle");
   });
 
-  it("answers capability fields directly (no stub-throw)", () => {
-    expect(drizzlePersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
-    expect(drizzlePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
-    expect(drizzlePersistenceAdapter.supports("mysql", "state", "state")).toBe(true);
-    expect(drizzlePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
-    expect(drizzlePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
-    // Event-sourced streams (appliers A2): an `eventLog` aggregate routed to
-    // an `eventLog` binding on a relational store is supported; a `state`
-    // binding for an event-sourced aggregate is not.
-    expect(drizzlePersistenceAdapter.supports("postgres", "eventLog", "eventLog")).toBe(true);
-    expect(drizzlePersistenceAdapter.supports("redis", "eventLog", "eventLog")).toBe(false);
-    expect(drizzlePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
+  it("is a REAL adapter, not a reserved stub (no stub-throw)", () => {
+    // See the sibling note in dotnet-efcore.test.ts: the `supports(...)`
+    // probes this replaces exercised a method nothing in src/ called.
+    expect(availableAdapterNames("node", "persistence")).toContain("drizzle");
+    expect(typeof drizzlePersistenceAdapter.emitProjectDeps).toBe("function");
   });
 
   it("emitProjectDeps returns drizzle + pg deps + devDeps as JSON lines", () => {

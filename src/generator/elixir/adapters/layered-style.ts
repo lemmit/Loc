@@ -29,7 +29,6 @@ const realSiblings = (): readonly string[] => ["ash", "layered"];
 
 export const layeredStyleAdapter: StyleAdapter = {
   name: "layered",
-  supportedStrategies: ["state"],
   supportedLayouts: ["byFeature"],
 
   emitEndpoint(_op: OperationIR, _ctx: EmitCtx): Lines {

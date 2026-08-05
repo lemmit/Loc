@@ -17,12 +17,7 @@
 // deliberately out of scope here — no method wrappers are emitted.
 // ---------------------------------------------------------------------------
 
-import type {
-  DataSourceIR,
-  DataSourceKind,
-  StorageIR,
-  StorageKind,
-} from "../../ir/types/loom-ir.js";
+import type { DataSourceIR, StorageIR } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, Lines } from "./types.js";
 
 export interface ResourceAdapter {
@@ -30,14 +25,12 @@ export interface ResourceAdapter {
    *  (e.g. `s3`, `rabbitmq`, `restApi`).  Lowercase / camelCase to
    *  match the `StorageKind` value. */
   readonly name: string;
-  /** Infrastructure kinds this adapter can wire (objectStore / queue /
-   *  api).  Mirrors the registry's `supports[kind]` for the sourceType;
-   *  the orchestrator uses it to route a resource to its adapter. */
-  readonly supportedKinds: readonly DataSourceKind[];
-  /** Per-binding capability check — does this adapter realize the
-   *  given (sourceType, kind) pair?  Implementations delegate to the
-   *  sourceType registry so there is one source of truth. */
-  supports(storageType: StorageKind, kind: DataSourceKind): boolean;
+  // NOTE: `supportedKinds` + `supports()` were removed — read by nothing in
+  // src/ (the orchestrator routes a resource to its adapter by `name`, and
+  // every `supports()` body merely re-expressed `supportsSurfaceKind` from
+  // `util/source-types.ts`, the actual source of truth).  Same removal, and
+  // the same reasoning, as the persistence capability half — see
+  // `persistence-surface.ts`.
   /** Client-library dependencies (name → semver range) merged into the
    *  deployable's manifest.  Returns `{}` when the kind needs no extra
    *  dependency (e.g. `restApi` uses the platform's built-in fetch). */
@@ -60,4 +53,4 @@ export interface ResourceAdapter {
 
 /** Capability subset a stub answers at registration time — parallels
  *  `PersistenceCapabilities`. */
-export type ResourceCapabilities = Pick<ResourceAdapter, "name" | "supportedKinds" | "supports">;
+export type ResourceCapabilities = Pick<ResourceAdapter, "name">;

@@ -3143,7 +3143,7 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
   // Note: the `shape:` knob (D-DOCUMENT-AXIS) is NOT listed here — it is
   // consumed by the backend emitters (relational / embedded / document),
   // and an unsupported shape for a given backend is rejected by the
-  // per-backend `supportedShapes` capability check, not warned as inert.
+  // per-PLATFORM saving-shape capability check, not warned as inert.
 ];
 
 // Aggregate-inheritance storage gate (aggregate-inheritance.md, I2/I3).

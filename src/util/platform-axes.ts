@@ -11,14 +11,17 @@
 import type { Platform, SavingShape } from "../ir/types/loom-ir.js";
 
 /** Saving shapes (D-DOCUMENT-AXIS `shape: …`) each backend platform can
- *  EMIT today — the single source of truth for the `supportedShapes`
- *  capability check.  A `shape: …` not listed for the target platform is
- *  a hard error (the backend has no emitter for it yet).  Keyed by the
- *  bareword family (a `family@version` pin resolves via `platformFamily`
- *  in the validator).  Frontend platforms (`react`/`static`) own no
- *  persistence and are omitted.  Consumed by both the IR validator
- *  (`validateSavingShapeSupport`) and the generator persistence adapters
- *  (`PersistenceAdapter.supportedShapes`). */
+ *  EMIT today — the single source of truth for the saving-shape capability
+ *  check.  A `shape: …` not listed for the target platform is a hard error
+ *  (the backend has no emitter for it yet).  Keyed by the bareword family
+ *  (a `family@version` pin resolves via `platformFamily` in the validator).
+ *  Frontend platforms (`react`/`static`) own no persistence and are omitted.
+ *
+ *  The check is keyed by PLATFORM, not by adapter.  This header used to
+ *  add "and the generator persistence adapters
+ *  (`PersistenceAdapter.supportedShapes`)" as a second consumer; that field
+ *  was read by nothing and has been removed, so the sole consumer is
+ *  `validateSavingShapeSupport`. */
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
   node: ["relational", "embedded", "document"],

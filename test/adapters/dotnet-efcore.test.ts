@@ -16,7 +16,7 @@ import {
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
-import { adaptersFor } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor, availableAdapterNames } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -60,16 +60,15 @@ describe("efcore PersistenceAdapter (real)", () => {
     expect(resolved.name).toBe("efcore");
   });
 
-  it("answers capability fields directly (no stub-throw)", () => {
-    expect(efcorePersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
-    expect(efcorePersistenceAdapter.supports("postgres", "state", "state")).toBe(true);
-    expect(efcorePersistenceAdapter.supports("redis", "state", "state")).toBe(false);
-    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "state")).toBe(false);
-    // Event-sourced streams (appliers A2.2b): an `eventLog` aggregate on an
-    // `eventLog` binding over a relational store is supported (EF event store).
-    expect(efcorePersistenceAdapter.supports("postgres", "eventLog", "eventLog")).toBe(true);
-    expect(efcorePersistenceAdapter.supports("redis", "eventLog", "eventLog")).toBe(false);
-    expect(efcorePersistenceAdapter.supports("postgres", "state", "eventLog")).toBe(false);
+  it("is a REAL adapter, not a reserved stub (no stub-throw)", () => {
+    // The block this replaces probed `efcore.supports(...)` across eight
+    // (storage, kind, strategy) triples.  Nothing in src/ ever called that
+    // method: the real kind↔storage gate is `checkDataSource`, driven by the
+    // sourceType registry.  The probes therefore only tested the adapter's own
+    // boolean expression.  What is worth pinning is that efcore resolves as a
+    // real, non-stub adapter, which is what "no stub-throw" meant.
+    expect(availableAdapterNames("dotnet", "persistence")).toContain("efcore");
+    expect(typeof efcorePersistenceAdapter.emitProjectDeps).toBe("function");
   });
 
   it("emitProjectDeps returns the EF Core PackageReferences", () => {

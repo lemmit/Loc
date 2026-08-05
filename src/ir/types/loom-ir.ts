@@ -731,7 +731,7 @@ export type InheritanceLayout = "sharedTable" | "ownTable";
  *    - `document` — the whole aggregate (root included) serialised as one
  *      opaque JSONB blob (`id, data, version`); schema-flexible,
  *      load-by-id (Marten-style).  Not every backend supports it (see
- *      `PersistenceAdapter.supportedShapes`). */
+ *      `PLATFORM_SAVING_SHAPES` in `util/platform-axes.ts`). */
 export type SavingShape = "relational" | "embedded" | "document";
 
 /** The aggregate's primary truth kind.  Named to match the
