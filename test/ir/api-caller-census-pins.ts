@@ -413,6 +413,16 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   "extern",
   "extern-handlers",
   "field-mask",
+  // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
+  // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
+  // — seeding a reversion in each of the five emitters fails it), but no
+  // RUNTIME caller exercises it: an e2e that proves the 403 needs a principal
+  // whose `permissions` claim the behavioural harness does not mint (the OIDC
+  // fixture's mock issuer supplies `realm_access.roles` and nothing else), and
+  // the e2e DSL has no negative-status assertion form to spell the denial with.
+  // Both are real gaps, and neither belongs to this slice — the runtime
+  // negative-authz proof for `requires` lives in the M-T3.13 OIDC e2e legs.
+  "lifecycle-guard",
   "outbox",
   "projection-aggregation",
   "projection-groupby",
