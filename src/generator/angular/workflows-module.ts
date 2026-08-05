@@ -22,8 +22,13 @@ import { allWorkflows } from "../_frontend/workflows-module.js";
 // ---------------------------------------------------------------------------
 
 /** Map a wire `TypeIR` to a TS type string (primitives + ids precise; enums /
- *  value objects / nested entities fall back to `unknown`). */
-function wireTsType(t: TypeIR): string {
+ *  value objects / nested entities fall back to `unknown`).
+ *
+ *  Exported for `projections-module.ts`, which needs the identical mapping
+ *  (notably wire `money` → `string`).  NOTE: `api-module.ts` carries a second,
+ *  `precise`-flagged variant of this function — the two predate each other and
+ *  unifying them is its own slice; this export at least stops a THIRD copy. */
+export function wireTsType(t: TypeIR): string {
   const info = wireTypeInfo(t, "response");
   if (info.isNullable) return `${wireTsType(peelNullable(t))} | null`;
   if (info.isCollection) return `${wireTsType(peelCollection(t))}[]`;

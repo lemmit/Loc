@@ -44,6 +44,7 @@ import {
   renderAngularExternComponentProps,
   renderAngularExternComponentShim,
 } from "./extern-components.js";
+import { buildAngularProjectionsModule, hasReadableProjections } from "./projections-module.js";
 import {
   buildAngularRealtimeHandlers,
   buildAngularToastService,
@@ -490,6 +491,17 @@ export function generateAngularForContexts(
   // workflow, so a plain project's tree is unchanged.
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
+  }
+
+  // Query-time projection clients (M-T1.3 Phase 1).  Angular FORKS the shared
+  // `_frontend/projections-module.ts` rather than widening its options — the
+  // emitted unit is an interface + an @Injectable service method + an
+  // `injectQuery` factory, not a zod schema plus a hook (see that module's
+  // header for the rule, and this one's for the four divergences).  Emitted
+  // only when the deployable serves a readable projection, so a
+  // projection-free app stays byte-identical.
+  if (hasReadableProjections(contexts)) {
+    out.set("src/api/projections.ts", buildAngularProjectionsModule(contexts));
   }
 
   // --- Playwright e2e harness (angular-frontend-plan.md Slice 6) -------
