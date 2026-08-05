@@ -57,6 +57,11 @@ Every heavy gate — the runtime/boot e2e suites, the deploy build — is a
 follow-up merge cancels the previous commit's heavy jobs, so a real failure
 gets attributed to a later, innocent commit.
 
+> **Every gate in every tier runs locally.** The workflow → local-command
+> reverse index is [`docs/testing.md`](testing.md) → "Running any CI gate
+> locally"; pushing a commit just to see a check's verdict burns the shared
+> runner pool and is never necessary.
+
 ## The tiers
 
 | Lane | What | Rule |
