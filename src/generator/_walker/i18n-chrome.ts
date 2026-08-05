@@ -43,6 +43,14 @@ export const CHROME_MESSAGES: Record<string, string> = {
   [chromeKey("previous")]: "Previous",
   [chromeKey("next")]: "Next",
   [chromeKey("filter")]: "Filter",
+  // The pager's position counter.  An ICU message with two holes rather than
+  // three concatenated fragments ("Page " + n + " of " + m), because a locale
+  // must be free to RE-ORDER them — the count-first and count-last languages
+  // both exist, and a concatenation can only ever be translated in English word
+  // order.  Still a static catalog string: the holes are named, the emitter
+  // supplies their values (`localizedChromeIcuText`), and the runtime's
+  // `intl-messageformat` substitutes and locale-formats the numbers.
+  [chromeKey("pageOf")]: "Page {page} of {pages}",
   // The empty-state text of a `<select>` picker.  One key rather than one per
   // call site: it is the same sentence to a translator, and every pack that
   // spells it spells it identically (unlike the nav-toggle pair, which packs
@@ -97,6 +105,7 @@ export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
   DataGrid: (call) => [
     entry("previous"),
     entry("next"),
+    entry("pageOf"),
     ...(gridHasFilterableColumn(call) ? [entry("filter")] : []),
   ],
   // A `SelectField` ALWAYS renders the picker, so this is exact — the primitive

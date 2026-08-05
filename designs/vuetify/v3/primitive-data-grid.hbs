@@ -50,7 +50,7 @@
       </v-table>
       <div class="d-flex align-center justify-space-between mt-3">
         <v-btn size="small" variant="tonal" :disabled="!table.getCanPreviousPage()" @click="table.previousPage()">{{{prevLabel}}}</v-btn>
-        <span class="text-body-2" aria-live="polite">Page \{{ table.getState().pagination.pageIndex + 1 }} of \{{ Math.max(table.getPageCount(), 1) }}</span>
+        <span class="text-body-2" aria-live="polite">{{{pageOfLabel}}}</span>
         <v-btn size="small" variant="tonal" :disabled="!table.getCanNextPage()" @click="table.nextPage()">{{{nextLabel}}}</v-btn>
       </div>
     </div>

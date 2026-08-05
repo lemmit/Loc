@@ -457,6 +457,101 @@ export function localizedChromeText(ctx: WalkContext, name: string): string {
   return ctx.target.escapeText(english);
 }
 
+/** A pack-chrome string with ICU HOLES in a TEXT/children position — a grid
+ *  pager's "Page 3 of 7" — for markup that may land in a hoisted child file.
+ *
+ *  The chrome catalog stays exactly what it was: `chrome.pageOf` is the STATIC
+ *  string `"Page {page} of {pages}"`, so an extractor, a translator and a locale
+ *  file all see one ordinary ICU message.  What is new is only that the emitter
+ *  supplies the hole VALUES, in the target's own expression language.
+ *
+ *   - `ctx.i18nPrefix` set → the interpolated `t(key, default, { page: … })`
+ *     call; the runtime's `intl-messageformat` substitutes and locale-formats
+ *     the numbers, so a locale is free to re-ORDER the holes ("Seite 3 von 7",
+ *     `{pages}`-first languages included) — the whole reason this is one message
+ *     rather than three concatenated fragments;
+ *   - no prefix → the message re-assembled AROUND the holes: literal segments
+ *     escaped, each `{name}` replaced by the target's interpolation of its
+ *     expression.  That reproduces the pre-i18n pack template byte for byte
+ *     (`Page {expr} of {expr}` on React/Svelte, `Page {{ expr }} of {{ expr }}`
+ *     on Vue/Angular) — which is why the template can hand its two expressions
+ *     over and stop spelling the sentence itself.
+ *
+ *  Registers no import — see the section note above. */
+export function localizedChromeIcuText(
+  ctx: WalkContext,
+  name: string,
+  values: ReadonlyArray<{ name: string; expr: string }>,
+): string {
+  const english = chromeMessage(name);
+  if (ctx.i18nPrefix) {
+    return ctx.target.renderInterpolation(
+      translateExpr(ctx, chromeKey(name), english, values),
+      TRANSLATED,
+    );
+  }
+  // No `TRANSLATED` here: with i18n off the holes carry their OWN types (a page
+  // NUMBER, not a string), and the two targets that read `exprType` coerce
+  // accordingly.  Claiming `string` would drop a coercion they need.
+  return spliceIcuHoles(
+    english,
+    values,
+    (expr) => ctx.target.renderInterpolation(expr),
+    (text) => ctx.target.escapeText(text),
+  );
+}
+
+/** The ICU twin of {@link localizedChromeValue}: the bound `t()` EXPRESSION for
+ *  a holed chrome string, for a procedural pack that splices it into its own
+ *  language rather than into markup (Feliz's `prop.text (…)`).
+ *
+ *  Returns `undefined` with i18n off — deliberately, and unlike
+ *  {@link localizedChromeIcuText}.  Re-assembling the message around its holes
+ *  needs a CONCATENATION spelling (F#'s `"a" + string (e) + "b"`), and inventing
+ *  a seam for it would put the pre-i18n output at the mercy of that seam getting
+ *  the parens and coercions exactly right.  A pack instead keeps its existing
+ *  hand-written sentence as the `??` fallback, so the i18n-off path is
+ *  byte-identical BY CONSTRUCTION rather than by reconstruction — the same trade
+ *  {@link localizedAriaLabelValue} makes when it returns `undefined` for a slot
+ *  with nothing to bind. */
+export function localizedChromeIcuValue(
+  ctx: WalkContext,
+  name: string,
+  values: ReadonlyArray<{ name: string; expr: string }>,
+): string | undefined {
+  if (!ctx.i18nPrefix) return undefined;
+  return translateExpr(ctx, chromeKey(name), chromeMessage(name), values);
+}
+
+/** Re-assemble an ICU message around its holes: literal segments through
+ *  `escapeText`, each `{name}` through `hole` with that value's expression.
+ *
+ *  Throws on a hole with no supplied value rather than passing the `{name}`
+ *  through — a literal `{page}` in JSX children is a syntax error at best and a
+ *  visible "{page}" at worst, and either would only surface in a generated
+ *  project.  The catalog message and the emitter's value list are two halves of
+ *  one contract; this is where they are checked against each other. */
+function spliceIcuHoles(
+  message: string,
+  values: ReadonlyArray<{ name: string; expr: string }>,
+  hole: (expr: string) => string,
+  escapeText: (text: string) => string,
+): string {
+  const byName = new Map(values.map((v) => [v.name, v.expr]));
+  const pattern = /\{(\w+)\}/g;
+  let out = "";
+  let cursor = 0;
+  for (let m = pattern.exec(message); m !== null; m = pattern.exec(message)) {
+    const expr = byName.get(m[1]!);
+    if (expr === undefined) {
+      throw new Error(`i18n-chrome: no value supplied for ICU hole "${m[1]}" in "${message}"`);
+    }
+    out += escapeText(message.slice(cursor, m.index)) + hole(expr);
+    cursor = m.index + m[0].length;
+  }
+  return out + escapeText(message.slice(cursor));
+}
+
 /** The raw translation-call EXPRESSION for a pack-chrome string, unwrapped — for
  *  a pack that splices it into its own expression language rather than into
  *  markup (Feliz's `prop.text (…)`, Flutter's `Text(…)`).  Returns the plain

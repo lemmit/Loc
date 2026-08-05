@@ -17,11 +17,22 @@
 // has to be wired into that file, not the page's import block.
 
 import { describe, expect, it } from "vitest";
+import { loadPack, resolvePackDir } from "../../src/generator/_packs/loader-fs.js";
 import {
   APP_SHELL_CHROME,
   CHROME_MESSAGES,
   chromeKey,
 } from "../../src/generator/_walker/i18n-chrome.js";
+import {
+  localizedChromeIcuText,
+  localizedChromeIcuValue,
+} from "../../src/generator/_walker/i18n-emit.js";
+import type { WalkContext } from "../../src/generator/_walker/walker-core.js";
+import { angularTarget } from "../../src/generator/angular/walker/angular-target.js";
+import { felizTarget } from "../../src/generator/feliz/feliz-target.js";
+import { tsxTarget } from "../../src/generator/react/walker/tsx-target.js";
+import { svelteTarget } from "../../src/generator/svelte/walker/svelte-target.js";
+import { vueTarget } from "../../src/generator/vue/walker/vue-target.js";
 import { generateSystemFiles } from "../_helpers/index.js";
 
 /** A one-page system on `<platform>`/`<design>` whose body is `<body>`.
@@ -460,6 +471,197 @@ describe("pack-chrome i18n — DataGrid pager", () => {
     expect(page).toContain(`{t("chrome.previous", "Previous")}`);
     expect(page).toContain(`import { t } from "../i18n"`);
     expect(catalogOf(files)["chrome.previous"]).toBe("Previous");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The pager's position counter — chrome with ICU HOLES
+// ---------------------------------------------------------------------------
+//
+// Every chrome string before this one was a whole sentence the pack owned.  The
+// counter is not: the packs spelled it as `Page ` + one expression + ` of ` +
+// another, which is a sentence NO locale can translate — the word order is
+// baked into the concatenation, and "Seite 3 von 7" only works because German
+// happens to agree with English here.  Languages that put the total first, or
+// need a different particle between the numbers, cannot be expressed at all.
+//
+// So the counter moves into the catalog as ONE ICU message with two named holes
+// (`chrome.pageOf` = "Page {page} of {pages}"), and the emitter supplies the
+// hole values in each frontend's own expression language.  The catalog contract
+// is unchanged — a static string, one key — and the runtime's
+// `intl-messageformat` does the substitution, so a locale is free to reorder.
+//
+// The holes are also why this is a fifth spelling rather than a reuse: the four
+// JS frontends read the TanStack `table` through a JS member chain, and Feliz
+// reaches the same numbers through Fable's dynamic-access operator.
+
+describe("pack-chrome i18n — pager position counter (ICU chrome)", () => {
+  it("React (mantine): one t() call carrying both numbers as named ICU holes", async () => {
+    const files = await generateSystemFiles(SYSTEM("react", "mantine", GRID_BODY(true)));
+    const page = pageOf(files, "home.tsx");
+    expect(page).toContain(
+      `{t("chrome.pageOf", "Page {page} of {pages}", ` +
+        `{ page: table.getState().pagination.pageIndex + 1, ` +
+        `pages: Math.max(table.getPageCount(), 1) })}`,
+    );
+    // The sentence is gone from the markup — if any pack still spelled it
+    // inline, half the counter would be translatable and half would not.
+    expect(page).not.toContain("Page {table.getState()");
+    expect(catalogOf(files)["chrome.pageOf"]).toBe("Page {page} of {pages}");
+  });
+
+  it("Vue (vuetify): the sibling SFC interpolates the same call", async () => {
+    const files = await generateSystemFiles(SYSTEM("vue", "vuetify", GRID_BODY(true)));
+    const child = gridChildOf(files, "src/components/OrdersDataGrid.vue");
+    expect(child).toContain(
+      `{{ t("chrome.pageOf", "Page {page} of {pages}", ` +
+        `{ page: table.getState().pagination.pageIndex + 1, ` +
+        `pages: Math.max(table.getPageCount(), 1) }) }}`,
+    );
+    expect(child).toContain(`import { t } from "../i18n";`);
+  });
+
+  it("Svelte (flowbite): the sibling component interpolates it", async () => {
+    const files = await generateSystemFiles(SYSTEM("svelte", "flowbite", GRID_BODY(true)));
+    const child = gridChildOf(files, "src/lib/components/OrdersDataGrid.svelte");
+    expect(child).toContain(`{t("chrome.pageOf", "Page {page} of {pages}", { page: `);
+    expect(child).toContain(`import { t } from "$lib/i18n";`);
+  });
+
+  it("Angular (angularMaterial): the template evaluates it against the instance", async () => {
+    const files = await generateSystemFiles(SYSTEM("angular", "angularMaterial", GRID_BODY(true)));
+    const child = gridChildOf(files, "src/app/components/orders-data-grid.component.ts");
+    expect(child).toContain(`{{ t("chrome.pageOf", "Page {page} of {pages}", { page: `);
+    // Both names in the expression are class members on Angular — `t` because
+    // the template has no module scope, `Math` for the same reason.
+    expect(child).toContain("protected readonly t = t;");
+    expect(child).toContain("Math");
+  });
+
+  it("Feliz: I18n.tf — the seam's WITH-VALUES arm, over Fable dynamic access", async () => {
+    // The four JS frontends share `t(key, default, values)`; F# has no such
+    // call, so `renderTranslate` spells the holed form as `I18n.tf` over a list
+    // of boxed pairs.  Same key, same default, same hole NAMES — only the way
+    // the two numbers are reached differs, which is why the Feliz child supplies
+    // its own hole expressions rather than reusing the JS ones.
+    const files = await generateSystemFiles(SYSTEM("feliz", "", GRID_BODY(true)));
+    const app = gridChildOf(files, "App.fs");
+    expect(app).toContain(
+      `prop.text (I18n.tf "chrome.pageOf" "Page {page} of {pages}" ` +
+        `[ "page", box (unbox<int> (table?getState()?pagination?pageIndex) + 1); ` +
+        `"pages", box (max (unbox<int> (table?getPageCount())) 1) ])`,
+    );
+    // The old hand-rolled concatenation is gone from the emitted F#.
+    expect(app).not.toContain(`"Page " + string`);
+    expect(app).toContain(`"chrome.pageOf", "Page {page} of {pages}"`);
+  });
+});
+
+// Per-pack-VERSION coverage, the lesson the app-shell block above records: a
+// template that keeps the sentence inline still COMPILES and still renders — it
+// is simply untranslatable, which no build gate and no single-pack assertion can
+// see.  The `design:` clause names a FAMILY and resolves to its newest version,
+// so a generate-and-assert test can only ever reach one version per family;
+// rendering each pack directly is what reaches all fifteen.
+
+describe("pager counter — every pack version renders it through the token", () => {
+  const GRID_PACKS = [
+    "angularMaterial@v1",
+    "chakra@v2",
+    "chakra@v3",
+    "flowbite@v1",
+    "mantine@v7",
+    "mantine@v9",
+    "mui@v5",
+    "mui@v7",
+    "primeng@v1",
+    "shadcn@v3",
+    "shadcn@v4",
+    "shadcnSvelte@v1",
+    "shadcnVue@v1",
+    "spartanNg@v1",
+    "vuetify@v3",
+  ];
+
+  it.each(GRID_PACKS)("%s", (name) => {
+    const pack = loadPack(resolvePackDir(name));
+    // The same context `emitDataGrid` builds, with the counter replaced by a
+    // sentinel so the assertion is about the TOKEN, not about any one frontend's
+    // interpolation syntax.
+    const html = pack.render("primitive-data-grid", {
+      hasColumnVisibility: true,
+      hasFilters: true,
+      hasSelection: false,
+      testidAttr: "",
+      prevLabel: "Previous",
+      nextLabel: "Next",
+      filterPlaceholderAttr: `placeholder="Filter"`,
+      pageOfLabel: "«COUNTER»",
+      headerBody: "",
+      cellBody: "",
+    });
+    expect(html).toContain("«COUNTER»");
+    // …and nothing left behind: the sentence must not ALSO be spelled inline.
+    expect(html).not.toMatch(/Page\s*\\?\{/);
+  });
+});
+
+// The i18n-OFF half, pinned at the helper rather than through the generator: a
+// UI containing a `DataGrid` is ALWAYS i18n-enabled (its pager chrome is a
+// used-only contribution, which is exactly what flips the runtime on), so there
+// is no generatable system in which the counter renders raw.  That makes the
+// off-branch defensive code — and defensive code with no test is how a "byte
+// identical when i18n is off" promise quietly stops being true.
+//
+// The expected strings below are the literal text the pack templates carried
+// before this slice, copied from the pre-change `.hbs` files.
+
+describe("ICU chrome with i18n off — the message re-assembled around its holes", () => {
+  const HOLES = [
+    { name: "page", expr: "table.getState().pagination.pageIndex + 1" },
+    { name: "pages", expr: "Math.max(table.getPageCount(), 1)" },
+  ];
+
+  /** The narrow slice of a walk context the chrome helpers actually read. */
+  const ctxWith = (target: unknown, i18nPrefix?: string) =>
+    ({ target, i18nPrefix }) as unknown as WalkContext;
+
+  it("React/Svelte: `Page {expr} of {expr}` — the JSX template, verbatim", () => {
+    for (const target of [tsxTarget, svelteTarget]) {
+      expect(localizedChromeIcuText(ctxWith(target), "pageOf", HOLES)).toBe(
+        "Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}",
+      );
+    }
+  });
+
+  it("Vue/Angular: `Page {{ expr }} of {{ expr }}` — the mustache template, verbatim", () => {
+    for (const target of [vueTarget, angularTarget]) {
+      expect(localizedChromeIcuText(ctxWith(target), "pageOf", HOLES)).toBe(
+        "Page {{ table.getState().pagination.pageIndex + 1 }} of " +
+          "{{ Math.max(table.getPageCount(), 1) }}",
+      );
+    }
+  });
+
+  it("the VALUE form yields nothing, so a procedural pack keeps its own sentence", () => {
+    // Feliz's counter is an F# concatenation, and no seam spells concatenation.
+    // Returning `undefined` hands the decision back to the pack, whose `??`
+    // fallback is the string it has always emitted — byte-identical by
+    // construction rather than by reconstruction.
+    expect(localizedChromeIcuValue(ctxWith(felizTarget), "pageOf", HOLES)).toBeUndefined();
+    expect(localizedChromeIcuValue(ctxWith(felizTarget, "page.Home"), "pageOf", HOLES)).toContain(
+      `I18n.tf "chrome.pageOf"`,
+    );
+  });
+
+  it("throws when a hole has no value rather than emitting a literal `{page}`", () => {
+    // A `{page}` that reached JSX children would be a syntax error in the
+    // generated project — far from the catalog edit that caused it.  The
+    // message and the emitter's value list are two halves of one contract, and
+    // this is where they are checked against each other.
+    expect(() => localizedChromeIcuText(ctxWith(tsxTarget), "pageOf", [HOLES[0]!])).toThrow(
+      /no value supplied for ICU hole "pages"/,
+    );
   });
 });
 
