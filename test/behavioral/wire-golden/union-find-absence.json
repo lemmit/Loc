@@ -24,6 +24,49 @@
     },
     {
       "seq": 2,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "C1B",
+        "id": "<volatile:key>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/by_code?code=C1B",
+      "status": 200,
+      "body": {
+        "code": "C1B",
+        "id": "<volatile:key>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders/by_code?code=C1",
+      "status": 404,
+      "body": {
+        "detail": "Not Found",
+        "instance": "/api/orders/by_code",
+        "resource": "Order",
+        "status": 404,
+        "title": "Not Found",
+        "type": "/errors/not-found"
+      }
+    },
+    {
+      "seq": 6,
       "method": "GET",
       "path": "/api/orders/by_code?code=NOPE",
       "status": 404,

@@ -68,6 +68,23 @@ system Payments {
     expect(read.last4).toBe("4242")
     expect(read.network).toBe("Visa")
     expect(read.expiryMonth).toBe(4)
+
+    // The canonical `update` (`POST /api/credit_cards/{id}/update`, 204 + empty
+    // body) across the SAME TPH split: every update param is a SUBTYPE field,
+    // and the base's `holderName`/`last4` are not in the input at all — so they
+    // must survive a write to the shared table.  RS-2 rides along (the enum
+    // moves Visa → Mastercard through a write, not just a create).
+    api.creditCards.update(c, { network: "Mastercard", expiryMonth: 12, expiryYear: 2031 })
+    let updated = api.creditCards.getById(c)
+    expect(updated.network).toBe("Mastercard")
+    expect(updated.expiryMonth).toBe(12)
+    expect(updated.expiryYear).toBe(2031)
+    expect(updated.holderName).toBe("Ada Lovelace")
+    expect(updated.last4).toBe("4242")
+    // The declared find over the enum column the update just moved — the one
+    // subtype-scoped query on this system, and previously uncalled.
+    let byNet = api.creditCards.byNetwork({ network: "Mastercard" })
+    expect(byNet.length).toBe(1)
   }
 
   // RS-1 (`holderName`/`routingNumber`) + RS-3. The second subtype of the
@@ -79,5 +96,15 @@ system Payments {
     expect(read.holderName).toBe("Grace Hopper")
     expect(read.routingNumber).toBe("021000021")
     expect(read.last4).toBe("0007")
+
+    // Same canonical `update`, second subtype of the same TPH base — one
+    // subtype-only param, and the inherited base fields left untouched.  The
+    // pair is what makes the discriminator observable on the WRITE path: an
+    // update that ignored the kind column would cross the two subtypes here.
+    api.bankAccounts.update(b, { routingNumber: "011000015" })
+    let updated = api.bankAccounts.getById(b)
+    expect(updated.routingNumber).toBe("011000015")
+    expect(updated.holderName).toBe("Grace Hopper")
+    expect(updated.last4).toBe("0007")
   }
 }

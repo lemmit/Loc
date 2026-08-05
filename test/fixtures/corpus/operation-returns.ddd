@@ -23,9 +23,38 @@ system RU {
     port: 4000
   }
 
+  // ORDER MATTERS HERE.  The canonical `update` + read-back run BEFORE the
+  // error-returning `reject`, and deliberately so — see the note below.
   test e2e "exception-less op: reject returns the NotFound error (404)" against d {
     let o = api.orders.create({ code: "OR1", reserved: false })
     api.orders.accept(o)
+
+    // The canonical `update` on the same aggregate — the ORDINARY (void) op
+    // beside the two union-returning ones.  `accept()` already flipped
+    // `reserved` through a `T or Error` route; this writes the same field
+    // through the 204-no-body route, so both response shapes of one aggregate
+    // are driven in one suite.
+    api.orders.update(o, { code: "OR2", reserved: false })
+    let read = api.orders.getById(o)
+    expect(read.code).toBe("OR2")
+    expect(read.reserved).toBe(false)
+
+    // …and only THEN the error variant, with no read after it.
+    //
+    // OPEN QUESTION, deliberately not pinned (found by this drain): does the
+    // transaction of an operation that returns its `error` variant COMMIT?
+    // Written the other way round — reject first, then update+read — node
+    // reads back `version: 4` and python `version: 3`.  Both emit the same
+    // route shape (`result = agg.reject(); repo.save(agg); if error → 404`),
+    // so the divergence is not in the route: python's per-request
+    // `TransactionMiddleware` commits only on `status < 400` and ROLLS BACK the
+    // 404, discarding the save; node has no status-driven transaction boundary
+    // and commits it.  Which is right is a language decision about
+    // exception-less returns (an `error` variant is a declared VALUE carried on
+    // a 4xx, not a failure), not a backend bug — so this fixture does not
+    // assert either answer.  It also has nothing to do with `update`: reordering
+    // keeps the version deterministic on all five backends and leaves the
+    // question where it belongs.
     expect(api.orders.reject(o)).toThrow(404)
   }
 }

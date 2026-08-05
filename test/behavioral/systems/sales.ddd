@@ -133,6 +133,15 @@ system Sales {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
     expect(read.sku).toBe("WIDGET-1")
+    // RS-7 on the WRITE path: the canonical `update` (204, empty body) carries
+    // the same `Money` value object INBOUND and it must survive the round-trip
+    // a second time.  Create-only coverage never proved the VO decomposes
+    // correctly on an update projection.
+    api.products.update(p, { sku: "WIDGET-1B", price: { amount: 12.50, currency: "EUR" } })
+    let updated = api.products.getById(p)
+    expect(updated.sku).toBe("WIDGET-1B")
+    expect(updated.price.amount).toBe(12.50)
+    expect(updated.price.currency).toBe("EUR")
   }
 
   // RS-6 (bool create default materialises at the wire boundary): `active` is
@@ -144,6 +153,16 @@ system Sales {
     let read = api.customers.getById(c)
     expect(read.active).toBe(true)
     expect(read.externalRef).toBe("ext-42")
+    // The update side of the same two rules: RS-6's `bool = true` default is a
+    // CREATE-input relaxation only, so `active` is a REQUIRED update param —
+    // sent as `false` here, it must actually land as false rather than being
+    // re-defaulted.  RS-1's multi-word key crosses the wire a second time, now
+    // inbound on a different route.
+    api.customers.update(c, { name: "Defaulter II", email: "def2@acme.test", externalRef: "ext-43", active: false })
+    let updated = api.customers.getById(c)
+    expect(updated.active).toBe(false)
+    expect(updated.externalRef).toBe("ext-43")
+    expect(updated.name).toBe("Defaulter II")
   }
 
   // RS-1 (camelCase keys both directions: customerId/placedAt) + RS-2 (enum
@@ -154,6 +173,17 @@ system Sales {
     let read = api.orders.getById(ord)
     expect(read.status).toBe("Draft")
     expect(read.placedAt).toBeSameInstant("2024-01-01T00:00:00Z")
+    // The canonical `update` re-sends all three of the rules this case covers —
+    // the id reference (RS-1 `customerId`), the enum (RS-2, moved to
+    // "Cancelled") and the timestamp (RS-4) — INBOUND on the update route.  A
+    // backend that parsed a datetime or an enum differently on the update
+    // projection than on the create one is invisible until something writes
+    // through both.
+    api.orders.update(ord, { customerId: cust.id, status: "Cancelled", placedAt: "2024-02-02T12:30:00Z" })
+    let updated = api.orders.getById(ord)
+    expect(updated.status).toBe("Cancelled")
+    expect(updated.customerId).toBe(cust.id)
+    expect(updated.placedAt).toBeSameInstant("2024-02-02T12:30:00Z")
   }
 
   // RS-8 (association round-trip via an operation) + RS-2 (enum "Confirmed").

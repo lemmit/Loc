@@ -37,5 +37,18 @@ system EmbSys {
     let read = api.orders.getById(o)
     expect(read.customer).toBe("acme")
     expect(read.lines.length).toBe(1)
+
+    // The canonical `update` rewrites the QUERYABLE root columns (`customer`,
+    // `total`) while the jsonb-folded `lines` containment — not an update
+    // param — must survive untouched.  That split is the whole point of
+    // `shape: embedded`, and the update route is where it can break silently:
+    // a backend re-writing the row from the update input alone empties `lines`.
+    api.orders.update(o, { customer: "beta", total: "125.00" })
+    let updated = api.orders.getById(o)
+    expect(updated.customer).toBe("beta")
+    expect(updated.lines.length).toBe(1)
+    // The declared find reads the root column the update just moved.
+    let byCustomer = api.orders.byCustomer({ name: "beta" })
+    expect(byCustomer.length).toBe(1)
   }
 }

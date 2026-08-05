@@ -31,5 +31,15 @@ system EmbOpt {
     let read = api.orders.getById(o)
     expect(read.customer).toBe("acme")
     expect(read.lines.length).toBe(1)
+
+    // The canonical `update` rewrites the root column while BOTH containments
+    // stay out of the update input — the collection one (`lines`, populated)
+    // and the optional single one (`note`, still unset).  The golden pins the
+    // unset cell's absence shape through the update, which is the axis this
+    // fixture exists for.
+    api.orders.update(o, { customer: "beta" })
+    let updated = api.orders.getById(o)
+    expect(updated.customer).toBe("beta")
+    expect(updated.lines.length).toBe(1)
   }
 }

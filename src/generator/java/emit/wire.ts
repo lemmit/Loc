@@ -155,7 +155,17 @@ export function wireToDomain(t: TypeIR, expr: string): string {
       const el = t.element;
       const mapped = wireToDomain(el, "__x");
       if (mapped === "__x") return expr;
-      return `${expr}.stream().map(__x -> ${mapped}).toList()`;
+      // MUTABLE copy, not `Stream.toList()`.  This value is assigned straight
+      // onto a domain field, and on a value-object collection that field is a
+      // JPA `@ElementCollection`.  Hibernate's merge REPLACES a collection in
+      // place — `CollectionType.replaceElements` calls `clear()` on the target
+      // — so an immutable `Stream.toList()` result made every UPDATE of an
+      // aggregate with a `Money[]`-shaped field answer 500
+      // (`UnsupportedOperationException` from `ImmutableCollections.uoe`).
+      // CREATE never hit it: a fresh entity is persisted, never merged, which
+      // is why the compile tier and the create-only e2e both stayed green.
+      // Found by the caller census's `update` drain on `value-collections`.
+      return `new java.util.ArrayList<>(${expr}.stream().map(__x -> ${mapped}).toList())`;
     }
     case "optional": {
       const inner = wireToDomain(t.inner, expr);

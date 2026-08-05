@@ -318,13 +318,34 @@ the conforming backends, and the fix that established it.
   document path already did. (Each is guarded on the `versioned` capability; the
   relational .NET/Java paths needed nothing, since there the bumped column IS
   the wire value.)
+- **A fourth shape, found later: INHERITED aggregates on java.** The rule is
+  also `inheritanceUsing:`-dependent, and java failed it for every subtype of an
+  abstract aggregate — `version` froze at the create factory's `1` and never
+  moved (`payments` credit card / bank account, `tph` car / truck: canonically
+  `2`, java `1`). One cause, and it is not Hibernate semantics this time
+  (unlike RS-20): the `version` token field is declared once, on the **base**,
+  and the concrete-entity emitter skips inherited fields — so `@Version` had to
+  be emitted by `renderAbstractBase`, which had no such arm. `renderEntity`'s
+  arm even carried the comment *"a TPH/TPC base carries it once"*, an intent
+  the base builder never implemented, so the annotation was emitted **nowhere**
+  and the column was a plain `@Column`. Beyond the wire value this left the
+  whole hierarchy's optimistic-concurrency guard **inert** — no `WHERE version
+  = ?` CAS, so a lost update between two writers was silent. **Fixed** (java
+  `emit/entity.ts`); gated structurally for TPH *and* TPC, with the negative
+  that the concrete must not redeclare it
+  (`generator-java-concurrency-conflict.test.ts`), and re-verified by booting
+  `payments` / `tph` / `inheritance` against Postgres in `gradle:9-jdk25`.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate
   (`test/behavioral/wire-golden/shapes.json` seq #3, `GET /api/carts/{id}`);
   fixed in the same PR, so the waiver is gone and the gate enforces it
   unconditionally on all five backends. Note RS-11 covered version at **create**
-  only — this is the **increment** path, and it is shape-dependent. Tier:
-  **behavioral**.
+  only — this is the **increment** path, and it is shape-dependent. The
+  inherited-shape half above was found by the caller census's `update` drain
+  (#2438) — the first callers ever put on `POST /api/<aggs>/{id}/update`, which
+  is the only route that mutates a `crudish` aggregate without a domain
+  operation, and therefore the only one that reaches an inherited aggregate
+  whose subtypes declare no operations at all. Tier: **behavioral**.
 
 ### RS-15 · A domain-floor rejection is **422**, not 400
 - **Guarantee.** A request that parses and typechecks but is rejected by the

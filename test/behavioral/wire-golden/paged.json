@@ -45,6 +45,45 @@
         "total": 2,
         "totalPages": 1
       }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "P1",
+        "id": "<volatile:key>",
+        "region": "EU",
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders/in_region?region=EU",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "P1",
+            "id": "<volatile:key>",
+            "region": "EU",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
     }
   ]
 }

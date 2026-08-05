@@ -34,5 +34,15 @@ system WhenShop {
     // a Shipped order is not — the `when` predicate fails → 409 Conflict
     let shipped = api.orders.create({ code: "A2", status: "Shipped" })
     expect(api.orders.cancel(shipped)).toThrow(409)
+
+    // The canonical `update` (`POST /api/orders/{id}/update`, 204 + empty body)
+    // is UNGATED — `when` guards `cancel`, not the crudish write path — so the
+    // same row a gated command was refused for is still writable.  That is the
+    // half of the gate no assertion reached: a backend that widened the `when`
+    // predicate onto every command would fail HERE, not on the 409 above.
+    api.orders.update(shipped, { code: "A2-REV", status: "Shipped" })
+    let revised = api.orders.getById(shipped)
+    expect(revised.code).toBe("A2-REV")
+    expect(revised.status).toBe("Shipped")
   }
 }

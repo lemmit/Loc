@@ -23,6 +23,59 @@
         "name": "Acme",
         "version": 1
       }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/customers/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 200,
+      "body": {
+        "creditLimit": 250,
+        "email": "a@x.com",
+        "id": "<volatile:key>",
+        "name": "Acme",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/customers/{id}/raise_limit",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 200,
+      "body": {
+        "creditLimit": 300,
+        "email": "a@x.com",
+        "id": "<volatile:key>",
+        "name": "Acme",
+        "version": 3
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/customers/by_email?email=a@x.com",
+      "status": 200,
+      "body": {
+        "creditLimit": 300,
+        "email": "a@x.com",
+        "id": "<volatile:key>",
+        "name": "Acme",
+        "version": 3
+      }
     }
   ]
 }

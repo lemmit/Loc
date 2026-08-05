@@ -32,5 +32,16 @@ system Stamped {
     let o = api.orders.create({ code: "S1" })
     let read = api.orders.getById(o)
     expect(read.code).toBe("S1")
+
+    // The `stamp onUpdate` half of the capability, which nothing drove: only
+    // `onCreate` had ever fired at runtime, because the canonical `update` —
+    // the one route on this aggregate that triggers an update stamp — had no
+    // caller.  The golden records `updatedAt`'s KEY through the write (its
+    // value is normalized as a timestamp), so a backend that never runs the
+    // onUpdate block, or drops the column from the update projection, diverges
+    // here.
+    api.orders.update(o, { code: "S2" })
+    let updated = api.orders.getById(o)
+    expect(updated.code).toBe("S2")
   }
 }

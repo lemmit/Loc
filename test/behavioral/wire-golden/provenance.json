@@ -54,6 +54,123 @@
         "unitPrice": 40,
         "version": 2
       }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "discount": 0,
+        "id": "<volatile:key>",
+        "quantity": 4,
+        "reference": "R2",
+        "total": 120,
+        "total_provenance": {
+          "computedValue": 120,
+          "inputs": [
+            {
+              "path": "total",
+              "value": 120
+            }
+          ],
+          "snapshotId": "<volatile:key>",
+          "target": {
+            "field": "total",
+            "type": "Order"
+          }
+        },
+        "unitPrice": 30,
+        "version": 3
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/orders/{id}/apply_discount",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "discount": 20,
+        "id": "<volatile:key>",
+        "quantity": 4,
+        "reference": "R2",
+        "total": 100,
+        "total_provenance": {
+          "computedValue": 100,
+          "inputs": [
+            {
+              "path": "quantity",
+              "value": 4
+            },
+            {
+              "path": "unitPrice",
+              "value": 30
+            },
+            {
+              "path": "amount",
+              "value": 20
+            }
+          ],
+          "snapshotId": "<volatile:key>",
+          "target": {
+            "field": "total",
+            "type": "Order"
+          }
+        },
+        "unitPrice": 30,
+        "version": 4
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders/by_reference?reference=R2",
+      "status": 200,
+      "body": {
+        "discount": 20,
+        "id": "<volatile:key>",
+        "quantity": 4,
+        "reference": "R2",
+        "total": 100,
+        "total_provenance": {
+          "computedValue": 100,
+          "inputs": [
+            {
+              "path": "quantity",
+              "value": 4
+            },
+            {
+              "path": "unitPrice",
+              "value": 30
+            },
+            {
+              "path": "amount",
+              "value": 20
+            }
+          ],
+          "snapshotId": "<volatile:key>",
+          "target": {
+            "field": "total",
+            "type": "Order"
+          }
+        },
+        "unitPrice": 30,
+        "version": 4
+      }
     }
   ]
 }

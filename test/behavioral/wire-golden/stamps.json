@@ -23,6 +23,26 @@
         "updatedAt": "<timestamp>",
         "version": 1
       }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "S2",
+        "createdAt": "<timestamp>",
+        "id": "<volatile:key>",
+        "updatedAt": "<timestamp>",
+        "version": 2
+      }
     }
   ]
 }

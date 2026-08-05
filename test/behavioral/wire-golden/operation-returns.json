@@ -24,12 +24,31 @@
     {
       "seq": 2,
       "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "OR2",
+        "id": "<volatile:key>",
+        "reserved": false,
+        "version": 3
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
       "path": "/api/orders/{id}/reject",
       "status": 404,
       "body": {
         "detail": "Not Found",
         "instance": "/api/orders/{id}/reject",
-        "resource": "OR1",
+        "resource": "OR2",
         "status": 404,
         "title": "Not Found",
         "type": "/errors/not-found"

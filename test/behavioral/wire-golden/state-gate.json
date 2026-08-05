@@ -39,6 +39,25 @@
         "title": "Disallowed",
         "type": "about:blank"
       }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "A2-REV",
+        "id": "<volatile:key>",
+        "status": "Shipped",
+        "version": 2
+      }
     }
   ]
 }

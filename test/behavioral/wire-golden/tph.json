@@ -23,6 +23,88 @@
         "name": "Sedan",
         "version": 1
       }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/cars/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/cars/{id}",
+      "status": 200,
+      "body": {
+        "capacity": 5,
+        "doors": 2,
+        "id": "<volatile:key>",
+        "name": "Sedan",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/cars/{id}/refit",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/cars/{id}",
+      "status": 200,
+      "body": {
+        "capacity": 5,
+        "doors": 3,
+        "id": "<volatile:key>",
+        "name": "Sedan",
+        "version": 3
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/trucks",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/trucks/{id}",
+      "status": 200,
+      "body": {
+        "capacity": 2,
+        "id": "<volatile:key>",
+        "name": "Hauler",
+        "payloadKg": 5000,
+        "version": 1
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/api/trucks/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/trucks/{id}",
+      "status": 200,
+      "body": {
+        "capacity": 2,
+        "id": "<volatile:key>",
+        "name": "Hauler",
+        "payloadKg": 7000,
+        "version": 2
+      }
     }
   ]
 }

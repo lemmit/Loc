@@ -24,6 +24,25 @@
           "version": 1
         }
       ]
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/invoices/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "amountDue": 250,
+        "id": "<volatile:key>",
+        "number": "INV-1B",
+        "version": 2
+      }
     }
   ]
 }

@@ -96,5 +96,38 @@ system AuditingSystem {
     let read = api.orders.getById(o)
     expect(read.reference).toBe("R1")
     expect(read.status).toBe(3)
+    // The declared find over the column the audited create wrote.
+    let byRef = api.orders.byReference({ reference: "R1" })
+    expect(byRef.status).toBe(3)
+  }
+
+  // The PER-COMMAND half of this fixture had no runtime caller at all: nothing
+  // created a `Shipment`, so neither the audited `dispatch()` nor the unmarked
+  // `retag()` nor the crudish `update` was ever driven.  The whole point of the
+  // aggregate is that the two commands differ only in whether an audit row is
+  // written — a difference that must be INVISIBLE on the response — so driving
+  // exactly one of the three and not the others proved nothing.
+  test e2e "the audited and unaudited commands of one aggregate behave alike" against d {
+    let s = api.shipments.create({ code: "SH-1", dispatched: false })
+    let read = api.shipments.getById(s)
+    expect(read.code).toBe("SH-1")
+    expect(read.dispatched).toBe(false)
+    // audited operation — the audit row commits in the same transaction, and
+    // the response must look like any other 204.
+    api.shipments.dispatch(s)
+    let dispatched = api.shipments.getById(s)
+    expect(dispatched.dispatched).toBe(true)
+    // the deliberately UNMARKED operation right beside it — same route shape,
+    // same 204, no audit row.
+    api.shipments.retag(s, { code: "SH-2" })
+    let retagged = api.shipments.getById(s)
+    expect(retagged.code).toBe("SH-2")
+    // canonical crudish update — also unaudited, and the third write route.
+    api.shipments.update(s, { code: "SH-3", dispatched: true })
+    let updated = api.shipments.getById(s)
+    expect(updated.code).toBe("SH-3")
+    expect(updated.dispatched).toBe(true)
+    let found = api.shipments.byCode({ code: "SH-3" })
+    expect(found.dispatched).toBe(true)
   }
 }

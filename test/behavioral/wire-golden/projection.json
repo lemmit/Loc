@@ -46,6 +46,36 @@
         "orderRef": "<uuid>",
         "status": "Shipped"
       }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "customerId": "<volatile:key>",
+        "id": "<volatile:key>",
+        "status": "Draft",
+        "version": 4
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/projections/order_board/{id}",
+      "status": 200,
+      "body": {
+        "at": "<timestamp>",
+        "orderRef": "<uuid>",
+        "status": "Shipped"
+      }
     }
   ]
 }

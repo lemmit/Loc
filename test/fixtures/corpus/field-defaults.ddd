@@ -68,5 +68,22 @@ system Defaults {
     expect(read.qty).toBe(1)
     expect(read.note).toBe("none")
     expect(read.active).toBe(true)
+
+    // The OTHER seam of RS-26, and the one no request had ever crossed: a
+    // `= default` relaxes CREATE input only.  The canonical `update` is full
+    // replacement — every writable field is a required param, defaults
+    // included — so this call carries all six, and the read-back proves each
+    // declared value was overwritten by the one sent rather than re-defaulted.
+    // `flag` (the bare bool, on the implicit rule) is the discriminator: a
+    // backend that carried its create-side relaxation onto update would let a
+    // value through and re-zero it.
+    api.items.update(i, { name: "Widget-2", qty: 7, note: "sent", active: false, archived: true, flag: true })
+    let updated = api.items.getById(i)
+    expect(updated.name).toBe("Widget-2")
+    expect(updated.qty).toBe(7)
+    expect(updated.note).toBe("sent")
+    expect(updated.active).toBe(false)
+    expect(updated.archived).toBe(true)
+    expect(updated.flag).toBe(true)
   }
 }

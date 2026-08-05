@@ -25,6 +25,18 @@ system UF {
     let o = api.orders.create({ code: "C1" })
     let read = api.orders.byCode({ code: "C1" })
     expect(read.code).toBe("C1")
+
+    // The canonical `update` rewrites the very column the union find keys on,
+    // so the find must follow it: `C1` stops resolving and `C1B` starts.  A
+    // backend whose update route wrote nothing (or answered 204 without
+    // saving — the #2342 shape) would still pass a plain read-back against a
+    // stale cache, but cannot pass a re-query through a different route.
+    api.orders.update(o, { code: "C1B" })
+    let byId = api.orders.getById(o)
+    expect(byId.code).toBe("C1B")
+    let moved = api.orders.byCode({ code: "C1B" })
+    expect(moved.code).toBe("C1B")
+    expect(api.orders.byCode({ code: "C1" })).toThrow(404)
   }
 
   // The ABSENCE half the case above is named for but never exercised.  This is

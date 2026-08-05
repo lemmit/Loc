@@ -73,5 +73,20 @@ system FulfillmentSaga {
     api.orders.place(ord)
     let ship = api.shipments.byOrder({ order: ord.id })
     expect(ship.status).toBe("Tracked")
+    // The shipment the SAGA created — not a client create — read back through
+    // its own by-id route.  Proves the correlation id the workflow persisted
+    // addresses a real row on the public surface.
+    let shipById = api.shipments.getById(ship)
+    expect(shipById.status).toBe("Tracked")
+
+    // The canonical `update` beside the event-emitting `place()`: it writes the
+    // same `status` column WITHOUT emitting, so a backend that hung the saga
+    // dispatch off "any write" (rather than off `emit`) would cascade a second
+    // shipment here.  The read-back pins both the value and the absence of a
+    // re-trigger.
+    api.orders.update(ord, { customerId: "c2", status: "Placed" })
+    let updated = api.orders.getById(ord)
+    expect(updated.customerId).toBe("c2")
+    expect(updated.status).toBe("Placed")
   }
 }

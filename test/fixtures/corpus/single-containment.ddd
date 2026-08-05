@@ -41,6 +41,14 @@ system SC {
     api.orders.ship(o, { carrier: "UPS", tracking: "1Z999" })
     let read = api.orders.getById(o)
     expect(read.shipment.carrier).toBe("UPS")
+    // The canonical `update` writes only the DECLARED fields — a containment is
+    // not an update param — so the folded `shipment` must SURVIVE a `code`
+    // rewrite.  A backend whose update path re-saves the aggregate from a
+    // partially-loaded root would drop it here and nowhere else.
+    api.orders.update(o, { code: "SC2" })
+    let updated = api.orders.getById(o)
+    expect(updated.code).toBe("SC2")
+    expect(updated.shipment.carrier).toBe("UPS")
     // The root list read carries the single containment too — the shape a
     // per-row `getById` alone never proves for the bulk-load path.
     let listed = api.orders.all()

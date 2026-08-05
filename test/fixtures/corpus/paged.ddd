@@ -21,9 +21,21 @@ system PagedShop {
   }
 
   test e2e "paged find returns the envelope" against d {
-    api.orders.create({ code: "P1", region: "NA" })
+    let p1 = api.orders.create({ code: "P1", region: "NA" })
     api.orders.create({ code: "P2", region: "NA" })
     let p = api.orders.recent()
     expect(p.items.length).toBe(2)
+
+    // The canonical `update` moves one row across the `inRegion` predicate —
+    // the parameterised paged find, which had no caller either.  Asserting the
+    // move through BOTH envelopes (one row in EU, one left in the unfiltered
+    // page) proves the write reached the column the WHERE clause reads, not
+    // just that the route answered 204.
+    api.orders.update(p1, { code: "P1", region: "EU" })
+    let moved = api.orders.getById(p1)
+    expect(moved.region).toBe("EU")
+    let eu = api.orders.inRegion({ region: "EU" })
+    expect(eu.items.length).toBe(1)
+    expect(eu.total).toBe(1)
   }
 }

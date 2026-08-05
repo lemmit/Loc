@@ -35,5 +35,18 @@ system Crit {
     api.orders.create({ code: "C2", region: "EU", archived: true })
     let list = api.orders.recent()
     expect(list.length).toBe(1)
+
+    // The WRITE side of the two capability criteria, which nothing drove: the
+    // canonical `update` loads the row through `Active` AND `InRegion("EU")`
+    // before it writes.  The row stays inside both criteria (still `EU`, still
+    // un-archived), so the write lands and the criterion-filtered reads still
+    // see exactly one order — `update` must not fall outside the filter regime
+    // the finds obey.
+    api.orders.update(a, { code: "C1B", region: "EU", archived: false })
+    let updated = api.orders.getById(a)
+    expect(updated.code).toBe("C1B")
+    expect(updated.region).toBe("EU")
+    let stillOne = api.orders.recent()
+    expect(stillOne.length).toBe(1)
   }
 }

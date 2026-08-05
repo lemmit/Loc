@@ -195,6 +195,30 @@ system SalesSystem {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
     expect(read.sku).toBe("WIDGET-1")
+    // The canonical `update` (`POST /api/products/{id}/update` → 204, empty
+    // body) carries the `Money` value object inbound and must land it: the
+    // crudish write path of this example had no caller at all.
+    api.products.update(p, { sku: "WIDGET-1B", price: { amount: 12.50, currency: "EUR" } })
+    let updated = api.products.getById(p)
+    expect(updated.sku).toBe("WIDGET-1B")
+    expect(updated.price.amount).toBe(12.50)
+  }
+
+  // The two remaining crudish write paths of this example, neither of which had
+  // a runtime caller: a plain-scalar aggregate and the one whose update input
+  // spans an id reference, an enum and a timestamp at once.
+  test e2e "update a customer and an order through the crudish write path" against api {
+    let cust = api.customers.create({ name: "Updatable", email: "up@acme.test" })
+    api.customers.update(cust, { name: "Updated", email: "up2@acme.test" })
+    let readCust = api.customers.getById(cust)
+    expect(readCust.name).toBe("Updated")
+    expect(readCust.email).toBe("up2@acme.test")
+
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.update(ord, { customerId: cust.id, status: "Cancelled", placedAt: "2024-02-02T12:30:00Z" })
+    let readOrd = api.orders.getById(ord)
+    expect(readOrd.status).toBe("Cancelled")
+    expect(readOrd.customerId).toBe(cust.id)
   }
 
   test e2e "create, add a line to, and confirm an order" against api {

@@ -37,5 +37,33 @@ system TPH {
     let read = api.cars.getById(c)
     expect(read.name).toBe("Sedan")
     expect(read.doors).toBe(4)
+
+    // The canonical `update` on a TPH subtype writes ONLY `doors` (the base's
+    // `name`/`capacity` are not update params), so the shared discriminated
+    // table must keep the base columns intact.  The subtype's own op then
+    // writes the same column through the other route.
+    api.cars.update(c, { doors: 2 })
+    let updated = api.cars.getById(c)
+    expect(updated.doors).toBe(2)
+    expect(updated.name).toBe("Sedan")
+    expect(updated.capacity).toBe(5)
+    api.cars.refit(c, { d: 3 })
+    let refitted = api.cars.getById(c)
+    expect(refitted.doors).toBe(3)
+  }
+
+  // The SECOND concrete of the same hierarchy had no runtime caller at all —
+  // create, read and update were all uncalled, so nothing proved the two
+  // subtypes coexist in the shared table (the classic TPH failure: the second
+  // discriminator's write clobbers or is clobbered by the first).
+  test e2e "the second TPH concrete round-trips beside the first" against d {
+    let t = api.trucks.create({ name: "Hauler", capacity: 2, payloadKg: 5000 })
+    let read = api.trucks.getById(t)
+    expect(read.name).toBe("Hauler")
+    expect(read.payloadKg).toBe(5000)
+    api.trucks.update(t, { payloadKg: 7000 })
+    let updated = api.trucks.getById(t)
+    expect(updated.payloadKg).toBe(7000)
+    expect(updated.name).toBe("Hauler")
   }
 }

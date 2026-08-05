@@ -36,6 +36,32 @@
         "note": null,
         "version": 2
       }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "customer": "beta",
+        "id": "<volatile:key>",
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "qty": 3,
+            "sku": "A1"
+          }
+        ],
+        "note": null,
+        "version": 3
+      }
     }
   ]
 }

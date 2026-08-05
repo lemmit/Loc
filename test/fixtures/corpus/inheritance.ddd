@@ -37,5 +37,24 @@ system Parties {
     let c = api.customers.create({ name: "Acme", email: "a@x.com", creditLimit: 100 })
     let read = api.customers.getById(c)
     expect(read.name).toBe("Acme")
+
+    // The canonical `update` of a TPH SUBTYPE carries only the subtype's own
+    // writable field (`creditLimit`) — the abstract base's `name`/`email` are
+    // not update params, so they must survive a write that touches the same
+    // shared table.  A backend whose update projects the subtype DTO over the
+    // whole row nulls the base columns here.
+    api.customers.update(c, { creditLimit: 250 })
+    let updated = api.customers.getById(c)
+    expect(updated.creditLimit).toBe(250)
+    expect(updated.name).toBe("Acme")
+    expect(updated.email).toBe("a@x.com")
+
+    // Free adjacents: the subtype's own domain op reads-modifies-writes the
+    // field the update just set, and the declared find keys on a BASE column.
+    api.customers.raiseLimit(c, { by: 50 })
+    let raised = api.customers.getById(c)
+    expect(raised.creditLimit).toBe(300)
+    let found = api.customers.byEmail({ email: "a@x.com" })
+    expect(found.creditLimit).toBe(300)
   }
 }

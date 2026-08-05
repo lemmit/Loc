@@ -33,6 +33,25 @@
           "version": 1
         }
       ]
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/accounts/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/accounts/{id}",
+      "status": 200,
+      "body": {
+        "balance": 150,
+        "id": "<volatile:key>",
+        "tenantId": "<volatile:key>",
+        "version": 2
+      }
     }
   ]
 }

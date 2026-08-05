@@ -257,6 +257,77 @@ system StorefrontSystem {
     let read = api.wallets.getById(wallet)
     expect(read.balance.amount).toBe(50.0)
   }
+
+  // The CRUDISH WRITE PATH of this example, which had no runtime caller on any
+  // of its four aggregates — `POST /api/<aggs>/{id}/update` (204, empty body)
+  // was emitted, mounted and spec-gated everywhere and driven nowhere.  Each
+  // update below is followed by the by-id read that proves it landed, and the
+  // wallet/order halves also drive the declared finds and lifecycle operations
+  // the same scenario passes through.
+  test e2e "the crudish update path writes every aggregate of this system" against api {
+    let cust = api.customers.create({ name: "Updatable", email: "up@acme.test" })
+    api.customers.update(cust, { name: "Updated", email: "up2@acme.test" })
+    let readCust = api.customers.getById(cust)
+    expect(readCust.name).toBe("Updated")
+    expect(readCust.email).toBe("up2@acme.test")
+
+    let prod = api.products.create({ sku: "UPD-1", price: { amount: 5.00, currency: "USD" } })
+    api.products.update(prod, { sku: "UPD-2", price: { amount: 7.50, currency: "USD" } })
+    let readProd = api.products.getById(prod)
+    expect(readProd.sku).toBe("UPD-2")
+    expect(readProd.price.amount).toBe(7.50)
+
+    // Wallet: the update input spans an id reference, an enum, a value object,
+    // a timestamp AND an unset optional (`closedAt`) in one body.
+    let wallet = api.wallets.create({
+      ownerId: cust.id,
+      status: "Open",
+      balance: { amount: 10.0, currency: "USD" },
+      openedAt: "2024-01-01T00:00:00Z"
+    })
+    api.wallets.update(wallet, {
+      ownerId: cust.id,
+      status: "Open",
+      balance: { amount: 25.0, currency: "USD" },
+      openedAt: "2024-03-03T09:00:00Z"
+    })
+    let readWallet = api.wallets.getById(wallet)
+    expect(readWallet.balance.amount).toBe(25.0)
+    expect(readWallet.status).toBe("Open")
+    // The two declared finds over the columns the update just wrote — one
+    // owner-scoped, one additionally status-scoped, so the pair discriminates.
+    let owned = api.wallets.byOwner({ owner: cust.id })
+    expect(owned.length).toBe(1)
+    let open = api.wallets.openByOwner({ owner: cust.id })
+    expect(open.length).toBe(1)
+    // The debit half of the banking pair (topUp is driven above), then the
+    // state transition that takes the wallet out of `openByOwner`.
+    api.wallets.debit(wallet, { amount: { amount: 5.0, currency: "USD" } })
+    let debited = api.wallets.getById(wallet)
+    expect(debited.balance.amount).toBe(20.0)
+    api.wallets.freeze(wallet, { reason: "audit" })
+    let frozen = api.wallets.getById(wallet)
+    expect(frozen.status).toBe("Frozen")
+    let stillOwned = api.wallets.byOwner({ owner: cust.id })
+    expect(stillOwned.length).toBe(1)
+    let noneOpen = api.wallets.openByOwner({ owner: cust.id })
+    expect(noneOpen.length).toBe(0)
+
+    // Order: created, lined and confirmed through the api (the checkout
+    // workflow is the only thing that had ever built one), then rewritten
+    // through the crudish update while its containment stays untouched.
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, unitPrice: { amount: 7.50, currency: "USD" }, qty: 2 })
+    api.orders.confirm(ord)
+    let readOrd = api.orders.getById(ord)
+    expect(readOrd.status).toBe("Confirmed")
+    expect(readOrd.lines.length).toBe(1)
+    api.orders.update(ord, { customerId: cust.id, status: "Shipped", placedAt: "2024-04-04T08:00:00Z" })
+    let shipped = api.orders.getById(ord)
+    expect(shipped.status).toBe("Shipped")
+    expect(shipped.lines.length).toBe(1)
+    expect(shipped.lineCount).toBe(1)
+  }
 }
 
 solution SOL-001 for US-001 {

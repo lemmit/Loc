@@ -99,6 +99,23 @@ system WireContract {
     expect(read.sku).toBe("SKU-1")
     expect(read.availability).toBe("InStock")
     expect(read.tags.length).toBe(0)
+
+    // The same three axes INBOUND on the canonical `update` (204, empty body):
+    // the `money` scale crosses the wire a second time, the enum moves through
+    // a write, and the OPTIONAL `note` — unset at create, and therefore the
+    // `null`-vs-absent axis this fixture exists for — is populated by an update
+    // rather than by a create.  `tags` is a containment and not an update
+    // param, so the empty collection must still read back `[]`, not null.
+    api.listings.update(l, { sku: "SKU-1B", price: "24.75", availability: "BackOrdered", note: "clearance" })
+    let updated = api.listings.getById(l)
+    expect(updated.sku).toBe("SKU-1B")
+    expect(updated.availability).toBe("BackOrdered")
+    expect(updated.note).toBe("clearance")
+    expect(updated.tags.length).toBe(0)
+    // The declared find over the column the update moved — the one query on
+    // this system, and previously uncalled.
+    let found = api.listings.bySku({ sku: "SKU-1B" })
+    expect(found.note).toBe("clearance")
   }
 
   // (2) The same collection AFTER an append — the non-empty shape, so the

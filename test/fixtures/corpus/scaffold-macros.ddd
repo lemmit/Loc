@@ -52,5 +52,15 @@ system MacroShop {
     let p = api.products.create({ name: "Widget", price: 9.99 })
     let read = api.products.getById(p)
     expect(read.name).toBe("Widget")
+
+    // The `update` third of the crudish triple, which had no caller — the
+    // macro's whole claim is that it synthesises a WORKING create/update/
+    // destroy lifecycle from the field declarations, and only the create half
+    // was ever driven.  `POST /api/products/{id}/update` (204, no body) writes
+    // both synthesised params.
+    api.products.update(p, { name: "Widget-2", price: 19.99 })
+    let updated = api.products.getById(p)
+    expect(updated.name).toBe("Widget-2")
+    expect(updated.price).toBe(19.99)
   }
 }

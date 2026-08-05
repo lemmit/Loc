@@ -36,6 +36,79 @@
         "version": 2,
         "viewCount": 0
       }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/articles/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/articles/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "sections": [
+          {
+            "body": "B",
+            "heading": "H",
+            "id": "<volatile:key>"
+          }
+        ],
+        "title": "T2",
+        "version": 3,
+        "viewCount": 5
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/articles/{id}/bump",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/articles/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "sections": [
+          {
+            "body": "B",
+            "heading": "H",
+            "id": "<volatile:key>"
+          }
+        ],
+        "title": "T2",
+        "version": 4,
+        "viewCount": 6
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/articles/popular?min=6",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "sections": [
+            {
+              "body": "B",
+              "heading": "H",
+              "id": "<volatile:key>"
+            }
+          ],
+          "title": "T2",
+          "version": 4,
+          "viewCount": 6
+        }
+      ]
     }
   ]
 }

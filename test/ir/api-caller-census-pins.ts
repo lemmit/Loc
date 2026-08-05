@@ -8,27 +8,44 @@
 //   • a pin that stops matching (the op gained a caller, or the op / fixture was
 //     renamed or deleted) fails as STALE, so the drain deletes it in the same PR.
 //
-// The reasons are shared constants rather than 210 hand-written sentences —
+// The reasons are shared constants rather than 126 hand-written sentences —
 // the gaps fall into a handful of classes, and the class is the honest
-// explanation.  ONE class (`gateProbe`, 1 pin) is still NOT an un-authored test:
-// that route is **unreachable from the `test e2e` surface**, so it cannot be
-// drained by writing a test.  That distinction is the point of writing the
-// reason down.
+// explanation.  THREE classes are NOT un-authored tests: `gateProbe` (1 pin),
+// `tenantRegistryRow` (10) and `unseedableAggregate` (4) name routes that
+// **cannot be driven from the `test e2e` surface at all**, so no amount of test
+// writing drains them.  Keeping that distinction is the point of writing the
+// reason down: an un-authored pin is work, an unreachable pin is a finding.
 //
-// `autoFindAll` and `destroy` USED to be in that unreachable class — 104 of the
+// `autoFindAll` and `destroy` USED to be in the unreachable class — 104 of the
 // 216 pins were those two routes, together the delete and list paths of every
-// generated system.  Both became reachable (`api.x.all()` → `GET /api/<aggs>`,
-// `api.x.destroy(id)` → `DELETE /api/<aggs>/{id}`), 6 were drained on the spot
-// across three corpus fixtures, and the remaining 98 are re-tagged as
-// UN-AUTHORED: an ordinary drain-list that shrinks by writing tests, exactly
-// like `crudishUpdate` / `getById` / `create`.
+// generated system.  Both became reachable (#2429: `api.x.all()` →
+// `GET /api/<aggs>`, `api.x.destroy(id)` → `DELETE /api/<aggs>/{id}`), 6 were
+// drained on the spot across three corpus fixtures, and the remaining 98 were
+// re-tagged as UN-AUTHORED: an ordinary drain-list that shrinks by writing
+// tests, exactly like `crudishUpdate` / `getById` / `create`.
+//
+// COUNT HISTORY.  216 (#2380, the census) → 210 (#2429, destroy + all reach
+// their routes) → 126 (this change).  The 84 drained here are the whole
+// `crudishUpdate` class that could be driven — 42 of its 45 pins, every one on
+// an aggregate a `test e2e` block can seed — plus the 42 adjacent operations a
+// real update scenario passes through anyway (the by-id read that proves the
+// write landed, the create for a second aggregate the scenario needed, the
+// declared find over the column the update moved, the domain op beside it).
+// The three `crudishUpdate` pins left behind are NOT un-authored: they are the
+// two tenant registries and the create-less soft-delete aggregate, re-tagged
+// below as the unreachable classes they always were.
+//
+// WHAT IS LEFT, by class: autoFindAll 53, destroy 41, tenantRegistryRow 10,
+// getById 9, domainOp 5, unseedableAggregate 4, declaredFind 3, gateProbe 1.
+// The two big ones are #2429's re-tagged drain-list — the list and delete paths
+// of every generated system — and they are the next drain, not a floor.
 
 /** Why an operation is pinned.  Grouped by CLASS — see the header. */
 export const R = {
   /**
    * UN-AUTHORED — the auto-`findAll` (`GET /api/<aggs>`, the bare collection
    * root; the paged envelope, or a bare array where `all` is typed `T[]` —
-   * event-sourced / document / subtype).  Reachable since this PR as
+   * event-sourced / document / subtype).  Reachable since #2429 as
    * `api.<aggs>.all()`, optionally `all({ page, pageSize, sort, dir })`:
    * `renderFindCall` routes the `all` find to the root rather than to
    * `/<aggs>/all`, which is the path no backend mounts and the reason this
@@ -38,8 +55,40 @@ export const R = {
    */
   autoFindAll: "un-authored: reachable as api.x.all() — the root list route GET /api/<aggs>",
   /**
+   * UNREACHABLE — a route on the TENANT REGISTRY (`tenancy by user.<claim> of
+   * <Registry>`).  Enrichment appends the derived self-scope filter `this.id ==
+   * currentUser.<claim>` to the registry's context filters, so EVERY read — and
+   * every write's load-before-save — is narrowed to the single row whose id IS
+   * the principal's claim.  The behavioural harness authenticates with
+   * `tenantId/orgId: "acme"` (`cases.mjs` DEV_CLAIMS), which is not a row id, so
+   * a registry row created through the api can never be read, updated or
+   * deleted back: `getById`/`update`/`destroy` 404 and `all` is empty.  `create`
+   * itself succeeds (a create applies no read filter) but has nothing
+   * observable to assert, which is the same gap wearing a different hat.
+   *
+   * Draining these needs a HARNESS change, not a test: a principal whose claim
+   * is a real registry id (the signup-bootstrap path `tenancy-e2e` drives),
+   * which is that suite's job, not this fixture's.
+   */
+  tenantRegistryRow:
+    "unreachable: registry self-scope `this.id == currentUser.<claim>` — the harness principal's claim is not a row id",
+  /**
+   * UNREACHABLE — an aggregate the api cannot SEED.  `with crudish(updateOnly:
+   * true)` emits `update` but no canonical `create`, so no `POST /api/<aggs>`
+   * route exists and no row can be minted through the api at all; every
+   * id-taking route on it (`getById`, `update`, and here the `softDelete` /
+   * `restore` ops the fixture exists to cover) is therefore undrivable from a
+   * `test e2e` block.  Found by this drain: `corpus/scaffold-macros`' `Item` —
+   * the aggregate whose whole point is the soft-delete lifecycle — has no
+   * api-reachable row, so that lifecycle has never run at runtime on any
+   * backend.  The exit is a fixture change (give `Item` a create path, or drive
+   * it through a seed dataset), not a caller.
+   */
+  unseedableAggregate:
+    "unreachable: crudish(updateOnly:) emits no create route, so no row can be minted through the api",
+  /**
    * UN-AUTHORED — the canonical destroy (`DELETE /api/<aggs>/{id}`, 204 empty).
-   * Reachable since this PR as `api.<aggs>.destroy(id)`.  Previously
+   * Reachable since #2429 as `api.<aggs>.destroy(id)`.  Previously
    * UNREACHABLE for a subtler reason than a wrong path: the canonical destroy
    * is not in `agg.operations` at all (lowering keeps it on
    * `agg.canonicalDestroy`), so the verb was rejected as an unknown method and
@@ -61,8 +110,15 @@ export const R = {
    * Reachable today (`api.<aggs>.update(id, { … })`), simply never written.
    * This is the exact route #2342 found carrying TWO contract bugs (a PATCH the
    * spec never advertised, and a 200-with-body against a declared 204) — found
-   * by hand precisely because no test called it.  The highest-value drain in
-   * this file.
+   * by hand precisely because no test called it.  It WAS the highest-value
+   * drain in this file: 42 of its 45 pins were drained by writing real callers
+   * (one per aggregate a `test e2e` block can seed), each asserting a read-back
+   * that proves the write landed rather than only that the route answered.  The
+   * three that remain are re-tagged `tenantRegistryRow` / `unseedableAggregate`
+   * — they were never un-authored, and this drain is what showed it.  So NO PIN
+   * carries this reason today; it is kept (like `create` below, also at zero)
+   * because the class recurs the moment a new fixture adds a `crudish`
+   * aggregate without a caller, and the census will name it here.
    */
   crudishUpdate: "un-authored: reachable as api.x.update(id, {…}) — the zero-caller route of #2342",
   /** UN-AUTHORED — `GET /api/<aggs>/{id}`.  Reachable as `api.x.getById(id)`;
@@ -88,22 +144,18 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   },
   "systems/payments": {
     byNetworkCreditCard: R.declaredFind,
+    getPaymentMethodById: R.getById,
     destroyCreditCard: R.destroy,
-    updateCreditCard: R.crudishUpdate,
     allCreditCard: R.autoFindAll,
     destroyBankAccount: R.destroy,
-    updateBankAccount: R.crudishUpdate,
     allBankAccount: R.autoFindAll,
   },
   "systems/sales": {
     destroyCustomer: R.destroy,
-    updateCustomer: R.crudishUpdate,
     allCustomer: R.autoFindAll,
     destroyProduct: R.destroy,
-    updateProduct: R.crudishUpdate,
     allProduct: R.autoFindAll,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "systems/shapes": {
@@ -113,44 +165,25 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     allWishlist: R.autoFindAll,
   },
   "systems/wire-contract": {
-    bySkuListing: R.declaredFind,
     destroyListing: R.destroy,
-    updateListing: R.crudishUpdate,
     allListing: R.autoFindAll,
   },
   "broad/sales-system": {
-    getCustomerById: R.getById,
     destroyCustomer: R.destroy,
-    updateCustomer: R.crudishUpdate,
     allCustomer: R.autoFindAll,
     destroyProduct: R.destroy,
-    updateProduct: R.crudishUpdate,
     allProduct: R.autoFindAll,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "broad/storefront-system": {
-    getCustomerById: R.getById,
     destroyCustomer: R.destroy,
-    updateCustomer: R.crudishUpdate,
     allCustomer: R.autoFindAll,
     destroyProduct: R.destroy,
-    updateProduct: R.crudishUpdate,
     allProduct: R.autoFindAll,
-    byOwnerWallet: R.declaredFind,
-    openByOwnerWallet: R.declaredFind,
     destroyWallet: R.destroy,
-    debitWallet: R.domainOp,
-    freezeWallet: R.domainOp,
-    updateWallet: R.crudishUpdate,
     allWallet: R.autoFindAll,
-    createOrder: R.create,
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
-    addLineOrder: R.domainOp,
-    confirmOrder: R.domainOp,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   // DRAINED: `destroyOrder` + `allOrder` now have callers (the list/delete
@@ -159,64 +192,44 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     byStatusOrder: R.declaredFind,
   },
   "corpus/state-gate": {
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
     canCancelOrder: R.gateProbe,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/operation-returns": {
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/union-find-absence": {
     maybeFirstOrder: R.declaredFind,
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/paged": {
-    inRegionOrder: R.declaredFind,
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
-  // DRAINED: `destroy` + `all` (the two verbs this PR made reachable).
-  "corpus/single-containment": {
-    updateOrder: R.crudishUpdate,
-  },
-  // DRAINED: `destroy` + `all`.
-  "corpus/value-collections": {
-    updateInvoice: R.crudishUpdate,
-  },
+  // FULLY DRAINED — every derived operation of these two fixtures now has a
+  // caller (`destroy` + `all` in #2429, `update` here), so they carry no pins
+  // at all.  Deliberately absent rather than present-and-empty: an empty record
+  // would read as "checked, nothing to say" when the truth is "nothing left".
   "corpus/document": {
-    popularArticle: R.declaredFind,
     destroyArticle: R.destroy,
-    bumpArticle: R.domainOp,
-    updateArticle: R.crudishUpdate,
     allArticle: R.autoFindAll,
   },
   "corpus/embedded": {
-    byCustomerOrder: R.declaredFind,
     destroyOrder: R.destroy,
     retotalOrder: R.domainOp,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/embedded-optional": {
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/inheritance": {
     byEmailCustomer: R.declaredFind,
+    getPartyById: R.getById,
     destroyCustomer: R.destroy,
-    raiseLimitCustomer: R.domainOp,
-    updateCustomer: R.crudishUpdate,
     allCustomer: R.autoFindAll,
     getVendorById: R.getById,
     allVendor: R.autoFindAll,
@@ -227,13 +240,8 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   },
   "corpus/tph": {
     destroyCar: R.destroy,
-    refitCar: R.domainOp,
-    updateCar: R.crudishUpdate,
     allCar: R.autoFindAll,
-    createTruck: R.create,
-    getTruckById: R.getById,
     destroyTruck: R.destroy,
-    updateTruck: R.crudishUpdate,
     allTruck: R.autoFindAll,
   },
   "corpus/event-sourcing": {
@@ -243,123 +251,96 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     allOrder: R.autoFindAll,
   },
   "corpus/saga": {
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
-    getShipmentById: R.getById,
     markTrackedShipment: R.domainOp,
     allShipment: R.autoFindAll,
   },
   "corpus/projection": {
-    getOrderById: R.getById,
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/auth-oidc": {
     destroyTicket: R.destroy,
-    updateTicket: R.crudishUpdate,
     allTicket: R.autoFindAll,
   },
   "corpus/auth-simple": {
     destroyTicket: R.destroy,
-    updateTicket: R.crudishUpdate,
     allTicket: R.autoFindAll,
   },
   "corpus/tenancy-filter": {
-    getAccountById: R.getById,
     destroyAccount: R.destroy,
-    updateAccount: R.crudishUpdate,
     allAccount: R.autoFindAll,
   },
   "corpus/tenancy-owned": {
-    getInvoiceById: R.getById,
     destroyInvoice: R.destroy,
-    updateInvoice: R.crudishUpdate,
     allInvoice: R.autoFindAll,
     destroyPlan: R.destroy,
-    updatePlan: R.crudishUpdate,
     allPlan: R.autoFindAll,
-    createOrganization: R.create,
-    getOrganizationById: R.getById,
-    destroyOrganization: R.destroy,
-    updateOrganization: R.crudishUpdate,
-    allOrganization: R.autoFindAll,
+    // `Organization` is this system's TENANT REGISTRY — see `R.tenantRegistryRow`.
+    createOrganization: R.tenantRegistryRow,
+    getOrganizationById: R.tenantRegistryRow,
+    destroyOrganization: R.tenantRegistryRow,
+    updateOrganization: R.tenantRegistryRow,
+    allOrganization: R.tenantRegistryRow,
   },
   "corpus/stamps": {
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/seeding": {
     destroyWidget: R.destroy,
-    updateWidget: R.crudishUpdate,
     allWidget: R.autoFindAll,
-    createGadget: R.create,
-    getGadgetById: R.getById,
     destroyGadget: R.destroy,
-    updateGadget: R.crudishUpdate,
     allGadget: R.autoFindAll,
   },
   "corpus/provenance": {
-    byReferenceOrder: R.declaredFind,
     destroyOrder: R.destroy,
-    applyDiscountOrder: R.domainOp,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/audited": {
-    byReferenceOrder: R.declaredFind,
     destroyOrder: R.destroy,
     allOrder: R.autoFindAll,
-    createShipment: R.create,
-    byCodeShipment: R.declaredFind,
-    getShipmentById: R.getById,
     destroyShipment: R.destroy,
-    dispatchShipment: R.domainOp,
-    retagShipment: R.domainOp,
-    updateShipment: R.crudishUpdate,
     allShipment: R.autoFindAll,
   },
   "corpus/criterion-filter": {
     destroyOrder: R.destroy,
-    updateOrder: R.crudishUpdate,
     allOrder: R.autoFindAll,
   },
   "corpus/domain-services": {
-    getAccountById: R.getById,
     destroyAccount: R.destroy,
     withdrawAccount: R.domainOp,
     depositAccount: R.domainOp,
-    updateAccount: R.crudishUpdate,
     allAccount: R.autoFindAll,
   },
   "corpus/scaffold-macros": {
     destroyProduct: R.destroy,
-    updateProduct: R.crudishUpdate,
     allProduct: R.autoFindAll,
-    getItemById: R.getById,
-    updateItem: R.crudishUpdate,
-    softDeleteItem: R.domainOp,
-    restoreItem: R.domainOp,
+    // `Item` is `with crudish(updateOnly: true), softDeletable, softDelete` —
+    // no canonical create, hence no `POST /api/items`, hence no row to address.
+    // See `R.unseedableAggregate`; `allItem` stays an ordinary un-authored pin
+    // (a list read of an empty table is drivable, just not worth asserting
+    // until the aggregate can be seeded).
+    getItemById: R.unseedableAggregate,
+    updateItem: R.unseedableAggregate,
+    softDeleteItem: R.unseedableAggregate,
+    restoreItem: R.unseedableAggregate,
     allItem: R.autoFindAll,
   },
   // ── fixtures added on main 2026-08-03 (post-census; pinned at rebase) ──
   "corpus/tenancy-claim-name": {
-    getInvoiceById: R.getById,
     destroyInvoice: R.destroy,
-    updateInvoice: R.crudishUpdate,
     allInvoice: R.autoFindAll,
-    createOrganization: R.create,
-    getOrganizationById: R.getById,
-    destroyOrganization: R.destroy,
-    updateOrganization: R.crudishUpdate,
-    allOrganization: R.autoFindAll,
+    // Same registry class as `corpus/tenancy-owned`, under the `orgId` claim.
+    createOrganization: R.tenantRegistryRow,
+    getOrganizationById: R.tenantRegistryRow,
+    destroyOrganization: R.tenantRegistryRow,
+    updateOrganization: R.tenantRegistryRow,
+    allOrganization: R.tenantRegistryRow,
   },
   "corpus/field-defaults": {
     destroyItem: R.destroy,
-    updateItem: R.crudishUpdate,
     allItem: R.autoFindAll,
   },
   "corpus/audit-history": {

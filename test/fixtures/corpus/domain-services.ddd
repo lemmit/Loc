@@ -113,5 +113,16 @@ system DomainSvc {
     let a = api.accounts.create({ holder: "alice", balance: { amount: 100, currency: "USD" } })
     let found = api.accounts.byHolder({ holder: "alice" })
     expect(found.holder).toBe("alice")
+
+    // The canonical `update` writes the SAME `holder` column the reading
+    // service's `byHolder` query keys on, so the service's precondition
+    // (`isHolderFree`) sees the moved name: the old holder stops resolving and
+    // the new one starts.  The by-id read in between is the account route the
+    // workflows load through, and had no caller either.
+    api.accounts.update(a, { holder: "alice2", balance: { amount: 100, currency: "USD" } })
+    let read = api.accounts.getById(a)
+    expect(read.holder).toBe("alice2")
+    let moved = api.accounts.byHolder({ holder: "alice2" })
+    expect(moved.holder).toBe("alice2")
   }
 }

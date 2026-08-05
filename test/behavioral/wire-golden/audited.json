@@ -30,6 +30,109 @@
         "status": 3,
         "version": 2
       }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/by_reference?reference=R1",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "quantity": 2,
+        "reference": "R1",
+        "status": 3,
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/shipments",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 200,
+      "body": {
+        "code": "SH-1",
+        "dispatched": false,
+        "id": "<volatile:key>",
+        "version": 1
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/shipments/{id}/dispatch",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 200,
+      "body": {
+        "code": "SH-1",
+        "dispatched": true,
+        "id": "<volatile:key>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/api/shipments/{id}/retag",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 200,
+      "body": {
+        "code": "SH-2",
+        "dispatched": true,
+        "id": "<volatile:key>",
+        "version": 3
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/api/shipments/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 200,
+      "body": {
+        "code": "SH-3",
+        "dispatched": true,
+        "id": "<volatile:key>",
+        "version": 4
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/shipments/by_code?code=SH-3",
+      "status": 200,
+      "body": {
+        "code": "SH-3",
+        "dispatched": true,
+        "id": "<volatile:key>",
+        "version": 4
+      }
     }
   ]
 }

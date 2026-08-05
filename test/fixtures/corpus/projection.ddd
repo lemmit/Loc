@@ -81,5 +81,18 @@ system ProjectionSys {
     api.orders.ship(ord)
     let shipped = api.orderBoard.byKey(ord)
     expect(shipped.status).toBe("Shipped")
+
+    // The canonical `update` writes the AGGREGATE's own `status` column and
+    // emits NOTHING — so the read model must NOT move.  That is the fold's
+    // contract stated from the other side: the projection tracks events, not
+    // rows.  A backend that folded on save instead of on emit would rewrite
+    // `OrderBoard` here (and, since "Draft" is not a `BoardStatus`, most likely
+    // 500 on the enum).
+    api.orders.update(ord, { customerId: "c-2", status: "Draft" })
+    let updated = api.orders.getById(ord)
+    expect(updated.customerId).toBe("c-2")
+    expect(updated.status).toBe("Draft")
+    let board = api.orderBoard.byKey(ord)
+    expect(board.status).toBe("Shipped")
   }
 }

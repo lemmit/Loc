@@ -35,9 +35,21 @@ system Tenancy {
   // the out-of-tenant row must be invisible.  A backend that fails to apply the
   // filter returns 2 (cross-tenant leak); the correct answer is 1.
   test e2e "capability filter scopes reads to the authenticated principal's tenant" against d {
-    api.accounts.create({ tenantId: "acme", balance: 100 })
+    let mineAcct = api.accounts.create({ tenantId: "acme", balance: 100 })
     api.accounts.create({ tenantId: "other", balance: 200 })
     let mine = api.accounts.byMinBalance({ min: 0 })
     expect(mine.length).toBe(1)
+
+    // The WRITE side of the same capability filter, which no test reached: the
+    // canonical `update` must load the row through the filtered scope before
+    // it writes.  The in-tenant row is reachable (204 + the new balance reads
+    // back), and the by-id read that confirms it is itself filtered — so this
+    // one exchange pins filter application on the update path AND on
+    // `GET /{id}`, the two routes the tenancy fixtures only ever exercised
+    // through a declared find.
+    api.accounts.update(mineAcct, { tenantId: "acme", balance: 150 })
+    let read = api.accounts.getById(mineAcct)
+    expect(read.balance).toBe(150)
+    expect(read.tenantId).toBe("acme")
   }
 }

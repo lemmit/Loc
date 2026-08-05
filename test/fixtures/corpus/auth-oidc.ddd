@@ -55,5 +55,15 @@ system Helpdesk {
     api.tickets.close(t)
     let read = api.tickets.getById(t)
     expect(read.open).toBe(false)
+
+    // The canonical `update` is UNGUARDED — no `requires` clause — but it still
+    // sits behind `auth: required`, so it exercises the other half of the
+    // authenticated surface: a route the verified principal reaches without any
+    // authorization predicate.  A backend that hung the `requires` guard off the
+    // aggregate rather than off `close()` would 403 here.
+    api.tickets.update(t, { subject: "SSO fixed", open: true })
+    let reopened = api.tickets.getById(t)
+    expect(reopened.subject).toBe("SSO fixed")
+    expect(reopened.open).toBe(true)
   }
 }

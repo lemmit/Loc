@@ -42,5 +42,27 @@ system Seeding {
     let w = api.widgets.create({ name: "Delta", size: 9, tier: "Free" })
     let read = api.widgets.getById(w)
     expect(read.name).toBe("Delta")
+
+    // The canonical `update` over the enum column — the seed datasets write
+    // `tier` at first boot through the SEED path, so this is the first time the
+    // same column is written through the REQUEST path.  Declared enum casing
+    // (`"Pro"`) has to survive both.
+    api.widgets.update(w, { name: "Delta-2", size: 10, tier: "Pro" })
+    let updated = api.widgets.getById(w)
+    expect(updated.name).toBe("Delta-2")
+    expect(updated.size).toBe(10)
+    expect(updated.tier).toBe("Pro")
+
+    // The SECOND seeded aggregate had no runtime caller at all — its create,
+    // read and update were uncalled, so nothing proved the cross-aggregate
+    // `Widget id` reference the `wired raw` dataset relies on round-trips
+    // through the api as well as through the seeder.
+    let g = api.gadgets.create({ widgetId: w.id, label: "g1" })
+    let readGadget = api.gadgets.getById(g)
+    expect(readGadget.label).toBe("g1")
+    expect(readGadget.widgetId).toBe(w.id)
+    api.gadgets.update(g, { widgetId: w.id, label: "g2" })
+    let updatedGadget = api.gadgets.getById(g)
+    expect(updatedGadget.label).toBe("g2")
   }
 }

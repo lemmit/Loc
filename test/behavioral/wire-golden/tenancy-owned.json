@@ -45,6 +45,44 @@
         "monthlyPrice": 50,
         "version": 1
       }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/invoices/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "amountDue": 250,
+        "id": "<volatile:key>",
+        "number": "INV-1B",
+        "version": 2
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/plans/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/plans/{id}",
+      "status": 200,
+      "body": {
+        "code": "PRO-PLUS",
+        "id": "<volatile:key>",
+        "monthlyPrice": 60,
+        "version": 2
+      }
     }
   ]
 }

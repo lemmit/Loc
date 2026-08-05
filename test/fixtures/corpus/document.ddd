@@ -33,5 +33,25 @@ system DocSys {
     api.articles.addSection(a, { heading: "H", body: "B" })
     let read = api.articles.getById(a)
     expect(read.title).toBe("T1")
+
+    // The canonical `update` on a `shape: document` aggregate rewrites the
+    // ROOT scalars only — `sections` is a containment, not an update param —
+    // yet the whole tree lives in ONE jsonb column, so the update has to
+    // re-serialize the containment it never received.  A backend that rebuilt
+    // the document from the update input alone loses the section here.
+    api.articles.update(a, { title: "T2", viewCount: 5 })
+    let updated = api.articles.getById(a)
+    expect(updated.title).toBe("T2")
+    expect(updated.viewCount).toBe(5)
+    expect(updated.sections.length).toBe(1)
+
+    // Free adjacents in the same scenario: the domain op that increments the
+    // same column the update just set, and the declared find whose threshold
+    // that column now crosses.
+    api.articles.bump(a)
+    let bumped = api.articles.getById(a)
+    expect(bumped.viewCount).toBe(6)
+    let popular = api.articles.popular({ min: 6 })
+    expect(popular.length).toBe(1)
   }
 }

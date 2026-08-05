@@ -38,5 +38,14 @@ system SimpleAuth {
     api.tickets.close(t)
     let read = api.tickets.getById(t)
     expect(read.open).toBe(false)
+
+    // The canonical `update` carries NO `requires` clause, so it proves the
+    // dev-stub principal reaches an unguarded write on an `auth: required`
+    // deployable — the complement of the guarded `close()` above.  A backend
+    // that applied the guard aggregate-wide would 403 here.
+    api.tickets.update(t, { subject: "Login restored", open: true })
+    let reopened = api.tickets.getById(t)
+    expect(reopened.subject).toBe("Login restored")
+    expect(reopened.open).toBe(true)
   }
 }
