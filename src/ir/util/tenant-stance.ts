@@ -61,10 +61,10 @@ export const TENANCY_SELF_SCOPE_ORIGIN = "tenancy";
  *                  `tenantId: guid`, `ids string` + `tenantId: string`, …);
  *                  every backend compares directly.
  *   - `"guid-from-string"` — a guid id + a `string` claim (the common JWT
- *                  shape).  Each backend binds the claim as the id's value
- *                  type at the accessor site (pg casts the text param on
- *                  node/elixir/python; .NET wraps in `Guid.Parse`; Java
- *                  converts in the SpEL principal accessor).
+ *                  shape).  Each backend PARSES the claim to the id's value
+ *                  type at the accessor site, yielding its null for a claim
+ *                  that doesn't parse, so a malformed one reads empty rather
+ *                  than 500-ing — see {@link guidFromStringSelfScope}.
  *   - `"mismatch"` — anything else (e.g. a guid id + `tenantId: int`).
  *                  Enrichment derives NO filter and IR validation rejects it
  *                  (`loom.tenancy-claim-type-mismatch`). */
@@ -122,6 +122,103 @@ export function buildRegistrySelfScopeFilter(
     leftType: idType,
     resultType: { kind: "primitive", name: "bool" },
   };
+}
+
+/** The claim member name when `e` is the `"guid-from-string"` registry
+ *  self-scope comparison — `this.id == currentUser.<claim>` where the id's
+ *  value type is `guid` and the claim is declared `string` (see
+ *  {@link tenancyClaimBinding}).  `undefined` for every other shape.
+ *
+ *  This is the ONE comparison in the language whose principal side can FAIL TO
+ *  PARSE at the accessor site: an authenticated token carrying `tenantId:
+ *  "not-a-guid"` is an ordinary unauthorized read, but a bare parse throws
+ *  (`IllegalArgumentException` / `Ecto.Query.CastError` / pg `invalid input
+ *  syntax for type uuid`) and answers it with a 500.  Each backend gates its
+ *  parse-to-NULL rendering on this predicate so a malformed claim degrades to
+ *  the same empty result a foreign-but-well-formed one already gives — .NET's
+ *  `Guid.TryParse(…) ? new <Agg>Id(g) : null` is the reference shape
+ *  (M-T3.7(c)).
+ *
+ *  `idOnLeft` reports which operand carried `this.id`, so a backend that emits
+ *  an infix comparison keeps the authored operand order. */
+export function guidFromStringSelfScope(
+  e: ExprIR,
+): { claim: string; idOnLeft: boolean } | undefined {
+  if (e.kind === "paren") return guidFromStringSelfScope(e.inner);
+  if (e.kind !== "binary" || e.op !== "==") return undefined;
+  const idOnLeft = isGuidSelfId(e.left);
+  if (!idOnLeft && !isGuidSelfId(e.right)) return undefined;
+  const claim = stringPrincipalClaim(idOnLeft ? e.right : e.left);
+  return claim === undefined ? undefined : { claim, idOnLeft };
+}
+
+/** The tenancy claim field name when the SYSTEM's binding is
+ *  `"guid-from-string"` — a `guid`-id registry keyed by a `string` claim (see
+ *  {@link tenancyClaimBinding}) — else `undefined`.  The system-level twin of
+ *  {@link guidFromStringSelfScope}: that one answers "does THIS comparison need
+ *  the parse-to-null guard", this one answers "does this system need the
+ *  accessor that performs it", which is what an auth-surface emitter asks
+ *  before emitting one (M-T3.7(c)). */
+export function guidFromStringTenancyClaim(
+  sys: Pick<SystemIR, "tenancy" | "subdomains" | "user">,
+): string | undefined {
+  const claimField = sys.tenancy?.claimField;
+  if (!claimField) return undefined;
+  const registry = findAggregate(sys, sys.tenancy!.registryName);
+  if (!registry) return undefined;
+  const declared = sys.user?.fields.find((f) => f.name === claimField)?.type;
+  const claimType = declared?.kind === "optional" ? declared.inner : declared;
+  return tenancyClaimBinding(registry.idValueType, claimType) === "guid-from-string"
+    ? claimField
+    : undefined;
+}
+
+function findAggregate(sys: Pick<SystemIR, "subdomains">, name: string): AggregateIR | undefined {
+  for (const mod of sys.subdomains) {
+    for (const ctx of mod.contexts) {
+      for (const agg of ctx.aggregates) {
+        if (agg.name === name) return agg;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** The `User` accessor name that yields {@link guidFromStringTenancyClaim}'s
+ *  claim parsed to the registry's `guid` id type, or null when it is absent or
+ *  MALFORMED — the fail-closed coercion every backend's registry self-scope
+ *  binds through (M-T3.7(c)).  Derived from the claim name so it can't collide
+ *  with the claim's own accessor. */
+export function guidClaimAccessorName(claimField: string): string {
+  return `${claimField}AsUuid`;
+}
+
+/** `this.id` typed as the aggregate's own `guid`-valued id. */
+function isGuidSelfId(x: ExprIR): boolean {
+  if (x.kind === "paren") return isGuidSelfId(x.inner);
+  return (
+    x.kind === "member" &&
+    x.receiver.kind === "this" &&
+    x.member === "id" &&
+    x.memberType.kind === "id" &&
+    x.memberType.valueType === "guid"
+  );
+}
+
+/** `currentUser.<claim>` whose DECLARED type is `string` — the side that can
+ *  hold a value the id's `guid` type cannot represent. */
+function stringPrincipalClaim(x: ExprIR): string | undefined {
+  if (x.kind === "paren") return stringPrincipalClaim(x.inner);
+  if (
+    x.kind === "member" &&
+    x.receiver.kind === "ref" &&
+    x.receiver.refKind === "current-user" &&
+    x.memberType.kind === "primitive" &&
+    x.memberType.name === "string"
+  ) {
+    return x.member;
+  }
+  return undefined;
 }
 
 /** The tenant-discriminator COLUMN the `tenantOwned` capability provides

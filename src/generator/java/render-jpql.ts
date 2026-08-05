@@ -2,6 +2,7 @@ import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
+  guidClaimAccessorName,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -254,8 +255,13 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
   // navigates into its component (`e.id.value`) and the SpEL principal side
   // binds the claim AS the id's value type: a same-typed claim binds directly
   // (Hibernate 6 rejects a String parameter against a UUID path), a `string`
-  // claim against a guid id converts in SpEL (`T(java.util.UUID).fromString`,
-  // null-guarded so a missing principal stays the fail-closed `= NULL`).
+  // claim against a guid id converts through the principal's emitted
+  // `<claim>AsUuid()` accessor (M-T3.7(c)), which yields null for BOTH a
+  // missing principal and a MALFORMED claim — the fail-closed `= NULL`.
+  // Converting inline in SpEL (`T(java.util.UUID).fromString`) could only
+  // null-guard, so an authenticated token carrying `tenantId: "not-a-guid"`
+  // threw IllegalArgumentException out of query preparation and answered an
+  // ordinary bad token with a 500.
   if (e.op === "==" || e.op === "!=") {
     const idSide = selfIdTypeOf(e.left) ? e.left : selfIdTypeOf(e.right) ? e.right : null;
     const other = idSide === e.left ? e.right : e.left;
@@ -264,10 +270,11 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
       const idType = selfIdTypeOf(idSide)!;
       const idPath = `${ctx.alias}.id.value`;
       const claimIsString = claim.type?.kind === "primitive" && claim.type.name === "string";
-      const spel =
+      const accessor =
         idType.valueType === "guid" && claimIsString
-          ? `:#{@${CURRENT_USER_BEAN}.user() == null || @${CURRENT_USER_BEAN}.user().${claim.member}() == null ? null : T(java.util.UUID).fromString(@${CURRENT_USER_BEAN}.user().${claim.member}())}`
-          : `:#{@${CURRENT_USER_BEAN}.user()?.${claim.member}()}`;
+          ? guidClaimAccessorName(claim.member)
+          : claim.member;
+      const spel = `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
       return idSide === e.left ? `${idPath} ${op} ${spel}` : `${spel} ${op} ${idPath}`;
     }
   }
