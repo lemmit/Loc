@@ -80,6 +80,24 @@ describe("api-surface — resolved error statuses", () => {
     expect(find?.errorStatuses).toEqual([404]);
   });
 
+  it("keeps a requires-gate's 403 on an error-payload absence union (#2363's rung)", async () => {
+    // The two-arms landmine in status form: python's union arm hand-declares
+    // [403, <absent>] for a gated union find; the derivation must agree on
+    // BOTH absence shapes, not just the `none`/optional one the shared table
+    // covers.
+    const model = await buildLoomModel(
+      SYS(`
+      error NotFound { resource: string }
+      aggregate Order { code: string }
+      repository Orders for Order {
+        find byCode(code: string): Order or NotFound requires currentUser.role == "admin"
+      }
+    `),
+    );
+    const find = opByKey(deriveContextOperations(orders(model)), "get", "/api/orders/by_code");
+    expect(find?.errorStatuses).toEqual([403, 404]);
+  });
+
   it("resolves the union-absent status through the api's httpStatus override", async () => {
     // The same read every backend performs at its own emit site:
     // `errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag)`.

@@ -271,10 +271,14 @@ function findErrorStatuses(
     // The `none` unit is the stdlib 404; an error payload answers its
     // `httpStatus`-resolved status — the same
     // `errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag)` read every
-    // backend's union-find arm performs at its own emit site today.
-    return absent.kind === "none"
-      ? errorStatuses("findOptional", guarded)
-      : [resolveErrorStatus(absent.tag, statuses?.errorStatusOverrides)];
+    // backend's union-find arm performs at its own emit site today.  A
+    // `requires` gate keeps its 403 on BOTH absence shapes (#2363's rung —
+    // python's union arm declares it by hand; dropping it here would re-open
+    // the exact "patched one arm, not the other" split that PR fixed).
+    if (absent.kind === "none") return errorStatuses("findOptional", guarded);
+    const set = new Set(guarded ? [403] : []);
+    set.add(resolveErrorStatus(absent.tag, statuses?.errorStatusOverrides));
+    return [...set].sort((a, b) => a - b);
   }
   if (find.returnType?.kind === "optional") {
     return errorStatuses("findOptional", guarded);
