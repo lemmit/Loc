@@ -253,6 +253,38 @@ describe("api-surface lift", () => {
     expect([...(cancel?.errorStatuses ?? [])].sort()).toEqual([400, 404, 409, 422]);
   });
 
+  it("declares exactly op.errorStatuses on every emitted route (render fidelity)", async () => {
+    // The errors leg the four other backends carry in their
+    // `api-surface-render` suites — added here when Hono switched to
+    // rendering from the derivation: a render arm dropping or retyping a
+    // status must fail on the emitted BYTES, not on the derivation comparing
+    // to itself.
+    const model = await buildLoomModel(SOURCE);
+    const derived = deriveContextOperations(ordersContext(model)!);
+    const files = await generateSystemFiles(SOURCE);
+    const src = [...files.entries()].find(([p]) => p.endsWith("order.routes.ts"))?.[1] ?? "";
+    const abs = (relPath: string): string =>
+      relPath === "/" ? "/api/orders" : `/api/orders${relPath}`;
+    const declared = new Map<string, number[]>();
+    for (const block of src.split(/app\.openapi\(/).slice(1)) {
+      const m = block.match(/method:\s*"(\w+)",\s*\n\s*path:\s*"([^"]*)"/);
+      if (!m) continue;
+      // Bound at the handler, not the first "})," — the zod param object
+      // closes with one of those before the responses map does.
+      const head = block.slice(0, block.indexOf("async (c)"));
+      const statuses = [...head.matchAll(/\n\s*([45]\d\d): \{ description:/g)]
+        .map((c) => Number(c[1]))
+        .sort((a, b) => a - b);
+      declared.set(`${m[1]} ${abs(m[2]!)}`, statuses);
+    }
+    expect(declared.size, "scraped no routes — the scraper is stale").toBeGreaterThan(0);
+    for (const op of derived) {
+      expect(declared.get(`${op.method} ${op.path}`), `${op.method} ${op.path}`).toEqual([
+        ...op.errorStatuses,
+      ]);
+    }
+  });
+
   it("emits no create route for a non-constructible aggregate", async () => {
     const model = await buildLoomModel(SOURCE);
     const ctx = ordersContext(model)!;
