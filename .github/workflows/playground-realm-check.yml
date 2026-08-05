@@ -39,6 +39,7 @@ name: Playground worker-realm check
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'web/**'
       - 'src/platform/hono/**'
@@ -58,6 +59,10 @@ permissions:
 
 jobs:
   realm-check:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: playground-realm-check
     runs-on: ubuntu-latest
     # Minutes: generate + one npm install of the backend's real dependency

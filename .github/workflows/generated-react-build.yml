@@ -68,6 +68,7 @@ on:
       - 'langium-config.json'
       - '.github/workflows/generated-react-build.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
       - 'src/**'
@@ -110,6 +111,10 @@ jobs:
   # and `label` is its display name.  Costs ~5 seconds of runner time —
   # negligible against the 142 cells we skip on a typical PR.
   configure:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -197,6 +202,10 @@ jobs:
   # props contract bites — a correct widget compiles, a field-mismatch
   # one fails.  One runner, ~40s.
   extern-component:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: extern component props contract
