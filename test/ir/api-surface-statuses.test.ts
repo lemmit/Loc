@@ -30,6 +30,9 @@ import {
   absenceUnionAbsent,
   apiSurfaceCoverage,
   deriveContextOperations,
+  isAllFind,
+  relativeOpPath,
+  successStatus,
 } from "../../src/ir/util/api-surface.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 
@@ -193,6 +196,41 @@ system P {
     expect(opByKey(ops, "get", "/api/orders/{id}/can_cancel")?.operation?.name).toBe("cancel");
     // The auto-`all` find is synthesized by enrichment but still a FindIR.
     expect(opByKey(ops, "get", "/api/orders")?.find?.name).toBe("all");
+  });
+});
+
+describe("api-surface — render helpers for the unification slices", () => {
+  it("splits the absolute path, states the success status, and marks the auto-all find", async () => {
+    const model = await buildLoomModel(
+      SYS(`
+      aggregate Order with crudish {
+        code: string
+        status: string
+        operation cancel() when status == "Open" { status := "Cancelled" }
+      }
+      repository Orders for Order { find byCode(code: string): Order option }
+    `),
+    );
+    const ops = deriveContextOperations(orders(model));
+    const rel = new Map(ops.map((o) => [`${o.method} ${o.path}`, relativeOpPath(o)]));
+    // The collection root renders as "" — a backend mounts it at its aggregate
+    // base with no extra segment (and NO trailing slash, per the create arm).
+    expect(rel.get("post /api/orders")).toBe("");
+    expect(rel.get("get /api/orders")).toBe("");
+    expect(rel.get("get /api/orders/{id}")).toBe("/{id}");
+    expect(rel.get("get /api/orders/by_code")).toBe("/by_code");
+    expect(rel.get("post /api/orders/{id}/cancel")).toBe("/{id}/cancel");
+    expect(rel.get("get /api/orders/{id}/can_cancel")).toBe("/{id}/can_cancel");
+
+    const byKey = (m: string, p: string) => opByKey(ops, m, p)!;
+    expect(successStatus(byKey("post", "/api/orders"))).toBe(201);
+    expect(successStatus(byKey("delete", "/api/orders/{id}"))).toBe(204);
+    // `cancel` declares no `: T` → bodiless 204; the probe answers `{allowed}`.
+    expect(successStatus(byKey("post", "/api/orders/{id}/cancel"))).toBe(204);
+    expect(successStatus(byKey("get", "/api/orders/{id}/can_cancel"))).toBe(200);
+    expect(successStatus(byKey("get", "/api/orders/{id}"))).toBe(200);
+
+    expect(ops.filter(isAllFind).map((o) => o.path)).toEqual(["/api/orders"]);
   });
 });
 

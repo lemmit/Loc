@@ -305,6 +305,33 @@ function entityType(aggName: string): TypeIR {
   return { kind: "entity", name: aggName };
 }
 
+/** The router-relative fragment of an operation's absolute `path` — what a
+ *  backend mounts under its aggregate base: `""` for the collection root
+ *  (create / auto-`all`), `"/{id}"`, `"/{id}/<op>"`, `"/<find>"`.  The inverse
+ *  of the `aggregateBase` composition, exported so route builders rendering
+ *  from this derivation don't each re-split the absolute path (backends that
+ *  spell a param `:id` rewrite the braces on top of this). */
+export function relativeOpPath(op: ApiOperationIR): string {
+  const base = aggregateBase(op.aggregate);
+  return op.path === base ? "" : op.path.slice(base.length);
+}
+
+/** The success status of a lifted operation — the ladder every backend's
+ *  route arm encodes today: create answers `201 {id}`, an operation with no
+ *  declared `: T` (and destroy) answers a bodiless `204`, everything else
+ *  `200`. */
+export function successStatus(op: ApiOperationIR): 200 | 201 | 204 {
+  if (op.kind === "create") return 201;
+  return op.responseType ? 200 : 204;
+}
+
+/** True for the auto-`all` find — the collection-root GET, which several
+ *  backends emit through a different arm (paged envelope, no path segment)
+ *  than a declared find. */
+export function isAllFind(op: ApiOperationIR): boolean {
+  return op.kind === "find" && op.find?.name === "all";
+}
+
 /** Derive every lifted HTTP operation one aggregate exposes.
  *
  *  Ordering mirrors the backends' registration order (static find paths
