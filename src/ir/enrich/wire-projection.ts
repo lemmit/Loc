@@ -306,6 +306,26 @@ export function emitsRestCreate(agg: AggregateIR): boolean {
     : agg.canonicalCreate != null;
 }
 
+/** Whether the aggregate exposes the generic `DELETE /<aggs>/{id}` REST route.
+ *
+ * The canonical (unnamed) `destroy` is what the DELETE verb maps to — a named
+ * destroy is a domain command, not the generic delete surface.  This is the
+ * Hono / derivation semantic (`api-surface.ts`), which the route-builder
+ * unification converges the others onto; the two backends that currently gate
+ * differently do so as KNOWN divergences reconciled in their own unification
+ * slices: java mounts DELETE for any `destroys.length > 0` (a named-only
+ * destroy gets a generic DELETE nothing else emits), and the vanilla-Phoenix
+ * ROUTER additionally excludes event-sourced aggregates while its own OpenAPI
+ * spec does not (`elixir/vanilla/rest-surface.ts` — whether an event-sourced
+ * canonical destroy should emit DELETE anywhere is unexercised by any fixture
+ * and stays an elixir-local stance until decided cross-backend).
+ *
+ * Abstract inheritance bases are excluded at the aggregate-iteration level
+ * (they have no HTTP surface at all), not here. */
+export function emitsRestDestroy(agg: AggregateIR): boolean {
+  return agg.canonicalDestroy != null;
+}
+
 /** Fields clients may modify in an **update** request's editable
  * payload.  Excludes:
  *   - `managed`  — server lifecycle.
