@@ -210,8 +210,12 @@ const A32 = `
       context Ordering with scaffoldHandlers {
         aggregate Order {
           code: string
-          status: string
-          create(code: string) { code := code  status := "new" }
+          // The default lives on the FIELD: a create-body assignment is not
+          // rendered on a state-based aggregate (loom.lifecycle-body-dropped),
+          // so setting it in the body would silently make status a REQUIRED
+          // client field instead of defaulting it.
+          status: string = "new"
+          create(code: string) { code := code }
           operation cancel() { status := "cancelled" }
           destroy { }
         }

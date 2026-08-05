@@ -33,11 +33,14 @@ system AuditHistorySystem {
       aggregate Order audited with versioned {
         reference: string
         quantity: int
-        status: int
+        // `status` defaults on the FIELD, not in the create body: a create-body
+        // assignment is not rendered on a state-based aggregate, so writing it there
+        // made `status` a REQUIRED client field (this fixture's own e2e had to send
+        // `status: 0` to compensate).  `loom.lifecycle-body-dropped` now says so.
+        status: int = 0
         create(reference: string, quantity: int) {
           reference := reference
           quantity := quantity
-          status := 0
         }
         operation cancel(reason: int) {
           precondition reason >= 0
