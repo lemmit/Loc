@@ -130,6 +130,12 @@ export interface ApiOperationIR {
 export interface ApiStatusContext {
   readonly errorStatusOverrides?: Readonly<Record<string, number>>;
   readonly structuralErrorStatuses?: Readonly<Record<string, number>>;
+  /** Names of the context's `error`-kind payloads — how a union RETURN's error
+   *  arms are told apart from its success arms (both are `entity` variants in
+   *  `TypeIR`; only the payload catalogue knows which is which, the same
+   *  `ctx.payloads.some(p => p.name === v.name && p.kind === "error")` read
+   *  the .NET `buildReturnUnionSpec` performs). */
+  readonly errorPayloadNames?: ReadonlySet<string>;
 }
 
 /** Route classes NOT yet lifted into `ApiOperationIR`.  Exported so a
@@ -297,6 +303,17 @@ function operationErrorStatuses(
   if (op.when) out.add(resolveErrorStatus("Disallowed", statuses?.structuralErrorStatuses));
   if (op.name === "update" && aggregateIsVersioned(agg)) {
     out.add(resolveErrorStatus("ConcurrencyConflict", statuses?.structuralErrorStatuses));
+  }
+  // A union RETURN's error arms (`operation reserve(): Order or OutOfStock`)
+  // each declare their resolved status — every backend's returning-operation
+  // emitter derives exactly this set from the variants whose name is an
+  // `error`-kind payload.
+  if (op.returnType?.kind === "union") {
+    for (const v of op.returnType.variants) {
+      if (v.kind === "entity" && statuses?.errorPayloadNames?.has(v.name)) {
+        out.add(resolveErrorStatus(v.name, statuses?.errorStatusOverrides));
+      }
+    }
   }
   return [...out].sort((a, b) => a - b);
 }
@@ -518,6 +535,7 @@ export function deriveContextOperations(ctx: BoundedContextIR): ApiOperationIR[]
   const statuses: ApiStatusContext = {
     errorStatusOverrides: ctx.errorStatusOverrides,
     structuralErrorStatuses: ctx.structuralErrorStatuses,
+    errorPayloadNames: new Set(ctx.payloads.filter((p) => p.kind === "error").map((p) => p.name)),
   };
   const out: ApiOperationIR[] = [];
   for (const agg of ctx.aggregates) {

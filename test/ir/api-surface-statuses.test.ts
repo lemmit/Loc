@@ -120,6 +120,31 @@ describe("api-surface — resolved error statuses", () => {
     expect(cancel?.errorStatuses).toEqual([400, 404, 422, 428]);
   });
 
+  it("declares a union RETURN's error-arm statuses (the returning-operation set)", async () => {
+    // `operation reserve(): Order or OutOfStock` — every backend's
+    // returning-operation emitter declares OutOfStock's resolved status; the
+    // derivation now derives the same set (error arms told apart from success
+    // arms via the context's error-payload catalogue).
+    const model = await buildLoomModel(
+      SYS(
+        `
+      error OutOfStock { sku: string }
+      aggregate Order {
+        code: string
+        create(code: string) { code := code }
+        operation reserve(): Order or OutOfStock {
+          return OutOfStock { sku: code }
+        }
+      }
+      repository Orders for Order { }
+    `,
+        "{ httpStatus OutOfStock -> 409 }",
+      ),
+    );
+    const op = opByKey(deriveContextOperations(orders(model)), "post", "/api/orders/{id}/reserve");
+    expect(op?.errorStatuses).toEqual([400, 404, 409, 422]);
+  });
+
   it("keeps the defaults when no httpStatus overrides exist", async () => {
     const model = await buildLoomModel(
       SYS(`
