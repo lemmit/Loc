@@ -62,9 +62,11 @@ const SOURCE = (platform: string): string => `
 system P {
   subdomain D {
     context Orders {
-      aggregate Order with crudish {
+      aggregate Order with crudish(updateOnly: true) {
         code: string
         status: string
+        create(code: string, status: string) { requires currentUser.role == "admin" }
+        destroy { requires currentUser.role == "admin" }
         operation cancel() when status == "Open" { status := "Cancelled" }
       }
       repository Orders for Order {
@@ -314,8 +316,20 @@ function shapesElixir(files: Map<string, string>): Map<string, MaybeShape> {
   const scope = router.match(/scope "\/api",[\s\S]*?\n {2}end/)?.[0] ?? "";
 
   const action = (name: string): MaybeShape => {
-    const body = ctl.match(new RegExp(`\\n  def ${name}\\(conn[\\s\\S]*?\\n  end\\n`))?.[0];
+    let body = ctl.match(new RegExp(`\\n  def ${name}\\(conn[\\s\\S]*?\\n  end\\n`))?.[0];
     if (body === undefined) return undefined;
+    // A lifecycle `requires` gate wraps the action: `def create` becomes a
+    // 403-or-delegate wrapper and the answering body moves to
+    // `defp __create_authorized`.  Follow the hop — otherwise the gate would
+    // read as "this route answers nothing", widening the blind spot this test
+    // exists to close.
+    const delegated = body.match(/__(\w+)_authorized\(conn/)?.[1];
+    if (delegated !== undefined) {
+      body =
+        ctl.match(
+          new RegExp(`\\n  defp __${delegated}_authorized\\(conn[\\s\\S]*?\\n  end`),
+        )?.[0] ?? body;
+    }
     if (/send_resp\(conn, 204, ""\)/.test(body)) return "none";
     // `json(conn, …)` and the piped `conn |> put_status(201) |> json(…)` are
     // both live forms — create uses the second.

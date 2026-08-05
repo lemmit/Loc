@@ -22,6 +22,7 @@ import type {
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import {
+  lifecycleGuards,
   operationIsGuarded,
   workflowEmitsCommandRoute,
   workflowIsGuarded,
@@ -517,7 +518,7 @@ function renderApiSpec(
             201 => %OpenApiSpex.Response{
               description: "Created",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${createRespMod}}}
-            }${errorResponseEntries("create", schemasModule)}
+            }${errorResponseEntries("create", schemasModule, lifecycleGuards(agg.canonicalCreate).length > 0)}
           }
         }`
       : "";
@@ -577,7 +578,7 @@ ${pagingQueryParams()}
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule, false, resolveConflict)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule, lifecycleGuards(agg.canonicalDestroy).length > 0, resolveConflict)}
           }
         }`
             : ""

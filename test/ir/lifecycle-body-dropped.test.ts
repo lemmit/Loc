@@ -7,10 +7,13 @@
 // from the field set.  So whatever the author wrote in the braces never reaches
 // an emitter.
 //
-// That makes a `requires` in a create silently NON-ENFORCING — it parses clean,
-// emits no guard, and leaves an authorization-gated create open.  Until the
-// bodies are actually rendered (the real fix: the IR is already correct, five
-// emitters just don't read it), a named error beats a silent drop.
+// `requires` USED TO BE THE WORST OF THESE and is no longer here: all five
+// backends now render the lifecycle authorization gate (create — before the
+// factory; destroy — after the row loads, so it may read `this`).  What
+// survives is the one form the route genuinely cannot evaluate: a CREATE guard
+// reading a create PARAMETER, which the field-derived request body has no slot
+// for.  Everything else in the body — `precondition`, `emit`, a value-changing
+// `assign` — is still dropped, and a named error beats a silent drop.
 //
 // The negative cases matter as much as the positive ones.  A diagnostic that
 // fires where nothing is lost trains readers to ignore it — which is how the
@@ -43,12 +46,29 @@ async function codesFor(agg: string): Promise<string[]> {
 }
 
 describe("validator — the lifecycle body no backend renders", () => {
-  it("rejects a `requires` in a state-based create — it would leave the route OPEN", async () => {
+  it("ACCEPTS a principal-only `requires` in a create and a destroy — both render now", async () => {
     const codes = await codesFor(`
       aggregate Order {
         code: string
         create(code: string) {
           requires currentUser.role == "admin"
+          code := code
+        }
+        destroy { requires currentUser.role == "admin" }
+      }`);
+    // The enforcement itself is pinned per backend in
+    // `test/generator/lifecycle-guard-render.test.ts`; here the point is only
+    // that the validator no longer stands in the way.
+    expect(codes).not.toContain(CODE);
+  });
+
+  it("rejects a create guard that reads a create PARAMETER — the body has no slot for it", async () => {
+    const codes = await codesFor(`
+      aggregate Order {
+        code: string
+        quantity: int
+        create(code: string, quantity: int) {
+          requires currentUser.role == "admin" && quantity > 0
           code := code
         }
       }`);
@@ -62,20 +82,20 @@ describe("validator — the lifecycle body no backend renders", () => {
       aggregate Order {
         code: string
         create(code: string) {
-          requires currentUser.role == "admin"
+          precondition code.length > 0
           code := code
         }
       }`),
       ),
     );
     const d = diags.find((x) => x.code === CODE);
-    // An author who reaches this needs to know the gate is not merely
+    // An author who reaches this needs to know the guard is not merely
     // undeclared (the find-403 case) but not RUNNING.
-    expect(d?.message).toMatch(/OPEN/);
+    expect(d?.message).toMatch(/never runs/);
     expect(d?.message).toMatch(/operation/);
   });
 
-  it("rejects a `precondition` in a create and a `requires` in a destroy", async () => {
+  it("rejects a `precondition` in a create", async () => {
     const codes = await codesFor(`
       aggregate Order {
         code: string
@@ -84,10 +104,8 @@ describe("validator — the lifecycle body no backend renders", () => {
           precondition code.length > 0
           code := code
         }
-        destroy() { requires currentUser.role == "admin" }
       }`);
-    // Two distinct sites, both dropped.
-    expect(codes.filter((c) => c === CODE).length).toBe(2);
+    expect(codes.filter((c) => c === CODE).length).toBe(1);
   });
 
   it("rejects a literal default written in the body with no matching field default", async () => {

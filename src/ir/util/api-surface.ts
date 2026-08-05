@@ -52,6 +52,7 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type FindIR,
+  lifecycleGuards,
   type OperationIR,
   operationIsGuarded,
   type RepositoryIR,
@@ -290,7 +291,7 @@ export function deriveAggregateOperations(
       // typed from it and narrowing it to an id is a wire-visible retype of
       // every existing call site — a separate, deliberate change.
       entityType(agg.name),
-      errorStatuses("create"),
+      errorStatuses("create", lifecycleGuards(agg.canonicalCreate).length > 0),
     );
   }
 
@@ -330,7 +331,7 @@ export function deriveAggregateOperations(
       `${base}/{id}`,
       [idParam()],
       undefined,
-      errorStatuses("destroy"),
+      errorStatuses("destroy", lifecycleGuards(agg.canonicalDestroy).length > 0),
     );
   }
 

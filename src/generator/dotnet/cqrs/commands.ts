@@ -3,13 +3,18 @@ import type {
   AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ExprIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  lifecycleGuards,
+  operationUsesCurrentUser,
+} from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { maskNamer, projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
-import { renderCsExpr, renderCsType } from "../render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
 
 /** The `when` canCommand gate (criterion.md use site 2): evaluate the
@@ -20,6 +25,54 @@ function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): stri
   if (!op.when) return "";
   const pred = renderCsExpr(op.when, { thisName: "aggregate" });
   return `        if (!(${pred})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");\n`;
+}
+
+/**
+ * The canonical `create` / `destroy` authorization gate, rendered into the
+ * command HANDLER — .NET's route layer is a thin Mediator dispatch, so the
+ * handler is the first place with both the principal (`ICurrentUserAccessor`)
+ * and, for a destroy, the loaded aggregate.  Denial throws
+ * `ForbiddenException`, which `DomainExceptionFilter` maps to the 403
+ * ProblemDetails `errorStatuses(<kind>, true)` declares.
+ *
+ * `thisName` is undefined for a create (there is no instance yet — the
+ * validator rejects a create guard that reads anything but the principal) and
+ * the loaded local for a destroy.
+ */
+function lifecycleGate(guards: readonly ExprIR[], label: string, thisName?: string): string {
+  if (guards.length === 0) return "";
+  const bindUser = guards.some(exprUsesCurrentUser)
+    ? "        var currentUser = _currentUser.User;\n"
+    : "";
+  return (
+    bindUser +
+    guards
+      .map(
+        (g) =>
+          `        if (!(${renderCsExpr(g, thisName ? { thisName } : undefined)}))\n` +
+          `        {\n` +
+          `            throw new ForbiddenException(${JSON.stringify(`Forbidden: ${label}`)});\n` +
+          `        }\n`,
+      )
+      .join("")
+  );
+}
+
+/** Handler dependency + using additions a lifecycle gate needs. */
+function lifecycleGateDeps(
+  guards: readonly ExprIR[],
+  ns: string,
+): { deps: { type: string; field: string }[]; usings: string[] } {
+  if (guards.length === 0) return { deps: [], usings: [] };
+  const usings = new Set<string>();
+  for (const g of guards) collectCsExprUsings(g, usings);
+  if (guards.some(exprUsesCurrentUser)) usings.add(`${ns}.Auth`);
+  return {
+    deps: guards.some(exprUsesCurrentUser)
+      ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
+      : [],
+    usings: [...usings],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +158,10 @@ export function emitCreateCommandAndHandler(
         { type: `ILogger<Create${agg.name}Handler>`, field: "_log" },
       ]
     : [];
+  // The canonical create's authorization gate runs BEFORE the factory — no
+  // instance exists yet, so it reads the principal only.
+  const createGuards = lifecycleGuards(agg.canonicalCreate);
+  const createGateDeps = lifecycleGateDeps(createGuards, ns);
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
   const createAuditUsings = auditCreate
@@ -123,9 +180,10 @@ export function emitCreateCommandAndHandler(
       handlerName: `Create${agg.name}Handler`,
       commandName: `Create${agg.name}Command`,
       returnType: idClass,
-      extraDeps: createAuditDeps,
-      extraUsings: createAuditUsings,
+      extraDeps: [...createAuditDeps, ...createGateDeps.deps],
+      extraUsings: [...createAuditUsings, ...createGateDeps.usings],
       body:
+        lifecycleGate(createGuards, `create ${agg.name}`) +
         `        var aggregate = ${agg.name}.Create(${requiredFields
           .map((f) => `command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
@@ -210,6 +268,8 @@ export function emitDestroyCommandAndHandler(
         { type: `ILogger<Destroy${agg.name}Handler>`, field: "_log" },
       ]
     : [];
+  const destroyGuards = lifecycleGuards(agg.canonicalDestroy);
+  const destroyGateDeps = lifecycleGateDeps(destroyGuards, ns);
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
   const destroyAuditUsings = auditDestroy
@@ -227,11 +287,14 @@ export function emitDestroyCommandAndHandler(
       aggName: agg.name,
       handlerName: `Destroy${agg.name}Handler`,
       commandName: `Destroy${agg.name}Command`,
-      extraDeps: destroyAuditDeps,
-      extraUsings: destroyAuditUsings,
+      extraDeps: [...destroyAuditDeps, ...destroyGateDeps.deps],
+      extraUsings: [...destroyAuditUsings, ...destroyGateDeps.usings],
       body:
         `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
         `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        // The gate sits AFTER the load — a destroy guard may read `this` — and
+        // BEFORE the audit stage, so a denied delete stages no record.
+        lifecycleGate(destroyGuards, `destroy ${agg.name}`, "aggregate") +
         destroyAuditStage +
         `        await _repo.DeleteAsync(aggregate, cancellationToken);\n` +
         `        return Unit.Value;\n`,

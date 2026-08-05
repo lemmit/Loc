@@ -27,6 +27,7 @@ import { allContexts } from "../../types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { aggregateIsEventSourced, resolveDataSourceConfig } from "../../util/resolve-datasource.js";
 import {
+  walkExprDeep,
   walkStmtExprsDeep as walkExprsInStmt,
   walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
 } from "../../util/walk.js";
@@ -1628,32 +1629,64 @@ function flagStmt(
 // (`forCreateInput`), so whatever the author wrote in the braces never reaches
 // an emitter.
 //
-// That makes a `requires` inside a create SILENTLY NON-ENFORCING: it parses
-// clean, emits no guard, and turns an authorization-gated create into an open
-// one.  A `precondition` vanishes the same way, and so does a literal default
+// A `precondition` vanishes that way, and so does a literal default
 // (`status := "New"`) — while `name := name` survives only by coincidence,
 // because the field-derived input already supplies `name`.  That coincidence is
 // why this went unnoticed: repo-wide it is the ONLY create-body idiom in use.
+//
+// `requires` USED TO BE ON THAT LIST and no longer is: all five backends now
+// render the lifecycle authorization gate in the route (create — before the
+// factory runs; destroy — after the row loads, so the guard may read `this`),
+// declaring 403 through the shared `errorStatuses` table.  The one create guard
+// still dropped is one that reads a create PARAM: the emitted create takes the
+// field-derived input, not the declared parameter list, so a parameter that is
+// not also a field has no wire slot to read the value from.  See
+// `createGuardReadsParam` below.
 //
 // EVENT-SOURCED aggregates are exempt and must stay so — their create runs
 // through `agg.creates[0]`, a different path that IS rendered (`emit` in an
 // `eventLog` create works today).  Gating them would break working code.
 //
-// This is deliberately a GAP, not a fix: the fix is to render the body like any
-// other operation (the IR is already correct — see the header note above), one
-// backend at a time.  Until then a named error beats a silent drop, which is
-// this repo's standing rule for a capability a backend does not emit.
+// What remains is deliberately a GAP, not a fix: the fix is to render the rest
+// of the body like any other operation (the IR is already correct — see the
+// header note above), one statement kind at a time.  Until then a named error
+// beats a silent drop, which is this repo's standing rule for a capability a
+// backend does not emit.
 // ---------------------------------------------------------------------------
 
 /** Statements whose effect the field-derived create input does NOT reproduce,
  *  paired with what the author loses.  An `assign` is judged separately below:
  *  `field := <same-named param>` is redundant with the input and therefore
- *  harmless, while any other RHS is a real drop. */
+ *  harmless, while any other RHS is a real drop.  `requires` is absent by
+ *  design — it renders now; see `createGuardReadsParam` for its one remnant. */
 const DROPPED_STMT_REASON: Partial<Record<StmtIR["kind"], string>> = {
-  requires: "the authorization gate never runs — the route is left OPEN",
   precondition: "the guard never runs — construction is left unchecked",
   emit: "the domain event is never published",
 };
+
+/**
+ * A `create` guard that reads a create PARAMETER — the one lifecycle `requires`
+ * still not enforceable.
+ *
+ * The emitted `POST /<aggs>` takes the FIELD-DERIVED create input
+ * (`forCreateInput`), not the declared parameter list, so the route can read a
+ * guard's `currentUser` (it has the principal) but has nowhere to read a
+ * parameter from — the parameter list never reaches the wire.  Rather than
+ * half-render the predicate — which would silently drop one conjunct of an
+ * authorization decision, the worst possible failure here — the parameter form
+ * stays rejected.  A value-dependent guard is a `precondition`'s job anyway;
+ * `requires` answers "may this caller", not "is this input sane".
+ *
+ * DESTROY guards are unaffected: a destroy takes no parameters, and its `this`
+ * refs read the row the route already loads.
+ */
+function createGuardReadsParam(expr: ExprIR): boolean {
+  let found = false;
+  walkExprDeep(expr, (node) => {
+    if (node.kind === "ref" && node.refKind === "param") found = true;
+  });
+  return found;
+}
 
 /**
  * An `assign` whose effect the emitted create ALREADY reproduces, by one of the
@@ -1694,6 +1727,26 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
       ["destroy", agg.canonicalDestroy],
     ] as const) {
       for (const s of action?.statements ?? []) {
+        // The one `requires` still not enforceable: a CREATE guard reading a
+        // declared parameter, which the field-derived request body has no slot
+        // for.  Every other `requires` renders (route gate → 403).
+        if (s.kind === "requires") {
+          if (label !== "create" || !createGuardReadsParam(s.expr)) continue;
+          diags.push({
+            severity: "error",
+            code: "loom.lifecycle-body-dropped",
+            message:
+              `aggregate '${agg.name}': the \`create\` guard reads a create PARAMETER, which the ` +
+              `emitted route cannot supply — \`POST /${plural(snake(agg.name))}\` takes the ` +
+              `field-derived create input, not the declared parameter list, so the parameter has ` +
+              `no wire slot. Half-rendering the predicate would drop one conjunct of an ` +
+              `authorization decision silently, so it is rejected instead. Guard on ` +
+              `\`currentUser\` (which the route does have), or move the value check to a ` +
+              `\`precondition\` on a named \`operation\`.`,
+            source: `${ctx.name}/aggregate ${agg.name}.create`,
+          });
+          continue;
+        }
         if (assignEffectReproduced(s, agg)) continue;
         const reason =
           DROPPED_STMT_REASON[s.kind] ??

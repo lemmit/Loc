@@ -11,7 +11,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  lifecycleGuards,
+  operationUsesCurrentUser,
+} from "../../../ir/types/loom-ir.js";
 import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -181,10 +185,31 @@ export function renderJavaService(
         `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
+  // The canonical create / destroy authorization gates.  Both render HERE
+  // rather than in the controller: the create gate belongs beside the factory
+  // call, and the destroy gate needs the aggregate the service loads.
+  const createGuards = lifecycleGuards(agg.canonicalCreate);
+  const destroyGuards = lifecycleGuards(agg.canonicalDestroy);
+  const lifecycleGuardExprs = [...createGuards, ...destroyGuards];
+  if (lifecycleGuardExprs.length > 0) {
+    imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);
+    for (const g of lifecycleGuardExprs) collectJavaExprImports(g, imports);
+  }
+
   const createLines = emitsRestCreate(agg)
     ? [
         `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
-        createDefaultUsesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        createDefaultUsesUser || createGuards.some(exprUsesCurrentUser)
+          ? `        var currentUser = currentUserAccessor.user();`
+          : null,
+        // The canonical create's authorization gate — BEFORE the factory, so
+        // it reads the principal only (there is no instance yet).
+        ...createGuards.map(
+          (g) =>
+            `        if (!(${renderJavaExpr(g)})) throw new ForbiddenException(${JSON.stringify(
+              `Forbidden: create ${agg.name}`,
+            )});`,
+        ),
         ...createLets,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
         `        repository.save(aggregate);`,
@@ -330,7 +355,11 @@ export function renderJavaService(
   // system even when no operation otherwise uses the current user, so the
   // accessor must be injected whenever audit + auth are both present — not only
   // when `anyOpUsesUser`, or the audit call references an uninjected field.
-  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed) || createDefaultUsesUser;
+  const needsUserAccessor =
+    anyOpUsesUser ||
+    (anyAudited && !!ctx.authed) ||
+    createDefaultUsesUser ||
+    [...createGuards, ...destroyGuards].some(exprUsesCurrentUser);
   // Optimistic concurrency (`versioned`): every public mutation threads the
   // client's expected version from the `If-Match` request header (think-time
   // CAS).  When supplied and it disagrees with the freshly-loaded aggregate's
@@ -455,6 +484,17 @@ export function renderJavaService(
       ? [
           `    public void destroy${agg.name}(${idClass} id) {`,
           `        var aggregate = repository.getById(id);`,
+          // The destroy gate runs AFTER the load (it may read `this`) and
+          // BEFORE the audit row is staged, so a denied delete records nothing.
+          ...(destroyGuards.some(exprUsesCurrentUser)
+            ? [`        var currentUser = currentUserAccessor.user();`]
+            : []),
+          ...destroyGuards.map(
+            (g) =>
+              `        if (!(${renderJavaExpr(g, { thisName: "aggregate", accessorProps: true })})) throw new ForbiddenException(${JSON.stringify(
+                `Forbidden: destroy ${agg.name}`,
+              )});`,
+          ),
           ...(auditDestroy
             ? [
                 `        var __before = ${agg.name}Response.from(aggregate);`,

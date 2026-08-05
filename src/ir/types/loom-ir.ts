@@ -3997,6 +3997,22 @@ export function operationIsGuarded(op: OperationIR): boolean {
   return op.statements.some((s) => s.kind === "requires");
 }
 
+/** The `requires` guard expressions of a canonical lifecycle action
+ *  (`create` / `destroy`), in declaration order; empty when the action is
+ *  absent or unguarded.
+ *
+ *  Lifecycle guards render in the ROUTE, not the domain layer — the
+ *  precedent is the find gate every backend already emits.  A `create`
+ *  guard has no `this` to read (there is no instance until the factory
+ *  runs; lowering resolves its refs to `current-user` / `param` only), and
+ *  a `destroy` has no domain method at all — but both routes already have
+ *  the request principal, and the destroy route already loads the row, so
+ *  the route is the one place that can evaluate either.  Wire-identical to
+ *  the operation path: both end at 403. */
+export function lifecycleGuards(action: OperationIR | null | undefined): ExprIR[] {
+  return (action?.statements ?? []).flatMap((s) => (s.kind === "requires" ? [s.expr] : []));
+}
+
 /** True when the workflow has at least one `requires` guard — same 403
  *  contract as a guarded operation. */
 export function workflowIsGuarded(wf: WorkflowIR): boolean {
