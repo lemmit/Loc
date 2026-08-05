@@ -758,7 +758,6 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "runtime-verified on node (PGlite), python (uvicorn + postgres) and java (gradle:9-jdk25 boot + postgres): all three match the golden byte-for-byte on core-domain, 0 divergences",
     ],
     tier: "behavioral",
-    tier: "static",
   },
   {
     id: "RS-28",

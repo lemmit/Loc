@@ -519,7 +519,7 @@
         "enabler: WIRE_NORMALIZE now templates a uuid embedded ANYWHERE in a string value, not only in a path — without it no golden can hold a 404-by-id body — test/_helpers/wire-record.ts",
         "runtime-verified on node (PGlite), python (uvicorn + postgres) and java (gradle:9-jdk25 boot + postgres): all three match the golden byte-for-byte on core-domain, 0 divergences"
       ],
-      "tier": "static"
+      "tier": "behavioral"
     },
     {
       "id": "RS-28",
