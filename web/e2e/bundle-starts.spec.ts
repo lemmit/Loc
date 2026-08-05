@@ -21,11 +21,13 @@
 // seconds, which is what lets it gate every PR while the specs it protects
 // only run post-merge.
 //
-// The SIBLING failure mode of the same race — a click that lands in the window
-// and bundles the provisional, map-less tree, so the boot bundle's inline map
-// never reaches `.ddd` — cannot be asserted without a real bundle, so it stays
-// covered by `devtools-sourcemap.spec.ts` in the post-merge heavy lane.  Both
-// are closed by the same `runBundle` change (see `generateInFlightRef`).
+// It does NOT cover the neighbouring failure in `devtools-sourcemap.spec.ts`
+// ("a .ddd entry in map.sources … Received: -1"), which needs a real bundle to
+// observe and so stays in the post-merge heavy lane.  That one is a separate,
+// pre-existing defect: it means the map-carrying generate did not land for
+// that cycle, leaving the persisted tree without its sourcemap overlay.  The
+// `runBundle` wait here keeps a click from bundling BEFORE that tree is
+// published; it does not make the tree carry maps in the first place.
 
 import { expect, test } from "@playwright/test";
 import { clickWorkspaceCreate, waitForPlaygroundReady } from "./_helpers";
