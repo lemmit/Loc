@@ -21,10 +21,10 @@ system HandlerScaffold {
 
       aggregate Order {
         code: string
-        status: string
-        priority: Priority
-        total: Money
-        create(code: string) { code := code  status := "new"  priority := Priority.low  total := Money { amount: 0, currency: "USD" } }
+        status: string = "new"
+        priority: Priority = Priority.low
+        total: Money = Money { amount: 0, currency: "USD" }
+        create(code: string) { code := code }
         operation reprice(newTotal: Money) { total := newTotal }
         operation escalate(level: Priority) { priority := level }
         operation cancel() { status := "cancelled" }

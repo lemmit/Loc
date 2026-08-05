@@ -1179,8 +1179,19 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
     // Carry the value object's declared field order so backends that need
     // named construction (Phoenix `%Mod.VO{field: …}` structs) always have
     // names — positional backends (TS `new VO(…)`, .NET) ignore them.
-    const fieldNames = vo.members.filter(isProperty).map((p) => p.name);
-    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor", fieldNames);
+    const props = vo.members.filter(isProperty);
+    const fieldNames = props.map((p) => p.name);
+    // …and the DECIMAL-typed slots, so an integer-spelled argument
+    // (`Money { amount: 0, currency: "USD" }`) is retyped here rather than
+    // left for each backend to coerce.  It is a resolution, not a rendering
+    // choice: the declared field type is known at exactly this point and
+    // nowhere downstream, and a backend whose decimal is a real type rather
+    // than a widening (Java's `BigDecimal`) cannot compile `new Money(0, …)`
+    // at all.  See `retypeDecimalSlots`.
+    const decimalSlots = new Set(
+      props.filter((p) => isDecimalLike(lowerType(p.type, env))).map((p) => p.name),
+    );
+    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor", fieldNames, decimalSlots);
   }
   const ent = findEntityByName(env, name);
   if (ent && isEntityPart(ent)) {
@@ -1224,12 +1235,48 @@ function inferBuilderCallType(expr: BuilderCall, env: Env): TypeIR {
   return { kind: "entity", name };
 }
 
+/** A declared type whose values are decimal-valued — the slots that must not
+ *  receive a bare integer literal. */
+function isDecimalLike(t: TypeIR): boolean {
+  const inner = t.kind === "optional" ? t.inner : t;
+  return inner.kind === "primitive" && (inner.name === "decimal" || inner.name === "money");
+}
+
+/**
+ * Retype an integer-spelled literal argument sitting in a DECIMAL slot.
+ *
+ * `Money { amount: 0, currency: "USD" }` is ordinary Loom, and the literal is
+ * honestly an `int` at the token level — but the slot it fills is `decimal`, so
+ * an IR that keeps it as `int` is under-resolved and every backend has to guess.
+ * The lenient ones (TS `number`, C# implicit conversion) guess right by
+ * accident; Java's `BigDecimal` is a real type with no widening from `int`, so
+ * it emitted `new Money(0, "USD")` and failed to compile.
+ *
+ * Only LITERALS are retyped, and only int/long ones: a decimal-valued
+ * expression is already decimal-typed, and coercing anything else here would be
+ * a silent conversion rather than a spelling fix.
+ */
+function retypeDecimalSlots(
+  args: ExprIR[],
+  argNames: (string | undefined)[],
+  decimalSlots: ReadonlySet<string>,
+): ExprIR[] {
+  if (decimalSlots.size === 0) return args;
+  return args.map((a, i) => {
+    const slot = argNames[i];
+    if (slot === undefined || !decimalSlots.has(slot)) return a;
+    if (a.kind !== "literal" || (a.lit !== "int" && a.lit !== "long")) return a;
+    return { ...a, lit: "decimal" };
+  });
+}
+
 function lowerBuilderCallAsCall(
   expr: BuilderCall,
   env: Env,
   name: string,
   callKind: "value-object-ctor" | "free",
   fieldNames?: string[],
+  decimalSlots?: ReadonlySet<string>,
 ): ExprIR {
   // Hoist `style:` named arg into its own IR field — see lowerStyleArg.
   // Filtering happens by index so `args` and `argNames` stay parallel.
@@ -1244,7 +1291,7 @@ function lowerBuilderCallAsCall(
     kind: "call",
     callKind,
     name,
-    args,
+    args: decimalSlots ? retypeDecimalSlots(args, argNames, decimalSlots) : args,
     ...(named ? { argNames } : {}),
     ...(styleHoist.style ? { style: styleHoist.style } : {}),
   };
