@@ -22,12 +22,18 @@ import {
   findUsesCurrentUser,
   type InvariantIR,
   type OperationIR,
-  operationIsGuarded,
   operationUsesCurrentUser,
   type PayloadIR,
   type RepositoryIR,
   type TypeIR,
 } from "../../ir/types/loom-ir.js";
+import {
+  type ApiOperationIR,
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+  relativeOpPath,
+} from "../../ir/util/api-surface.js";
 import { maskedHistoryFields } from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { errorStatuses, type OpErrorKind, problemTitle } from "../../ir/util/openapi-errors.js";
@@ -102,6 +108,19 @@ export function buildPyRoutesFile(
   extraIdNames: readonly string[] = [],
 ): string {
   const slug = snake(plural(agg.name));
+  // THE UNIFICATION SEAM (api-surface.ts): route-set membership, decorator
+  // paths, and the declared error statuses come from the shared derivation.
+  // This file keeps what is genuinely python's: pydantic models, handler
+  // bodies, the union-absent runtime translation, and the entity-history
+  // route (`apiSurfaceCoverage.notLifted`).
+  const derivedOps = deriveAggregateOperations(agg, repo, apiStatusContext(ctx));
+  const createOp = derivedOps.find((o) => o.kind === "create");
+  const allOp = derivedOps.find((o) => isAllFind(o));
+  const declaredFindOps = derivedOps.filter((o) => o.kind === "find" && !isAllFind(o));
+  const getByIdOp = derivedOps.find((o) => o.kind === "getById")!;
+  const destroyOp = derivedOps.find((o) => o.kind === "destroy");
+  const opEntries = derivedOps.filter((o) => o.kind === "operation");
+  const probeEntries = derivedOps.filter((o) => o.kind === "gateProbe");
   // Children-first so a nested part's `<Part>Response` is defined before the
   // `<Parent>Response` that references it (`list[LabelResponse]`) — no Pydantic
   // forward-ref.  Byte-identical when there is no part-in-part nesting.
@@ -183,16 +202,16 @@ export function buildPyRoutesFile(
     hasDispatch
       ? `    return ${agg.name}Repository(session, make_dispatcher(session))`
       : `    return ${agg.name}Repository(session, NoopDomainEventDispatcher())`,
-    hasCreateFactory(agg) ? ["", "", createRoute(agg, ctx)] : null,
+    createOp ? ["", "", createRoute(agg, ctx, createOp)] : null,
     "",
     "",
-    allRoute(agg, repo),
+    allRoute(agg, repo, allOp!),
     // Finds register before /{id}: Starlette matches in declaration
     // order, so the static find paths must win over the id pattern.
-    ...exposedFinds.flatMap((f) => ["", "", findRoute(agg, f, ctx)]),
+    ...declaredFindOps.flatMap((e) => ["", "", findRoute(agg, e.find!, ctx, e)]),
     "",
     "",
-    byIdRoute(agg),
+    byIdRoute(agg, getByIdOp),
     // Entity history (docs/audit.md) — two path segments, so no collision with
     // the `/{id}` pattern above.  Driven by the enrichment-derived `historyFind`
     // so the read surface cannot disagree with the gate / `ignoring` stance
@@ -200,11 +219,11 @@ export function buildPyRoutesFile(
     historyFind
       ? ["", "", renderPyHistoryMapper(agg), "", "", historyRoute(agg, historyFind)]
       : null,
-    agg.canonicalDestroy ? ["", "", destroyRoute(agg, conflictResolver(ctx))] : null,
-    ...publicOps.map((op) => ["", "", operationRoute(agg, op, ctx)]),
+    destroyOp ? ["", "", destroyRoute(agg, conflictResolver(ctx), destroyOp)] : null,
+    ...opEntries.map((e) => ["", "", operationRoute(agg, e.operation!, ctx, e)]),
     // Can-query companions register after the operation routes (static
     // `can_<op>` paths, no collision with `/{id}`).
-    ...whenGatedOps.map((op) => ["", "", canOpRoute(agg, op, ctx)]),
+    ...probeEntries.map((e) => ["", "", canOpRoute(agg, e.operation!, e)]),
   );
 
   const body = `${models}\n\n\n${routes}`;
@@ -372,40 +391,17 @@ export function errorResponsesKwarg(
   return `, responses={${entries.join(", ")}}`;
 }
 
-/** The per-operation CONFLICT statuses the shared `errorStatuses` table cannot
- *  know, because both are facts about this operation rather than its kind:
- *
- *   - a `when` STATE GATE can answer `Disallowed` — the `when` rung of the
- *     denial ladder (`when` → 409, `requires` → 403, `precondition` → 422;
- *     RS-15);
- *   - a versioned aggregate's `update` can answer `ConcurrencyConflict` on a
- *     stale `If-Match`.
- *
- *  Both resolve through the `httpStatus` mapper (M-T3.4a) and DEDUPE, so with
- *  no override they collapse to a single declared 409 — byte-identical to what
- *  this emitted before for the versioned-update case.
- *
- *  The `when` arm was missing here.  This backend's runtime raises
- *  `DisallowedError`, which `app/domain/errors.py` maps to 409, but the route
- *  declared only `{400, 404, 422}` — so a `when`-gated operation answered a
- *  status its own published contract did not list.  Hono, .NET and Phoenix all
- *  declared it; python and java did not.  `conformance-parity` compares this
- *  dimension (`errorResponses`) and still could not see it: the ONE fixture it
- *  boots, `examples/showcase.ddd`, has no `when`-gated operation — every op
- *  there uses `requires` + `precondition`. */
-function operationConflictStatuses(
-  agg: EnrichedAggregateIR,
-  op: OperationIR,
-  /** Structural-conflict resolver (M-T3.4a) — each conflict is remappable via
-   *  `httpStatus`; omitted ⇒ literal 409. */
-  resolve?: (name: string) => number,
-): number[] {
-  const out = new Set<number>();
-  if (op.when) out.add(resolve?.("Disallowed") ?? 409);
-  if (op.name === "update" && aggregateIsVersioned(agg)) {
-    out.add(resolve?.("ConcurrencyConflict") ?? 409);
-  }
-  return [...out].sort((a, b) => a - b);
+/** The DERIVED operation's declared non-2xx set as the FastAPI `responses=`
+ *  kwarg — `op.errorStatuses` is already httpStatus-resolved, sorted, and
+ *  deduped (base table + when/versioned conflicts + union error arms), so the
+ *  route renders it verbatim.  This is the unification seam: the numbers come
+ *  from `deriveAggregateOperations`, only the kwarg idiom is python's. */
+function derivedResponsesKwarg(op: ApiOperationIR): string {
+  if (op.errorStatuses.length === 0) return "";
+  const entries = op.errorStatuses.map(
+    (st) => `${st}: {"model": ProblemDetails, "description": "${problemTitle(st)}"}`,
+  );
+  return `, responses={${entries.join(", ")}}`;
 }
 
 /** `resolveErrorStatus` bound to a context's `httpStatus` override map — the
@@ -741,7 +737,11 @@ function createAuditCall(agg: EnrichedAggregateIR): string[] {
   ];
 }
 
-function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+function createRoute(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  apiOp: ApiOperationIR,
+): string {
   const createAction = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
   const auditCreate = !!createAction?.audited;
   const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
@@ -750,7 +750,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+      `@router.post("${relativeOpPath(apiOp)}", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
       `    created = ${agg.name}.create(${args})`,
       auditCreate ? "    repo = _repo(session)" : null,
@@ -793,7 +793,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     "session: SessionDep",
   ].join(", ");
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+    `@router.post("${relativeOpPath(apiOp)}", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
     stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
     `    created = ${agg.name}.create(${args})`,
@@ -807,7 +807,11 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
   );
 }
 
-function allRoute(agg: EnrichedAggregateIR, repo: RepositoryIR | undefined): string {
+function allRoute(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  apiOp: ApiOperationIR,
+): string {
   // The implicit findAll is paged (M-T2.6) for a plain relational aggregate: the
   // list GET carries the `<Agg>Paged` envelope + page/pageSize/sort/dir query
   // controls and maps the `PagedResult` carrier to the wire shape — matching
@@ -823,7 +827,7 @@ function allRoute(agg: EnrichedAggregateIR, repo: RepositoryIR | undefined): str
       `dir: str = "asc"`,
     ].join(", ");
     return lines(
-      `@router.get("", response_model=${paged.name}, operation_id="all${agg.name}")`,
+      `@router.get("${relativeOpPath(apiOp)}", response_model=${paged.name}, operation_id="all${agg.name}"${derivedResponsesKwarg(apiOp)})`,
       `async def all_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
       "    repo = _repo(session)",
       "    result = await repo.all(page, pageSize, sort, dir)",
@@ -837,16 +841,16 @@ function allRoute(agg: EnrichedAggregateIR, repo: RepositoryIR | undefined): str
     );
   }
   return lines(
-    `@router.get("", response_model=${agg.name}ListResponse, operation_id="all${agg.name}")`,
+    `@router.get("${relativeOpPath(apiOp)}", response_model=${agg.name}ListResponse, operation_id="all${agg.name}"${derivedResponsesKwarg(apiOp)})`,
     `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
     `    return [${wireResp(agg, "root")} for root in await repo.all()]`,
   );
 }
 
-function byIdRoute(agg: EnrichedAggregateIR): string {
+function byIdRoute(agg: EnrichedAggregateIR, apiOp: ApiOperationIR): string {
   return lines(
-    `@router.get("/{id}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}"${errorResponsesKwarg("getById")})`,
+    `@router.get("${relativeOpPath(apiOp)}", response_model=${agg.name}Response, operation_id="${camelId(opGetById(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def get_${snake(agg.name)}_by_id(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
     `    return ${wireResp(agg, `await repo.get_by_id(${agg.name}Id(id))`)}`,
@@ -880,7 +884,11 @@ function historyRoute(agg: EnrichedAggregateIR, find: FindIR): string {
   );
 }
 
-function destroyRoute(agg: EnrichedAggregateIR, resolve: (name: string) => number): string {
+function destroyRoute(
+  agg: EnrichedAggregateIR,
+  resolve: (name: string) => number,
+  apiOp: ApiOperationIR,
+): string {
   // The cross-aggregate `X id` FK is ON DELETE RESTRICT — a still-referenced
   // delete raises IntegrityError → the `ReferencedInUse` structural conflict,
   // remappable via `httpStatus` (M-T3.4a). Default resolves to 409.
@@ -903,7 +911,7 @@ function destroyRoute(agg: EnrichedAggregateIR, resolve: (name: string) => numbe
       ]
     : [];
   return lines(
-    `@router.delete("/{id}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${errorResponsesKwarg("destroy", false, [], resolve)})`,
+    `@router.delete("${relativeOpPath(apiOp)}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
     auditDestroy
@@ -943,15 +951,10 @@ function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
  *  `when`-gated operation — loads the aggregate, evaluates the predicate,
  *  returns `{ allowed }` so a UI can enable/disable the action without
  *  invoking it (the canCommand pattern). */
-function canOpRoute(
-  agg: EnrichedAggregateIR,
-  op: OperationIR,
-  _ctx: EnrichedBoundedContextIR,
-): string {
-  const opSnake = snake(op.routeSlug ?? op.name);
+function canOpRoute(agg: EnrichedAggregateIR, op: OperationIR, apiOp: ApiOperationIR): string {
   const pred = renderPyExpr(op.when as ExprIR, { thisName: "found" });
   return lines(
-    `@router.get("/{id}/can_${opSnake}", response_model=CanResponse, operation_id="${camelId(opOperation(agg.name, `can_${op.name}`))}"${errorResponsesKwarg("getById")})`,
+    `@router.get("${relativeOpPath(apiOp)}", response_model=CanResponse, operation_id="${camelId(opOperation(agg.name, `can_${op.name}`))}"${derivedResponsesKwarg(apiOp)})`,
     `async def can_${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
     `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
@@ -1022,9 +1025,8 @@ function operationRoute(
   agg: EnrichedAggregateIR,
   op: OperationIR,
   ctx: EnrichedBoundedContextIR,
+  apiOp: ApiOperationIR,
 ): string {
-  const opSnake = snake(op.routeSlug ?? op.name);
-  const resolve = conflictResolver(ctx);
   // Exception-less operation (`operation foo(): X or NotFound`): the
   // route intercepts each error variant and translates it to an
   // RFC-7807 ProblemDetails at its mapped status; success rides as the
@@ -1052,7 +1054,10 @@ function operationRoute(
     if (usesUser) callArgs.push("current_user");
     const vsave = versionedSave(agg);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), operationConflictStatuses(agg, op, resolve), resolve)})`,
+      // NAMED FIX (unification): the declared set now includes the union
+      // error arms' statuses — this route always ANSWERED them (the
+      // ProblemDetails translations below) but never declared them.
+      `@router.post("${relativeOpPath(apiOp)}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
@@ -1099,7 +1104,7 @@ function operationRoute(
   if (op.returnType) {
     const wireType = responsePyType(op.returnType, ctx);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=${wireType}, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), operationConflictStatuses(agg, op, resolve), resolve)})`,
+      `@router.post("${relativeOpPath(apiOp)}", response_model=${wireType}, operation_id="${camelId(opOperation(agg.name, op.name))}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> ${wireType}:`,
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
@@ -1120,7 +1125,7 @@ function operationRoute(
     );
   }
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), operationConflictStatuses(agg, op, resolve), resolve)})`,
+    `@router.post("${relativeOpPath(apiOp)}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
@@ -1143,6 +1148,7 @@ function findRoute(
   agg: EnrichedAggregateIR,
   find: import("../../ir/types/loom-ir.js").FindIR,
   ctx: EnrichedBoundedContextIR,
+  apiOp: ApiOperationIR,
 ): string {
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
@@ -1207,18 +1213,13 @@ function findRoute(
             ];
           })();
     return lines(
-      // A `requires`-gated union find declares 403 alongside its absent
-      // status.  This decorator is hand-built rather than routed through
-      // `errorResponsesKwarg`, so it needs the rung explicitly — the absence
-      // union is a SEPARATE emitter path from the plain optional find, and
-      // patching only the latter left `Order option` still publishing [404]
-      // while its sibling `Order[]` published [403].
-      `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}", responses={${[
-        ...(find.requires
-          ? [`403: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(403))}}`]
-          : []),
-        `${absentStatus}: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(absentStatus))}}`,
-      ].join(", ")}})`,
+      // The union arm's declared set (incl. the gated 403 and the resolved
+      // absent status) comes from the derivation — the same numbers the
+      // RUNTIME translation above answers with, so the two cannot drift.
+      // (This decorator was the two-arms landmine: hand-built separately from
+      // the optional arm, it once published [404] while its sibling published
+      // [403].)
+      `@router.get("${relativeOpPath(apiOp)}", response_model=${agg.name}Response, operation_id="${opId}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
       userBind,
       gateLines,
@@ -1251,7 +1252,7 @@ function findRoute(
       "dir",
     ];
     return lines(
-      `@router.get("/${findSnake}", response_model=${paged.name}, operation_id="${opId}")`,
+      `@router.get("${relativeOpPath(apiOp)}", response_model=${paged.name}, operation_id="${opId}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${pagedSig}) -> dict[str, object]:`,
       userBind,
       gateLines,
@@ -1268,7 +1269,7 @@ function findRoute(
   }
   if (isList) {
     return lines(
-      `@router.get("/${findSnake}", response_model=${agg.name}ListResponse, operation_id="${opId}"${errorResponsesKwarg("findList", !!find.requires)})`,
+      `@router.get("${relativeOpPath(apiOp)}", response_model=${agg.name}ListResponse, operation_id="${opId}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> list[dict[str, object]]:`,
       userBind,
       gateLines,
@@ -1277,7 +1278,7 @@ function findRoute(
     );
   }
   return lines(
-    `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}"${errorResponsesKwarg("findOptional", !!find.requires)})`,
+    `@router.get("${relativeOpPath(apiOp)}", response_model=${agg.name}Response, operation_id="${opId}"${derivedResponsesKwarg(apiOp)})`,
     `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
     userBind,
     gateLines,

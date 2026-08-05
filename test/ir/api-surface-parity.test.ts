@@ -98,22 +98,6 @@ function normalisePath(p: string): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
-/** FastAPI — `@router.<m>("<p>")` under a router prefix, itself mounted under
- *  `app.include_router(..., prefix="/api")` in `main.py`.  BOTH prefixes are
- *  read from the emitted source; hardcoding `/api` here would make the scraper
- *  agree with the derivation by construction rather than by observation. */
-function scrapePython(files: Map<string, string>): Route[] {
-  const src = [...files].find(([p]) => p.endsWith("order_routes.py"))?.[1] ?? "";
-  const main = [...files].find(([p]) => p.endsWith("app/main.py"))?.[1] ?? "";
-  const mount = main.match(/include_router\(\s*order_router[^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? "";
-  const prefix = `${mount}${src.match(/APIRouter\([^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? ""}`;
-  const out: Route[] = [];
-  for (const m of src.matchAll(/@router\.(get|post|put|patch|delete)\("([^"]*)"/g)) {
-    out.push({ method: m[1]!, path: normalisePath(`${prefix}${m[2]}`) });
-  }
-  return out;
-}
-
 /** Spring — class `@RequestMapping("<base>")` + method `@<M>Mapping[("<p>")]`.
  *  A BARE annotation (no parens) mounts at the class path itself, which is how
  *  create / findAll are declared. */
@@ -188,32 +172,6 @@ function expectedShape(op: ApiOperationIR): Shape {
   const coll = collectionSuccess(op.responseType);
   if (coll) return coll.carrier === "paged" ? "paged" : "array";
   return "entity";
-}
-
-/** FastAPI — `response_model=X` on the decorator, X resolved to its pydantic
- *  field list.  No `response_model` + `status_code=204` is a bodiless answer. */
-function shapesPython(files: Map<string, string>): Map<string, MaybeShape> {
-  const src = [...files].find(([p]) => p.endsWith("order_routes.py"))?.[1] ?? "";
-  const main = [...files].find(([p]) => p.endsWith("app/main.py"))?.[1] ?? "";
-  const mount = main.match(/include_router\(\s*order_router[^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? "";
-  const prefix = `${mount}${src.match(/APIRouter\([^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? ""}`;
-
-  const model = (name: string): MaybeShape => {
-    const root = src.match(new RegExp(`class ${name}\\(RootModel\\[list\\[`));
-    if (root) return "array";
-    const body = src.match(new RegExp(`class ${name}\\(BaseModel\\):\\n((?: +.*\\n|\\n)*)`))?.[1];
-    if (body === undefined) return undefined;
-    return shapeOfFields([...body.matchAll(/^ {4}(\w+): /gm)].map((m) => m[1]!));
-  };
-
-  const out = new Map<string, MaybeShape>();
-  for (const m of src.matchAll(/@router\.(get|post|put|patch|delete)\("([^"]*)"([^\n]*)\)/g)) {
-    const k = key({ method: m[1]!, path: normalisePath(`${prefix}${m[2]}`) });
-    const decorator = m[3]!;
-    const named = decorator.match(/response_model=(\w+)/)?.[1];
-    out.set(k, named ? model(named) : "none");
-  }
-  return out;
 }
 
 /** Spring — the handler's declared return type, resolved through the emitted
@@ -303,20 +261,6 @@ function shapesElixir(files: Map<string, string>): Map<string, MaybeShape> {
 // has no `when` gate.  Hence this check, on a fixture that does.
 // ---------------------------------------------------------------------------
 
-/** FastAPI — `responses={400: {"model": ProblemDetails, …}, …}` on the decorator. */
-function errorsPython(files: Map<string, string>): Map<string, number[]> {
-  const src = [...files].find(([p]) => p.endsWith("order_routes.py"))?.[1] ?? "";
-  const main = [...files].find(([p]) => p.endsWith("app/main.py"))?.[1] ?? "";
-  const mount = main.match(/include_router\(\s*order_router[^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? "";
-  const prefix = `${mount}${src.match(/APIRouter\([^)]*prefix\s*=\s*"([^"]*)"/)?.[1] ?? ""}`;
-  const out = new Map<string, number[]>();
-  for (const m of src.matchAll(/@router\.(get|post|put|patch|delete)\("([^"]*)"([^\n]*)\)/g)) {
-    const codes = [...m[3]!.matchAll(/(\d{3}): \{"model"/g)].map((c) => Number(c[1]));
-    out.set(key({ method: m[1]!, path: normalisePath(`${prefix}${m[2]}`) }), codes.sort());
-  }
-  return out;
-}
-
 /** Spring — springdoc infers nothing useful here, so the contract lives in the
  *  emitted `OpenApiContractCustomizer`'s `Route` table: `new Route(method, path,
  *  successRef, new int[] {…}, …)`. Reading the customizer IS reading what java
@@ -341,7 +285,6 @@ const UNRESOLVED: Record<string, readonly string[]> = {
   // `ResponseEntity<Void>` that cannot unify with the success type.  Widening
   // it to a declared type is a Java-emitter change, not a test change.
   "Java/Spring": ["get /api/orders/by_code"],
-  "Python/FastAPI": [],
   "Elixir/Phoenix": [],
 };
 
@@ -356,12 +299,11 @@ const BACKENDS: Record<
     errors?(f: Map<string, string>): Map<string, number[]>;
   }
 > = {
-  "Python/FastAPI": {
-    platform: "python",
-    scrape: scrapePython,
-    shapes: shapesPython,
-    errors: errorsPython,
-  },
+  // "Python/FastAPI" dropped: its router renders from `deriveAggregateOperations`
+  // (the unification's python slice) — holding it here would compare the
+  // derivation to itself.  Render fidelity is pinned by
+  // `test/generator/python/api-surface-render.test.ts` (same scrapers, same
+  // three axes, against the rendering instead of an independent copy).
   "Java/Spring": { platform: "java", scrape: scrapeJava, shapes: shapesJava, errors: errorsJava },
   // ".NET" dropped: its controller now RENDERS from `deriveAggregateOperations`
   // (the unification's dotnet slice), so holding it here would compare the

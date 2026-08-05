@@ -16,6 +16,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
 import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
+import { deriveContextOperations } from "../../ir/util/api-surface.js";
 import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
@@ -1411,11 +1412,21 @@ function collectOpUnions(contexts: readonly EnrichedBoundedContextIR[]): PyOpUni
   const seen = new Set<string>();
   const out: PyOpUnion[] = [];
   for (const ctx of contexts) {
+    // The injected 200's path comes from the derivation — the same absolute
+    // path the route decorator mounts (unification seam), so the spec can no
+    // longer document a path the router does not serve.  An operation the
+    // derivation does not lift (private / abstract host) injects nothing.
+    const derivedPaths = new Map<unknown, string>(
+      deriveContextOperations(ctx)
+        .filter((o) => o.kind === "operation")
+        .map((o) => [o.operation, o.path]),
+    );
     for (const agg of ctx.aggregates) {
       for (const op of agg.operations) {
-        if (op.visibility !== "public" || op.returnType?.kind !== "union") continue;
+        if (op.returnType?.kind !== "union") continue;
+        const path = derivedPaths.get(op);
+        if (path === undefined) continue;
         const name = unionInstanceName(op.returnType.variants);
-        const path = `${API_BASE_PATH}/${snake(plural(agg.name))}/{id}/${snake(op.routeSlug ?? op.name)}`;
         if (seen.has(`${path}|${name}`)) continue;
         seen.add(`${path}|${name}`);
         out.push({ path, name, schema: unionJsonSchema(op.returnType.variants, ctx) });
