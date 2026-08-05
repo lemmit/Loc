@@ -723,7 +723,6 @@ export default function App(): JSX.Element {
     generationEpochRef.current++;
     dispatch({ type: "RESET" });
     lastBundleReadyRef.current = null;
-    lastMappedGenerateRef.current = null;
     setLspDiagnostics([]);
     setSelectedPath(null);
     setPreviewBundle(null);
@@ -913,12 +912,6 @@ export default function App(): JSX.Element {
   // the same map-carrying set the auto-cascade would have. See
   // `persistGeneratedTree` / `strip-sourcemap.ts`.
   const lastBundleReadyRef = useRef<GenerateResult | null>(null);
-  // The map-carrying (sourcemap-on) generate of the CURRENT source, set at
-  // the end of `runGenerateStep` alongside the flag-off `result` it
-  // returns.  `null` whenever the mapped generate hasn't landed yet or
-  // failed — every consumer treats that as "bundle without maps" rather
-  // than blocking on it, so a sourcemap hiccup never breaks the boot.
-  const lastMappedGenerateRef = useRef<GenerateOk | null>(null);
   const autoGenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef(0);
   const generatingRef = useRef(false);
@@ -1087,7 +1080,33 @@ export default function App(): JSX.Element {
     return tracked;
   }
 
-  async function runGenerateStep(): Promise<GenerateResult | null> {
+  /** What one generate CYCLE produced: the flag-off tree that drives the file
+   *  view, plus that same cycle's map-carrying tree (or `null` when its
+   *  sourcemap pass didn't land).
+   *
+   *  `mapped` is returned rather than stashed in a ref on purpose.  It used to
+   *  live in `lastMappedGenerateRef` — one shared mutable slot for a value
+   *  that is per-cycle — and the comment on its reader even called it "this
+   *  cycle's separate sourcemap generate", which is only true while no two
+   *  cycles overlap.  They do overlap: `selectExample` schedules an
+   *  auto-generate and the user (or a spec) can click Generate on top of it.
+   *  Then this interleaving loses the maps entirely:
+   *
+   *    B: sourcemap pass resolves  → ref = mapped_B ; step returns
+   *    A: flag-off resolves (late) → ref = null        ← wipes B's
+   *    B: persistGeneratedTree reads ref → null → merged tree, NO overlay
+   *
+   *  and the boot bundle's map then stops at the generated `.ts` instead of
+   *  reaching `.ddd` — `devtools-sourcemap.spec.ts`'s "Received: -1".  An
+   *  epoch guard cannot fix that: both cycles share an epoch when no reset
+   *  happened between them.  Threading the value removes the shared slot, so
+   *  no cycle can observe or clobber another's. */
+  interface GenerateCycle {
+    result: GenerateResult;
+    mapped: GenerateOk | null;
+  }
+
+  async function runGenerateStep(): Promise<GenerateCycle | null> {
     const client = buildClientRef.current;
     if (!client) return null;
     // Wait out any in-flight workspace seed so the multi-file example's
@@ -1134,12 +1153,14 @@ export default function App(): JSX.Element {
     // repaints the file view nor drives the live-mode bundle/boot cascade.
     if (epoch !== generationEpochRef.current) return null;
     dispatch({ type: "GENERATE_DONE", result });
-    // Publish HERE, in the same turn as the dispatch that enables the Bundle
-    // button — not after the sourcemap generate below.  A click landing
-    // before that finishes bundles the flag-off tree, which is exactly the
-    // documented fallback for "the mapped generate hasn't landed yet"
-    // (`lastMappedGenerateRef`), and is infinitely better than doing nothing.
-    // `runGenerate` / `runFull` upgrade this to the mapped or merged set.
+    // A FLOOR, not the intended input: the flag-off tree, published in the
+    // same turn as the dispatch that enables the Bundle button.  `runBundle`
+    // awaits the whole cycle before reading the ref, so it normally sees the
+    // mapped / merged set `runGenerate` publishes below and never this.  What
+    // this covers is the cycle that never gets there — a build-worker respawn
+    // rejects it — where the choice is bundling without `.ddd` maps or a
+    // click that does nothing at all.  The former is recoverable and visible;
+    // the latter is the 600s hang this whole change exists to remove.
     publishBundleInput(epoch, result);
     if (result.ok && result.files.length > 0) {
       // Preserve the user's selection only when that exact path still
@@ -1156,8 +1177,8 @@ export default function App(): JSX.Element {
     // boot bundle (`runBundleStep` / `persistGeneratedTree`'s overlay),
     // never the view/persist.  Best-effort: on failure the bundle just
     // falls back to the (still fully functional, just not `.ddd`-
-    // debuggable) flag-off files — see `lastMappedGenerateRef`.
-    lastMappedGenerateRef.current = null;
+    // debuggable) flag-off files — see `GenerateCycle`.
+    let mappedForCycle: GenerateOk | null = null;
     if (result.ok) {
       try {
         const mapped = await client.generateFromPath(entryPath, { sourcemap: true });
@@ -1167,7 +1188,7 @@ export default function App(): JSX.Element {
           // sidecars (no filesystem), so without this the boot bundle's map
           // stops at the generated `.ts` and never reaches `.ddd`. See
           // `inlineSourcemapArtifacts` + `web/e2e/devtools-sourcemap.spec.ts`.
-          lastMappedGenerateRef.current = {
+          mappedForCycle = {
             ...mapped,
             files: inlineSourcemapArtifacts(mapped.files),
           };
@@ -1176,7 +1197,7 @@ export default function App(): JSX.Element {
         /* best-effort — see comment above */
       }
     }
-    return result;
+    return { result, mapped: mappedForCycle };
   }
 
   interface BundleStepResult {
@@ -1342,6 +1363,7 @@ export default function App(): JSX.Element {
   // came back empty.  Best-effort: a failure never breaks generate.
   async function persistGeneratedTree(
     result: GenerateResult | null,
+    mapped: GenerateOk | null,
   ): Promise<VirtualFile[] | null> {
     const store = workspace.store;
     if (!store || !result?.ok || result.files.length === 0) return null;
@@ -1367,7 +1389,6 @@ export default function App(): JSX.Element {
       // persisted.  See `overlaySourcemapArtifacts` for the hand-edit
       // limitation; falls back to the plain merged tree (no maps, still
       // functionally correct) when the mapped generate isn't available.
-      const mapped = lastMappedGenerateRef.current;
       return mapped ? overlaySourcemapArtifacts(mergedFiles, result.files, mapped.files) : mergedFiles;
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -1382,17 +1403,18 @@ export default function App(): JSX.Element {
 
   async function runGenerateInner(persist = false): Promise<void> {
     const epoch = generationEpochRef.current;
-    const result = await runGenerateStep();
+    const cycle = await runGenerateStep();
+    const result = cycle?.result ?? null;
     let bundleGen: GenerateResult | null = result;
     if (persist && result?.ok) {
-      const merged = await persistGeneratedTree(result);
+      const merged = await persistGeneratedTree(result, cycle?.mapped ?? null);
       if (merged) bundleGen = { ...result, files: merged };
-    } else if (result?.ok && lastMappedGenerateRef.current) {
+    } else if (result?.ok && cycle?.mapped) {
       // Live-auto (no persist): bundle the map-carrying generate of this
       // same source directly, so the boot bundle can still chain to
       // `.ddd`.  Falls back to the flag-off `result` above when the
       // mapped generate hasn't landed (best-effort, see `runGenerateStep`).
-      bundleGen = lastMappedGenerateRef.current;
+      bundleGen = cycle.mapped;
     }
     // Upgrade the provisional set published at GENERATE_DONE to the
     // map-carrying / merged one, so a later manual "Bundle" click (Live mode
@@ -1471,12 +1493,13 @@ export default function App(): JSX.Element {
     // page reloads names the step that killed it.
     markPhase("generate");
     const epoch = generationEpochRef.current;
-    const gen = await runGenerateStep();
+    const cycle = await runGenerateStep();
+    const gen = cycle?.result;
     if (!gen?.ok || gen.files.length === 0) return;
     // Intentional run → version the output and bundle the merged tree
     // (reflects hand edits to generated code).
     let bundleGen: GenerateOk = gen;
-    const merged = await persistGeneratedTree(gen);
+    const merged = await persistGeneratedTree(gen, cycle?.mapped ?? null);
     if (merged) bundleGen = { ...gen, files: merged };
     publishBundleInput(epoch, bundleGen);
     const bundleRes = await runBundleStep(bundleGen);

@@ -80,14 +80,20 @@ test("clicking Bundle the moment Generate lands actually starts a bundle", async
     btn.click();
   });
 
-  // The bundle has STARTED — `pipeline.bundling` drives Mantine's `loading`,
-  // which renders `data-loading`.  We assert only this, never completion: a
-  // bundle that starts and then fails on the network is a different problem
-  // and reports itself honestly.  A click that changes nothing at all is
-  // this one, and it is invisible without this assertion.
-  await expect(page.getByTestId("btn-bundle")).toHaveAttribute(
-    "data-loading",
-    "true",
-    { timeout: 15_000 },
-  );
+  // The click DID something — the pipeline reached a settled bundle outcome,
+  // success or failure.  Either proves the point; only "nothing at all" is
+  // the bug under test, and with no npm registry reachable this lane always
+  // lands on the failure side within seconds.
+  //
+  // Asserting the TRANSIENT `data-loading` flag instead was my first attempt
+  // and it was wrong: with the registry unreachable the bundle settles almost
+  // immediately, so the loading state can come and go between two Playwright
+  // polls.  It passed several times by luck before failing.  A settled
+  // outcome is durable; a spinner is not.
+  await expect(
+    page
+      .getByText(/bundled [\d.]+ [KM]?B in \d+ ms/)
+      .or(page.getByText(/bundle: \d+ error\(s\)/))
+      .first(),
+  ).toBeVisible({ timeout: 120_000 });
 });
