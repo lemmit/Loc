@@ -29,7 +29,11 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
-import { type ExprIR, exprUsesCurrentUser, lifecycleGuards } from "../../../ir/types/loom-ir.js";
+import {
+  type ExprIR,
+  exprUsesCurrentUser,
+  lifecycleRouteGuards,
+} from "../../../ir/types/loom-ir.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
@@ -316,8 +320,8 @@ function renderController(
   // where `conn.assigns.current_user` lives.  The action keeps its existing body
   // verbatim inside a private `__<verb>_authorized/2`, so the gate is a wrapper
   // rather than a re-indent of every arm.
-  const createGuards = lifecycleGuards(agg.canonicalCreate);
-  const destroyGuards = lifecycleGuards(agg.canonicalDestroy);
+  const createGuards = lifecycleRouteGuards(agg, agg.canonicalCreate);
+  const destroyGuards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
   const cuBind = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const listArg = principal ? "current_user" : "";
   const getActor = principal ? ", current_user" : "";

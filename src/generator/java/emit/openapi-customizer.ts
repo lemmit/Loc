@@ -13,7 +13,7 @@ import type {
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import {
-  lifecycleGuards,
+  lifecycleRouteGuards,
   operationIsGuarded,
   workflowEmitsCommandRoute,
   workflowIsGuarded,
@@ -227,7 +227,9 @@ export function buildJavaOpenApiContract(
         routes.push({
           method: "post",
           path: route,
-          errors: err(errorStatuses("create", lifecycleGuards(agg.canonicalCreate).length > 0)),
+          errors: err(
+            errorStatuses("create", lifecycleRouteGuards(agg, agg.canonicalCreate).length > 0),
+          ),
         });
         const createInput = agg.createInput ?? [];
         for (const c of createInput) noteEnumRefs(c.field.type, c.field.name);
@@ -264,7 +266,7 @@ export function buildJavaOpenApiContract(
           errors: err(
             errorStatuses(
               "destroy",
-              lifecycleGuards(agg.canonicalDestroy).length > 0,
+              lifecycleRouteGuards(agg, agg.canonicalDestroy).length > 0,
               resolveStructural,
             ),
           ),

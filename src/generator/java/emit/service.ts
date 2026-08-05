@@ -13,7 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   exprUsesCurrentUser,
-  lifecycleGuards,
+  lifecycleRouteGuards,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
@@ -188,8 +188,8 @@ export function renderJavaService(
   // The canonical create / destroy authorization gates.  Both render HERE
   // rather than in the controller: the create gate belongs beside the factory
   // call, and the destroy gate needs the aggregate the service loads.
-  const createGuards = lifecycleGuards(agg.canonicalCreate);
-  const destroyGuards = lifecycleGuards(agg.canonicalDestroy);
+  const createGuards = lifecycleRouteGuards(agg, agg.canonicalCreate);
+  const destroyGuards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
   const lifecycleGuardExprs = [...createGuards, ...destroyGuards];
   if (lifecycleGuardExprs.length > 0) {
     imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);

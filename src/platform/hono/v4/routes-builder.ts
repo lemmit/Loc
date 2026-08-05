@@ -58,7 +58,7 @@ import {
   exprUsesCurrentUser,
   findGateUsesCurrentUser,
   findUsesCurrentUser,
-  lifecycleGuards,
+  lifecycleRouteGuards,
   operationIsGuarded,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
@@ -438,7 +438,7 @@ export function buildRoutesFile(
   // aggregate by construction (`canonicalCreate` is null there and the create
   // action's body is rendered into the domain `_init` instead) — so the ES arm
   // keeps today's bytes and its guard is not run twice.
-  const createGuards = lifecycleGuards(agg.canonicalCreate);
+  const createGuards = lifecycleRouteGuards(agg, agg.canonicalCreate);
   // Unified create-input shape: `{ name, type, optional, default }`.  ES
   // takes the create action's params (no defaults); state takes the
   // create-input field set (server-controlled fields excluded).
@@ -948,7 +948,7 @@ export function buildRoutesFile(
   // unchanged.  crudish's destroy is empty-bodied — load (404 guard),
   // then hard-delete (children/join rows cascade via FK).
   if (agg.canonicalDestroy) {
-    const destroyGuards = lifecycleGuards(agg.canonicalDestroy);
+    const destroyGuards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
     // FK-restrict conflict status resolved through the `httpStatus` mapper
     // (M-T3.4a) — `ReferencedInUse`, 409 by default. Drives both the OpenAPI
     // declaration and the runtime arm below so they can't drift.

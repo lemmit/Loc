@@ -7,7 +7,7 @@ import type {
   OperationIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
-import { lifecycleGuards, operationIsGuarded } from "../../../ir/types/loom-ir.js";
+import { lifecycleRouteGuards, operationIsGuarded } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -219,8 +219,8 @@ export function emitController(
       idClrType: csIdValueClrType(agg.idValueType),
       createAction: createActionOverride ?? emitsRestCreate(agg),
       destroyAction: !!agg.canonicalDestroy,
-      createGuarded: lifecycleGuards(agg.canonicalCreate).length > 0,
-      destroyGuarded: lifecycleGuards(agg.canonicalDestroy).length > 0,
+      createGuarded: lifecycleRouteGuards(agg, agg.canonicalCreate).length > 0,
+      destroyGuarded: lifecycleRouteGuards(agg, agg.canonicalDestroy).length > 0,
       // Entity history (docs/audit.md): the derived read sits BESIDE `finds`
       // (see `RepositoryIR.historyFind`), so it drives its own action rather
       // than riding the `exposedFinds` loop.  `guarded` is the gate the find

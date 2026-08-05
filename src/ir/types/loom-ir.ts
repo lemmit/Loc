@@ -4013,6 +4013,28 @@ export function lifecycleGuards(action: OperationIR | null | undefined): ExprIR[
   return (action?.statements ?? []).flatMap((s) => (s.kind === "requires" ? [s.expr] : []));
 }
 
+/** The lifecycle guards a ROUTE must render, which is `lifecycleGuards` minus
+ *  the event-sourced case.
+ *
+ *  An `eventLog` aggregate's create body IS rendered — into the domain factory
+ *  (`_init` / the fold), the documented exemption from `loom.lifecycle-body-
+ *  dropped` — so its `requires` already raises there.  `canonicalCreate` is
+ *  populated for an ES aggregate too (any unnamed `create` sets it), so a
+ *  backend reading `lifecycleGuards` directly would evaluate the predicate a
+ *  SECOND time in the route.
+ *
+ *  Declarations use this too, not `lifecycleGuards`: whether the ES domain-side
+ *  guard is reachable at all (it has no principal in scope) is a separate,
+ *  pre-existing question, and publishing a 403 no backend has been shown to
+ *  answer is the declared-vs-actual drift the shared table exists to remove. */
+export function lifecycleRouteGuards(
+  agg: Pick<AggregateIR, "persistedAs">,
+  action: OperationIR | null | undefined,
+): ExprIR[] {
+  if (agg.persistedAs === "eventLog") return [];
+  return lifecycleGuards(action);
+}
+
 /** True when the workflow has at least one `requires` guard — same 403
  *  contract as a guarded operation. */
 export function workflowIsGuarded(wf: WorkflowIR): boolean {

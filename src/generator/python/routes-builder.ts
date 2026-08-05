@@ -21,7 +21,7 @@ import {
   findGateUsesCurrentUser,
   findUsesCurrentUser,
   type InvariantIR,
-  lifecycleGuards,
+  lifecycleRouteGuards,
   type OperationIR,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -269,8 +269,8 @@ export function buildPyRoutesFile(
       // A find `requires` gate that reads currentUser binds `current_user: User`.
       emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
       // …and so does a lifecycle (`create` / `destroy`) `requires` gate.
-      lifecycleGuards(agg.canonicalCreate).some(exprUsesCurrentUser) ||
-      lifecycleGuards(agg.canonicalDestroy).some(exprUsesCurrentUser) ||
+      lifecycleRouteGuards(agg, agg.canonicalCreate).some(exprUsesCurrentUser) ||
+      lifecycleRouteGuards(agg, agg.canonicalDestroy).some(exprUsesCurrentUser) ||
       (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
       (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
       // A `currentUser.*` create-field default binds `current_user: User` in
@@ -753,12 +753,15 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     const args = esCreate.params
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
-    // No route gate on the ES arm: an event-sourced create's body IS rendered
-    // (into the domain `_init`), so its `requires` already raises there.  Only
-    // the DECLARED 403 was missing — the same declared-vs-actual gap the shared
-    // table exists to close.  Double-gating would run the predicate twice.
+    // The ES arm is untouched, declaration included.  An event-sourced create's
+    // body IS rendered (into the domain `_init`) — the documented exemption
+    // from `loom.lifecycle-body-dropped` — so a route gate here would run the
+    // predicate a SECOND time.  Whether that domain-side guard is reachable at
+    // all (it has no principal in scope) is a separate, pre-existing question,
+    // and declaring a 403 nothing has been shown to answer is exactly the
+    // declared-vs-actual drift this table exists to remove.
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", lifecycleGuards(esCreate).length > 0)})`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
       `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
       `    created = ${agg.name}.create(${args})`,
       auditCreate ? "    repo = _repo(session)" : null,
@@ -800,7 +803,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
   // (the validator rejects a create guard reading a create param, which the
   // field-derived request body has no slot for).  Denial → ForbiddenError → 403,
   // the same rung the find gate and the operation gate land on.
-  const guards = lifecycleGuards(agg.canonicalCreate);
+  const guards = lifecycleRouteGuards(agg, agg.canonicalCreate);
   const needsUser = stampUsesPrincipal || guards.some(exprUsesCurrentUser);
   const sig = [
     `body: Create${agg.name}Request`,
@@ -925,7 +928,7 @@ function destroyRoute(agg: EnrichedAggregateIR, resolve: (name: string) => numbe
   // unlike a create guard it may read `this`, and the route already loads the
   // aggregate (reachability), so `__loaded` is the receiver.  404 (unreachable)
   // therefore wins over 403 (unauthorized), matching the operation routes.
-  const guards = lifecycleGuards(agg.canonicalDestroy);
+  const guards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
   const guarded = guards.length > 0;
   const bindLoaded = auditDestroy || guarded;
   const gateUsesUser = guards.some(exprUsesCurrentUser);

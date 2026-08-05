@@ -7,7 +7,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   exprUsesCurrentUser,
-  lifecycleGuards,
+  lifecycleRouteGuards,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -160,7 +160,7 @@ export function emitCreateCommandAndHandler(
     : [];
   // The canonical create's authorization gate runs BEFORE the factory — no
   // instance exists yet, so it reads the principal only.
-  const createGuards = lifecycleGuards(agg.canonicalCreate);
+  const createGuards = lifecycleRouteGuards(agg, agg.canonicalCreate);
   const createGateDeps = lifecycleGateDeps(createGuards, ns);
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
@@ -268,7 +268,7 @@ export function emitDestroyCommandAndHandler(
         { type: `ILogger<Destroy${agg.name}Handler>`, field: "_log" },
       ]
     : [];
-  const destroyGuards = lifecycleGuards(agg.canonicalDestroy);
+  const destroyGuards = lifecycleRouteGuards(agg, agg.canonicalDestroy);
   const destroyGateDeps = lifecycleGateDeps(destroyGuards, ns);
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
