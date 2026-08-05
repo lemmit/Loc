@@ -24,6 +24,7 @@ import type {
   OperationIR,
   StmtIR,
   SystemIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
@@ -129,6 +130,50 @@ export function emitVanillaContextModule(
     for (const frag of opFragments) {
       sourcemap.fragment(path, content, frag.fragmentText, frag.subRegions);
     }
+  }
+}
+
+/**
+ * Bind one named-operation param out of the raw request map, COERCED to the
+ * runtime form its declared type has.
+ *
+ * The op path hands the domain body `Map.get(params, "<name>")` — the value
+ * straight off the decoded JSON — and the body then `force_change`s it onto the
+ * aggregate.  `force_change` bypasses casting by design, so whatever the wire
+ * carried is what Ecto tries to DUMP:
+ *
+ *     ** (Ecto.ChangeError) value `"7.25"` for `D.Shop.Order.total` in `update`
+ *        does not match type :decimal
+ *
+ * …a 500 on any operation that assigns a `money`/`decimal`/`datetime` field
+ * from a param, on every `platform: elixir` system that has one.  The four
+ * other backends never see it: each deserializes the request into a TYPED DTO
+ * (zod / pydantic / jackson / System.Text.Json) before the domain call, so the
+ * param arrives already in its declared type.  Elixir alone passed a raw string.
+ *
+ * Only the two wire-form-vs-runtime-form mismatches are coerced — a JSON number
+ * is already an integer/float, a JSON bool a boolean, a JSON string a string —
+ * so every other param binds byte-identically to before.
+ *
+ * Found 2026-08-05 by the caller-census drain: `corpus/embedded`'s
+ * `retotal(amount: money)` got its first runtime caller and 500'd.  (The crudish
+ * `update` route never hit it because it runs the params through a real
+ * `update_changeset`, which casts.)
+ */
+function coerceOpParam(varName: string, type: TypeIR | undefined): string {
+  const t = type?.kind === "optional" ? type.inner : type;
+  if (t?.kind !== "primitive") return varName;
+  switch (t.name) {
+    case "money":
+    case "decimal":
+      // `to_string` first so a JSON number (`7.25`) and a JSON string (`"7.25"`)
+      // both land on the same Decimal — the wire allows either.
+      return `(if is_nil(${varName}), do: nil, else: Decimal.new(to_string(${varName})))`;
+    case "datetime":
+      // `:utc_datetime` wants a DateTime struct; the wire is ISO-8601 text.
+      return `(case ${varName} do\n      nil -> nil\n      %DateTime{} = __dt -> __dt\n      __s when is_binary(__s) -> (case DateTime.from_iso8601(__s) do\n        {:ok, __d, _} -> DateTime.truncate(__d, :second)\n        _ -> __s\n      end)\n      __other -> __other\n    end)`;
+    default:
+      return varName;
   }
 }
 
@@ -453,6 +498,12 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
     ? `\n${renderPutAssocPartsHelper()}\n`
     : "";
 
+  // Shared `:utc_datetime` truncation helper — emitted once per context module
+  // when ANY named operation assigns a `datetime` field.  Gated so a context
+  // without one stays byte-identical (and never trips
+  // `--warnings-as-errors` on an unused private fn).
+  const truncateDtHelper = contextOpAssignsDatetime(ctx) ? `\n${renderTruncateDtHelper()}\n` : "";
+
   // A named-/returning-op body that `emit`s a domain event renders a catalog
   // `event_dispatched` line (`renderReturningStmt` "emit" arm) — that needs
   // `require Logger` in this host module.  Gate it so the require never sits
@@ -481,7 +532,7 @@ defmodule ${facadeMod} do
   workflow body).  Plain Elixir context module.
   """${requireLogger}${mutatesRefColl ? "\n  import Ecto.Query" : ""}
 
-${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}end
+${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}${truncateDtHelper}end
 `;
 }
 
@@ -605,6 +656,51 @@ function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: System
   });
 }
 
+/** Does ANY named operation in this context assign a `datetime` field?  Gates
+ *  the shared `__truncate_dt/1` helper emission — the op persist path calls it
+ *  for every `:utc_datetime` column so a microsecond `now()` can be dumped. */
+function contextOpAssignsDatetime(ctx: BoundedContextIR): boolean {
+  return ctx.aggregates.some((agg) => {
+    const dtFields = new Set(
+      agg.fields
+        .filter((f) => {
+          const t = f.type.kind === "optional" ? f.type.inner : f.type;
+          return t.kind === "primitive" && t.name === "datetime";
+        })
+        .map((f) => snake(f.name)),
+    );
+    if (dtFields.size === 0) return false;
+    return agg.operations.some((op) =>
+      op.statements.some(
+        (st) =>
+          (st.kind === "assign" || st.kind === "add" || st.kind === "remove") &&
+          dtFields.has(snake(st.target.segments[0] ?? "")),
+      ),
+    );
+  });
+}
+
+/** `__truncate_dt/1` — the second-precision guard for a `:utc_datetime` column
+ *  written through an OPERATION's `force_change` persist line.
+ *
+ *  `now()` renders to `DateTime.utc_now()`, which carries MICROSECONDS, and
+ *  `force_change` bypasses the cast that would drop them — so Ecto refuses the
+ *  dump with `** (ArgumentError) :utc_datetime expects microseconds to be
+ *  empty`, surfacing as a raw 500.  `stamp-emit` (B7), `audit-emit` and
+ *  `provenance-emit` each already truncate their own `:utc_datetime` writes;
+ *  this is the same rule for the operation-assignment arm, which was the one
+ *  that never reached it.  Found by the caller-census drain: `softDelete()`
+ *  (`deletedAt := now()`) got its first runtime caller and 500'd. */
+function renderTruncateDtHelper(): string {
+  return `  # Second-precision guard for a \`:utc_datetime\` column assigned by an
+  # operation body.  \`now()\` yields microsecond precision and \`force_change\`
+  # skips casting, so Ecto would refuse the dump; truncating here matches what
+  # the stamp / audit / provenance writers already do.
+  defp __truncate_dt(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
+  defp __truncate_dt(%NaiveDateTime{} = dt), do: NaiveDateTime.truncate(dt, :second)
+  defp __truncate_dt(other), do: other`;
+}
+
 /** The private helper a context module emits when a named op mutates a RELATIONAL
  *  containment.  Normalises the mutated part-struct list to `put_assoc`-ready
  *  maps: a bare part STRUCT with a nil PK is NOT inserted by `put_assoc` (Ecto
@@ -724,7 +820,10 @@ function renderExternOpFunction(
   // stay inside the `params` map the hook receives (no unused-var warning).
   const paramBinds = op.params
     .filter((p) => op.statements.some((s) => stmtUsesParam(s, p.name)))
-    .map((p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})\n`)
+    .map(
+      (p) =>
+        `    ${snake(p.name)} = ${coerceOpParam(`Map.get(params, ${JSON.stringify(p.name)})`, p.type)}\n`,
+    )
     .join("");
   // Re-assert the aggregate's cross-field invariants after the hook mutates and
   // before the write (D3c) — byte-identical when the aggregate has none.
@@ -810,7 +909,8 @@ function renderNamedOpFunction(
   // pipeline reads it — so it needs no such guard.)
   const usedParams = op.params.filter((p) => op.statements.some((s) => stmtUsesParam(s, p.name)));
   const paramBinds = usedParams.map(
-    (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
+    (p) =>
+      `    ${snake(p.name)} = ${coerceOpParam(`Map.get(params, ${JSON.stringify(p.name)})`, p.type)}`,
   );
 
   // S5a: a body that `emit`s a domain event is restructured to persist-then-

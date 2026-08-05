@@ -52,9 +52,16 @@ describe("vanilla — custom-find HTTP surface", () => {
     // its declared OpenAPI `findOptional → [404]`), not a schema-invalid 200
     // `null` body.
     expect(ctl).toContain("def latest(conn, _params) do");
-    expect(ctl).toContain(
-      'ProblemDetails.problem_response(conn, 404, "Not Found", "Order not found")',
-    );
+    // UPDATED 2026-08-05 — the `detail` is the canonical `"not_found"` TOKEN.
+    // It used to be `"<Agg> not found"`, a sentence that reads like RS-27's
+    // by-id form but carries no id and matched no other backend; RS-27 scopes
+    // the find miss OUT of the sentence and keeps the token, which
+    // node/python/java/dotnet all send.  Elixir had two spellings for one 404
+    // in one controller (this arm, and `"Not Found"` on the `T option` arm);
+    // both now reach the shared producer.  Surfaced by the caller census's
+    // first callers for the optional finds.
+    expect(ctl).toContain('ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")');
+    expect(ctl).not.toContain('"Order not found"');
     expect(ctl).not.toContain("{:ok, nil} -> json(conn, nil)");
   });
 });

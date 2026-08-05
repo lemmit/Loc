@@ -15,6 +15,7 @@ import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 import type { ReturnUnionSpec } from "../cqrs/controller.js";
+import { dotnetFindAbsenceThrow } from "./common.js";
 
 /** Controller action method name = PascalCase of the shared operationId,
  *  so Program.cs's `CustomOperationIds` (lower-first of the action name)
@@ -179,8 +180,18 @@ function absentReturnLines(
   ua:
     | Extract<ControllerShape["finds"][number]["unionAbsent"], { kind: "error" }>
     | { kind: "none" },
+  ns: string,
 ): string[] {
-  if (ua.kind === "none") return ["            return NotFound();"];
+  // RS-22/RS-27 — a `none` absence THROWS, so `DomainExceptionFilter` renders
+  // the envelope.  This used to `return NotFound();`: ASP.NET's own bare 404,
+  // which never reaches the filter and is rendered by `ProblemDetailsFactory`
+  // instead — wrong `type` (rfc9110 §15.5.5, not `about:blank`), null `detail`,
+  // null `instance`, plus an injected `traceId` the envelope must not carry.
+  // The identical defect RS-27 fixed on the by-id read, at the arm that reads
+  // `null` and answers locally; it also made ONE controller emit two different
+  // wires for shapes `docs/payloads.md` declares wire-identical, since the
+  // `error`-variant branch below hand-builds a correct ProblemDetails.
+  if (ua.kind === "none") return [`            ${dotnetFindAbsenceThrow(ns)}`];
   const detail = JSON.stringify(ua.title);
   if (!ua.resource) {
     return [
@@ -262,14 +273,21 @@ export function renderController(
     const ua = f.unionAbsent;
     const returnLines =
       f.returnShape === "optional"
-        ? ["        return result is null ? NotFound() : Ok(result);"]
+        ? [
+            // RS-22/RS-27 — same repair as the `none` arm: an OPTIONAL find
+            // (`find byEmail(...): Customer?`) is wire-identical to
+            // `Customer option`, so its miss must carry the same five-member
+            // envelope rather than ASP.NET's framework-default one.
+            `        if (result is null) ${dotnetFindAbsenceThrow(ns)}`,
+            "        return Ok(result);",
+          ]
         : ua
           ? [
               // Union find: the handler yields the success `<Agg>Response` or
               // null; a null maps to the absent variant's status (exception-less
               // §4), a value returns the success variant directly at 200.
               "        if (result is null)",
-              ...absentReturnLines(ua),
+              ...absentReturnLines(ua, ns),
               "        return Ok(result);",
             ]
           : ["        return Ok(result);"];

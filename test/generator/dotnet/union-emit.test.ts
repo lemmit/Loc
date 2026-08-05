@@ -80,3 +80,77 @@ describe("dotnet generator — discriminated-union finds (P4c)", () => {
     expect(ctrl).toContain("[ProducesResponseType(typeof(ProblemDetails), 404)]");
   });
 });
+
+// ---------------------------------------------------------------------------
+// RS-22/RS-27 — a FIND-ABSENCE 404 goes through the shared producer.
+//
+// Both arms below used to `return NotFound();` — ASP.NET's own bare 404, which
+// never reaches `DomainExceptionFilter` and is rendered by
+// `ProblemDetailsFactory` instead.  That is FOUR wrong members at once against
+// the golden envelope: `type` = the rfc9110 §15.5.5 URI rather than
+// `about:blank`, `detail` = null rather than the `"not_found"` token,
+// `instance` = null rather than the request path, plus an injected `traceId`
+// the envelope must not carry.  RS-22 names exactly this factory behaviour and
+// records dotnet as CONFORMING — because the arms nobody had converted were the
+// arms nobody had CALLED.
+//
+// The controller emitter is SHARED between the EF and Dapper adapters (its only
+// `usingDapper` branch is the destroy FK catch), so both legs carried it.
+// Found 2026-08-05 on the dapper leg, one backend over from the identical java
+// defect: the caller census named these finds as zero-caller routes, the first
+// callers drove their miss paths, and all 28 of the leg's wire divergences —
+// across `union-find-absence`, `inheritance`, `provenance`, `audited` and
+// `wire-contract` — were this one bug.
+// ---------------------------------------------------------------------------
+
+const ABSENCE_SRC = `
+  context Orders {
+    aggregate Order { code: string }
+    error Missing { resource: string }
+    repository Orders for Order {
+      find optionFind(code: string): Order option
+      find nullableFind(code: string): Order?
+      find errorFind(code: string): Order or Missing
+      find listFind(code: string): Order[]
+    }
+  }
+`;
+
+describe("dotnet generator — find-absence 404 (RS-22/RS-27)", () => {
+  it("throws through the shared producer for BOTH the `option` and the `?` find", async () => {
+    const map = await generateDotnet(await parseValid(ABSENCE_SRC));
+    const ctrl = find(map, "OrdersController.cs");
+
+    // Premise: all four find shapes really are on this controller, so the
+    // assertions below are about the ABSENCE arm and not about a find the
+    // emitter dropped.
+    for (const route of ["option_find", "nullable_find", "error_find", "list_find"]) {
+      expect(ctrl).toContain(`[HttpGet("${route}")]`);
+    }
+
+    // The two shapes that answered the framework 404.
+    const throws = ctrl.match(
+      /throw new global::[\w.]*Domain\.Common\.AggregateNotFoundException\("not_found"\);/g,
+    );
+    expect(throws?.length).toBe(2);
+
+    // NOT the framework 404, anywhere in the controller.  `NotFound()` bypasses
+    // `DomainExceptionFilter`, so it can never carry the RS-22 envelope.
+    expect(ctrl).not.toContain("NotFound()");
+
+    // The declared-`error` variant keeps its own mapped status + `resource`
+    // extension (RS-19) — the fix must not collapse the two absence classes.
+    expect(ctrl).toContain('problem.Extensions["resource"] = "Order";');
+  });
+
+  it("a LIST find is untouched — it has no absence to answer", async () => {
+    // Scope guard: `Order[]` answers `[]`, never a 404 (RS-23).  Without this,
+    // a fix that threw on every null-ish find would pass the test above.
+    const ctrl = find(await generateDotnet(await parseValid(ABSENCE_SRC)), "OrdersController.cs");
+    const arm = ctrl.slice(ctrl.indexOf('[HttpGet("list_find")]'));
+    const next = arm.indexOf("[HttpGet", 1);
+    const body = next === -1 ? arm : arm.slice(0, next);
+    expect(body).toContain("return Ok(result);");
+    expect(body).not.toContain("AggregateNotFoundException");
+  });
+});

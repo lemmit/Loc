@@ -26,6 +26,7 @@ import type {
   StmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
@@ -107,6 +108,15 @@ export function persistPutBodies(
     if (f.length > 0 && !assignedFields.includes(f)) assignedFields.push(f);
   }
   const provNames = new Set(provenancedFieldsOf(agg).map((f) => snake(f.name)));
+  // Second-precision `:utc_datetime` columns — see the truncation note below.
+  const datetimeColumns = new Set(
+    agg.fields
+      .filter((f) => {
+        const t = f.type.kind === "optional" ? f.type.inner : f.type;
+        return t.kind === "primitive" && t.name === "datetime";
+      })
+      .map((f) => snake(f.name)),
+  );
   const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
   return [
     ...assignedFields.map((f) => {
@@ -143,7 +153,24 @@ export function persistPutBodies(
       // (`Ecto.Type.equal?`), leaving an EMPTY changeset — `Repo.update` then runs
       // no SQL and the operation's write is silently lost.  `force_change/3` stores
       // it regardless, so the assigned column actually persists.
-      return `Ecto.Changeset.force_change(:${f}, record.${f})`;
+      //
+      // A `datetime` column is `:utc_datetime` (SECOND precision — schema-emit's
+      // `mapTypeToEcto`), and `force_change` bypasses casting, so a microsecond
+      // DateTime — which `now()` renders to (`DateTime.utc_now()`) — makes Ecto
+      // refuse the DUMP:
+      //
+      //     ** (ArgumentError) :utc_datetime expects microseconds to be empty,
+      //        got: ~U[2026-08-05 19:32:36.811626Z]
+      //
+      // …a raw 500 on the operation.  `stamp-emit` already truncates for exactly
+      // this reason (its `stampFieldIsDatetime` seam, B7), and `audit-emit` /
+      // `provenance-emit` truncate their own `:utc_datetime` writes — the
+      // OPERATION assignment path was the one arm that never reached the same
+      // rule.  Found 2026-08-05 by the caller-census drain: `softDelete()`
+      // (`deletedAt := now()`) got its first runtime caller and 500'd.
+      return datetimeColumns.has(f)
+        ? `Ecto.Changeset.force_change(:${f}, __truncate_dt(record.${f}))`
+        : `Ecto.Changeset.force_change(:${f}, record.${f})`;
     }),
     ...provColumns.map((c) => `Ecto.Changeset.force_change(:${c}, record.${c})`),
   ];
@@ -590,6 +617,27 @@ export function renderReturningOpFunction(
     relationalContainments,
   );
   const putBlock = putBodies.map((b) => `\n      |> ${b}`).join("");
+
+  // The `versioned` counter bump, on the RETURNING-operation write path.
+  //
+  // `versioned` declares `version: int token = 1`, incremented per command
+  // (`src/macros/prelude.ts`), and the named-operation path in `context-emit.ts`
+  // already emits `change(%{version: record.version + 1})` — its comment says it
+  // "brings the relational/embedded path in line" with the document path.  This
+  // arm was never brought in line: it emitted a bare `change(%{})`, so an
+  // exception-less `T or Error` operation persisted its field write and left
+  // `version` untouched.
+  //
+  // Not the RS-20 shape (java's Hibernate `@Version` tracks ROW DIRTINESS, so it
+  // misses a bump only when nothing actually changed).  Here the write is a real
+  // change and the bump is simply absent from one emitter arm — elixir alone,
+  // against a capability the other four backends honour, so it is a fix rather
+  // than a waiver.
+  //
+  // Found 2026-08-05 by the caller-census drain: `corpus/operation-returns`'
+  // `accept()` (`reserved := true`, returning `: string or NotFound`) read back
+  // `version: 2` where every other backend read 3.
+  const versionBump = aggregateIsVersioned(agg) ? `%{version: record.version + 1}` : "%{}";
   // A trailing NON-aggregate success return (shape C), re-rendered to sit inside
   // the `{:ok, saved}` commit arm over the persisted struct — a preceding
   // `record = saved` rebinds `record`, so the return's `this.*` reads reflect the
@@ -634,7 +682,7 @@ export function renderReturningOpFunction(
             // so a rollback drops them too.
             `    changeset =`,
             `      record`,
-            `      |> Ecto.Changeset.change(%{})${putBlock}`,
+            `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
             ``,
             `    tx_result =`,
             `      ${appModule}.Repo.transaction(fn ->`,
@@ -660,7 +708,7 @@ export function renderReturningOpFunction(
         : [
             `    changeset =`,
             `      record`,
-            `      |> Ecto.Changeset.change(%{})${putBlock}`,
+            `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
             ``,
             `    ${appModule}.Repo.transaction(fn ->`,
             `      case ${repoMod}.persist_change(changeset) do`,
@@ -680,7 +728,7 @@ export function renderReturningOpFunction(
         [
           `    changeset =`,
           `      record`,
-          `      |> Ecto.Changeset.change(%{})${putBlock}`,
+          `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
           ``,
           `    tx_result =`,
           `      ${appModule}.Repo.transaction(fn ->`,
@@ -714,7 +762,7 @@ export function renderReturningOpFunction(
       ? [
           `    changeset =`,
           `      record`,
-          `      |> Ecto.Changeset.change(%{})${putBlock}`,
+          `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
           ``,
           `    case ${repoMod}.persist_change(changeset) do`,
           `      {:ok, saved} ->`,
@@ -728,7 +776,7 @@ export function renderReturningOpFunction(
       : [
           `    changeset =`,
           `      record`,
-          `      |> Ecto.Changeset.change(%{})${putBlock}`,
+          `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
           ``,
           `    case ${repoMod}.persist_change(changeset) do`,
           `      {:ok, saved} -> {:ok, ${wireMap("saved", true)}}`,
@@ -744,7 +792,7 @@ export function renderReturningOpFunction(
     tailLines = [
       `    changeset =`,
       `      record`,
-      `      |> Ecto.Changeset.change(%{})${putBlock}`,
+      `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
       ``,
       `    case ${repoMod}.persist_change(changeset) do`,
       `      {:ok, saved} ->`,
@@ -762,7 +810,7 @@ export function renderReturningOpFunction(
     tailLines = [
       `    changeset =`,
       `      record`,
-      `      |> Ecto.Changeset.change(%{})${putBlock}`,
+      `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
       ``,
       `    case ${repoMod}.persist_change(changeset) do`,
       `      {:ok, saved} ->`,

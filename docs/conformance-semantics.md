@@ -809,6 +809,44 @@ the conforming backends, and the fix that established it.
   > in the shared producer (`emit/common.ts` → `JAVA_FIND_ABSENCE_THROW`);
   > `generator-java-api.test.ts` pins it, mutation-proven, with a list-find
   > scope guard. The `detail` token itself is unchanged and still out of scope.
+  >
+  > **And the same again on .NET, hours later (2026-08-05).** The dapper
+  > behavioural leg then reported **28 wire divergences, all one bug**: both
+  > .NET find-absence arms `return NotFound();` — ASP.NET's own bare 404, which
+  > never reaches `DomainExceptionFilter` and is rendered by
+  > `ProblemDetailsFactory` instead. Four wrong members at once, on every
+  > declared-find miss across five cases (`by_sku`, `by_reference` ×2,
+  > `by_code`, `by_email`, `maybe_first`): `type` = the rfc9110 §15.5.5 URI
+  > rather than `about:blank`, `detail` = null rather than the token,
+  > `instance` = null rather than the request path, plus an injected `traceId`.
+  > RS-22 names that factory behaviour *exactly* and still listed dotnet as
+  > conforming — because the arms nobody had converted were the arms nobody had
+  > CALLED. The controller emitter is **shared** between the EF and Dapper
+  > adapters (its only `usingDapper` branch is the destroy FK catch — the two
+  > controllers are otherwise byte-identical), so the EF leg carried it
+  > identically; the dapper leg simply reported first. Fixed the same way
+  > (`emit/common.ts` → `dotnetFindAbsenceThrow`), pinned in
+  > `union-emit.test.ts` with the same list-find scope guard, and both legs
+  > re-booted to 0 divergences on all five cases.
+  >
+  > **And elixir, the same day, with TWO spellings at once.** Its `T?` arm sent
+  > `"<Aggregate> not found"` — a sentence that *reads* like this rule's by-id
+  > form but carries no id — and its `T option` arm sent `"Not Found"` (its
+  > `problem_variant/5` helper sets `detail: title`). Nine of the elixir leg's
+  > eleven wire divergences were those two arms, across `union-find-absence`,
+  > `inheritance`, `provenance`, `audited` and `wire-contract`. Both now call
+  > `ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")` —
+  > the same shared producer the by-id read already used.
+  >
+  > **Four backends, one rule, four separate discoveries** — and in each the
+  > defect sat beside a *correct* sibling arm in the same file: java's
+  > `error`-variant branch built a real ProblemDetail three lines from the empty
+  > one; .NET's did the same; elixir's two arms disagreed with *each other*.
+  > That is the shape to look for when adding a route class: not "is the
+  > producer right", but "does **every** arm reach it". Only node and python —
+  > the two that never hand-rolled a find 404 — were right from the start, which
+  > is the rule restated: the arms that were wrong are exactly the arms that
+  > answered locally instead of reaching the producer.
 - **The real rule: don't hand-roll a 404.** This was not five backends inventing
   five strings. **Two agreed out of the box**, because on each the message comes
   from one shared producer — the repository's `getById`

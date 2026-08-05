@@ -112,4 +112,41 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     reason:
       "RS-20 — java skips the version bump on an IDEMPOTENT command (re-assigning the value a field already holds leaves the row un-dirty, so @Version never increments)",
   },
+  // RS-18 / docs/provenance.md — elixir does not re-capture a provenanced
+  // field's lineage when the CRUDISH UPDATE writes it, so the row keeps the
+  // lineage of the previous write.  On `corpus/provenance` the update sets
+  // `total: 120` directly and the read-back still reports `reprice`'s leaves:
+  //
+  //   golden  [{path: "total",  value: 120}]
+  //   elixir  [{path: "qty", value: 3}, {path: "price", value: 40},
+  //            {path: "discount", value: 0}]
+  //
+  // node/python/java/dotnet all match the golden, and `docs/provenance.md` is
+  // explicit — "inline trace capture at EVERY provenanced write site" — so
+  // elixir is the outlier against a declared contract, not a disagreement about
+  // semantics.
+  //
+  // WAIVED rather than fixed because the cause is not a missing capture line,
+  // it is a different WRITE PATH.  Every other backend runs the synthesized
+  // `operation update(...)` body (node emits a real `update()` domain method
+  // with the capture inlined — `snapshotId "3a1011f0"`, `inputs [{path:
+  // "total"}]`); elixir instead delegates `update_order/3` straight to
+  // `OrderRepository.update` → `OrderChangeset.update_changeset(attrs)`
+  // (`repository-emit.ts` §433), so the operation body never executes at all.
+  // Provenance is the observable symptom; ANY body semantics on a synthesized
+  // update is in the same blast radius, and the changeset path was chosen
+  // deliberately (it is what makes the RS-26 default/relax rules work there).
+  //
+  // Exit: give the elixir crudish update the operation-body path (or capture
+  // provenance on the changeset path with the write-site snapshot ids the IR
+  // already carries) — a mission of its own, not a coverage-drain edit.  This
+  // waiver ratchets: it fails as stale the moment that lands.
+  {
+    backends: ["elixir"],
+    cases: ["provenance"],
+    path: "$.total_provenance.inputs",
+    kinds: ["value"],
+    reason:
+      "RS-18 — elixir's crudish update runs a changeset, not the operation body, so a provenanced field keeps its previous lineage",
+  },
 ];

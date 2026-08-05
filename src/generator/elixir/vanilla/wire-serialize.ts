@@ -424,10 +424,38 @@ export function renderWireSerialize(
   // non-Decimal through untouched (a jsonb-sourced value may already be a
   // float/integer).
   if (usedDecimal) {
+    // The BINARY clause is not defensive padding — it is the second writer.
+    // A value object persists as a plain `:map` (jsonb), and the two paths that
+    // write one disagree about the encoding of a decimal field:
+    //
+    //   - CREATE goes through the changeset cast, so the raw JSON number the
+    //     client sent (`100`) is what lands in the column;
+    //   - an OPERATION computes (`Decimal.add(...)`) and `force_change`s the
+    //     resulting map, so a `%Decimal{}` reaches Jason, which encodes a
+    //     Decimal as a STRING — the column then holds `"125"`.
+    //
+    // On the way back out the jsonb value is already a bare string, so the
+    // `%Decimal{}` clause never matches and the wire shipped `"125"` where the
+    // other four backends ship `125` — an RS-24 break visible only AFTER an
+    // operation had written the value.  Parsing the binary here reproduces the
+    // oracle from either storage form.  Scoped by TYPE: this helper is only
+    // applied to entries the emitter already typed as a plain `decimal`, so
+    // `money` (which must stay a fixed-scale string, RS-12) is untouched — it
+    // rides `__money_round/1` instead.
+    //
+    // Found 2026-08-05 by the caller-census drain: `corpus/domain-services`'
+    // `deposit`/`withdraw` were driven for the first time and the balance came
+    // back quoted.
     helpers.set(
       "__decimal_num",
       `  defp __decimal_num(nil), do: nil\n\n` +
         `  defp __decimal_num(%Decimal{} = dec), do: Decimal.to_float(dec)\n\n` +
+        `  defp __decimal_num(bin) when is_binary(bin) do\n` +
+        `    case Decimal.parse(bin) do\n` +
+        `      {dec, ""} -> Decimal.to_float(dec)\n` +
+        `      _ -> bin\n` +
+        `    end\n` +
+        `  end\n\n` +
         `  defp __decimal_num(other), do: other`,
     );
   }

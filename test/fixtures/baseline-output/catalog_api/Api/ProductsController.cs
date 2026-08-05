@@ -104,7 +104,8 @@ public sealed class ProductsController : ControllerBase
     public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string sku)
     {
         var result = await _mediator.Send(new BySkuQuery(sku));
-        return result is null ? NotFound() : Ok(result);
+        if (result is null) throw new global::CatalogApi.Domain.Common.AggregateNotFoundException("not_found");
+        return Ok(result);
     }
 
 }
