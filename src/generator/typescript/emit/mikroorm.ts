@@ -65,6 +65,7 @@ import {
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { guidFromStringSelfScope } from "../../../ir/util/tenant-stance.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -83,6 +84,7 @@ import {
 } from "../repository-document-builder.js";
 import { hydrateConcreteFromSharedRow, hydrateRootExpr } from "../repository-find-builder.js";
 import { hydrateEntityExpr } from "../repository-find-hydrate.js";
+import { GUID_CLAIM_RE_LITERAL } from "../repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "../repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "../repository-port-builder.js";
 import {
@@ -963,6 +965,17 @@ function booleanColumnName(e: ExprIR): string | null {
  *  false`), and a general `!<compound>` (→ `$not: {...}`). */
 function predicateEntry(e: ExprIR): string {
   const inner = e.kind === "paren" ? e.inner : e;
+  // Registry self-scope against a `string` tenancy claim (M-T3.7(c)) — the
+  // MikroORM twin of the drizzle guard.  Binding the raw claim to a `uuid`
+  // column makes Postgres reject the statement (`invalid input syntax for type
+  // uuid`), so a malformed claim answers an ordinary bad token with a 500.
+  // `{ id: null }` is MikroORM's `id IS NULL`, which no NOT NULL primary key
+  // matches — the same empty read a foreign-but-well-formed claim gives.
+  const selfScope = guidFromStringSelfScope(inner);
+  if (selfScope) {
+    const claim = `requireCurrentUser().${selfScope.claim}`;
+    return `id: ${GUID_CLAIM_RE_LITERAL}.test(${claim}) ? ${claim} : null`;
+  }
   const boolCol = booleanColumnName(inner);
   if (boolCol) return `${boolCol}: true`;
   if (inner.kind === "unary" && inner.op === "!") {

@@ -8,6 +8,8 @@ import type {
 import { type DurationExprIR, durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
+  guidClaimAccessorName,
+  guidFromStringSelfScope,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -243,6 +245,22 @@ function criteriaPathExpr(e: ExprIR, ctx: CriteriaCtx): string | null {
 function binary(e: Extract<ExprIR, { kind: "binary" }>, ctx: CriteriaCtx): string {
   if (e.op === "&&") return `cb.and(${bool(e.left, ctx)}, ${bool(e.right, ctx)})`;
   if (e.op === "||") return `cb.or(${bool(e.left, ctx)}, ${bool(e.right, ctx)})`;
+  // Registry self-scope against a `string` tenancy claim (M-T3.7(c)), the
+  // Criteria twin of the @Query SpEL in render-jpql.ts.  Two things the generic
+  // path below gets wrong here: the entity key is an `@EmbeddedId` record, so
+  // the comparison must navigate into its `value` component (`root.get("id")
+  // .get("value")`, matching JPQL's `e.id.value`), and the claim must arrive as
+  // a UUID — the principal's `<claim>AsUuid()` accessor, which is null for an
+  // absent OR malformed claim, so a bad token reads empty instead of throwing.
+  {
+    const selfScope = guidFromStringSelfScope(e);
+    if (selfScope) {
+      ctx.imports.add("java.util.UUID");
+      const idPath = `root.get("id").<UUID>get("value")`;
+      const claim = `(currentUser == null ? null : currentUser.${guidClaimAccessorName(selfScope.claim)}())`;
+      return `cb.equal(${idPath}, ${claim})`;
+    }
+  }
   const isNull = (x: ExprIR): boolean => x.kind === "literal" && x.lit === "null";
   if ((e.op === "==" || e.op === "!=") && (isNull(e.left) || isNull(e.right))) {
     const operand = isNull(e.left) ? e.right : e.left;
