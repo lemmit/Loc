@@ -33,22 +33,6 @@ function _contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | u
 
 export const ectoPersistenceAdapter: PersistenceAdapter = {
   name: "ecto",
-  // ecto emits a full event-sourced store (struct + fold + `<agg>_event_log`
-  // Ecto schema + load-fold-append repository — see
-  // `vanilla/eventsourced-emit.ts`), so it hosts BOTH the `state` and
-  // `eventLog` strategies.
-  supportedStrategies: ["state", "eventLog"],
-
-  supports(storageType, kind, persistenceStrategy) {
-    if (persistenceStrategy === "eventLog") {
-      return storageType === "postgres" && kind === "eventLog";
-    }
-    return (
-      persistenceStrategy === "state" &&
-      storageType === "postgres" &&
-      ["state", "snapshot", "replica"].includes(kind)
-    );
-  },
 
   emitProjectDeps(_ctx: EmitCtx): Lines {
     // Plain Ecto/Postgrex.  The rest of `mix.exs` (phoenix / bandit /

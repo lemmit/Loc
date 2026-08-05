@@ -64,8 +64,10 @@ describe("cqrs StyleAdapter — dotnet (real)", () => {
     expect(resolved.name).toBe("cqrs");
   });
 
-  it("answers capability fields directly", () => {
-    expect(cqrsStyleAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
+  it("declares the layouts the validator gates against", () => {
+    // `supportedLayouts` is LIVE: it reaches the deployable R3 check through
+    // the adapter-metadata mirror, so this value has consequences.  Its
+    // sibling `supportedStrategies` was read by nothing and is gone.
     expect(cqrsStyleAdapter.supportedLayouts).toEqual(["byLayer", "byFeature"]);
   });
 

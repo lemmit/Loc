@@ -6,10 +6,11 @@
 // As with the dotnet `dapper` adapter, the orchestrator (`emit.ts`) branches on
 // the deployable's resolved `persistence` key and emits the MikroORM `db/` layer
 // directly (entities + config + repository + connection wiring — see
-// `generator/typescript/emit/mikroorm.ts`); this adapter publishes the
-// capability surface the validator reads to accept + gate the selection
-// (`supports`), and wraps the same emitters on the formal contract for the
-// eventual clean orchestrator dispatch.
+// `generator/typescript/emit/mikroorm.ts`); this adapter carries the registry
+// key + project deps and wraps the same emitters on the formal contract for the
+// eventual clean orchestrator dispatch.  (The `supports()` "capability surface
+// the validator reads" named here was read by nothing and is gone — the live
+// gate is `validateMikroOrmSupport`, below.)
 //
 // The IR validator (`validateMikroOrmSupport` in `ir/validate/checks/
 // system-checks.ts`) accepts the wired surface — relational + event-sourced
@@ -46,20 +47,6 @@ const _splitLines = (s: string): Lines => s.split("\n");
 
 export const mikroOrmPersistenceAdapter: PersistenceAdapter = {
   name: "mikroorm",
-  // State + event-sourced (appliers, MikroORM edition): the `<agg>_events`
-  // stream + fold reuse the persistence-agnostic domain/CQRS layer.
-  supportedStrategies: ["state", "eventLog"],
-
-  supports(storageType, kind, persistenceStrategy) {
-    if (persistenceStrategy === "eventLog") {
-      return storageType === "postgres" && kind === "eventLog";
-    }
-    return (
-      persistenceStrategy === "state" &&
-      ["postgres"].includes(storageType) &&
-      ["state", "replica"].includes(kind)
-    );
-  },
 
   emitProjectDeps(_ctx: EmitCtx): Lines {
     return [...MIKRO_DEPS];

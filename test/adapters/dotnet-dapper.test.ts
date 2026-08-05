@@ -59,8 +59,13 @@ describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
   it("is registered as a real persistence adapter", () => {
     expect(adaptersFor("dotnet")!.persistence.dapper).toBe(dapperPersistenceAdapter);
     expect(dapperPersistenceAdapter.name).toBe("dapper");
-    expect(dapperPersistenceAdapter.supportedShapes).toEqual(["relational"]);
-    expect(dapperPersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
+    // This test used to also pin `supportedShapes` to ["relational"].  That
+    // was FALSE from M-T6.9 onward — dapper emits document (`data jsonb`) and
+    // embedded shapes — and stayed green for the whole time it was wrong,
+    // because the assertion compared the declaration to itself.  The field is
+    // gone; the shapes a backend can emit are gated by PLATFORM, via
+    // `PLATFORM_SAVING_SHAPES`.  Real dapper emission is covered below and by
+    // `corpus-dotnet-dapper-build.test.ts`.
   });
 
   it("emits a Dapper Infrastructure instead of EF Core", async () => {

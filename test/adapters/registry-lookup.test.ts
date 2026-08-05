@@ -41,12 +41,16 @@ describe("adapter registry — lookup", () => {
     "dotnet",
     "java",
     "elixir",
-  ] as const)("%s default eventLog adapter is real and advertises eventLog", (platform) => {
+  ] as const)("%s default eventLog adapter is a REAL adapter, not a stub", (platform) => {
     const name = defaultsFor(platform)!.persistence.eventLog;
-    // `availableAdapterNames` lists REAL adapters only (stubs excluded).
+    // `availableAdapterNames` lists REAL adapters only (stubs excluded).  This
+    // is the whole content of the test (DEBT-20): an event-sourced aggregate
+    // with no explicit `persistence:` must land on an adapter that actually
+    // emits the store.  The old second assertion — that the adapter's own
+    // `supportedStrategies` array contained "eventLog" — compared a
+    // declaration to itself and has been dropped with the field.
     expect(availableAdapterNames(platform, "persistence")).toContain(name);
-    const adapter = adaptersFor(platform)!.persistence[name];
-    expect(adapter.supportedStrategies).toContain("eventLog");
+    expect(adaptersFor(platform)!.persistence[name].name).toBe(name);
   });
 
   it("exposes the node defaults", () => {
@@ -80,10 +84,9 @@ describe("adapter registry — lookup", () => {
   it("reads an explicit `persistence: dapper` from the menu", () => {
     const dapper = adaptersFor("dotnet")!.persistence.dapper;
     expect(dapper.name).toBe("dapper");
-    // Capability fields answer; emit throws (verified in stub-throws.test.ts).
-    expect(dapper.supports("postgres", "state", "state")).toBe(true);
-    // Event sourcing (appliers, Dapper edition) is now supported.
-    expect(dapper.supports("postgres", "eventLog", "eventLog")).toBe(true);
+    // It is a REAL adapter (in the validator's menu), not a reserved stub —
+    // which is what "reads it from the menu" is actually asserting.
+    expect(availableAdapterNames("dotnet", "persistence")).toContain("dapper");
   });
 
   it("a frontend platform has no adapter menu; style resolution throws", () => {
@@ -96,18 +99,22 @@ describe("adapter registry — lookup", () => {
       const menu = adaptersFor(platform)!;
       for (const [name, adapter] of Object.entries(menu.persistence)) {
         expect(adapter.name).toBe(name);
-        expect(Array.isArray(adapter.supportedStrategies)).toBe(true);
-        expect(typeof adapter.supports).toBe("function");
+        // `emitProjectDeps` is the contract's one live emit method; the old
+        // `supportedStrategies` / `supports` shape checks tested declarations
+        // nothing read.
+        expect(typeof adapter.emitProjectDeps).toBe("function");
       }
     }
   });
 
-  it("every registered style adapter declares strategies + layouts", () => {
+  it("every registered style adapter declares its layouts", () => {
     for (const platform of ["dotnet", "node", "elixir"] as const) {
       const menu = adaptersFor(platform)!;
       for (const [name, adapter] of Object.entries(menu.styles)) {
         expect(adapter.name).toBe(name);
-        expect(Array.isArray(adapter.supportedStrategies)).toBe(true);
+        // `supportedLayouts` is LIVE — it reaches the validator's R3 check via
+        // the adapter-metadata mirror (see style-surface.ts).  Its dead
+        // sibling `supportedStrategies` was removed.
         expect(Array.isArray(adapter.supportedLayouts)).toBe(true);
       }
     }

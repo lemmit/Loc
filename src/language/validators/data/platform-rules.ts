@@ -91,7 +91,7 @@ export function platformOwnsBackend(platform: string | undefined): boolean {
 }
 
 /** Saving shapes (D-DOCUMENT-AXIS `shape: …`) the given platform can
- *  emit today — the capability tier of the supportedShapes validator.
+ *  emit today — the capability tier of the saving-shape validator.
  *  Resolves a `family@version` pin to its family first.  `undefined` for
  *  frontend / unknown platforms (they own no persistence). */
 export function platformSavingShapes(

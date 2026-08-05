@@ -71,20 +71,49 @@ export function readableProjections(
   return out;
 }
 
+/** Per-framework emission leaves.
+ *
+ *  Every one is a STRING (or a boolean picking between two fixed spellings)
+ *  substituted into otherwise identical output — which is the test for staying
+ *  in this shared module rather than forking, per the decision recorded above.
+ *  Defaults are React's, so every existing caller stays byte-identical. */
+export interface ProjectionsModuleOptions {
+  /** TanStack Query package specifier — `@tanstack/{react,vue,svelte}-query`. */
+  queryPackage?: string;
+  /** Query factory imported from it.  React/Vue call it `useQuery`; Svelte
+   *  renamed the whole family to `create*` for the store-flavoured API. */
+  queryFactory?: string;
+  /** Whether the factory takes a THUNK returning the options object
+   *  (`createQuery(() => ({…}))`) rather than the object itself.  Svelte 5's
+   *  runes API needs the thunk so the options re-read reactively. */
+  thunkOptions?: boolean;
+  /** Import specifier for the shared `moneySchema`, relative to this module.
+   *  React/Vue put it two hops up from `src/api/`; Svelte's module lives at
+   *  `src/lib/api/`, one hop below `src/lib/schemas.ts`. */
+  schemasImport?: string;
+}
+
 export function buildProjectionsApiModule(
   contexts: BoundedContextIR[],
-  options: { queryPackage?: string } = {},
+  options: ProjectionsModuleOptions = {},
 ): string {
   const queryPackage = options.queryPackage ?? "@tanstack/react-query";
+  const queryFactory = options.queryFactory ?? "useQuery";
+  const schemasImport = options.schemasImport ?? "../lib/schemas";
+  // `createQuery(() => ({ … }))` vs `useQuery({ … })` — the only structural
+  // divergence, and it is two fixed spellings rather than a shape the caller
+  // supplies, so it stays a boolean instead of a renderer seam.
+  const openOptions = options.thunkOptions ? "() => ({" : "{";
+  const closeOptions = options.thunkOptions ? "}));" : "});";
   const projections = readableProjections(contexts);
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
-  lines.push(`import { useQuery } from "${queryPackage}";`);
+  lines.push(`import { ${queryFactory} } from "${queryPackage}";`);
   lines.push(`import { api } from "./client";`);
   if (contexts.some(contextUsesMoney)) {
-    lines.push(`import { moneySchema } from "../lib/schemas";`);
+    lines.push(`import { moneySchema } from "${schemasImport}";`);
   }
   lines.push("");
 
@@ -128,13 +157,13 @@ export function buildProjectionsApiModule(
     // A singleton read takes no arguments and no id: the projection IS the row.
     // `.parse` is a real boundary check, matching every other read hook.
     lines.push(`export function use${T}() {`);
-    lines.push(`  return useQuery({`);
+    lines.push(`  return ${queryFactory}(${openOptions}`);
     lines.push(`    queryKey: ["projections", "${slug}"],`);
     lines.push(`    queryFn: async () => {`);
     lines.push(`      const r = await api.get(\`/projections/${slug}\`);`);
     lines.push(`      return ${T}Response.parse(r);`);
     lines.push(`    },`);
-    lines.push(`  });`);
+    lines.push(`  ${closeOptions}`);
     lines.push(`}`);
     lines.push("");
   }

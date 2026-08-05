@@ -64,7 +64,7 @@
           {{{prevLabel}}}
         </Button>
         <Typography variant="body2" aria-live="polite">
-          Page {table.getState().pagination.pageIndex + 1} of {Math.max(table.getPageCount(), 1)}
+          {{{pageOfLabel}}}
         </Typography>
         <Button size="small" variant="outlined" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
           {{{nextLabel}}}

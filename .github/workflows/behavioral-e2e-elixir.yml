@@ -36,6 +36,7 @@ on:
       - 'package.json'
       - '.github/workflows/behavioral-e2e-elixir.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'src/ir/**'
       - 'src/generator/elixir/**'
@@ -66,10 +67,18 @@ concurrency:
   # went ~2 days without a single non-cancelled run. Matches the pattern
   # tenancy-e2e.yml / hono-oidc-e2e.yml already use to stay green under the
   # same cadence.
-  cancel-in-progress: false
+  # ...but on a PR ref a superseded push SHOULD cancel the stale run — only
+  # the latest commit gets gated, and a queued 15-20min Elixir boot from a
+  # dead SHA is pure runner-slot waste. The per-ref group keeps the two
+  # regimes from ever touching each other.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   behavioral-elixir:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     # 45 → 30. The old budget existed because this leg recompiled the ENTIRE hex
     # dep tree (phoenix/ecto/postgrex/open_api_spex/opentelemetry → grpcbox +

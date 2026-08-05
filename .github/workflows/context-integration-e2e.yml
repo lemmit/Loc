@@ -38,6 +38,7 @@ on:
       - 'package.json'
       - '.github/workflows/context-integration-e2e.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: *paths
   workflow_dispatch:
 
@@ -50,6 +51,10 @@ concurrency:
 
 jobs:
   context-integration:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:

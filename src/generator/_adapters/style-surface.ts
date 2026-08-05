@@ -9,7 +9,7 @@
 // same persistence library composes with multiple styles.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, OperationIR, PersistenceStrategy } from "../../ir/types/loom-ir.js";
+import type { AggregateIR, OperationIR } from "../../ir/types/loom-ir.js";
 import type { EmitCtx, EmittedArtifact, Lines } from "./types.js";
 
 /** Coarse layout-shape constraints a style requires.  Validator pairs
@@ -20,10 +20,22 @@ export type LayoutShape = "byLayer" | "byFeature";
 export interface StyleAdapter {
   /** Registry key — `style: <name>` resolves to this entry. */
   readonly name: string;
-  /** Aggregate persistence strategies this style can drive. */
-  readonly supportedStrategies: readonly PersistenceStrategy[];
-  /** Layouts this style supports.  The validator intersects with the
-   *  resolved `LayoutAdapter.name` to gate combinations. */
+  /** Layouts this style supports.  LIVE, but reached indirectly — a grep
+   *  for `.supportedLayouts` finds no read in `src/`, because the value
+   *  travels through the D-ADAPTER-HOME mirror rather than being read off
+   *  this object:
+   *
+   *    this declaration
+   *      → `adapter-metadata-consistency.test.ts` pins it against …
+   *      → `styleSupportedLayouts` in `platform/adapter-metadata.ts` (the
+   *        client-safe pure-data mirror the validator may import) …
+   *      → `resolveStyleLayoutCompat` (validators/data/platform-rules.ts)
+   *      → the deployable R3 check → `loom.platform-knob-style-layout-mismatch`.
+   *
+   *  Changing a value here fails the consistency test until the mirror
+   *  follows, and then changes what the validator rejects.  (Its dead
+   *  sibling `supportedStrategies` was removed — see persistence-surface.ts
+   *  for why the unread capability declarations went.) */
   readonly supportedLayouts: readonly LayoutShape[];
   /** HTTP / message-bus endpoint for an aggregate operation —
    *  controller / route entry that hands off to a handler or service.
@@ -60,7 +72,4 @@ export interface StyleAdapter {
 }
 
 /** Capability subset a stub still answers at registration time. */
-export type StyleCapabilities = Pick<
-  StyleAdapter,
-  "name" | "supportedStrategies" | "supportedLayouts"
->;
+export type StyleCapabilities = Pick<StyleAdapter, "name" | "supportedLayouts">;
