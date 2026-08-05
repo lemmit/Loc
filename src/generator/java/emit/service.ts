@@ -324,13 +324,18 @@ export function renderJavaService(
    *  never learns the row's state.  Operation params need no remapping here —
    *  the service already binds each one as a `var <name> = …` local above. */
   const requiresGateLines = (op: (typeof agg.operations)[number]): string[] =>
-    operationGates(op).map(
-      (g) =>
-        `        if (!(${renderJavaExpr(g.expr, {
-          thisName: "aggregate",
-          accessorProps: true,
-        })})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${g.source}`)});`,
-    );
+    operationGates(op).map((g) => {
+      // The gate's own expression imports (`java.util.Objects` for a string
+      // comparison, enum/id types, …) used to ride in on the ENTITY's
+      // `collectJavaStmtImports` sweep over `op.statements`.  The gate lives
+      // here now, so this file has to collect them — a `tsc`-green emitter can
+      // still emit Java that doesn't compile.
+      collectJavaExprImports(g.expr, imports);
+      return `        if (!(${renderJavaExpr(g.expr, {
+        thisName: "aggregate",
+        accessorProps: true,
+      })})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${g.source}`)});`;
+    });
   const whenGateLine = (op: (typeof agg.operations)[number]): string | null =>
     op.when
       ? `        if (!(${renderJavaExpr(op.when, { thisName: "aggregate", accessorProps: true })})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");`

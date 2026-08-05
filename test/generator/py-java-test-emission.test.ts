@@ -117,7 +117,7 @@ describe("Python domain-test emitter (renderPyTestsFile)", () => {
     expect(src).toContain('        p.rename("")');
   });
 
-  it("coerces typed create inputs and threads a synthetic actor into a gated op", async () => {
+  it("coerces typed create inputs and calls a gated op with no synthetic actor", async () => {
     const files = await generateSystemFiles(TYPED);
     const src = findFile(files, /py_api\/tests\/test_order\.py$/);
 
@@ -125,12 +125,13 @@ describe("Python domain-test emitter (renderPyTestsFile)", () => {
     expect(create).toContain('customer_id=CustomerId("c1")'); // `X id` brand
     expect(create).toContain('total=Money(9.99, "USD")'); // VO positional ctor, declared order
     expect(create).toContain('placed_at=datetime.fromisoformat("2024-01-01T00:00:00Z")'); // datetime
-    // A currentUser-gated op gets the synthetic full-access actor as the
-    // trailing arg (resolved via the let-binding type table — the receiver is
-    // untyped in test position).
-    expect(src).toContain("from app.auth.user import User");
-    expect(src).toContain('SimpleNamespace(id="00000000-0000-0000-0000-000000000000"');
-    expect(src).toContain("o.cancel(cast(User, SimpleNamespace(");
+    // The gate is hoisted to the route (op-gates.ts), so the method signature
+    // no longer takes a principal and the domain test stops fabricating one —
+    // passing the old actor would now be an excess argument under
+    // `mypy --strict`.
+    expect(src).toContain("o.cancel()");
+    expect(src).not.toContain("SimpleNamespace(id=");
+    expect(src).not.toContain("from app.auth.user import User");
   });
 });
 

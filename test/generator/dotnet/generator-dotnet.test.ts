@@ -1683,12 +1683,26 @@ describe(".NET generator", () => {
       }
     `;
 
-    it("`requires` lowers to a ForbiddenException throw inside the operation method", async () => {
+    it("`requires` is hoisted OUT of the aggregate into the command handler", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
+      // Authorization is not an invariant (op-gates.ts) — the entity neither
+      // evaluates the gate nor takes a principal.
       const order = files.get("Domain/Orders/Order.cs")!;
-      expect(order).toMatch(/throw new ForbiddenException\(/);
+      expect(order).not.toMatch(/throw new ForbiddenException\(/);
+      expect(order).not.toMatch(/currentUser/);
       // The `precondition` 422-mapping path stays distinct.
       expect(order).not.toMatch(/throw new DomainException\([^)]*Forbidden/);
+      // The handler owns the 403 now, post-load and pre-call.
+      const handler = [...files.entries()].find(
+        ([p, c]) => p.includes("Commands/") && c.includes("aggregate.Cancel("),
+      )?.[1];
+      expect(handler, "the Cancel command handler").toBeDefined();
+      expect(handler).toMatch(/throw new ForbiddenException\(/);
+      const load = handler!.indexOf("var aggregate = await _repo.");
+      const gate = handler!.indexOf("throw new ForbiddenException(");
+      const call = handler!.indexOf("aggregate.Cancel(");
+      expect(load).toBeLessThan(gate);
+      expect(gate).toBeLessThan(call);
     });
 
     it("DomainExceptionFilter maps ForbiddenException to 403", async () => {

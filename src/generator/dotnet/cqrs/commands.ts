@@ -4,7 +4,11 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  operationBodyUsesCurrentUser,
+  operationGates,
+  operationGatesUseCurrentUser,
+} from "../../../ir/util/op-gates.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { maskNamer, projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
@@ -16,6 +20,39 @@ import { renderCreateValidator, renderOperationValidator } from "../validator-em
  *  predicate against the loaded aggregate before the body runs; false →
  *  DisallowedException, which DomainExceptionFilter maps to a 409
  *  ProblemDetails ("Disallowed").  Empty string when the op has no gate. */
+/** The hoisted authorization gate — the leading run of `requires` statements,
+ *  evaluated by the command HANDLER rather than the aggregate (op-gates.ts).
+ *
+ *  Emitted post-load (so a row-aware term reads the loaded `aggregate`) and
+ *  BEFORE the `when` state gate: 403 precedes 409, so an unauthorized caller
+ *  never learns the row's state.  Operation params are not locals here — they
+ *  ride the command record, which is where the call reads them from too. */
+function requiresGate(op: AggregateIR["operations"][number]): string {
+  const gates = operationGates(op);
+  if (gates.length === 0) return "";
+  // Bind the principal to a local rather than rendering the accessor inline, so
+  // the emitted guard text is IDENTICAL to the one the aggregate used to carry
+  // — the hoist changes where the check runs, not what it reads.
+  const bind = operationGatesUseCurrentUser(op)
+    ? "        var currentUser = _currentUser.User;\n"
+    : "";
+  return (
+    bind +
+    gates
+      .map((g) => {
+        const pred = renderCsExpr(g.expr, {
+          thisName: "aggregate",
+          paramExpr: (name) =>
+            op.params.some((q) => q.name === name) ? `command.${upperFirst(name)}` : undefined,
+        });
+        return `        if (!(${pred})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: ${g.source}`,
+        )});\n`;
+      })
+      .join("")
+  );
+}
+
 function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): string {
   if (!op.when) return "";
   const pred = renderCsExpr(op.when, { thisName: "aggregate" });
@@ -324,11 +361,15 @@ export function emitOperationCommandAndHandler(
     // parameter; the handler injects ICurrentUserAccessor and passes
     // its `User` into the call.  Any non-auth-aware op stays
     // untouched — no DI changes, no handler-ctor surface widening.
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
+    // The gate is evaluated by the handler now, so it needs the accessor
+    // injected even when the remaining body no longer takes a principal.
+    const gateUsesUser = operationGatesUseCurrentUser(op);
     const baseCallArgs = op.params.map((p) => `command.${upperFirst(p.name)}`);
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
-    const userExtraDeps = usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
-    const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
+    const userExtraDeps =
+      usesUser || gateUsesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
+    const userExtraUsings = usesUser || gateUsesUser ? [`${ns}.Auth`] : [];
     // Extern (b) Phase 2: an `extern` op is now an ordinary aggregate method
     // (its body runs preconditions, calls the `<Op>Core` partial hook, and
     // re-asserts invariants — see `emit/entity.ts`), so it flows through the
@@ -409,6 +450,7 @@ export function emitOperationCommandAndHandler(
     const loadLine =
       `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
       `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+      requiresGate(op) +
       whenGate(agg, op);
     const handlerBody = returnUnion
       ? loadLine +
