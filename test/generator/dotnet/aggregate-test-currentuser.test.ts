@@ -51,15 +51,16 @@ system Acme {
 `;
 
 describe("dotnet — aggregate test for a currentUser-gated operation compiles", () => {
-  it("injects a synthetic actor and does not bind a void call to var", async () => {
+  it("calls the gated op with no synthetic actor — there is no gate left to satisfy", async () => {
     const files = await generateSystemFiles(SRC);
     const testFile = [...files.entries()].find(([p]) => p.endsWith("OrderTests.cs"))?.[1];
     expect(testFile, "OrderTests.cs").toBeDefined();
-    // The gated op call supplies the trailing currentUser actor (admin).
-    expect(testFile).toMatch(/o\.Rename\(""\s*,\s*[^)]*"admin"[^)]*\)/);
+    // The gate is hoisted to the command handler (op-gates.ts), so the method
+    // signature no longer takes a principal; passing the old actor would now be
+    // an excess argument and fail `dotnet build /warnaserror`.
+    expect(testFile).toMatch(/o\.Rename\(""\)/);
+    expect(testFile).not.toMatch(/o\.Rename\(""\s*,/);
     // A void operation call is a statement, not `var __ = <void>`.
     expect(testFile).not.toMatch(/var __ = o\.Rename/);
-    // The actor type (Auth-layer User) must be in scope.
-    expect(testFile).toContain("using Api.Auth;");
   });
 });

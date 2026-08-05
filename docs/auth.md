@@ -295,7 +295,7 @@ resource, the operation params, and `currentUser`.  A header gate and a first-bo
 the header form to the body as a synthetic `requires` statement — so both emit the
 identical guard.
 
-#### Where the guard lands (node)
+#### Where the guard lands
 
 The gate is **not** domain logic, and it is not emitted into the aggregate.  A
 `precondition` (→ 422) says the aggregate is in an invalid state; a `requires`
@@ -338,8 +338,28 @@ Consequences worth knowing:
   mutation or a `let` it depends on) stays in the body and still throws from the
   domain — hoisting it would change *when* it evaluates, not just where it lives.
 
-The other four backends still emit the guard inside the domain method; the hoist
-is landing per-backend.
+This is how all five backends behave, by two different routes. **Node, .NET,
+Java, and Python** needed the hoist: each emitted the 403 inside the aggregate
+method, so the gate moved out to the caller — the route handler / command
+handler / service, plus the inline op-call inside a workflow or explicit
+handler, because a gate that only the HTTP path evaluates is a gate a saga can
+walk around.
+
+**Phoenix/Elixir was already right**, and by a better factoring. Its guards
+(`requires`, `precondition`, and the `when` gate alike) lift into a leading
+`with :ok <- ensure(…)` chain on the **context function** — Phoenix's
+application layer — leaving the Ecto schema a plain data struct. Because every
+caller goes *through* the context function, enforcement is inherited rather than
+re-emitted per call site:
+
+```elixir
+# lib/<app>/<context>.ex — the context function owns the gate
+def close_ticket(%App.C.Ticket{} = record, params, current_user \\ nil) do
+  with :ok <- ensure(current_user.role == "agent", {:forbidden, "Forbidden: currentUser.role == \"agent\""}) do
+    ...
+  end
+end
+```
 
 A workflow `create` gate scopes to `currentUser` + the starter's command params
 (a saga has no aggregate `this`) and renders identically.  (A workflow `handle`

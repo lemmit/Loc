@@ -857,7 +857,7 @@ export function pyWorkflowStmtTarget(
       // Emitting it here is what keeps the hoist enforcement-neutral instead
       // of silently dropping the check on the non-HTTP path.
       const gateLines = (op ? operationGates(op) : []).flatMap((g) => {
-        const pred = renderPyExpr(g.expr, {
+        const guard = renderPyNegatedGuard(g.expr, {
           ...rctx,
           thisName: snake(st.target),
           paramExpr: (name) => {
@@ -866,7 +866,7 @@ export function pyWorkflowStmtTarget(
           },
         });
         return [
-          `${i}if not (${pred}):`,
+          `${i}if ${guard}:`,
           `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
         ];
       });

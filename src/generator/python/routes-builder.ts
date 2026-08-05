@@ -941,7 +941,10 @@ function destroyRoute(agg: EnrichedAggregateIR, resolve: (name: string) => numbe
  *  learns the row's state. */
 function requiresGate(op: OperationIR, ctx: BoundedContextIR): string[] {
   return operationGates(op).flatMap((g) => {
-    const pred = renderPyExpr(g.expr, {
+    // `renderPyNegatedGuard` (not a bare `not (...)`) so a membership gate keeps
+    // the idiomatic `x not in y` the statement renderer produced before the
+    // hoist — the check moved, its spelling shouldn't.
+    const guard = renderPyNegatedGuard(g.expr, {
       thisName: "found",
       // Operation params are NOT locals here — the handler holds them at the
       // wire-read expression the call is about to pass.
@@ -951,7 +954,7 @@ function requiresGate(op: OperationIR, ctx: BoundedContextIR): string[] {
       },
     });
     return [
-      `    if not (${pred}):`,
+      `    if ${guard}:`,
       `        raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
     ];
   });

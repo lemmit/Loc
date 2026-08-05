@@ -8,7 +8,7 @@ import type {
   TestStmtIR,
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { escapeCsharpIdent, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
@@ -302,7 +302,7 @@ export function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
         const p = op.params[i];
         return p ? coerceLiteralToCsType(p.type, a, rendered) : rendered;
       });
-      if (operationUsesCurrentUser(op)) args.push(TEST_ACTOR);
+      if (operationBodyUsesCurrentUser(op)) args.push(TEST_ACTOR);
       return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
     }
   }

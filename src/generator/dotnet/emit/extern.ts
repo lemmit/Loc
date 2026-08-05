@@ -25,7 +25,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import { renderCsType } from "../render-expr.js";
@@ -36,7 +36,7 @@ import { renderCsType } from "../render-expr.js";
  *  op references `currentUser`. */
 function hookParams(op: AggregateIR["operations"][number]): string {
   const base = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`);
-  return [...base, ...(operationUsesCurrentUser(op) ? ["User currentUser"] : [])].join(", ");
+  return [...base, ...(operationBodyUsesCurrentUser(op) ? ["User currentUser"] : [])].join(", ");
 }
 
 /** Render the scaffold-once user-owned extern-hook partial for an aggregate
@@ -45,7 +45,7 @@ function hookParams(op: AggregateIR["operations"][number]): string {
 export function renderExternHookImpl(agg: AggregateIR, ns: string): string | undefined {
   const externOps = agg.operations.filter((o) => o.extern);
   if (externOps.length === 0) return undefined;
-  const anyUsesUser = externOps.some(operationUsesCurrentUser);
+  const anyUsesUser = externOps.some(operationBodyUsesCurrentUser);
 
   const hooks = externOps
     .map((op) => {
