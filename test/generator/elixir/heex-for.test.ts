@@ -55,7 +55,11 @@ describe("HEEx For comprehension (DEBT-05)", () => {
     const heex = await landingHeex(`Stack { For { each: [1, 2], n => Bold { "x=" + n } } }`);
     // `n` is a for-comprehension local, not a socket assign.
     expect(heex).toMatch(/<%= for n <- /);
-    expect(heex).toContain('"x=" <> ');
+    // The slot is a user-visible INTERPOLATION, so it is translated (M-T1.11,
+    // D-I18N-HEEX-ICU) — which sharpens this test rather than weakening it: the
+    // loop local has to resolve correctly in the ICU BINDING, `n: n`, and a
+    // wrong `@n` there would render the assign instead of the iteration value.
+    expect(heex).toContain("[n: n]");
     expect(heex).not.toContain("@n");
   });
 
