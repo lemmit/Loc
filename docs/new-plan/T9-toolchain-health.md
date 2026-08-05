@@ -125,13 +125,19 @@ Unlike the persistence surface [M-T9.2](./missions/M-T9.2-persistence-seam-desig
 **Sequencing prerequisite (2026-08-03):** slices 1–3 are **blocked on [#2340](https://github.com/lemmit/Loc/pull/2340)** (M-T9.25), which modifies five of the six files in their blast radius *and changes emitted output* — and byte-identical gating needs a baseline that holds still, so this is a method prerequisite, not a merge-conflict inconvenience. Routing around it by starting at slice 4/5 is explicitly rejected in §2.6: those are the two deliberate non-leaf fragments, and deriving the contract from its worst-fit consumers is how a seam grows the single-use methods the anti-criterion exists to reject.
 
 Sources: [M-T9.26 brief + design](./missions/M-T9.26-route-target-seam-brief.md). Related: M-T9.2 (the precedent + the decline discipline), M-T6.23 (the silent-omission failure mode), `_obs/` (the in-tree neutral-catalog-plus-renderers pattern this generalises).
-## M-T9.25 — Runtime-semantics census probes → RS-rules — `in-flight` · **M** · P1
-*(Minted 2026-08-05 — the ID was claimed by open PR #2340 since 08-01 with no tracker entry; reserved here so the M-T9.12–14 duplicate-ID incident can't recur.)* Census probes over the behavioral legs minting runtime-semantics rules for the wire-golden differential. **State:** PR #2340 is dirty and partially superseded — while it sat, `main` landed RS-26 (#2329, omitted-UPDATE-field) and RS-27 (#2429, the 404 `detail` sentence — which also resolves #2340's own 404-split finding and corrected its Java survey) under *different meanings* than #2340's draft mints. The PR needs a hard rebase, renumbering (next free id RS-28), and per-finding re-verification (the 422-title, extern-detail-leak, and elixir-casing findings likely remain live). Blocks M-T9.26's implementation slices.
+## M-T9.25 — Runtime-semantics census probes → RS-rules — resolved into the mission below
+*(Minted 2026-08-05, reserving the ID PR #2340 had claimed since 08-01 with no tracker entry — the same M-T9.12–14 duplicate-ID incident this note existed to prevent recurred once more while #2340 sat: main independently landed RS-26 (#2329, omitted-UPDATE-field) and RS-27 (#2429, the 404 `detail` sentence) under different meanings than #2340's draft mints.)* **Resolved 2026-08-06:** #2340 hard-rebased onto both; its four rules renumbered to RS-27–RS-30 (RS-26/RS-27 already taken), its 404 finding reconciled into an extension of main's RS-27 rather than a competing rule, and its per-backend emitter changes that main's own route-derivation refactor (#2462) and denial-ladder rework had independently superseded were dropped in favor of main's versions — except where that supersession turned out to be incomplete: main's unification (#2462) covered the DECLARED response set but never re-threaded the DomainError/Forbidden `httpStatus` override into the four backends' runtime handlers, silently reverting M-T5.20's own feature. Re-applied in the same rebase (see the M-T5.20 restoration commit). Full yield in the M-T9.25 mission body below.
 
 ## M-T9.26 — `RouteTarget` — seal the HTTP-emission surface behind a contract — `in-flight` · **L** · P2
 *(Minted 2026-08-05 — ID claimed by open PR #2396 since 08-03 with no tracker entry.)* The `ExprTarget`/`WalkerTarget` playbook applied to route emission: measured divergence audit, leaf/adapter/structural classification (the two non-leaf seams — `c.req.raw`, SSE — recorded, not glossed), byte-identical per-slice gating, home under `src/platform/hono/v4/route/` until a second consumer exists. **Design-only so far** (#2396 carries the mission brief; no `src/`). Sequenced *after* M-T9.25's census drains. Watch: `RouteSpecIR` must stay a generator-internal descriptor (like `PagerSpec`) — slice 6's cross-language consumption idea is where the "no target-backend IR" rule would bite.
 
-## M-T9.25 — Intra-backend consistency gates — `open` · **M** · P1 ⭐ the seam every existing gate is blind to
+## M-T9.25 — Intra-backend consistency gates — `partial` · **M** · P1 ⭐ the seam every existing gate is blind to
+
+> **Round 1 landed (#2340).** Four census sweeps ran; every one found something.
+> **Yield: RS-27, RS-28, RS-29, RS-30**, two ratcheted IR merge boundaries, a
+> static elixir unused-helper gate, and four missions filed (M-T6.25–M-T6.28).
+> Probe 2 is **drained**; probe 1 is **partly swept** and probe 3 is **untouched**.
+> The unswept list is at the bottom of this mission — start there.
 **Found 2026-08-01 by a 30-second probe, having already shipped.** Every runtime gate this repo owns compares one backend to *something else*:
 
 | Gate | Compares |
@@ -161,5 +167,17 @@ Both were invisible until someone censused the emitted statuses per backend and 
 3. **One-override-moves-everything.** `test/conformance/denial-ladder-override-parity.test.ts` is the template: assert a single declaration reaches *every* emission site, per backend and across backends. Its first version was worthless — a whole-output `toContain` passes as soon as one router resolves, and it went green against the broken code — so the assertion has to be **per-file**, and must be verified to fail without the fix.
 
 **Why P1.** The two other discovery seams (cross-backend divergence, golden re-read) are largely drained: 26 RS-rules, 25 of them now five-way conforming. This one has **no coverage at all** and produced a shipped bug on first inspection. Expected yield is the highest of the three.
+
+### What is still unswept (round 2 starts here)
+
+Ordered by expected yield. Every one is a source-level probe needing no boot.
+
+1. **Re-run the whole 4xx/5xx census UNDER AN OVERRIDE.** ⭐ highest value. Sweeps 1–4 all read DEFAULT emission, which *cannot* distinguish "resolved to the default" from "hardcoded" — the trap both `denial-ladder-override-parity` and `problem-arm-census` document in-file, having each fallen into it once. Re-run with `api A from S { httpStatus ConcurrencyConflict -> 429, httpStatus Disallowed -> 423, httpStatus UniquenessConflict -> 422 }`. **Four known 409 sites are inline literal bodies** (node destroy, dotnet destroy, python destroy, elixir `conflict_response`) that visibly cannot read an override map — those are the prime suspects, and it is the same defect class as the `mergeContexts` bug that started this mission.
+2. **The 401/403 arms.** Blocked on the same harness gap as M-T9.11's 4xx goldens: one `DEV_CLAIMS` identity cannot express an authenticated-but-unauthorized principal. Fixing the harness unblocks both.
+3. **Event-sourced and document persistence.** Sweeps 1–4 used a relational fixture, so `repository-eventsourced-builder.ts` / `repository-document-builder.ts` (TS **and** python) each carry their own `Concurrency` sites that were never reached. Parameterize on `event-sourcing.ddd` / `document.ddd`.
+4. **`errors[]` pointer shape for a NESTED field.** Partly inferred, not verified: java's `pushNestedPath` yields `/lineTotals[0].unitPrice`, which is **not an RFC 6901 pointer**, while .NET explicitly converts to `/items/0/qty`. Elixir's validator never traverses `cast_assoc` children, so a nested violation likely yields `errors: []`. Needs generating all five and reading, not reasoning.
+5. **Probe 3 — one-override-moves-everything, per backend.** `denial-ladder-override-parity.test.ts` is the template but currently asserts per-file on node only. The same claim is unmade for dotnet/java/python/elixir.
+
+**Method, non-negotiable, earned four times:** read GENERATED OUTPUT, not emitters. Grepping emitters is what made an all-five `conforms` claim wrong on RS-18 (×2), RS-19 and RS-27. Generate all five from one parameterized fixture, diff the emitted strings, *then* write the rule. And make the fixture able to falsify the rule — see `docs/conformance-semantics.md` § "Make the fixture able to falsify the rule".
 
 Sources: found while landing M-T5.20 / M-T6.24 (#2340). Relates to M-T9.11 (whose oracle model structurally cannot see this class) and M-T9.8 (the "is a green gate telling the truth" question, asked of the gates' *domain* rather than their assertions).

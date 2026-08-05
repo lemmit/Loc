@@ -1005,6 +1005,47 @@ When a cross-backend runtime bug is fixed:
    and commit `test/conformance/semantics-spec.json` — `semantics-spec-sync.test.ts`
    gates the drift.
 
+### Claim the NUMBER before you build
+
+The registry is append-only with a monotonic counter and **no reservation
+mechanism**, so two agents minting rules in parallel collide every time — and
+`RS-26` was minted twice on 2026-08-03 by two branches that were both correct.
+The `id` contract ("never renumbered") settles *who* moves — whichever landed
+on `main` first keeps the number — but the loser then renames across every
+citing file, which on that occasion was 23 of them.
+
+**So: state the id you are taking in your draft PR title/body before you write
+the rule**, the same way CLAUDE.md has you claim the work itself. Read the open
+drafts first; if one already claims your number, take the next.
+
+If you do have to renumber, note that applying `26→27, 27→28, 28→29` as a
+left-to-right sweep **double-bumps** anything already advanced during conflict
+resolution. Verify with a uniqueness check over the emitted ids rather than by
+reading the diff:
+
+```bash
+grep -o 'id: "RS-[0-9]*"' test/conformance/semantics-rules.ts | sort | uniq -d
+```
+
+### Make the fixture able to falsify the rule
+
+A rule is only as good as the data its fixture carries. **RS-30** (declared-error
+extension members are camelCase) sat undetected because the one golden recording
+a declared-error body used `error NotFound { resource: string }` — and
+`resource` is the same string in snake_case and camelCase. Before trusting a new
+gate, ask what its fixture would have to look like for the rule to *fail*:
+
+| rule about | fixture must carry |
+|---|---|
+| casing | a **multi-word** field name |
+| defaults | a value that differs from the type's zero value |
+| an override being honoured | a **non-default** override — default emission cannot distinguish "resolved to the default" from "hardcoded" |
+| an error arm | the path the rule's own `trigger` sentence names, not just the fall-through arm |
+
+And verify the gate by reverting **the emitter line**, not by stashing the
+working tree: if the fix is already committed, `git stash push -- src/` reverts
+nothing and the test passes vacuously.
+
 ## Roadmap
 
 > **Claimable follow-up tickets** (parallel-agent-ready — RS-9 gating, more
