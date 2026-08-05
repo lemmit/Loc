@@ -11,6 +11,19 @@ on:
       - 'package-lock.json'
       - 'langium-config.json'
       - '.github/workflows/pages.yml'
+  # Per-PR promotion (docs/ci-gating.md): the `build` job runs on PRs touching
+  # the same inputs as push:main, so a playground/docs build break is caught
+  # before merge instead of on the post-merge deploy.  `deploy` never runs on
+  # a PR — same split the merge queue relies on.
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'web/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
   merge_group:
 permissions:
@@ -18,9 +31,13 @@ permissions:
   pages: write
   id-token: write
 
+# main-push runs serialize on one fixed group (deploys must not interleave);
+# PR and merge-group runs get per-ref groups so they neither queue behind a
+# deploy nor collide with each other.  PR runs cancel-in-progress (only the
+# latest push matters); deploy runs never cancel.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'pages-deploy' || format('pages-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Build the site + playground.  This is also the merge-queue GATE half: on a
@@ -105,11 +122,11 @@ jobs:
         with:
           path: docs/_site
 
-  # Publish half.  Never runs from the merge queue — the queue runs this
-  # workflow to gate the build, not to ship a candidate that may still be
-  # dequeued.
+  # Publish half.  Never runs from the merge queue or a pull request — those
+  # events run this workflow to gate the build, not to ship a candidate that
+  # may still be dequeued (or a branch that may never merge).
   deploy:
-    if: github.event_name != 'merge_group'
+    if: github.event_name != 'merge_group' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

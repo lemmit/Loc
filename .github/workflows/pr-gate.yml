@@ -1,0 +1,54 @@
+name: PR gate
+
+# The personal-account substitute for a merge queue — see docs/ci-gating.md →
+# "No merge queue on a personal account: the pr-gate check".
+#
+# Every other PR workflow in this repo is path-filtered, so branch protection
+# cannot require them by name: a required check that gets path-skipped never
+# reports and blocks the PR on "Expected" forever.  This workflow runs on
+# EVERY pull request (no paths filter — that is the point), waits for every
+# other check on the head SHA, and passes only when none of them failed.
+# Branch protection then requires just `tests passed` + `pr-gate`, and every
+# gate that DID trigger — path-scoped, label-fired, or unconditional — becomes
+# binding without ever stranding a PR whose diff couldn't trigger it.
+#
+# `types` includes `labeled` so a `run-*` feature label re-arms the gate: the
+# labeled run's heavy gates join the set pr-gate waits on.
+#
+# If a red check is re-run and turns green, re-run pr-gate too — branch
+# protection reads the latest run per check name, and pr-gate's verdict is a
+# snapshot from when it completed.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  checks: read
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-gate:
+    name: pr-gate
+    runs-on: ubuntu-latest
+    # Must outlast the slowest per-PR chain (the generated-frontend builds and
+    # the docker-backed behavioral legs run 20-40min under load); the script's
+    # own PR_GATE_TIMEOUT_MS default (80min) fails with a named culprit before
+    # this hard cap kills the job anonymously.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Wait for every other check on this SHA
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/pr-gate.mjs
