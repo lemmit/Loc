@@ -73,6 +73,13 @@ export interface PyRenderContext {
    *  workflow path wires this — aggregate-op render contexts leave it undefined
    *  (and the validator forbids them calling a non-pure service anyway). */
   readPortArgs?: (service: string, op: string) => string[];
+  /** Text an operation-PARAMETER ref renders as, overriding the default
+   *  snake-cased parameter name.  A hoisted `requires` gate (op-gates.ts) is
+   *  evaluated by the CALLER, where the operation's arguments are not yet
+   *  bound to locals — they live at whatever the call site reads them from
+   *  (`body.<name>` on a route).  Unset everywhere the parameters really are
+   *  in scope, which keeps every existing render byte-identical. */
+  paramExpr?: (name: string) => string | undefined;
 }
 
 const DEFAULT: PyRenderContext = { thisName: "self" };
@@ -312,7 +319,7 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       // use matches the (also-escaped) binding.
       return escapePythonIdent(snake(e.name));
     case "param":
-      return snake(e.name);
+      return ctx.paramExpr?.(e.name) ?? snake(e.name);
     case "this-prop":
       // Wire DTO: the verbatim camelCase attribute.  Inside the aggregate
       // class: the private backing field.  Outside (row scope, e.g. projection

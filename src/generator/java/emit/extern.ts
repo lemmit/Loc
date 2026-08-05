@@ -1,5 +1,5 @@
 import type { EnrichedAggregateIR, OperationIR } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
@@ -38,9 +38,9 @@ export function renderJavaExternHook(
   basePkg: string,
 ): string {
   const recv = lowerFirst(agg.name);
-  const anyUsesUser = externOps.some(operationUsesCurrentUser);
+  const anyUsesUser = externOps.some(operationBodyUsesCurrentUser);
   const methods = externOps.flatMap((op) => {
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
     const params = [
       `${agg.name} ${recv}`,
       ...op.params.map((p) => `${renderJavaType(p.type)} ${p.name}`),

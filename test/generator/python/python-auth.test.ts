@@ -69,16 +69,27 @@ describe("python auth gate", () => {
     expect(authAt).toBeLessThan(corsAt);
   });
 
-  it("guarded op gains the trailing actor param and the route threads + declares 403", async () => {
+  it("the gate is hoisted OUT of the aggregate — the route owns it, the entity takes no actor", async () => {
     const files = await build();
     const domain = files.get("api/app/domain/order.py")!;
-    expect(domain).toContain("from app.auth.user import User");
-    expect(domain).toContain("def cancel(self, current_user: User) -> None:");
-    expect(domain).toContain("raise ForbiddenError(");
+    // Authorization is not an invariant (op-gates.ts): the entity neither
+    // evaluates the gate nor takes a principal, so it stays callable without
+    // one from a saga / seed / timer.
+    expect(domain).toContain("def cancel(self) -> None:");
+    expect(domain).not.toContain("raise ForbiddenError(");
+    expect(domain).not.toContain("current_user");
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain("current_user: User = request.state.current_user");
-    expect(routes).toContain("found.cancel(current_user)");
+    expect(routes).toContain("raise ForbiddenError(");
+    expect(routes).toContain("found.cancel()");
     expect(routes).toContain('403: {"model": ProblemDetails, "description": "Forbidden"}');
+    // Post-load and pre-call: a row-aware gate can read `found`, and the
+    // domain body never runs for an unauthorized caller.
+    const load = routes.indexOf("found = await repo.");
+    const gate = routes.indexOf("raise ForbiddenError(");
+    const call = routes.indexOf("found.cancel()");
+    expect(load).toBeLessThan(gate);
+    expect(gate).toBeLessThan(call);
   });
 
   it("currentUser-scoped find threads the actor into the repository predicate", async () => {
@@ -95,20 +106,23 @@ describe("python auth gate", () => {
     const files = await build();
     const wf = files.get("api/app/http/workflows_routes.py")!;
     expect(wf).toContain("current_user: User = request.state.current_user");
-    // The gated op takes the actor as its trailing argument.
-    expect(wf).toContain("o.cancel(current_user)");
+    // The op's gate is hoisted, so this inline op-call evaluates it HERE
+    // rather than inheriting it from the entity — emitting it at every caller
+    // is what keeps the hoist enforcement-neutral on the non-HTTP path.
+    expect(wf).toContain("o.cancel()");
+    expect(wf).not.toContain("o.cancel(current_user)");
     expect(wf).toContain('403: {"model": ProblemDetails, "description": "Forbidden"}');
     expect(wf).toContain("raise ForbiddenError(");
   });
 
-  it("domain tests inject the synthetic full-access actor", async () => {
+  it("domain tests call the gated op with no synthetic actor — there is no gate left to satisfy", async () => {
     const files = await build();
     const tests = files.get("api/tests/test_order.py")!;
-    expect(tests).toContain("from types import SimpleNamespace");
-    expect(tests).toContain("from app.auth.user import User");
-    expect(tests).toContain(
-      'o.cancel(cast(User, SimpleNamespace(id="00000000-0000-0000-0000-000000000000", role="admin", permissions=["*"])))',
-    );
+    // The method signature no longer takes a principal, so the emitted unit
+    // test stops fabricating one; passing the old actor would now be an
+    // excess argument and fail `mypy --strict`.
+    expect(tests).toContain("o.cancel()");
+    expect(tests).not.toContain("SimpleNamespace(id=");
   });
 
   it("anonymous deployables emit no auth module and stay Noop-shaped", async () => {
