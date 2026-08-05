@@ -14,7 +14,7 @@ import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.j
 import { emitExpr } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
 import { FELIZ_GRID_ROW_VAR, renderFelizDataGridChild } from "./data-grid-child.js";
-import { FS_LEAVES, fsString, storeModelField } from "./fs-expr.js";
+import { FS_LEAVES, fsString, renderFsIntrinsic, storeModelField } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
   byIdFieldName,
@@ -878,6 +878,14 @@ export const felizTarget: WalkerTarget = {
   exprConvert: (value, target, from) => FS_LEAVES.convert(value, target as never, from as never),
   exprList: (elements) => FS_LEAVES.list(elements),
   exprObject: (fields) => FS_LEAVES.object([...fields]),
+
+  // Scalar intrinsics — the SAME F# table the MVU update path uses
+  // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a
+  // page body and another in an action body.  Before this seam was supplied
+  // the view path had no intrinsic arm at all and emitted Loom's own spelling
+  // verbatim (`(model.Name.toUpper())`), which is not F#.
+  renderIntrinsic: (receiverType, member, recv, args) =>
+    renderFsIntrinsic(receiverType, member, recv, args),
 };
 
 export { fsString };
