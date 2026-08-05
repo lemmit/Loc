@@ -23,10 +23,19 @@
 // variable in scope.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR } from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, ExprIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
-import { deepScopeAnchorClaim, isDeepScopeFilter } from "../../../ir/util/tenant-stance.js";
-import { type RenderCtx, renderDeepScopeEcto, renderExpr } from "../render-expr.js";
+import {
+  deepScopeAnchorClaim,
+  guidFromStringSelfScope,
+  isDeepScopeFilter,
+} from "../../../ir/util/tenant-stance.js";
+import {
+  type RenderCtx,
+  renderDeepScopeEcto,
+  renderExpr,
+  renderGuidClaimSelfScopeEcto,
+} from "../render-expr.js";
 
 export { aggregateUsesPrincipalContextFilter } from "../../../ir/types/loom-ir.js";
 
@@ -35,6 +44,20 @@ export { aggregateUsesPrincipalContextFilter } from "../../../ir/types/loom-ir.j
  *  predicates (they only touch `record.*`). */
 function pinPrincipal(rendered: string): string {
   return rendered.replace(/\bcurrent_user\.([a-z0-9_]+)/g, "^(current_user && current_user.$1)");
+}
+
+/** One capability/write-scope predicate as an Ecto `where:` fragment, with the
+ *  principal side made fail-closed.  The `"guid-from-string"` registry
+ *  self-scope needs more than `pinPrincipal`'s pin — the claim is raw token
+ *  text bound against a `:binary_id` field, so Ecto casts it and a MALFORMED
+ *  claim raised `Ecto.Query.CastError` (a 500 for an ordinary bad token).  That
+ *  one shape routes to `renderGuidClaimSelfScopeEcto`, which casts in Elixir
+ *  and pins nil on failure; everything else keeps today's rendering.  (The
+ *  deep-scope sentinel is intercepted by the callers, which own actor gating.) */
+function renderPrincipalFilter(p: ExprIR, ctx: RenderCtx): string {
+  const selfScope = guidFromStringSelfScope(p);
+  if (selfScope) return renderGuidClaimSelfScopeEcto(ctx.thisName, selfScope.claim);
+  return exprUsesCurrentUser(p) ? pinPrincipal(renderExpr(p, ctx)) : renderExpr(p, ctx);
 }
 
 /** A read's capability filter-bypass spec (`ignoring <Cap>` / `ignoring *`),
@@ -92,9 +115,7 @@ export function vanillaCapabilityFilter(
       // NOT run it through `pinPrincipal` (it already pins).
       isDeepScopeFilter(p)
         ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
-        : exprUsesCurrentUser(p)
-          ? pinPrincipal(renderExpr(p, ctx))
-          : renderExpr(p, ctx),
+        : renderPrincipalFilter(p, ctx),
     );
   if (preds.length === 0) return null;
   // `and` is a reserved word in Elixir — the infix form is the only valid one
@@ -121,9 +142,7 @@ export function vanillaWriteScopeFilter(agg: AggregateIR, contextModule: string)
   const p = agg.writeScopeFilter;
   return isDeepScopeFilter(p)
     ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
-    : exprUsesCurrentUser(p)
-      ? pinPrincipal(renderExpr(p, ctx))
-      : renderExpr(p, ctx);
+    : renderPrincipalFilter(p, ctx);
 }
 
 /** Conjoin a capability-filter predicate with an existing `where:` predicate.
@@ -159,9 +178,7 @@ export function vanillaCapabilityFilterParts(
     if (!opts?.actor && exprUsesCurrentUser(p)) return;
     const pred = isDeepScopeFilter(p)
       ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
-      : exprUsesCurrentUser(p)
-        ? pinPrincipal(renderExpr(p, ctx))
-        : renderExpr(p, ctx);
+      : renderPrincipalFilter(p, ctx);
     parts.push({ origin: agg.contextFilterOrigins?.[i], pred });
   });
   return parts;

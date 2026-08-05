@@ -147,24 +147,33 @@ at each backend's accessor site**:
 | Claim type vs `ids` | Result |
 |---|---|
 | same-typed (`guid`/`guid`, `string`/`string`, …) | compared directly on every backend |
-| `string` claim, `guid` aggregate id | bound as a guid at the accessor site: pg casts the text parameter (node/elixir/python), .NET wraps `Guid.Parse(...)`, Java converts in the SpEL principal expression (`T(java.util.UUID).fromString(...)`, null-guarded → fail-closed `= NULL`) |
+| `string` claim, `guid` aggregate id | **parsed** to the id's value type at each backend's accessor site, yielding null when it doesn't parse (see below) |
 | anything else | `loom.tenancy-claim-type-mismatch` (error, with the fix spelled out) |
 
-A **malformed** tenant claim (not a parseable guid) under a guid-id registry
-fails the registry read with a server error on every backend — no data is
-returned (fail-closed), but it is a 500, not an empty list. A **missing**
-principal claim binds null and matches no rows.
+A **malformed** tenant claim (an authenticated token carrying
+`tenantId: "not-a-guid"`) is an ordinary empty read on every backend — the
+same 200-with-an-empty-list / 404-by-id a foreign-but-well-formed claim gives,
+never a 500. That is what the parse-to-null accessor buys: the `string` claim
+is coerced in the host language *before* it reaches the database, so a value
+the `guid` id cannot represent binds NULL and matches no row. A **missing**
+principal claim takes the same path, for the same reason.
 
-Per-backend registry read scope (all five compile-gated; node also
+.NET has always done this (`Guid.TryParse`); the other four parsed
+unconditionally and answered a bad token with a stack trace until M-T3.7(c).
+Pinned per backend by the `tenancy-registry-self-scope` generator suites and
+end-to-end by `assertCrossTenantIsolation` (the `tenancy-e2e` matrix, all five
+backends × {flat, hierarchy}).
+
+Per-backend registry read scope (all five compile-gated, and all five
 runtime-gated by the isolation e2e):
 
-| Backend | Registry read scope |
-|---|---|
-| node (Hono/Drizzle) | `eq(schema.organizations.id, requireCurrentUser().tenantId)` AND-ed into every root read |
-| .NET (EF Core) | `HasQueryFilter("IdFilter", x => x.Id == new OrganizationId(Guid.Parse(RequestContext.Current!.CurrentUser!.TenantId)))` |
-| elixir (Ecto) | `record.id == ^(current_user && current_user.tenant_id)` (pinned, fail-closed) |
-| python (SQLAlchemy) | `OrganizationRow.id == require_current_user().tenant_id` (id column is `Uuid(as_uuid=False)` — string-mapped) |
-| java (Spring/JPA) | `e.id.value = :#{… T(java.util.UUID).fromString(@currentUserAccessor.user().tenantId()) …}` scoped `@Query` overrides on findAll/findById + every find |
+| Backend | Registry read scope | Malformed claim |
+|---|---|---|
+| node (Hono/Drizzle) | `eq(schema.organizations.id, requireCurrentUser().tenantId)` AND-ed into every root read, behind a UUID-shape ternary | falls to the always-false term (`and(isNull(id), isNotNull(id))`) |
+| .NET (EF Core) | `HasQueryFilter("IdFilter", x => x.Id == __SelfScopeId_Organization_0)`, a hoisted `OrganizationId?` member | `Guid.TryParse(…) ? new OrganizationId(g) : null` → `= NULL` |
+| elixir (Ecto) | `fragment("? = ?", record.id, ^…)` — cast in Elixir, compared on the uuid column so the PK index still serves it | `Ecto.UUID.cast/1` → `nil` → `= NULL` |
+| python (SQLAlchemy) | `OrganizationRow.id == require_current_user().guid_claim("tenant_id")` | `guid_claim` → `None` → `IS NULL` |
+| java (Spring/JPA) | `e.id.value = :#{@currentUserAccessor.user()?.tenantIdAsUuid()}` scoped `@Query` overrides on findAll/findById + every find (and the same accessor in the `tenantScope(User)` Specification a reified retrieval uses) | `<claim>AsUuid()` → `null` → `= NULL` |
 
 The derived filter is provenance-tagged `tenancy` in
 `contextFilterOrigins`. `tenancy` is not a capability, so a named

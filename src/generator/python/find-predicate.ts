@@ -12,6 +12,7 @@ import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
+  guidFromStringSelfScope,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -211,6 +212,20 @@ function lower(
       }
     }
     case "binary": {
+      // Registry self-scope against a `string` tenancy claim (M-T3.7(c)).  The
+      // claim is raw token text compared to a `Uuid` column, so SQLAlchemy's
+      // bind processor calls `uuid.UUID(value)` on it and a malformed claim
+      // ("not-a-guid") raises `ValueError` → 500 on an ordinary bad token.
+      // `User.guid_claim` parses it to None instead, and `col == None` renders
+      // `IS NULL` — no row can match a NOT NULL primary key, so the read is the
+      // same EMPTY result a foreign-but-well-formed claim already gives.
+      {
+        const selfScope = guidFromStringSelfScope(e);
+        if (selfScope) {
+          const claim = JSON.stringify(snake(selfScope.claim));
+          return `${row}.id == ${principalAccessor}.guid_claim(${claim})`;
+        }
+      }
       // A5 temporal — `datetime ± days/hours/minutes(n)` renders as
       // SQL interval arithmetic (`side ± make_interval(…, n)`), composing on
       // EITHER side of a comparison: a column stands as-is, a host value
