@@ -42,23 +42,10 @@ export function httpFindsOf(ctx: BoundedContextIR, agg: AggregateIR): FindIR[] {
   return (repo?.finds ?? []).filter((f) => f.name !== "all" && !f.synthesized);
 }
 
-/** True when the aggregate has a union-returning find whose absent variant is a
- *  DECLARED ERROR (→ the controller emits a `problem_variant/5` *call*, so it
- *  needs the shared responder).
- *
- *  Deliberately narrower than "has any union find". A `none`-absent union
- *  (`Order option`) answers through `ProblemDetails.problem_response/4` instead
- *  — RS-28, so its 404 detail names the resource rather than degrading to the
- *  bare status phrase — and therefore does NOT call `problem_variant/5`. An
- *  aggregate whose only union find is `T option`, with no error-returning
- *  operation, would otherwise emit the private helper unused and trip
- *  `mix compile --warnings-as-errors`.
- *
- *  This is exactly the reasoning `aggregateHasReturningOpError` documents for
- *  the operation half; the find half had the looser predicate because, until
- *  RS-28, every union find called the responder. */
-export function aggregateHasUnionFindError(ctx: BoundedContextIR, agg: AggregateIR): boolean {
-  return httpFindsOf(ctx, agg).some((f) => absentSpec(agg, f.returnType, ctx)?.kind === "error");
+/** True when the aggregate has any union-returning find (→ the controller needs
+ *  the shared `problem_variant/5` responder). */
+export function aggregateHasUnionFind(ctx: BoundedContextIR, agg: AggregateIR): boolean {
+  return httpFindsOf(ctx, agg).some((f) => f.returnType.kind === "union");
 }
 
 /** True when the find returns zero-or-one record (`Customer?` / `Customer`) or
@@ -205,18 +192,9 @@ ${innerBody}
       // emitted spec (`<Agg>Response`) and every other backend
       // (exception-less.md §4).  The error/absent variant is a status response,
       // never a tagged 200 body.
-      // RS-28 — the `none` absent case has no declared variant, so routing it
-      // through `problem_variant/5` (which sets `detail: title`) degraded the
-      // detail to the bare status phrase `"Not Found"`, where node and python
-      // send `"<Agg> not found"`.  `problem_response/4` is what this
-      // controller's own `T?` arm already uses for the same meaning, so this
-      // makes elixir agree with itself as well as with the other four.  The
-      // DECLARED-variant arm below keeps `problem_variant/5`: there
-      // `detail == title` is the decided cross-backend answer (node emits the
-      // same, and `union-find-absence.json` pins it).
       const absentArm =
         absent.kind === "none"
-          ? `        ProblemDetails.problem_response(conn, 404, "Not Found", "${aggPascal} not found")`
+          ? `        problem_variant(conn, 404, "about:blank", "Not Found", %{})`
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
       return wrap(`    case ${call} do
       {:ok, nil} ->

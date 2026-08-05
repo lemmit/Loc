@@ -615,7 +615,7 @@ export function buildExplicitRoutesFile(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    // RS-26: the extern arm sanitizes like every other 500.  `err.message`
+    // RS-28: the extern arm sanitizes like every other 500.  `err.message`
     // interpolates the INNER exception the user handler threw — driver text,
     // URLs, connection strings — into a public body.  op + aggregate already
     // reach the operator via the `extern_handler_threw` catalog event.

@@ -48,7 +48,7 @@ import {
   disallowedResponse,
   disallowedTerm,
 } from "./denial.js";
-import { aggregateHasUnionFindError, renderFindActions } from "./find-controller.js";
+import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
 import { hasRefColls } from "./ref-collection-emit.js";
@@ -619,7 +619,7 @@ ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
 
   // Union finds translate their absent variant via the shared problem_variant/5
   // responder — emit it (once) when the aggregate has any union find.
-  const problemVariant = aggregateHasUnionFindError(ctx, agg)
+  const problemVariant = aggregateHasUnionFind(ctx, agg)
     ? `\n${renderProblemVariantHelper()}\n`
     : "";
 

@@ -916,7 +916,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             // 500 — the user handler threw, which is an internal
             // failure from the framework's POV, so the body is
-            // sanitized to "internal" like every other 500 arm (RS-26).
+            // sanitized to "internal" like every other 500 arm (RS-28).
             //
             // This previously sent xh.Message, whose intent was to name
             // the offending op + aggregate so operators didn't have to grep

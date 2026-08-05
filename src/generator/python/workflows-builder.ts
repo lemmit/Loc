@@ -730,7 +730,7 @@ function instanceRoutes(wf: WorkflowIR): string {
         `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
         `    __stream = await ${fns.load}(session, ${idAsKey})`,
         "    if not __stream:",
-        `        raise AggregateNotFoundError("not_found")`,
+        `        raise AggregateNotFoundError(f"${T} {id} not found")`,
         `    row = ${fns.fold}(${idAsKey}, __stream)`,
         `    return {${proj("row")}}`,
       )
@@ -739,7 +739,7 @@ function instanceRoutes(wf: WorkflowIR): string {
         `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
         `    row = await session.get(${row}, id)`,
         "    if row is None:",
-        `        raise AggregateNotFoundError("not_found")`,
+        `        raise AggregateNotFoundError(f"${T} {id} not found")`,
         `    return {${proj("row")}}`,
       );
   return [list, byId].join("\n\n\n");

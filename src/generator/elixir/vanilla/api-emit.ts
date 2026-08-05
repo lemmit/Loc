@@ -52,7 +52,7 @@ import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { denialOverrides, denialResponse, disallowedResponse } from "./denial.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
-import { aggregateHasUnionFindError, findRoutes, renderFindActions } from "./find-controller.js";
+import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   aggregateHasReturningOpError,
@@ -479,7 +479,7 @@ ${cuBind}    case ${ctxModule}.${cmdGet}(id${getActor}) do
   // private fn under --warnings-as-errors — a returning op with a scalar /
   // success-only return never calls it).
   const problemVariant =
-    aggregateHasReturningOpError(agg, ctx) || aggregateHasUnionFindError(ctx, agg)
+    aggregateHasReturningOpError(agg, ctx) || aggregateHasUnionFind(ctx, agg)
       ? `\n${renderProblemVariantHelper()}\n`
       : "";
 

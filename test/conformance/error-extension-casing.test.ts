@@ -1,4 +1,4 @@
-// RS-29 — a declared error variant's fields reach the RFC 7807 body as
+// RS-30 — a declared error variant's fields reach the RFC 7807 body as
 // camelCase extension members, on all five backends.
 //
 // Found by the M-T9.25 casing/absence census sweep, and it is the ONE casing
@@ -81,7 +81,7 @@ async function joined(platform: string): Promise<string> {
   return [...(await generateSystemFiles(SOURCE(platform))).values()].join("\n");
 }
 
-describe("RS-29 — declared-error extension members are camelCase on the wire", () => {
+describe("RS-30 — declared-error extension members are camelCase on the wire", () => {
   it("the fixture parses clean — an error-recovered AST proves nothing", async () => {
     // `generateSystemFiles` tolerates diagnostics, and Langium error recovery
     // still yields enough AST to emit plausible-looking output. An earlier draft

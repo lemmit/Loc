@@ -108,7 +108,9 @@ describe("python workflow-instance endpoints", () => {
     );
     expect(wf).toContain("row = await session.get(OrderFulfillmentRow, id)");
     expect(wf).toContain("if row is None:");
-    expect(wf).toContain('raise AggregateNotFoundError("not_found")');
+    // RS-27 — a workflow INSTANCE read is addressed by id, so its 404 carries
+    // the same sentence the aggregate getById route does.
+    expect(wf).toContain('raise AggregateNotFoundError(f"OrderFulfillment {id} not found")');
     expect(wf).toContain('return {"orderId": row.order_id, "attempts": row.attempts}');
     expect(wf).toContain("from app.domain.errors import AggregateNotFoundError");
     expect(wf).toContain("from app.http.problem import ProblemDetails");
@@ -144,7 +146,7 @@ describe("python event-sourced workflow-instance endpoints", () => {
     );
     expect(wf).toContain("__stream = await _load_tally_events(session, id)");
     expect(wf).toContain("    if not __stream:");
-    expect(wf).toContain('        raise AggregateNotFoundError("not_found")');
+    expect(wf).toContain('        raise AggregateNotFoundError(f"Tally {id} not found")');
     expect(wf).toContain("    row = _fold_tally(id, __stream)");
     expect(wf).toContain('    return {"orderId": row.order_id, "total": row.total}');
   });
