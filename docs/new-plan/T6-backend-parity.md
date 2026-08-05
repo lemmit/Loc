@@ -141,7 +141,8 @@ Neither is reachable from a shared behavioural system today, which is why the pe
 
 Sources: found 2026-07-29 while landing RS-15 (#2300). Related: M-T6.20 (the `raise`-path half of the same protocol), M-T5.20 (routing the ladder through `resolveErrorStatus`).
 
-## M-T6.x — `= default` fields are optional input on node, still required on elixir — `landed` · **S** · P2
+## M-T6.26 — `= default` / required-input parity across create & update paths — `partial` · **S** · P2
+*(Renumbered from the placeholder "M-T6.x" and re-statused 2026-08-05 — `landed` isn't a legend status. Create-path parity is done (below, #2377); the update-path halves landed via #2392 ("a default never relaxes an update" — Elixir enforced less than promised, Java rejected what it advertised); the remaining residue is in-flight as draft PR #2440 — Elixir accepts a PUT that omits a required field (presence is a deserialization question there too), with retro §79 (open PR #2415) as its documentation twin.)*
 
 Surfaced 2026-08-01 by the `audited` corpus fixture in the behavioral tier, not
 by anything audit-specific.
