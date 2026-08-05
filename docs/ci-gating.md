@@ -92,27 +92,39 @@ reports, and the PR blocks on "Expected — waiting for status" forever. A
 docs-only PR would strand on all of them.
 
 `pr-gate.yml` is the personal-account answer — one aggregate check that
-branch protection can require safely:
+branch protection can require safely. It is **event-driven** (v2): the v1
+design was a single long-polling job, and under real load it fed on itself —
+each open PR's gate parked a runner slot while polling (six parked gates ≈ a
+third of the ~20-slot pool), starving the very jobs it waited for until its
+timeout fired and needed a manual label re-arm. v2 never waits:
 
-- It runs on **every** pull request (no `paths:` filter — that is the point)
-  and re-arms on `labeled`, so `run-*`-label heavy runs join the set.
-- `scripts/pr-gate.mjs` polls the head SHA's check runs and passes only when
-  every *other* triggered check completed without failure. A path-skipped
-  workflow never appears on the SHA, so it's OK by construction; any
-  triggered red fails the gate immediately (fail-fast, culprit named).
-- Zero other checks reporting **fails closed** — `test.yml` runs unfiltered
-  on PRs precisely so at least one check always reports; "nothing reported"
-  means Actions never picked the push up, not "nothing to verify".
-- The decision core is pure and pinned by `test/system/pr-gate.test.ts`,
-  including the fail-closed arms (unknown conclusions, cancelled runs, the
-  late-created-run race).
+- It triggers on the `pull_request` events (including `labeled` — `run-*`
+  heavy runs join the set — and `ready_for_review`, which fires the
+  draft-gated fan-out) **and on `workflow_run: completed` of every other
+  workflow**, so each completion re-evaluates the gate; the last workflow to
+  finish always produces the final verdict. No polling, no timeout, no
+  parked slot.
+- Each evaluation is seconds: `scripts/pr-gate.mjs` reads the head SHA's
+  check runs once and **posts a check run named `pr-gate`** via the Checks
+  API (workflow_run-triggered jobs don't surface in the PR checks UI, so the
+  job is `pr-gate-eval` and the canonical name rides the posted check). Any
+  triggered red → `failure` with culprits named (fail-fast); checks still
+  running → `in_progress` (blocks merge without claiming failure); all
+  triggered checks green → `success`. A path-skipped workflow never appears
+  on the SHA, so it's OK by construction.
+- Zero other checks reporting **blocks** — `test.yml` runs unfiltered on PRs
+  precisely so at least one check always comes; pending is *never* green.
+- Re-running a red check to green fires `workflow_run: completed` again, so
+  the gate re-evaluates **automatically** — no manual pr-gate re-run.
+- The decision core is pure and pinned by `test/system/pr-gate.test.ts` —
+  including the fail-closed arms (unknown conclusions, cancelled runs,
+  pending-never-green) and the `workflow_run.workflows` list's completeness
+  both ways (a workflow missing from the list completes without
+  re-evaluating; a stale name re-evaluates nothing).
 
 **Branch protection on a personal account should require exactly two
 checks: `tests passed` and `pr-gate`.** Everything else stays non-required
 by name but becomes *binding through pr-gate* the moment it triggers.
-One operational note: if you re-run a failed check and it turns green,
-re-run `pr-gate` too — its verdict is a snapshot, and branch protection
-reads the latest run per check name.
 
 If the repo ever moves to an organization, drop `pr-gate` from the required
 list and follow the merge-queue runbook below instead — the queue subsumes
