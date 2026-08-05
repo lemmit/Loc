@@ -36,6 +36,11 @@ import {
 } from "../../ir/util/api-surface.js";
 import { maskedHistoryFields } from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
+import {
+  operationBodyUsesCurrentUser,
+  operationGates,
+  operationGatesUseCurrentUser,
+} from "../../ir/util/op-gates.js";
 import { errorStatuses, type OpErrorKind, problemTitle } from "../../ir/util/openapi-errors.js";
 import {
   camelId,
@@ -938,6 +943,30 @@ function destroyRoute(
 /** The `when` state-gate line(s) injected after the aggregate loads and
  *  before the operation body runs — false → DisallowedError (409),
  *  matching the side-effect-free `can_<op>` predicate. */
+/** The hoisted authorization gate — the leading run of `requires` statements,
+ *  evaluated by the HANDLER rather than the aggregate (`src/ir/util/op-gates.ts`).
+ *
+ *  Emitted post-load (so a row-aware term reads the loaded `found`) and BEFORE
+ *  the `when` state gate: 403 precedes 409, so an unauthorized caller never
+ *  learns the row's state. */
+function requiresGate(op: OperationIR, ctx: BoundedContextIR): string[] {
+  return operationGates(op).flatMap((g) => {
+    const pred = renderPyExpr(g.expr, {
+      thisName: "found",
+      // Operation params are NOT locals here — the handler holds them at the
+      // wire-read expression the call is about to pass.
+      paramExpr: (name) => {
+        const p = op.params.find((q) => q.name === name);
+        return p ? pyWireToDomain(`body.${p.name}`, p.type, ctx) : undefined;
+      },
+    });
+    return [
+      `    if not (${pred}):`,
+      `        raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
+    ];
+  });
+}
+
 function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
   if (!op.when) return [];
   const pred = renderPyExpr(op.when, { thisName: "found" });
@@ -1048,7 +1077,8 @@ function operationRoute(
         "        )",
       ];
     });
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
+    const gateUsesUser = operationGatesUseCurrentUser(op);
     // Update stamps apply right before the persist; a principal-referencing
     // stamp needs `current_user` bound (the route already takes `request`).
     const stampUpdateUsesUser = stampUsesUser(agg, "update");
@@ -1061,13 +1091,14 @@ function operationRoute(
       // ProblemDetails translations below) but never declared them.
       `@router.post("${relativeOpPath(apiOp)}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
-      usesUser || stampUpdateUsesUser
+      usesUser || gateUsesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
         : null,
       "    repo = _repo(session)",
       `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
       `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
       `    record_domain_operation(${JSON.stringify(agg.name)}, ${JSON.stringify(op.name)})`,
+      ...requiresGate(op, ctx),
       ...whenGate(agg, op),
       op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -1083,12 +1114,13 @@ function operationRoute(
   // currentUser-gated ops read the actor the auth middleware stashed on
   // the request scope and thread it as the trailing domain argument; a
   // `requires`-guarded op additionally declares its 403 outcome.
-  const usesUser = operationUsesCurrentUser(op);
+  const usesUser = operationBodyUsesCurrentUser(op);
+  const gateUsesUser = operationGatesUseCurrentUser(op);
   // Update stamps apply right before the persist; a principal-referencing
   // stamp threads `current_user` off the request scope (and takes `request`).
   const stampUpdateUsesUser = stampUsesUser(agg, "update");
   const versioned = aggregateIsVersioned(agg);
-  const needsRequest = usesUser || stampUpdateUsesUser || versioned;
+  const needsRequest = usesUser || gateUsesUser || stampUpdateUsesUser || versioned;
   const opSig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
@@ -1108,13 +1140,14 @@ function operationRoute(
     return lines(
       `@router.post("${relativeOpPath(apiOp)}", response_model=${wireType}, operation_id="${camelId(opOperation(agg.name, op.name))}"${derivedResponsesKwarg(apiOp)})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> ${wireType}:`,
-      usesUser || stampUpdateUsesUser
+      usesUser || gateUsesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
         : null,
       "    repo = _repo(session)",
       `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
       `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
       `    record_domain_operation(${JSON.stringify(agg.name)}, ${JSON.stringify(op.name)})`,
+      ...requiresGate(op, ctx),
       ...whenGate(agg, op),
       op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -1129,11 +1162,14 @@ function operationRoute(
   return lines(
     `@router.post("${relativeOpPath(apiOp)}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
-    usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
+    usesUser || gateUsesUser || stampUpdateUsesUser
+      ? "    current_user: User = request.state.current_user"
+      : null,
     "    repo = _repo(session)",
     `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
     `    record_domain_operation(${JSON.stringify(agg.name)}, ${JSON.stringify(op.name)})`,
+    ...requiresGate(op, ctx),
     ...whenGate(agg, op),
     op.audited ? "    __before = repo.to_wire(found)" : null,
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,

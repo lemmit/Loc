@@ -9,12 +9,9 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import {
-  exprUsesCurrentUser,
-  operationUsesCurrentUser,
-  workflowEmitsCommandRoute,
-} from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, workflowEmitsCommandRoute } from "../../../ir/types/loom-ir.js";
 import { readPortsForOperation } from "../../../ir/util/domain-service-read-ports.js";
+import { operationBodyUsesCurrentUser, operationGates } from "../../../ir/util/op-gates.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
@@ -273,8 +270,28 @@ export function javaWorkflowStmtTarget(
       const targetOp = ctx.aggregates
         .find((a) => a.name === s.aggName)
         ?.operations.find((o) => o.name === s.op);
-      if (targetOp && operationUsesCurrentUser(targetOp)) rendered.push("currentUser");
-      return [`${indent}${s.target}.${s.op}(${rendered.join(", ")});`];
+      const callArgs = [...rendered];
+      if (targetOp && operationBodyUsesCurrentUser(targetOp)) callArgs.push("currentUser");
+      // The op's authorization gate is hoisted out of the entity (op-gates.ts),
+      // so EVERY caller owns it — this inline op-call included.  Emitting it
+      // here is what keeps the hoist enforcement-neutral instead of silently
+      // dropping the check on the non-HTTP path.
+      const gateLines = (targetOp ? operationGates(targetOp) : []).map((g) => {
+        collectJavaExprImports(g.expr, imports);
+        const pred = renderJavaExpr(g.expr, {
+          ...renderCtx,
+          thisName: s.target,
+          accessorProps: true,
+          paramExpr: (name) => {
+            const i = targetOp!.params.findIndex((q) => q.name === name);
+            return i >= 0 ? rendered[i] : undefined;
+          },
+        });
+        return `${indent}if (!(${pred})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: ${g.source}`,
+        )});`;
+      });
+      return [...gateLines, `${indent}${s.target}.${s.op}(${callArgs.join(", ")});`];
     },
     repoDelete: (s, indent) => {
       // `<Repo>.delete(o)` → `<repo>.delete(<entity>)`.  The Spring Data

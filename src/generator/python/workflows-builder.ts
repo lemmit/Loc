@@ -3,7 +3,6 @@ import {
   type EnrichedBoundedContextIR,
   type ExprIR,
   type OperationIR,
-  operationUsesCurrentUser,
   type SystemIR,
   type WireField,
   type WorkflowIR,
@@ -13,6 +12,11 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { type ReadPort, readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
 import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
+import {
+  operationBodyUsesCurrentUser,
+  operationGates,
+  operationGatesUseCurrentUser,
+} from "../../ir/util/op-gates.js";
 import {
   camelId,
   opWorkflow,
@@ -286,7 +290,9 @@ function callsUserGatedOp(sts: WorkflowStmtIR[], ctx: EnrichedBoundedContextIR):
   return sts.some((s) => {
     if (s.kind === "op-call") {
       const o = lookupOp(ctx, s.aggName, s.op);
-      return !!o && operationUsesCurrentUser(o);
+      // Either half can need the binding: the remaining body (trailing
+      // argument) or the hoisted gate rendered at this call site.
+      return !!o && (operationBodyUsesCurrentUser(o) || operationGatesUseCurrentUser(o));
     }
     if (s.kind === "for-each") return callsUserGatedOp(s.body, ctx);
     return false;
@@ -842,11 +848,30 @@ export function pyWorkflowStmtTarget(
       // A currentUser-gated op takes the actor as its trailing argument
       // (in scope: the route bound `current_user` for this workflow).
       const op = ctx ? lookupOp(ctx, st.aggName, st.op) : undefined;
+      const renderedArgs = st.args.map((a) => renderPyExpr(a, rctx));
       const args = [
-        ...st.args.map((a) => renderPyExpr(a, rctx)),
-        ...(op && operationUsesCurrentUser(op) ? ["current_user"] : []),
+        ...renderedArgs,
+        ...(op && operationBodyUsesCurrentUser(op) ? ["current_user"] : []),
       ].join(", ");
-      return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
+      // The op's authorization gate is hoisted out of the entity
+      // (op-gates.ts), so EVERY caller owns it — this inline op-call included.
+      // Emitting it here is what keeps the hoist enforcement-neutral instead
+      // of silently dropping the check on the non-HTTP path.
+      const gateLines = (op ? operationGates(op) : []).flatMap((g) => {
+        const pred = renderPyExpr(g.expr, {
+          ...rctx,
+          thisName: snake(st.target),
+          paramExpr: (name) => {
+            const idx = op!.params.findIndex((q) => q.name === name);
+            return idx >= 0 ? renderedArgs[idx] : undefined;
+          },
+        });
+        return [
+          `${i}if not (${pred}):`,
+          `${i}    raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
+        ];
+      });
+      return [...gateLines, `${i}${snake(st.target)}.${snake(st.op)}(${args})`];
     },
     repoDelete: (st, i) => {
       // `<Repo>.delete(o)` → `await <repo>.delete(<entity>.id)`.  The generated

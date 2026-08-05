@@ -1,16 +1,16 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
-import {
-  type AggregateIR,
-  type BoundedContextIR,
-  type ContainmentIR,
-  type DomainServiceIR,
-  type ExprIR,
-  operationUsesCurrentUser,
-  type TestIR,
-  type TestStmtIR,
-  type TypeIR,
-  type ValueObjectIR,
+import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ContainmentIR,
+  DomainServiceIR,
+  ExprIR,
+  TestIR,
+  TestStmtIR,
+  TypeIR,
+  ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { escapePythonIdent, snake } from "../../../util/naming.js";
 import { renderPyExpr, renderPyType } from "../render-expr.js";
 
@@ -236,7 +236,7 @@ export function renderTestExpr(
           : undefined;
     const agg = aggName ? ctx.aggregates.find((a) => a.name === aggName) : undefined;
     const op = agg?.operations.find((o) => o.name === e.member);
-    if (op && operationUsesCurrentUser(op)) {
+    if (op && operationBodyUsesCurrentUser(op)) {
       const recv = renderTestExpr(e.receiver, ctx, lets);
       const args = [...e.args.map((a) => renderTestExpr(a, ctx, lets)), TEST_ACTOR_PY];
       return `${recv}.${snake(e.member)}(${args.join(", ")})`;

@@ -13,6 +13,11 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
+import {
+  operationBodyUsesCurrentUser,
+  operationGates,
+  operationGatesUseCurrentUser,
+} from "../../../ir/util/op-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
@@ -306,6 +311,26 @@ export function renderJavaService(
   // can_<op> companion returns.
   const gatedOps = agg.operations.filter((op) => op.visibility === "public" && !!op.when);
   if (gatedOps.length > 0) imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
+  // The 403 the hoisted `requires` gate throws now lives HERE rather than in
+  // the entity (op-gates.ts), so the service pulls the exception in.
+  if (agg.operations.some((op) => operationGates(op).length > 0)) {
+    imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);
+  }
+  /** The hoisted authorization gate — the leading run of `requires` statements,
+   *  evaluated by the SERVICE rather than the aggregate (op-gates.ts).
+   *
+   *  Emitted post-load (so a row-aware term reads the loaded `aggregate`) and
+   *  BEFORE the `when` state gate: 403 precedes 409, so an unauthorized caller
+   *  never learns the row's state.  Operation params need no remapping here —
+   *  the service already binds each one as a `var <name> = …` local above. */
+  const requiresGateLines = (op: (typeof agg.operations)[number]): string[] =>
+    operationGates(op).map(
+      (g) =>
+        `        if (!(${renderJavaExpr(g.expr, {
+          thisName: "aggregate",
+          accessorProps: true,
+        })})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${g.source}`)});`,
+    );
   const whenGateLine = (op: (typeof agg.operations)[number]): string | null =>
     op.when
       ? `        if (!(${renderJavaExpr(op.when, { thisName: "aggregate", accessorProps: true })})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");`
@@ -356,8 +381,11 @@ export function renderJavaService(
         (p) => `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`,
       );
       for (const p of op.params) collectWireToDomainImports(p.type, imports);
-      const usesUser = !!ctx.authed && operationUsesCurrentUser(op);
-      const args = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
+      const usesUser =
+        !!ctx.authed && (operationBodyUsesCurrentUser(op) || operationGatesUseCurrentUser(op));
+      // Only what REMAINS of the body still takes the trailing argument.
+      const passUser = !!ctx.authed && operationBodyUsesCurrentUser(op);
+      const args = [...op.params.map((p) => p.name), ...(passUser ? ["currentUser"] : [])].join(
         ", ",
       );
       if (op.extern) {
@@ -373,6 +401,7 @@ export function renderJavaService(
           usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var aggregate = repository.getById(id);`,
           ifMatchGuard,
+          ...requiresGateLines(op),
           whenGateLine(op),
           `        aggregate.${op.name}(${args});`,
           `        repository.save(aggregate);`,
@@ -411,6 +440,7 @@ export function renderJavaService(
         usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         `        var aggregate = repository.getById(id);`,
         ifMatchGuard,
+        ...requiresGateLines(op),
         whenGateLine(op),
         audited ? `        var __before = ${agg.name}Response.from(aggregate);` : null,
         returnsValue
