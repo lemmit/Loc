@@ -290,13 +290,56 @@ workflow Fulfil {
 
 On an operation it sits after the return type and before `when`; it is evaluated
 **post-load** (against the loaded `this` instance), so it may reference the
-resource, the operation params, and `currentUser`.  Every backend emits the same
-guard a first-body `requires` produces:
+resource, the operation params, and `currentUser`.  A header gate and a first-body
+`requires` are the same thing by the time a backend sees them — lowering prepends
+the header form to the body as a synthetic `requires` statement — so both emit the
+identical guard.
+
+#### Where the guard lands (node)
+
+The gate is **not** domain logic, and it is not emitted into the aggregate.  A
+`precondition` (→ 422) says the aggregate is in an invalid state; a `requires`
+(→ 403) says the *caller* may not issue the command.  The second is an
+application-layer decision, so the **leading run** of `requires` statements is
+hoisted out of the entity and evaluated by whatever calls it — the HTTP handler,
+or a workflow's / explicit handler's inline op-call:
+
+```ddd
+operation cancel(reason: string) requires currentUser.role == "manager" && reason != "" {
+  status := Cancelled
+}
+```
 
 ```ts
-// generated (Hono) — top of the operation body, before any mutation
-if (!(currentUser.role === "manager")) throw new ForbiddenError("Forbidden: currentUser.role == \"manager\"");
+// generated (Hono) — http/order.routes.ts, post-load and pre-call
+const aggregate = await repo.getById(Ids.OrderId(id));
+if (!(currentUser.role === "manager" && body.reason !== "")) throw new ForbiddenError("Forbidden: currentUser.role == \"manager\" && reason != \"\"");
+aggregate.cancel(body.reason);
+
+// domain/order.ts — no gate, no principal parameter
+public cancel(reason: string): void {
+  this._status = "cancelled";
+  this._assertInvariants();
+}
 ```
+
+Consequences worth knowing:
+
+- The aggregate method **drops its `currentUser: User` parameter** when the gate
+  was its only use, so the entity stays callable from a saga, a seed, or a timer
+  without fabricating a principal.
+- A gate that references operation **parameters** resolves them to whatever the
+  call site passes (`body.<name>` on a route, the caller's own expression at an
+  inline op-call) — the parameters are not locals outside the method.
+- `requires` is evaluated **before** `when`, so an unauthorized caller gets 403
+  and never learns whether the operation would have been allowed in the row's
+  current state.
+- A `requires` that is **not** in the leading run (one that appears after a
+  mutation or a `let` it depends on) stays in the body and still throws from the
+  domain — hoisting it would change *when* it evaluates, not just where it lives.
+
+The other four backends still emit the guard inside the domain method; the hoist
+is landing per-backend.
 
 A workflow `create` gate scopes to `currentUser` + the starter's command params
 (a saga has no aggregate `this`) and renders identically.  (A workflow `handle`

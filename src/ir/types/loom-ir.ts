@@ -4085,7 +4085,7 @@ export function aggregateStampUsesPrincipal(agg: { contextStamps?: ContextStampI
   );
 }
 
-function stmtUsesCurrentUser(s: StmtIR): boolean {
+export function stmtUsesCurrentUser(s: StmtIR): boolean {
   let found = false;
   walkStmtExprsDeep(s, (node) => {
     if (node.kind === "ref" && node.refKind === "current-user") found = true;

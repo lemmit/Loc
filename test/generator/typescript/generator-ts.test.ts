@@ -1534,20 +1534,136 @@ describe("typescript generator", () => {
       }
     `;
 
-    it("`requires` lowers to a ForbiddenError throw inside the aggregate method", async () => {
+    it("a leading `requires` is hoisted OUT of the aggregate — no gate, no principal, no ForbiddenError import", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("domain/order.ts")!;
-      expect(order).toMatch(/throw new ForbiddenError\(/);
-      // The errors-module import is now narrowed to what the body actually
-      // emits — this fixture has a `requires` (ForbiddenError) but no
-      // invariants/preconditions, so DomainError isn't imported.
-      expect(order).toMatch(/import \{ ForbiddenError \} from "\.\/errors";/);
+      // Authorization is not an invariant: the entity neither evaluates the
+      // gate nor takes a principal, so it stays callable from a saga / seed /
+      // timer without one (src/ir/util/op-gates.ts).
+      expect(order).not.toMatch(/throw new ForbiddenError\(/);
+      expect(order).not.toMatch(/import .*ForbiddenError.* from "\.\/errors";/);
+      expect(order).not.toMatch(/currentUser/);
+      expect(order).toMatch(/cancel\(\): void \{/);
+    });
+
+    it("the handler evaluates the hoisted gate post-load, before it calls the aggregate", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const route = files.get("http/order.routes.ts")!;
+      const gate = route.indexOf('throw new ForbiddenError("Forbidden: currentUser.role');
+      const load = route.indexOf("await repo.getById(");
+      const call = route.indexOf("aggregate.cancel(");
+      expect(gate).toBeGreaterThan(-1);
+      // Post-load (so a row-aware gate can read `aggregate.<field>`) and
+      // pre-call (so the domain body never runs for an unauthorized caller).
+      expect(load).toBeLessThan(gate);
+      expect(gate).toBeLessThan(call);
+      // The aggregate method no longer takes the principal.
+      expect(route).toMatch(/aggregate\.cancel\(\);/);
     });
 
     it("errors.ts exports ForbiddenError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const errors = files.get("domain/errors.ts")!;
       expect(errors).toMatch(/export class ForbiddenError extends Error/);
+    });
+
+    // The hoist moves `requires` from inside the entity method to the handler,
+    // which is also where the `when` state gate already lives.  The two now
+    // sit adjacent, so their ORDER becomes an explicit contract rather than an
+    // accident of which layer each happened to live in.
+    const SRC_GATE_ORDER = `
+      system S {
+        user { id: guid  role: string }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              amount: int
+              operation cancel(reason: string)
+                requires currentUser.role == "manager" && reason != "" && amount > 0
+                when status == "open" {
+                  status := "cancelled"
+                }
+            }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: node
+          contexts: [Orders]
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    it("403 precedes 409 — an unauthorized caller never learns the row's state", async () => {
+      const files = await emitForAuthSystem(SRC_GATE_ORDER);
+      const route = files.get("http/order.routes.ts")!;
+      const forbidden = route.indexOf("throw new ForbiddenError(");
+      const disallowed = route.indexOf("throw new DisallowedError(");
+      expect(forbidden).toBeGreaterThan(-1);
+      expect(disallowed).toBeGreaterThan(-1);
+      expect(forbidden).toBeLessThan(disallowed);
+    });
+
+    it("an arg-aware gate reads the same wire value the call is about to pass", async () => {
+      const files = await emitForAuthSystem(SRC_GATE_ORDER);
+      const route = files.get("http/order.routes.ts")!;
+      // `reason` is an operation PARAMETER: inside the method it was a local,
+      // but at the handler it is only reachable at `body.reason` — a bare
+      // `reason` here would not even compile.
+      expect(route).toMatch(/body\.reason !== ""/);
+      // A row-aware term still resolves against the loaded aggregate.
+      expect(route).toMatch(/aggregate\.amount > 0/);
+      expect(files.get("domain/order.ts")!).not.toMatch(/ForbiddenError/);
+    });
+
+    // A hoisted gate is only enforcement-neutral if EVERY caller evaluates it.
+    // The inline op-call inside a workflow / explicit handler is the path that
+    // would silently lose the check if the hoist only taught the HTTP route.
+    const SRC_WF_CALLS_GATED_OP = `
+      system S {
+        user { id: guid  role: string }
+        subdomain Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel(reason: string) requires currentUser.role == "manager" {
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+            workflow Sweep {
+              create run(orderId: Order id, reason: string) {
+                let o = Orders.getById(orderId)
+                o.cancel(reason)
+                Orders.save(o)
+              }
+            }
+          }
+        }
+        deployable api {
+          platform: node
+          contexts: [Orders]
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    it("a workflow's inline op-call still evaluates the gate it no longer inherits", async () => {
+      const files = await emitForAuthSystem(SRC_WF_CALLS_GATED_OP);
+      const wf = files.get("http/workflows.ts")!;
+      const gate = wf.indexOf("throw new ForbiddenError(");
+      const call = wf.indexOf("o.cancel(");
+      expect(gate).toBeGreaterThan(-1);
+      expect(gate).toBeLessThan(call);
+      // The parameter resolves to the argument THIS call passes, not a name
+      // that happens to be in scope.
+      expect(wf).toMatch(/currentUser\.role === "manager"/);
+      // And the entity is out of it entirely.
+      expect(files.get("domain/order.ts")!).not.toMatch(/ForbiddenError|currentUser/);
     });
 
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
