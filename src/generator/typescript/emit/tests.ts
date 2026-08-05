@@ -1,4 +1,4 @@
-import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -197,27 +197,26 @@ export function renderCreateInput(
   agg: AggregateIR,
   ctx: BoundedContextIR,
 ): string {
-  const written = new Map(obj.fields.map((f) => [f.name, f.value] as const));
-  // Iterate the DECLARED create-input set, not just the fields the test author
-  // wrote: the create factory's input type requires all of them, so an omitted
-  // defaulted field (`Item.create({ name: "N" })` against `qty: int = 1`) would
-  // otherwise emit a literal missing that key and fail `tsc` in the generated
-  // project — the Java emitter already fills omissions this way.
-  const parts = forCreateInput(agg.fields)
-    .map((f) => {
-      const value = written.get(f.name);
-      if (value !== undefined) return `${f.name}: ${coerceCreateValue(value, f.type, ctx)}`;
-      // An OPTIONAL field is already `?` on the factory's input type, so an
-      // omitted one needs nothing.  Only a non-optional param is structurally
-      // required and would otherwise fail `tsc` as a missing property.
-      if (f.optional) return null;
-      const omission = createOmissionValue(f);
-      // A language-defined default (`now()`, `newId()`, …) renders through the
-      // normal expression path; the other two arms are the literal stand-ins.
-      if (omission.kind === "default") return `${f.name}: ${renderTestExpr(omission.expr, ctx)}`;
-      return `${f.name}: ${omission.kind === "false" ? "false" : "null"}`;
-    })
-    .filter((p): p is string => p !== null);
+  const declared = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
+  // Emit EXACTLY the fields the test author wrote.
+  //
+  // This used to iterate the whole create-input set and fill each omission from
+  // `createOmissionValue`, because the factory's input type required every
+  // field and an omitted one failed `tsc` in the generated project.  That fix
+  // made the assertion vacuous: `test "an omitted default is applied at
+  // construction"` writes `Item.create({ name: "N" })` and checks `qty == 1`,
+  // and the fill turned it into `Item.create({ name: "N", qty: 1, … })` —
+  // passing the value it then asserted.  The test could not fail.
+  //
+  // The factory now defaults omittable inputs itself (see `factoryDefault` in
+  // emit/aggregate.ts), so an omission both compiles AND exercises the domain
+  // rule the author was testing.  Filling here again would re-vacuum it.
+  const parts = obj.fields.map((f) => {
+    const t = declared.get(f.name);
+    // An unknown key isn't the emitter's to diagnose — it renders verbatim and
+    // the generated project's own typecheck names it, the same as before.
+    return `${f.name}: ${t === undefined ? renderTestExpr(f.value, ctx) : coerceCreateValue(f.value, t, ctx)}`;
+  });
   return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;
 }
 

@@ -1,5 +1,10 @@
 import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  createOmissionValue,
+  forCreateInput,
+  hasCreate,
+  isRequiredCreateInput,
+} from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -19,7 +24,10 @@ import {
 import { directParentName, partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
-import { constructionSeededDefaults } from "../../_frontend/server-default.js";
+import {
+  constructionSeededDefaults,
+  isServerSourcedDefault,
+} from "../../_frontend/server-default.js";
 import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { externHookCall, externHookModuleName } from "../extern-builder.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
@@ -769,11 +777,31 @@ function renderEntity(
   if (e.isRoot && e.hasCreate && !e.eventSourced) {
     const inputs = forCreateInput(e.fields);
     const inputNames = new Set(inputs.map((f) => f.name));
-    const factoryParams = inputs.map((f) =>
-      f.optional
+    // A declared default is a CONSTRUCTION rule, so the factory materializes
+    // it and the caller may omit the argument.  Server-sourced defaults
+    // (`now()`, `currentUser.*`) stay on their existing path — the wire treats
+    // those as server-supplied rather than as defaults.
+    const factoryDefault = (f: FieldIR): string | undefined => {
+      if (isRequiredCreateInput(f)) return undefined;
+      const omission = createOmissionValue(f);
+      if (omission.kind === "default") {
+        return isServerSourcedDefault(omission.expr) ? undefined : renderPyExpr(omission.expr);
+      }
+      if (omission.kind === "false") return "False";
+      return undefined; // plain optional — already `= None`
+    };
+    const factoryParams = inputs.map((f) => {
+      // `T | None = None` rather than `T = <default>`: the default expression
+      // is rendered once, in the body, so a mutable or non-literal default
+      // (`[]`, `now()`) can never become a shared Python default argument.
+      // mypy --strict narrows the `is not None` check back to `T`.
+      if (factoryDefault(f) !== undefined) {
+        return `${snake(f.name)}: ${renderPyType(f.type)} | None = None`;
+      }
+      return f.optional
         ? `${snake(f.name)}: ${renderPyType(f.type)} = None`
-        : `${snake(f.name)}: ${renderPyType(f.type)}`,
-    );
+        : `${snake(f.name)}: ${renderPyType(f.type)}`;
+    });
     // Server-seeded literal defaults (RS-11): a field outside the create-input
     // set (`token`/`managed`/`internal`) whose default is a plain constant —
     // the `versioned` capability's `version: int token = 1` is the canonical
@@ -783,7 +811,15 @@ function renderEntity(
       constructionSeededDefaults(e.fields).map((f) => [f.name, renderPyExpr(f.default)]),
     );
     const fieldInit = (f: FieldIR): string => {
-      if (inputNames.has(f.name)) return snake(f.name);
+      if (inputNames.has(f.name)) {
+        const dflt = factoryDefault(f);
+        // `is not None`, not a truthiness test: an explicit 0 / "" / False the
+        // caller passed must survive.
+        if (dflt !== undefined) {
+          return `${snake(f.name)} if ${snake(f.name)} is not None else ${dflt}`;
+        }
+        return snake(f.name);
+      }
       const seeded = defaultSeeds.get(f.name);
       if (seeded !== undefined) return seeded;
       if (f.optional) return "None";

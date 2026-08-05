@@ -1,7 +1,7 @@
 import {
-  createOmissionValue,
   emitsRestCreate,
   forCreateInput,
+  isRequiredCreateInput,
 } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
@@ -115,20 +115,21 @@ export function renderJavaService(
     // null, so materialize the declared default here — parity with node/python
     // (RS-6 / RST-10).  Fields without a default keep their existing mapping.
     const dflt = ctx.esCreateParams ? undefined : (f as FieldIR).default;
-    if (dflt) {
-      // The rendered default may reference an imported domain type (e.g. a
-      // `decimal` default → `new BigDecimal("0")`, needing java.math.BigDecimal)
-      // that the wire→domain conversion alone doesn't pull in.
+    // A SERVER-SOURCED default (`now()`, `currentUser.*`) is supplied here, at
+    // the request boundary, because that is where the clock and the principal
+    // are — it is not a construction rule the domain could apply.
+    if (dflt && isServerSourcedDefault(dflt)) {
       collectJavaExprImports(dflt, imports);
       return `        var ${f.name} = ${raw} != null ? ${wireToDomain(f.type, raw)} : ${renderJavaExpr(dflt)};`;
     }
-    // A BARE `bool` has no `= expr`, but it is still omittable create input:
-    // the language defines its implicit default, which `createOmissionValue`
-    // reports as `false`.  Its component is boxed for the same reason a
-    // defaulted one is (dto.ts), so it arrives null on omission and needs the
-    // same coalesce — without it the boxed `Boolean` would unbox to an NPE.
-    if (!ctx.esCreateParams && createOmissionValue(f as FieldIR).kind === "false") {
-      return `        var ${f.name} = ${raw} != null ? ${raw} : false;`;
+    // Every OTHER default now belongs to the factory (`javaFactoryDefault` in
+    // emit/entity.ts), which reads `null` as "the caller omitted this".  The
+    // service used to coalesce here too; keeping both would restate one rule in
+    // two places, which is the exact duplication that produced the node /
+    // elixir / java drift bugs (#2329, #2392).  So an omittable input passes
+    // straight through, null and all.
+    if (!ctx.esCreateParams && !isRequiredCreateInput(f as FieldIR)) {
+      return `        var ${f.name} = ${wireToDomain(eff(f.type, true), raw)};`;
     }
     return `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), raw)};`;
   });
