@@ -87,7 +87,6 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     allAccount: R.autoFindAll,
   },
   "systems/payments": {
-    getPaymentMethodById: R.getById,
     byNetworkCreditCard: R.declaredFind,
     destroyCreditCard: R.destroy,
     updateCreditCard: R.crudishUpdate,
@@ -214,7 +213,6 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     allOrder: R.autoFindAll,
   },
   "corpus/inheritance": {
-    getPartyById: R.getById,
     byEmailCustomer: R.declaredFind,
     destroyCustomer: R.destroy,
     raiseLimitCustomer: R.domainOp,
@@ -222,14 +220,12 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     allCustomer: R.autoFindAll,
     getVendorById: R.getById,
     allVendor: R.autoFindAll,
-    getAssetById: R.getById,
     getMachineById: R.getById,
     allMachine: R.autoFindAll,
     getVehicleById: R.getById,
     allVehicle: R.autoFindAll,
   },
   "corpus/tph": {
-    getVehicleById: R.getById,
     destroyCar: R.destroy,
     refitCar: R.domainOp,
     updateCar: R.crudishUpdate,
@@ -316,7 +312,6 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   "corpus/audited": {
     byReferenceOrder: R.declaredFind,
     destroyOrder: R.destroy,
-    recalcOrder: R.domainOp,
     allOrder: R.autoFindAll,
     createShipment: R.create,
     byCodeShipment: R.declaredFind,
