@@ -62,6 +62,7 @@ jobs:
       # invocation read the same variable, so a renamed spec fails loudly
       # instead of silently shrinking the lane.
       SPECS: >-
+        e2e/bundle-starts.spec.ts
         e2e/editor.spec.ts
         e2e/source-files.spec.ts
         e2e/workspace-history.spec.ts

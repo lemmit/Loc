@@ -733,6 +733,36 @@ export default function App(): JSX.Element {
     void engineRef.current?.reset();
   }
 
+  /** Publish the file set a Bundle click would use.
+   *
+   *  This ref has to AGREE with `pipeline.generate`, because the Bundle
+   *  button is enabled off that state while `runBundle` reads this — and for
+   *  a long time the two were written at different moments by different
+   *  rules, which produced both halves of a nasty race:
+   *
+   *   - `GENERATE_DONE` (which paints "generated N file(s)" and enables the
+   *     button) is dispatched BEFORE `runGenerateStep`'s second,
+   *     sourcemap-carrying generate; the ref was assigned only after that
+   *     returned.  On a 145-file system that is a ~0.7s window on an idle
+   *     machine and multiple seconds on a loaded CI runner, during which a
+   *     click did NOTHING AT ALL — no state change, no diagnostic, no
+   *     network.  That is what hung every `heavy-preview` Playwright spec for
+   *     its full 600s ceiling.
+   *   - conversely, a generate for a project the user had already left could
+   *     land its write AFTER `resetProject()` cleared the ref, leaving the
+   *     PREVIOUS project's tree as the thing the next Bundle click would
+   *     build.
+   *
+   *  So: write it exactly where and when the dispatch is written — under the
+   *  same epoch guard — and treat `null` as "superseded, not mine to write"
+   *  rather than as "there is nothing to bundle".  See
+   *  `e2e/bundle-starts.spec.ts`. */
+  function publishBundleInput(epoch: number, gen: GenerateResult | null): void {
+    if (epoch !== generationEpochRef.current) return;
+    if (gen === null) return;
+    lastBundleReadyRef.current = gen;
+  }
+
   // Write a project's main + companion `.ddd` files into the workspace
   // and land the editor on main.ddd.  Awaiting the controller writes is
   // deliberate: the resident sources snapshot must reflect the new
@@ -1069,6 +1099,13 @@ export default function App(): JSX.Element {
     // repaints the file view nor drives the live-mode bundle/boot cascade.
     if (epoch !== generationEpochRef.current) return null;
     dispatch({ type: "GENERATE_DONE", result });
+    // Publish HERE, in the same turn as the dispatch that enables the Bundle
+    // button — not after the sourcemap generate below.  A click landing
+    // before that finishes bundles the flag-off tree, which is exactly the
+    // documented fallback for "the mapped generate hasn't landed yet"
+    // (`lastMappedGenerateRef`), and is infinitely better than doing nothing.
+    // `runGenerate` / `runFull` upgrade this to the mapped or merged set.
+    publishBundleInput(epoch, result);
     if (result.ok && result.files.length > 0) {
       // Preserve the user's selection only when that exact path still
       // exists in the freshly generated tree; otherwise fall back to the
@@ -1305,6 +1342,7 @@ export default function App(): JSX.Element {
   }
 
   async function runGenerate(persist = false): Promise<void> {
+    const epoch = generationEpochRef.current;
     const result = await runGenerateStep();
     let bundleGen: GenerateResult | null = result;
     if (persist && result?.ok) {
@@ -1317,10 +1355,11 @@ export default function App(): JSX.Element {
       // mapped generate hasn't landed (best-effort, see `runGenerateStep`).
       bundleGen = lastMappedGenerateRef.current;
     }
-    // Remember the map-carrying set a bundle right now would use, so a
-    // later manual "Bundle" click (Live mode off — the desktop default)
-    // still gets sourcemaps even though this generate didn't cascade.
-    lastBundleReadyRef.current = bundleGen;
+    // Upgrade the provisional set published at GENERATE_DONE to the
+    // map-carrying / merged one, so a later manual "Bundle" click (Live mode
+    // off — the desktop default) still gets sourcemaps even though this
+    // generate didn't cascade.
+    publishBundleInput(epoch, bundleGen);
     if (
       liveModeRef.current &&
       bundleGen?.ok &&
@@ -1335,7 +1374,14 @@ export default function App(): JSX.Element {
   runGenerateRef.current = () => runGenerate();
 
   async function runBundle(): Promise<void> {
-    const gen = lastBundleReadyRef.current;
+    // The button is enabled off `generateSuccess`, so this must never
+    // disagree with it.  `lastBundleReadyRef` is the PREFERRED input — it
+    // carries the sourcemapped / merged tree — but falling back to the
+    // pipeline's own successful generate is what makes "the button is
+    // enabled" and "the click does something" the same condition, instead of
+    // two that have to be kept in sync by hand.  They drifted once already;
+    // see `publishBundleInput`.
+    const gen = lastBundleReadyRef.current ?? generateSuccess;
     if (!gen?.ok || gen.files.length === 0) return;
     const result = await runBundleStep(gen);
     if (liveModeRef.current && result?.hono.ok) {
@@ -1370,6 +1416,7 @@ export default function App(): JSX.Element {
     // (see runtime/client.ts).  Whatever is left in localStorage after the
     // page reloads names the step that killed it.
     markPhase("generate");
+    const epoch = generationEpochRef.current;
     const gen = await runGenerateStep();
     if (!gen?.ok || gen.files.length === 0) return;
     // Intentional run → version the output and bundle the merged tree
@@ -1377,7 +1424,7 @@ export default function App(): JSX.Element {
     let bundleGen: GenerateOk = gen;
     const merged = await persistGeneratedTree(gen);
     if (merged) bundleGen = { ...gen, files: merged };
-    lastBundleReadyRef.current = bundleGen;
+    publishBundleInput(epoch, bundleGen);
     const bundleRes = await runBundleStep(bundleGen);
     if (!bundleRes?.hono.ok) return;
     // MOBILE: hand the memory back before booting.  The bundler worker has
