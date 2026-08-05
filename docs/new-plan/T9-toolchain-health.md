@@ -113,7 +113,14 @@ Eleven items had closed in the eleven days since the hunt — **four of them sil
 
 Sources: [`fleet-bug-hunt-2026-07-19.md`](../audits/fleet-bug-hunt-2026-07-19.md) (per-bug file:line + repro), [`repo-code-review-2026-07-19.md`](../audits/repo-code-review-2026-07-19.md), [`repo-code-review-2026-07.md`](../audits/repo-code-review-2026-07.md). Related: M-T9.8 (hollow-work), M-T9.11 (differential gate), M-T5.16 (compiler-internal fragility), M-T9.4 (review remediation residue).
 
-## M-T9.25 — Intra-backend consistency gates — `open` · **M** · P1 ⭐ the seam every existing gate is blind to
+## M-T9.25 — Intra-backend consistency gates — `partial` · **M** · P1 ⭐ the seam every existing gate is blind to
+
+> **Round 1 landed (#2340).** Four census sweeps ran; every one found something.
+> **Yield: RS-27, RS-28, RS-29, RS-30**, two ratcheted IR merge boundaries, a
+> static elixir unused-helper gate, and four missions filed (M-T6.25–M-T6.28).
+> Probe 2 is **drained**; probe 1 is **partly swept** and probe 3 is **untouched**.
+> The unswept list is at the bottom of this mission — start there.
+
 **Found 2026-08-01 by a 30-second probe, having already shipped.** Every runtime gate this repo owns compares one backend to *something else*:
 
 | Gate | Compares |
@@ -143,5 +150,17 @@ Both were invisible until someone censused the emitted statuses per backend and 
 3. **One-override-moves-everything.** `test/conformance/denial-ladder-override-parity.test.ts` is the template: assert a single declaration reaches *every* emission site, per backend and across backends. Its first version was worthless — a whole-output `toContain` passes as soon as one router resolves, and it went green against the broken code — so the assertion has to be **per-file**, and must be verified to fail without the fix.
 
 **Why P1.** The two other discovery seams (cross-backend divergence, golden re-read) are largely drained: 26 RS-rules, 25 of them now five-way conforming. This one has **no coverage at all** and produced a shipped bug on first inspection. Expected yield is the highest of the three.
+
+### What is still unswept (round 2 starts here)
+
+Ordered by expected yield. Every one is a source-level probe needing no boot.
+
+1. **Re-run the whole 4xx/5xx census UNDER AN OVERRIDE.** ⭐ highest value. Sweeps 1–4 all read DEFAULT emission, which *cannot* distinguish "resolved to the default" from "hardcoded" — the trap both `denial-ladder-override-parity` and `problem-arm-census` document in-file, having each fallen into it once. Re-run with `api A from S { httpStatus ConcurrencyConflict -> 429, httpStatus Disallowed -> 423, httpStatus UniquenessConflict -> 422 }`. **Four known 409 sites are inline literal bodies** (node destroy, dotnet destroy, python destroy, elixir `conflict_response`) that visibly cannot read an override map — those are the prime suspects, and it is the same defect class as the `mergeContexts` bug that started this mission.
+2. **The 401/403 arms.** Blocked on the same harness gap as M-T9.11's 4xx goldens: one `DEV_CLAIMS` identity cannot express an authenticated-but-unauthorized principal. Fixing the harness unblocks both.
+3. **Event-sourced and document persistence.** Sweeps 1–4 used a relational fixture, so `repository-eventsourced-builder.ts` / `repository-document-builder.ts` (TS **and** python) each carry their own `Concurrency` sites that were never reached. Parameterize on `event-sourcing.ddd` / `document.ddd`.
+4. **`errors[]` pointer shape for a NESTED field.** Partly inferred, not verified: java's `pushNestedPath` yields `/lineTotals[0].unitPrice`, which is **not an RFC 6901 pointer**, while .NET explicitly converts to `/items/0/qty`. Elixir's validator never traverses `cast_assoc` children, so a nested violation likely yields `errors: []`. Needs generating all five and reading, not reasoning.
+5. **Probe 3 — one-override-moves-everything, per backend.** `denial-ladder-override-parity.test.ts` is the template but currently asserts per-file on node only. The same claim is unmade for dotnet/java/python/elixir.
+
+**Method, non-negotiable, earned four times:** read GENERATED OUTPUT, not emitters. Grepping emitters is what made an all-five `conforms` claim wrong on RS-18 (×2), RS-19 and RS-27. Generate all five from one parameterized fixture, diff the emitted strings, *then* write the rule. And make the fixture able to falsify the rule — see `docs/conformance-semantics.md` § "Make the fixture able to falsify the rule".
 
 Sources: found while landing M-T5.20 / M-T6.24 (#2340). Relates to M-T9.11 (whose oracle model structurally cannot see this class) and M-T9.8 (the "is a green gate telling the truth" question, asked of the gates' *domain* rather than their assertions).
