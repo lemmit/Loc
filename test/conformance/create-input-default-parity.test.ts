@@ -214,7 +214,16 @@ function updateRequiresField(files: Map<string, string>, backend: Backend, field
       const changeset = fileNamed(files, /item_changeset\.ex$/);
       const inSchema = new RegExp(`required: \\[[^\\]]*:${field}\\b`).test(schema);
       const inChangeset = new RegExp(`@update_required \\[[^\\]]*:${field}\\b`).test(changeset);
-      return inSchema && inChangeset;
+      // ...and a THIRD assertion, because membership in `@update_required` is
+      // still not enforcement on this seam.  `validate_required/2` resolves
+      // through `get_field/2`, which falls back to the LOADED ROW, so an omitted
+      // key is invisible to it: the field can be correctly listed and the PUT
+      // still accepted (204 here, 422 on the other four).  Presence is enforced
+      // by `__require_keys/3` against the raw attrs, ahead of `cast`, so the gate
+      // reads the mechanism and not just the list — the same lesson as the two
+      // arms above, one level further in.
+      const enforcesPresence = /\|> __require_keys\(attrs, @update_required\)/.test(changeset);
+      return inSchema && inChangeset && enforcesPresence;
     }
   }
 }
@@ -264,7 +273,10 @@ describe("an omitted UPDATE bool is rejected, not silently defaulted", () => {
       expect(
         required,
         `${BACKEND_LABEL[backend]} does not require ${BOOLS.filter((f) => !required.includes(f)).join(", ")} ` +
-          `on update — a PUT omitting the field will silently overwrite stored state`,
+          `on update — a PUT omitting the field is ACCEPTED here and rejected 422 elsewhere. ` +
+          `(It does not overwrite: an omitted key never enters \`changes\`, so \`Repo.update\` ` +
+          `does not write the column. The defect is the cross-backend divergence, and a served ` +
+          `spec the runtime does not honour.)`,
       ).toEqual(BOOLS);
     });
   }
