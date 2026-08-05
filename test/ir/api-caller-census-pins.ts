@@ -336,6 +336,12 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   "extern-handlers",
   "field-mask",
   "outbox",
+  // `deny` compiles on all five backends (that is what the fixture was added
+  // for — see docs/new-plan T3 M-T3.3), but nothing calls a denied aggregate's
+  // routes at runtime, so "a denied read 404s / lists empty over HTTP" is still
+  // unproven.  Registered rather than silently absent: before this fixture the
+  // feature had no `.ddd` at all, so it could not even appear on this list.
+  "policy-deny",
   "projection-aggregation",
   "projection-groupby",
   "resources",
