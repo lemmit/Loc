@@ -56,7 +56,7 @@ export default function ProductList() {
                 )) }
               </Table.Tbody>
             </Table>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>Prev</button><span>Page {pageNum} of {Math.max(1, productAll.data.totalPages)}</span><button type="button" disabled={pageNum >= Math.max(1, productAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>Next</button></div></>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }} data-testid="pager"><button type="button" disabled={pageNum <= 1} onClick={() => setPageNum(pageNum - 1)}>{t("chrome.prev", "Prev")}</button><span>{t("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, productAll.data.totalPages) })}</span><button type="button" disabled={pageNum >= Math.max(1, productAll.data.totalPages)} onClick={() => setPageNum(pageNum + 1)}>{t("chrome.next", "Next")}</button></div></>
           </Paper>
         ) }
       </>

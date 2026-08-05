@@ -60,8 +60,30 @@ describe("flutter Table controls — server-driven (M-T1.1)", () => {
     expect(dart).toContain(
       "state.pageNum <= 1 ? null : () => notifier.setPageNum(state.pageNum - 1)",
     );
+    // This fixture's page carries three authored literals (the QueryView's
+    // loading / error / empty text), so the ui is i18n-enabled and the pager's
+    // chrome BINDS (M-T1.11).  `const` goes with it: Dart rejects `const` over a
+    // `t()` call, so constness has to follow the label.
+    expect(dart).toContain("child: Text(t('chrome.next', 'Next'))");
+    expect(dart).toContain("Text(t('chrome.pageOf', 'Page {page} of {pages}', <String, Object>{");
+  });
+
+  it("…and keeps `const Text` + the raw counter when the ui has nothing to translate", async () => {
+    // The byte-identical half, on the target where it costs something real: drop
+    // the three authored literals and the whole page is string-less, so no
+    // runtime ships and the pager renders exactly what it did pre-i18n —
+    // `const` included, which is the bit a naive "always bind" would silently
+    // lose.
+    const dart = await page(`QueryView { of: Shop.Product.all,
+      data: rows => Table(
+        Column("Name", p => p.name, sortable: true),
+        rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 3,
+        testid: "product-table") }`);
+    expect(dart).toContain("child: const Text('Prev')");
     expect(dart).toContain("child: const Text('Next')");
-    expect(dart).toContain("Page ${state.pageNum} of ");
+    expect(dart).toContain("Text('Page ${state.pageNum} of ");
+    expect(dart).not.toContain("chrome.");
+    expect(dart).not.toContain("i18n.dart");
   });
 
   it("emits Dart for the client page window — never JavaScript", async () => {
