@@ -58,8 +58,12 @@ function appliesDefault(files: Map<string, string>, backend: Backend, field: str
       // record positional default: `int Qty = 1`.
       return new RegExp(`\\b${pascal}\\s*=\\s*[^,)\\n]+[,)]`).test(all);
     case "java":
-      // service-side coalesce on the boxed component.
-      return new RegExp(`request\\.${field}\\(\\)\\s*!=\\s*null\\s*\\?`).test(all);
+      // DOMAIN-FACTORY coalesce on the boxed parameter: `qty != null ? qty : 1`
+      // in `Item.create(...)`.  This used to look for the same shape in the
+      // SERVICE (`request.qty() != null ? …`) — the coalesce moved into the
+      // factory so one site per backend owns the rule, which is also what makes
+      // the omission genuinely testable from the domain layer.
+      return new RegExp(`e\\.${field} = ${field} != null \\? ${field} :`).test(all);
     case "vanilla":
       // Ecto schema default.
       return new RegExp(`field :${field},[^\\n]*default:`).test(all);

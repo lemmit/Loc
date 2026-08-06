@@ -38,6 +38,15 @@ import { namedArgValue, positionalArgs } from "./shared/args.js";
 export interface MessageEntry {
   key: string;
   message: string;
+  /** True when the message came from an INTERPOLATED slot and therefore carries
+   *  ICU holes (`"Status: {code}"`) rather than being a plain literal.
+   *
+   *  Every frontend formats holes at runtime, but only Phoenix has to DECIDE
+   *  whether to ship a formatter at all: gettext alone cannot substitute ICU
+   *  holes, so an app with an interpolated message needs an ICU engine and a
+   *  plain-literal one must not pay for it (D-I18N-HEEX-ICU).  Marked here, at
+   *  the one place that already knows, rather than re-derived by re-walking. */
+  icu?: true;
 }
 
 /** The plain-string value of an expression, or undefined when it is not a
@@ -198,7 +207,11 @@ function collectBody(body: ExprIR | undefined, prefix: string, out: MessageEntry
       // the named display form (the React emitter derives the identical key).
       const icu = icuFromConcat(arg);
       if (icu) {
-        out.push({ key: messageKey(prefix, slot.role, icu.positional), message: icu.display });
+        out.push({
+          key: messageKey(prefix, slot.role, icu.positional),
+          message: icu.display,
+          icu: true,
+        });
       }
     }
   });

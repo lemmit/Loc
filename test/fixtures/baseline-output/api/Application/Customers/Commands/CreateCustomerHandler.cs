@@ -20,7 +20,7 @@ public sealed class CreateCustomerHandler : ICommandHandler<CreateCustomerComman
 
     public async ValueTask<CustomerId> Handle(CreateCustomerCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = Customer.Create(command.Username, command.Email, command.Age);
+        var aggregate = Customer.Create(username: command.Username, email: command.Email, age: command.Age);
         await _repo.SaveAsync(aggregate, cancellationToken);
         return aggregate.Id;
     }

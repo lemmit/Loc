@@ -1,9 +1,15 @@
 import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
 import { offsetToLineCol } from "../../../generator/_trace/sourcemap.js";
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  createOmissionValue,
+  forCreateInput,
+  hasCreate,
+  isRequiredCreateInput,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
+  FieldIR,
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -13,7 +19,10 @@ import { resolveToSource } from "../../../ir/types/origin.js";
 import { typeIsFile } from "../../../ir/util/file-field.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { constructionSeededDefaults } from "../../_frontend/server-default.js";
+import {
+  constructionSeededDefaults,
+  isServerSourcedDefault,
+} from "../../_frontend/server-default.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import { collectCsExprUsings, csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import {
@@ -712,9 +721,26 @@ export function renderEntity(
   // non-constructible aggregate exposes no public factory; it is
   // reconstructed only via `_Create` (hydration).  Assigns each create-input
   // field from its positional param.
-  const createAssignments = createInputFieldList.map(
-    (f) => `        e.${upperFirst(f.name)} = ${f.name};`,
-  );
+  // A declared default is a CONSTRUCTION rule, so the factory materializes it
+  // and the caller may omit the argument.  Server-sourced defaults (`now()`,
+  // `currentUser.*`) keep their existing path — the wire treats those as
+  // server-supplied rather than as defaults.
+  const csFactoryDefault = (f: FieldIR): string | undefined => {
+    if (isRequiredCreateInput(f)) return undefined;
+    const omission = createOmissionValue(f);
+    if (omission.kind === "default") {
+      return isServerSourcedDefault(omission.expr)
+        ? undefined
+        : renderCsExpr(omission.expr, renderCtx);
+    }
+    if (omission.kind === "false") return "false";
+    return undefined; // plain optional — already nullable
+  };
+  const createAssignments = createInputFieldList.map((f) => {
+    const dflt = csFactoryDefault(f);
+    // `??`, not a truthiness test: an explicit 0/""/false must survive.
+    return `        e.${upperFirst(f.name)} = ${dflt === undefined ? f.name : `${f.name} ?? ${dflt}`};`;
+  });
   // Server-seeded literal defaults (RS-11): fields outside the create-input set
   // (`token`/`managed`/`internal`) whose default is a plain constant — the
   // `versioned` capability's `version: int token = 1` is the canonical case.
@@ -730,8 +756,24 @@ export function renderEntity(
   const createPublicLines =
     isRoot && isAgg(entity) && hasCreate(entity) && !eventSourced
       ? [
-          `    public static ${entity.name} Create(${createInputFieldList
-            .map((f) => `${renderCsType(f.type)} ${f.name}`)
+          // Defaultable parameters must TRAIL the required ones (CS1737: "an
+          // optional parameter cannot precede a required parameter").  A stable
+          // partition, not a sort, so declared order is preserved within each
+          // group; the handler calls by name, so the reorder is invisible.
+          `    public static ${entity.name} Create(${[
+            ...createInputFieldList.filter((f) => csFactoryDefault(f) === undefined),
+            ...createInputFieldList.filter((f) => csFactoryDefault(f) !== undefined),
+          ]
+            .map((f) => {
+              const dflt = csFactoryDefault(f);
+              if (dflt === undefined) return `${renderCsType(f.type)} ${f.name}`;
+              // `T? x = null` rather than `T x = <default>`: a C# optional
+              // parameter default must be a compile-time constant, which a
+              // rendered default expression (a VO ctor, an enum member, a
+              // decimal) need not be.  The body applies it instead.
+              const t = renderCsType(f.type);
+              return `${t.endsWith("?") ? t : `${t}?`} ${f.name} = null`;
+            })
             .join(", ")})`,
           "    {",
           `        var e = new ${entity.name}();`,

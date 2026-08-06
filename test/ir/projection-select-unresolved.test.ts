@@ -345,7 +345,12 @@ describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
   deployable web { platform: ${framework} targets: api ui: WebApp { Sales: api } port: 3002 }
 }`;
 
-  for (const framework of ["react", "vue"]) {
+  // Both lists shift one framework at a time as the ports land (#2324 react,
+  // #2366 vue, #2369 svelte, …).  A sibling port rebasing onto this file moves
+  // its own name from the second loop to the first — it never rewrites either
+  // list wholesale, for the same reason `PROJECTION_READ_FRAMEWORKS` itself
+  // must be merged rather than taken from one side.
+  for (const framework of ["react", "vue", "svelte"]) {
     it(`is silent on ${framework} — the projection client ships there`, async () => {
       expect(await codes(onFrontend(framework))).not.toContain(
         "loom.ui-projection-read-unsupported",
@@ -353,7 +358,7 @@ describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
     });
   }
 
-  for (const framework of ["svelte", "angular", "flutter"]) {
+  for (const framework of ["angular", "flutter"]) {
     it(`gates ${framework} honestly until its client ports`, async () => {
       expect(await codes(onFrontend(framework))).toContain("loom.ui-projection-read-unsupported");
     });
