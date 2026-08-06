@@ -51,10 +51,9 @@ import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
-import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
+import { findRoutes, renderFindActions } from "./find-controller.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
-  aggregateHasReturningOpError,
   GUARD_RESCUE,
   isReturningOperation,
   opHasGuards,
@@ -472,15 +471,6 @@ ${cuBind}    case ${ctxModule}.${cmdGet}(id${getActor}) do
     })
     .join("\n");
 
-  // Shared error-variant responder, emitted once when the aggregate has a
-  // returning op WITH an error variant or a union find (else it'd be an unused
-  // private fn under --warnings-as-errors — a returning op with a scalar /
-  // success-only return never calls it).
-  const problemVariant =
-    aggregateHasReturningOpError(agg, ctx) || aggregateHasUnionFind(ctx, agg)
-      ? `\n${renderProblemVariantHelper()}\n`
-      : "";
-
   // `GET /<plural>/<find>` actions for the aggregate's custom finds.
   const findActions = renderFindActions(appModule, ctxModule, agg, ctx);
 
@@ -742,6 +732,19 @@ ${cuBind}${updateCuBind}${versionBind}
     ? `\n\n${renderVanillaHistoryAction(appModule, ctxModule, ctx, agg, historyFind, principal)}`
     : "";
   const historyMapper = historyFind ? `\n\n${renderVanillaHistoryMapper(appModule, ctx, agg)}` : "";
+
+  // Shared error-variant responder — emitted iff a rendered section actually
+  // CALLS it.  The old declarative gate (has-returning-op-error || has-union-find)
+  // drifted from the render sites the moment the find-absence arms moved to the
+  // token producer (#2448's elixir round): api-call's controller emitted the
+  // helper with zero callers, an unused private fn under --warnings-as-errors.
+  // Deriving the gate from the assembled sections cannot drift again
+  // (CLAUDE.md: derive, don't stamp).
+  const problemVariant = [writeActions, findActions, opActions, canActions].some((s) =>
+    s.includes("problem_variant("),
+  )
+    ? `\n${renderProblemVariantHelper()}\n`
+    : "";
 
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do

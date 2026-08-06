@@ -41,12 +41,6 @@ export function httpFindsOf(ctx: BoundedContextIR, agg: AggregateIR): FindIR[] {
   return (repo?.finds ?? []).filter((f) => f.name !== "all" && !f.synthesized);
 }
 
-/** True when the aggregate has any union-returning find (→ the controller needs
- *  the shared `problem_variant/5` responder). */
-export function aggregateHasUnionFind(ctx: BoundedContextIR, agg: AggregateIR): boolean {
-  return httpFindsOf(ctx, agg).some((f) => f.returnType.kind === "union");
-}
-
 /** True when the find returns zero-or-one record (`Customer?` / `Customer`) or
  *  a union (`Customer or NotFound`) rather than a list. */
 function isSingleReturn(t: TypeIR): boolean {

@@ -393,20 +393,6 @@ export function aggregateHasReturningOp(agg: AggregateIR): boolean {
   return agg.operations.some((op) => op.visibility === "public" && isReturningOperation(op));
 }
 
-/** Does any PUBLIC returning op on this aggregate declare an ERROR variant?
- *  Only then does the controller emit a `problem_variant/5` *call* — a returning
- *  op with an error-free return (a scalar like `: string`, or a success-only
- *  union) takes the `{:ok, …}` path exclusively.  Gating the shared
- *  `problem_variant/5` responder on this (not merely "has a returning op")
- *  keeps it from being emitted-but-unused, which trips
- *  `mix compile --warnings-as-errors`. */
-export function aggregateHasReturningOpError(agg: AggregateIR, ctx: BoundedContextIR): boolean {
-  return agg.operations.some(
-    (op) =>
-      op.visibility === "public" && isReturningOperation(op) && errorVariantsOf(op, ctx).length > 0,
-  );
-}
-
 /** A return variant is an *error* iff it names a `kind: "error"` payload in
  *  this context; the other (success) variant is the aggregate itself. */
 function isErrorTag(tag: string, ctx: BoundedContextIR): boolean {
