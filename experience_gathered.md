@@ -4397,3 +4397,46 @@ what it would mean if the marker doesn't move (128 MB is more than iOS will
 give a web page → the answer is a server-side runtime, not more trimming).
 Writing down the falsifier before the measurement is what stops the next fix
 from being reported as a success on the strength of its bundle graph.
+
+## 78. "It compiles in CI" can mean "no CI job reaches it" (2026-08-05)
+
+Shipping ICU interpolation on Phoenix added a generated CLDR backend, a
+generated `loom_icu/2`, two hex deps and an `import` into every template. All
+of it is Elixir the toolchain emits but never itself compiles — so the question
+"does the emitted Elixir actually build?" belongs to `elixir-vanilla-build.yml`.
+
+Before assuming it did, I counted. A 15-line census over every `.ddd` in the
+repo, run through the real gate function:
+
+- the 40 corpus fixtures carry **no `ui` block at all** → `corpus-elixir-build`
+  can never reach a frontend feature;
+- of 47 example UIs, **3** interpolate — and **none of the four
+  Elixir-targeting examples is one of them**.
+
+So the feature would have merged with **zero** compile coverage, on a green
+board, and the first person to find out would have been a user writing
+`` `Order {id}` `` in a Phoenix page. The gates were all passing and all blind:
+the emission is conditional, and no gated input satisfied its condition.
+
+The fix was one fixture — `elixir-vanilla-build.yml` enumerates its fixture
+directory dynamically, so adding the file adds a matrix cell. It compiled, and
+the compile was worth having: it is the only thing that proves the generated
+`Cldr` backend, the `import` into `html_helpers`, and the `{…}` attribute form
+all survive `mix compile --warnings-as-errors`.
+
+**Lesson.** A conditional emission needs a fixture that satisfies its
+condition, and "some gate covers this area" is not evidence that one does.
+Before trusting a gate, ask what INPUT would exercise the new branch and check
+that a gated input actually has it — the census is minutes, and it is the
+difference between a gate and a green light. Related to §63's "mutation-prove a
+new gate", one step earlier: that rule asks whether the gate would fail on a
+seeded defect; this one asks whether the gate ever runs the code at all.
+
+### The measurement that made the trade honest, too
+
+The same census answered the cost question the design hinged on. The CLDR
+compile is real (1m50s → 2m47s on a generated app), which is why the engine
+sits behind a second-tier gate — and because no corpus fixture has a `ui`, the
+measured CI cost of the whole slice is *one added matrix cell*, not a tax on
+every Elixir job. Guessing either number would have argued for the wrong
+design.

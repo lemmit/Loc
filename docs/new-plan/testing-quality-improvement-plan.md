@@ -28,8 +28,8 @@ Verified passing on **node + python** behavioral legs (the self-fold chain runs 
 ### M-T9.13 — `resources` / `extern` runtime validation — `open` · **M** · P2
 `resources` (objectStore/queue/api/email clients) and `extern`/`extern-handlers` (escape-hatch scaffolds) are compile-only. `email-e2e`/`channels-e2e` exist but do not exercise these corpus fixtures. Add a behavioral block or a dedicated harness proving a resource client round-trips (put→get) and an extern handler is invoked. (`extern` bodies that legitimately `throw "not implemented"` stay honest fail-fast, excluded.)
 
-### M-T9.14 — Flutter runtime proof — `open` · **M** · P2 ⭐
-Flutter is the one frontend with **zero** runtime coverage: `generated-flutter-build.yml` (compile) is its entire gate — no SPA smoke, absent from the nightly `frontend-fullstack-e2e.yml` matrix. It is also the only frontend with **no `render-expr` per-kind test** (`flutter/dart-expr.ts` untested — see D) and **no auth-UI test**. Add, at minimum, the backend-less SPA smoke (`flutter build web` + a Playwright mount/route assertion) the other frontends have, then a matrix cell in `frontend-fullstack-e2e`.
+### M-T9.14 — Flutter runtime proof — `partial` (re-verified 2026-08-05 — the "zero runtime coverage" premise is stale) · **M** · P2 ⭐
+Flutter now has runtime legs riding `generated-flutter-build.yml`: the `flutter test` table-controls widget test (M-T1.1 Follow-on C — taps the real generated controls, asserts the real Notifier state), the M-T1.18 runtime smoke, and #2282's runtime WCAG gate. What genuinely remains: a `frontend-fullstack-e2e.yml` matrix cell (real-backend round-trip). It is also the only frontend with **no `render-expr` per-kind test** (`flutter/dart-expr.ts` untested — see D) and **no auth-UI test**. Add, at minimum, the backend-less SPA smoke (`flutter build web` + a Playwright mount/route assertion) the other frontends have, then a matrix cell in `frontend-fullstack-e2e`.
 
 ### M-T9.15 — Per-PR full-stack round-trip for one non-React frontend — `open` · **L** · P2
 React is the only frontend with a **per-PR** full-stack round-trip (`behavioral-ui-e2e.yml`). Vue/Svelte/Angular/Feliz get a build gate + a *backend-less* SPA smoke (routing only, `push:main`); their only proof that generated forms create+read against a real backend is nightly (`frontend-fullstack-e2e.yml`, cron `17 5 * * *`). A wire-contract/form-binding regression on those four ships and sits on `main` until the nightly. Promote **one** (Vue, the most-used) to a per-PR `run-ui.mjs` cell.
@@ -77,8 +77,8 @@ Add focused unit tests (mock target / minimal IR fixtures, no full generation) f
 
 Lower-severity, but each is a place where one target's emitter is pinned per-kind and a peer's is not:
 
-### M-T9.20 — Frontend unit-test parity fill — `open` · **S** · P3
-- **`render-expr` per-kind**: all 5 backends pin every `ExprIR` kind; the two frontends with their own expression renderers — `flutter/dart-expr.ts` and `feliz/fs-expr.ts` — have none.
+### M-T9.20 — Frontend unit-test parity fill — `partial` (widened 2026-08-05 to own the frontend-expression workstream, which had no mission: #2346 collection-op gate, #2348 shared intrinsic snippet table, #2353 coverage gate + 4 defects, #2355 exhaustive walker expression dispatch — no silent placeholders; open PR #2439 wires the Feliz `fs-expr.ts` table through `renderIntrinsic` and deletes a ratchet entry) · **S** · P3
+- **`render-expr` per-kind**: all 5 backends pin every `ExprIR` kind; the two frontends with their own expression renderers — `flutter/dart-expr.ts` and `feliz/fs-expr.ts` — now ride the shared intrinsic table + coverage gate (#2348/#2353); per-kind pinning tail remains.
 - **`file-upload`**: tested on react + feliz frontends; missing on vue/svelte/angular/flutter.
 - **`sourcemap`**: react/vue/svelte/angular covered; feliz + flutter uncovered.
 - **frontend ACL / field-mask redaction**: react-only (`frontend-acl-emit.test.ts`); no vue/svelte/angular/feliz/flutter equivalent.
