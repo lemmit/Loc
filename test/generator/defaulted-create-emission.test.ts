@@ -6,8 +6,14 @@
 // default is applied at the wire boundary when the client omits it, so the
 // field drops out of the request's required-set.  Each backend renders the
 // default in its native slot: Hono zod `.default(…)`, .NET record `= …`,
-// Phoenix Ecto `field ... default: ...`.  The domain factory signature is unchanged —
-// the create input still names every field (see `wireCreateDefault`).
+// Phoenix Ecto `field ... default: ...`.
+//
+// The DOMAIN FACTORY applies it too, and that is the primary site: a default is
+// a construction rule, so an omittable create input is optional on the factory
+// and materializes its declared value there.  An in-process caller — a seed, a
+// unit test, a sibling aggregate — can therefore omit it, which is what makes
+// `test "an omitted default is applied at construction"` a real assertion
+// rather than one the test emitter pre-satisfied by filling the argument.
 //
 // REST-create gate (symmetric with DELETE): the auto-derived `POST /<coll>`
 // endpoint + request DTO + create command now require an EXPLICIT canonical
@@ -119,11 +125,17 @@ describe("defaulted aggregate — parameterized create (invariant gate)", () => 
     // client may omit the field — it is no longer a required input.
     expect(routes).toMatch(/count:\s*z\.coerce\.number\(\)\.int\(\)\.default\(0\)/);
     expect(routes).toMatch(/label:\s*z\.string\(\)\.default\("untitled"\)/);
-    // The factory call + domain signature are unchanged — the create input
-    // still names every field.
+    // The route still names every field — the wire has a value for each.
     expect(routes).toMatch(/Counter\.create\(\{ count: body\.count, label: body\.label \}\)/);
+    // The DOMAIN factory now owns the default too: an omittable input is `?` and
+    // materializes its declared value, so `Counter.create({})` is legal in-process
+    // (a seed, a unit test, another aggregate) and applies 0 / "untitled".
     const domain = findFile(files, /domain\/counter\.ts$/i)!;
-    expect(domain).toMatch(/static create\(input: \{ count: number; label: string \}\): Counter/);
+    expect(domain).toMatch(
+      /static create\(input: \{ count\?: number; label\?: string \}\): Counter/,
+    );
+    expect(domain).toMatch(/count: input\.count \?\? 0/);
+    expect(domain).toMatch(/label: input\.label \?\? "untitled"/);
   });
 
   it(".NET: defaulted fields become optional request params via record defaults", async () => {
@@ -134,8 +146,15 @@ describe("defaulted aggregate — parameterized create (invariant gate)", () => 
     expect(dto).toMatch(
       /record CreateCounterRequest\(\s*int Count = 0,\s*string Label = "untitled"\s*\)/,
     );
+    // The DOMAIN factory owns the default too — omittable params are nullable
+    // with `= null` and the body applies the declared value, so an in-process
+    // caller (seed, unit test, sibling aggregate) may omit them.
     const domain = findFile(files, /Domain\/Counters\/Counter\.cs$/)!;
-    expect(domain).toMatch(/public static Counter Create\(int count, string label\)/);
+    expect(domain).toMatch(
+      /public static Counter Create\(int\? count = null, string\? label = null\)/,
+    );
+    expect(domain).toMatch(/e\.Count = count \?\? 0;/);
+    expect(domain).toMatch(/e\.Label = label \?\? "untitled";/);
   });
 
   it("Phoenix: defaulted fields carry an Ecto `default:` so they are optional input", async () => {

@@ -153,19 +153,27 @@ describe("Java domain-test emitter (renderJavaTestsFile)", () => {
     expect(src).toContain('assertThrows(DomainException.class, () -> p.rename(""))');
   });
 
-  it("fills a defaulted create-input with its literal and coerces typed inputs", async () => {
+  it("passes null for an omitted create-input and coerces the typed ones", async () => {
     const files = await generateSystemFiles(TYPED);
     const src = findFile(files, /OrderTests\.java$/);
 
     // Positional create: the guid-typed id coerced to the Id record
     // (`new CustomerId(UUID.fromString(...))`, since `record CustomerId(UUID)`),
-    // `new Money(...)` VO ctor, the ISO datetime coerced to `Instant.parse(...)`,
-    // and the defaulted `status` filled with its literal ("open").
+    // `new Money(...)` VO ctor, and the ISO datetime coerced to
+    // `Instant.parse(...)`.
     const create = line(src, /Order\.create\(/);
     expect(create).toContain(
       'Order.create(new CustomerId(UUID.fromString("c1")), new Money(new BigDecimal("9.99"), "USD")',
     );
     expect(create).toContain('Instant.parse("2024-01-01T00:00:00Z")');
-    expect(create).toContain('"open")'); // defaulted field filled
+
+    // The omitted defaulted `status` is passed as `null` — Java's spelling of
+    // "the caller omitted this" — NOT filled with its literal.  Filling it is
+    // what made the construction assertion vacuous: the emitter supplied the
+    // value the test then checked.  The DOMAIN factory applies the default,
+    // which is the rule actually under test.
+    expect(create).not.toContain('"open"');
+    const domain = findFile(files, /Order\.java$/);
+    expect(domain).toMatch(/status = status != null \? status : "open"/);
   });
 });

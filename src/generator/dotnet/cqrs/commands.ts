@@ -126,8 +126,13 @@ export function emitCreateCommandAndHandler(
       extraDeps: createAuditDeps,
       extraUsings: createAuditUsings,
       body:
+        // NAMED arguments, not positional: the factory now trails its
+        // defaultable parameters (C# CS1737 requires optional params last), so
+        // its signature order no longer matches the declared field order this
+        // list is in.  Naming them decouples the two — and a create factory is
+        // exactly the call site where positional args were least readable.
         `        var aggregate = ${agg.name}.Create(${requiredFields
-          .map((f) => `command.${upperFirst(f.name)}`)
+          .map((f) => `${f.name}: command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
         createAuditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +

@@ -64,16 +64,20 @@ function createLine(src: string, marker: RegExp): string {
 }
 
 describe("domain test-block aggregate create — backend emission", () => {
-  it(".NET renders a named-arg Create(...) filling the omitted optional with null", async () => {
+  it(".NET renders a named-arg Create(...) with only the inputs the test named", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const tests = findFile(files, /ProjectTests\.cs$/i);
     const line = createLine(tests, /Project\.Create\(/);
     // Named-arg factory call, not a `new { ... }` anonymous object.
     expect(line).not.toMatch(/Project\.Create\(new\s*\{/);
-    // Provided inputs ride through; the omitted optional is filled with null.
+    // Provided inputs ride through.
     expect(line).toMatch(/name:\s*"demo"/);
     expect(line).toMatch(/budget:\s*0\.0m/);
-    expect(line).toMatch(/description:\s*null/);
+    // The OMITTED optional is simply absent.  It used to be filled with an
+    // explicit `description: null`, which the factory's `= null` default now
+    // supplies — and filling omissions in general is what made the
+    // construction assertions vacuous (see defaulted-create-emission.test.ts).
+    expect(line).not.toMatch(/description:/);
   });
 
   it("TS renders the object-literal create with the provided inputs", async () => {

@@ -20,7 +20,7 @@ public sealed class CreateProductHandler : ICommandHandler<CreateProductCommand,
 
     public async ValueTask<ProductId> Handle(CreateProductCommand command, CancellationToken cancellationToken)
     {
-        var aggregate = Product.Create(command.Sku, command.Price);
+        var aggregate = Product.Create(sku: command.Sku, price: command.Price);
         await _repo.SaveAsync(aggregate, cancellationToken);
         return aggregate.Id;
     }
