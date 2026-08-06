@@ -535,12 +535,19 @@ export function deriveAggregateOperations(
 /** Every lifted operation across a context, aggregate by aggregate.  Threads
  *  the context's `httpStatus` maps so each operation's `errorStatuses` are the
  *  RESOLVED statuses the backend answers, not the unremapped defaults. */
-export function deriveContextOperations(ctx: BoundedContextIR): ApiOperationIR[] {
-  const statuses: ApiStatusContext = {
+/** The status-resolution inputs read off a context — for a backend that
+ *  derives per aggregate (`deriveAggregateOperations`) rather than through
+ *  `deriveContextOperations`. */
+export function apiStatusContext(ctx: BoundedContextIR): ApiStatusContext {
+  return {
     errorStatusOverrides: ctx.errorStatusOverrides,
     structuralErrorStatuses: ctx.structuralErrorStatuses,
     errorPayloadNames: new Set(ctx.payloads.filter((p) => p.kind === "error").map((p) => p.name)),
   };
+}
+
+export function deriveContextOperations(ctx: BoundedContextIR): ApiOperationIR[] {
+  const statuses = apiStatusContext(ctx);
   const out: ApiOperationIR[] = [];
   for (const agg of ctx.aggregates) {
     // An abstract inheritance base owns the shared table but no HTTP surface —

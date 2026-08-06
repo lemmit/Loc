@@ -1,4 +1,4 @@
-import { emitsRestCreate, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
@@ -8,6 +8,12 @@ import type {
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationIsGuarded } from "../../../ir/types/loom-ir.js";
+import {
+  type ApiOperationIR,
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+} from "../../../ir/util/api-surface.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -51,8 +57,6 @@ export interface ReturnUnionSpec {
   domainNs: string;
   appNs: string;
   arms: ReturnUnionArm[];
-  /** Distinct error statuses → `[ProducesResponseType]` declarations. */
-  errorStatuses: number[];
 }
 
 /** Build the controller-shape spec for ONE public operation (F5d
@@ -65,7 +69,7 @@ export function buildOperationSpec(
   op: AggregateIR["operations"][number],
   ctx: EnrichedBoundedContextIR,
   ns: string,
-): ControllerShape["publicOps"][number] {
+): Omit<ControllerShape["publicOps"][number], "apiOp" | "probeOp"> {
   return {
     name: op.name,
     // URL segment from routeSlug (D-URLSTYLE); name stays the verb
@@ -148,15 +152,11 @@ function buildReturnUnionSpec(
           : [],
     };
   });
-  const errorStatuses = [...new Set(arms.filter((a) => a.isError).map((a) => a.status))].sort(
-    (a, b) => a - b,
-  );
   return {
     unionName: unionInstanceName(variants),
     domainNs: `${ns}.Domain.${plural(agg.name)}`,
     appNs: `${ns}.Application.${plural(agg.name)}.Responses`,
     arms,
-    errorStatuses,
   };
 }
 
@@ -186,11 +186,27 @@ export function emitController(
   // System.Globalization for a datetime/money parse); collected over the
   // same types those conversions consume so the controller file imports
   // each once, only when actually needed.
-  const publicOps = agg.operations.filter((o) => o.visibility === "public");
-  // A synthesized find (paged-run queryHandler support) is never auto-exposed by
-  // the aggregate controller — the queryHandler's own route is the exposure — so
-  // it drives no action / OpenAPI path here.
-  const exposedFinds = (repo?.finds ?? []).filter((f) => !f.synthesized);
+  // THE UNIFICATION SEAM (api-surface.ts): the aggregate's HTTP surface —
+  // which routes exist, at which method + path, declaring which error
+  // statuses — comes from the shared derivation.  This file keeps what is
+  // genuinely .NET's: DTO/command names, binding, handler bodies, the
+  // union-absent ProblemDetails payload.  The entity-history action stays a
+  // named local extra (`apiSurfaceCoverage.notLifted` documents it).
+  const derivedOps = deriveAggregateOperations(agg, repo, apiStatusContext(ctx));
+  const opEntries = derivedOps.filter((o) => o.kind === "operation");
+  const probeByOp = new Map<unknown, ApiOperationIR>(
+    derivedOps.filter((o) => o.kind === "gateProbe").map((o) => [o.operation, o]),
+  );
+  // The derivation registers the auto-`all` LAST (Hono's shadowing order);
+  // .NET has always emitted it first (enrichment prepends it to `repo.finds`),
+  // and ASP.NET attribute routing is registration-order-free — so keep the
+  // historical order rather than churn every controller's method layout.
+  const findEntries = [
+    ...derivedOps.filter((o) => isAllFind(o)),
+    ...derivedOps.filter((o) => o.kind === "find" && !isAllFind(o)),
+  ];
+  const publicOps = opEntries.map((o) => o.operation!);
+  const exposedFinds = findEntries.map((o) => o.find!);
   const usings = new Set<string>();
   for (const f of requiredFields) collectWireUsings(f.type, ctx, usings);
   for (const op of publicOps) for (const p of op.params) collectWireUsings(p.type, ctx, usings);
@@ -217,8 +233,11 @@ export function emitController(
     renderController(agg, repo, ns, {
       idClass,
       idClrType: csIdValueClrType(agg.idValueType),
-      createAction: createActionOverride ?? emitsRestCreate(agg),
-      destroyAction: !!agg.canonicalDestroy,
+      createAction: createActionOverride ?? derivedOps.some((o) => o.kind === "create"),
+      destroyAction: derivedOps.some((o) => o.kind === "destroy"),
+      createApiOp: derivedOps.find((o) => o.kind === "create"),
+      getByIdApiOp: derivedOps.find((o) => o.kind === "getById")!,
+      destroyApiOp: derivedOps.find((o) => o.kind === "destroy"),
       // Entity history (docs/audit.md): the derived read sits BESIDE `finds`
       // (see `RepositoryIR.historyFind`), so it drives its own action rather
       // than riding the `exposedFinds` loop.  `guarded` is the gate the find
@@ -246,10 +265,13 @@ export function emitController(
         }
         return wireArg;
       }),
-      publicOps: agg.operations
-        .filter((o) => o.visibility === "public")
-        .map((op) => buildOperationSpec(agg, op, ctx, ns)),
-      finds: exposedFinds.map((find) => {
+      publicOps: opEntries.map((o) => ({
+        ...buildOperationSpec(agg, o.operation!, ctx, ns),
+        apiOp: o,
+        probeOp: probeByOp.get(o.operation),
+      })),
+      finds: findEntries.map((entry) => {
+        const find = entry.find!;
         const paged = pagedReturn(find.returnType);
         // A single-success union find returns the SUCCESS variant's
         // `<Agg>Response` directly at 200 (exception-less.md §4); the
@@ -280,7 +302,8 @@ export function emitController(
         return {
           unionAbsent,
           name: find.name,
-          isRoot: find.name === "all",
+          isRoot: isAllFind(entry),
+          apiOp: entry,
           responseType: isUnion ? `${agg.name}Response` : undefined,
           queryRouteParams: [
             ...find.params.map((p) => {

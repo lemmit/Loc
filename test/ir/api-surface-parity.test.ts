@@ -130,21 +130,6 @@ function scrapeJava(files: Map<string, string>): Route[] {
   return out;
 }
 
-/** ASP.NET — class `[Route("<base>")]` + `[Http<M>]` / `[Http<M>("<p>")]`.
- *  Attribute paths carry no leading slash. */
-function scrapeDotnet(files: Map<string, string>): Route[] {
-  const src =
-    [...files].find(([p, c]) => p.endsWith(".cs") && /\[Route\("api\/orders"\)\]/.test(c))?.[1] ??
-    "";
-  const base = src.match(/\[Route\("([^"]*)"\)\]/)?.[1] ?? "";
-  const out: Route[] = [];
-  for (const m of src.matchAll(/\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?\]/g)) {
-    const seg = m[2] ? `/${m[2]}` : "";
-    out.push({ method: m[1]!, path: normalisePath(`/${base}${seg}`) });
-  }
-  return out;
-}
-
 /** Phoenix — `<m> "<path>", Controller, :action` inside `scope "/api"`. */
 function scrapeElixir(files: Map<string, string>): Route[] {
   const src = [...files].find(([p]) => p.endsWith("router.ex"))?.[1] ?? "";
@@ -271,40 +256,6 @@ function shapesJava(files: Map<string, string>): Map<string, MaybeShape> {
   return out;
 }
 
-/** ASP.NET — the 2xx `[ProducesResponseType]`, resolved through the emitted
- *  `record`.  A bare `[ProducesResponseType(204)]` names no type: bodiless. */
-function shapesDotnet(files: Map<string, string>): Map<string, MaybeShape> {
-  const src =
-    [...files].find(([p, c]) => p.endsWith(".cs") && /\[Route\("api\/orders"\)\]/.test(c))?.[1] ??
-    "";
-  const base = src.match(/\[Route\("([^"]*)"\)\]/)?.[1] ?? "";
-  const all = [...files.values()].join("\n");
-
-  const record = (name: string): MaybeShape => {
-    if (/^Paged</.test(name)) return "paged"; // the shared generic carrier
-    const params = all.match(new RegExp(`record ${name}\\(([^)]*)\\)`))?.[1];
-    if (params === undefined) return undefined;
-    const fields = params
-      .split(",")
-      .map((s) => s.replace(/\[[^\]]*\]/g, "").trim())
-      .map((s) => s.split(/\s+/).pop() ?? "")
-      .filter(Boolean);
-    return shapeOfFields(fields);
-  };
-
-  const out = new Map<string, MaybeShape>();
-  const re = /\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?\]([\s\S]*?)public\s/g;
-  for (const m of src.matchAll(re)) {
-    const seg = m[2] ? `/${m[2]}` : "";
-    const k = key({ method: m[1]!, path: normalisePath(`/${base}${seg}`) });
-    const success = [
-      ...m[3]!.matchAll(/\[ProducesResponseType\((?:typeof\((.+?)\), )?(2\d\d)\)\]/g),
-    ];
-    out.set(k, success.length === 0 ? undefined : success[0]![1] ? record(success[0]![1]) : "none");
-  }
-  return out;
-}
-
 /** Phoenix — no DTOs to resolve, so the shape is read off the action's own
  *  success return: `send_resp(conn, 204, "")`, a literal `%{"id" => …}`, the
  *  shared `serialize/1`, or the paged struct update. */
@@ -366,25 +317,6 @@ function errorsPython(files: Map<string, string>): Map<string, number[]> {
   return out;
 }
 
-/** ASP.NET — the 4xx/5xx `[ProducesResponseType(typeof(ProblemDetails), NNN)]`. */
-function errorsDotnet(files: Map<string, string>): Map<string, number[]> {
-  const src =
-    [...files].find(([p, c]) => p.endsWith(".cs") && /\[Route\("api\/orders"\)\]/.test(c))?.[1] ??
-    "";
-  const base = src.match(/\[Route\("([^"]*)"\)\]/)?.[1] ?? "";
-  const out = new Map<string, number[]>();
-  for (const m of src.matchAll(
-    /\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?\]([\s\S]*?)public\s/g,
-  )) {
-    const seg = m[2] ? `/${m[2]}` : "";
-    const codes = [...m[3]!.matchAll(/\[ProducesResponseType\((?:typeof\(.+?\), )?([45]\d\d)\)\]/g)]
-      .map((c) => Number(c[1]))
-      .sort();
-    out.set(key({ method: m[1]!, path: normalisePath(`/${base}${seg}`) }), codes);
-  }
-  return out;
-}
-
 /** Spring — springdoc infers nothing useful here, so the contract lives in the
  *  emitted `OpenApiContractCustomizer`'s `Route` table: `new Route(method, path,
  *  successRef, new int[] {…}, …)`. Reading the customizer IS reading what java
@@ -410,7 +342,6 @@ const UNRESOLVED: Record<string, readonly string[]> = {
   // it to a declared type is a Java-emitter change, not a test change.
   "Java/Spring": ["get /api/orders/by_code"],
   "Python/FastAPI": [],
-  ".NET": [],
   "Elixir/Phoenix": [],
 };
 
@@ -432,7 +363,11 @@ const BACKENDS: Record<
     errors: errorsPython,
   },
   "Java/Spring": { platform: "java", scrape: scrapeJava, shapes: shapesJava, errors: errorsJava },
-  ".NET": { platform: "dotnet", scrape: scrapeDotnet, shapes: shapesDotnet, errors: errorsDotnet },
+  // ".NET" dropped: its controller now RENDERS from `deriveAggregateOperations`
+  // (the unification's dotnet slice), so holding it here would compare the
+  // derivation to itself.  Render fidelity for it is pinned by
+  // `test/generator/dotnet/api-surface-render.test.ts` — same scrapers, same
+  // three axes, reframed against the rendering instead of an independent copy.
   // Phoenix declares its error set in the OpenApiSpex module, which is emitted
   // only for a system carrying an `api` declaration — this fixture has none, so
   // there is nothing to read.  Its ROUTES and BODIES are still gated above; the

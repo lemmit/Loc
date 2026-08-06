@@ -1,5 +1,6 @@
 import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
+import { type ApiOperationIR, relativeOpPath } from "../../../ir/util/api-surface.js";
 import { errorStatuses, type OpErrorKind } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
@@ -42,6 +43,25 @@ function producesProblem(
   );
 }
 
+/** The declared non-2xx set of a DERIVED operation — `op.errorStatuses` is
+ *  already resolved (httpStatus overrides, when/versioned conflicts, union
+ *  error arms), so the controller renders it verbatim instead of re-deriving
+ *  the set per arm.  This is the unification seam: the numbers come from
+ *  `deriveAggregateOperations`, only the attribute idiom is .NET's. */
+function derivedProblemDecls(op: ApiOperationIR, indent = "    "): string[] {
+  return op.errorStatuses.map(
+    (s) => `${indent}[ProducesResponseType(typeof(ProblemDetails), ${s})]`,
+  );
+}
+
+/** The `[HttpX("...")]` route-template fragment for a derived operation —
+ *  `relativeOpPath` minus its leading slash (ASP.NET attribute paths carry
+ *  none), and the BARE attribute (`[HttpPost]`) at the collection root. */
+function routeTemplate(op: ApiOperationIR): string {
+  const rel = relativeOpPath(op);
+  return rel === "" ? "" : `("${rel.slice(1)}")`;
+}
+
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
 // controller never sees the domain class — only the request/response
@@ -70,9 +90,21 @@ export interface ControllerShape {
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
+  /** The derived create / getById / destroy operations (api-surface.ts) —
+   *  the unification seam: their presence gates the arms, and their `path` /
+   *  `errorStatuses` are what the arms render.  `getByIdApiOp` is always
+   *  present; the other two mirror `createAction` / `destroyAction`. */
+  createApiOp?: ApiOperationIR;
+  getByIdApiOp: ApiOperationIR;
+  destroyApiOp?: ApiOperationIR;
   publicOps: Array<{
     name: string;
     routeSlug?: string;
+    /** The derived `kind: "operation"` entry this action renders — route
+     *  template + declared error statuses come from it. */
+    apiOp: ApiOperationIR;
+    /** The derived `can_<op>` gate probe (present iff `whenGated`). */
+    probeOp?: ApiOperationIR;
     cmdArgs: string[];
     paramNames: string[];
     /** Has a `requires` guard → declares 403 (authorization denied). */
@@ -101,6 +133,9 @@ export interface ControllerShape {
   finds: Array<{
     name: string;
     isRoot: boolean;
+    /** The derived `kind: "find"` entry — route template + declared error
+     *  statuses come from it. */
+    apiOp: ApiOperationIR;
     queryRouteParams: string;
     queryConstructorArgs: string;
     /** Cardinality of the response, derived from the IR find's
@@ -238,7 +273,6 @@ export function renderController(
       idClass,
       idClrType: shape.idClrType,
       emitTrace: shape.emitTrace,
-      structuralStatuses: shape.structuralStatuses,
     }),
   );
 
@@ -283,21 +317,12 @@ export function renderController(
           : f.returnShape === "list"
             ? `IReadOnlyList<${agg.name}Response>`
             : `${agg.name}Response`;
-    // The OpenAPI error set: optional finds (and union-`none`) declare the
-    // 404; a union-`error` declares its mapped ProblemDetails status.
-    const problemDecls =
-      ua?.kind === "error"
-        ? [`    [ProducesResponseType(typeof(ProblemDetails), ${ua.status})]`]
-        : producesProblem(
-            f.returnShape === "optional" || ua?.kind === "none"
-              ? "findOptional"
-              : f.returnShape === "list" || f.returnShape === "paged"
-                ? "findList"
-                : "findSingle",
-            f.guarded,
-          );
+    // The OpenAPI error set — rendered from the derived operation, which
+    // already resolved the union-absent status / optional 404 / empty
+    // list-set the arms above hand-classified.
+    const problemDecls = derivedProblemDecls(f.apiOp);
     return [
-      `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
+      `    [HttpGet${routeTemplate(f.apiOp)}]`,
       `    [ProducesResponseType(typeof(${successType}), 200)]`,
       ...problemDecls,
       `    public async Task<ActionResult<${responseType}>> ${actionName(opFind(agg.name, f.name))}(${f.queryRouteParams})`,
@@ -360,11 +385,14 @@ export function renderController(
       "",
       // Create — POST / (gated on a canonical create; non-constructible
       // aggregates emit no create action/command/DTO/response).
+      // `createAction` and the derived create op are the same predicate
+      // (`emitsRestCreate` on both sides), so the `!` is a type-level
+      // formality, not a runtime bet.
       ...(shape.createAction !== false
         ? [
-            "    [HttpPost]",
+            `    [HttpPost${routeTemplate(shape.createApiOp!)}]`,
             `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
-            ...producesProblem("create"),
+            ...derivedProblemDecls(shape.createApiOp!),
             `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
             "    {",
             // VO-invariant → 422: validate the wire request (safe DTO) BEFORE
@@ -391,9 +419,9 @@ export function renderController(
             "",
           ]
         : []),
-      '    [HttpGet("{id}")]',
+      `    [HttpGet${routeTemplate(shape.getByIdApiOp)}]`,
       `    [ProducesResponseType(typeof(${agg.name}Response), 200)]`,
-      ...producesProblem("getById"),
+      ...derivedProblemDecls(shape.getByIdApiOp),
       `    public async Task<ActionResult<${agg.name}Response>> ${actionName(opGetById(agg.name))}([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${idClass}(id)));`,
@@ -437,9 +465,12 @@ export function renderController(
       // the command carries only the id.
       ...(shape.destroyAction
         ? [
-            '    [HttpDelete("{id}")]',
+            `    [HttpDelete${routeTemplate(shape.destroyApiOp!)}]`,
             "    [ProducesResponseType(204)]",
-            ...producesProblem("destroy", false, "    ", resolveStruct),
+            // The derived set already resolved `ReferencedInUse` through the
+            // httpStatus map — the same `resolveStruct` the runtime arm below
+            // still uses, so declaration and runtime stay in lockstep.
+            ...derivedProblemDecls(shape.destroyApiOp!),
             `    public async Task<IActionResult> ${actionName(opDestroy(agg.name))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
             // EF wraps a Postgres foreign_key_violation in DbUpdateException
@@ -484,10 +515,6 @@ export function renderOperationActionBlock(
     idClass?: string;
     idClrType: string;
     emitTrace?: boolean;
-    /** App-wide resolved structural-conflict statuses (M-T3.4a) — routes the
-     *  per-op `when` (Disallowed) / versioned-update (ConcurrencyConflict) 409
-     *  declarations through the `httpStatus` mapper. Undefined ⇒ 409. */
-    structuralStatuses?: Record<string, number>;
   },
 ): string[] {
   const idClass = shape.idClass ?? `${agg.name}Id`;
@@ -523,39 +550,23 @@ export function renderOperationActionBlock(
   // DTO (cast to the polymorphic base so it serializes with the `type` tag).
   const ru = op.returnUnion;
   const rs = op.returnScalar;
-  const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
-  // A `when` state gate declares 409 (Disallowed); a versioned `update` can also
-  // 409 on a stale `If-Match` (ConcurrencyConflict). Each status resolves
-  // through the `httpStatus` mapper (M-T3.4a) — deduped, so with no override
-  // both collapse to a single `409` attribute (byte-identical); an override
-  // splits them into their distinct declarations.
-  const when409Statuses = new Set<number>();
-  if (op.whenGated) when409Statuses.add(resolveErrorStatus("Disallowed", shape.structuralStatuses));
-  if (op.versionedUpdate)
-    when409Statuses.add(resolveErrorStatus("ConcurrencyConflict", shape.structuralStatuses));
-  const when409 = [...when409Statuses]
-    .sort((a, b) => a - b)
-    .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]`);
-  const responseDecls = ru
-    ? [
-        `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
-        ...producesProblem("operation", op.guarded),
-        ...when409,
-        ...ru.errorStatuses
-          .filter((s) => !STD.has(s))
-          .map((s) => `    [ProducesResponseType(${s})]`),
-      ]
+  // The non-2xx declarations come from the DERIVED operation
+  // (`op.apiOp.errorStatuses`): base table + when/versioned conflicts + union
+  // error arms, already httpStatus-resolved, sorted numerically, deduped.
+  // Three deliberate diffs from the hand-built groups this replaces:
+  //   1. a `when`/versioned 409 now sorts numerically among the declarations
+  //      instead of trailing the 422 (same set, attribute order only);
+  //   2. a union error arm declares `typeof(ProblemDetails)` — the arm really
+  //      does answer a ProblemDetails body (see the dispatch below), so the
+  //      old bare `[ProducesResponseType(<s>)]` under-documented it;
+  //   3. a union arm sharing a status with the when-gate is declared once,
+  //      where the old groups declared it twice (typed + bare).
+  const successDecl = ru
+    ? `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`
     : rs
-      ? [
-          `    [ProducesResponseType(typeof(${rs.wireType}), 200)]`,
-          ...producesProblem("operation", op.guarded),
-          ...when409,
-        ]
-      : [
-          "    [ProducesResponseType(204)]",
-          ...producesProblem("operation", op.guarded),
-          ...when409,
-        ];
+      ? `    [ProducesResponseType(typeof(${rs.wireType}), 200)]`
+      : "    [ProducesResponseType(204)]";
+  const responseDecls = [successDecl, ...derivedProblemDecls(op.apiOp)];
   const dispatchTail = ru
     ? [
         "        var result = await _mediator.Send(cmd);",
@@ -612,9 +623,9 @@ export function renderOperationActionBlock(
   // `{ allowed }` so a UI can enable/disable the action without invoking it.
   const canBlock = op.whenGated
     ? [
-        `    [HttpGet("{id}/can_${snake(op.routeSlug ?? op.name)}")]`,
+        `    [HttpGet${routeTemplate(op.probeOp!)}]`,
         `    [ProducesResponseType(typeof(CanResponse), 200)]`,
-        `    [ProducesResponseType(typeof(ProblemDetails), 404)]`,
+        ...derivedProblemDecls(op.probeOp!),
         `    public async Task<ActionResult<CanResponse>> ${actionName(opOperation(agg.name, `can_${op.name}`))}([FromRoute] ${shape.idClrType} id)`,
         "    {",
         `        var result = await _mediator.Send(new Can${upperFirst(op.name)}Query(new ${idClass}(id)));`,
@@ -625,7 +636,7 @@ export function renderOperationActionBlock(
     : [];
   return [
     ...canBlock,
-    `    [HttpPost("{id}/${snake(op.routeSlug ?? op.name)}")]`,
+    `    [HttpPost${routeTemplate(op.apiOp)}]`,
     // Declare the success response explicitly — once any
     // [ProducesResponseType] is present, Swashbuckle stops inferring the
     // 2xx body from the action signature, so it must be spelled out.
