@@ -16,16 +16,21 @@
 // documented shape into returned DATA and pairs it with the request/response
 // `TypeIR`, so a consumer gets the whole operation rather than just its name.
 //
-// CONSUMERS.  The in-system typed service-to-service client (M-T4.8) is the
-// first; the natural follow-ons are the per-backend route builders themselves
-// (which would then render a shared derivation instead of five parallel ones)
-// and the `.loom/` artifact bundle.
+// CONSUMERS.  The in-system typed service-to-service client (M-T4.8) was the
+// first; since the route-builder unification, ALL FIVE backend route builders
+// render from this derivation — route-set membership, paths, and declared
+// error statuses come from here (Hono `routes-builder.ts`, .NET
+// `cqrs/controller.ts`+`emit/api.ts`, python `routes-builder.ts`, java
+// `emit/api.ts`+`openapi-customizer.ts`, elixir `vanilla/api-emit.ts`+
+// `openapi-emit.ts`) — plus the five api-CLIENT emitters and the `.loom/`
+// artifact bundle.
 //
-// FIDELITY.  The derivation mirrors the SHIPPED Hono surface, which the
-// conformance-parity gate already holds the other four backends to.  A
-// disagreement between this module and a backend is therefore catchable by an
-// existing gate rather than only at runtime.  `api-surface.test.ts` pins it
-// against the routes Hono actually emits.
+// FIDELITY.  The derivation was modelled on the SHIPPED Hono surface, and
+// until the unification four independent re-derivations were held against it
+// (`api-surface-parity.test.ts`, since retired).  Now that the builders
+// render FROM it, fidelity means the RENDERING: `api-surface.test.ts` scrapes
+// Hono's emitted bytes against this list, and each backend has a
+// `test/generator/<backend>/api-surface-render.test.ts` sibling.
 //
 // SCOPE (honest partial).  This slice lifts the AGGREGATE surface: create,
 // getById, destroy, domain operations + their gate probes, and repository

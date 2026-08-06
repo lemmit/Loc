@@ -76,6 +76,14 @@ route builder (`src/platform/hono/v4/routes-builder.ts` is 2039 lines; the
 `.loom/wire-spec.json` carries types only, no routes. There is no single place
 that knows what an `api` exposes.
 
+> **Resolved by the route-builder unification (follow-on, shipped):** the
+> surface IS IR data now (`src/ir/util/api-surface.ts`,
+> `deriveContextOperations`), and all five backend route builders RENDER from
+> it — membership, paths, and declared error statuses — one slice per backend,
+> Hono last so `test/ir/api-surface.test.ts` stayed a non-tautological gate
+> until four independent implementations had agreed.  Render fidelity per
+> backend: `test/generator/<backend>/api-surface-render.test.ts`.
+
 The shipped Hono surface, for reference — this is what the lift must reproduce:
 
 | Operation | Method + path (under `API_BASE_PATH = "/api"`) |
