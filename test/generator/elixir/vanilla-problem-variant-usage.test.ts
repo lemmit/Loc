@@ -26,10 +26,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 const CORPUS = join(import.meta.dirname, "..", "..", "fixtures", "corpus");
 
 function elixirSource(fixture: string): string {
-  return readFileSync(join(CORPUS, `${fixture}.ddd`), "utf8").replace(
-    /__PLATFORM__/g,
-    "elixir",
-  );
+  return readFileSync(join(CORPUS, `${fixture}.ddd`), "utf8").replace(/__PLATFORM__/g, "elixir");
 }
 
 async function controllers(fixture: string): Promise<Map<string, string>> {
@@ -60,6 +57,24 @@ describe("elixir controllers: problem_variant/5 is emitted iff called", () => {
           !defines || calls,
           `${path} defines problem_variant/5 but never calls it — ` +
             `unused private fn, a --warnings-as-errors compile failure`,
+        ).toBe(true);
+      }
+    });
+  }
+
+  // Same drifted-gate class, next helper: __truncate_dt/1 shipped unused into
+  // projection-groupby's CONTEXT module (the declarative "any op assigns a
+  // datetime" gate over-approximated the returning-op persist path that calls
+  // it).  Same implication, same stripping rule.
+  for (const fixture of ["projection-groupby", "scaffold-macros"]) {
+    it(`${fixture}: no context module defines __truncate_dt without calling it`, async () => {
+      const files = await generateSystemFiles(elixirSource(fixture));
+      for (const [path, ex] of files) {
+        if (!path.endsWith(".ex") || !ex.includes("defp __truncate_dt(")) continue;
+        const body = ex.replace(/defp __truncate_dt\([^\n]*/g, "");
+        expect(
+          /__truncate_dt\(/.test(body),
+          `${path} defines __truncate_dt/1 but never calls it`,
         ).toBe(true);
       }
     });

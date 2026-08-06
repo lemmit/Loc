@@ -502,7 +502,12 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
   // when ANY named operation assigns a `datetime` field.  Gated so a context
   // without one stays byte-identical (and never trips
   // `--warnings-as-errors` on an unused private fn).
-  const truncateDtHelper = contextOpAssignsDatetime(ctx) ? `\n${renderTruncateDtHelper()}\n` : "";
+  // Emitted iff a rendered block actually CALLS it — the declarative gate
+  // ("any op assigns a datetime field") over-approximated the returning-op
+  // persist path that renders the call, so projection-groupby's context
+  // shipped the helper with zero callers: an unused private fn under
+  // --warnings-as-errors (the same drifted-gate class as problem_variant/5,
+  // fixed the same way — derive, don't stamp).
 
   // A named-/returning-op body that `emit`s a domain event renders a catalog
   // `event_dispatched` line (`renderReturningStmt` "emit" arm) — that needs
@@ -522,6 +527,17 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
       ? `\n  # Reading-tier domain services (ambient Repo) — domain-services.md rev. 4\n${readingServiceFns.join("\n\n")}\n`
       : "";
 
+  const truncateDtBody = [
+    blocks.join("\n"),
+    retrievalBlock,
+    readingServiceBlock,
+    ensureBlock,
+    refCollHelpers,
+    putAssocPartsHelper,
+  ].some((s) => s.includes("__truncate_dt("))
+    ? `\n${renderTruncateDtHelper()}\n`
+    : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -532,7 +548,7 @@ defmodule ${facadeMod} do
   workflow body).  Plain Elixir context module.
   """${requireLogger}${mutatesRefColl ? "\n  import Ecto.Query" : ""}
 
-${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}${truncateDtHelper}end
+${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}${truncateDtBody}end
 `;
 }
 
@@ -652,30 +668,6 @@ function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: System
             (s.kind === "assign" || s.kind === "add" || s.kind === "remove") &&
             containNames.has(snake(s.target.segments[0] ?? "")),
         ),
-    );
-  });
-}
-
-/** Does ANY named operation in this context assign a `datetime` field?  Gates
- *  the shared `__truncate_dt/1` helper emission — the op persist path calls it
- *  for every `:utc_datetime` column so a microsecond `now()` can be dumped. */
-function contextOpAssignsDatetime(ctx: BoundedContextIR): boolean {
-  return ctx.aggregates.some((agg) => {
-    const dtFields = new Set(
-      agg.fields
-        .filter((f) => {
-          const t = f.type.kind === "optional" ? f.type.inner : f.type;
-          return t.kind === "primitive" && t.name === "datetime";
-        })
-        .map((f) => snake(f.name)),
-    );
-    if (dtFields.size === 0) return false;
-    return agg.operations.some((op) =>
-      op.statements.some(
-        (st) =>
-          (st.kind === "assign" || st.kind === "add" || st.kind === "remove") &&
-          dtFields.has(snake(st.target.segments[0] ?? "")),
-      ),
     );
   });
 }
