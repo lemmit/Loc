@@ -66,6 +66,15 @@ describe("elixir controllers: problem_variant/5 is emitted iff called", () => {
   // projection-groupby's CONTEXT module (the declarative "any op assigns a
   // datetime" gate over-approximated the returning-op persist path that calls
   // it).  Same implication, same stripping rule.
+  //
+  // Deadness is also CLAUSE-level, and a string pin cannot see reachability —
+  // the docker compile is the oracle there.  What a pin CAN hold is the fix's
+  // residue: Elixir ≥1.18 infers private-fn argument types from call sites, and
+  // a `%NaiveDateTime{}` clause is disjoint from everything the persist line
+  // can pass (`:utc_datetime` columns → `%DateTime{}` | wire binary | nil), so
+  // that exact clause went "never used" in scaffold-macros' corpus cell
+  // (#2448).  The bare-variable catch-all is the safe tail — it overlaps any
+  // inferred type, so it survives even a DateTime-only call-site profile.
   for (const fixture of ["projection-groupby", "scaffold-macros"]) {
     it(`${fixture}: no context module defines __truncate_dt without calling it`, async () => {
       const files = await generateSystemFiles(elixirSource(fixture));
@@ -76,6 +85,11 @@ describe("elixir controllers: problem_variant/5 is emitted iff called", () => {
           /__truncate_dt\(/.test(body),
           `${path} defines __truncate_dt/1 but never calls it`,
         ).toBe(true);
+        expect(
+          ex.includes("defp __truncate_dt(%NaiveDateTime{}"),
+          `${path} carries the dead %NaiveDateTime{} clause — no call site can ` +
+            `pass one, so Elixir's type checker fails it under --warnings-as-errors`,
+        ).toBe(false);
       }
     });
   }

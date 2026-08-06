@@ -682,14 +682,24 @@ function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: System
  *  `provenance-emit` each already truncate their own `:utc_datetime` writes;
  *  this is the same rule for the operation-assignment arm, which was the one
  *  that never reached it.  Found by the caller-census drain: `softDelete()`
- *  (`deletedAt := now()`) got its first runtime caller and 500'd. */
+ *  (`deletedAt := now()`) got its first runtime caller and 500'd.
+ *
+ *  Exactly TWO clauses.  Every value that reaches the helper is a
+ *  \`%DateTime{}\`, a wire binary, or nil — vanilla datetime columns are all
+ *  \`:utc_datetime\`, \`now()\` renders \`DateTime.utc_now()\`, and the wire
+ *  coercion above never produces a \`%NaiveDateTime{}\` — so a
+ *  \`%NaiveDateTime{}\` clause is disjoint from every call site's inferred
+ *  argument type and Elixir ≥1.18's type checker flags it "never used"
+ *  (a \`--warnings-as-errors\` compile failure; scaffold-macros' corpus cell,
+ *  #2448).  The bare-variable catch-all is safe: a var pattern overlaps any
+ *  inferred type, so it is never flagged even at a DateTime-only call site
+ *  (verified empirically against the corpus gate's hexpm/elixir image). */
 function renderTruncateDtHelper(): string {
   return `  # Second-precision guard for a \`:utc_datetime\` column assigned by an
   # operation body.  \`now()\` yields microsecond precision and \`force_change\`
   # skips casting, so Ecto would refuse the dump; truncating here matches what
   # the stamp / audit / provenance writers already do.
   defp __truncate_dt(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
-  defp __truncate_dt(%NaiveDateTime{} = dt), do: NaiveDateTime.truncate(dt, :second)
   defp __truncate_dt(other), do: other`;
 }
 
