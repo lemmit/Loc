@@ -135,13 +135,77 @@ async function postCheck(repo, sha, token, v) {
   if (!res.ok) throw new Error(`GitHub API ${res.status} posting check run: ${await res.text()}`);
 }
 
+/**
+ * The state of the currently-published `pr-gate` check in a snapshot, so the
+ * sweep can tell whether a fresh verdict would CHANGE anything.  Uses the same
+ * fetched list the verdict uses (`filter=latest` keeps the newest run per
+ * name).
+ *
+ * @param {ReadonlyArray<{name: string, status: string, conclusion: string | null}>} runs
+ * @returns {"success" | "failure" | "pending" | "absent"}
+ */
+export function currentGateState(runs) {
+  const gate = runs.find((r) => r.name === "pr-gate");
+  if (!gate) return "absent";
+  if (gate.status !== "completed") return "pending";
+  return gate.conclusion === "success" ? "success" : "failure";
+}
+
+/** Sweep-mode posting rule: publish only when the fresh verdict DISAGREES with
+ *  what is already on the SHA.  The sweep is a safety net for dropped
+ *  `workflow_run` events, not a second event stream — re-posting an identical
+ *  verdict every cycle is churn with no information. */
+export function sweepShouldPost(current, fresh) {
+  return current !== fresh.state;
+}
+
+async function fetchOpenPrHeads(repo, token) {
+  const res = await fetch(`https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`, {
+    headers: API_HEADERS(token),
+  });
+  if (!res.ok) throw new Error(`GitHub API ${res.status} listing open PRs: ${await res.text()}`);
+  const prs = await res.json();
+  return prs.map((p) => ({ number: p.number, sha: p.head.sha }));
+}
+
+/** The safety net: `workflow_run` delivery is best-effort — under this repo's
+ *  completion storms (a post-merge heavy set is ~60 completions; a label event
+ *  spawns a dozen more) GitHub demonstrably DROPS some dispatches, and an
+ *  event-driven gate turns one dropped final event into a permanently parked
+ *  PR (observed on #2464: last checks completed 08:40–08:42, no eval fired).
+ *  Every 15 minutes this re-derives the verdict for every open PR and posts
+ *  only where it differs, capping any dropped-event outage at one sweep
+ *  interval. */
+async function sweep(repo, token) {
+  const prs = await fetchOpenPrHeads(repo, token);
+  console.log(`pr-gate sweep: ${prs.length} open PR(s)`);
+  for (const pr of prs) {
+    const runs = await fetchCheckRuns(repo, pr.sha, token);
+    const v = verdict(evaluate(runs, SELF_NAMES));
+    const current = currentGateState(runs);
+    if (sweepShouldPost(current, v)) {
+      await postCheck(repo, pr.sha, token, v);
+      console.log(`  #${pr.number} ${pr.sha.slice(0, 8)}: ${current} -> ${v.state} — ${v.summary}`);
+    } else {
+      console.log(`  #${pr.number} ${pr.sha.slice(0, 8)}: ${current} (unchanged)`);
+    }
+  }
+}
+
 async function main() {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
   const sha = process.env.HEAD_SHA;
-  if (!token || !repo || !sha) {
-    console.error("pr-gate: GITHUB_TOKEN, GITHUB_REPOSITORY and HEAD_SHA are required");
+  if (!token || !repo) {
+    console.error("pr-gate: GITHUB_TOKEN and GITHUB_REPOSITORY are required");
     process.exit(2);
+  }
+
+  // No HEAD_SHA = sweep mode (schedule / workflow_dispatch): reconcile every
+  // open PR instead of evaluating one SHA.
+  if (!sha) {
+    await sweep(repo, token);
+    return;
   }
 
   const snapshot = evaluate(await fetchCheckRuns(repo, sha, token), SELF_NAMES);

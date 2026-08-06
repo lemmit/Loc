@@ -31,8 +31,24 @@ name: PR gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
+  # The safety net: `workflow_run` delivery is BEST-EFFORT — under completion
+  # storms (post-merge heavy sets, label spawns) GitHub drops dispatches, and
+  # a dropped final event parked a green PR at in_progress (#2464, 08:42Z).
+  # The sweep re-derives every open PR's verdict and posts only where it
+  # differs, capping any dropped-event outage at one interval.
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
   workflow_run:
     types: [completed]
+    # Only PR-branch completions re-evaluate the gate.  push:main completions
+    # (a ~60-workflow heavy set per merge) and merge-queue refs used to create
+    # a skipped eval run EACH — the dispatch storm that got real events
+    # dropped.  Filtering by the triggering run's head branch stops those runs
+    # from being created at all.
+    branches-ignore:
+      - main
+      - 'gh-readonly-queue/**'
     workflows:
       - 'API call (typed in-system call runtime e2e)'
       - 'OIDC auth (full-compose runtime e2e)'
@@ -99,6 +115,8 @@ on:
 permissions:
   checks: write
   contents: read
+  # Sweep mode lists open PRs to reconcile their verdicts.
+  pull-requests: read
 
 # One evaluation per SHA at a time; a burst of completions collapses to the
 # newest evaluation (cancelled `pr-gate-eval` runs are excluded from the
@@ -110,10 +128,9 @@ concurrency:
 jobs:
   pr-gate-eval:
     name: pr-gate-eval
-    # Evaluate only PR activity: direct pull_request events, or the completion
-    # of another workflow's pull_request-triggered run.  push:main and
-    # scheduled completions are not this gate's business.
-    if: github.event_name == 'pull_request' || github.event.workflow_run.event == 'pull_request'
+    # Everything runs except non-PR workflow_run completions: pull_request
+    # events evaluate one SHA, schedule/workflow_dispatch run the sweep.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
