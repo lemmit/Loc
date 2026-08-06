@@ -58,7 +58,7 @@ import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js"
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
-import { messageKey } from "../_walker/i18n-extract.js";
+import { icuFromConcat, messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
 import { elixirI18nString } from "./i18n.js";
@@ -1409,10 +1409,12 @@ export function escapeHeexAttr(text: string): string {
  *  JS `messages[key] ?? default` shim has.  Wrapped in `<%= … %>`: it is a
  *  function call in HEEx text position, not static markup.
  *
- *  Returns undefined when i18n is off, the slot has no role, or the value isn't
- *  a plain literal — every one of which keeps the pre-i18n raw path.  (An
- *  INTERPOLATED slot is deliberately out of scope: gettext interpolates
- *  `%{name}`, not ICU `{name}`.) */
+ *  An INTERPOLATED slot (a lowered backtick template) rides the SAME call with
+ *  the ICU formatting step layered over it — see {@link heexTranslateCall}.
+ *
+ *  Returns undefined when i18n is off, the slot has no role, or the value is
+ *  neither a plain literal nor an interpolation — each of which keeps the
+ *  pre-i18n raw path. */
 function localizedHeex(
   arg: ExprIR,
   ctx: WalkContext,
@@ -1422,19 +1424,49 @@ function localizedHeex(
   return call === undefined ? undefined : `<%= ${call} %>`;
 }
 
-/** The bare `pgettext(<key>, <English>)` CALL for a literal user-visible slot,
- *  with no positional wrapping — the shared half of {@link localizedHeex} (text
- *  position, `<%= … %>`) and {@link localizedHeexAttr} (attribute position,
- *  `{…}`).  Undefined on every path that keeps the pre-i18n raw output. */
+/** The bare translation CALL for a user-visible slot, with no positional
+ *  wrapping — the shared half of {@link localizedHeex} (text position, `<%= …
+ *  %>`) and {@link localizedHeexAttr} (attribute position, `{…}`).  Undefined
+ *  on every path that keeps the pre-i18n raw output.
+ *
+ *  Two shapes, one catalog key:
+ *
+ *   - a plain literal → `pgettext(<key>, <English>)`.  The CONTEXT is Loom's
+ *     content-hashed key (identical to `.loom/messages.en.json` and to what the
+ *     other five frontends emit), the msgid is the source-language default, so
+ *     gettext's own "empty translation ⇒ render the msgid" rule gives the same
+ *     fallback the JS `messages[key] ?? default` shim has;
+ *   - an INTERPOLATION → the same `pgettext` call wrapped in `loom_icu/2`
+ *     (D-I18N-HEEX-ICU).  gettext resolves the message; `ex_cldr_messages`
+ *     formats the holes in whatever the ACTIVE LOCALE's translation turned out
+ *     to be — which is the point, since a locale may reorder them or use plural
+ *     categories English does not have.  The msgid stays ICU verbatim, so the
+ *     Phoenix `.po` entry and the other five catalogs remain the same message.
+ *
+ * `icuFromConcat` is the SHARED re-detector every frontend keys against, so the
+ * emitted key equals the catalog key on both branches. */
 function heexTranslateCall(
   arg: ExprIR,
   ctx: WalkContext,
   role: string | undefined,
 ): string | undefined {
   if (!ctx.i18nPrefix || !role) return undefined;
-  if (arg.kind !== "literal" || arg.lit !== "string") return undefined;
-  const key = messageKey(ctx.i18nPrefix, role, arg.value);
-  return `pgettext(${elixirI18nString(key)}, ${elixirI18nString(arg.value)})`;
+  if (arg.kind === "literal" && arg.lit === "string") {
+    const key = messageKey(ctx.i18nPrefix, role, arg.value);
+    return `pgettext(${elixirI18nString(key)}, ${elixirI18nString(arg.value)})`;
+  }
+  const icu = icuFromConcat(arg);
+  if (!icu) return undefined;
+  const key = messageKey(ctx.i18nPrefix, role, icu.positional);
+  const message = `pgettext(${elixirI18nString(key)}, ${elixirI18nString(icu.display)})`;
+  // The bindings are a keyword list — the Elixir spelling of the JS runtime's
+  // `{ code: code }` values object.  Values are the PEELED raw expressions
+  // (a Decimal, a Date), not their stringified form, so the formatter can
+  // locale-format rather than re-parse text.
+  const bindings = icu.holes
+    .map((h) => `${h.name}: ${renderExpr(h.expr, { ...ctx, position: "template" })}`)
+    .join(", ");
+  return `loom_icu(${message}, [${bindings}])`;
 }
 
 /** A user-visible slot in ATTRIBUTE position — a `role="img"` icon's accessible
