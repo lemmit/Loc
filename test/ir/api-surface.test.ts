@@ -41,6 +41,12 @@ system Acme {
         operation cancel() when status == "Placed" {
           status := "Cancelled"
         }
+        // private: Hono mounts NO route for it, so the exact set-equality
+        // below fails if the derivation ever lifts a non-public operation
+        // again (it did, until the visibility filter landed).
+        private operation recompute() {
+          status := status
+        }
       }
       repository Orders for Order {
         find byCode(c: string): Order? where code == c
