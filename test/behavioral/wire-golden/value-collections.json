@@ -35,6 +35,36 @@
     },
     {
       "seq": 2,
+      "method": "POST",
+      "path": "/api/invoices/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "lineItems": [
+          {
+            "amount": 7.25,
+            "currency": "USD"
+          }
+        ],
+        "reference": "INV-2",
+        "surcharges": [
+          {
+            "amount": 1,
+            "currency": "USD"
+          }
+        ],
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
       "method": "GET",
       "path": "/api/invoices",
       "status": 200,
@@ -44,17 +74,18 @@
             "id": "<volatile:key>",
             "lineItems": [
               {
-                "amount": 9.99,
-                "currency": "USD"
-              },
-              {
-                "amount": 5,
+                "amount": 7.25,
                 "currency": "USD"
               }
             ],
-            "reference": "INV-1",
-            "surcharges": [],
-            "version": 1
+            "reference": "INV-2",
+            "surcharges": [
+              {
+                "amount": 1,
+                "currency": "USD"
+              }
+            ],
+            "version": 2
           }
         ],
         "page": 1,
@@ -64,14 +95,14 @@
       }
     },
     {
-      "seq": 3,
+      "seq": 5,
       "method": "DELETE",
       "path": "/api/invoices/{id}",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 4,
+      "seq": 6,
       "method": "GET",
       "path": "/api/invoices",
       "status": 200,

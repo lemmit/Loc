@@ -195,6 +195,70 @@ system SalesSystem {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
     expect(read.sku).toBe("WIDGET-1")
+    // The canonical `update` (`POST /api/products/{id}/update` → 204, empty
+    // body) carries the `Money` value object inbound and must land it: the
+    // crudish write path of this example had no caller at all.
+    api.products.update(p, { sku: "WIDGET-1B", price: { amount: 12.50, currency: "EUR" } })
+    let updated = api.products.getById(p)
+    expect(updated.sku).toBe("WIDGET-1B")
+    expect(updated.price.amount).toBe(12.50)
+
+    // The list and delete paths of the same aggregate, the last two routes of
+    // this example with no caller.  `all()` reads the collection root (the
+    // paged envelope, carrying the same `Money` value object the by-id read
+    // does — a separately emitted projection on every backend), and the
+    // canonical DELETE answers 204 with no body.  This block runs first, so the
+    // one row it created is the whole table; the product is also the one no
+    // order line references, which matters because `OrderLine.productId` is a
+    // real foreign key.
+    let listed = api.products.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.products.destroy(p)
+    expect(api.products.getById(p)).toThrow(404)
+    let empty = api.products.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
+  }
+
+  // The two remaining crudish write paths of this example, neither of which had
+  // a runtime caller: a plain-scalar aggregate and the one whose update input
+  // spans an id reference, an enum and a timestamp at once.
+  test e2e "update a customer and an order through the crudish write path" against api {
+    let cust = api.customers.create({ name: "Updatable", email: "up@acme.test" })
+    api.customers.update(cust, { name: "Updated", email: "up2@acme.test" })
+    let readCust = api.customers.getById(cust)
+    expect(readCust.name).toBe("Updated")
+    expect(readCust.email).toBe("up2@acme.test")
+
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.update(ord, { customerId: cust.id, status: "Cancelled", placedAt: "2024-02-02T12:30:00Z" })
+    let readOrd = api.orders.getById(ord)
+    expect(readOrd.status).toBe("Cancelled")
+    expect(readOrd.customerId).toBe(cust.id)
+
+    // The list and delete paths of the two remaining aggregates, in the order
+    // the schema requires: `Order.customerId: Customer id` is emitted as a
+    // foreign key, so the order goes first and only then the customer it
+    // pointed at.  The delete-then-list pair proves the row actually left the
+    // table rather than only stopping resolving by id.
+    let orders = api.orders.all()
+    expect(orders.items.length).toBe(1)
+    expect(orders.total).toBe(1)
+    api.orders.destroy(ord)
+    expect(api.orders.getById(ord)).toThrow(404)
+    let noOrders = api.orders.all()
+    expect(noOrders.items.length).toBe(0)
+    expect(noOrders.total).toBe(0)
+
+    let customers = api.customers.all()
+    expect(customers.items.length).toBe(1)
+    expect(customers.total).toBe(1)
+    api.customers.destroy(cust)
+    expect(api.customers.getById(cust)).toThrow(404)
+    let noCustomers = api.customers.all()
+    expect(noCustomers.items.length).toBe(0)
+    expect(noCustomers.total).toBe(0)
   }
 
   test e2e "create, add a line to, and confirm an order" against api {

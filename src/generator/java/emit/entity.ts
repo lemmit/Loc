@@ -1057,6 +1057,18 @@ export function renderJavaAbstractBaseEntity(
       // subtype of `Object id()`), so the base compiles standalone.
       [`    public abstract Object id();`, ``];
   const fieldLines = base.fields.flatMap((f) => [
+    // Optimistic concurrency on an INHERITED aggregate.  The `version` token
+    // field is declared once, on the base — the concretes skip inherited fields
+    // — so `@Version` has to be emitted HERE or it is emitted nowhere.  It was
+    // emitted nowhere: `renderEntity`'s token arm carries the comment "a TPH/TPC
+    // base carries it once", but this builder never had the matching arm, so
+    // every subtype of an abstract aggregate mapped `version` as a plain
+    // `@Column`. Hibernate then never incremented it and never added the
+    // `WHERE version = ?` CAS — `version` froze at the create factory's 1 and
+    // the 409-conflict guard was inert on the whole hierarchy.  Found at runtime
+    // by the `payments` update caller (golden 2 ≠ java 1 on the by-id read after
+    // `POST /credit_cards/{id}/update`); RS-14 / RS-11 are the contract.
+    ...(persistence && aggregateIsVersioned(base) && f.access === "token" ? [`    @Version`] : []),
     // TPC bases are @MappedSuperclass — their column mappings flatten
     // into each concrete's own table (the schema merges base + own
     // fields per concrete).  TPH bases are real @Entity roots of the

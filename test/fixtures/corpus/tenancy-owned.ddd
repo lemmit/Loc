@@ -53,11 +53,55 @@ system TenantOwned {
   // built-in default) or over-filters returns 0 — the capability is broken
   // there.  `crossTenant Plan` carries NO filter, so it round-trips too.
   test e2e "tenantOwned stamps the principal's tenant so same-tenant reads round-trip" against d {
-    api.invoices.create({ number: "INV-1", amountDue: 100 })
+    let inv = api.invoices.create({ number: "INV-1", amountDue: 100 })
     let mine = api.invoices.byNumber({ n: "INV-1" })
     expect(mine.length).toBe(1)
     let p = api.plans.create({ code: "PRO", monthlyPrice: 50 })
     let readPlan = api.plans.getById(p)
     expect(readPlan.code).toBe("PRO")
+
+    // The canonical `update` on a `tenantOwned` aggregate: the tenant column is
+    // capability-owned, so it is NOT an update param — the write must leave the
+    // stamp alone while still being scoped by it.  The read-back through
+    // `GET /{id}` (also tenant-filtered, and also previously uncalled) is what
+    // proves the row stayed inside the tenant after the write.
+    api.invoices.update(inv, { number: "INV-1B", amountDue: 250 })
+    let updatedInv = api.invoices.getById(inv)
+    expect(updatedInv.number).toBe("INV-1B")
+    expect(updatedInv.amountDue).toBe(250)
+    // …and the `crossTenant` sibling, which carries NO filter, updates through
+    // the same route with no scoping at all.
+    api.plans.update(p, { code: "PRO-PLUS", monthlyPrice: 60 })
+    let updatedPlan = api.plans.getById(p)
+    expect(updatedPlan.code).toBe("PRO-PLUS")
+    expect(updatedPlan.monthlyPrice).toBe(60)
+
+    // The ROOT LIST route on BOTH stances, side by side — the read where the
+    // capability's filter and the `crossTenant` marker's ABSENCE are the same
+    // question asked twice.  `total` matters as much as `items`: it is a second
+    // query, and a count that skipped the tenant predicate is a cross-tenant
+    // COUNT leak no `items`-only assertion can see.
+    let invoices = api.invoices.all()
+    expect(invoices.items.length).toBe(1)
+    expect(invoices.total).toBe(1)
+    let plans = api.plans.all()
+    expect(plans.items.length).toBe(1)
+    expect(plans.total).toBe(1)
+
+    // DELETE on both stances.  The tenant-owned delete must load through the
+    // tenant scope before removing (the same narrowing the update above proved
+    // on the write path); the `crossTenant` one has no scope to narrow.
+    api.invoices.destroy(inv)
+    expect(api.invoices.getById(inv)).toThrow(404)
+    let noInvoices = api.invoices.all()
+    expect(noInvoices.items.length).toBe(0)
+    expect(noInvoices.total).toBe(0)
+    let goneFromFind = api.invoices.byNumber({ n: "INV-1B" })
+    expect(goneFromFind.length).toBe(0)
+    api.plans.destroy(p)
+    expect(api.plans.getById(p)).toThrow(404)
+    let noPlans = api.plans.all()
+    expect(noPlans.items.length).toBe(0)
+    expect(noPlans.total).toBe(0)
   }
 }

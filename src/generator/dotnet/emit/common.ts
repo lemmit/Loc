@@ -282,3 +282,36 @@ public sealed class InProcessDomainEventDispatcher : IDomainEventDispatcher
 }
 `;
 }
+
+/**
+ * The `throw new AggregateNotFoundException(...)` a FIND-ABSENCE 404 raises —
+ * the `T option` / `T?` miss.
+ *
+ * Kept separate from the by-id throw (which interpolates the RS-27 sentence
+ * `"<Agg> <id> not found"`) because the two answer different questions and
+ * RS-27 scopes the find miss OUT: it keeps the `"not_found"` token that node,
+ * python, elixir and — since this — java and dotnet all send.  Same PRODUCER
+ * either way, which is the whole of RS-27's "don't hand-roll a 404".
+ *
+ * Both .NET find-absence arms used to `return NotFound();` — ASP.NET's own bare
+ * 404, which never reaches `DomainExceptionFilter` and is instead rendered by
+ * `ProblemDetailsFactory`.  That produced FOUR wrong members at once:
+ * `type` = the rfc9110 §15.5.5 URI instead of `about:blank`, `detail` = null,
+ * `instance` = null, plus an injected `traceId` the envelope must not carry —
+ * an [RS-22] violation on every count, and exactly the divergence RS-22 already
+ * names for the arms "nobody had converted".
+ *
+ * The shared filter arm renders `Problem(context, 404, "Not Found", nf.Message,
+ * …)`, whose helper sets `Type = "about:blank"` and `Instance` = the request
+ * path and carries no traceId — so throwing lands on the golden envelope.
+ *
+ * Found 2026-08-05 by the caller-census drain, on the DAPPER leg, one backend
+ * over from the identical java defect fixed in the same change: the census
+ * named these finds as zero-caller routes, the first callers drove their miss
+ * paths, and 28 of the leg's 28 wire divergences were this one bug.  The arms
+ * are in the SHARED controller emitter (`emit/api.ts` — its only `usingDapper`
+ * branch is the destroy FK catch), so the plain EF leg carried it identically.
+ */
+export function dotnetFindAbsenceThrow(ns: string): string {
+  return `throw new global::${ns}.Domain.Common.AggregateNotFoundException("not_found");`;
+}

@@ -133,6 +133,32 @@ system Sales {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
     expect(read.sku).toBe("WIDGET-1")
+    // RS-7 on the WRITE path: the canonical `update` (204, empty body) carries
+    // the same `Money` value object INBOUND and it must survive the round-trip
+    // a second time.  Create-only coverage never proved the VO decomposes
+    // correctly on an update projection.
+    api.products.update(p, { sku: "WIDGET-1B", price: { amount: 12.50, currency: "EUR" } })
+    let updated = api.products.getById(p)
+    expect(updated.sku).toBe("WIDGET-1B")
+    expect(updated.price.amount).toBe(12.50)
+    expect(updated.price.currency).toBe("EUR")
+
+    // The root LIST route carries the value object too — a separate projection
+    // from the by-id one, so RS-7 has to hold on both.  This block runs first,
+    // so exactly the row it created is in the table.
+    let listed = api.products.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // DELETE.  This product is deliberately the one NO order line references —
+    // `OrderLine.productId: Product id` is emitted as a foreign key, so a
+    // referenced product is not deletable on any backend that runs the emitted
+    // migration chain.
+    api.products.destroy(p)
+    expect(api.products.getById(p)).toThrow(404)
+    let empty = api.products.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 
   // RS-6 (bool create default materialises at the wire boundary): `active` is
@@ -144,6 +170,34 @@ system Sales {
     let read = api.customers.getById(c)
     expect(read.active).toBe(true)
     expect(read.externalRef).toBe("ext-42")
+    // The update side of the same two rules: RS-6's `bool = true` default is a
+    // CREATE-input relaxation only, so `active` is a REQUIRED update param —
+    // sent as `false` here, it must actually land as false rather than being
+    // re-defaulted.  RS-1's multi-word key crosses the wire a second time, now
+    // inbound on a different route.
+    api.customers.update(c, { name: "Defaulter II", email: "def2@acme.test", externalRef: "ext-43", active: false })
+    let updated = api.customers.getById(c)
+    expect(updated.active).toBe(false)
+    expect(updated.externalRef).toBe("ext-43")
+    expect(updated.name).toBe("Defaulter II")
+
+    // The root LIST route.  RS-6 and RS-1 both ride it: `active` (the
+    // defaulted bool, now explicitly false) and `externalRef` (the multi-word
+    // key) have to survive the collection projection as well as the by-id one.
+    // The previous block deleted its product but created no customer, so this
+    // one row is the whole table.
+    let listed = api.customers.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // DELETE — again on the customer no order references (`Order.customerId:
+    // Customer id` is a foreign key; the two customers the order blocks below
+    // create are referenced and stay).
+    api.customers.destroy(c)
+    expect(api.customers.getById(c)).toThrow(404)
+    let empty = api.customers.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 
   // RS-1 (camelCase keys both directions: customerId/placedAt) + RS-2 (enum
@@ -154,6 +208,17 @@ system Sales {
     let read = api.orders.getById(ord)
     expect(read.status).toBe("Draft")
     expect(read.placedAt).toBeSameInstant("2024-01-01T00:00:00Z")
+    // The canonical `update` re-sends all three of the rules this case covers —
+    // the id reference (RS-1 `customerId`), the enum (RS-2, moved to
+    // "Cancelled") and the timestamp (RS-4) — INBOUND on the update route.  A
+    // backend that parsed a datetime or an enum differently on the update
+    // projection than on the create one is invisible until something writes
+    // through both.
+    api.orders.update(ord, { customerId: cust.id, status: "Cancelled", placedAt: "2024-02-02T12:30:00Z" })
+    let updated = api.orders.getById(ord)
+    expect(updated.status).toBe("Cancelled")
+    expect(updated.customerId).toBe(cust.id)
+    expect(updated.placedAt).toBeSameInstant("2024-02-02T12:30:00Z")
   }
 
   // RS-8 (association round-trip via an operation) + RS-2 (enum "Confirmed").
@@ -166,5 +231,40 @@ system Sales {
     let read = api.orders.getById(ord)
     expect(read.status).toBe("Confirmed")
     expect(read.lines.length).toBe(1)
+
+    // The root LIST route on the aggregate WITH a containment.  Two orders are
+    // in the table by now — the previous block's `Cancelled` one and this
+    // block's `Confirmed` one — and the page has to fold each row's `lines`
+    // through the BULK loader rather than the per-id one.
+    //
+    // Sorted by `placedAt`, NOT by the enum that separates them, and that is a
+    // finding rather than a preference.  Sorting by `status` was written first
+    // and disagreed across backends: node answered [Confirmed, Cancelled] and
+    // python [Cancelled, Confirmed], because the enum column is not the same
+    // TYPE on the two.  The emitted migration chain declares it `TEXT`
+    // (`MigrationsIR` → `sql-pg.ts`, shared by every backend) so `ORDER BY`
+    // is lexicographic, while the emitted Drizzle schema declares a `pgEnum`
+    // — a native Postgres enum type, which orders by DECLARATION order — and
+    // the node behavioural leg builds its PGlite schema from that Drizzle
+    // metadata (`web/src/runtime/ddl.ts`) instead of from the migrations.  So
+    // the two schema sources of ONE backend disagree with each other, and the
+    // node COMPOSE stack (which does run the migrations) would sort like
+    // python, not like this leg.  Reported for disposition — it is a schema
+    // representation decision, not a lone backend's bug — and a timestamp
+    // column is used here so the assertion pins the bulk containment fold
+    // rather than encoding the disagreement.
+    let listed = api.orders.all({ sort: "placedAt", dir: "asc" })
+    expect(listed.items.length).toBe(2)
+    expect(listed.total).toBe(2)
+
+    // DELETE an order that OWNS a contained child.  The `order_lines` row hangs
+    // off a containment FK (`ON DELETE CASCADE`, unlike the RESTRICT that
+    // cross-aggregate references get), so the parent delete has to take the
+    // child with it — and the other order must be untouched.
+    api.orders.destroy(ord)
+    expect(api.orders.getById(ord)).toThrow(404)
+    let left = api.orders.all()
+    expect(left.items.length).toBe(1)
+    expect(left.total).toBe(1)
   }
 }

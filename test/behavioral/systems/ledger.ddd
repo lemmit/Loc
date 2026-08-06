@@ -79,6 +79,19 @@ system Ledger {
     let read = api.accounts.getById(a)
     expect(read.owner).toBe("alice")
     expect(read.balance).toBe(70)
+
+    // The root LIST route (`GET /api/accounts`).  On `persistedAs: eventLog`
+    // the auto-`findAll` is a bare ARRAY, not the paged envelope — `all` folds
+    // every stream rather than slicing a queryable table — so this is the only
+    // caller that runs the fold in BULK instead of per-id, and the only place a
+    // backend reading collections from a stale projection table (rather than
+    // from the log) would show a wrong balance.
+    //
+    // Read in the FIRST block on purpose: the second block opens another
+    // account, and a multi-stream fold has no declared order for the golden to
+    // record.
+    let listed = api.accounts.all()
+    expect(listed.length).toBe(1)
   }
 
   // RS-8 fold on a fresh read via the `byOwner` filter query — the event

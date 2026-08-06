@@ -27,8 +27,13 @@
 // Pure parse → lower → enrich.  No boot, no docker: it belongs in the fast
 // suite, and it answers a question no booted gate asks.
 //
-// RATCHET, not big-bang.  The uncovered set today is 210 operations; each is an
-// explicit entry in `UNCALLED_PINS` (`api-caller-census-pins.ts`) with a reason.
+// RATCHET, not big-bang.  The uncovered set today is 13 operations (216 at
+// #2380 → 210 once `destroy`/`all` became reachable in #2429 → 126 once the
+// `crudish` `update` class was drained → 13 once `destroy` + `all` and their
+// tails were); each is an explicit entry in `UNCALLED_PINS`
+// (`api-caller-census-pins.ts`) with a reason, and NONE of the 13 is an
+// un-authored test any more — every one names a route the `test e2e` surface
+// cannot reach as it stands, so the file has become a findings list.
 // The gate compares the two sets EXACTLY, so it fails when
 //   (1) a NEW derived operation has no caller and no pin, and
 //   (2) a pin goes STALE — the op gained a caller, or was renamed/removed —

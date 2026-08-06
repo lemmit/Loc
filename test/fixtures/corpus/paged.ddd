@@ -21,9 +21,50 @@ system PagedShop {
   }
 
   test e2e "paged find returns the envelope" against d {
-    api.orders.create({ code: "P1", region: "NA" })
+    let p1 = api.orders.create({ code: "P1", region: "NA" })
     api.orders.create({ code: "P2", region: "NA" })
     let p = api.orders.recent()
     expect(p.items.length).toBe(2)
+
+    // The canonical `update` moves one row across the `inRegion` predicate —
+    // the parameterised paged find, which had no caller either.  Asserting the
+    // move through BOTH envelopes (one row in EU, one left in the unfiltered
+    // page) proves the write reached the column the WHERE clause reads, not
+    // just that the route answered 204.
+    api.orders.update(p1, { code: "P1", region: "EU" })
+    let moved = api.orders.getById(p1)
+    expect(moved.region).toBe("EU")
+    let eu = api.orders.inRegion({ region: "EU" })
+    expect(eu.items.length).toBe(1)
+    expect(eu.total).toBe(1)
+
+    // The AUTO-findAll at the collection root, beside the two DECLARED paged
+    // finds.  Same envelope, different derivation — `all` is synthesized in
+    // enrichment and mounted at the bare root, so nothing here shared a code
+    // path with `recent`/`inRegion` above.
+    let all = api.orders.all({ sort: "code", dir: "asc" })
+    expect(all.items.length).toBe(2)
+    expect(all.total).toBe(2)
+    // …and the PAGE WINDOW itself, which no caller in the repo had ever
+    // narrowed: `pageSize` must slice the items while `total`/`totalPages`
+    // keep describing the whole set.  A backend that paged in memory after
+    // loading everything still passes; one that forgot the count query, or
+    // applied LIMIT to the count too, cannot.
+    let firstPage = api.orders.all({ page: 1, pageSize: 1, sort: "code", dir: "asc" })
+    expect(firstPage.items.length).toBe(1)
+    expect(firstPage.total).toBe(2)
+    expect(firstPage.totalPages).toBe(2)
+
+    // DELETE, then re-read through the by-id route AND through the declared
+    // find whose predicate the row still satisfies — a delete that only
+    // detached the row would keep answering the filtered page.
+    api.orders.destroy(p1)
+    expect(api.orders.getById(p1)).toThrow(404)
+    let goneFromEu = api.orders.inRegion({ region: "EU" })
+    expect(goneFromEu.items.length).toBe(0)
+    expect(goneFromEu.total).toBe(0)
+    let left = api.orders.all()
+    expect(left.items.length).toBe(1)
+    expect(left.total).toBe(1)
   }
 }

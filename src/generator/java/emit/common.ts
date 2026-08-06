@@ -90,6 +90,33 @@ export function javaNotFoundThrow(aggName: string, idExpr = "id"): string {
   return `new AggregateNotFoundException("${aggName} " + ${idExpr} + " not found")`;
 }
 
+/**
+ * The `new AggregateNotFoundException(...)` a FIND-ABSENCE 404 raises — the
+ * `T option` / `T?` miss, which RS-27 explicitly scopes OUT of the by-id
+ * sentence and leaves carrying the `"not_found"` token that node, python,
+ * dotnet and elixir all send.
+ *
+ * Separate from `javaNotFoundThrow` because the two answer different questions:
+ * a by-id miss names the aggregate and the id it was asked for; a find miss has
+ * no id to name.  Same producer either way, and that is the point — RS-22
+ * requires the five-member envelope on ANY error response, and java answered an
+ * EMPTY body here (`ResponseEntity.notFound().build()`, Spring's own bare 404,
+ * which never reaches the `@RestControllerAdvice`).  It is the identical defect
+ * RS-27 fixed on the by-id read, at the two route arms that read `null` and
+ * answered locally instead of throwing.
+ *
+ * It also made java emit TWO different wires for shapes `docs/payloads.md`
+ * declares wire-identical: a union find with a declared `error` variant built a
+ * real ProblemDetail in the same controller, while `T option` / `T?` beside it
+ * built nothing.
+ *
+ * Found 2026-08-05 by the caller census drain: the `option` find
+ * (`corpus/union-find-absence`'s `maybeFirst`) and the optional find
+ * (`corpus/inheritance`'s `byEmail`) got their first callers, and the java leg
+ * read `golden {…} ≠ java ""`.
+ */
+export const JAVA_FIND_ABSENCE_THROW = `new AggregateNotFoundException("not_found")`;
+
 export function renderPagedRecord(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.common;`,

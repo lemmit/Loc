@@ -24,12 +24,106 @@
     {
       "seq": 2,
       "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "OR2",
+        "id": "<volatile:key>",
+        "reserved": false,
+        "version": 3
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders?dir=asc&sort=code",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "OR2",
+            "id": "<volatile:key>",
+            "reserved": false,
+            "version": 3
+          },
+          {
+            "code": "OR3",
+            "id": "<volatile:key>",
+            "reserved": false,
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 6,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "OR2",
+            "id": "<volatile:key>",
+            "reserved": false,
+            "version": 3
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
       "path": "/api/orders/{id}/reject",
       "status": 404,
       "body": {
         "detail": "Not Found",
         "instance": "/api/orders/{id}/reject",
-        "resource": "OR1",
+        "resource": "OR2",
         "status": 404,
         "title": "Not Found",
         "type": "/errors/not-found"

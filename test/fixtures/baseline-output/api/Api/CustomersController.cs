@@ -103,7 +103,8 @@ public sealed class CustomersController : ControllerBase
     public async Task<ActionResult<CustomerResponse?>> ByEmailCustomer([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string email)
     {
         var result = await _mediator.Send(new ByEmailQuery(email));
-        return result is null ? NotFound() : Ok(result);
+        if (result is null) throw new global::Api.Domain.Common.AggregateNotFoundException("not_found");
+        return Ok(result);
     }
 
 }

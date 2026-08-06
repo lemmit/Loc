@@ -55,8 +55,33 @@ system TenantClaimName {
   // compares the same pair.  A backend that stamped from a missing claim
   // writes NULL and the filtered read returns 0.
   test e2e "the tenant claim binds by its declared name, not by `tenantId`" against d {
-    api.invoices.create({ number: "INV-1", amountDue: 100 })
+    let inv = api.invoices.create({ number: "INV-1", amountDue: 100 })
     let mine = api.invoices.byNumber({ n: "INV-1" })
     expect(mine.length).toBe(1)
+
+    // The write path binds the same claim under its declared name: the
+    // canonical `update` loads the row through `this.tenantId ==
+    // currentUser.orgId` before writing, and the by-id read that confirms it
+    // resolves through the same pair.  A backend that reached for
+    // `currentUser.tenantId` on either route (the exact mix-up this fixture
+    // exists to expose) 404s the row it just created.
+    api.invoices.update(inv, { number: "INV-1B", amountDue: 250 })
+    let updated = api.invoices.getById(inv)
+    expect(updated.number).toBe("INV-1B")
+    expect(updated.amountDue).toBe(250)
+
+    // The LIST and DELETE routes bind the claim by the same declared name.
+    // Both are derived, neither had a caller: a backend that reached for
+    // `currentUser.tenantId` on the collection root returns an empty page for a
+    // row it can read by id, and one that reached for it on the DELETE 404s a
+    // row it just updated.
+    let listed = api.invoices.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.invoices.destroy(inv)
+    expect(api.invoices.getById(inv)).toThrow(404)
+    let empty = api.invoices.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

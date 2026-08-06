@@ -73,5 +73,65 @@ system FulfillmentSaga {
     api.orders.place(ord)
     let ship = api.shipments.byOrder({ order: ord.id })
     expect(ship.status).toBe("Tracked")
+    // The shipment the SAGA created — not a client create — read back through
+    // its own by-id route.  Proves the correlation id the workflow persisted
+    // addresses a real row on the public surface.
+    let shipById = api.shipments.getById(ship)
+    expect(shipById.status).toBe("Tracked")
+
+    // The canonical `update` beside the event-emitting `place()`: it writes the
+    // same `status` column WITHOUT emitting, so a backend that hung the saga
+    // dispatch off "any write" (rather than off `emit`) would cascade a second
+    // shipment here.  The read-back pins both the value and the absence of a
+    // re-trigger.
+    api.orders.update(ord, { customerId: "c2", status: "Placed" })
+    let updated = api.orders.getById(ord)
+    expect(updated.customerId).toBe("c2")
+    expect(updated.status).toBe("Placed")
+
+    // The two LIST routes.  The shipment row was created by the WORKFLOW, not
+    // by a client, so `shipments.all()` is the only read that proves a
+    // saga-authored row reaches the public collection surface at all.
+    let orders = api.orders.all()
+    expect(orders.items.length).toBe(1)
+    expect(orders.total).toBe(1)
+    let shipments = api.shipments.all()
+    expect(shipments.items.length).toBe(1)
+    expect(shipments.total).toBe(1)
+
+    // The shipment's own domain op over HTTP.  The saga reached `markTracked`
+    // IN-PROCESS (`ship.markTracked()` inside `on(...)`); this is the first
+    // time the route in front of it is driven, on an aggregate the client can
+    // never create.
+    api.shipments.markTracked(ship)
+    let remarked = api.shipments.getById(ship)
+    expect(remarked.status).toBe("Tracked")
+
+    // ── DELETE, deliberately on an UNREFERENCED row ──────────────────────
+    //
+    // A second order is created and never `place()`d, so the saga never runs
+    // for it and no Shipment points at it.  That is not incidental:
+    // `Shipment.orderRef: Order id` is emitted as a real foreign key with
+    // ON DELETE RESTRICT (`migrations-builder.ts` → the `fulfillment.shipments`
+    // CREATE TABLE), so `ord` is undeletable by construction on any backend
+    // that runs the emitted migration chain.
+    //
+    // FOUND BY THIS DRAIN, reported not asserted: the backends do NOT agree
+    // about that, and the disagreement is in the HARNESS, not in the domain.
+    // The node behavioural leg boots PGlite on a schema synthesized from the
+    // DRIZZLE metadata (`web/src/runtime/ddl.ts`), and neither the generated
+    // `db/schema.ts` nor that synthesizer carries foreign keys — so on node
+    // `DELETE /api/orders/{referenced-id}` answers 204 and orphans the
+    // shipment, while python/java/dotnet/elixir boot the real migration chain
+    // and the database refuses.  Asserting either answer here would encode a
+    // harness artefact as a wire contract, so this block deletes the
+    // unreferenced row and leaves the referential-integrity question to the
+    // mission that fixes the asymmetry.
+    let orphan = api.orders.create({ customerId: "c3", status: "Draft" })
+    api.orders.destroy(orphan)
+    expect(api.orders.getById(orphan)).toThrow(404)
+    let ordersLeft = api.orders.all()
+    expect(ordersLeft.items.length).toBe(1)
+    expect(ordersLeft.total).toBe(1)
   }
 }

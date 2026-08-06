@@ -56,5 +56,41 @@ system OrderingSystem {
     api.orders.reprice(o, { qty: 3, price: 40 })
     let read = api.orders.getById(o)
     expect(read.reference).toBe("R1")
+    expect(read.total).toBe(120)
+
+    // A THIRD write site for the same `provenanced` field, reached through the
+    // canonical `update` rather than through a domain operation.  `total` is an
+    // ordinary update param, so the crudish path writes a provenanced field
+    // DIRECTLY — the write site the provenance snapshot has to attribute to
+    // `update`, and the one no test drove.
+    api.orders.update(o, { reference: "R2", quantity: 4, unitPrice: 30, discount: 0, total: 120 })
+    let updated = api.orders.getById(o)
+    expect(updated.reference).toBe("R2")
+    expect(updated.quantity).toBe(4)
+    expect(updated.total).toBe(120)
+
+    // Free adjacents: the second domain write site recomputes the same field
+    // from the values the update just stored, and the declared find keys on the
+    // column the update moved.
+    api.orders.applyDiscount(o, { amount: 20 })
+    let discounted = api.orders.getById(o)
+    expect(discounted.total).toBe(100)
+    let byRef = api.orders.byReference({ reference: "R2" })
+    expect(byRef.total).toBe(100)
+
+    // The LIST route reads the same provenanced column in bulk — three write
+    // sites have now touched `total` (a domain op, the crudish update, a second
+    // op) and the collection projection has to carry the final value like every
+    // other read does.
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    api.orders.destroy(o)
+    expect(api.orders.getById(o)).toThrow(404)
+    expect(api.orders.byReference({ reference: "R2" })).toThrow(404)
+    let empty = api.orders.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }

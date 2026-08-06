@@ -337,3 +337,106 @@ system Demo {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// RS-22/RS-27 — a FIND-ABSENCE 404 goes through the shared producer.
+//
+// Both arms below used to answer `ResponseEntity.notFound().build()` — Spring's
+// own bare 404 with an EMPTY BODY, which never reaches the
+// `@RestControllerAdvice` and therefore carries none of the five RFC-9457
+// members RS-22 requires on ANY error response.  It is the identical defect
+// RS-27 fixed on the by-id read, at the two route arms that read `null` and
+// answered locally instead of throwing.
+//
+// It also made ONE controller emit two different wires for shapes
+// `docs/payloads.md` declares wire-identical: a union find with a declared
+// `error` variant built a real ProblemDetail, while the `T option` / `T?` finds
+// beside it built nothing.
+//
+// Found by the caller census drain (2026-08-05): `maybeFirst` (option) and
+// `byEmail` (optional) got their first-ever callers and the java behavioural
+// leg read `golden {…} ≠ java ""` on both.
+// ---------------------------------------------------------------------------
+
+const ABSENCE_SRC = `
+system Abs {
+  subdomain S {
+    context C {
+      error Missing { resource: string }
+      aggregate Order with crudish { code: string }
+      repository Orders for Order {
+        find optionFind(code: string): Order option where this.code == code
+        find nullableFind(code: string): Order? where this.code == code
+        find errorFind(code: string): Order or Missing where this.code == code
+        find listFind(code: string): Order[] where this.code == code
+      }
+    }
+  }
+  api A from S
+  storage primary { type: postgres }
+  deployable api { platform: java contexts: [C] serves: A port: 8080 }
+}
+`;
+
+describe("java generator — find-absence 404 (RS-22/RS-27)", () => {
+  it("throws through the shared producer for BOTH the `option` and the `?` find", async () => {
+    const files_ = await generateSystemFiles(ABSENCE_SRC);
+    const ctrl = files_.get(
+      "api/src/main/java/com/loom/api/features/orders/OrdersController.java",
+    )!;
+    expect(ctrl, "the controller must be emitted for the premise to hold").toBeDefined();
+
+    // Premise: all four find shapes really are in this controller, so the
+    // assertions below are about the ABSENCE arm and not about a find the
+    // emitter dropped.
+    for (const route of ["/option_find", "/nullable_find", "/error_find", "/list_find"]) {
+      expect(ctrl).toContain(`@GetMapping("${route}")`);
+    }
+
+    // `T option` and `T?` — the two shapes that answered an empty body.
+    expect(ctrl).toContain('throw new AggregateNotFoundException("not_found");');
+    expect(ctrl.match(/throw new AggregateNotFoundException\("not_found"\);/g)?.length).toBe(2);
+    // …and the import that makes it compile.
+    expect(ctrl).toContain("import com.loom.api.domain.common.AggregateNotFoundException;");
+
+    // NOT the bare Spring 404, anywhere in the controller.  This is the exact
+    // line the defect was: `ResponseEntity.notFound().build()` bypasses the
+    // advice, so it can never carry the RS-22 envelope.
+    expect(ctrl).not.toContain("ResponseEntity.notFound().build()");
+
+    // The declared-`error` variant keeps its own mapped status + `resource`
+    // extension (RS-19) — this fix must not collapse the two absence classes
+    // into one.
+    expect(ctrl).toContain('problem.setProperty("resource", "Order");');
+  });
+
+  it("routes that throw reach the advice's five-member envelope", async () => {
+    // The other half of the contract: the producer the throw lands in really
+    // does build the RS-22 envelope, so the two assertions compose into "the
+    // find-absence 404 carries type/title/status/detail/instance".
+    const files_ = await generateSystemFiles(ABSENCE_SRC);
+    const advice = files_.get("api/src/main/java/com/loom/api/api/ApiExceptionAdvice.java")!;
+    expect(advice).toContain("@ExceptionHandler(AggregateNotFoundException.class)");
+    expect(advice).toContain(
+      'return respond(problem(404, "Not Found", e.getMessage(), request), 404);',
+    );
+    // RS-9 — `type` is present and `about:blank`, written through setProperty
+    // so Spring's NON_DEFAULT suppression cannot drop it.
+    expect(advice).toContain('problem.setProperty("type", "about:blank");');
+  });
+
+  it("a LIST find is untouched — it has no absence to answer", async () => {
+    // Scope guard: `Order[]` answers `[]`, never a 404 (RS-23), so the arm
+    // must not have grown a throw.  Without this, a fix that threw on every
+    // null-ish find would pass the two tests above.
+    const files_ = await generateSystemFiles(ABSENCE_SRC);
+    const ctrl = files_.get(
+      "api/src/main/java/com/loom/api/features/orders/OrdersController.java",
+    )!;
+    const listArm = ctrl.slice(ctrl.indexOf('@GetMapping("/list_find")'));
+    const nextRoute = listArm.indexOf("@GetMapping", 1);
+    const body = nextRoute === -1 ? listArm : listArm.slice(0, nextRoute);
+    expect(body).toContain("return service.listFind(code);");
+    expect(body).not.toContain("AggregateNotFoundException");
+  });
+});

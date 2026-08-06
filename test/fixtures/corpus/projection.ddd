@@ -81,5 +81,37 @@ system ProjectionSys {
     api.orders.ship(ord)
     let shipped = api.orderBoard.byKey(ord)
     expect(shipped.status).toBe("Shipped")
+
+    // The canonical `update` writes the AGGREGATE's own `status` column and
+    // emits NOTHING — so the read model must NOT move.  That is the fold's
+    // contract stated from the other side: the projection tracks events, not
+    // rows.  A backend that folded on save instead of on emit would rewrite
+    // `OrderBoard` here (and, since "Draft" is not a `BoardStatus`, most likely
+    // 500 on the enum).
+    api.orders.update(ord, { customerId: "c-2", status: "Draft" })
+    let updated = api.orders.getById(ord)
+    expect(updated.customerId).toBe("c-2")
+    expect(updated.status).toBe("Draft")
+    let board = api.orderBoard.byKey(ord)
+    expect(board.status).toBe("Shipped")
+
+    // The aggregate's own LIST route, beside the projection read.  Two
+    // collections over the same lifecycle — one derived, one folded — and the
+    // contrast is the point: `orders` is the row, `order_board` is the fold.
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // DELETE the aggregate.  The projection row is NOT a containment of it and
+    // no event is emitted by the destroy, so the read model must SURVIVE the
+    // delete — the same "the projection tracks events, not rows" contract the
+    // update above states, now from the destructive side.  A backend that
+    // cascaded the fold row (or folded on delete) loses it here.
+    api.orders.destroy(ord)
+    expect(api.orders.getById(ord)).toThrow(404)
+    let empty = api.orders.all()
+    expect(empty.items.length).toBe(0)
+    let boardAfter = api.orderBoard.byKey(ord)
+    expect(boardAfter.status).toBe("Shipped")
   }
 }

@@ -65,6 +65,53 @@
           "operationId": "<volatile:key>"
         }
       ]
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "quantity": 5,
+        "reference": "R1",
+        "status": 7,
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/by_reference?reference=R1",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "quantity": 5,
+        "reference": "R1",
+        "status": 7,
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "quantity": 5,
+            "reference": "R1",
+            "status": 7,
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
     }
   ]
 }

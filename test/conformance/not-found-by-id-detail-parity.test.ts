@@ -180,11 +180,30 @@ describe("RS-27 — a 404-by-id detail is the same sentence on all five backends
   });
 
   it("dotnet's getById no longer bypasses the ProblemDetails filter", async () => {
-    const src = sourceFor(await generateSystemFiles(systemFor("dotnet", 3012)), ".cs");
-    // `NotFound()` produced ASP.NET's own bare 404 — outside the app's filter,
-    // and therefore outside RS-22's envelope too (no `instance`, an injected
-    // `traceId`).  Nothing in the controller may answer it that way again.
-    expect(src).not.toContain("return response is null ? NotFound() : Ok(response);");
+    const files = await generateSystemFiles(systemFor("dotnet", 3012));
+    const controller = sourceFor(files, "Controller.cs");
+    // STRENGTHENED 2026-08-05, and for the reason the java arm below was: this
+    // asserted only a NEGATIVE, and only the one exact by-id spelling, over
+    // EVERY `.cs` file at once — so it could not tell "the route throws" from
+    // "the route was renamed", and it said nothing about the OTHER arms that
+    // answered `NotFound()`.  Those arms existed: both find-absence paths (`T
+    // option` / `T?`) shipped ASP.NET's bare 404 until the same day, and this
+    // test passed the whole time.  (The dapper behavioural leg read them as 28
+    // wire divergences across 5 cases: wrong `type`, null `detail`, null
+    // `instance`, an injected `traceId` — RS-22 on every count.)
+    //
+    // So: the POSITIVE, scoped to the controller…
+    expect(controller).toContain(
+      'throw new global::Api.Domain.Common.AggregateNotFoundException($"Order {id} not found");',
+    );
+    // …and a BLANKET ban on the framework 404 anywhere in the controller, which
+    // now holds because every arm goes through the filter.
+    expect(controller).not.toContain("NotFound()");
+    // The filter that renders it — `nf.Message` is what carries the sentence,
+    // and `Problem(...)` is what supplies `about:blank` + `instance`.
+    expect(sourceFor(files, ".cs")).toContain(
+      'context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);',
+    );
   });
 
   it("java's getById route no longer answers Spring's own empty-bodied 404", async () => {
