@@ -18,6 +18,65 @@ export function dashboardProjectionName(aggName: string): string {
   return `${aggName}Totals`;
 }
 
+/** The per-day SERIES projection name.  `Order` → `OrderPerDay`. */
+export function dashboardSeriesName(aggName: string): string {
+  return `${aggName}PerDay`;
+}
+
+/** The series row's two fields — the day bucket and that day's row count. */
+export const SERIES_DAY = "day";
+export const SERIES_COUNT = "rowCount";
+
+/** The `datetime` column the per-day series groups on, or `null` when the
+ *  aggregate has none — in which case there is no series and no chart tile.
+ *
+ *  `createdAt` wins when present (the "created per day" the mission asks for);
+ *  otherwise the FIRST non-optional datetime
+ *  property stands in, so an aggregate modelling its own timestamp
+ *  (`placedAt`, `occurredAt`) still charts.
+ *
+ *  ORDERING CAVEAT: a `createdAt` contributed by the `auditable` CAPABILITY is
+ *  only visible once that capability has expanded, and macro expansion is
+ *  source order — so an `aggregate X with auditable` may reach this function
+ *  before its stamp exists and fall back to a declared datetime.  The series is
+ *  still correct (it groups on a real column); only WHICH column can vary.  A
+ *  declared `createdAt` is deterministic.
+ *
+ *  Optional columns are excluded for
+ *  the same reason `summableFields` excludes them: NULL rows would vanish from
+ *  the series while still counting in the `rowCount` tile beside it. */
+export function seriesDateField(agg: Aggregate): string | null {
+  const datetimes: string[] = [];
+  for (const m of agg.members) {
+    if (!isProperty(m)) continue;
+    const t = m.type;
+    if (!t || t.array || t.optional) continue;
+    const base = t.base;
+    if (base?.$type !== "PrimitiveType" || base.name !== "datetime") continue;
+    if (m.name === "createdAt") return m.name;
+    datetimes.push(m.name);
+  }
+  return datetimes[0] ?? null;
+}
+
+/** The per-day series a dashboard chart tile binds for `agg`, or `null`.
+ *  The series twin of `dashboardFieldsFor`, answering the same two ways for
+ *  the same reason (expansion order is source order, so neither half may
+ *  assume the other ran). */
+export function dashboardSeriesFor(agg: Aggregate): { projection: string } | null {
+  const ctx = agg.$container;
+  if (!isBoundedContext(ctx)) return null;
+  const name = dashboardSeriesName(agg.name);
+  const declared = ctx.members.find((m): m is Projection => isProjection(m) && m.name === name);
+  if (declared) {
+    // Only a GROUPED projection is a series — a singleton is one row and has
+    // nothing to plot along an axis.
+    return declared.groupBys.length > 0 && declared.source ? { projection: name } : null;
+  }
+  if (!contextScaffoldsDashboard(ctx)) return null;
+  return seriesDateField(agg) ? { projection: name } : null;
+}
+
 /** The KPI fields a dashboard card row shows for `agg`, or `null` when the
  *  aggregate has no dashboard projection to read.
  *
