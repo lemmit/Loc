@@ -121,6 +121,16 @@ timeout fired and needed a manual label re-arm. v2 never waits:
   precisely so at least one check always comes; pending is *never* green.
 - Re-running a red check to green fires `workflow_run: completed` again, so
   the gate re-evaluates **automatically** — no manual pr-gate re-run.
+- **`workflow_run` delivery is best-effort, so the gate does not depend on
+  it alone.** Under completion storms GitHub drops dispatches — observed
+  live: a fully-green PR parked at `in_progress` because the events for its
+  final two completions never arrived. Two defenses: the trigger carries
+  `branches-ignore: [main, gh-readonly-queue/**]`, so the ~60 push-to-main
+  completions per merge stop creating (skipped) eval runs at all — the storm
+  source; and a **15-minute scheduled sweep** re-derives the verdict for
+  every open PR and posts only where it differs from what's published,
+  capping any dropped-event outage at one sweep interval. Both are pinned by
+  `test/system/pr-gate.test.ts`.
 - The decision core is pure and pinned by `test/system/pr-gate.test.ts` —
   including the fail-closed arms (unknown conclusions, cancelled runs,
   pending-never-green) and the `workflow_run.workflows` list's completeness

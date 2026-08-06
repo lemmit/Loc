@@ -16,7 +16,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain-JS module without a declaration file; the runtime
 // shape is pinned by the assertions below.
-import { evaluate, SELF_NAMES, verdict } from "../../scripts/pr-gate.mjs";
+import {
+  currentGateState,
+  evaluate,
+  SELF_NAMES,
+  sweepShouldPost,
+  verdict,
+} from "../../scripts/pr-gate.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
@@ -110,10 +116,14 @@ function workflowName(file: string): string {
   return (m as RegExpMatchArray)[1].trim().replace(/^['"]|['"]$/g, "");
 }
 
-/** The quoted entries of pr-gate.yml's `workflow_run.workflows:` list. */
+/** The quoted entries of pr-gate.yml's `workflow_run.workflows:` list.
+ *  Anchored on the indented KEY line, not the word — the file's comments and
+ *  the `branches-ignore` block also contain "workflows"/list entries. */
 function triggerList(): string[] {
   const src = readFileSync(path.join(workflowsDir, "pr-gate.yml"), "utf8");
-  const block = src.slice(src.indexOf("workflows:"), src.indexOf("permissions:"));
+  const start = src.search(/^ {4}workflows:\s*$/m);
+  expect(start, "pr-gate.yml lost its workflow_run.workflows key").toBeGreaterThan(-1);
+  const block = src.slice(start, src.indexOf("permissions:"));
   return [...block.matchAll(/-\s*'([^']+)'/g)].map((m) => m[1]);
 }
 
@@ -148,5 +158,66 @@ describe("pr-gate.yml re-evaluates on every other workflow's completion", () => 
 
   it("does not listen to itself", () => {
     expect(listed.has(workflowName("pr-gate.yml"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dropped-event resilience — pinned.  `workflow_run` delivery is BEST-EFFORT:
+// under this repo's completion storms GitHub drops dispatches, and a dropped
+// final event parked a fully-green PR at in_progress (#2464, 08:42Z).  Two
+// defenses, each of which rots silently if removed:
+//   1. `branches-ignore: [main]` on the workflow_run trigger — without it,
+//      every push:main heavy-set completion (~60 per merge) creates an eval
+//      run, and that dispatch storm is what got real events dropped;
+//   2. the scheduled sweep — without it, one dropped event = one PR parked
+//      until a human pokes it.
+// ---------------------------------------------------------------------------
+
+describe("pr-gate survives dropped workflow_run events", () => {
+  const src = readFileSync(path.join(workflowsDir, "pr-gate.yml"), "utf8");
+
+  it("ignores main / merge-queue completions at the trigger (the storm source)", () => {
+    const wrBlock = src.slice(src.indexOf("workflow_run:"), src.indexOf("permissions:"));
+    expect(
+      /branches-ignore:/.test(wrBlock) && /-\s*main\b/.test(wrBlock),
+      "workflow_run must carry branches-ignore including main — every push:main " +
+        "completion otherwise creates an eval run, and that storm drops real events",
+    ).toBe(true);
+  });
+
+  it("carries the scheduled sweep (the dropped-event safety net)", () => {
+    expect(/^\s*schedule:/m.test(src), "pr-gate.yml lost its schedule trigger").toBe(true);
+    expect(/cron:/.test(src)).toBe(true);
+  });
+
+  it("the job runs on schedule/dispatch events, not only pull_request paths", () => {
+    // The old guard `event_name == 'pull_request' || …` silently skips the
+    // sweep.  The inverted form runs everything except non-PR workflow_run.
+    expect(src).toContain(
+      "if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'",
+    );
+  });
+
+  it("sweep may list open PRs", () => {
+    expect(/pull-requests:\s*read/.test(src)).toBe(true);
+  });
+});
+
+describe("sweep reconciliation — currentGateState / sweepShouldPost", () => {
+  it("reads the published gate state out of a snapshot", () => {
+    expect(currentGateState([green("a")])).toBe("absent");
+    expect(currentGateState([run("pr-gate", "in_progress"), green("a")])).toBe("pending");
+    expect(currentGateState([run("pr-gate", "completed", "success")])).toBe("success");
+    expect(currentGateState([run("pr-gate", "completed", "failure")])).toBe("failure");
+  });
+
+  it("posts exactly when the fresh verdict disagrees — the parked-PR fix", () => {
+    // The observed outage: gate published `pending`, every check green.
+    expect(sweepShouldPost("pending", { state: "success" })).toBe(true);
+    // And the churn guard: identical verdicts are not re-posted every cycle.
+    expect(sweepShouldPost("success", { state: "success" })).toBe(false);
+    expect(sweepShouldPost("pending", { state: "pending" })).toBe(false);
+    expect(sweepShouldPost("success", { state: "failure" })).toBe(true);
+    expect(sweepShouldPost("absent", { state: "pending" })).toBe(true);
   });
 });
