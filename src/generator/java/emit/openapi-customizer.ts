@@ -1,5 +1,4 @@
 import {
-  emitsRestCreate,
   forApiRead,
   wireFieldsForAggregate,
   wireFieldsForPart,
@@ -8,27 +7,30 @@ import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   EnrichedBoundedContextIR,
   EnumIR,
+  OperationIR,
   RepositoryIR,
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
+import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
 import {
-  operationIsGuarded,
-  workflowEmitsCommandRoute,
-  workflowIsGuarded,
-} from "../../../ir/types/loom-ir.js";
+  type ApiOperationIR,
+  aggregateSegment,
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+  relativeOpPath,
+} from "../../../ir/util/api-surface.js";
 import {
   errorStatuses,
   PROBLEM_JSON,
   PROBLEM_SCHEMA,
   problemTitle,
 } from "../../../ir/util/openapi-errors.js";
-import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
-import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
+import { isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 
 // ---------------------------------------------------------------------------
@@ -180,14 +182,6 @@ export function buildJavaOpenApiContract(
 
   const err = (statuses: number[]): RouteError[] => statuses.map((status) => ({ status }));
 
-  // Structural-conflict `httpStatus` resolver (M-T3.4a) — app-wide, folded across
-  // every api and stamped identically on each enriched context. Threaded into the
-  // destroy matrix (`ReferencedInUse`) and the versioned-update ad-hoc 409
-  // (`ConcurrencyConflict`) so the OpenAPI declaration moves with the runtime
-  // arm; undefined ⇒ every conflict defaults to 409 (byte-identical output).
-  const structuralMap = contexts.find((c) => c.structuralErrorStatuses)?.structuralErrorStatuses;
-  const resolveStructural = (name: string): number => resolveErrorStatus(name, structuralMap);
-
   // Index every declared enum (root + per-context) so a referenced one can be
   // resolved to its value list.
   for (const e of [...contexts.flatMap((c) => c.enums ?? [])]) allEnums.set(e.name, e);
@@ -199,8 +193,19 @@ export function buildJavaOpenApiContract(
 
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
-      const route = `${routePrefix}/${snake(plural(agg.name))}`;
+      const route = `${routePrefix}/${aggregateSegment(agg.name)}`;
       const repo = repoByAgg.get(agg.name);
+      // THE UNIFICATION SEAM (api-surface.ts): every published path + declared
+      // error set below comes from the same derived list the controller
+      // renders (emit/api.ts) — the customizer and the router can no longer
+      // disagree, which they have three separate times.  Workflow routes stay
+      // hand-built (`apiSurfaceCoverage.notLifted`).
+      const derivedOps = deriveAggregateOperations(agg, repo, apiStatusContext(ctx));
+      const pathOf = (o: ApiOperationIR): string => `${route}${relativeOpPath(o)}`;
+      const opEntryOf = (op: OperationIR): ApiOperationIR | undefined =>
+        derivedOps.find((o) => o.kind === "operation" && o.operation === op);
+      const probeOf = (op: OperationIR): ApiOperationIR | undefined =>
+        derivedOps.find((o) => o.kind === "gateProbe" && o.operation === op);
 
       // Required-field sets — the non-optional field set per emitted DTO/wire
       // component, matching what the other backends mark required (springdoc
@@ -222,8 +227,13 @@ export function buildJavaOpenApiContract(
       }
 
       // POST /<plural>  (create) → 400, 422
-      if (emitsRestCreate(agg)) {
-        routes.push({ method: "post", path: route, errors: err(errorStatuses("create")) });
+      const createEntry = derivedOps.find((o) => o.kind === "create");
+      if (createEntry) {
+        routes.push({
+          method: "post",
+          path: pathOf(createEntry),
+          errors: err([...createEntry.errorStatuses]),
+        });
         const createInput = agg.createInput ?? [];
         for (const c of createInput) noteEnumRefs(c.field.type, c.field.name);
         setRequired(
@@ -240,8 +250,9 @@ export function buildJavaOpenApiContract(
         if (op.visibility !== "public") continue;
         for (const p of op.params) noteEnumRefs(p.type, p.name);
         const reqName = `${upperFirst(op.name)}${agg.name}Request`;
-        if (op.params.length === 0) {
-          emptyRequests.push({ path: `${route}/{id}/${snake(op.name)}`, schema: reqName });
+        const opEntry = opEntryOf(op);
+        if (op.params.length === 0 && opEntry) {
+          emptyRequests.push({ path: pathOf(opEntry), schema: reqName });
           setRequired(reqName, []);
         } else {
           setRequired(reqName, requiredParams(op.params));
@@ -249,14 +260,23 @@ export function buildJavaOpenApiContract(
       }
 
       // GET /<plural>/{id} (getById) → 404
-      routes.push({ method: "get", path: `${route}/{id}`, errors: err(errorStatuses("getById")) });
+      const getByIdEntry = derivedOps.find((o) => o.kind === "getById")!;
+      routes.push({
+        method: "get",
+        path: pathOf(getByIdEntry),
+        errors: err([...getByIdEntry.errorStatuses]),
+      });
 
-      // DELETE /<plural>/{id} (destroy) → 404, 409
-      if ((agg.destroys?.length ?? 0) > 0) {
+      // DELETE /<plural>/{id} (destroy) → 404, 409.  NAMED FIX (unification):
+      // gated on the shared `emitsRestDestroy` (canonical destroy) — this used
+      // to be `destroys.length > 0`, documenting a generic DELETE for a
+      // named-only destroy.
+      const destroyEntry = derivedOps.find((o) => o.kind === "destroy");
+      if (destroyEntry) {
         routes.push({
           method: "delete",
-          path: `${route}/{id}`,
-          errors: err(errorStatuses("destroy", false, resolveStructural)),
+          path: pathOf(destroyEntry),
+          errors: err([...destroyEntry.errorStatuses]),
         });
       }
 
@@ -266,41 +286,35 @@ export function buildJavaOpenApiContract(
       // params natively — no list wrapper (that would force the bare array).  A
       // non-paged findAll keeps the `<Agg>ListResponse` array wrapper.
       const listWrapper = `${agg.name}ListResponse`;
+      const allEntry = derivedOps.find((o) => isAllFind(o))!;
       if (isPagedAutoAll(repo)) {
         setRequired(`${agg.name}Paged`, ["items", "page", "pageSize", "total", "totalPages"]);
-        routes.push({ method: "get", path: route, errors: [] });
+        routes.push({
+          method: "get",
+          path: pathOf(allEntry),
+          errors: [...allEntry.errorStatuses].map((status) => ({ status })),
+        });
       } else {
         wrappers.set(listWrapper, `${agg.name}Response`);
-        routes.push({ method: "get", path: route, listWrapper, errors: [] });
+        routes.push({
+          method: "get",
+          path: pathOf(allEntry),
+          listWrapper,
+          errors: err([...allEntry.errorStatuses]),
+        });
       }
 
       // Operations — POST /<plural>/{id}/<op> (+ optional GET can_<op>).
+      // The declared set (base matrix + when/versioned conflicts + union error
+      // arms, httpStatus-resolved) and the path (routeSlug honored — NAMED
+      // FIX; java was the only backend ignoring it) both come from the
+      // derived entry.
       for (const op of agg.operations) {
         if (op.visibility !== "public") continue;
-        const opPath = `${route}/{id}/${snake(op.name)}`;
+        const opEntry2 = opEntryOf(op);
+        if (!opEntry2) continue;
+        const opPath = pathOf(opEntry2);
         const spec = ctx ? returnUnionSpec(op, ctx) : undefined;
-        // The two per-operation CONFLICT statuses, both remappable via
-        // `httpStatus` (M-T3.4a) and deduped, so with no override they collapse
-        // to one declared 409:
-        //   - a `when` STATE GATE answers `Disallowed` — the `when` rung of the
-        //     denial ladder (RS-15: `when` -> 409, `requires` -> 403,
-        //     `precondition` -> 422);
-        //   - a versioned aggregate's `update` answers `ConcurrencyConflict` on
-        //     a stale `If-Match`.
-        //
-        // The `when` arm was missing.  This backend's runtime already answers
-        // the resolved `Disallowed` status (`emit/api.ts` renders exactly that
-        // arm), but the customizer declared only `{400, 404, 422}` — so a
-        // `when`-gated operation answered a status its own published contract
-        // did not list.  `op.when` was already read three lines below to emit
-        // the `can_<op>` companion, so the fact was in hand and unused.
-        const versionedUpdate = op.name === "update" && aggregateIsVersioned(agg);
-        const conflictStatuses = (): number[] => {
-          const out: number[] = [];
-          if (op.when) out.push(resolveStructural("Disallowed"));
-          if (versionedUpdate) out.push(resolveStructural("ConcurrencyConflict"));
-          return out;
-        };
         if (spec && op.returnType?.kind === "union") {
           // Exception-less return union: 200 carries the tagged union DTO
           // (the controller returns `ResponseEntity<?>`, so springdoc infers
@@ -310,30 +324,26 @@ export function buildJavaOpenApiContract(
           // Hono / .NET (showcase's `reserve` surfaced both gaps live).
           const unionName = unionInstanceName(op.returnType.variants);
           unions.set(unionName, JSON.stringify(unionJsonSchema(op.returnType.variants, ctx)));
-          const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
-          for (const a of spec.arms) if (a.isError) statuses.add(a.status);
-          for (const s of conflictStatuses()) statuses.add(s);
           routes.push({
             method: "post",
             path: opPath,
             successRef: unionName,
-            errors: err([...statuses].sort((x, y) => x - y)),
+            errors: err([...opEntry2.errorStatuses]),
           });
         } else {
-          const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
-          for (const s of conflictStatuses()) statuses.add(s);
           routes.push({
             method: "post",
             path: opPath,
-            errors: err([...statuses].sort((x, y) => x - y)),
+            errors: err([...opEntry2.errorStatuses]),
           });
         }
         // can_<op> companion (GET) → 404 (loads the aggregate first).
-        if (op.when) {
+        const probe = probeOf(op);
+        if (probe) {
           routes.push({
             method: "get",
-            path: `${route}/{id}/can_${snake(op.name)}`,
-            errors: err([404]),
+            path: pathOf(probe),
+            errors: err([...probe.errorStatuses]),
           });
         }
       }
@@ -341,32 +351,26 @@ export function buildJavaOpenApiContract(
       // Declared finds — GET /<plural>/<find_snake>.  A synthesized find
       // (paged-run queryHandler support) is not auto-exposed, so it documents
       // no path here — the queryHandler's own route carries the OpenAPI entry.
-      for (const f of declaredFinds(repo).filter((f) => !f.synthesized)) {
-        const findPath = `${route}/${snake(f.name)}`;
+      for (const entry of derivedOps.filter((o) => o.kind === "find" && !isAllFind(o))) {
+        const f = entry.find!;
+        const findPath = pathOf(entry);
+        const findErrors = err([...entry.errorStatuses]);
         const spec = ctx ? findUnionSpec(f.returnType, agg.name, ctx) : null;
         if (spec) {
-          // Union find: absent `none` → 404, absent `error` → its mapped status.
-          const status =
-            spec.absent.kind === "none"
-              ? 404
-              : (ctx.errorStatusOverrides?.[spec.absent.tag] ??
-                defaultErrorStatus(spec.absent.tag));
-          // 200 is the SUCCESS variant directly (`<Agg>Response`); the union
-          // controller returns `ResponseEntity<?>` so springdoc infers nothing,
-          // hence the explicit ref.  Error/absent variant → `status`.
-          // A `requires`-gated union find declares 403 alongside its absent
-          // status — the absence union is a SEPARATE arm from the plain
-          // optional find below, so it needs the rung explicitly.
+          // Union find: 200 is the SUCCESS variant directly (`<Agg>Response`);
+          // the union controller returns `ResponseEntity<?>` so springdoc
+          // infers nothing, hence the explicit ref.  The declared set (gated
+          // 403 + the httpStatus-resolved absent status) is the derived one.
           routes.push({
             method: "get",
             path: findPath,
             successRef: `${agg.name}Response`,
-            errors: err(f.requires !== undefined ? [403, status].sort((a, b) => a - b) : [status]),
+            errors: findErrors,
           });
           continue;
         }
         if (isPagedFind(f)) {
-          routes.push({ method: "get", path: findPath, errors: [] });
+          routes.push({ method: "get", path: findPath, errors: findErrors });
           continue;
         }
         if (f.returnType.kind === "array") {
@@ -374,20 +378,13 @@ export function buildJavaOpenApiContract(
           // paged auto-findAll leaves it unregistered, so the route can't rely
           // on that).  `wrappers.set` is idempotent for the non-paged case.
           wrappers.set(listWrapper, `${agg.name}Response`);
-          routes.push({
-            method: "get",
-            path: findPath,
-            listWrapper,
-            errors: err(errorStatuses("findList", f.requires !== undefined)),
-          });
+          routes.push({ method: "get", path: findPath, listWrapper, errors: findErrors });
         } else {
-          // Single optional find → 404, plus 403 when the find carries a
-          // `requires` guard (the runtime already answers it).
-          routes.push({
-            method: "get",
-            path: findPath,
-            errors: err(errorStatuses("findOptional", f.requires !== undefined)),
-          });
+          // Optional find → 404 (+403 when gated).  NAMED FIX (unification): a
+          // GENUINELY-single find (bare `T`, not `T option`) no longer
+          // declares the optional convention's 404 — the derivation classifies
+          // it `findSingle`, matching what the controller answers.
+          routes.push({ method: "get", path: findPath, errors: findErrors });
         }
       }
     }
