@@ -1,0 +1,107 @@
+// ICU INTERPOLATION on Phoenix HEEx (M-T1.11, D-I18N-HEEX-ICU) — the fixture
+// that makes the per-PR Elixir gate actually COMPILE the ICU path.
+//
+// Why this file exists at all: a census of every `.ddd` in the repo found that
+// NO gated Elixir build reaches an interpolating ui.  The corpus fixtures carry
+// no `ui` block, and all four Elixir-targeting examples are literal-only — so
+// the whole `ex_cldr_messages` emission (a generated CLDR backend, a generated
+// `loom_icu/2`, two hex deps and an `import` into every template) would have
+// shipped with zero coverage of "does the emitted Elixir compile".  That is the
+// gate-that-never-reaches-the-thing-it-names shape, so: one fixture, and the
+// matrix picks it up automatically (`elixir-vanilla-build.yml` enumerates this
+// directory).
+//
+// Every arm of the emission is exercised deliberately:
+//
+//   * a plain interpolation      — `{code}`, the common case;
+//   * an ICU number SKELETON     — `{total, number, ::currency/USD}`, the one
+//                                  `ex_cldr_messages` cannot parse, whose
+//                                  documented degradation is raw substitution;
+//   * a hole in ATTRIBUTE position — the `{…}` HEEx expression form rather than
+//                                  `<%= … %>`, a different escape path;
+//   * a plain literal alongside  — the two tiers must coexist in one app
+//                                  (gettext alone for it, ICU for the others).
+//
+// `mix compile --warnings-as-errors` is the assertion.  The RUNTIME behaviour
+// of `loom_icu/2` (plural, select, the skeleton fallback, an unbound hole) is
+// pinned separately — see `test/generator/elixir/i18n-runtime.test.ts`.
+system VanillaI18nIcu {
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        code: string
+        total: money
+        invariant code.length > 0
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  ui OrdersAdmin {
+    page Orders {
+      route: "/orders"
+      body: Stack {
+        // Tier 1 — a plain literal.  gettext alone resolves this one; it must
+        // keep working in an app that ALSO carries ICU messages.
+        Heading { "Orders" },
+        QueryView {
+          of:      Order.all,
+          loading: Loader {},
+          error:   Alert { "Couldn't load orders" },
+          empty:   Empty { "No orders yet." },
+          data:    rows => Paper {
+            Table {
+              rows: rows,
+              Column { "Code",  o => Text { o.code } },
+              Column { "Total", o => Money { o.total } }
+            }
+          }
+        }
+      }
+    }
+    page OrderDetail(id: Order id) {
+      route: "/orders/:id"
+      body: Stack {
+        Heading { "Order" },
+        QueryView {
+          of:      Order.byId(id),
+          single:  true,
+          loading: Loader {},
+          empty:   Empty { "Not found" },
+          data:    order => Paper {
+            Stack {
+              // Tier 2a — a plain ICU hole in TEXT position.
+              Text { `Order {order.code}` },
+              // Tier 2b — an ICU number SKELETON.  `ex_cldr_messages` cannot
+              // parse it, so this line is what proves the generated fallback
+              // compiles and is reached rather than crashing the render.
+              Text { `Billed {order.total, number, ::currency/USD} in total` },
+              // Tier 2c — a hole in ATTRIBUTE position.  A command `Button`'s
+              // `label:` is its accessible name, which HEEx emits as a `{…}`
+              // expression attribute rather than `<%= … %>` — a different
+              // escape path through `elixirI18nString`, and the reason it
+              // escapes `{`/`}` at all.
+              Button { "↻", label: `Refresh order {order.code}` },
+              // …and the same hole in a named TEXT slot, for contrast.
+              Divider { label: `Details for {order.code}` }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir
+    design: coreComponents
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: OrdersAdmin
+    port: 4000
+  }
+}
