@@ -19,10 +19,12 @@ import {
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, FindIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import type { ApiOperationIR } from "../../../ir/util/api-surface.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { renderExpr } from "../render-expr.js";
+import { plugRelativePath } from "./api-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 
@@ -85,15 +87,28 @@ function absentSpec(
 /** `GET /<plural>/<find>` routes — must be registered *before* the
  *  `/<plural>/:id` show route so the literal segment wins in Phoenix's
  *  in-order match (`/orders/recent` would otherwise bind `:id = "recent"`). */
-export function findRoutes(agg: AggregateIR, ctx: BoundedContextIR): ApiRoute[] {
+export function findRoutes(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  /** The aggregate's derived operations (api-surface.ts) — declared-find
+   *  routes mount at the derived path.  Empty for an abstract base, whose
+   *  read-only finds (if any) fall back to the legacy spelling. */
+  derivedOps: readonly ApiOperationIR[] = [],
+): ApiRoute[] {
   const aggsPath = snake(plural(agg.name));
   const controller = `${upperFirst(agg.name)}Controller`;
-  return httpFindsOf(ctx, agg).map((f) => ({
-    method: "get" as const,
-    path: `/${aggsPath}/${snake(f.name)}`,
-    controller,
-    action: `:${snake(f.name)}`,
-  }));
+  const derivedByFind = new Map(
+    derivedOps.filter((o) => o.kind === "find" && o.find).map((o) => [o.find, o]),
+  );
+  return httpFindsOf(ctx, agg).map((f) => {
+    const entry = derivedByFind.get(f);
+    return {
+      method: "get" as const,
+      path: entry ? `/${aggsPath}${plugRelativePath(entry)}` : `/${aggsPath}/${snake(f.name)}`,
+      controller,
+      action: `:${snake(f.name)}`,
+    };
+  });
 }
 
 /** Controller actions for the aggregate's HTTP finds. */
