@@ -93,6 +93,82 @@ describe("java generator — versioned optimistic-concurrency", () => {
     expect(advice).toMatch(/return respond\(problem\(409, "Conflict",[\s\S]*?, 409\);/);
   });
 
+  // ── INHERITED aggregates ────────────────────────────────────────────────
+  //
+  // The `version` token field is declared ONCE, on the abstract base — the
+  // concrete subclass emitter skips inherited fields — so `@Version` has to
+  // land on the BASE or it lands nowhere.  It landed nowhere: `renderEntity`'s
+  // token arm carried the comment "a TPH/TPC base carries it once" while
+  // `renderAbstractBase` had no matching arm, so every subtype of an abstract
+  // aggregate mapped `version` as a plain `@Column`.  Hibernate then never
+  // incremented it and never emitted the `WHERE version = ?` CAS: `version`
+  // froze at the create factory's `1` and the whole hierarchy's 409 guard was
+  // inert.  Invisible to every test here because they all used a FLAT
+  // aggregate; found at runtime by the caller census's `update` drain
+  // (`payments`: golden `2` ≠ java `1` on the by-id read after
+  // `POST /credit_cards/{id}/update`, and the same on `tph`).
+  //
+  // Both strategies are asserted because they map differently — TPH's base is a
+  // real `@Entity` (SINGLE_TABLE), TPC's is a `@MappedSuperclass` — and the
+  // negatives pin that the annotation is on the base, not duplicated onto the
+  // concrete (a second `@Version` in one hierarchy is a Hibernate mapping
+  // error, so "emit it on both" is not a safe over-approximation).
+  const inheritedSystem = (using: string) => `
+  system Fleet {
+    subdomain D {
+      context Yard {
+        abstract aggregate Vehicle inheritanceUsing: ${using} {
+          name: string
+        }
+        aggregate Car extends Vehicle {
+          doors: int
+          operation refit(d: int) { doors := d }
+        }
+        repository Cars for Car { }
+      }
+    }
+    api A from D
+    storage primarySql { type: postgres }
+    resource st { for: Yard, kind: state, use: primarySql }
+    deployable api {
+      platform: java
+      contexts: [Yard]
+      dataSources: [st]
+      serves: A
+      port: 8081
+    }
+  }
+`;
+
+  it("a TPH abstract base annotates the inherited version field with @Version", async () => {
+    const files = await generateSystemFiles(inheritedSystem("sharedTable"));
+    const base = files.get(`${ROOT}/features/vehicles/Vehicle.java`)!;
+    expect(base, "Vehicle.java (abstract TPH base) missing").toBeTruthy();
+    // The base is the SINGLE_TABLE root, and it owns the version column.
+    expect(base).toContain("@Inheritance(strategy = InheritanceType.SINGLE_TABLE)");
+    expect(base).toMatch(
+      /@Version\s*\n\s*@Column\(name = "version"\)\s*\n\s*protected int version;/,
+    );
+    // …and the concrete must NOT redeclare it (one @Version per hierarchy).
+    const concrete = files.get(`${ROOT}/features/cars/Car.java`)!;
+    expect(concrete, "Car.java missing").toBeTruthy();
+    expect(concrete).not.toContain("int version;");
+    expect(concrete).not.toContain("@Version");
+  });
+
+  it("a TPC abstract base annotates the inherited version field with @Version", async () => {
+    const files = await generateSystemFiles(inheritedSystem("ownTable"));
+    const base = files.get(`${ROOT}/features/vehicles/Vehicle.java`)!;
+    expect(base, "Vehicle.java (abstract TPC base) missing").toBeTruthy();
+    // A @MappedSuperclass's @Version is inherited by each concrete @Entity.
+    expect(base).toContain("@MappedSuperclass");
+    expect(base).toMatch(
+      /@Version\s*\n\s*@Column\(name = "version"\)\s*\n\s*protected int version;/,
+    );
+    const concrete = files.get(`${ROOT}/features/cars/Car.java`)!;
+    expect(concrete).not.toContain("@Version");
+  });
+
   it("an aggregate without a `with versioned` clause still gets @Version + CAS — default-on (M-T3.4)", async () => {
     const files = await generateSystemFiles(javaSystem(""));
     const entity = files.get(`${feature}/Customer.java`)!;

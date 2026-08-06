@@ -23,6 +23,80 @@
         "updatedAt": "<timestamp>",
         "version": 1
       }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "S2",
+        "createdAt": "<timestamp>",
+        "id": "<volatile:key>",
+        "updatedAt": "<timestamp>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "S2",
+            "createdAt": "<timestamp>",
+            "id": "<volatile:key>",
+            "updatedAt": "<timestamp>",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 5,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
     }
   ]
 }

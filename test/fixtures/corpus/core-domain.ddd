@@ -84,5 +84,18 @@ system CoreShop {
     let left = api.orders.all()
     expect(left.items.length).toBe(1)
     expect(left.total).toBe(1)
+
+    // The declared ENUM-keyed find, the last route on this aggregate with no
+    // caller.  The two rows above sat on opposite sides of its predicate
+    // (`Placed` vs `Draft`), and the `Draft` one was just deleted — so asking
+    // for each value in turn separates "the enum is bound correctly" from "the
+    // filter matched everything": `Placed` must answer the surviving row and
+    // `Draft` must answer none.  Declared enum casing has to survive the trip
+    // through a query parameter, which is a different coercion from the body
+    // path the create/update above exercise.
+    let placed = api.orders.byStatus({ s: "Placed" })
+    expect(placed.length).toBe(1)
+    let drafts = api.orders.byStatus({ s: "Draft" })
+    expect(drafts.length).toBe(0)
   }
 }

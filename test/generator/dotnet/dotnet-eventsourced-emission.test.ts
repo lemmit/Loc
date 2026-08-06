@@ -137,6 +137,10 @@ describe(".NET event-sourcing emission (persistedAs: eventLog)", () => {
     expect(req).toContain("Owner");
     expect(req).not.toMatch(/CreateAccountRequest\([^)]*Balance/);
     const handler = files.get("Application/Accounts/Commands/CreateAccountHandler.cs")!;
-    expect(handler).toContain("Account.Create(command.Owner)");
+    // NAMED argument: the factory trails its defaultable parameters (CS1737),
+    // so its signature order no longer matches the declared field order and the
+    // handler names each one.  The assertion's point is unchanged — the command
+    // binds `owner` (the create param) and nothing else.
+    expect(handler).toContain("Account.Create(owner: command.Owner)");
   });
 });

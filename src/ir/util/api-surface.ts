@@ -16,16 +16,21 @@
 // documented shape into returned DATA and pairs it with the request/response
 // `TypeIR`, so a consumer gets the whole operation rather than just its name.
 //
-// CONSUMERS.  The in-system typed service-to-service client (M-T4.8) is the
-// first; the natural follow-ons are the per-backend route builders themselves
-// (which would then render a shared derivation instead of five parallel ones)
-// and the `.loom/` artifact bundle.
+// CONSUMERS.  The in-system typed service-to-service client (M-T4.8) was the
+// first; since the route-builder unification, ALL FIVE backend route builders
+// render from this derivation — route-set membership, paths, and declared
+// error statuses come from here (Hono `routes-builder.ts`, .NET
+// `cqrs/controller.ts`+`emit/api.ts`, python `routes-builder.ts`, java
+// `emit/api.ts`+`openapi-customizer.ts`, elixir `vanilla/api-emit.ts`+
+// `openapi-emit.ts`) — plus the five api-CLIENT emitters and the `.loom/`
+// artifact bundle.
 //
-// FIDELITY.  The derivation mirrors the SHIPPED Hono surface, which the
-// conformance-parity gate already holds the other four backends to.  A
-// disagreement between this module and a backend is therefore catchable by an
-// existing gate rather than only at runtime.  `api-surface.test.ts` pins it
-// against the routes Hono actually emits.
+// FIDELITY.  The derivation was modelled on the SHIPPED Hono surface, and
+// until the unification four independent re-derivations were held against it
+// (`api-surface-parity.test.ts`, since retired).  Now that the builders
+// render FROM it, fidelity means the RENDERING: `api-surface.test.ts` scrapes
+// Hono's emitted bytes against this list, and each backend has a
+// `test/generator/<backend>/api-surface-render.test.ts` sibling.
 //
 // SCOPE (honest partial).  This slice lifts the AGGREGATE surface: create,
 // getById, destroy, domain operations + their gate probes, and repository
@@ -46,8 +51,9 @@
 // endpoint).
 
 import { API_BASE_PATH } from "../../util/api-base.js";
+import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
-import { emitsRestCreate } from "../enrich/wire-projection.js";
+import { emitsRestCreate, emitsRestDestroy } from "../enrich/wire-projection.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -105,8 +111,36 @@ export interface ApiOperationIR {
   /** Success (2xx) response type.  Absent for a 204 (destroy). */
   readonly responseType?: TypeIR;
   /** Non-2xx statuses this operation can answer with, so a client can type
-   *  its failure union instead of collapsing every error into a throw. */
+   *  its failure union instead of collapsing every error into a throw.
+   *  Resolved through the context's `httpStatus` maps when the derivation is
+   *  given them (see `ApiStatusContext`) — i.e. these are the statuses the
+   *  backend actually answers, not the unremapped defaults. */
   readonly errorStatuses: readonly number[];
+  /** The `FindIR` a `kind: "find"` operation was derived from — so a route
+   *  builder rendering this list can hand its existing find emitter the
+   *  underlying IR node instead of re-locating it by name. */
+  readonly find?: FindIR;
+  /** The `OperationIR` behind a `kind: "operation"` or `"gateProbe"` entry —
+   *  same purpose as `find`. */
+  readonly operation?: OperationIR;
+}
+
+/** The per-context `httpStatus` override maps the derivation resolves error
+ *  statuses through — the same two maps every backend's route emitter reads
+ *  (`BoundedContextIR.errorStatusOverrides` for user `error` payloads,
+ *  `.structuralErrorStatuses` for the structural-conflict built-ins).
+ *  `deriveContextOperations` threads them automatically; passing nothing keeps
+ *  the stdlib defaults, which is correct for single-context (no-api) lowering
+ *  where the maps are undefined anyway. */
+export interface ApiStatusContext {
+  readonly errorStatusOverrides?: Readonly<Record<string, number>>;
+  readonly structuralErrorStatuses?: Readonly<Record<string, number>>;
+  /** Names of the context's `error`-kind payloads — how a union RETURN's error
+   *  arms are told apart from its success arms (both are `entity` variants in
+   *  `TypeIR`; only the payload catalogue knows which is which, the same
+   *  `ctx.payloads.some(p => p.name === v.name && p.kind === "error")` read
+   *  the .NET `buildReturnUnionSpec` performs). */
+  readonly errorPayloadNames?: ReadonlySet<string>;
 }
 
 /** Route classes NOT yet lifted into `ApiOperationIR`.  Exported so a
@@ -120,6 +154,11 @@ export const apiSurfaceCoverage = {
     "workflowInstances",
     "explicitHandler",
     "projectionQuery",
+    // GET /<aggs>/{id}/history — the audit-history read.  Driven by the
+    // SYNTHESIZED history find (`find.synthesized`, skipped below), so it was
+    // never lifted; named here so the omission is a documented decision rather
+    // than a hole discovered by diffing routers against this list.
+    "history",
   ] as const,
 } as const;
 
@@ -183,10 +222,37 @@ export function collectionSuccess(
   return undefined;
 }
 
+/** The ABSENT variant of an absence union returned by a find on `aggName`'s
+ *  repository: the `none` unit, or the error payload it rides out on.
+ *
+ *  Distinct from `absenceUnionSuccess` because the two shapes are NOT the same
+ *  in `TypeIR`: `Order or NotFound`'s absent arm is `kind: "none"`, but an
+ *  error-payload union (`Order or OrderMissing`) carries the payload as a
+ *  second `kind: "entity"` variant — only the aggregate name tells the success
+ *  arm from the absent one, which is why this takes `aggName` (mirroring
+ *  `findUnionSpec`'s discrimination in `generator/_payload/union-wire.ts`).
+ *  `absenceUnionSuccess` misses that shape entirely (both variants are
+ *  entities), which silently classified error-payload union finds as
+ *  `findSingle` and declared NO error status while every backend declares the
+ *  payload's resolved one. */
+export function absenceUnionAbsent(
+  t: TypeIR | undefined,
+  aggName: string,
+): { readonly kind: "none" } | { readonly kind: "error"; readonly tag: string } | undefined {
+  if (t?.kind !== "union" || t.variants.length !== 2) return undefined;
+  const success = t.variants.find((v) => v.kind === "entity" && v.name === aggName);
+  const absent = t.variants.find((v) => v !== success);
+  if (!success || !absent) return undefined;
+  if (absent.kind === "none") return { kind: "none" };
+  if (absent.kind === "entity") return { kind: "error", tag: absent.name };
+  return undefined;
+}
+
 /**
  * The error statuses a find declares, keyed the same way every backend keys
- * them: an ABSENCE-returning find (`T option` / `T or NotFound`) can 404; a
- * collection or single-valued find cannot.
+ * them: an ABSENCE-returning find (`T option` / `T or NotFound`) can 404 — or
+ * the absent payload's `httpStatus`-resolved status when the union rides an
+ * error payload — while a collection or single-valued find declares nothing.
  *
  * `guarded` is passed through but is INERT TODAY: `errorStatuses` branches on
  * it only for `operation`/`workflow`, so every find declares the same set gated
@@ -199,8 +265,27 @@ export function collectionSuccess(
  * module declaring a status no backend publishes and recreating the two-truths
  * problem it exists to remove.
  */
-function findErrorStatuses(find: FindIR, guarded: boolean): number[] {
-  if (absenceUnionSuccess(find.returnType) || find.returnType?.kind === "optional") {
+function findErrorStatuses(
+  find: FindIR,
+  guarded: boolean,
+  aggName: string,
+  statuses: ApiStatusContext | undefined,
+): number[] {
+  const absent = absenceUnionAbsent(find.returnType, aggName);
+  if (absent) {
+    // The `none` unit is the stdlib 404; an error payload answers its
+    // `httpStatus`-resolved status — the same
+    // `errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag)` read every
+    // backend's union-find arm performs at its own emit site today.  A
+    // `requires` gate keeps its 403 on BOTH absence shapes (#2363's rung —
+    // python's union arm declares it by hand; dropping it here would re-open
+    // the exact "patched one arm, not the other" split that PR fixed).
+    if (absent.kind === "none") return errorStatuses("findOptional", guarded);
+    const set = new Set(guarded ? [403] : []);
+    set.add(resolveErrorStatus(absent.tag, statuses?.errorStatusOverrides));
+    return [...set].sort((a, b) => a - b);
+  }
+  if (find.returnType?.kind === "optional") {
     return errorStatuses("findOptional", guarded);
   }
   return errorStatuses(collectionSuccess(find.returnType) ? "findList" : "findSingle", guarded);
@@ -213,23 +298,64 @@ function findErrorStatuses(find: FindIR, guarded: boolean): number[] {
  * per-operation facts the table cannot know, and each backend adds them at its
  * own call site: a `when` state gate can answer `Disallowed` (409), and a
  * versioned aggregate's `update` can answer `ConcurrencyConflict` (409) on a
- * stale `If-Match`. With no `httpStatus` override both collapse to one 409.
- *
- * NOT resolved through `httpStatus` here.  The overrides live on
- * `BoundedContextIR.structuralErrorStatuses`, and this derivation is
- * per-aggregate — a caller that needs the remapped status reads it off the
- * context the same way the emitters do.  Declaring the default is strictly
- * better than declaring nothing, which is what this returned before.
+ * stale `If-Match`.  Both resolve through the context's `httpStatus` map
+ * (`structuralErrorStatuses`) exactly as the emitters resolve them, so a
+ * remapped conflict reaches this derivation too; with no override both
+ * collapse to one 409.
  */
-function operationErrorStatuses(agg: AggregateIR, op: OperationIR): number[] {
-  const statuses = new Set(errorStatuses("operation", operationIsGuarded(op)));
-  if (op.when) statuses.add(409);
-  if (op.name === "update" && aggregateIsVersioned(agg)) statuses.add(409);
-  return [...statuses].sort((a, b) => a - b);
+function operationErrorStatuses(
+  agg: AggregateIR,
+  op: OperationIR,
+  statuses: ApiStatusContext | undefined,
+): number[] {
+  const out = new Set(errorStatuses("operation", operationIsGuarded(op)));
+  if (op.when) out.add(resolveErrorStatus("Disallowed", statuses?.structuralErrorStatuses));
+  if (op.name === "update" && aggregateIsVersioned(agg)) {
+    out.add(resolveErrorStatus("ConcurrencyConflict", statuses?.structuralErrorStatuses));
+  }
+  // A union RETURN's error arms (`operation reserve(): Order or OutOfStock`)
+  // each declare their resolved status — every backend's returning-operation
+  // emitter derives exactly this set from the variants whose name is an
+  // `error`-kind payload.
+  if (op.returnType?.kind === "union") {
+    for (const v of op.returnType.variants) {
+      if (v.kind === "entity" && statuses?.errorPayloadNames?.has(v.name)) {
+        out.add(resolveErrorStatus(v.name, statuses?.errorStatusOverrides));
+      }
+    }
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 function entityType(aggName: string): TypeIR {
   return { kind: "entity", name: aggName };
+}
+
+/** The router-relative fragment of an operation's absolute `path` — what a
+ *  backend mounts under its aggregate base: `""` for the collection root
+ *  (create / auto-`all`), `"/{id}"`, `"/{id}/<op>"`, `"/<find>"`.  The inverse
+ *  of the `aggregateBase` composition, exported so route builders rendering
+ *  from this derivation don't each re-split the absolute path (backends that
+ *  spell a param `:id` rewrite the braces on top of this). */
+export function relativeOpPath(op: ApiOperationIR): string {
+  const base = aggregateBase(op.aggregate);
+  return op.path === base ? "" : op.path.slice(base.length);
+}
+
+/** The success status of a lifted operation — the ladder every backend's
+ *  route arm encodes today: create answers `201 {id}`, an operation with no
+ *  declared `: T` (and destroy) answers a bodiless `204`, everything else
+ *  `200`. */
+export function successStatus(op: ApiOperationIR): 200 | 201 | 204 {
+  if (op.kind === "create") return 201;
+  return op.responseType ? 200 : 204;
+}
+
+/** True for the auto-`all` find — the collection-root GET, which several
+ *  backends emit through a different arm (paged envelope, no path segment)
+ *  than a declared find. */
+export function isAllFind(op: ApiOperationIR): boolean {
+  return op.kind === "find" && op.find?.name === "all";
 }
 
 /** Derive every lifted HTTP operation one aggregate exposes.
@@ -240,6 +366,7 @@ function entityType(aggName: string): TypeIR {
 export function deriveAggregateOperations(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
+  statuses?: ApiStatusContext,
 ): ApiOperationIR[] {
   const base = aggregateBase(agg.name);
   const out: ApiOperationIR[] = [];
@@ -252,6 +379,7 @@ export function deriveAggregateOperations(
     params: readonly ApiOperationParamIR[],
     responseType: TypeIR | undefined,
     errorStatuses: readonly number[],
+    source?: { readonly find?: FindIR; readonly operation?: OperationIR },
   ): void => {
     out.push({
       idTokens,
@@ -263,6 +391,8 @@ export function deriveAggregateOperations(
       params,
       ...(responseType ? { responseType } : {}),
       errorStatuses,
+      ...(source?.find ? { find: source.find } : {}),
+      ...(source?.operation ? { operation: source.operation } : {}),
     });
   };
 
@@ -306,7 +436,8 @@ export function deriveAggregateOperations(
       `${base}/${snake(find.name)}`,
       findParams(find),
       find.returnType,
-      findErrorStatuses(find, find.requires !== undefined),
+      findErrorStatuses(find, find.requires !== undefined, agg.name, statuses),
+      { find },
     );
   }
 
@@ -321,8 +452,11 @@ export function deriveAggregateOperations(
     errorStatuses("getById"),
   );
 
-  // DELETE /api/<aggs>/{id} — only when the aggregate has a canonical destroy.
-  if (agg.canonicalDestroy) {
+  // DELETE /api/<aggs>/{id} — only when the aggregate exposes a REST destroy
+  // (the shared predicate next to `emitsRestCreate`).  `ReferencedInUse`
+  // resolves through the context's `httpStatus` map, matching the emitters'
+  // `resolveErrorStatus("ReferencedInUse", ctx.structuralErrorStatuses)`.
+  if (emitsRestDestroy(agg)) {
     push(
       "destroy",
       opDestroy(agg.name),
@@ -330,13 +464,19 @@ export function deriveAggregateOperations(
       `${base}/{id}`,
       [idParam()],
       undefined,
-      errorStatuses("destroy"),
+      errorStatuses("destroy", false, (name) =>
+        resolveErrorStatus(name, statuses?.structuralErrorStatuses),
+      ),
     );
   }
 
   // POST /api/<aggs>/{id}/<op> plus its GET …/can_<op> gate probe.
   for (const op of agg.operations ?? []) {
     if (isCanonical(op)) continue; // create/destroy already emitted above
+    // A `private` operation has no HTTP surface — every backend's route
+    // emitter filters on `visibility === "public"`, so lifting a private op
+    // here would type a call to a route that does not exist.
+    if (op.visibility !== "public") continue;
     const slug = snake(op.routeSlug ?? op.name);
     push(
       "operation",
@@ -352,7 +492,8 @@ export function deriveAggregateOperations(
       // that compiles perfectly on both sides.  Caught by the success-body-shape
       // gate in `api-surface.test.ts`; `updateOrder` was live when it landed.
       op.returnType,
-      operationErrorStatuses(agg, op),
+      operationErrorStatuses(agg, op, statuses),
+      { operation: op },
     );
     // The `GET /{id}/can_<op>` companion exists ONLY for a `when`-gated
     // operation — it is the canCommand probe for that gate, so an ungated
@@ -371,6 +512,7 @@ export function deriveAggregateOperations(
         [idParam()],
         { kind: "primitive", name: "bool" },
         errorStatuses("getById"),
+        { operation: op },
       );
     }
   }
@@ -387,19 +529,39 @@ export function deriveAggregateOperations(
       base,
       findParams(all),
       all.returnType,
-      findErrorStatuses(all, all.requires !== undefined),
+      findErrorStatuses(all, all.requires !== undefined, agg.name, statuses),
+      { find: all },
     );
   }
 
   return out;
 }
 
-/** Every lifted operation across a context, aggregate by aggregate. */
+/** Every lifted operation across a context, aggregate by aggregate.  Threads
+ *  the context's `httpStatus` maps so each operation's `errorStatuses` are the
+ *  RESOLVED statuses the backend answers, not the unremapped defaults. */
+/** The status-resolution inputs read off a context — for a backend that
+ *  derives per aggregate (`deriveAggregateOperations`) rather than through
+ *  `deriveContextOperations`. */
+export function apiStatusContext(ctx: BoundedContextIR): ApiStatusContext {
+  return {
+    errorStatusOverrides: ctx.errorStatusOverrides,
+    structuralErrorStatuses: ctx.structuralErrorStatuses,
+    errorPayloadNames: new Set(ctx.payloads.filter((p) => p.kind === "error").map((p) => p.name)),
+  };
+}
+
 export function deriveContextOperations(ctx: BoundedContextIR): ApiOperationIR[] {
+  const statuses = apiStatusContext(ctx);
   const out: ApiOperationIR[] = [];
   for (const agg of ctx.aggregates) {
+    // An abstract inheritance base owns the shared table but no HTTP surface —
+    // Hono, python and the java contract all skip it wholesale (e.g.
+    // `typescript/emit/routes.ts` filters `!a.isAbstract` before mounting), so
+    // deriving routes for it would type calls nothing serves.
+    if (agg.isAbstract) continue;
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-    out.push(...deriveAggregateOperations(agg, repo));
+    out.push(...deriveAggregateOperations(agg, repo, statuses));
   }
   return out;
 }

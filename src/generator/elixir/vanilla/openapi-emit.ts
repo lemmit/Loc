@@ -32,6 +32,13 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../../ir/types/wire-types.js";
+import {
+  type ApiOperationIR,
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+  relativeOpPath,
+} from "../../../ir/util/api-surface.js";
 import { AUDIT_ENTRY_TYPE, auditEntryWireShape } from "../../../ir/util/audit-history.js";
 import {
   errorStatuses,
@@ -56,7 +63,9 @@ import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defa
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
-import { emitsRestCreate, servesHistory } from "./api-emit.js";
+import { servedOperationEntries, servesHistory } from "./api-emit.js";
+import { isAbstractBase } from "./inheritance-emit.js";
+import { emitsRestDelete } from "./rest-surface.js";
 
 // ---------------------------------------------------------------------------
 // OpenApiSpex emission for Phoenix LiveView / Ash.
@@ -493,15 +502,27 @@ function renderApiSpec(
   // public operations and repository finds.
   for (const { ctx, agg } of allAggregates) {
     const aggSlug = snake(plural(agg.name));
+    // THE UNIFICATION SEAM (api-surface.ts): the documented paths and every
+    // declared error set below come from the same derived list the router
+    // mounts (api-emit.ts, via `servedOperationEntries`) — the spec can no
+    // longer advertise a route the router does not serve, which it has done
+    // three separate times.  An abstract base derives nothing; its read-only
+    // list/show docs below stay the elixir-local extra the router also keeps.
+    const specRepo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+    const derivedOps = isAbstractBase(agg)
+      ? []
+      : deriveAggregateOperations(agg, specRepo, apiStatusContext(ctx));
+    const served = servedOperationEntries(agg, derivedOps);
+    const specPath = (o: ApiOperationIR): string => `/${aggSlug}${relativeOpPath(o)}`;
     const respMod = `${schemasModule}.${agg.name}Response`;
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
     const createReqMod = `${schemasModule}.Create${agg.name}Request`;
     const createRespMod = `${schemasModule}.Create${agg.name}Response`;
-    // The `post` create operation rides the SAME `emitsRestCreate` predicate as
-    // the router route (api-emit.ts) — documenting a create the router doesn't
-    // wire (or vice versa) is the exact divergence this shares away.  A
+    // The `post` create operation is documented iff the derived create entry
+    // exists — the same gate the router mounts, so the two cannot diverge.  A
     // non-constructible / abstract aggregate documents no create.
-    const createPost = emitsRestCreate(agg)
+    const createEntry = derivedOps.find((o) => o.kind === "create");
+    const createPost = createEntry
       ? `,
         post: %OpenApiSpex.Operation{
           summary: "Create ${agg.name}",
@@ -517,7 +538,7 @@ function renderApiSpec(
             201 => %OpenApiSpex.Response{
               description: "Created",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${createRespMod}}}
-            }${errorResponseEntries("create", schemasModule)}
+            }${statusResponseEntries([...createEntry.errorStatuses], schemasModule)}
           }
         }`
       : "";
@@ -560,14 +581,15 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            }${errorResponseEntries("getById", schemasModule)}
+            }${statusResponseEntries([...(derivedOps.find((o) => o.kind === "getById")?.errorStatuses ?? [404])], schemasModule)}
           }
         }${
-          // Canonical destroy → DELETE /<aggs>/{id}.  Gated on the IR
-          // lifecycle so the Phoenix spec matches the Hono/.NET destroy
-          // route (operationId + 404/409 error set from the shared matrix);
-          // the route + controller `def destroy` are emitted in api-emit.ts.
-          agg.canonicalDestroy
+          // DELETE /<aggs>/{id} — documented iff the ROUTER mounts it: the
+          // derived destroy entry AND the elixir-local `emitsRestDelete`
+          // stance (ES exclusion).  The spec used to gate on
+          // `canonicalDestroy` alone, documenting a DELETE the router refused
+          // for event-sourced aggregates.
+          derivedOps.some((o) => o.kind === "destroy") && emitsRestDelete(agg)
             ? `,
         delete: %OpenApiSpex.Operation{
           summary: "Destroy ${agg.name}",
@@ -577,7 +599,7 @@ ${pagingQueryParams()}
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("destroy", schemasModule, false, resolveConflict)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${statusResponseEntries([...derivedOps.find((o) => o.kind === "destroy")!.errorStatuses], schemasModule)}
           }
         }`
             : ""
@@ -613,14 +635,14 @@ ${pagingQueryParams()}
       );
     }
 
-    // Per-operation paths: POST /<plural>/{id}/<op>
-    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-      // Spec path must track the route's URL segment (routeSlug, D-URLSTYLE);
-      // operationId + request module stay keyed on op.name.
-      const opSnake = snake(op.routeSlug ?? op.name);
+    // Per-operation paths — the SERVED entries (router parity by
+    // construction; the spec used to document every public op, including the
+    // CRUD-verb-named ones the router never mounts and the ES `update`).
+    for (const entry of served.opEntries) {
+      const op = entry.operation!;
       const opReqMod = `${schemasModule}.${upperFirst(op.name)}${agg.name}Request`;
       pathEntries.push(
-        `      "/${aggSlug}/{id}/${opSnake}" => %OpenApiSpex.PathItem{
+        `      "${specPath(entry)}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
           summary: "${op.name} on ${agg.name}",
           operationId: "${camelId(opOperation(agg.name, op.name))}",
@@ -658,34 +680,17 @@ ${pagingQueryParams()}
               }}}
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
-            }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
-              // A `when` state gate (`Disallowed`) OR a versioned aggregate's
-              // `update` (stale `If-Match` → `ConcurrencyConflict`) declares a
-              // conflict status, mirroring the Hono / .NET contract.  Each
-              // resolves through the `httpStatus` mapper (M-T3.4a): 409 by
-              // default (both collapse to one `409:` line, byte-identical), or a
-              // per-conflict override.
-              statusResponseEntries(
-                [
-                  ...new Set([
-                    ...(op.when ? [resolveConflict("Disallowed")] : []),
-                    ...(op.name === "update" && aggregateIsVersioned(agg)
-                      ? [resolveConflict("ConcurrencyConflict")]
-                      : []),
-                  ]),
-                ].sort((a, b) => a - b),
-                schemasModule,
-              )
-            }
+            }${statusResponseEntries([...entry.errorStatuses], schemasModule)}
           }
         }
       }`,
       );
       // The auto-exposed `GET /<plural>/{id}/can_<op>` companion of a
       // `when`-gated op — returns `{ allowed }` (criterion.md, use site 2).
-      if (op.when) {
+      const probe = served.probeByOp.get(op);
+      if (probe) {
         pathEntries.push(
-          `      "/${aggSlug}/{id}/can_${opSnake}" => %OpenApiSpex.PathItem{
+          `      "${specPath(probe)}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "can_${op.name} on ${agg.name}",
           operationId: "${camelId(opOperation(agg.name, `can_${op.name}`))}",
@@ -697,71 +702,43 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.CanResponse}}
-            }${errorResponseEntries("getById", schemasModule)}
+            }${statusResponseEntries([...probe.errorStatuses], schemasModule)}
           }
         }
       }`,
         );
       }
     }
-
-    // Per-find paths: GET /<plural>/<find>.  Skip auto-`all` (already served
-    // by the CRUD `GET /<plural>` above).  Response cardinality follows the
-    // declared find return type: array → list response; otherwise single.
-    const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-    if (repo) {
-      for (const find of repo.finds) {
-        // A synthesized find (paged-run queryHandler support) is not auto-exposed
-        // by the aggregate controller — the queryHandler's own route documents it.
-        if (find.name === "all" || find.synthesized) continue;
-        const findSnake = snake(find.name);
-        // A paged explicit find (`find x(): T paged`) shares the `<Agg>Paged`
-        // envelope and gains the page/pageSize/sort/dir controls, mirroring the
-        // paged auto-findAll above (and the Hono/.NET/Java/Python emitters).
-        const findPaged = pagedReturn(find.returnType);
-        const isArrayReturn = find.returnType.kind === "array";
-        const findRespMod = findPaged
-          ? `${schemasModule}.${findPaged.name}`
-          : isArrayReturn
-            ? listRespMod
-            : respMod;
-        const findKind: OpErrorKind =
-          find.returnType.kind === "optional"
-            ? "findOptional"
-            : isArrayReturn || findPaged
-              ? "findList"
-              : "findSingle";
-        // Union finds (`Agg or NotFound` / `Agg option`) translate absence to
-        // a ProblemDetails at the absent variant's status — 200 stays the
-        // SUCCESS variant (`<Agg>Response`).  Same edge translation as Hono's
-        // union-find route and Java's customizer (exception-less.md).
-        const unionSpec = findUnionSpec(find.returnType, agg.name, ctx);
-        const unionAbsentStatus = unionSpec
-          ? unionSpec.absent.kind === "none"
-            ? 404
-            : (ctx.errorStatusOverrides?.[unionSpec.absent.tag] ??
-              defaultErrorStatus(unionSpec.absent.tag))
-          : undefined;
-        // Filter params cross as query parameters — Hono/.NET declare them,
-        // so Phoenix must too (name + type + required), or the parity gate's
-        // query-param dimension diffs `phoenix=[]`.  Required mirrors Hono's
-        // `zodFor`: a nullable param is optional, everything else required.
-        const queryParamLines = find.params.map(
-          (p) =>
-            `            %OpenApiSpex.Parameter{name: :${p.name}, in: :query, required: ${
-              wireTypeInfo(p.type, "request").isNullable ? "false" : "true"
-            }, schema: ${openApiType(p.type, schemasModule)}}`,
-        );
-        // Paged finds append the shared page/pageSize/sort/dir controls after
-        // the declared params.
-        if (findPaged) queryParamLines.push(pagingQueryParams());
-        const queryParams = queryParamLines.join(",\n");
-        const queryParamsBlock =
-          queryParamLines.length > 0
-            ? `\n          parameters: [\n${queryParams}\n          ],`
-            : "";
-        pathEntries.push(
-          `      "/${aggSlug}/${findSnake}" => %OpenApiSpex.PathItem{
+    for (const entry of derivedOps.filter((o) => o.kind === "find" && !isAllFind(o))) {
+      const find = entry.find!;
+      // A paged explicit find (`find x(): T paged`) shares the `<Agg>Paged`
+      // envelope and gains the page/pageSize/sort/dir controls, mirroring the
+      // paged auto-findAll above (and the Hono/.NET/Java/Python emitters).
+      const findPaged = pagedReturn(find.returnType);
+      const isArrayReturn = find.returnType.kind === "array";
+      const findRespMod = findPaged
+        ? `${schemasModule}.${findPaged.name}`
+        : isArrayReturn
+          ? listRespMod
+          : respMod;
+      // Filter params cross as query parameters — Hono/.NET declare them,
+      // so Phoenix must too (name + type + required), or the parity gate's
+      // query-param dimension diffs `phoenix=[]`.  Required mirrors Hono's
+      // `zodFor`: a nullable param is optional, everything else required.
+      const queryParamLines = find.params.map(
+        (p) =>
+          `            %OpenApiSpex.Parameter{name: :${p.name}, in: :query, required: ${
+            wireTypeInfo(p.type, "request").isNullable ? "false" : "true"
+          }, schema: ${openApiType(p.type, schemasModule)}}`,
+      );
+      // Paged finds append the shared page/pageSize/sort/dir controls after
+      // the declared params.
+      if (findPaged) queryParamLines.push(pagingQueryParams());
+      const queryParams = queryParamLines.join(",\n");
+      const queryParamsBlock =
+        queryParamLines.length > 0 ? `\n          parameters: [\n${queryParams}\n          ],` : "";
+      pathEntries.push(
+        `      "${specPath(entry)}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "${find.name} on ${agg.name}",
           operationId: "${camelId(opFind(agg.name, find.name))}",
@@ -771,15 +748,15 @@ ${pagingQueryParams()}
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
             }${
-              unionAbsentStatus !== undefined
-                ? statusResponseEntries([unionAbsentStatus], schemasModule)
-                : errorResponseEntries(findKind, schemasModule, find.requires !== undefined)
+              // The declared set (gated 403 included, union-absent status
+              // resolved) is the derived one — the union arm here used to
+              // omit the 403 a gated union find answers.
+              statusResponseEntries([...entry.errorStatuses], schemasModule)
             }
           }
         }
       }`,
-        );
-      }
+      );
     }
   }
 

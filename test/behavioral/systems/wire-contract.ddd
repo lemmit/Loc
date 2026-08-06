@@ -99,6 +99,23 @@ system WireContract {
     expect(read.sku).toBe("SKU-1")
     expect(read.availability).toBe("InStock")
     expect(read.tags.length).toBe(0)
+
+    // The same three axes INBOUND on the canonical `update` (204, empty body):
+    // the `money` scale crosses the wire a second time, the enum moves through
+    // a write, and the OPTIONAL `note` — unset at create, and therefore the
+    // `null`-vs-absent axis this fixture exists for — is populated by an update
+    // rather than by a create.  `tags` is a containment and not an update
+    // param, so the empty collection must still read back `[]`, not null.
+    api.listings.update(l, { sku: "SKU-1B", price: "24.75", availability: "BackOrdered", note: "clearance" })
+    let updated = api.listings.getById(l)
+    expect(updated.sku).toBe("SKU-1B")
+    expect(updated.availability).toBe("BackOrdered")
+    expect(updated.note).toBe("clearance")
+    expect(updated.tags.length).toBe(0)
+    // The declared find over the column the update moved — the one query on
+    // this system, and previously uncalled.
+    let found = api.listings.bySku({ sku: "SKU-1B" })
+    expect(found.note).toBe("clearance")
   }
 
   // (2) The same collection AFTER an append — the non-empty shape, so the
@@ -109,6 +126,15 @@ system WireContract {
     api.listings.addTag(l, { label: "clearance" })
     let read = api.listings.getById(l)
     expect(read.tags.length).toBe(1)
+
+    // DELETE the listing that OWNS a contained child.  The `tags` row hangs off
+    // a containment foreign key (`ON DELETE CASCADE`), so the parent delete has
+    // to take it with it — the one delete shape in this system where the row
+    // count and the child count differ.  The previous block's listing survives
+    // and is counted in the next one.
+    api.listings.destroy(l)
+    expect(api.listings.getById(l)).toThrow(404)
+    expect(api.listings.bySku({ sku: "SKU-2" })).toThrow(404)
   }
 
   // (3) RS-15 — the DOMAIN FLOOR.  The first `discontinue` succeeds; the second
@@ -122,6 +148,18 @@ system WireContract {
     let l = api.listings.create({ sku: "SKU-3", price: "1", availability: "InStock" })
     api.listings.discontinue(l)
     expect(api.listings.discontinue(l)).toThrow(422)
+
+    // The root LIST route, reading BOTH surviving listings — the first block's
+    // (SKU-1B, `note` populated, `tags` empty) and this one's (SKU-3, `note`
+    // never set, now Discontinued).  That pairing is what makes the read worth
+    // making: this system exists to pin the `[]`-vs-`null` and money-scale
+    // axes, and the collection projection is a second, independently written
+    // serializer on every backend — an empty containment that reads `[]` by id
+    // and `null` in a list is exactly the divergence RS-8 names, and nothing
+    // had ever looked at the list side.  Sorted, since two rows come back.
+    let listed = api.listings.all({ sort: "sku", dir: "asc" })
+    expect(listed.items.length).toBe(2)
+    expect(listed.total).toBe(2)
   }
 
 }

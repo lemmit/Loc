@@ -27,8 +27,31 @@ system MacroShop {
       // ── softDeletable capability + softDelete macro ── soft-delete ops + the
       // read filter; crudish(updateOnly:) yields the update op without a
       // competing hard-delete destroy.
+      //
+      // The `create` is AUTHOR-DECLARED, and deliberately so.  `crudish(
+      // updateOnly: true)` suppresses the canonical create as well as the
+      // canonical destroy, and `softDeletable` (a pure mixin: fields + filter)
+      // supplies neither — so with only the two clauses this aggregate has no
+      // create route on any backend and NO ROW CAN BE MINTED THROUGH THE API AT
+      // ALL.  That is how it stood until this change, which is why the whole
+      // soft-delete lifecycle the fixture exists to cover had never once run at
+      // runtime (`R.unseedableAggregate` in the caller-census pins).
+      //
+      // The alternative exit — seeding rows through a `seed` dataset — does not
+      // work here: the node behavioural leg composes `createApp` directly and
+      // never calls `runSeeds`, so a seeded row would exist on the four legs
+      // that boot the real entrypoint and be absent on the oracle.
+      //
+      // Nothing is lost by declaring it: what `crudish(updateOnly:)` uniquely
+      // promises — that it emits `update` and suppresses create+destroy — is
+      // pinned directly, at the AST level, on its own inline fixture in
+      // `test/macro/crudish.test.ts` ("updateOnly: true suppresses create +
+      // destroy"), which is a stronger statement than any route-level
+      // observation here.  What this fixture is now free to prove instead is
+      // the thing only a booted backend can: that softDelete/restore work.
       aggregate Item with crudish(updateOnly: true), softDeletable, softDelete {
         label: string
+        create(label: string) { label := label }
       }
 
       repository Products for Product { }
@@ -52,5 +75,100 @@ system MacroShop {
     let p = api.products.create({ name: "Widget", price: 9.99 })
     let read = api.products.getById(p)
     expect(read.name).toBe("Widget")
+
+    // The `update` third of the crudish triple, which had no caller — the
+    // macro's whole claim is that it synthesises a WORKING create/update/
+    // destroy lifecycle from the field declarations, and only the create half
+    // was ever driven.  `POST /api/products/{id}/update` (204, no body) writes
+    // both synthesised params.
+    api.products.update(p, { name: "Widget-2", price: 19.99 })
+    let updated = api.products.getById(p)
+    expect(updated.name).toBe("Widget-2")
+    expect(updated.price).toBe(19.99)
+
+    // The remaining third of the crudish triple: the HARD destroy the macro
+    // synthesises (`DELETE /api/products/{id}`, 204), and the collection root
+    // that shows the row leaving.  `Product` is the control for `Item` below —
+    // same macro family, opposite deletion story.
+    let listed = api.products.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.products.destroy(p)
+    expect(api.products.getById(p)).toThrow(404)
+    let empty = api.products.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
+  }
+
+  // The SOFT-DELETE LIFECYCLE — the half of this fixture that had never run on
+  // any backend, because `Item` had no api-reachable row (see the aggregate's
+  // note).  Every route here is a first caller: create, getById, update,
+  // softDelete, restore, and the collection root.
+  //
+  // The assertion that matters is the FILTER, not the flag.  `softDeletable`
+  // contributes `filter !this.isDeleted`, which the enrichment AND-s into every
+  // read — so a soft-deleted row must vanish from `GET /{id}` and from the
+  // collection exactly as a hard-deleted one does, while still being in the
+  // table.  A backend that emitted the `isDeleted` column and the two
+  // operations but dropped the capability's filter passes every compile gate,
+  // answers 204 to `softDelete()`, and then keeps serving the row.
+  test e2e "softDelete hides the row from every read, and restore cannot reach it" against d {
+    let it = api.items.create({ label: "L1" })
+    let read = api.items.getById(it)
+    expect(read.label).toBe("L1")
+    let listed = api.items.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+
+    // The `update` the macro DOES emit under `updateOnly:` — driven here so the
+    // one operation crudish contributes to this aggregate has a caller on the
+    // same row the lifecycle then removes.
+    api.items.update(it, { label: "L2" })
+    let renamed = api.items.getById(it)
+    expect(renamed.label).toBe("L2")
+
+    // SOFT DELETE.  The row stays in the table; every read must stop seeing it,
+    // including the count beside the page.
+    api.items.softDelete(it)
+    expect(api.items.getById(it)).toThrow(404)
+    let hidden = api.items.all()
+    expect(hidden.items.length).toBe(0)
+    expect(hidden.total).toBe(0)
+
+    // ── RESTORE: a REPRODUCER, not a contract ────────────────────────────
+    //
+    // `restore()` cannot be invoked.  It has to address a row the capability's
+    // OWN read filter (`!this.isDeleted`) is currently hiding, and every
+    // backend narrows an operation's load-before-write by exactly that filter —
+    // uniformly and deliberately, because that is what makes a cross-tenant
+    // `update`/`destroy` 404 in the tenancy fixtures.  Applied to
+    // `softDeletable` the same rule means a soft-deleted row can never come
+    // back through the api: `POST /api/items/{id}/restore` answers the RS-27
+    // 404 envelope ("Item <id> not found") on every backend.
+    //
+    // So the `softDelete` macro emits an operation that is dead on arrival —
+    // invisible until this drain, because `Item` had no api-mintable row and
+    // `restore()` had no caller in the repo.
+    //
+    // The assertion below pins the DEFECT so it has a runtime reproducer on all
+    // five backends; it is not a statement of intent.  The intended behaviour
+    // is the two commented lines under it, and a fix must swap them in — which
+    // is the point of asserting the wrong answer out loud rather than leaving
+    // the operation uncalled: this line FAILS the moment someone repairs it.
+    //
+    // The repair is a language decision, not a backend bug — no backend is an
+    // outlier here — because it turns on whether a capability's read filter
+    // should scope an operation's load at all, and `softDeletable` and
+    // `tenantOwned` want opposite answers from the same mechanism.  Reported
+    // for disposition rather than fixed in a coverage change.
+    expect(api.items.restore(it)).toThrow(404)
+    // WANTED, once the filter/load interaction is decided:
+    //   api.items.restore(it)
+    //   let restored = api.items.getById(it)
+    //   expect(restored.label).toBe("L2")
+    expect(api.items.getById(it)).toThrow(404)
+    let stillHidden = api.items.all()
+    expect(stillHidden.items.length).toBe(0)
+    expect(stillHidden.total).toBe(0)
   }
 }

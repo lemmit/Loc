@@ -75,5 +75,22 @@ system AuditHistorySystem {
     expect(cancelled.changes.first().field).toBe("status")
     expect(cancelled.changes.first().before).toBe(0)
     expect(cancelled.changes.first().after).toBe(7)
+
+    // The three ORDINARY read routes beside the history read — the entity by
+    // id, the declared find over the column the audited create wrote, and the
+    // collection root.  None had a caller, so this fixture asserted what
+    // HAPPENED without ever asserting what EXISTS: a backend whose audit write
+    // corrupted the row it snapshots would still produce a perfect timeline.
+    // `version` is on all three and on neither history entry, which is the
+    // contrast the file's header describes and nothing could see.
+    let read = api.orders.getById(o)
+    expect(read.reference).toBe("R1")
+    expect(read.quantity).toBe(5)
+    expect(read.status).toBe(7)
+    let byRef = api.orders.byReference({ reference: "R1" })
+    expect(byRef.status).toBe(7)
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
   }
 }

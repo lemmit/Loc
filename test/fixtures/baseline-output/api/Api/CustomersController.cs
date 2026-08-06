@@ -73,8 +73,8 @@ public sealed class CustomersController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    [ProducesResponseType(typeof(ProblemDetails), 422)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<IActionResult> UpdateCustomer([FromRoute] Guid id, [FromBody] UpdateCustomerRequest request)
     {
         _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Customer", "update", id);
@@ -103,7 +103,8 @@ public sealed class CustomersController : ControllerBase
     public async Task<ActionResult<CustomerResponse?>> ByEmailCustomer([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string email)
     {
         var result = await _mediator.Send(new ByEmailQuery(email));
-        return result is null ? NotFound() : Ok(result);
+        if (result is null) throw new global::Api.Domain.Common.AggregateNotFoundException("not_found");
+        return Ok(result);
     }
 
 }

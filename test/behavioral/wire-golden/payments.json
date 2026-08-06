@@ -29,6 +29,96 @@
     {
       "seq": 2,
       "method": "POST",
+      "path": "/api/credit_cards/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/credit_cards/{id}",
+      "status": 200,
+      "body": {
+        "expiryMonth": 12,
+        "expiryYear": 2031,
+        "holderName": "Ada Lovelace",
+        "id": "<volatile:key>",
+        "last4": "4242",
+        "network": "Mastercard",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/credit_cards/by_network?network=Mastercard",
+      "status": 200,
+      "body": [
+        {
+          "expiryMonth": 12,
+          "expiryYear": 2031,
+          "holderName": "Ada Lovelace",
+          "id": "<volatile:key>",
+          "last4": "4242",
+          "network": "Mastercard",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/credit_cards",
+      "status": 200,
+      "body": [
+        {
+          "expiryMonth": 12,
+          "expiryYear": 2031,
+          "holderName": "Ada Lovelace",
+          "id": "<volatile:key>",
+          "last4": "4242",
+          "network": "Mastercard",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 6,
+      "method": "DELETE",
+      "path": "/api/credit_cards/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/credit_cards/{id}",
+      "status": 404,
+      "body": {
+        "detail": "CreditCard {id} not found",
+        "instance": "/api/credit_cards/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/credit_cards",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/credit_cards/by_network?network=Mastercard",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 10,
+      "method": "POST",
       "path": "/api/bank_accounts",
       "status": 201,
       "body": {
@@ -36,7 +126,7 @@
       }
     },
     {
-      "seq": 3,
+      "seq": 11,
       "method": "GET",
       "path": "/api/bank_accounts/{id}",
       "status": 200,
@@ -47,6 +137,68 @@
         "routingNumber": "021000021",
         "version": 1
       }
+    },
+    {
+      "seq": 12,
+      "method": "POST",
+      "path": "/api/bank_accounts/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/bank_accounts/{id}",
+      "status": 200,
+      "body": {
+        "holderName": "Grace Hopper",
+        "id": "<volatile:key>",
+        "last4": "0007",
+        "routingNumber": "011000015",
+        "version": 2
+      }
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/api/bank_accounts",
+      "status": 200,
+      "body": [
+        {
+          "holderName": "Grace Hopper",
+          "id": "<volatile:key>",
+          "last4": "0007",
+          "routingNumber": "011000015",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 15,
+      "method": "DELETE",
+      "path": "/api/bank_accounts/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/api/bank_accounts/{id}",
+      "status": 404,
+      "body": {
+        "detail": "BankAccount {id} not found",
+        "instance": "/api/bank_accounts/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/bank_accounts",
+      "status": 200,
+      "body": []
     }
   ]
 }

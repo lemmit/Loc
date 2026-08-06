@@ -318,13 +318,34 @@ the conforming backends, and the fix that established it.
   document path already did. (Each is guarded on the `versioned` capability; the
   relational .NET/Java paths needed nothing, since there the bumped column IS
   the wire value.)
+- **A fourth shape, found later: INHERITED aggregates on java.** The rule is
+  also `inheritanceUsing:`-dependent, and java failed it for every subtype of an
+  abstract aggregate — `version` froze at the create factory's `1` and never
+  moved (`payments` credit card / bank account, `tph` car / truck: canonically
+  `2`, java `1`). One cause, and it is not Hibernate semantics this time
+  (unlike RS-20): the `version` token field is declared once, on the **base**,
+  and the concrete-entity emitter skips inherited fields — so `@Version` had to
+  be emitted by `renderAbstractBase`, which had no such arm. `renderEntity`'s
+  arm even carried the comment *"a TPH/TPC base carries it once"*, an intent
+  the base builder never implemented, so the annotation was emitted **nowhere**
+  and the column was a plain `@Column`. Beyond the wire value this left the
+  whole hierarchy's optimistic-concurrency guard **inert** — no `WHERE version
+  = ?` CAS, so a lost update between two writers was silent. **Fixed** (java
+  `emit/entity.ts`); gated structurally for TPH *and* TPC, with the negative
+  that the concrete must not redeclare it
+  (`generator-java-concurrency-conflict.test.ts`), and re-verified by booting
+  `payments` / `tph` / `inheritance` against Postgres in `gradle:9-jdk25`.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate
   (`test/behavioral/wire-golden/shapes.json` seq #3, `GET /api/carts/{id}`);
   fixed in the same PR, so the waiver is gone and the gate enforces it
   unconditionally on all five backends. Note RS-11 covered version at **create**
-  only — this is the **increment** path, and it is shape-dependent. Tier:
-  **behavioral**.
+  only — this is the **increment** path, and it is shape-dependent. The
+  inherited-shape half above was found by the caller census's `update` drain
+  (#2438) — the first callers ever put on `POST /api/<aggs>/{id}/update`, which
+  is the only route that mutates a `crudish` aggregate without a domain
+  operation, and therefore the only one that reaches an inherited aggregate
+  whose subtypes declare no operations at all. Tier: **behavioral**.
 
 ### RS-15 · A domain-floor rejection is **422**, not 400
 - **Guarantee.** A request that parses and typechecks but is rejected by the
@@ -772,7 +793,60 @@ the conforming backends, and the fix that established it.
 - **Scope.** *By id.* The 404 an **optional find** answers
   (`find byCode(...): Order option` with no match) is a different class and
   keeps the `"not_found"` token — node and python already agree there, and the
-  rule deliberately does not touch it.
+  rule deliberately does not touch its `detail`.
+  > **Correction (2026-08-05).** "node and python already agree there" was read,
+  > at the time, as *everyone* agreeing there — and no test drove that path, so
+  > nothing checked. The caller census drain wrote the first callers for an
+  > `option` find (`corpus/union-find-absence`'s `maybeFirst`) and an optional
+  > find (`corpus/inheritance`'s `byEmail`), and **java answered an EMPTY body**
+  > on both: `ResponseEntity.notFound().build()`, Spring's own bare 404, which
+  > never reaches the `@RestControllerAdvice`. That is not an RS-27 `detail`
+  > question — it is a straight [RS-22](#rs-22--the-rfc-7807-envelope-is-exactly-five-members-plus-declared-extensions)
+  > violation (no envelope at all), and it is *this rule's own lesson* — "don't
+  > hand-roll a 404" — at two arms nobody had converted, in the very controller
+  > whose `error`-variant branch built a real ProblemDetail three lines away.
+  > Fixed by throwing `AggregateNotFoundException("not_found")` so both arms land
+  > in the shared producer (`emit/common.ts` → `JAVA_FIND_ABSENCE_THROW`);
+  > `generator-java-api.test.ts` pins it, mutation-proven, with a list-find
+  > scope guard. The `detail` token itself is unchanged and still out of scope.
+  >
+  > **And the same again on .NET, hours later (2026-08-05).** The dapper
+  > behavioural leg then reported **28 wire divergences, all one bug**: both
+  > .NET find-absence arms `return NotFound();` — ASP.NET's own bare 404, which
+  > never reaches `DomainExceptionFilter` and is rendered by
+  > `ProblemDetailsFactory` instead. Four wrong members at once, on every
+  > declared-find miss across five cases (`by_sku`, `by_reference` ×2,
+  > `by_code`, `by_email`, `maybe_first`): `type` = the rfc9110 §15.5.5 URI
+  > rather than `about:blank`, `detail` = null rather than the token,
+  > `instance` = null rather than the request path, plus an injected `traceId`.
+  > RS-22 names that factory behaviour *exactly* and still listed dotnet as
+  > conforming — because the arms nobody had converted were the arms nobody had
+  > CALLED. The controller emitter is **shared** between the EF and Dapper
+  > adapters (its only `usingDapper` branch is the destroy FK catch — the two
+  > controllers are otherwise byte-identical), so the EF leg carried it
+  > identically; the dapper leg simply reported first. Fixed the same way
+  > (`emit/common.ts` → `dotnetFindAbsenceThrow`), pinned in
+  > `union-emit.test.ts` with the same list-find scope guard, and both legs
+  > re-booted to 0 divergences on all five cases.
+  >
+  > **And elixir, the same day, with TWO spellings at once.** Its `T?` arm sent
+  > `"<Aggregate> not found"` — a sentence that *reads* like this rule's by-id
+  > form but carries no id — and its `T option` arm sent `"Not Found"` (its
+  > `problem_variant/5` helper sets `detail: title`). Nine of the elixir leg's
+  > eleven wire divergences were those two arms, across `union-find-absence`,
+  > `inheritance`, `provenance`, `audited` and `wire-contract`. Both now call
+  > `ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")` —
+  > the same shared producer the by-id read already used.
+  >
+  > **Four backends, one rule, four separate discoveries** — and in each the
+  > defect sat beside a *correct* sibling arm in the same file: java's
+  > `error`-variant branch built a real ProblemDetail three lines from the empty
+  > one; .NET's did the same; elixir's two arms disagreed with *each other*.
+  > That is the shape to look for when adding a route class: not "is the
+  > producer right", but "does **every** arm reach it". Only node and python —
+  > the two that never hand-rolled a find 404 — were right from the start, which
+  > is the rule restated: the arms that were wrong are exactly the arms that
+  > answered locally instead of reaching the producer.
 - **The real rule: don't hand-roll a 404.** This was not five backends inventing
   five strings. **Two agreed out of the box**, because on each the message comes
   from one shared producer — the repository's `getById`

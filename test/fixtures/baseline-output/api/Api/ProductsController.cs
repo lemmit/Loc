@@ -74,8 +74,8 @@ public sealed class ProductsController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
-    [ProducesResponseType(typeof(ProblemDetails), 422)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<IActionResult> UpdateProduct([FromRoute] Guid id, [FromBody] UpdateProductRequest request)
     {
         new UpdateProductRequestValidator().ValidateAndThrow(request);
@@ -104,7 +104,8 @@ public sealed class ProductsController : ControllerBase
     public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string sku)
     {
         var result = await _mediator.Send(new BySkuQuery(sku));
-        return result is null ? NotFound() : Ok(result);
+        if (result is null) throw new global::Api.Domain.Common.AggregateNotFoundException("not_found");
+        return Ok(result);
     }
 
 }

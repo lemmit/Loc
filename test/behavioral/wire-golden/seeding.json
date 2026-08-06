@@ -24,6 +24,107 @@
         "tier": "Free",
         "version": 1
       }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/widgets/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/widgets/{id}",
+      "status": 200,
+      "body": {
+        "display": "Delta-2",
+        "id": "<volatile:key>",
+        "name": "Delta-2",
+        "size": 10,
+        "tier": "Pro",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/gadgets",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/gadgets/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "label": "g1",
+        "version": 1,
+        "widgetId": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/gadgets/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/gadgets/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "label": "g2",
+        "version": 2,
+        "widgetId": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/gadgets/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/gadgets/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Gadget {id} not found",
+        "instance": "/api/gadgets/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "DELETE",
+      "path": "/api/widgets/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/widgets/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Widget {id} not found",
+        "instance": "/api/widgets/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
     }
   ]
 }

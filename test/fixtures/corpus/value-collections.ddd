@@ -27,6 +27,17 @@ system Billing {
     let read = api.invoices.getById(inv)
     expect(read.reference).toBe("INV-1")
     expect(read.lineItems.length).toBe(2)
+    // The canonical `update` REPLACES the inline value collections wholesale
+    // (both `Money[]` fields are update params).  Shrinking `lineItems` 2 → 1
+    // and populating the previously-unset optional `surcharges` in one call is
+    // the write-side half of this fixture: a backend that appends instead of
+    // replacing reads back 3, and one that ignores the optional reads back
+    // null/[].
+    api.invoices.update(inv, { reference: "INV-2", lineItems: [{ amount: 7.25, currency: "USD" }], surcharges: [{ amount: 1.00, currency: "USD" }] })
+    let updated = api.invoices.getById(inv)
+    expect(updated.reference).toBe("INV-2")
+    expect(updated.lineItems.length).toBe(1)
+    expect(updated.surcharges.length).toBe(1)
     // The inline value-object array over the ROOT LIST route: findAll loads
     // value collections through a separate bulk path from `getById`, so the
     // list read is where a dropped/duplicated `Money[]` would show.

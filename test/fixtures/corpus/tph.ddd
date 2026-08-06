@@ -37,5 +37,71 @@ system TPH {
     let read = api.cars.getById(c)
     expect(read.name).toBe("Sedan")
     expect(read.doors).toBe(4)
+
+    // The canonical `update` on a TPH subtype writes ONLY `doors` (the base's
+    // `name`/`capacity` are not update params), so the shared discriminated
+    // table must keep the base columns intact.  The subtype's own op then
+    // writes the same column through the other route.
+    api.cars.update(c, { doors: 2 })
+    let updated = api.cars.getById(c)
+    expect(updated.doors).toBe(2)
+    expect(updated.name).toBe("Sedan")
+    expect(updated.capacity).toBe(5)
+    api.cars.refit(c, { d: 3 })
+    let refitted = api.cars.getById(c)
+    expect(refitted.doors).toBe(3)
+  }
+
+  // The SECOND concrete of the same hierarchy had no runtime caller at all —
+  // create, read and update were all uncalled, so nothing proved the two
+  // subtypes coexist in the shared table (the classic TPH failure: the second
+  // discriminator's write clobbers or is clobbered by the first).
+  test e2e "the second TPH concrete round-trips beside the first" against d {
+    let t = api.trucks.create({ name: "Hauler", capacity: 2, payloadKg: 5000 })
+    let read = api.trucks.getById(t)
+    expect(read.name).toBe("Hauler")
+    expect(read.payloadKg).toBe(5000)
+    api.trucks.update(t, { payloadKg: 7000 })
+    let updated = api.trucks.getById(t)
+    expect(updated.payloadKg).toBe(7000)
+    expect(updated.name).toBe("Hauler")
+
+    // ── the LIST and DELETE routes, on the shared table ──────────────────
+    //
+    // Both concretes now have exactly one row in the ONE discriminated table
+    // (the car came from the previous block).  That makes the two per-subtype
+    // list routes the discriminator's proof: a reader that forgot the `kind`
+    // predicate answers 2 on BOTH.  Every list read below is 0- or 1-row on
+    // purpose — a subtype's `all` is a bare unbounded array with no `sort`
+    // param, so a 2-row read would have no deterministic order to record.
+    let trucks = api.trucks.all()
+    expect(trucks.length).toBe(1)
+    let cars = api.cars.all()
+    expect(cars.length).toBe(1)
+
+    // There is deliberately no `api.vehicles.getById(...)` — `Vehicle` is the
+    // ABSTRACT base, which `docs/inheritance.md` says owns no routes, and no
+    // backend mounts one.  `deriveContextOperations` derived it anyway until
+    // this drain's first caller answered 404 on a row that exists; see the
+    // note in `inheritance.ddd` and the fix in `api-surface.ts`.
+    //
+    // DELETE of one row out of the shared table must remove EXACTLY that row.
+    // A second car is minted so the car delete has a row of its own; the
+    // block's original car is the witness that survives it.
+    let spare = api.cars.create({ name: "Coupe", capacity: 2, doors: 2 })
+    api.cars.destroy(spare)
+    expect(api.cars.getById(spare)).toThrow(404)
+    let carsAfter = api.cars.all()
+    expect(carsAfter.length).toBe(1)
+
+    // …and deleting the OTHER discriminator's row must not touch this one — the
+    // classic TPH delete failure is a DELETE that carries the id but not the
+    // kind (or the kind but not the id), and both empty more than they should.
+    api.trucks.destroy(t)
+    expect(api.trucks.getById(t)).toThrow(404)
+    let trucksAfter = api.trucks.all()
+    expect(trucksAfter.length).toBe(0)
+    let carsStill = api.cars.all()
+    expect(carsStill.length).toBe(1)
   }
 }

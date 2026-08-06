@@ -21,7 +21,7 @@ Missions marked *design-first* or touching grammar require the design pass first
 ## 4. Implement to the repo's bar
 - Follow the pipeline recipes in `CLAUDE.md` §Extending (grammar → IR → validators → all backends' emitters → printers → tests). A feature is not done on one backend: it either lands on every target or gets an honest `loom.*` validator gate on the others — **never a silent gap, a crash, or a TODO comment emitted into compiling output**.
 - New behavior needs: one parsing test, one negative validator test, one generator test per affected backend, and the matching completeness-pin updates.
-- Run the gates locally before pushing: `npm test`, plus the per-backend compile/boot gate matching your blast radius (see CLAUDE.md's test table). The heavy compose-boot gates do NOT run on narrow diffs — run them yourself when you touched migrations/boot/db wiring.
+- Run the gates locally before pushing: `npm test`, plus the per-backend compile/boot gate matching your blast radius. **Every CI gate has a local command** — the workflow → command reverse index is `docs/testing.md` → "Running any CI gate locally" (weird-toolchain recipes: `docs/tools.md`). Do not use CI as your compiler: pushing to see a check's verdict burns the shared runner pool. The heavy compose-boot gates do NOT run on narrow diffs — run them yourself when you touched migrations/boot/db wiring.
 
 ## 5. Close the loop (as important as the code)
 - Update the mission's status line in its track file (and its `coverage.md` rows if a source doc is now fully drained). **No status flip without code evidence** — cite the file:line or gate in the commit.

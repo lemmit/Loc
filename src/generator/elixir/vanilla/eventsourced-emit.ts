@@ -42,7 +42,7 @@ import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js"
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { denialTerm, disallowedTerm } from "./denial.js";
-import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
+import { renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
 import { hasRefColls } from "./ref-collection-emit.js";
@@ -610,9 +610,13 @@ ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
 `
     : "";
 
-  // Union finds translate their absent variant via the shared problem_variant/5
-  // responder — emit it (once) when the aggregate has any union find.
-  const problemVariant = aggregateHasUnionFind(ctx, agg)
+  // Shared error-variant responder — emitted iff a rendered section actually
+  // CALLS it (usage-derived, like api-emit's: a declarative predicate drifts
+  // from the render sites; the assembled sections cannot — CLAUDE.md: derive,
+  // don't stamp).
+  const problemVariant = [findActions, opActions, commandError].some((s) =>
+    s.includes("problem_variant("),
+  )
     ? `\n${renderProblemVariantHelper()}\n`
     : "";
 

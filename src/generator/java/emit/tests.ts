@@ -13,6 +13,7 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { escapeJavaIdent, upperFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { collectJavaExprImports, collectJavaTypeImports, renderJavaExpr } from "../render-expr.js";
 import { stubUserValue } from "./auth.js";
 
@@ -239,14 +240,25 @@ export function renderCreateCall(
       // factory param's strong Java type (id record / Instant / …).
       return coerceLiteralToJavaType(f.type, v, renderJavaExpr(v), imports);
     }
+    // Java has no optional or named parameters, so an omitted create input is
+    // spelled `null` — the same signal the create DTO sends, and what the
+    // factory's `x != null ? x : <default>` reads (emit/entity.ts).
+    //
+    // This used to render the DEFAULT VALUE here instead, which made the
+    // assertion vacuous: `test "an omitted default is applied at construction"`
+    // writes `Item.create({ name: "N" })` and checks `qty == 1`, and the fill
+    // emitted `Item.create("N", 1, …)` — passing the value it then asserted.
+    // Passing `null` keeps the call compiling AND leaves the domain rule under
+    // test as the thing that decides the value.
+    //
+    // A SERVER-SOURCED default (`now()`, `currentUser.*`) is not a factory
+    // default (see `javaFactoryDefault`), so it still renders its expression.
     const omission = createOmissionValue(f);
-    if (omission.kind === "default") {
-      // A language-defined default (`newId()`, `now()`, …) already renders as
-      // the correct Java type — no coercion.
+    if (omission.kind === "default" && isServerSourcedDefault(omission.expr)) {
       collectJavaExprImports(omission.expr, imports);
       return renderJavaExpr(omission.expr);
     }
-    return omission.kind === "false" ? "false" : "null";
+    return "null";
   });
   return `${agg.name}.create(${args.join(", ")})`;
 }

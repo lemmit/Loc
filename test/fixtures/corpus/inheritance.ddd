@@ -37,5 +37,73 @@ system Parties {
     let c = api.customers.create({ name: "Acme", email: "a@x.com", creditLimit: 100 })
     let read = api.customers.getById(c)
     expect(read.name).toBe("Acme")
+
+    // The canonical `update` of a TPH SUBTYPE carries only the subtype's own
+    // writable field (`creditLimit`) — the abstract base's `name`/`email` are
+    // not update params, so they must survive a write that touches the same
+    // shared table.  A backend whose update projects the subtype DTO over the
+    // whole row nulls the base columns here.
+    api.customers.update(c, { creditLimit: 250 })
+    let updated = api.customers.getById(c)
+    expect(updated.creditLimit).toBe(250)
+    expect(updated.name).toBe("Acme")
+    expect(updated.email).toBe("a@x.com")
+
+    // Free adjacents: the subtype's own domain op reads-modifies-writes the
+    // field the update just set, and the declared find keys on a BASE column.
+    api.customers.raiseLimit(c, { by: 50 })
+    let raised = api.customers.getById(c)
+    expect(raised.creditLimit).toBe(300)
+    let found = api.customers.byEmail({ email: "a@x.com" })
+    expect(found.creditLimit).toBe(300)
+
+    // NOTE — there is deliberately no `api.parties.getById(...)` here, and the
+    // reason is a bug this drain found.  `deriveContextOperations` used to
+    // derive `GET /api/parties/{id}` (and `/api/assets/{id}`) for the ABSTRACT
+    // bases, so the census listed them as routes needing a caller; writing the
+    // first one showed it answering 404 for a row that exists, because
+    // `docs/inheritance.md` says an abstract base "owns no table, repository,
+    // controller, or routes" and all five backends implement exactly that.
+    // The derivation was the lone outlier and is fixed (`api-surface.ts`); the
+    // phantom `<base>.getById` those five typed api-clients were emitting goes
+    // with it.
+    //
+    // The per-concrete LIST routes.  All four are BARE ARRAYS (an inheritance
+    // subtype's `all` stays unbounded so the polymorphic base reader can
+    // concatenate them), and three of the four have no create route at all —
+    // `Vendor`/`Machine`/`Vehicle` are not `crudish`.  Reading them empty is
+    // still the assertion that matters here: the TPH sibling (`Vendor`, sharing
+    // Customer's table) must NOT return Customer's row, and the two TPC
+    // siblings must have real, separate, queryable tables of their own.  A
+    // discriminator a backend forgot to filter on shows up as `vendors`
+    // answering 1.
+    let customers = api.customers.all()
+    expect(customers.length).toBe(1)
+    let vendors = api.vendors.all()
+    expect(vendors.length).toBe(0)
+    let machines = api.machines.all()
+    expect(machines.length).toBe(0)
+    let vehicles = api.vehicles.all()
+    expect(vehicles.length).toBe(0)
+
+    // The by-id reads of the same three uncreatable CONCRETES, probed with a
+    // well-formed absent id: the RS-27 canonical-404 envelope on a TPH sibling
+    // and on two TPC concretes — route families whose miss path no test in the
+    // repo had ever driven, and whose `detail` names the aggregate.
+    // (The literals are well-formed RFC-4122 v4 uuids — a version-0 uuid is
+    // rejected at the id parameter's own validator and answers 422, which is a
+    // different rung of the ladder than the absence 404 under test here.)
+    expect(api.vendors.getById("11111111-1111-4111-8111-111111111111")).toThrow(404)
+    expect(api.machines.getById("22222222-2222-4222-8222-222222222222")).toThrow(404)
+    expect(api.vehicles.getById("33333333-3333-4333-8333-333333333333")).toThrow(404)
+
+    // DELETE on a TPH concrete: the row leaves the SHARED table, so the
+    // concrete route must stop resolving it and the declared find over a BASE
+    // column must stop answering.
+    api.customers.destroy(c)
+    expect(api.customers.getById(c)).toThrow(404)
+    expect(api.customers.byEmail({ email: "a@x.com" })).toThrow(404)
+    let afterDelete = api.customers.all()
+    expect(afterDelete.length).toBe(0)
   }
 }

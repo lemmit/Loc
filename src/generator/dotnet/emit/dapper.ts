@@ -1183,10 +1183,33 @@ export function renderDapperRepository(
     const ret = renderCsType(f.returnType);
     const isList = f.returnType.kind === "array";
     // Id-typed params bind their wrapped `.Value` (Dapper has no handler for
-    // the strongly-typed id struct); scalars bind directly.
+    // the strongly-typed id struct); ENUM-typed params bind `.ToString()`;
+    // scalars bind directly.
+    //
+    // The enum arm is not symmetry for its own sake — without it the find 500s.
+    // An enum column is `text` on every backend (`columnFor` above declares
+    // `sql: "text"` and saves `${acc}.ToString()`), but Dapper's default handler
+    // maps a C# enum PARAMETER to its integer ordinal, so the predicate reaches
+    // Postgres as `WHERE status = 1` against a text column — `operator does not
+    // exist: text = integer`, a 500 at the route.  The SAVE path in this same
+    // file already spells `.ToString()`; only the find binder had been written
+    // without it, so an enum-keyed find was broken on Dapper for as long as it
+    // has shipped, on every fixture that has one.
+    //
+    // Found 2026-08-05 by the caller-census drain: `core-domain`'s `byStatus`
+    // (a new caller) and `payments`' `byNetwork` (a caller from the preceding
+    // update-route drain) were the first enum-keyed finds ever driven at
+    // runtime, and both were ✗ on the dapper leg — the leg's only two case
+    // failures, one bug.
     const paramFields = f.params.map((p) => {
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
-      return pt.kind === "id" ? `${p.name} = ${p.name}.Value` : p.name;
+      if (pt.kind === "id") return `${p.name} = ${p.name}.Value`;
+      if (pt.kind === "enum") {
+        return p.type.kind === "optional"
+          ? `${p.name} = ${p.name}?.ToString()`
+          : `${p.name} = ${p.name}.ToString()`;
+      }
+      return p.name;
     });
     // Bind the find's own params + every `currentUser.<claim>` param the SELECT
     // references — both the capability-filter refs spliced into every WHERE AND

@@ -66,6 +66,13 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../../ir/types/wire-types.js";
+import {
+  type ApiOperationIR,
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+  relativeOpPath,
+} from "../../../ir/util/api-surface.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import {
   camelId,
@@ -237,6 +244,27 @@ function historyInsertCall(
   if (!usingMikro) return `tx.insert(schema.${table}).values({`;
   const row = table === "auditRecords" ? "AuditRecordRow" : "ProvenanceRecordRow";
   return `tx.insert(${row}, {`;
+}
+
+/** A derived operation's router-relative path in Hono's spelling — the
+ *  collection root is `"/"`, params keep their `{id}` braces. */
+function honoPath(entry: ApiOperationIR): string {
+  const rel = relativeOpPath(entry);
+  return rel === "" ? "/" : rel;
+}
+
+/** The declared non-2xx `responses:` lines of a derived operation —
+ *  `entry.errorStatuses` is already httpStatus-resolved, sorted, deduped
+ *  (base matrix + when/versioned conflicts + union error arms + the gated
+ *  403s), so the route renders it verbatim.  THE UNIFICATION SEAM: the
+ *  numbers come from `deriveAggregateOperations`; only the line idiom
+ *  (description text via `httpStatusText`, ProblemDetails content) is
+ *  Hono's. */
+function problemResponseLines(entry: ApiOperationIR, pad: string): string[] {
+  return entry.errorStatuses.map(
+    (s) =>
+      `${pad}${s}: { description: ${JSON.stringify(httpStatusText(s))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
 }
 
 export function buildRoutesFile(
@@ -432,6 +460,26 @@ export function buildRoutesFile(
   // action (validator-enforced); without one it exposes no POST route (rather
   // than calling the suppressed field-based factory).
   const emitCreate = emitsRestCreate(agg);
+  // THE UNIFICATION SEAM (api-surface.ts): which routes exist, at which path,
+  // declaring which error statuses — from the shared derivation the other four
+  // backends already render.  Hono unified LAST on purpose: it is the
+  // reference implementation `test/ir/api-surface.test.ts` pinned the
+  // derivation against, and that gate stayed non-tautological until four
+  // independent implementations had agreed.  Kept local: schemas, handler
+  // bodies, history + prepare (`apiSurfaceCoverage.notLifted`).
+  const derivedOps = deriveAggregateOperations(agg, repo, apiStatusContext(ctx));
+  const derivedCreate = derivedOps.find((o) => o.kind === "create");
+  const derivedGetById = derivedOps.find((o) => o.kind === "getById")!;
+  const derivedDestroy = derivedOps.find((o) => o.kind === "destroy");
+  const derivedFindByIR = new Map(
+    derivedOps.filter((o) => o.kind === "find").map((o) => [o.find, o]),
+  );
+  const derivedOpByIR = new Map(
+    derivedOps.filter((o) => o.kind === "operation").map((o) => [o.operation, o]),
+  );
+  const derivedProbeByIR = new Map(
+    derivedOps.filter((o) => o.kind === "gateProbe").map((o) => [o.operation, o]),
+  );
   // Unified create-input shape: `{ name, type, optional, default }`.  ES
   // takes the create action's params (no defaults); state takes the
   // create-input field set (server-controlled fields excluded).
@@ -675,11 +723,11 @@ export function buildRoutesFile(
   lines.push("");
 
   // Create — gated on `hasCreate` (no canonical create ⇒ no POST route).
-  if (emitCreate) {
+  if (emitCreate && derivedCreate) {
     lines.push(`  app.openapi(`);
     lines.push(`    createRoute({`);
-    lines.push(`      method: "post",`);
-    lines.push(`      path: "/",`);
+    lines.push(`      method: "${derivedCreate.method}",`);
+    lines.push(`      path: "${honoPath(derivedCreate)}",`);
     lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
     lines.push(`      operationId: "${camelId(opCreate(agg.name))}",`);
     lines.push(`      request: {`);
@@ -692,15 +740,10 @@ export function buildRoutesFile(
     lines.push(`          description: "Created",`);
     lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
     lines.push(`        },`);
-    // create → 400 (DomainError) + 422 (validation, ProblemDetails with
-    // §3.2 `errors[]` extension emitted by the shared defaultHook), per
-    // the openapi-errors matrix.  See docs/old/proposals/validation-error-extension.md.
-    lines.push(
-      `        400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-    lines.push(
-      `        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
+    // create → the derived set (400 DomainError + 422 validation, plus a
+    // guarded 403 when the lifecycle gate lands).  The §3.2 `errors[]`
+    // extension rides the shared defaultHook.
+    lines.push(...problemResponseLines(derivedCreate, "        "));
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
@@ -850,12 +893,10 @@ export function buildRoutesFile(
   // after `/{id}` is shadowed — `GET /by_holder` would match `/{id}` first
   // and 422 on the non-UUID segment.  The auto-`all` find stays at the root
   // (`GET /`, no conflict) and is emitted with the rest below.
-  if (repo) {
-    for (const find of repo.finds) {
-      if (find.name === "all" || find.synthesized) continue;
-      lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
-      lines.push("");
-    }
+  for (const [findIR, entry] of derivedFindByIR) {
+    if (isAllFind(entry)) continue;
+    lines.push(...emitFindRoute(agg, findIR!, ctx, entry, emitTrace).map((l) => `  ${l}`));
+    lines.push("");
   }
 
   // Entity history — `GET /{id}/history` (docs/audit.md).  Two segments, so it
@@ -869,8 +910,8 @@ export function buildRoutesFile(
   // Get by id.
   lines.push(`  app.openapi(`);
   lines.push(`    createRoute({`);
-  lines.push(`      method: "get",`);
-  lines.push(`      path: "/{id}",`);
+  lines.push(`      method: "${derivedGetById.method}",`);
+  lines.push(`      path: "${honoPath(derivedGetById)}",`);
   lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
   lines.push(`      operationId: "${camelId(opGetById(agg.name))}",`);
   lines.push(`      request: { params: z.object({ id: z.string().uuid() }) },`);
@@ -878,9 +919,7 @@ export function buildRoutesFile(
   lines.push(
     `        200: { description: "OK", content: { "application/json": { schema: ${agg.name}Response } } },`,
   );
-  lines.push(
-    `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
+  lines.push(...problemResponseLines(derivedGetById, "        "));
   lines.push(`      },`);
   lines.push(`    }),`);
   lines.push(`    async (c) => {`);
@@ -921,32 +960,25 @@ export function buildRoutesFile(
   // (declared or via `crudish`), so plain aggregates' route files are
   // unchanged.  crudish's destroy is empty-bodied — load (404 guard),
   // then hard-delete (children/join rows cascade via FK).
-  if (agg.canonicalDestroy) {
+  if (derivedDestroy) {
     // FK-restrict conflict status resolved through the `httpStatus` mapper
-    // (M-T3.4a) — `ReferencedInUse`, 409 by default. Drives both the OpenAPI
-    // declaration and the runtime arm below so they can't drift.
+    // (M-T3.4a) — `ReferencedInUse`, 409 by default; the RUNTIME arm below
+    // still resolves it locally, the DECLARED set is the derived one (which
+    // resolved the same map), so they can't drift.
     const referencedInUseStatus = resolveErrorStatus(
       "ReferencedInUse",
       ctx.structuralErrorStatuses,
     );
     lines.push(`  app.openapi(`);
     lines.push(`    createRoute({`);
-    lines.push(`      method: "delete",`);
-    lines.push(`      path: "/{id}",`);
+    lines.push(`      method: "${derivedDestroy.method}",`);
+    lines.push(`      path: "${honoPath(derivedDestroy)}",`);
     lines.push(`      tags: ["${snake(plural(agg.name))}"],`);
     lines.push(`      operationId: "${camelId(opDestroy(agg.name))}",`);
     lines.push(`      request: { params: z.object({ id: z.string().uuid() }) },`);
     lines.push(`      responses: {`);
     lines.push(`        204: { description: "No Content" },`);
-    lines.push(
-      `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-    // Deleting a still-referenced aggregate trips a Postgres
-    // foreign_key_violation (cross-aggregate `X id` FK is ON DELETE
-    // RESTRICT) → 409 Conflict (or the `httpStatus ReferencedInUse` override).
-    lines.push(
-      `        ${referencedInUseStatus}: { description: ${JSON.stringify(httpStatusText(referencedInUseStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
+    lines.push(...problemResponseLines(derivedDestroy, "        "));
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
@@ -1019,22 +1051,25 @@ export function buildRoutesFile(
     lines.push("");
   }
 
-  // Operations.
-  for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+  // Operations — the derived entries (public, non-canonical, in declaration
+  // order), each carrying its path + resolved status set.
+  for (const [op, entry] of derivedOpByIR) {
     lines.push(
       ...emitOperationRoute(
         agg,
-        op,
+        op!,
         ctx,
-        auditOps.includes(op),
-        provOps.includes(op),
+        entry,
+        auditOps.includes(op!),
+        provOps.includes(op!),
         emitTrace,
         usingMikro,
       ).map((l) => `  ${l}`),
     );
-    if (op.when) {
+    const probe = derivedProbeByIR.get(op);
+    if (probe) {
       lines.push("");
-      lines.push(...emitCanOpRoute(agg, op, emitTrace).map((l) => `  ${l}`));
+      lines.push(...emitCanOpRoute(agg, op!, probe, emitTrace).map((l) => `  ${l}`));
     }
     lines.push("");
   }
@@ -1042,12 +1077,10 @@ export function buildRoutesFile(
   // The auto-included `all` find (`GET /`, root path — no conflict with
   // `/{id}`).  Named static-path finds were emitted ABOVE, before the
   // `GET /{id}` param route, so they win Hono's registration-order match.
-  if (repo) {
-    for (const find of repo.finds) {
-      if (find.name !== "all") continue;
-      lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
-      lines.push("");
-    }
+  for (const [findIR, entry] of derivedFindByIR) {
+    if (!isAllFind(entry)) continue;
+    lines.push(...emitFindRoute(agg, findIR!, ctx, entry, emitTrace).map((l) => `  ${l}`));
+    lines.push("");
   }
 
   // Structural-conflict statuses resolved through the `httpStatus` mapper
@@ -1235,17 +1268,21 @@ function whenGateLine(agg: AggregateIR, op: OperationIR, pad: string): string[] 
 /** The auto-exposed, side-effect-free `GET /{id}/can_<op>` companion of a
  *  `when`-gated operation — returns `{ allowed }` so a UI can enable or
  *  disable the action without invoking it (the canCommand pattern). */
-function emitCanOpRoute(agg: AggregateIR, op: OperationIR, emitTrace: boolean): string[] {
+function emitCanOpRoute(
+  agg: AggregateIR,
+  op: OperationIR,
+  entry: ApiOperationIR,
+  emitTrace: boolean,
+): string[] {
   if (!op.when) return [];
   void emitTrace;
   const aggSlug = snake(plural(agg.name));
-  const opSnake = snake(op.routeSlug ?? op.name);
   const pred = renderTsExpr(op.when, { thisName: "aggregate" });
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
-  out.push(`    method: "get",`);
-  out.push(`    path: "/{id}/can_${opSnake}",`);
+  out.push(`    method: "${entry.method}",`);
+  out.push(`    path: "${honoPath(entry)}",`);
   out.push(`    tags: ["${aggSlug}"],`);
   out.push(`    operationId: "${camelId(opOperation(agg.name, `can_${op.name}`))}",`);
   out.push(`    request: {`);
@@ -1255,9 +1292,7 @@ function emitCanOpRoute(agg: AggregateIR, op: OperationIR, emitTrace: boolean): 
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: z.object({ allowed: z.boolean() }) } } },`,
   );
-  out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
+  out.push(...problemResponseLines(entry, "      "));
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
@@ -1273,6 +1308,7 @@ function emitOperationRoute(
   agg: AggregateIR,
   op: OperationIR,
   ctx: BoundedContextIR,
+  entry: ApiOperationIR,
   audit: boolean,
   prov: boolean,
   emitTrace: boolean,
@@ -1281,18 +1317,13 @@ function emitOperationRoute(
   // Lifecycle stamps are applied persist-time in the drizzle save()
   // (node-persist-time-auditing); the operation route no longer stamps.
   const aggSlug = snake(plural(agg.name));
-  // Operation URL segment from the enriched routeSlug (D-URLSTYLE):
-  // op.name under urlStyle:literal, plural(name) under :resource.  The
-  // backend owns the snake-casing convention; identity uses (operationId,
-  // request DTOs, extern handler keys) stay keyed on op.name below.
-  const opSnake = snake(op.routeSlug ?? op.name);
   // Exception-less operation (`operation foo(): X or NotFound`): the route
   // captures the tagged-union result and translates an `error`-variant to an
   // RFC-7807 ProblemDetails status, a success to HTTP 200 (exception-less.md).
   // The spike supports the plain repo path only (audit / prov / extern return-
   // typed ops are a later slice); they fall through to the void handler.
   if (op.returnType && !audit && !prov && !op.extern) {
-    return emitReturningOperationRoute(agg, op, ctx, emitTrace);
+    return emitReturningOperationRoute(agg, op, ctx, entry, emitTrace);
   }
   // The canonical `update(...)` operation (crudish, or a hand-declared one of
   // the same name) is the one route that honours the client's optimistic-
@@ -1306,8 +1337,8 @@ function emitOperationRoute(
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
-  out.push(`    method: "post",`);
-  out.push(`    path: "/{id}/${opSnake}",`);
+  out.push(`    method: "${entry.method}",`);
+  out.push(`    path: "${honoPath(entry)}",`);
   out.push(`    tags: ["${aggSlug}"],`);
   out.push(`    operationId: "${camelId(opOperation(agg.name, op.name))}",`);
   out.push(`    request: {`);
@@ -1318,41 +1349,10 @@ function emitOperationRoute(
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
-  // operation → 400 (domain) + 404 (aggregate not found) + 422
-  // (validation, ProblemDetails with §3.2 `errors[]` extension emitted by
-  // the shared defaultHook), per the openapi-errors matrix.  Phase D of
-  // docs/old/proposals/validation-error-extension.md.
-  out.push(
-    `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
-  out.push(
-    `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
-  // A `when` state gate denies with 409 (DisallowedError → onError); a
-  // versioned `update` can also 409 on a stale `If-Match` (ConcurrencyError →
-  // onError).  Each status resolves through the `httpStatus` mapper (M-T3.4a):
-  // 409 by default (both reasons collapse to one `409:` line, byte-identical),
-  // or a per-conflict override.
-  const opConflictStatuses = new Set<number>();
-  if (op.when)
-    opConflictStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
-  if (isVersionedUpdate)
-    opConflictStatuses.add(resolveErrorStatus("ConcurrencyConflict", ctx.structuralErrorStatuses));
-  for (const status of [...opConflictStatuses].sort((a, b) => a - b)) {
-    out.push(
-      `      ${status}: { description: ${JSON.stringify(httpStatusText(status))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-  }
-  // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
-  // it so the published contract documents the authorization outcome.
-  if (operationIsGuarded(op)) {
-    out.push(
-      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-  }
-  out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-  );
+  // The derived non-2xx set: 400 (domain) + 404 + 422 (validation, §3.2
+  // `errors[]` via the shared defaultHook) + a guarded 403 + the
+  // httpStatus-resolved when/versioned conflicts — sorted numerically.
+  out.push(...problemResponseLines(entry, "      "));
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
@@ -1548,12 +1548,12 @@ function emitReturningOperationRoute(
   agg: AggregateIR,
   op: OperationIR,
   ctx: BoundedContextIR,
+  entry: ApiOperationIR,
   emitTrace: boolean,
 ): string[] {
   // Lifecycle stamps are applied persist-time in the drizzle save()
   // (node-persist-time-auditing); the operation route no longer stamps.
   const aggSlug = snake(plural(agg.name));
-  const opSnake = snake(op.routeSlug ?? op.name);
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
   const errorVariants = variants.filter((vv) => isErrorVariant(vv, ctx));
   const u = op.returnType ? unionForFind(op.returnType, ctx) : null;
@@ -1570,19 +1570,11 @@ function emitReturningOperationRoute(
   // for this context (exception-less.md A1) if present, else the stdlib default.
   const statusFor = (tag: string): number =>
     ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
-  // The ProblemDetails statuses this route can produce: the framework defaults
-  // (422 for the wire-validation tier AND the domain floor — RS-15; 400 for a
-  // malformed/unparseable body; 404 aggregate-not-found from getById), 403 if
-  // guarded, plus each error variant's mapped status.
-  const problemStatuses = new Set<number>([400, 422, 404]);
-  if (operationIsGuarded(op)) problemStatuses.add(403);
-  if (op.when) problemStatuses.add(resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses));
-  for (const v of errorVariants) problemStatuses.add(statusFor(variantTag(v)));
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
-  out.push(`    method: "post",`);
-  out.push(`    path: "/{id}/${opSnake}",`);
+  out.push(`    method: "${entry.method}",`);
+  out.push(`    path: "${honoPath(entry)}",`);
   out.push(`    tags: ["${aggSlug}"],`);
   out.push(`    operationId: "${camelId(opOperation(agg.name, op.name))}",`);
   out.push(`    request: {`);
@@ -1598,11 +1590,7 @@ function emitReturningOperationRoute(
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${successSchema} } } },`,
   );
-  for (const status of [...problemStatuses].sort((a, b) => a - b)) {
-    out.push(
-      `      ${status}: { description: ${JSON.stringify(httpStatusText(status))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-  }
+  out.push(...problemResponseLines(entry, "      "));
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
@@ -1678,10 +1666,10 @@ function emitFindRoute(
   agg: AggregateIR,
   find: FindIR,
   ctx: BoundedContextIR,
+  entry: ApiOperationIR,
   emitTrace: boolean,
 ): string[] {
   const aggSlug = snake(plural(agg.name));
-  const findSnake = snake(find.name);
   const paged = pagedReturn(find.returnType);
   const isList = find.returnType.kind === "array";
   // A union find's 200 body is the SUCCESS variant directly (the aggregate),
@@ -1698,12 +1686,11 @@ function emitFindRoute(
   // A paged find always carries a query (page/pageSize), even with no
   // declared params.
   const hasQuery = find.params.length > 0 || !!paged;
-  const path = find.name === "all" ? "/" : `/${findSnake}`;
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
-  out.push(`    method: "get",`);
-  out.push(`    path: "${path}",`);
+  out.push(`    method: "${entry.method}",`);
+  out.push(`    path: "${honoPath(entry)}",`);
   out.push(`    tags: ["${aggSlug}"],`);
   out.push(`    operationId: "${camelId(opFind(agg.name, find.name))}",`);
   if (hasQuery) {
@@ -1723,24 +1710,11 @@ function emitFindRoute(
       : (ctx.errorStatusOverrides?.[unionSpec.absent.tag] ??
         defaultErrorStatus(unionSpec.absent.tag))
     : undefined;
-  // A `requires`-gated read declares 403 — the same rung as a guarded
-  // operation.  The gate below has always been ENFORCED here (the handler
-  // throws `ForbiddenError`, which this file's `onError` filter maps to a 403
-  // ProblemDetails); only the DECLARED set omitted it, on all five backends,
-  // so every generated client had to treat its callee's authorization denial as
-  // an unexpected throw.  Kept in lockstep with `errorStatuses(<find kind>,
-  // guarded)`, which the other four backends read.
-  if (find.requires) {
-    out.push(
-      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-  }
-  if (find.returnType.kind === "optional" || unionAbsentStatus !== undefined) {
-    const st = unionAbsentStatus ?? 404;
-    out.push(
-      `      ${st}: { description: ${JSON.stringify(httpStatusText(st))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
-    );
-  }
+  // The derived declared set — the gated 403 and the absence status (the
+  // union-absent's httpStatus-resolved one included), sorted.  The unionSpec
+  // above still drives the RUNTIME translation below; the declaration and the
+  // runtime read the same resolved values, so they cannot drift.
+  out.push(...problemResponseLines(entry, "      "));
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);

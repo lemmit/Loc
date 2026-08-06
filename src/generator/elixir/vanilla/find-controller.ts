@@ -19,10 +19,12 @@ import {
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, FindIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import type { ApiOperationIR } from "../../../ir/util/api-surface.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { renderExpr } from "../render-expr.js";
+import { plugRelativePath } from "./api-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 
@@ -39,12 +41,6 @@ export function httpFindsOf(ctx: BoundedContextIR, agg: AggregateIR): FindIR[] {
   // + repository method (via `customFindsOf`) still emit, so the paged queryHandler
   // route can call it.
   return (repo?.finds ?? []).filter((f) => f.name !== "all" && !f.synthesized);
-}
-
-/** True when the aggregate has any union-returning find (→ the controller needs
- *  the shared `problem_variant/5` responder). */
-export function aggregateHasUnionFind(ctx: BoundedContextIR, agg: AggregateIR): boolean {
-  return httpFindsOf(ctx, agg).some((f) => f.returnType.kind === "union");
 }
 
 /** True when the find returns zero-or-one record (`Customer?` / `Customer`) or
@@ -85,15 +81,90 @@ function absentSpec(
 /** `GET /<plural>/<find>` routes — must be registered *before* the
  *  `/<plural>/:id` show route so the literal segment wins in Phoenix's
  *  in-order match (`/orders/recent` would otherwise bind `:id = "recent"`). */
-export function findRoutes(agg: AggregateIR, ctx: BoundedContextIR): ApiRoute[] {
+export function findRoutes(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  /** The aggregate's derived operations (api-surface.ts) — declared-find
+   *  routes mount at the derived path.  Empty for an abstract base, whose
+   *  read-only finds (if any) fall back to the legacy spelling. */
+  derivedOps: readonly ApiOperationIR[] = [],
+): ApiRoute[] {
   const aggsPath = snake(plural(agg.name));
   const controller = `${upperFirst(agg.name)}Controller`;
-  return httpFindsOf(ctx, agg).map((f) => ({
-    method: "get" as const,
-    path: `/${aggsPath}/${snake(f.name)}`,
-    controller,
-    action: `:${snake(f.name)}`,
-  }));
+  const derivedByFind = new Map(
+    derivedOps.filter((o) => o.kind === "find" && o.find).map((o) => [o.find, o]),
+  );
+  return httpFindsOf(ctx, agg).map((f) => {
+    const entry = derivedByFind.get(f);
+    return {
+      method: "get" as const,
+      path: entry ? `/${aggsPath}${plugRelativePath(entry)}` : `/${aggsPath}/${snake(f.name)}`,
+      controller,
+      action: `:${snake(f.name)}`,
+    };
+  });
+}
+
+/** The scalar KIND a find param must be coerced to, or `undefined` when the
+ *  query-string form is already right (string / guid / enum / id). */
+function findParamCoercion(t: TypeIR | undefined): "int" | "decimal" | "bool" | undefined {
+  const inner = t?.kind === "optional" ? t.inner : t;
+  if (inner?.kind !== "primitive") return undefined;
+  switch (inner.name) {
+    case "int":
+    case "long":
+      return "int";
+    case "decimal":
+    case "money":
+      return "decimal";
+    case "bool":
+      return "bool";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Read one declared find param off the query string, COERCED to its declared
+ * type.
+ *
+ * Phoenix delivers every query param as a STRING — the emitter already knows
+ * this, which is why `page`/`pageSize` go through `page_param/3`.  The find's
+ * OWN params never got the same treatment, and on the relational path that was
+ * invisible: the value lands in an Ecto query (`^min`), and Ecto casts it
+ * against the schema's field type.
+ *
+ * The IN-MEMORY filter path has no Ecto to cast.  A `shape: document`
+ * aggregate's find loads the rows and filters in Elixir:
+ *
+ *     Enum.filter(fn row -> row.data.view_count >= min end)
+ *
+ * …so `6 >= "6"` is evaluated under Erlang's term ordering, where a number is
+ * ALWAYS less than a binary — the comparison is silently `false` and the find
+ * returns `[]` for every row.  No error, no log: a find that quietly answers
+ * nothing.
+ *
+ * Coercing at the controller fixes the in-memory path and leaves the relational
+ * one equivalent (Ecto accepted the string; it accepts the integer too).  A
+ * string / guid / enum / id param is returned unchanged, so only finds with a
+ * numeric or boolean param change bytes at all.
+ *
+ * Found 2026-08-05 by the caller-census drain: `corpus/document`'s
+ * `popular(min: int)` — an in-memory find over a jsonb document — was driven
+ * for the first time and answered `[]` where every other backend answered 1.
+ */
+function findParamRead(p: { name: string; type?: TypeIR }): string {
+  const raw = `params[${JSON.stringify(p.name)}]`;
+  switch (findParamCoercion(p.type)) {
+    case "int":
+      return `__find_int(${raw})`;
+    case "decimal":
+      return `__find_decimal(${raw})`;
+    case "bool":
+      return `__find_bool(${raw})`;
+    default:
+      return raw;
+  }
 }
 
 /** Controller actions for the aggregate's HTTP finds. */
@@ -127,7 +198,7 @@ export function renderFindActions(
     // `page`/`pageSize` off `params`.
     const paramArg = f.params.length > 0 || paged ? "params" : "_params";
     const argReads = [
-      ...f.params.map((p) => `params[${JSON.stringify(p.name)}]`),
+      ...f.params.map((p) => findParamRead(p)),
       // Paged: 1-based `page`/`pageSize` query controls, defaulted + coerced to
       // integers (Phoenix delivers query params as strings).  Matches the
       // shared cross-backend defaults.
@@ -190,7 +261,15 @@ ${innerBody}
       // never a tagged 200 body.
       const absentArm =
         absent.kind === "none"
-          ? `        problem_variant(conn, 404, "about:blank", "Not Found", %{})`
+          ? // RS-22/RS-27 — the `T option` miss goes through the SHARED
+            // producer, with the canonical `"not_found"` token as `detail`.
+            // It used to call `problem_variant(…, "Not Found", %{})`, whose
+            // helper sets `detail: title` — so elixir answered `"Not Found"`
+            // where node/python/java/dotnet answer `"not_found"`.  Two
+            // spellings of one 404 inside ONE controller (the `T?` arm below
+            // said `"<Agg> not found"`), which is this rule's own lesson:
+            // don't hand-roll a 404, reach the producer.
+            `        ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")`
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
       return wrap(`    case ${call} do
       {:ok, nil} ->
@@ -204,16 +283,21 @@ ${absentArm}
     if (isSingleReturn(f.returnType)) {
       // An OPTIONAL find (`: X?` / `: X option`) whose row is absent returns
       // 404 — its declared OpenAPI status (`findOptional → [404]`) and every
-      // other backend (node throws → 404, .NET `NotFound()`, python/java
-      // 404-at-route).  The previous `json(conn, nil)` emitted an HTTP 200 with
+      // other backend.  The previous `json(conn, nil)` emitted an HTTP 200 with
       // a `null` body that isn't even a valid `<Agg>Response` (the 200 schema),
       // the lone cross-backend divergence for optional-find absence.  A bare
       // `: X` single find (findOptional == false) keeps its shape — `findSingle`
       // declares no error status, and its default is the (softened) A4 question.
+      //
+      // The `detail` is the canonical `"not_found"` TOKEN (RS-27 scopes the
+      // find miss out of the by-id sentence).  It used to interpolate the
+      // aggregate — `"<Agg> not found"` — which reads like the by-id sentence
+      // but carries no id and matched no other backend; the first callers for
+      // `by_email` / `by_reference` / `by_code` / `by_sku` are what surfaced it.
       if (f.returnType.kind === "optional") {
         return wrap(`    case ${call} do
       {:ok, nil} ->
-        ProblemDetails.problem_response(conn, 404, "Not Found", "${aggPascal} not found")
+        ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")
 
       {:ok, record} ->
         json(conn, serialize(record))
@@ -254,5 +338,55 @@ ${absentArm}
     end
   end`
     : "";
-  return actions.join("\n") + pageParamHelper;
+
+  // Typed query-param coercion for the finds' OWN params — same reason
+  // `page_param/3` exists (Phoenix delivers query params as strings), applied to
+  // the params the find declares.  Each helper is emitted only when some find on
+  // this controller actually needs it, so a string-only controller is
+  // byte-identical and no unused private fn trips `--warnings-as-errors`.
+  const neededCoercions = new Set(
+    httpFindsOf(ctx, agg)
+      .flatMap((f) => f.params)
+      .map((p) => findParamCoercion(p.type))
+      .filter((k): k is "int" | "decimal" | "bool" => k !== undefined),
+  );
+  const findParamHelpers = [
+    neededCoercions.has("int")
+      ? `
+  # A declared find's \`int\` query param — Phoenix delivers it as a string, and
+  # an in-memory filter (document/embedded shape) compares it directly, where
+  # Erlang's term order makes \`6 >= "6"\` false.
+  defp __find_int(v) when is_integer(v), do: v
+
+  defp __find_int(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} -> n
+      _ -> v
+    end
+  end
+
+  defp __find_int(v), do: v`
+      : "",
+    neededCoercions.has("decimal")
+      ? `
+  # A declared find's \`decimal\`/\`money\` query param.
+  defp __find_decimal(v) when is_binary(v) do
+    case Decimal.parse(v) do
+      {d, ""} -> d
+      _ -> v
+    end
+  end
+
+  defp __find_decimal(v), do: v`
+      : "",
+    neededCoercions.has("bool")
+      ? `
+  # A declared find's \`bool\` query param.
+  defp __find_bool("true"), do: true
+  defp __find_bool("false"), do: false
+  defp __find_bool(v), do: v`
+      : "",
+  ].join("");
+
+  return actions.join("\n") + pageParamHelper + findParamHelpers;
 }

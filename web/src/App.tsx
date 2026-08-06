@@ -723,7 +723,6 @@ export default function App(): JSX.Element {
     generationEpochRef.current++;
     dispatch({ type: "RESET" });
     lastBundleReadyRef.current = null;
-    lastMappedGenerateRef.current = null;
     setLspDiagnostics([]);
     setSelectedPath(null);
     setPreviewBundle(null);
@@ -731,6 +730,36 @@ export default function App(): JSX.Element {
     setBackendLog([]);
     setAppLog([]);
     void engineRef.current?.reset();
+  }
+
+  /** Publish the file set a Bundle click would use.
+   *
+   *  This ref has to AGREE with `pipeline.generate`, because the Bundle
+   *  button is enabled off that state while `runBundle` reads this — and for
+   *  a long time the two were written at different moments by different
+   *  rules, which produced both halves of a nasty race:
+   *
+   *   - `GENERATE_DONE` (which paints "generated N file(s)" and enables the
+   *     button) is dispatched BEFORE `runGenerateStep`'s second,
+   *     sourcemap-carrying generate; the ref was assigned only after that
+   *     returned.  On a 145-file system that is a ~0.7s window on an idle
+   *     machine and multiple seconds on a loaded CI runner, during which a
+   *     click did NOTHING AT ALL — no state change, no diagnostic, no
+   *     network.  That is what hung every `heavy-preview` Playwright spec for
+   *     its full 600s ceiling.
+   *   - conversely, a generate for a project the user had already left could
+   *     land its write AFTER `resetProject()` cleared the ref, leaving the
+   *     PREVIOUS project's tree as the thing the next Bundle click would
+   *     build.
+   *
+   *  So: write it exactly where and when the dispatch is written — under the
+   *  same epoch guard — and treat `null` as "superseded, not mine to write"
+   *  rather than as "there is nothing to bundle".  See
+   *  `e2e/bundle-starts.spec.ts`. */
+  function publishBundleInput(epoch: number, gen: GenerateResult | null): void {
+    if (epoch !== generationEpochRef.current) return;
+    if (gen === null) return;
+    lastBundleReadyRef.current = gen;
   }
 
   // Write a project's main + companion `.ddd` files into the workspace
@@ -883,12 +912,6 @@ export default function App(): JSX.Element {
   // the same map-carrying set the auto-cascade would have. See
   // `persistGeneratedTree` / `strip-sourcemap.ts`.
   const lastBundleReadyRef = useRef<GenerateResult | null>(null);
-  // The map-carrying (sourcemap-on) generate of the CURRENT source, set at
-  // the end of `runGenerateStep` alongside the flag-off `result` it
-  // returns.  `null` whenever the mapped generate hasn't landed yet or
-  // failed — every consumer treats that as "bundle without maps" rather
-  // than blocking on it, so a sourcemap hiccup never breaks the boot.
-  const lastMappedGenerateRef = useRef<GenerateOk | null>(null);
   const autoGenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef(0);
   const generatingRef = useRef(false);
@@ -1022,7 +1045,68 @@ export default function App(): JSX.Element {
   // follow-up call execute in the same microtask, so the follow-up
   // saw the *previous* render's stale value and bailed out.
 
-  async function runGenerateStep(): Promise<GenerateResult | null> {
+  /** The generate currently in flight, INCLUDING its sourcemap pass.
+   *
+   *  `runGenerateStep` does two generates: the flag-off one that drives the
+   *  UI (and dispatches `GENERATE_DONE`), then a map-carrying one that only
+   *  the boot bundle consumes.  A manual Bundle click can land between them,
+   *  and the two ways that used to go wrong are the same race seen from
+   *  either side: read `lastBundleReadyRef` too early and it was `null` (the
+   *  click did NOTHING — the 600s `waitForBundle` hangs), or read the
+   *  provisional value published at `GENERATE_DONE` and the boot bundle
+   *  carries no `.ddd` mapping (`devtools-sourcemap.spec.ts` fails with
+   *  "a .ddd entry in map.sources … Received: -1").
+   *
+   *  Both close the same way: a click waits out the pass that is already
+   *  running, so it always bundles the BEST available input instead of
+   *  whichever one happened to be published when it arrived. */
+  const generateInFlightRef = useRef<Promise<unknown> | null>(null);
+
+  /** Register `p` as the generate CYCLE currently in flight.
+   *
+   *  The scope matters and I got it wrong once: tracking `runGenerateStep`
+   *  alone is not enough.  `btn-generate` runs `runGenerate(true)`, and the
+   *  map-carrying tree a boot bundle needs is only assembled AFTER that step
+   *  resolves — `persistGeneratedTree` merges the workspace and
+   *  `overlaySourcemapArtifacts` re-attaches the `.ts.map` sidecars, then
+   *  `publishBundleInput` records the result.  Awaiting the step stops one
+   *  stage early and hands `runBundle` the un-overlaid tree every time, which
+   *  turned `devtools-sourcemap`'s "-1" from intermittent into certain. */
+  function trackGenerate<T>(p: Promise<T>): Promise<T> {
+    const tracked = p.finally(() => {
+      if (generateInFlightRef.current === tracked) generateInFlightRef.current = null;
+    });
+    generateInFlightRef.current = tracked;
+    return tracked;
+  }
+
+  /** What one generate CYCLE produced: the flag-off tree that drives the file
+   *  view, plus that same cycle's map-carrying tree (or `null` when its
+   *  sourcemap pass didn't land).
+   *
+   *  `mapped` is returned rather than stashed in a ref on purpose.  It used to
+   *  live in `lastMappedGenerateRef` — one shared mutable slot for a value
+   *  that is per-cycle — and the comment on its reader even called it "this
+   *  cycle's separate sourcemap generate", which is only true while no two
+   *  cycles overlap.  They do overlap: `selectExample` schedules an
+   *  auto-generate and the user (or a spec) can click Generate on top of it.
+   *  Then this interleaving loses the maps entirely:
+   *
+   *    B: sourcemap pass resolves  → ref = mapped_B ; step returns
+   *    A: flag-off resolves (late) → ref = null        ← wipes B's
+   *    B: persistGeneratedTree reads ref → null → merged tree, NO overlay
+   *
+   *  and the boot bundle's map then stops at the generated `.ts` instead of
+   *  reaching `.ddd` — `devtools-sourcemap.spec.ts`'s "Received: -1".  An
+   *  epoch guard cannot fix that: both cycles share an epoch when no reset
+   *  happened between them.  Threading the value removes the shared slot, so
+   *  no cycle can observe or clobber another's. */
+  interface GenerateCycle {
+    result: GenerateResult;
+    mapped: GenerateOk | null;
+  }
+
+  async function runGenerateStep(): Promise<GenerateCycle | null> {
     const client = buildClientRef.current;
     if (!client) return null;
     // Wait out any in-flight workspace seed so the multi-file example's
@@ -1069,6 +1153,15 @@ export default function App(): JSX.Element {
     // repaints the file view nor drives the live-mode bundle/boot cascade.
     if (epoch !== generationEpochRef.current) return null;
     dispatch({ type: "GENERATE_DONE", result });
+    // A FLOOR, not the intended input: the flag-off tree, published in the
+    // same turn as the dispatch that enables the Bundle button.  `runBundle`
+    // awaits the whole cycle before reading the ref, so it normally sees the
+    // mapped / merged set `runGenerate` publishes below and never this.  What
+    // this covers is the cycle that never gets there — a build-worker respawn
+    // rejects it — where the choice is bundling without `.ddd` maps or a
+    // click that does nothing at all.  The former is recoverable and visible;
+    // the latter is the 600s hang this whole change exists to remove.
+    publishBundleInput(epoch, result);
     if (result.ok && result.files.length > 0) {
       // Preserve the user's selection only when that exact path still
       // exists in the freshly generated tree; otherwise fall back to the
@@ -1084,8 +1177,8 @@ export default function App(): JSX.Element {
     // boot bundle (`runBundleStep` / `persistGeneratedTree`'s overlay),
     // never the view/persist.  Best-effort: on failure the bundle just
     // falls back to the (still fully functional, just not `.ddd`-
-    // debuggable) flag-off files — see `lastMappedGenerateRef`.
-    lastMappedGenerateRef.current = null;
+    // debuggable) flag-off files — see `GenerateCycle`.
+    let mappedForCycle: GenerateOk | null = null;
     if (result.ok) {
       try {
         const mapped = await client.generateFromPath(entryPath, { sourcemap: true });
@@ -1095,7 +1188,7 @@ export default function App(): JSX.Element {
           // sidecars (no filesystem), so without this the boot bundle's map
           // stops at the generated `.ts` and never reaches `.ddd`. See
           // `inlineSourcemapArtifacts` + `web/e2e/devtools-sourcemap.spec.ts`.
-          lastMappedGenerateRef.current = {
+          mappedForCycle = {
             ...mapped,
             files: inlineSourcemapArtifacts(mapped.files),
           };
@@ -1104,7 +1197,7 @@ export default function App(): JSX.Element {
         /* best-effort — see comment above */
       }
     }
-    return result;
+    return { result, mapped: mappedForCycle };
   }
 
   interface BundleStepResult {
@@ -1270,6 +1363,7 @@ export default function App(): JSX.Element {
   // came back empty.  Best-effort: a failure never breaks generate.
   async function persistGeneratedTree(
     result: GenerateResult | null,
+    mapped: GenerateOk | null,
   ): Promise<VirtualFile[] | null> {
     const store = workspace.store;
     if (!store || !result?.ok || result.files.length === 0) return null;
@@ -1295,7 +1389,6 @@ export default function App(): JSX.Element {
       // persisted.  See `overlaySourcemapArtifacts` for the hand-edit
       // limitation; falls back to the plain merged tree (no maps, still
       // functionally correct) when the mapped generate isn't available.
-      const mapped = lastMappedGenerateRef.current;
       return mapped ? overlaySourcemapArtifacts(mergedFiles, result.files, mapped.files) : mergedFiles;
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -1304,23 +1397,30 @@ export default function App(): JSX.Element {
     }
   }
 
-  async function runGenerate(persist = false): Promise<void> {
-    const result = await runGenerateStep();
+  function runGenerate(persist = false): Promise<void> {
+    return trackGenerate(runGenerateInner(persist));
+  }
+
+  async function runGenerateInner(persist = false): Promise<void> {
+    const epoch = generationEpochRef.current;
+    const cycle = await runGenerateStep();
+    const result = cycle?.result ?? null;
     let bundleGen: GenerateResult | null = result;
     if (persist && result?.ok) {
-      const merged = await persistGeneratedTree(result);
+      const merged = await persistGeneratedTree(result, cycle?.mapped ?? null);
       if (merged) bundleGen = { ...result, files: merged };
-    } else if (result?.ok && lastMappedGenerateRef.current) {
+    } else if (result?.ok && cycle?.mapped) {
       // Live-auto (no persist): bundle the map-carrying generate of this
       // same source directly, so the boot bundle can still chain to
       // `.ddd`.  Falls back to the flag-off `result` above when the
       // mapped generate hasn't landed (best-effort, see `runGenerateStep`).
-      bundleGen = lastMappedGenerateRef.current;
+      bundleGen = cycle.mapped;
     }
-    // Remember the map-carrying set a bundle right now would use, so a
-    // later manual "Bundle" click (Live mode off — the desktop default)
-    // still gets sourcemaps even though this generate didn't cascade.
-    lastBundleReadyRef.current = bundleGen;
+    // Upgrade the provisional set published at GENERATE_DONE to the
+    // map-carrying / merged one, so a later manual "Bundle" click (Live mode
+    // off — the desktop default) still gets sourcemaps even though this
+    // generate didn't cascade.
+    publishBundleInput(epoch, bundleGen);
     if (
       liveModeRef.current &&
       bundleGen?.ok &&
@@ -1335,6 +1435,24 @@ export default function App(): JSX.Element {
   runGenerateRef.current = () => runGenerate();
 
   async function runBundle(): Promise<void> {
+    // Wait out the generate CYCLE that is still running, so the boot bundle
+    // is built from the map-carrying tree that cycle is about to publish
+    // rather than from whatever happened to be in the ref when the click
+    // arrived.  `GENERATE_DONE` — which paints "generated N file(s)" and
+    // enables this button — lands well before the cycle finishes: it is
+    // followed by a second, sourcemap-carrying generate and (on the persist
+    // path) `persistGeneratedTree`'s merge + overlay.  Measured at ~0.7s on
+    // an idle machine and seconds on a loaded CI runner; a click inside that
+    // window used to read `null` and do NOTHING AT ALL, which is what hung
+    // every `heavy-preview` spec for its full 600s ceiling.
+    //
+    // Deliberately NO fallback to `generateSuccess` if the ref is still
+    // empty: that is the flag-off tree with no inline `.ddd` maps, so
+    // bundling it yields a boot bundle whose map stops at the generated
+    // `.ts` — `devtools-sourcemap.spec.ts`'s "-1".  Substituting a worse
+    // input for a wait we have already done buys nothing.
+    const inFlight = generateInFlightRef.current;
+    if (inFlight) await inFlight.catch(() => undefined);
     const gen = lastBundleReadyRef.current;
     if (!gen?.ok || gen.files.length === 0) return;
     const result = await runBundleStep(gen);
@@ -1362,7 +1480,11 @@ export default function App(): JSX.Element {
   // Preview (or Backend when there's no React deployable to render).
   // On any failure the user is left on their current tab; the
   // Problems tab carries a red-dot indicator for errors.
-  async function runFull(): Promise<void> {
+  function runFull(): Promise<void> {
+    return trackGenerate(runFullInner());
+  }
+
+  async function runFullInner(): Promise<void> {
     // Phase markers bracket the whole cascade.  They are the ONLY record that
     // survives a renderer kill — no error fires, no `pagehide`, so the ring's
     // async capture never runs.  `runBundleStep`/`runBootStep` narrow the
@@ -1370,14 +1492,16 @@ export default function App(): JSX.Element {
     // (see runtime/client.ts).  Whatever is left in localStorage after the
     // page reloads names the step that killed it.
     markPhase("generate");
-    const gen = await runGenerateStep();
+    const epoch = generationEpochRef.current;
+    const cycle = await runGenerateStep();
+    const gen = cycle?.result;
     if (!gen?.ok || gen.files.length === 0) return;
     // Intentional run → version the output and bundle the merged tree
     // (reflects hand edits to generated code).
     let bundleGen: GenerateOk = gen;
-    const merged = await persistGeneratedTree(gen);
+    const merged = await persistGeneratedTree(gen, cycle?.mapped ?? null);
     if (merged) bundleGen = { ...gen, files: merged };
-    lastBundleReadyRef.current = bundleGen;
+    publishBundleInput(epoch, bundleGen);
     const bundleRes = await runBundleStep(bundleGen);
     if (!bundleRes?.hono.ok) return;
     // MOBILE: hand the memory back before booting.  The bundler worker has

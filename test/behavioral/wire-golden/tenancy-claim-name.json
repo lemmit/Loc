@@ -24,6 +24,78 @@
           "version": 1
         }
       ]
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/invoices/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "amountDue": 250,
+        "id": "<volatile:key>",
+        "number": "INV-1B",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/invoices",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "amountDue": 250,
+            "id": "<volatile:key>",
+            "number": "INV-1B",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 5,
+      "method": "DELETE",
+      "path": "/api/invoices/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Invoice {id} not found",
+        "instance": "/api/invoices/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/invoices",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
     }
   ]
 }

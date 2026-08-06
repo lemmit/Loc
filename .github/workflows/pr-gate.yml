@@ -1,0 +1,130 @@
+name: PR gate
+
+# The personal-account substitute for a merge queue — see docs/ci-gating.md →
+# "No merge queue on a personal account: the pr-gate check".
+#
+# v2 — EVENT-DRIVEN.  v1 was one long-polling job that waited (up to 80min)
+# for every other check while itself holding a runner slot; under load the
+# parked gates starved the jobs they were waiting for and timed out.  v2 runs
+# a seconds-long EVALUATION on every completion event instead:
+#
+#   * `pull_request` events start the cycle (and re-arm it on `labeled` /
+#     `ready_for_review`, whose fan-outs add new checks to wait for);
+#   * `workflow_run: completed` of every other workflow re-evaluates — the
+#     LAST workflow to finish always triggers the final, green evaluation.
+#
+# Each evaluation posts a check run named `pr-gate` on the head SHA via the
+# Checks API (checks: write): failure with culprits named, `in_progress`
+# while others still run (blocks merge without claiming failure), success
+# when everything triggered has passed.  That API-posted check — not this
+# job's own — is what branch protection requires: workflow_run-triggered
+# jobs don't surface in the PR checks UI, so the job is `pr-gate-eval` and
+# the canonical `pr-gate` name comes from the posted check on every path.
+#
+# No polling, no timeout to tune, no parked slot — and a re-run of a red
+# check fires `workflow_run: completed` again, so recovery is automatic.
+#
+# The `workflows:` list below must name every other workflow (else a gate's
+# completion stops re-evaluating and a PR can stick at in_progress until the
+# next event) — pinned complete by test/system/pr-gate.test.ts.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
+  workflow_run:
+    types: [completed]
+    workflows:
+      - 'API call (typed in-system call runtime e2e)'
+      - 'OIDC auth (full-compose runtime e2e)'
+      - 'Behavioral e2e — .NET (persistence: dapper)'
+      - 'Behavioral e2e — .NET (ASP.NET + EF Core)'
+      - 'Behavioral e2e — Elixir (plain Ecto/Phoenix)'
+      - 'Behavioral e2e — Java (Spring Boot + JPA)'
+      - 'Behavioral e2e — node/Hono (MikroORM)'
+      - 'Behavioral e2e — Python (FastAPI)'
+      - 'Behavioral e2e (headless, no docker)'
+      - 'Behavioral UI e2e (headless, no docker)'
+      - 'Channels (broker runtime e2e)'
+      - 'main-red alarm'
+      - 'Cleanup old workflow artifacts'
+      - 'Conformance full (nightly)'
+      - 'Conformance parity (per-PR)'
+      - 'Context integration (runtime e2e)'
+      - 'Corpus compile gates'
+      - 'Corpus compile gate (Elixir)'
+      - 'Cross-backend response differential (report-only)'
+      - '.NET build verification'
+      - '.NET observability events (runtime e2e)'
+      - '.NET OIDC auth (runtime e2e)'
+      - 'OIDC auth — Elixir/Phoenix (full-compose runtime e2e)'
+      - 'Elixir / Vanilla build verification'
+      - 'Elixir / Vanilla runtime e2e (observability)'
+      - 'Elixir / Vanilla VO wire round-trip (runtime e2e)'
+      - 'Mailer smtp (runtime e2e)'
+      - 'Frontend full-stack e2e (nightly, no docker)'
+      - 'Generated a11y (axe-core)'
+      - 'Generated Angular build'
+      - 'Generated Angular e2e'
+      - 'Generated Feliz build'
+      - 'Generated Flutter build'
+      - 'Generated React TSX build'
+      - 'Generated React e2e'
+      - 'Generated Svelte build'
+      - 'Generated Svelte e2e'
+      - 'Generated Vue build'
+      - 'Generated Vue e2e'
+      - 'TypeScript (Hono) build verification'
+      - 'Hono observability events (runtime e2e)'
+      - 'Hono OIDC auth (runtime e2e)'
+      - 'Java build verification'
+      - 'Java observability e2e'
+      - 'Java OIDC auth (runtime e2e)'
+      - 'Kubernetes/Helm validation'
+      - 'Kubernetes cluster e2e (kind)'
+      - 'Langium generated files in sync'
+      - 'Migration evolution (runtime e2e)'
+      - 'Deploy landing page + playground to GitHub Pages'
+      - 'Phoenix / LiveView UI smoke (runtime e2e)'
+      - 'Playground e2e (no-network)'
+      - 'Playground e2e'
+      - 'Playground worker-realm check'
+      - 'Python build verification'
+      - 'Python observability e2e'
+      - 'Python OIDC auth (runtime e2e)'
+      - 'Schema load (emitted DDL)'
+      - 'Tenancy isolation (runtime e2e)'
+      - 'Tests + coverage'
+      - 'Lint GitHub Actions workflows'
+
+permissions:
+  checks: write
+  contents: read
+
+# One evaluation per SHA at a time; a burst of completions collapses to the
+# newest evaluation (cancelled `pr-gate-eval` runs are excluded from the
+# verdict by SELF_NAMES).
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  pr-gate-eval:
+    name: pr-gate-eval
+    # Evaluate only PR activity: direct pull_request events, or the completion
+    # of another workflow's pull_request-triggered run.  push:main and
+    # scheduled completions are not this gate's business.
+    if: github.event_name == 'pull_request' || github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Evaluate all checks on this SHA and post the pr-gate verdict
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+        run: node scripts/pr-gate.mjs

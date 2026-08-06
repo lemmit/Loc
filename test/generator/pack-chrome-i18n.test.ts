@@ -91,32 +91,53 @@ function shellOf(files: Map<string, string>, suffix: string): string {
   return entry[1];
 }
 
-describe("pack-chrome i18n — React app-shell chrome", () => {
-  // EVERY React pack, not just the default one.  The skip-link slice wired 13
-  // packs and missed shadcn v3/v4 — they rendered `{{{notFoundText}}}` and
-  // `{{{primaryNavAria}}}` but kept the skip link as raw text, so the string was
-  // in the catalog and untranslatable on those two packs.  A per-pack loop is
-  // what catches a template that forgets a token; a single-pack assertion never
-  // could.
-  it.each([
-    "mantine",
-    "shadcn",
-    "mui",
-    "chakra",
-  ])("%s renders every shell-chrome token (no raw string left behind)", async (design) => {
-    const on = appOf(await generateSystemFiles(SYSTEM("react", design, `Heading { "Welcome" }`)));
+// EVERY shell-rendering pack on EVERY frontend, not just each frontend's
+// default.  The skip-link slice wired 13 packs and missed shadcn v3/v4 — they
+// rendered `{{{notFoundText}}}` and `{{{primaryNavAria}}}` but kept the skip
+// link as raw text, so the string sat in the catalog, got translated, and did
+// nothing on those two packs.  It survived four merged slices because every
+// other assertion in this file pins ONE pack per frontend, which makes a
+// template that forgets a token structurally invisible.
+//
+// One assertion covers all four frameworks because the emitted `t(key, default)`
+// call is IDENTICAL everywhere — only the wrapper around it is framework-shaped
+// (React/Svelte `{…}`, Vue `{{ … }}` / `:attr='…'`, Angular `[attr.x]='…'`).
+// So this gate needs no per-framework binding table and cannot drift from one.
+const SHELL_PACKS: ReadonlyArray<[platform: string, design: string, shell: string]> = [
+  ["react", "mantine", "src/App.tsx"],
+  ["react", "shadcn", "src/App.tsx"],
+  ["react", "mui", "src/App.tsx"],
+  ["react", "chakra", "src/App.tsx"],
+  ["vue", "vuetify", "src/App.vue"],
+  ["vue", "shadcnVue", "src/App.vue"],
+  ["svelte", "flowbite", "(app)/+layout.svelte"],
+  ["svelte", "shadcnSvelte", "(app)/+layout.svelte"],
+  ["angular", "angularMaterial", "src/app/app.component.ts"],
+  ["angular", "primeng", "src/app/app.component.ts"],
+  ["angular", "spartanNg", "src/app/app.component.ts"],
+];
+
+describe("pack-chrome i18n — app-shell chrome, every pack on every frontend", () => {
+  it.each(
+    SHELL_PACKS,
+  )("%s/%s renders every shell-chrome token (no raw string left behind)", async (platform, design, shell) => {
+    const files = await generateSystemFiles(SYSTEM(platform, design, `Heading { "Welcome" }`));
+    const on = shellOf(files, shell);
     for (const [key, english] of Object.entries(APP_SHELL_CHROME)) {
-      // A pack need not SPELL every chrome string (mui has no nav landmark
-      // label, only chakra says "Open menu") — but whatever it spells must be
-      // bound, never raw.  So: if the English appears at all, it appears
-      // inside a t() call for its own key.
+      // A pack need not SPELL every chrome string — mui renders no nav
+      // landmark label, only chakra says "Open menu", the Angular packs carry
+      // neither error boundary nor burger.  But whatever it DOES spell must be
+      // bound, never raw.  So the invariant is "not raw", not "present": if
+      // the English appears at all, it appears inside a t() call for its key.
       if (!on.includes(english)) continue;
-      expect(on, `${design} left "${english}" unbound`).toContain(
+      expect(on, `${platform}/${design} left "${english}" unbound`).toContain(
         `t(${JSON.stringify(key)}, ${JSON.stringify(english)})`,
       );
     }
   });
+});
 
+describe("pack-chrome i18n — React app-shell chrome", () => {
   it("binds the 404 + skip-link text through t() and imports t into App.tsx", async () => {
     const files = await generateSystemFiles(SYSTEM("react", "mantine", `Heading { "Welcome" }`));
     const app = appOf(files);

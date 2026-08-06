@@ -24,6 +24,7 @@ import type {
   OperationIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
+import { apiStatusContext, deriveAggregateOperations } from "../../../ir/util/api-surface.js";
 import { tableOwnerName } from "../../../ir/util/inheritance.js";
 import { apiRoutePrefix } from "../../../util/api-base.js";
 import { plural } from "../../../util/naming.js";
@@ -126,14 +127,29 @@ export const cqrsStyleAdapter: StyleAdapter = {
     const { agg, owningCtx } = hostOf(op, ctx);
     const ns = nsOf(ctx);
     const idClass = `${tableOwnerName(agg, owningCtx.aggregates)}Id`;
-    return renderOperationActionBlock(agg, buildOperationSpec(agg, op, owningCtx, ns), {
-      idClass,
-      idClrType: csIdValueClrType(agg.idValueType),
-      emitTrace: !!ctx.emitTrace,
-      // Structural-conflict `httpStatus` overrides (M-T3.4a) — the per-op
-      // when/versioned 409 declarations resolve through this map.
-      structuralStatuses: owningCtx.structuralErrorStatuses,
-    });
+    // Route template + declared statuses come from the shared derivation
+    // (api-surface.ts) — the same entries the per-aggregate controller path
+    // renders.  `hostOf` may have matched a same-named clone of `op`, so the
+    // derived entries are looked up by the HOSTED operation object.
+    const repo = owningCtx.repositories.find((r) => r.aggregateName === agg.name);
+    const derived = deriveAggregateOperations(agg, repo, apiStatusContext(owningCtx));
+    const hosted = agg.operations.find((o) => o === op || o.name === op.name);
+    const apiOp = derived.find((o) => o.kind === "operation" && o.operation === hosted);
+    if (!apiOp) {
+      throw new Error(
+        `cqrsStyleAdapter: operation '${op.name}' has no derived HTTP operation (private?).`,
+      );
+    }
+    const probeOp = derived.find((o) => o.kind === "gateProbe" && o.operation === hosted);
+    return renderOperationActionBlock(
+      agg,
+      { ...buildOperationSpec(agg, hosted!, owningCtx, ns), apiOp, probeOp },
+      {
+        idClass,
+        idClrType: csIdValueClrType(agg.idValueType),
+        emitTrace: !!ctx.emitTrace,
+      },
+    );
   },
 
   emitHandlerOrService(op: OperationIR, ctx: EmitCtx): readonly EmittedArtifact[] {

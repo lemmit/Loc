@@ -59,6 +59,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/corpus-build.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       # Every phase `generate system` walks, whatever the backend: parse ->
       # macro expand -> lower -> enrich -> IR validate -> compose, plus the
@@ -96,6 +97,10 @@ jobs:
   # TS/Hono — tsc --noEmit per feature.  No external SDK; npm install per
   # feature dominates the wall time.
   corpus-tsc:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     name: corpus × tsc (Hono/node)
@@ -114,6 +119,10 @@ jobs:
 
   # .NET — dotnet restore + build /warnaserror per feature.
   corpus-dotnet:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     name: corpus × dotnet (.NET)
@@ -145,6 +154,10 @@ jobs:
   # takes was invisible to it (that is how the #2387 IAuditWriter CS0246 shipped
   # green).  Same corpus, same compiler, `persistence: dapper` forced.
   corpus-dotnet-dapper:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     name: corpus × dotnet (Dapper)
@@ -173,6 +186,10 @@ jobs:
 
   # Java/Spring — gradle testClasses bootJar per feature.
   corpus-java:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     name: corpus × java (Spring Boot)
@@ -204,6 +221,10 @@ jobs:
 
   # Python/FastAPI — uv sync + ruff + mypy --strict per feature.
   corpus-python:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     name: corpus × python (FastAPI)

@@ -1,6 +1,11 @@
 import { unionMembers } from "../../../generator/_payload/union-wire.js";
 import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  createOmissionValue,
+  forCreateInput,
+  hasCreate,
+  isRequiredCreateInput,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   ApplyIR,
@@ -19,6 +24,7 @@ import { directParentName } from "../../../ir/util/containment-parent.js";
 import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
+import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
 import {
   renderTsStatementChunks,
@@ -618,8 +624,29 @@ function renderEntity(
   // create is parameterized by this set; there is no parameterless form.
   const createInputs = forCreateInput(e.fields);
   const createInputNames = new Set(createInputs.map((f) => f.name));
+  // A declared default is a CONSTRUCTION rule, so the factory — not the wire —
+  // materializes it.  Returns the TS expression for "what this field becomes
+  // when the caller omits it", or undefined when the caller must supply it.
+  //
+  // Server-sourced defaults (`now()`, `currentUser.*`) are deliberately NOT
+  // handled here: the wire layer already treats them as server-supplied rather
+  // than as wire defaults (`isServerSourcedDefault` in routes-builder), and
+  // moving them would change a second, unrelated path.
+  const factoryDefault = (f: FieldIR): string | undefined => {
+    if (isRequiredCreateInput(f)) return undefined;
+    const omission = createOmissionValue(f);
+    if (omission.kind === "default") {
+      return isServerSourcedDefault(omission.expr) ? undefined : renderTsExpr(omission.expr);
+    }
+    if (omission.kind === "false") return "false";
+    return undefined; // plain optional — the `?? null` path below already covers it
+  };
   const fieldInit = (f: FieldIR): string => {
     if (createInputNames.has(f.name)) {
+      const dflt = factoryDefault(f);
+      // `??`, not `||`: a caller passing an explicit `0`/`""`/`false` must keep
+      // it.  Only an absent (or null) value falls through to the default.
+      if (dflt !== undefined) return `input.${f.name} ?? ${dflt}`;
       return f.optional ? `input.${f.name} ?? null` : `input.${f.name}`;
     }
     // Outside the create input (managed/token/internal): server-initialised.
@@ -704,8 +731,16 @@ function renderEntity(
       ? [
           factoryHead(
             "create",
+            // A field the factory can default is `?` on the input type, so a
+            // domain caller may genuinely omit it — which is what makes
+            // `Item.create({ name: "N" })` compile, and what makes the emitted
+            // `test "an omitted default is applied at construction"` a real
+            // assertion instead of one the emitter pre-satisfied.
             `input: { ${createInputs
-              .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
+              .map(
+                (f) =>
+                  `${f.name}${f.optional || factoryDefault(f) !== undefined ? "?" : ""}: ${renderTsType(f.type)}`,
+              )
               .join("; ")} }`,
             e.name,
           ),

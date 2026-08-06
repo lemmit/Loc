@@ -30,6 +30,45 @@
     {
       "seq": 2,
       "method": "POST",
+      "path": "/api/listings/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/listings/{id}",
+      "status": 200,
+      "body": {
+        "availability": "BackOrdered",
+        "floorPrice": "0.0000",
+        "id": "<volatile:key>",
+        "note": "clearance",
+        "price": "24.7500",
+        "sku": "SKU-1B",
+        "tags": [],
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/listings/by_sku?sku=SKU-1B",
+      "status": 200,
+      "body": {
+        "availability": "BackOrdered",
+        "floorPrice": "0.0000",
+        "id": "<volatile:key>",
+        "note": "clearance",
+        "price": "24.7500",
+        "sku": "SKU-1B",
+        "tags": [],
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
       "path": "/api/listings",
       "status": 201,
       "body": {
@@ -37,14 +76,14 @@
       }
     },
     {
-      "seq": 3,
+      "seq": 6,
       "method": "POST",
       "path": "/api/listings/{id}/add_tag",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 4,
+      "seq": 7,
       "method": "GET",
       "path": "/api/listings/{id}",
       "status": 200,
@@ -65,7 +104,40 @@
       }
     },
     {
-      "seq": 5,
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/listings/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/listings/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Listing {id} not found",
+        "instance": "/api/listings/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/listings/by_sku?sku=SKU-2",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/listings/by_sku",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
       "method": "POST",
       "path": "/api/listings",
       "status": 201,
@@ -74,14 +146,14 @@
       }
     },
     {
-      "seq": 6,
+      "seq": 12,
       "method": "POST",
       "path": "/api/listings/{id}/discontinue",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 7,
+      "seq": 13,
       "method": "POST",
       "path": "/api/listings/{id}/discontinue",
       "status": 422,
@@ -91,6 +163,40 @@
         "status": 422,
         "title": "Unprocessable Entity",
         "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/api/listings?dir=asc&sort=sku",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "availability": "BackOrdered",
+            "floorPrice": "0.0000",
+            "id": "<volatile:key>",
+            "note": "clearance",
+            "price": "24.7500",
+            "sku": "SKU-1B",
+            "tags": [],
+            "version": 2
+          },
+          {
+            "availability": "Discontinued",
+            "floorPrice": "0.0000",
+            "id": "<volatile:key>",
+            "note": null,
+            "price": "1.0000",
+            "sku": "SKU-3",
+            "tags": [],
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
       }
     }
   ]

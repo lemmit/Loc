@@ -8,6 +8,24 @@
 // `.ddd`, generates the Hono project, scrapes the `createRoute({ method, path })`
 // pairs out of the emitted routes file, and asserts the two sets agree.
 //
+// WHERE THE FOUR-BACKEND PARITY GATE WENT.  Until the route-builder
+// unification, `test/ir/api-surface-parity.test.ts` held python / java /
+// dotnet / elixir — four INDEPENDENT re-derivations — against this module on
+// three axes (mounted paths, success-body shape, declared error statuses).
+// Slice by slice each backend switched to RENDERING from the derivation,
+// which made its independence leg self-comparing; each drop moved the
+// coverage into a per-backend render-fidelity suite
+// (`test/generator/{dotnet,python,java,elixir}/api-surface-render.test.ts` —
+// same scrapers, held against the rendering).  When the elixir slice emptied
+// the registry the file was deleted.  Its one standing waiver — java's
+// `by_code` union find publishing `ResponseEntity<?>` (the 404 arm can't
+// unify with the success type) — is recorded at the java fidelity suite.
+// Hono is the last independent implementation, which is exactly why the
+// four others were unified FIRST: this file stays a real gate until the Hono
+// slice lands, and after it, it is the render-fidelity pin for Hono (the
+// scrape reads emitted bytes, so a render arm dropping or mangling a route
+// still fails here).
+//
 // The comparison is scoped to the route classes the lift covers
 // (`apiSurfaceCoverage.lifted`); the not-yet-lifted classes (workflow,
 // explicit handler, projection query, prepare) are excluded EXPLICITLY by
@@ -40,6 +58,12 @@ system Acme {
         // passing on zero-vs-zero.
         operation cancel() when status == "Placed" {
           status := "Cancelled"
+        }
+        // private: Hono mounts NO route for it, so the exact set-equality
+        // below fails if the derivation ever lifts a non-public operation
+        // again (it did, until the visibility filter landed).
+        private operation recompute() {
+          status := status
         }
       }
       repository Orders for Order {
@@ -229,6 +253,38 @@ describe("api-surface lift", () => {
     expect([...(cancel?.errorStatuses ?? [])].sort()).toEqual([400, 404, 409, 422]);
   });
 
+  it("declares exactly op.errorStatuses on every emitted route (render fidelity)", async () => {
+    // The errors leg the four other backends carry in their
+    // `api-surface-render` suites — added here when Hono switched to
+    // rendering from the derivation: a render arm dropping or retyping a
+    // status must fail on the emitted BYTES, not on the derivation comparing
+    // to itself.
+    const model = await buildLoomModel(SOURCE);
+    const derived = deriveContextOperations(ordersContext(model)!);
+    const files = await generateSystemFiles(SOURCE);
+    const src = [...files.entries()].find(([p]) => p.endsWith("order.routes.ts"))?.[1] ?? "";
+    const abs = (relPath: string): string =>
+      relPath === "/" ? "/api/orders" : `/api/orders${relPath}`;
+    const declared = new Map<string, number[]>();
+    for (const block of src.split(/app\.openapi\(/).slice(1)) {
+      const m = block.match(/method:\s*"(\w+)",\s*\n\s*path:\s*"([^"]*)"/);
+      if (!m) continue;
+      // Bound at the handler, not the first "})," — the zod param object
+      // closes with one of those before the responses map does.
+      const head = block.slice(0, block.indexOf("async (c)"));
+      const statuses = [...head.matchAll(/\n\s*([45]\d\d): \{ description:/g)]
+        .map((c) => Number(c[1]))
+        .sort((a, b) => a - b);
+      declared.set(`${m[1]} ${abs(m[2]!)}`, statuses);
+    }
+    expect(declared.size, "scraped no routes — the scraper is stale").toBeGreaterThan(0);
+    for (const op of derived) {
+      expect(declared.get(`${op.method} ${op.path}`), `${op.method} ${op.path}`).toEqual([
+        ...op.errorStatuses,
+      ]);
+    }
+  });
+
   it("emits no create route for a non-constructible aggregate", async () => {
     const model = await buildLoomModel(SOURCE);
     const ctx = ordersContext(model)!;
@@ -254,5 +310,121 @@ describe("api-surface lift", () => {
     const probes = ops.filter((o) => o.kind === "gateProbe").map((o) => o.path);
     // `cancel` is `when`-gated; `place` and crudish's `update` are not.
     expect(probes).toEqual(["/api/orders/{id}/can_cancel"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two shapes the derivation used to declare and NO backend mounts.
+//
+// Both were found by the caller census (#2380): it listed the route, the drain
+// wrote the first caller, and the caller answered 404 against a row that
+// exists.  They matter beyond the census because the five typed in-system
+// api-client emitters render their method lists FROM this derivation — an
+// over-declared operation is a client method that can only ever fail, which is
+// the #2342 class exactly.
+//
+// The premise of each test is asserted first (the aggregate/operation really is
+// abstract/private, and its SIBLING really is derived), so neither can pass by
+// reaching nothing — the failure shape `experience_gathered.md` §63 names.
+// ---------------------------------------------------------------------------
+
+const HIERARCHY_SOURCE = `
+system Fleet {
+  subdomain Core {
+    context Yard {
+      abstract aggregate Vehicle inheritanceUsing: sharedTable {
+        name: string
+      }
+      aggregate Car extends Vehicle with crudish {
+        doors: int
+      }
+      repository Cars for Car { }
+    }
+  }
+  storage primary { type: postgres }
+  resource yardState { for: Yard, kind: state, use: primary }
+  deployable yardSvc { platform: node contexts: [Yard] dataSources: [yardState] port: 3000 }
+}
+`;
+
+const PRIVATE_OP_SOURCE = `
+system Books {
+  subdomain Core {
+    context Shelf {
+      aggregate Book with crudish {
+        title: string
+        pages: int
+        operation retitle(t: string) { title := t }
+        private operation recount() { pages := pages + 1 }
+      }
+      repository Books for Book { }
+    }
+  }
+  storage primary { type: postgres }
+  resource shelfState { for: Shelf, kind: state, use: primary }
+  deployable shelfSvc { platform: node contexts: [Shelf] dataSources: [shelfState] port: 3000 }
+}
+`;
+
+const contextNamed = (model: LoomModel, name: string): BoundedContextIR =>
+  model.systems
+    .flatMap((s) => s.subdomains)
+    .flatMap((sd) => sd.contexts)
+    .find((c) => c.name === name)!;
+
+describe("api-surface lift — routes no backend mounts are not derived", () => {
+  it("derives NO operation for an abstract base, while its concrete keeps its full surface", async () => {
+    const model = await buildLoomModel(HIERARCHY_SOURCE);
+    const ctx = contextNamed(model, "Yard");
+
+    // Premise: the hierarchy really is a hierarchy — an abstract base with a
+    // concrete subtype — so the assertion below is about abstractness and not
+    // about a context that happens to hold one aggregate.
+    const base = ctx.aggregates.find((a) => a.name === "Vehicle")!;
+    const concrete = ctx.aggregates.find((a) => a.name === "Car")!;
+    expect(base.isAbstract).toBe(true);
+    expect(concrete.isAbstract ?? false).toBe(false);
+    expect(concrete.extendsAggregate).toBe("Vehicle");
+
+    const ops = deriveContextOperations(ctx);
+    // Nothing at all for the base.  `docs/inheritance.md`: an abstract
+    // aggregate "owns no table, repository, controller, or routes", and every
+    // backend skips it before its controller emitter — so a `GET
+    // /api/vehicles/{id}` in this list is a route with no handler anywhere.
+    expect(ops.filter((o) => o.aggregate === "Vehicle")).toEqual([]);
+    expect(ops.map((o) => o.path)).not.toContain("/api/vehicles/{id}");
+
+    // …and the concrete is untouched: this is a skip, not a hierarchy-wide
+    // silence.  (Reverting the `isAbstract` skip in `deriveContextOperations`
+    // fails the two assertions above and leaves these passing.)
+    const carPaths = ops.filter((o) => o.aggregate === "Car").map((o) => `${o.method} ${o.path}`);
+    expect(carPaths).toContain("get /api/cars/{id}");
+    expect(carPaths).toContain("post /api/cars");
+    expect(carPaths).toContain("delete /api/cars/{id}");
+    expect(carPaths).toContain("get /api/cars");
+  });
+
+  it("derives NO route for a private operation, while the public one beside it keeps its route", async () => {
+    const model = await buildLoomModel(PRIVATE_OP_SOURCE);
+    const ctx = contextNamed(model, "Shelf");
+
+    // Premise: both operations exist on the lowered aggregate and differ only
+    // in visibility — so a `recount` route missing for any other reason (a
+    // dropped member, a rename) would fail here first.
+    const book = ctx.aggregates.find((a) => a.name === "Book")!;
+    expect(book.operations.map((o) => `${o.name}:${o.visibility}`)).toEqual(
+      expect.arrayContaining(["retitle:public", "recount:private"]),
+    );
+
+    const ops = deriveContextOperations(ctx);
+    const opPaths = ops.filter((o) => o.kind === "operation").map((o) => o.path);
+    // `docs/language.md` defines a private operation as "only callable from
+    // within the same aggregate root"; every backend's route emitter filters
+    // `visibility === "public"`.
+    expect(opPaths).not.toContain("/api/books/{id}/recount");
+    expect(ops.some((o) => o.id.toLowerCase().includes("recount"))).toBe(false);
+    // The public sibling is still derived — reverting the visibility skip fails
+    // the two assertions above and leaves this one passing.
+    expect(opPaths).toContain("/api/books/{id}/retitle");
   });
 });

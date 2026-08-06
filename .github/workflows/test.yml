@@ -15,19 +15,14 @@ on:
       - 'biome.generated.json'
       - 'designs/**'
       - '.github/workflows/test.yml'
+  # Deliberately UNFILTERED on pull requests: `tests passed` is a required
+  # status check, and a required check that gets path-skipped never reports —
+  # blocking the PR on "Expected" forever.  Running the fast suite on a
+  # docs-only PR costs a few minutes; stranding the PR costs an admin bypass.
+  # It is also pr-gate's floor: at least one check reports on EVERY PR, so
+  # pr-gate's "nothing reported" arm stays a real failure signal
+  # (docs/ci-gating.md → "No merge queue on a personal account").
   pull_request:
-    paths:
-      - 'src/**'
-      - 'test/**'
-      - 'web/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'langium-config.json'
-      - 'vitest.config.ts'
-      - 'biome.json'
-      - 'biome.generated.json'
-      - 'designs/**'
-      - '.github/workflows/test.yml'
   merge_group:
 permissions:
   contents: read
@@ -155,11 +150,15 @@ jobs:
           path: coverage/
           retention-days: 14
 
-  # Biome gates, split off the test shards so they run once (not 4×) and
-  # in parallel with them: `biome ci` over the repo + the generated-code
-  # Biome gate (emits TS/TSX projects and lints them).
+  # Biome gates + the web/ typecheck, split off the test shards so they run
+  # once (not 4×) and in parallel with them: `biome ci` over the repo, the
+  # generated-code Biome gate (emits TS/TSX projects and lints them), the
+  # contrast gate, then the playground typecheck + DDL unit guard.  One job
+  # instead of two (the old separate `web-tsc`) — each half is ~1min of
+  # mostly-install, and a runner SLOT is the scarce resource on this account,
+  # not wall-clock (docs/ci-gating.md, "Draft PRs and the runner queue").
   lint:
-    name: lint + generated biome
+    name: lint + web-tsc
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -168,7 +167,9 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
 
       - name: Install (runs langium:generate + build)
         run: npm ci
@@ -182,6 +183,27 @@ jobs:
       # accessibility.md — static per-pack WCAG-AA design-token contrast gate.
       - name: Design-token contrast gate
         run: npm run test:contrast
+
+      # web/ resolves `../src/language/generated/**` at typecheck time; the
+      # root `npm ci` above already produced it.
+      - name: Install web
+        working-directory: web
+        run: npm ci
+
+      # `npm run build` in web/ chains `tsc -b && vite build`; we only need
+      # the typecheck for this gate, so invoke `tsc` directly.
+      - name: Typecheck web
+        working-directory: web
+        run: npx tsc -b
+
+      # Network-free unit guard for the runtime DDL synth — pre-merge gate
+      # for the per-context-pgSchema regression (system-mode backends query
+      # schema-qualified tables).  The end-to-end e2e/runtime.spec.ts covers
+      # the same path but self-skips when the npm registry is unreachable,
+      # so it doesn't gate reliably; this does.
+      - name: Test runtime DDL synth
+        working-directory: web
+        run: npm run test:ddl
 
   # Single roll-up status for branch protection: succeeds only when every
   # shard, the coverage merge, and the lint gates pass.  Require THIS
@@ -204,48 +226,3 @@ jobs:
             && [ "${{ needs.coverage.result }}" = "success" ] \
             && [ "${{ needs.lint.result }}" = "success" ]
 
-  # Fast typecheck gate for the playground (`web/`).  The playground imports
-  # the Loom toolchain straight from `../src`, so a `src/` change can silently
-  # break `web/` — exactly the failure mode of PR #517, where a `case "Form"`
-  # in web/src/builder/page/components.tsx survived a `PrimitiveName` narrowing
-  # in src/ir/loom-ir.ts and only surfaced days later in playground-e2e.  This
-  # job closes that gap in under two minutes by running `tsc -b` against
-  # `web/` (skipping `vite build`, which `web`'s `npm run build` script
-  # bundles in).
-  web-tsc:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: |
-            package-lock.json
-            web/package-lock.json
-
-      # Root install runs the `prepare` lifecycle (langium:generate + build);
-      # `web/` resolves `../src/language/generated/**` at typecheck time, so
-      # this must complete before `tsc -b` runs inside `web/`.
-      - name: Install root (runs langium:generate + build)
-        run: npm ci
-
-      - name: Install web
-        working-directory: web
-        run: npm ci
-
-      # `npm run build` in web/ chains `tsc -b && vite build`; we only need
-      # the typecheck for this gate, so invoke `tsc` directly.
-      - name: Typecheck web
-        working-directory: web
-        run: npx tsc -b
-
-      # Network-free unit guard for the runtime DDL synth — pre-merge gate
-      # for the per-context-pgSchema regression (system-mode backends query
-      # schema-qualified tables).  The end-to-end e2e/runtime.spec.ts covers
-      # the same path but self-skips when the npm registry is unreachable,
-      # so it doesn't gate reliably; this does.
-      - name: Test runtime DDL synth
-        working-directory: web
-        run: npm run test:ddl

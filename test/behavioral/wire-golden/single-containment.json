@@ -36,20 +36,43 @@
     },
     {
       "seq": 3,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "SC2",
+        "id": "<volatile:key>",
+        "shipment": {
+          "carrier": "UPS",
+          "id": "<volatile:key>",
+          "trackingCode": "1Z999"
+        },
+        "version": 3
+      }
+    },
+    {
+      "seq": 5,
       "method": "GET",
       "path": "/api/orders",
       "status": 200,
       "body": {
         "items": [
           {
-            "code": "SC1",
+            "code": "SC2",
             "id": "<volatile:key>",
             "shipment": {
               "carrier": "UPS",
               "id": "<volatile:key>",
               "trackingCode": "1Z999"
             },
-            "version": 2
+            "version": 3
           }
         ],
         "page": 1,
@@ -59,14 +82,14 @@
       }
     },
     {
-      "seq": 4,
+      "seq": 6,
       "method": "DELETE",
       "path": "/api/orders/{id}",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 5,
+      "seq": 7,
       "method": "GET",
       "path": "/api/orders",
       "status": 200,

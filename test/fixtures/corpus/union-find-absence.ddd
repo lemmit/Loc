@@ -25,6 +25,42 @@ system UF {
     let o = api.orders.create({ code: "C1" })
     let read = api.orders.byCode({ code: "C1" })
     expect(read.code).toBe("C1")
+
+    // The canonical `update` rewrites the very column the union find keys on,
+    // so the find must follow it: `C1` stops resolving and `C1B` starts.  A
+    // backend whose update route wrote nothing (or answered 204 without
+    // saving — the #2342 shape) would still pass a plain read-back against a
+    // stale cache, but cannot pass a re-query through a different route.
+    api.orders.update(o, { code: "C1B" })
+    let byId = api.orders.getById(o)
+    expect(byId.code).toBe("C1B")
+    let moved = api.orders.byCode({ code: "C1B" })
+    expect(moved.code).toBe("C1B")
+    expect(api.orders.byCode({ code: "C1" })).toThrow(404)
+
+    // The `option` SIBLING of the same absence shape — `Order option` is sugar
+    // for `Order or none`, so it must be wire-identical to `byCode`: the hit is
+    // a bare `OrderResponse` at 200 (no `type` tag, no `oneOf` wrapper) and the
+    // miss is a bare 404.  It had no caller at all, so nothing proved the two
+    // spellings of the same shape actually agree at runtime.
+    let maybe = api.orders.maybeFirst({ code: "C1B" })
+    expect(maybe.code).toBe("C1B")
+    expect(api.orders.maybeFirst({ code: "C1" })).toThrow(404)
+
+    // The LIST and DELETE routes.  The row is deleted through DELETE and then
+    // read back through BOTH union finds: a delete that only unlinked the row
+    // (or a find that answered from a stale index) would keep answering 200
+    // here, which the by-id 404 alone cannot show.
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.orders.destroy(o)
+    expect(api.orders.getById(o)).toThrow(404)
+    expect(api.orders.byCode({ code: "C1B" })).toThrow(404)
+    expect(api.orders.maybeFirst({ code: "C1B" })).toThrow(404)
+    let empty = api.orders.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 
   // The ABSENCE half the case above is named for but never exercised.  This is

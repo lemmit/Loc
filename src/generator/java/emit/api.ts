@@ -1,10 +1,16 @@
-import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import type { ApiOperationIR } from "../../../ir/util/api-surface.js";
+import {
+  apiStatusContext,
+  deriveAggregateOperations,
+  isAllFind,
+  relativeOpPath,
+} from "../../../ir/util/api-surface.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import {
@@ -22,6 +28,7 @@ import {
   renderJavaType,
 } from "../render-expr.js";
 import { javaAuditApiPkg, javaHistoryFind, renderJavaHistoryRoute } from "./audit-history.js";
+import { JAVA_FIND_ABSENCE_THROW } from "./common.js";
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 import { javaCommandValidatorNames } from "./validator.js";
@@ -67,6 +74,19 @@ export function renderJavaController(
 ): string {
   const route = snake(plural(agg.name));
   const idClass = ctx.idClass ?? `${agg.name}Id`;
+  // THE UNIFICATION SEAM (api-surface.ts): which routes exist and at which
+  // path comes from the shared derivation (the statuses live in the OpenAPI
+  // customizer, which reads the same list).  This file keeps what is
+  // genuinely java's: DTO/record names, service calls, handler bodies, the
+  // union ProblemDetail arms, and the entity-history route (notLifted).
+  const derivedOps = ctx.boundedContext
+    ? deriveAggregateOperations(agg, repo, apiStatusContext(ctx.boundedContext))
+    : deriveAggregateOperations(agg, repo);
+  const opEntries = derivedOps.filter((o) => o.kind === "operation");
+  const probeByOp = new Map<unknown, ApiOperationIR>(
+    derivedOps.filter((o) => o.kind === "gateProbe").map((o) => [o.operation, o]),
+  );
+  const findEntries = derivedOps.filter((o) => o.kind === "find" && !isAllFind(o));
   // Optimistic concurrency (`versioned`): a mutation carries the client's
   // expected version in the `If-Match` header (think-time CAS), forwarded to the
   // service.  Non-versioned aggregates thread nothing → byte-identical routes.
@@ -132,6 +152,9 @@ export function renderJavaController(
 
   const unionImports = new Set<string>();
   let anyUnionProblem = false;
+  /** Set when a find arm throws the shared find-absence 404 (RS-22/RS-27), so
+   *  the controller imports `AggregateNotFoundException` only where it uses it. */
+  let anyFindAbsenceThrow = false;
   const anyReturnUnion =
     !!ctx.boundedContext &&
     agg.operations.some(
@@ -144,19 +167,25 @@ export function renderJavaController(
   // predicate, returns `{ allowed }` so a UI can enable/disable the action
   // without invoking it.  The service owns the load + predicate; the
   // controller wraps the boolean in the shared `CanResponse` record.
-  const canRouteLines = (op: (typeof agg.operations)[number]): string[] =>
-    op.when
-      ? [
-          `    @GetMapping("/{id}/can_${snake(op.name)}")`,
-          `    public CanResponse can${upperFirst(op.name)}${agg.name}(@PathVariable ${idJava} id) {`,
-          `        return new CanResponse(service.can${upperFirst(op.name)}(new ${idClass}(id)));`,
-          `    }`,
-          ``,
-        ]
-      : [];
-  const opRoutes = agg.operations
-    .filter((op) => op.visibility === "public")
-    .flatMap((op) => {
+  const canRouteLines = (op: (typeof agg.operations)[number]): string[] => {
+    const probe = probeByOp.get(op);
+    if (!probe) return [];
+    return [
+      `    @GetMapping("${relativeOpPath(probe)}")`,
+      `    public CanResponse can${upperFirst(op.name)}${agg.name}(@PathVariable ${idJava} id) {`,
+      `        return new CanResponse(service.can${upperFirst(op.name)}(new ${idClass}(id)));`,
+      `    }`,
+      ``,
+    ];
+  };
+  const opRoutes = opEntries.flatMap((entry) => {
+    const op = entry.operation!;
+    // NAMED FIX (unification): the mount honors `routeSlug` — java was the
+    // only backend rendering `snake(op.name)` here, so a `urlStyle: resource`
+    // op mounted at a URL the other four backends (and every generated
+    // client) do not use.
+    const opMapping = `    @PostMapping("${relativeOpPath(entry)}")`;
+    {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
       const spec = ctx.boundedContext ? returnUnionSpec(op, ctx.boundedContext) : undefined;
@@ -200,7 +229,7 @@ export function renderJavaController(
           ];
         });
         return [
-          `    @PostMapping("/{id}/${snake(op.name)}")`,
+          opMapping,
           hasParams
             ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
@@ -231,7 +260,7 @@ export function renderJavaController(
         const wireRet = wireJavaType(op.returnType, "Response", true);
         collectWireImports(op.returnType, imports);
         return [
-          `    @PostMapping("/{id}/${snake(op.name)}")`,
+          opMapping,
           hasParams
             ? `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
@@ -247,7 +276,7 @@ export function renderJavaController(
         ];
       }
       return [
-        `    @PostMapping("/{id}/${snake(op.name)}")`,
+        opMapping,
         `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
         hasParams
           ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
@@ -261,11 +290,12 @@ export function renderJavaController(
         ``,
         ...canRouteLines(op),
       ];
-    });
+    }
+  });
 
-  const findRoutes = declaredFinds(repo)
-    .filter((f) => !f.synthesized)
-    .flatMap((f) => {
+  const findRoutes = findEntries.flatMap((entry) => {
+    const f = entry.find!;
+    {
       // An id-typed find param (`find byOrder(order: Order id)`) binds as its
       // RAW underlying type (`UUID`/`long`/…) and wraps into the id class at the
       // service call — Spring has no `String → <Agg>Id` value-type converter, so
@@ -291,9 +321,19 @@ export function renderJavaController(
         ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
         : null;
       if (spec) {
+        if (spec.absent.kind === "none") anyFindAbsenceThrow = true;
         const absent =
           spec.absent.kind === "none"
-            ? [`            return ResponseEntity.notFound().build();`]
+            ? // RS-22/RS-27 — THROW, so the `@RestControllerAdvice` renders the
+              // five-member envelope.  This used to be
+              // `ResponseEntity.notFound().build()`: Spring's own bare 404 with
+              // an EMPTY BODY, which never reaches the advice — the identical
+              // defect RS-27 fixed on the by-id read, at the arm that reads
+              // `null` and answers locally.  It also made this controller emit
+              // two different wires for shapes `payloads.md` declares
+              // wire-identical, since the `error`-variant branch below builds a
+              // real ProblemDetail.
+              [`            throw ${JAVA_FIND_ABSENCE_THROW};`]
             : (() => {
                 const tag = spec.absent.tag;
                 const status =
@@ -311,7 +351,7 @@ export function renderJavaController(
               })();
         if (spec.absent.kind !== "none") anyUnionProblem = true;
         return [
-          `    @GetMapping("/${snake(f.name)}")`,
+          `    @GetMapping("${relativeOpPath(entry)}")`,
           `    public ResponseEntity<?> ${f.name}${agg.name}(${params}) {`,
           ...(f.requires ? findGateLines(f) : []),
           `        var r = service.${f.name}(${args});`,
@@ -333,7 +373,7 @@ export function renderJavaController(
         ].join(", ");
         const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
         return [
-          `    @GetMapping("/${snake(f.name)}")`,
+          `    @GetMapping("${relativeOpPath(entry)}")`,
           `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
           ...(f.requires ? findGateLines(f) : []),
           `        return service.${f.name}(${pagedArgs});`,
@@ -342,37 +382,48 @@ export function renderJavaController(
         ];
       }
       const single = f.returnType.kind !== "array";
+      if (single) anyFindAbsenceThrow = true;
       const retType = single ? `ResponseEntity<${agg.name}Response>` : `List<${agg.name}Response>`;
       return [
-        `    @GetMapping("/${snake(f.name)}")`,
+        `    @GetMapping("${relativeOpPath(entry)}")`,
         `    public ${retType} ${f.name}${agg.name}(${params}) {`,
         ...(f.requires ? findGateLines(f) : []),
         single
           ? `        var response = service.${f.name}(${args});`
           : `        return service.${f.name}(${args});`,
         single
-          ? `        return response == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(response);`
+          ? // RS-22/RS-27 — same repair as the `option` arm above: an OPTIONAL
+            // find (`find byEmail(...): Customer?`) is wire-identical to
+            // `Customer option`, so its miss must carry the same five-member
+            // envelope rather than Spring's bare empty 404.
+            `        if (response == null) throw ${JAVA_FIND_ABSENCE_THROW};\n        return ResponseEntity.ok(response);`
           : null,
         `    }`,
         ``,
       ].filter((l): l is string => l !== null);
-    });
+    }
+  });
 
-  const destroyRoutes =
-    (agg.destroys?.length ?? 0) > 0
-      ? [
-          `    @DeleteMapping("/{id}")`,
-          `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
-          `    public void destroy${agg.name}(@PathVariable ${idJava} id) {`,
-          `        service.destroy${agg.name}(new ${idClass}(id));`,
-          `    }`,
-          ``,
-        ]
-      : [];
-
-  const createRoute = emitsRestCreate(agg)
+  // NAMED FIX (unification): the DELETE gate is the shared `emitsRestDestroy`
+  // (canonical destroy), not `destroys.length > 0` — a named-only destroy is a
+  // domain command, and java was the only backend mounting a generic DELETE
+  // for it (a route its own OpenAPI customizer refused to document).
+  const destroyEntry = derivedOps.find((o) => o.kind === "destroy");
+  const destroyRoutes = destroyEntry
     ? [
-        `    @PostMapping`,
+        `    @DeleteMapping("${relativeOpPath(destroyEntry)}")`,
+        `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
+        `    public void destroy${agg.name}(@PathVariable ${idJava} id) {`,
+        `        service.destroy${agg.name}(new ${idClass}(id));`,
+        `    }`,
+        ``,
+      ]
+    : [];
+
+  const createEntry = derivedOps.find((o) => o.kind === "create");
+  const createRoute = createEntry
+    ? [
+        `    @PostMapping${relativeOpPath(createEntry) === "" ? "" : `("${relativeOpPath(createEntry)}")`}`,
         `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@Valid @RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
         `        CatalogLog.event("aggregate_created", "info", "aggregate", "${agg.name}", "id", id.value());`,
@@ -384,9 +435,10 @@ export function renderJavaController(
       ]
     : [];
   const pagedAutoAll = isPagedAutoAll(repo);
+  const getByIdEntry = derivedOps.find((o) => o.kind === "getById")!;
   const body = [
     ...createRoute,
-    `    @GetMapping("/{id}")`,
+    `    @GetMapping("${relativeOpPath(getByIdEntry)}")`,
     `    public ResponseEntity<${agg.name}Response> get${agg.name}ById(@PathVariable ${idJava} id) {`,
     // RS-27 — the service THROWS AggregateNotFoundException on a miss now
     // (never returns null), so the `@RestControllerAdvice` renders the RFC-9457
@@ -442,6 +494,7 @@ export function renderJavaController(
     ...[...unionImports].sort().map((i) => `import ${i};`),
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     anyFindGate ? `import ${ctx.basePkg}.domain.common.ForbiddenException;` : null,
+    anyFindAbsenceThrow ? `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;` : null,
     anyFindGateUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     // Entity history — the shared `AuditEntry` wire record.  Under byLayer the
     // controller already lives in `<base>.api`, so the import is emitted only
@@ -455,7 +508,7 @@ export function renderJavaController(
     `import ${ctx.basePkg}.config.HttpMetrics;`,
     // `@Valid` triggers Bean Validation on the request DTOs (`@Size`/`@Pattern`/…)
     // at the controller boundary; emitted only when the controller takes a body.
-    emitsRestCreate(agg) || agg.operations.some((o) => o.params.length > 0)
+    createEntry !== undefined || agg.operations.some((o) => o.params.length > 0)
       ? `import jakarta.validation.Valid;`
       : null,
     // WebDataBinder for the @InitBinder that registers this aggregate's command

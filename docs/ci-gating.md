@@ -12,11 +12,14 @@ Every heavy gate — the runtime/boot e2e suites, the deploy build — is a
 *non-required* check. Three consequences:
 
 1. **Many heavy gates don't run on a PR by default.** `tenancy-e2e`, the five
-   `*-obs-e2e`, the five `*-oidc-e2e`, `auth-oidc-compose-e2e`, and `pages`
-   trigger on `push: [main]` only. Whatever they catch, they catch *after*
-   merge — on `main`, where it sits red. (All but `pages` now also accept a
-   per-PR **label** trigger as a manual escape hatch — see "The interim escape
-   hatch" below — but that's opt-in, so the default is still post-merge.)
+   `*-obs-e2e`, the five `*-oidc-e2e`, and `auth-oidc-compose-e2e` trigger on
+   `push: [main]` only. Whatever they catch, they catch *after* merge — on
+   `main`, where it sits red. (Each also accepts a per-PR **label** trigger as
+   a manual escape hatch — see "The interim escape hatch" below — but that's
+   opt-in, so the default is still post-merge. The cross-backend
+   `behavioral-e2e-*` legs and the `pages` build have since been *promoted*
+   to real path-scoped `pull_request:` triggers and are no longer in this
+   bucket.)
 2. **A red heavy gate doesn't block anything.** A gate can be broken (even
    unparseable) and still merge green. `behavioral-e2e-dapper.yml` had an
    unquoted colon in its `name:`, was a permanent `startup_failure`, and stayed
@@ -54,12 +57,18 @@ Every heavy gate — the runtime/boot e2e suites, the deploy build — is a
 follow-up merge cancels the previous commit's heavy jobs, so a real failure
 gets attributed to a later, innocent commit.
 
+> **Every gate in every tier runs locally.** The workflow → local-command
+> reverse index is [`docs/testing.md`](testing.md) → "Running any CI gate
+> locally"; pushing a commit just to see a check's verdict burns the shared
+> runner pool and is never necessary.
+
 ## The tiers
 
 | Lane | What | Rule |
 |---|---|---|
-| **Per-PR, every push** (required) | `test.yml` (fast vitest ×4 shards) + lint + web-tsc → `tests-passed`; `langium-generated`; `workflow-lint`; the typecheck/compile gates (`hono/dotnet/java/python-build`, `generated-*-build`, `corpus-build`); `behavioral-e2e` (Hono on PGlite, daemonless) as the runtime canary | Cheap, parallel, no docker/db. Catches most regressions with fast feedback. |
-| **Merge queue** (`merge_group`, runs once on the final candidate) | The cross-backend runtime matrix — `behavioral-e2e-{dotnet,java,python,elixir,dapper,mikroorm}`, `tenancy-e2e` (10 legs), `*-obs-e2e`, `*-oidc-e2e`, `auth-oidc-compose-e2e`; the full `generated-react-build` Cartesian; `pages` build | What actually breaks `main` **and** the expensive ones. Runs once per landing, not per push. A PR revised 10× pays this once. |
+| **Per-PR, every push** (required) | `test.yml` (fast vitest ×4 shards) + lint + web-tsc → `tests-passed` (unfiltered on PRs); `langium-generated`; `workflow-lint`; the typecheck/compile gates (`hono/dotnet/java/python-build`, `generated-*-build`, `corpus-build`); `behavioral-e2e` (Hono on PGlite, daemonless) as the runtime canary; `pr-gate` (the aggregate verdict over everything that triggered) | Cheap, parallel, no docker/db. Catches most regressions with fast feedback. |
+| **Per-PR, path-scoped** (binding via `pr-gate`) | The cross-backend runtime legs `behavioral-e2e-{dotnet,java,python,elixir,dapper,mikroorm}` + `behavioral-ui-e2e` (each fires when the PR touches its backend's emitters, the shared IR, or the harness); the `pages` build (docs/web/src) | Docker/boot cost paid only by the PRs that can break them; when they fire, `pr-gate` makes them blocking. |
+| **Merge queue** (`merge_group`, runs once on the final candidate — inert until the repo lives in an org) | The same cross-backend runtime matrix unconditionally, `tenancy-e2e` (10 legs), `*-obs-e2e`, `*-oidc-e2e`, `auth-oidc-compose-e2e`; the full `generated-react-build` Cartesian; `pages` build | What actually breaks `main` **and** the expensive ones. Runs once per landing, not per push. A PR revised 10× pays this once. |
 | **Nightly / label** (unchanged) | `conformance-full`, `generated-a11y`, `frontend-fullstack-e2e`, `k8s-e2e` | Broad, slow, low churn — post-hoc is fine. |
 
 Note: `generated-react-build`, `generated-vue-build` and
@@ -76,6 +85,96 @@ post-merge / nightly / `run-e2e`-label; `playground-e2e-no-network` runs the
 network-free subset (workspace, history, builder, requirements, editor) on
 every PR touching `web/**` or `src/**`, so file-management and builder
 regressions are caught before merge.
+
+## No merge queue on a personal account: the `pr-gate` check
+
+GitHub offers merge queues only on **organization-owned** repositories
+(public on any plan; private on Enterprise Cloud). While this repo lives
+under a personal account, the queue below cannot be switched on — and plain
+required-status-checks can't substitute for it, because **every PR workflow
+here is path-filtered**: a required check that gets path-skipped never
+reports, and the PR blocks on "Expected — waiting for status" forever. A
+docs-only PR would strand on all of them.
+
+`pr-gate.yml` is the personal-account answer — one aggregate check that
+branch protection can require safely. It is **event-driven** (v2): the v1
+design was a single long-polling job, and under real load it fed on itself —
+each open PR's gate parked a runner slot while polling (six parked gates ≈ a
+third of the ~20-slot pool), starving the very jobs it waited for until its
+timeout fired and needed a manual label re-arm. v2 never waits:
+
+- It triggers on the `pull_request` events (including `labeled` — `run-*`
+  heavy runs join the set — and `ready_for_review`, which fires the
+  draft-gated fan-out) **and on `workflow_run: completed` of every other
+  workflow**, so each completion re-evaluates the gate; the last workflow to
+  finish always produces the final verdict. No polling, no timeout, no
+  parked slot.
+- Each evaluation is seconds: `scripts/pr-gate.mjs` reads the head SHA's
+  check runs once and **posts a check run named `pr-gate`** via the Checks
+  API (workflow_run-triggered jobs don't surface in the PR checks UI, so the
+  job is `pr-gate-eval` and the canonical name rides the posted check). Any
+  triggered red → `failure` with culprits named (fail-fast); checks still
+  running → `in_progress` (blocks merge without claiming failure); all
+  triggered checks green → `success`. A path-skipped workflow never appears
+  on the SHA, so it's OK by construction.
+- Zero other checks reporting **blocks** — `test.yml` runs unfiltered on PRs
+  precisely so at least one check always comes; pending is *never* green.
+- Re-running a red check to green fires `workflow_run: completed` again, so
+  the gate re-evaluates **automatically** — no manual pr-gate re-run.
+- The decision core is pure and pinned by `test/system/pr-gate.test.ts` —
+  including the fail-closed arms (unknown conclusions, cancelled runs,
+  pending-never-green) and the `workflow_run.workflows` list's completeness
+  both ways (a workflow missing from the list completes without
+  re-evaluating; a stale name re-evaluates nothing).
+
+**Branch protection on a personal account should require exactly two
+checks: `tests passed` and `pr-gate`.** Everything else stays non-required
+by name but becomes *binding through pr-gate* the moment it triggers.
+
+If the repo ever moves to an organization, drop `pr-gate` from the required
+list and follow the merge-queue runbook below instead — the queue subsumes
+it and adds what pr-gate cannot: gating the *rebased combination* of
+concurrent PRs.
+
+## Draft PRs and the runner queue
+
+The account's GitHub-hosted runner pool allows ~20 concurrent jobs
+(Free plan), and a substantive PR push fires 30–50 jobs across the fan-out.
+With this repo's claim-first culture — every PR *starts* as a draft and
+pushes repeatedly while in progress — draft pushes were the bulk of the
+queue load, and the queue was the bulk of CI latency (jobs have sat queued
+for an hour before starting).
+
+So the fan-out is **draft-gated**: on a draft PR only the fast lane runs —
+`test.yml` (the required floor), `langium-generated`, `workflow-lint`, and
+`pr-gate` (which waits on whatever ran). Every other per-PR workflow carries
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+jobs:
+  <entry-job>:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+```
+
+Marking the PR **ready for review** fires the full fan-out (that's what the
+`ready_for_review` type is for), and every push after that runs it too. The
+`if` sits only on entry jobs — `needs:`-chained jobs cascade-skip, and the
+`<stem>-passed` rollups treat skipped needs as OK, exactly as in the merge
+queue. `pr-gate` also triggers on `ready_for_review`, so its verdict always
+covers the full set. Drafts can't merge anyway, so nothing is lost — a
+draft gets fast feedback, and "ready" means "now spend the fleet on me."
+
+The label-gated heavy workflows (`run-obs`, `run-oidc`, …) are deliberately
+NOT draft-gated: applying the label to a draft is an explicit request and
+still works.
+
+One deliberate side effect of the slot economy: `test.yml`'s `web-tsc` job
+was folded into its `lint` job (`lint + web-tsc`) — each half was ~1 minute
+of mostly-install, and a runner slot is the scarce resource here, not
+wall-clock. The playground typecheck + DDL guard thereby joined the
+`tests passed` rollup, which only makes the floor stricter.
 
 ## Enabling the merge queue (the structural fix)
 

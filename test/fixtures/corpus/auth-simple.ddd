@@ -38,5 +38,27 @@ system SimpleAuth {
     api.tickets.close(t)
     let read = api.tickets.getById(t)
     expect(read.open).toBe(false)
+
+    // The canonical `update` carries NO `requires` clause, so it proves the
+    // dev-stub principal reaches an unguarded write on an `auth: required`
+    // deployable — the complement of the guarded `close()` above.  A backend
+    // that applied the guard aggregate-wide would 403 here.
+    api.tickets.update(t, { subject: "Login restored", open: true })
+    let reopened = api.tickets.getById(t)
+    expect(reopened.subject).toBe("Login restored")
+    expect(reopened.open).toBe(true)
+
+    // The LIST and DELETE routes on an `auth: required` deployable.  Neither
+    // carries a `requires`, so both must be reachable by the same dev-stub
+    // principal — the third and fourth unguarded routes beside the guarded
+    // `close()`, and the ones an aggregate-wide guard would 403.
+    let listed = api.tickets.all()
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    api.tickets.destroy(t)
+    expect(api.tickets.getById(t)).toThrow(404)
+    let empty = api.tickets.all()
+    expect(empty.items.length).toBe(0)
+    expect(empty.total).toBe(0)
   }
 }
