@@ -466,24 +466,57 @@ environment this variable is unnecessary.
 The opt-in per-backend build suites (`test:dotnet`, `test:java`,
 `test:phoenix`, `test:python`, plus their `obs-*` / `auth-e2e-*`
 siblings) emit a project from a fixture and compile it with the real
-toolchain.  Two of them run the toolchain **inside Docker** rather than
-on the host:
+toolchain.  **Three of the four need Docker** — the sandbox host's
+toolchains are older than what the emitted projects target:
 
-| Suite | Toolchain | Runs in |
-|---|---|---|
-| `test:java` | JDK 21 + Gradle | host (no container) |
-| `test:dotnet` | .NET SDK 8 | host (no container) |
-| `test:phoenix` | `mix` (Elixir/Ecto) | **`hexpm/elixir` container** |
-| `test:python` | `uv` + ruff + mypy + pytest | host |
+| Suite | Emitted project targets | Host has | Runs in |
+|---|---|---|---|
+| `test:java` | Java **25** toolchain (needs Gradle 9.1+) | JDK 21 + Gradle 8.14 | **`gradle:9-jdk25` container** |
+| `test:dotnet` | **`net10.0`** | no .NET SDK at all | **`mcr.microsoft.com/dotnet/sdk:10.0` container** |
+| `test:phoenix` | `mix` (Elixir/Ecto) | — | **`hexpm/elixir` container** |
+| `test:python` | `uv` + ruff + mypy + pytest | `uv` | host |
 
 A managed remote/sandbox environment usually ships the Docker **client**
 but not a running daemon — start one with `dockerd` (root /
 passwordless-sudo) before any Docker-backed suite, e.g. `sudo dockerd
 >/tmp/dockerd.log 2>&1 &`.  Image pulls from Docker Hub / `mcr.microsoft.com`
-work through the standard egress.  An agent verifying a backend change
-can generate a project (`node bin/cli.js generate system <f.ddd> -o out`)
-and compile it directly: Gradle/.NET on the host, or
-`docker run … hexpm/elixir … 'mix deps.get && mix compile'` for Phoenix.
+work through the standard egress.
+
+An agent verifying a backend change can generate a project
+(`node bin/cli.js generate system <f.ddd> -o out`) and compile it directly:
+
+```bash
+# Java — the emitted Gradle toolchain is Java 25, so the host's JDK 21 +
+# Gradle 8.14 CANNOT build it ("No matching toolchains found").  Same image
+# family the emitted Dockerfile uses; CI pins Gradle 9.6.1 via setup-gradle.
+docker run --rm --network host -v <deployable>:/src -w /src \
+  -v /root/.ccr:/root/.ccr:ro -e JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS" \
+  gradle:9-jdk25 gradle --no-daemon testClasses bootJar
+
+# .NET — mounting /root/.ccr is NOT enough; see the CA note below.
+docker run --rm --network host -v <deployable>:/src -w /src \
+  -v /root/.ccr:/root/.ccr:ro mcr.microsoft.com/dotnet/sdk:10.0 bash -c \
+  'cp /root/.ccr/ca-bundle.crt /usr/local/share/ca-certificates/proxy.crt \
+   && update-ca-certificates >/dev/null && dotnet build /warnaserror'
+
+# Phoenix
+docker run --rm -v <deployable>:/app -w /app hexpm/elixir:… bash -c \
+  'mix deps.get && mix compile --warnings-as-errors'
+```
+
+**The .NET CA step is required, not optional.**  Java reads the proxy CA
+from the mounted `JAVA_TOOL_OPTIONS` truststore and Elixir has its own
+`LOOM_HEX_MIRROR` path (below), but NuGet trusts only the container's
+**system** certificate store.  Mounting `/root/.ccr` without installing
+the bundle into it fails restore before a single file compiles:
+
+```
+error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.
+error NU1301:   The SSL connection could not be established…
+error NU1301:   The remote certificate is invalid because of errors in the certificate chain: UntrustedRoot
+```
+
+which reads like a network outage rather than a missing trust anchor.
 
 ### Running `mix` on the HOST — for the suites that can't use a container
 
@@ -567,12 +600,15 @@ repositories, same proxy — resolves everything (pass the proxy to the JVM via
 `JAVA_TOOL_OPTIONS="-Dhttps.proxyHost=… -Dhttps.proxyPort=…"` if it isn't
 picked up from the environment).
 
-The recipe that works everywhere: **build the bootJar on the host, containerise
-only the jar.**
+The recipe that works everywhere: **build the bootJar outside the image,
+containerise only the jar.**
 
 ```bash
 cd out/<java-deployable>
-gradle bootJar                                  # host JDK 21 + Gradle
+# The emitted toolchain is Java 25, so this needs a JDK 25 + Gradle 9.1+ —
+# NOT the sandbox host's JDK 21 / Gradle 8.14.  Either a host with those
+# versions, or the `gradle:9-jdk25` container from the table above.
+gradle bootJar
 cp build/libs/app.jar app.jar                   # .dockerignore excludes build/,
                                                 # so copy the jar INTO the context
 cat > Dockerfile.local <<'EOF'
