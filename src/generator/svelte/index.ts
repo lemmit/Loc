@@ -28,6 +28,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import {
   jsxChromeAttr as shellChromeAttr,
@@ -154,6 +155,25 @@ export function generateSvelteForContexts(
   }
   if (hasAnyWorkflow(contexts)) {
     out.set("src/lib/api/workflows.ts", buildWorkflowsApiModule(contexts));
+  }
+
+  // Query-time projection clients (M-T1.3 Phase 1) — the SHARED builder React
+  // and Vue use, driven by the svelte-query leaves (PR #2366's decision: reuse
+  // while the divergence is leaf-shaped).  `createQuery` + the thunked options
+  // object + `../schemas` (this module lives at `src/lib/api/`, one hop below
+  // `src/lib/schemas.ts`, where React/Vue are two below `src/api/`).  Emitted
+  // only when the deployable actually serves a readable projection, so a
+  // projection-free app stays byte-identical.
+  if (readableProjections(contexts).length > 0) {
+    out.set(
+      "src/lib/api/projections.ts",
+      buildProjectionsApiModule(contexts, {
+        queryPackage: "@tanstack/svelte-query",
+        queryFactory: "createQuery",
+        thunkOptions: true,
+        schemasImport: "../schemas",
+      }),
+    );
   }
 
   // Pages + components through the shared walker.

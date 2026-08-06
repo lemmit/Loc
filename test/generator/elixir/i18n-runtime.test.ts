@@ -141,16 +141,17 @@ describe("Phoenix HEEx i18n runtime", () => {
     expect(live).toContain("@status");
   });
 
-  it("leaves an INTERPOLATED slot on the raw path (documented scope limit)", async () => {
-    // gettext interpolates `%{name}`, not ICU `{name}`, and has no
-    // plural/select arg-type — so an interpolated template keeps the pre-i18n
-    // raw path rather than emitting a message the runtime would mis-render.
+  it("translates an INTERPOLATED slot too — the scope limit is gone", async () => {
+    // This test used to pin the OPPOSITE: an interpolated slot kept the raw
+    // path, because gettext interpolates `%{name}` rather than ICU `{name}`.
+    // The message now stays ICU and an ICU engine formats gettext's result
+    // (D-I18N-HEEX-ICU), so the hole is translatable like every other frontend's.
     const src = SYSTEM("Heading { `Status: {code}` }").replace(
       'page Home {\n      route: "/"',
       'page Home(code: string) {\n      route: "/:code"',
     );
     const live = await homeLive(src);
-    expect(live).not.toContain('pgettext("page.Home.heading');
+    expect(live).toContain('loom_icu(pgettext("page.Home.heading');
   });
 
   it("does not emit the runtime for a string-less app", async () => {
@@ -222,5 +223,114 @@ describe("Phoenix HEEx i18n runtime", () => {
     const files = await generateSystemFiles(SYSTEM(`CodeBlock { "let total = 1" }`));
     expect(fileEndingWith(files, "_web/gettext.ex")).toBeUndefined();
     expect(fileEndingWith(files, "live/home_live.ex")).toContain("let total = 1");
+  });
+});
+// ---------------------------------------------------------------------------
+// ICU INTERPOLATION (D-I18N-HEEX-ICU)
+// ---------------------------------------------------------------------------
+//
+// Phoenix was the one frontend that could not translate a sentence with a hole
+// in it.  gettext interpolates `%{name}`, not ICU `{name}`, and has no
+// plural/select arg type — so an interpolated slot kept the raw path and
+// emitted the very shape the `loom.user-visible-concat` validator BANS in
+// `.ddd` source: `<%= "Status: " <> @code %>`.
+//
+// The message now stays ICU VERBATIM (so the Phoenix `.po` carries the same
+// msgid as the other five catalogs) and the two jobs split at their natural
+// seam: gettext resolves, `ex_cldr_messages` formats the result.  The engine
+// ships behind a SECOND-tier gate — a translatable app with no interpolation
+// must keep its pre-slice dep list byte-for-byte.
+
+describe("Phoenix HEEx i18n — ICU interpolation", () => {
+  it("emits pgettext INSIDE loom_icu, with the holes as a keyword list", async () => {
+    const src = SYSTEM("Text { `Status: {code}` }").replace(
+      'page Home {\n      route: "/"',
+      'page Home(code: string) {\n      route: "/:code"',
+    );
+    const live = await homeLive(src);
+    const key = await keyFor(src, "Status: {code}");
+    // gettext resolves the message; ICU formats what it returned — so the
+    // pgettext call is the ARGUMENT, never the other way round.  A locale whose
+    // translation reorders the holes still formats correctly.
+    expect(live).toContain(`loom_icu(pgettext("${key}", "Status: \\x7Bcode\\x7D"), [code: @code])`);
+    // …and the concat the validator bans is gone from the emitted template.
+    expect(live).not.toContain('"Status: " <> @code');
+  });
+
+  it("keys the ICU message IDENTICALLY to the shared catalog", async () => {
+    // The whole reason the message stays ICU: one msgid across six frontends.
+    const src = SYSTEM("Text { `Status: {code}` }").replace(
+      'page Home {\n      route: "/"',
+      'page Home(code: string) {\n      route: "/:code"',
+    );
+    const files = await generateSystemFiles(src);
+    const key = await keyFor(src, "Status: {code}");
+    const po = fileEndingWith(files, "priv/gettext/en/LC_MESSAGES/default.po")!;
+    expect(po).toContain(`msgctxt "${key}"`);
+    expect(po).toContain('msgid "Status: {code}"');
+  });
+
+  it("carries an ICU format skeleton verbatim into the msgid", async () => {
+    // `::currency/USD` is the spelling Loom's own grammar documents, and the one
+    // `ex_cldr_messages` cannot parse — the runtime's documented fallback covers
+    // it (see `renderIcuRuntime`).  What matters here is that the CATALOG is
+    // unharmed: the skeleton reaches the translator intact.
+    const src = SYSTEM("Text { `Total: {total, number, ::currency/USD}` }").replace(
+      'page Home {\n      route: "/"',
+      'page Home(total: money) {\n      route: "/:total"',
+    );
+    const files = await generateSystemFiles(src);
+    expect(fileEndingWith(files, "priv/gettext/en/LC_MESSAGES/default.po")).toContain(
+      'msgid "Total: {total, number, ::currency/USD}"',
+    );
+  });
+
+  it("ships the ICU engine, backend and template import for an interpolating ui", async () => {
+    const src = SYSTEM("Text { `Status: {code}` }").replace(
+      'page Home {\n      route: "/"',
+      'page Home(code: string) {\n      route: "/:code"',
+    );
+    const files = await generateSystemFiles(src);
+    expect(fileEndingWith(files, "mix.exs")).toContain('{:ex_cldr_messages, "~> 1.0"}');
+    const cldr = fileEndingWith(files, "lib/app/cldr.ex");
+    expect(cldr).toContain("use Cldr,");
+    expect(cldr).toContain("providers: [Cldr.Number, Cldr.Message]");
+    // Adding a locale takes TWO steps — the `.po` tree AND this list, because
+    // that is what compiles the locale's plural rules in.  Stated in the file,
+    // since a `.po` with unusable plural forms is the failure mode.
+    expect(cldr).toContain("add `<locale>` to `locales:` below");
+    const runtime = fileEndingWith(files, "lib/app_web/i18n.ex");
+    expect(runtime).toContain("def loom_icu(message, bindings) when is_binary(message) do");
+    // Both failure shapes are absorbed: the library reports a parse/bind error
+    // as a tuple but a missing date provider as a raise.
+    expect(runtime).toContain("rescue");
+    expect(runtime).toContain("defp substitute(message, bindings) do");
+    // The helper is imported into every template — hence the distinct name.
+    expect(fileEndingWith(files, "lib/app_web.ex")).toContain("import AppWeb.I18n");
+  });
+
+  it("does NOT ship the ICU engine for a translatable ui with no interpolation", async () => {
+    // The second-tier gate.  A literal-only app is translatable but never
+    // formats anything, so it must not pay the CLDR compile — its dep list,
+    // its file set and its bytes are exactly what they were before this slice.
+    const files = await generateSystemFiles(SYSTEM(`Heading { "Orders" }`));
+    expect(fileEndingWith(files, "priv/gettext/en/LC_MESSAGES/default.po")).toBeDefined();
+    expect(fileEndingWith(files, "mix.exs")).toContain('{:gettext, "~> 0.26"}');
+    expect(fileEndingWith(files, "mix.exs")).not.toContain("ex_cldr");
+    expect(fileEndingWith(files, "lib/app/cldr.ex")).toBeUndefined();
+    expect(fileEndingWith(files, "lib/app_web/i18n.ex")).toBeUndefined();
+    expect(fileEndingWith(files, "lib/app_web.ex")).not.toContain("import AppWeb.I18n");
+  });
+
+  it("does not let a hole-carrying CHROME message flip the ICU gate on", async () => {
+    // `chrome.pageOf` ("Page {page} of {pages}") and friends are merged into
+    // every enabled catalog, and HEEx renders none of them through this path.
+    // Gating on a `{`-sniff over the catalog would therefore put the CLDR
+    // compile into every translatable app — so the gate reads the extraction
+    // pass's own per-entry `icu` marker instead.
+    const files = await generateSystemFiles(SYSTEM(`Heading { "Orders" }`));
+    const catalog = fileEndingWith(files, "priv/gettext/en/LC_MESSAGES/default.po")!;
+    expect(catalog).toMatch(/msgid "[^"]*\{[^"]*"/); // a holed chrome msgid IS present…
+    expect(fileEndingWith(files, "mix.exs")).not.toContain("ex_cldr"); // …and gates nothing.
   });
 });

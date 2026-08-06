@@ -15,7 +15,8 @@
 // JS leaf table (React/Vue/Svelte/Angular) stays inline in walker-core until
 // the seam extraction (slice 4) converts it.
 
-import type { BinOp, ExprIR, LiteralKind, PrimitiveName } from "../../ir/types/loom-ir.js";
+import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { upperFirst } from "../../util/naming.js";
 
 /** F# spelling of a Loom binary operator. */
@@ -74,6 +75,128 @@ export const FS_LEAVES = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Scalar-intrinsic snippet table for F# / Fable — the Feliz sibling of
+// `_expr/js-intrinsics.ts` (JS family) and `dotnet/render-expr.ts`'s
+// `CS_INTRINSIC_RENDERERS` (C#).  One arm per `INTRINSIC_SIGNATURES` row,
+// keyed `<receiver>.<name>` via `intrinsicKey`.
+//
+// Without this table the walker fell through to a VERBATIM `recv.member(args)`,
+// which on F# is:
+//   - a compile error wherever .NET spells the op differently
+//     (`toUpper` vs `ToUpper`, `abs` vs `abs`/`Math.Abs`) — every arm here, since
+//     .NET members are PascalCase and Loom's are camelCase; and
+//   - silently wrong for `substring`, where .NET's `Substring(start, length)`
+//     agrees with Loom on the arg MEANING but THROWS on out-of-range where Loom
+//     clamps.
+//
+// Representation on this target (`type-fs.ts`): `int`/`long` → F# `int`,
+// `decimal`/`money` → F# `decimal` (money is a bare precise scalar, no
+// currency), `datetime` → `System.DateTime`, and a Loom `T[]` is an F# `list`
+// (see `FS_LEAVES.list` and the `List.*` collection arms below).
+//
+// Fable maps the .NET members used here onto their JS equivalents, so the
+// generated app compiles under `dotnet fable` — which is what
+// `generated-feliz-build.yml` proves.
+// ---------------------------------------------------------------------------
+
+export const FS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `(${recv}.Trim())`,
+  "string.toUpper": (recv) => `(${recv}.ToUpper())`,
+  "string.toLower": (recv) => `(${recv}.ToLower())`,
+  // 0-based CLAMPING semantics (JS `slice` — the catalogue contract).  .NET's
+  // Substring THROWS on an out-of-range start or length, so guard both edges.
+  // Receiver/arg duplication is safe: Loom expressions are pure.
+  "string.substring": (recv, args) =>
+    args.length > 1
+      ? `(if ${args[0]} >= ${recv}.Length then "" else ${recv}.Substring(${args[0]}, min (${args[1]}) (${recv}.Length - ${args[0]})))`
+      : `(if ${args[0]} >= ${recv}.Length then "" else ${recv}.Substring(${args[0]}))`,
+  // Fable compiles these to the JS String methods, which are ordinal — the
+  // catalogue's culture-free contract, with no StringComparison overload
+  // needed (and Fable's coverage of those overloads is thinner).
+  "string.startsWith": (recv, args) => `(${recv}.StartsWith(${args[0]}))`,
+  "string.endsWith": (recv, args) => `(${recv}.EndsWith(${args[0]}))`,
+  "string.contains": (recv, args) => `(${recv}.Contains(${args[0]}))`,
+  // .NET `Replace` already replaces ALL occurrences — the Loom contract.
+  "string.replace": (recv, args) => `(${recv}.Replace(${args[0]}, ${args[1]}))`,
+  // `Split` yields an ARRAY; a Loom `string[]` is an F# `list` on this target
+  // (the collection arms below are `List.*`), so materialize it.  The
+  // single-element separator array is the overload Fable maps reliably, and it
+  // keeps empty segments — the catalogue's contract.
+  "string.split": (recv, args) =>
+    `(${recv}.Split([| ${args[0]} |], System.StringSplitOptions.None) |> List.ofArray)`,
+  // ---- numerics -----------------------------------------------------------
+  // F#'s `abs` / `min` / `max` are generic and resolve per receiver type
+  // (`int` and `decimal` both), so no per-receiver spelling is needed — but the
+  // rows stay explicit, one per catalogue entry, so a missing arm is visible.
+  "int.abs": (recv) => `(abs ${recv})`,
+  "long.abs": (recv) => `(abs ${recv})`,
+  "decimal.abs": (recv) => `(abs ${recv})`,
+  "money.abs": (recv) => `(abs ${recv})`,
+  // Truncating integer division (toward zero) — F# `/` on `int` truncates
+  // natively, matching the catalogue.
+  "int.divTrunc": (recv, args) => `(${recv} / ${args[0]})`,
+  "long.divTrunc": (recv, args) => `(${recv} / ${args[0]})`,
+  // Two-value LEAST/GREATEST, not an aggregate.
+  "int.min": (recv, args) => `(min ${recv} ${args[0]})`,
+  "long.min": (recv, args) => `(min ${recv} ${args[0]})`,
+  "decimal.min": (recv, args) => `(min ${recv} ${args[0]})`,
+  "money.min": (recv, args) => `(min ${recv} ${args[0]})`,
+  "int.max": (recv, args) => `(max ${recv} ${args[0]})`,
+  "long.max": (recv, args) => `(max ${recv} ${args[0]})`,
+  "decimal.max": (recv, args) => `(max ${recv} ${args[0]})`,
+  "money.max": (recv, args) => `(max ${recv} ${args[0]})`,
+  // HALF-AWAY-FROM-ZERO ("commercial") rounding per the catalogue — .NET's
+  // native default is banker's half-even, so the mode is forced, exactly as the
+  // C# table does.  `places` defaults to 0.
+  "decimal.round": (recv, args) =>
+    args.length > 0
+      ? `(System.Math.Round(${recv}, ${args[0]}, System.MidpointRounding.AwayFromZero))`
+      : `(System.Math.Round(${recv}, System.MidpointRounding.AwayFromZero))`,
+  "money.round": (recv, args) =>
+    args.length > 0
+      ? `(System.Math.Round(${recv}, ${args[0]}, System.MidpointRounding.AwayFromZero))`
+      : `(System.Math.Round(${recv}, System.MidpointRounding.AwayFromZero))`,
+  // floor/ceil KEEP the receiver type (a whole-valued decimal, not an int) —
+  // the decimal overloads of Math.Floor/Ceiling do exactly that.
+  "decimal.floor": (recv) => `(System.Math.Floor(${recv}))`,
+  "money.floor": (recv) => `(System.Math.Floor(${recv}))`,
+  "decimal.ceil": (recv) => `(System.Math.Ceiling(${recv}))`,
+  "money.ceil": (recv) => `(System.Math.Ceiling(${recv}))`,
+  // ---- datetime -----------------------------------------------------------
+  // MIDNIGHT UTC of the receiver's day (the catalogue contract).  `.Date` alone
+  // would truncate in the value's own Kind, so normalize to UTC first and
+  // rebuild with an explicit Kind — the same care the JS arm takes with its
+  // `getUTC*` readers instead of `setHours`.
+  "datetime.startOfDay": (recv) =>
+    `(let d = (${recv}).ToUniversalTime() in System.DateTime(d.Year, d.Month, d.Day, 0, 0, 0, System.DateTimeKind.Utc))`,
+};
+
+/**
+ * Render a scalar intrinsic to F#, or `undefined` when this member is not a
+ * catalogue intrinsic on this receiver — the caller then falls through to its
+ * ordinary member/method-call emission.
+ *
+ * Mirrors `renderJsIntrinsic`: intrinsics are RECEIVER-QUALIFIED, so a
+ * `string.contains` (substring test) and a `T[].contains` (collection
+ * membership) never collide — lowering keys `isCollectionOp` off the receiver
+ * type, and a primitive receiver is never flagged as one.
+ *
+ * Unlike the JS table there is no declined-arm guard here: F# needs no import
+ * for `System.Math` / `System.DateTime`, so every arm is emittable.
+ */
+export function renderFsIntrinsic(
+  receiverType: TypeIR,
+  member: string,
+  recv: string,
+  args: readonly string[],
+): string | undefined {
+  if (receiverType.kind !== "primitive") return undefined;
+  if (!intrinsicFor(receiverType.name, member)) return undefined;
+  const render = FS_INTRINSIC_RENDERERS[intrinsicKey(receiverType.name, member)];
+  return render ? render(recv, [...args]) : undefined;
+}
+
 /** Resolution context for the standalone update-path renderer. */
 export interface FsExprCtx {
   /** State field names — a ref resolves to `model.<Pascal(name)>`. */
@@ -100,12 +223,19 @@ export function storeMsgCase(store: string, action: string): string {
   return `${upperFirst(store)}${upperFirst(action)}`;
 }
 
-/** Render a method-call to idiomatic F# for the update/action path.  Frontend
- *  page logic reaches a small, well-defined set — collection membership on the
- *  F# `list` (`List.contains`/`List.isEmpty`) and .NET-string ops that Fable
- *  maps natively (`.ToUpper()`/`.Contains(..)`/…).  An unrecognised method fails
- *  fast (mirrors the backends' bounded-intrinsic + error design) rather than
- *  emitting a `.member(args)` call that would not compile under Fable. */
+/** Render a method-call to idiomatic F# for the update/action path.
+ *
+ *  Collection membership on the F# `list` (`List.contains`/`List.isEmpty`/
+ *  `List.length`) is handled here; every SCALAR op routes through the shared
+ *  `FS_INTRINSIC_RENDERERS` table above — the same table the VIEW path reaches
+ *  via `felizTarget.renderIntrinsic`, so the two paths cannot diverge on what
+ *  `s.replace(a, b)` means (this file's whole premise, and previously true of
+ *  the leaves but NOT of the intrinsics: the view path had no table at all and
+ *  emitted the Loom spelling verbatim, while this path knew seven ops and threw
+ *  on the rest).
+ *
+ *  An unrecognised method still fails fast rather than emitting a
+ *  `.member(args)` call that would not compile under Fable. */
 function renderFsMethodCall(
   e: Extract<ExprIR, { kind: "method-call" }>,
   recv: string,
@@ -122,27 +252,16 @@ function renderFsMethodCall(
         return `(List.length ${recv})`;
     }
   }
-  // String receiver (or generic scalar) → .NET string members Fable supports.
-  switch (e.member) {
-    case "toUpper":
-      return `(${recv}.ToUpper())`;
-    case "toLower":
-      return `(${recv}.ToLower())`;
-    case "trim":
-      return `(${recv}.Trim())`;
-    case "contains":
-      return `(${recv}.Contains(${a0}))`;
-    case "startsWith":
-      return `(${recv}.StartsWith(${a0}))`;
-    case "endsWith":
-      return `(${recv}.EndsWith(${a0}))`;
-    case "length":
-      return `(${recv}.Length)`;
-  }
+  const intrinsic = renderFsIntrinsic(e.receiverType, e.member, recv, args);
+  if (intrinsic !== undefined) return intrinsic;
+  // `length` is a string PROPERTY in Loom, not a catalogue intrinsic, so it is
+  // not in the table — but it does reach this path.
+  if (e.member === "length") return `(${recv}.Length)`;
   throw new Error(
     `feliz: method '${e.member}' is not implemented on the F# action/update path — ` +
-      `the Feliz frontend renders a bounded set of collection/string methods here. ` +
-      `Add a '${e.member}' arm in fs-expr.ts (renderFsMethodCall) if it is needed.`,
+      `the Feliz frontend renders the scalar-intrinsic catalogue plus a bounded set of ` +
+      `collection methods here. Add a '${e.member}' arm in fs-expr.ts ` +
+      `(FS_INTRINSIC_RENDERERS for a catalogue intrinsic, renderFsMethodCall otherwise).`,
   );
 }
 

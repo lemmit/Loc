@@ -18,8 +18,12 @@ import type { ApiRoute } from "../api-emit.js";
 import {
   GETTEXT_DEP,
   GETTEXT_DOMAIN,
+  heexIcuEnabled,
+  ICU_DEPS,
+  renderCldrBackend,
   renderGettextBackend,
   renderGettextCatalog,
+  renderIcuRuntime,
   shellChromeAria,
   shellChromeText,
 } from "../i18n.js";
@@ -79,6 +83,10 @@ export function emitVanillaShellFiles(
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   const i18nEnabled = i18nUi !== undefined;
+  // The SECOND-tier i18n gate (D-I18N-HEEX-ICU): an ICU engine ships only for a
+  // ui that actually INTERPOLATES.  A translatable-but-literal-only app keeps
+  // the byte-identical dep list it had before this slice.
+  const icuEnabled = i18nUi !== undefined && heexIcuEnabled(i18nUi);
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
   // application starts — even for the SMTP adapter, which sends through
   // gen_smtp and needs no HTTP client.  The smtp mailer pulls `swoosh` +
@@ -95,6 +103,7 @@ export function emitVanillaShellFiles(
       authEnabled && oidc,
       hasLiveView,
       i18nEnabled,
+      icuEnabled,
     ),
   );
   out.set(".formatter.exs", renderVanillaFormatterExs());
@@ -125,7 +134,7 @@ export function emitVanillaShellFiles(
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(
     `lib/${appName}_web.ex`,
-    renderVanillaWebModule(appName, appModule, hasLiveView, i18nEnabled),
+    renderVanillaWebModule(appName, appModule, hasLiveView, i18nEnabled, icuEnabled),
   );
   out.set(
     `lib/${appName}_web/endpoint.ex`,
@@ -183,6 +192,12 @@ export function emitVanillaShellFiles(
         `priv/gettext/en/LC_MESSAGES/${GETTEXT_DOMAIN}.po`,
         renderGettextCatalog(i18nUi, "po"),
       );
+      // ICU formatting runs OVER gettext's result, so it ships only alongside
+      // it — and only for a ui with an interpolated message.
+      if (icuEnabled) {
+        out.set(`lib/${appName}/cldr.ex`, renderCldrBackend(appModule));
+        out.set(`lib/${appName}_web/i18n.ex`, renderIcuRuntime(appModule));
+      }
     }
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
@@ -214,6 +229,10 @@ function renderVanillaMixExs(
    *  adds the `gettext` dep the generated backend + `priv/gettext/**` need.
    *  False ⇒ the dep list is byte-identical to pre-i18n. */
   i18nEnabled = false,
+  /** True when that ui INTERPOLATES (D-I18N-HEEX-ICU) — adds the ICU engine the
+   *  generated `loom_icu/2` formats through.  Strictly narrower than
+   *  `i18nEnabled`: a literal-only app never pays the CLDR compile. */
+  icuEnabled = false,
 ): string {
   // LiveView dep — only when the deployable mounts a HEEx `ui:`.
   // `phoenix_html` is already in the base set; LiveView adds
@@ -228,6 +247,9 @@ function renderVanillaMixExs(
     : "";
   // Translation runtime (M-T1.11) — only when the ui has strings to translate.
   const gettextDep = i18nEnabled ? `,\n      ${GETTEXT_DEP}` : "";
+  // The ICU engine (D-I18N-HEEX-ICU) — second-tier, so a translatable app with
+  // no interpolation keeps the pre-slice dep list byte-for-byte.
+  const icuDeps = icuEnabled ? ICU_DEPS.map((d) => `,\n      ${d}`).join("") : "";
   // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
   // req) ride alongside the core Phoenix/Ecto set.  Sorted for stable output.
   // Values already include the surrounding `"…"`.
@@ -288,7 +310,7 @@ defmodule ${appModule}.MixProject do
       # is set (config/runtime.exs).
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry, "~> 1.5"},
-      {:opentelemetry_exporter, "~> 1.8"}${liveViewDep}${gettextDep}${extraBlock}${oidcDep}
+      {:opentelemetry_exporter, "~> 1.8"}${liveViewDep}${gettextDep}${icuDeps}${extraBlock}${oidcDep}
     ]
   end
 
@@ -337,6 +359,9 @@ function renderVanillaWebModule(
    *  `html_helpers` so `pgettext/2` resolves unqualified inside every `~H`
    *  template.  False ⇒ byte-identical. */
   i18nEnabled = false,
+  /** True when the ui interpolates — `import`s the generated ICU helper so
+   *  `loom_icu/2` resolves inside every `~H` template (D-I18N-HEEX-ICU). */
+  icuEnabled = false,
 ): string {
   const webModule = `${appModule}Web`;
   // LiveView spine: a HEEx `ui:` needs the `:live_view` / `:html` /
@@ -450,6 +475,11 @@ defmodule ${webModule} do
         // nothing, which the real compiler reports as `undefined function
         // pgettext/2` at every call site (M-T1.11).
         i18nEnabled ? `\n      use Gettext, backend: ${webModule}.Gettext` : ""
+      }${
+        // The ICU formatting step that runs over gettext's result.  Named
+        // `loom_icu/2` rather than `format/2` precisely because this import
+        // lands in every template, where a generic name would collide.
+        icuEnabled ? `\n      import ${webModule}.I18n` : ""
       }
       alias Phoenix.LiveView.JS
       unquote(verified_routes())

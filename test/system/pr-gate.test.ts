@@ -1,13 +1,26 @@
-// Pins the decision core of scripts/pr-gate.mjs — the aggregate required
-// check that substitutes for a merge queue on this personal-account repo
-// (docs/ci-gating.md).  The gate's whole claim is "any triggered red blocks,
-// path-skipped is fine, nothing-reported fails closed"; each arm below is the
-// seeded-defect proof for one clause of that claim.
+// Pins the decision core of scripts/pr-gate.mjs (v2, event-driven) — the
+// aggregate required check that substitutes for a merge queue on this
+// personal-account repo (docs/ci-gating.md).  The gate's claim is "any
+// triggered red blocks, path-skipped is fine, pending is never green, and
+// every workflow completion re-evaluates"; each arm below is the
+// seeded-defect proof for one clause.
+//
+// The second half pins pr-gate.yml's `workflow_run.workflows` list against
+// the real workflow inventory: a workflow missing from that list completes
+// WITHOUT re-evaluating the gate, so a PR can stick at in_progress until an
+// unrelated event — the v2 equivalent of v1's silent-timeout class.
 
+import { readdirSync, readFileSync } from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain-JS module without a declaration file; the runtime
 // shape is pinned by the assertions below.
-import { evaluate, runGate } from "../../scripts/pr-gate.mjs";
+import { evaluate, SELF_NAMES, verdict } from "../../scripts/pr-gate.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "../..");
+const workflowsDir = path.join(repoRoot, ".github/workflows");
 
 interface CheckRun {
   name: string;
@@ -23,136 +36,117 @@ const run = (name: string, status: string, conclusion: string | null = null): Ch
 
 const green = (name: string): CheckRun => run(name, "completed", "success");
 
-/** Drive runGate over a scripted sequence of poll snapshots; the last snapshot
- *  repeats once the script runs out (a stable end state). */
-function gateOver(snapshots: CheckRun[][], overrides: Record<string, unknown> = {}) {
-  let poll = 0;
-  return runGate({
-    listCheckRuns: () => {
-      const snap = snapshots[Math.min(poll, snapshots.length - 1)];
-      poll += 1;
-      return Promise.resolve(snap);
-    },
-    sleep: () => Promise.resolve(),
-    log: () => {},
-    selfName: "pr-gate",
-    pollMs: 1000,
-    graceMs: 2000,
-    timeoutMs: 10_000,
-    ...overrides,
-  }) as Promise<{ ok: boolean; reason: string }>;
-}
+const evalRuns = (runs: CheckRun[]) => evaluate(runs, SELF_NAMES);
 
-describe("evaluate — one snapshot's verdict", () => {
+describe("evaluate — one snapshot's classification", () => {
   it("passes success, neutral and skipped; fails failure and cancelled", () => {
-    const { failed, pending } = evaluate(
-      [
-        green("a"),
-        run("b", "completed", "neutral"),
-        run("c", "completed", "skipped"),
-        run("d", "completed", "failure"),
-        run("e", "completed", "cancelled"),
-      ],
-      "pr-gate",
-    );
+    const { failed, pending } = evalRuns([
+      green("a"),
+      run("b", "completed", "neutral"),
+      run("c", "completed", "skipped"),
+      run("d", "completed", "failure"),
+      run("e", "completed", "cancelled"),
+    ]);
     expect(pending).toEqual([]);
     expect(failed).toEqual(["d", "e"]);
   });
 
   it("fails closed on a conclusion it has never heard of", () => {
-    expect(evaluate([run("x", "completed", "some_future_conclusion")], "pr-gate").failed).toEqual([
-      "x",
-    ]);
-    expect(evaluate([run("y", "completed", null)], "pr-gate").failed).toEqual(["y"]);
+    expect(evalRuns([run("x", "completed", "some_future_conclusion")]).failed).toEqual(["x"]);
+    expect(evalRuns([run("y", "completed", null)]).failed).toEqual(["y"]);
   });
 
-  it("excludes only itself — a FAILING run named pr-gate is not self-fulfilling", () => {
-    const { total, failed } = evaluate(
-      [run("pr-gate", "completed", "failure"), green("a")],
-      "pr-gate",
-    );
+  it("excludes only its own check names — a FAILING pr-gate run is not self-fulfilling", () => {
+    // Both the API-posted check (`pr-gate`) and the eval job's own check
+    // (`pr-gate-eval`, cancelled by per-SHA concurrency collapses) must be
+    // invisible to the verdict.
+    const { total, failed } = evalRuns([
+      run("pr-gate", "completed", "failure"),
+      run("pr-gate-eval", "completed", "cancelled"),
+      green("a"),
+    ]);
     expect(total).toBe(1);
     expect(failed).toEqual([]);
   });
 
   it("reports queued and in_progress runs as pending", () => {
-    const { pending } = evaluate(
-      [run("a", "queued"), run("b", "in_progress"), green("c")],
-      "pr-gate",
-    );
+    const { pending } = evalRuns([run("a", "queued"), run("b", "in_progress"), green("c")]);
     expect(pending).toEqual(["a", "b"]);
   });
 });
 
-describe("runGate — the polling verdict", () => {
-  it("passes once every triggered check completes green (after grace, twice)", async () => {
-    const result = await gateOver([
-      [run("suite", "in_progress")],
-      [run("suite", "in_progress")],
-      [green("suite")],
-      [green("suite")],
-    ]);
-    expect(result.ok).toBe(true);
+describe("verdict — snapshot to published state", () => {
+  it("any failure wins, even while others are still pending (fail-fast)", () => {
+    const v = verdict(evalRuns([run("fast-suite", "completed", "failure"), run("slow", "queued")]));
+    expect(v.state).toBe("failure");
+    expect(v.summary).toContain("fast-suite");
   });
 
-  it("fails FAST on a red check — does not wait out the still-pending ones", async () => {
-    let polls = 0;
-    const result = await runGate({
-      listCheckRuns: () => {
-        polls += 1;
-        return Promise.resolve([run("fast-suite", "completed", "failure"), run("slow", "queued")]);
-      },
-      sleep: () => Promise.resolve(),
-      log: () => {},
-      selfName: "pr-gate",
-      pollMs: 1000,
-      graceMs: 2000,
-      timeoutMs: 10_000,
+  it("pending is BLOCKING but not failed — never green while checks run", () => {
+    const v = verdict(evalRuns([green("done"), run("still-going", "in_progress")]));
+    expect(v.state).toBe("pending");
+    expect(v.summary).toContain("still-going");
+  });
+
+  it("zero other checks reporting blocks (fail-closed), it does not pass", () => {
+    expect(verdict(evalRuns([])).state).toBe("pending");
+  });
+
+  it("all triggered checks green → success", () => {
+    const v = verdict(evalRuns([green("a"), green("b")]));
+    expect(v.state).toBe("success");
+    expect(v.summary).toContain("2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The workflow_run trigger list — pinned against the real inventory.
+// ---------------------------------------------------------------------------
+
+/** The `name:` of a workflow file (first line by repo convention). */
+function workflowName(file: string): string {
+  const m = readFileSync(path.join(workflowsDir, file), "utf8").match(/^name:\s*(.+)$/m);
+  expect(m, `${file} has no name:`).toBeTruthy();
+  return (m as RegExpMatchArray)[1].trim().replace(/^['"]|['"]$/g, "");
+}
+
+/** The quoted entries of pr-gate.yml's `workflow_run.workflows:` list. */
+function triggerList(): string[] {
+  const src = readFileSync(path.join(workflowsDir, "pr-gate.yml"), "utf8");
+  const block = src.slice(src.indexOf("workflows:"), src.indexOf("permissions:"));
+  return [...block.matchAll(/-\s*'([^']+)'/g)].map((m) => m[1]);
+}
+
+describe("pr-gate.yml re-evaluates on every other workflow's completion", () => {
+  const others = readdirSync(workflowsDir)
+    .filter((f) => f.endsWith(".yml") && f !== "pr-gate.yml")
+    .sort();
+  const listed = new Set(triggerList());
+
+  it("found the real inventory (the reader still works)", () => {
+    expect(others.length).toBeGreaterThan(40);
+    expect(listed.size).toBeGreaterThan(40);
+  });
+
+  for (const file of others) {
+    it(`${file} is in the workflow_run list`, () => {
+      const name = workflowName(file);
+      expect(
+        listed.has(name),
+        `pr-gate.yml's workflow_run.workflows is missing '${name}' (${file}).\n` +
+          "Without it, that workflow's completion never re-evaluates the gate " +
+          "and a PR waiting only on it sticks at in_progress.",
+      ).toBe(true);
     });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("fast-suite");
-    expect(polls).toBe(1);
+  }
+
+  it("lists nothing that does not exist (stale names re-evaluate nothing)", () => {
+    const real = new Set(others.map(workflowName));
+    const stale = [...listed].filter((n) => !real.has(n));
+    expect(stale, `stale workflow_run entries: ${stale.join("; ")}`).toEqual([]);
   });
 
-  it("fails closed when NO other check ever reports (Actions never picked the push up)", async () => {
-    const result = await gateOver([[]]);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("no other check ever reported");
-  });
-
-  it("a lone early all-clear poll does not pass — late-created runs are waited for", async () => {
-    // Poll 1: only the fast check exists and is already green (inside grace).
-    // Poll 2: a heavier workflow's run has appeared, still queued.  A gate that
-    // trusted the first snapshot would have passed before the real gates ran.
-    const result = await gateOver([
-      [green("fast")],
-      [green("fast"), run("heavy", "queued")],
-      [green("fast"), run("heavy", "completed", "failure")],
-    ]);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("heavy");
-  });
-
-  it("requires TWO consecutive all-clear polls, independent of the grace period", async () => {
-    // graceMs: 0 isolates the consecutive-poll defense from the grace window —
-    // with grace alone, a single-poll pass (`allClearPolls >= 1`) would survive
-    // the test above (the grace delay happens to outlast the late run's
-    // appearance).  Mutation-proved: weakening the threshold to 1 fails here.
-    const result = await gateOver(
-      [
-        [green("fast")],
-        [green("fast"), run("heavy", "queued")],
-        [green("fast"), run("heavy", "completed", "failure")],
-      ],
-      { graceMs: 0 },
-    );
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("heavy");
-  });
-
-  it("times out with the culprits named when a check never completes", async () => {
-    const result = await gateOver([[run("wedged", "in_progress")]]);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("wedged");
+  it("does not listen to itself", () => {
+    expect(listed.has(workflowName("pr-gate.yml"))).toBe(false);
   });
 });

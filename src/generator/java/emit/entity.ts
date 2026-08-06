@@ -1,4 +1,9 @@
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import {
+  createOmissionValue,
+  forCreateInput,
+  hasCreate,
+  isRequiredCreateInput,
+} from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
@@ -12,7 +17,10 @@ import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
-import { constructionSeededDefaults } from "../../_frontend/server-default.js";
+import {
+  constructionSeededDefaults,
+  isServerSourcedDefault,
+} from "../../_frontend/server-default.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import type { SourceMapSubRegion } from "../../_trace/sourcemap.js";
 import { promotedFilters, sqlRestrictionFilters } from "../capability-filter.js";
@@ -221,6 +229,20 @@ export function renderJavaEntity(
   const idClass = superType?.sharesIdentity ? `${superType.name}Id` : `${entity.name}Id`;
   const operations = isAgg(entity) ? entity.operations : [];
   const createInputFieldList = isAgg(entity) ? forCreateInput(entity.fields) : [];
+  // The declared value an omittable create input takes when the caller passes
+  // null, or undefined when the caller must supply it.  Server-sourced defaults
+  // (`now()`, `currentUser.*`) keep their existing path.
+  const javaFactoryDefault = (f: FieldIR): string | undefined => {
+    if (isRequiredCreateInput(f)) return undefined;
+    const omission = createOmissionValue(f);
+    if (omission.kind === "default") {
+      return isServerSourcedDefault(omission.expr)
+        ? undefined
+        : renderJavaExpr(omission.expr, renderCtx);
+    }
+    if (omission.kind === "false") return "false";
+    return undefined; // plain optional — already nullable
+  };
   const eventSourced = isAgg(entity) && entity.persistedAs === "eventLog";
   const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
@@ -745,12 +767,26 @@ export function renderJavaEntity(
   const createPublicLines: string[] =
     isRoot && isAgg(entity) && hasCreate(entity) && !eventSourced
       ? [
+          // Java has neither optional nor named parameters, so "the caller
+          // omitted this" is spelled `null` on a BOXED parameter — which is
+          // also exactly what the create DTO already sends for an omittable
+          // field (emit/dto.ts boxes them for the same reason).  The factory,
+          // not the service, then materializes the declared default: a default
+          // is a construction rule, and keeping it here means one site per
+          // backend owns it instead of the wire layer restating it.
           `    public static ${entity.name} create(${createInputFieldList
-            .map((f) => `${renderJavaType(f.type)} ${f.name}`)
+            .map(
+              (f) =>
+                `${renderJavaType(javaFactoryDefault(f) === undefined ? f.type : { kind: "optional", inner: f.type })} ${f.name}`,
+            )
             .join(", ")}) {`,
           `        var e = new ${entity.name}();`,
           `        e.id = ${idClass}.newId();`,
-          ...createInputFieldList.map((f) => `        e.${f.name} = ${f.name};`),
+          ...createInputFieldList.map((f) => {
+            const dflt = javaFactoryDefault(f);
+            // `!= null`, not a truthiness test: an explicit 0/""/false survives.
+            return `        e.${f.name} = ${dflt === undefined ? f.name : `${f.name} != null ? ${f.name} : ${dflt}`};`;
+          }),
           // Server-seeded literal defaults (RS-11): fields outside the create-
           // input set (`token`/`managed`/`internal`) whose default is a plain
           // constant — the `versioned` capability's `version: int token = 1` is
