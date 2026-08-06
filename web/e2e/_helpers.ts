@@ -248,6 +248,27 @@ export async function clickWorkspaceCreate(page: Page): Promise<void> {
 export async function waitForBundle(page: Page, timeout = 600_000): Promise<void> {
   const ok = page.getByText(/bundled [\d.]+ [KM]?B in \d+ ms \(\d+ deps fetched\)/);
   const failed = page.getByText(/bundle: \d+ error\(s\)/);
+
+  // FIRST: did the bundle even start?  A click that is a complete no-op —
+  // no bundling state, no result, no network — is indistinguishable from a
+  // slow bundle to the wait below, so it used to burn the whole 600s ceiling
+  // and then report "element(s) not found", which names neither the step nor
+  // the cause.  That is exactly how the `lastBundleReadyRef` race presented
+  // when it turned `main` red (see `bundle-starts.spec.ts`), and it cost far
+  // more to diagnose than it should have.  A settled result also satisfies
+  // this — a bundle fast enough to finish before we look is not a failure.
+  const bundling = page.locator('[data-testid="btn-bundle"][data-loading="true"]');
+  try {
+    await expect(bundling.or(ok).or(failed).first()).toBeVisible({ timeout: 30_000 });
+  } catch {
+    throw new Error(
+      "Bundle never started: 30s after clicking Bundle the pipeline is still " +
+        "idle — no bundling state, no result, no diagnostic.  That is a no-op " +
+        "click (the button was enabled while the action's input was missing), " +
+        "not a slow bundle.  See web/e2e/bundle-starts.spec.ts.",
+    );
+  }
+
   await expect(ok.or(failed).first()).toBeVisible({ timeout });
   if (await failed.isVisible()) {
     // Surface the worker's actual diagnostic (the auto-rendered bundle-error

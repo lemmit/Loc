@@ -173,6 +173,20 @@ export const svelteTarget: WalkerTarget = {
         argsRendered: detected.args.map(renderArg),
       };
     }
+    if (detected.kind === "projection") {
+      // `Sales.SalesTotals` → useSalesTotals().  A singleton projection read
+      // takes no arguments and no id — the projection IS the row — so there is
+      // no operation in the name, unlike an aggregate's `useAll…` / `use…ById`.
+      // Lives in the shared `$lib/api/projections` module, emitted from the
+      // same `_frontend/projections-module.ts` builder React and Vue use.
+      const proj = upperFirstName(detected.aggregateName);
+      return {
+        varName: lowerFirstName(proj),
+        hookName: `use${proj}`,
+        importFrom: "$lib/api/projections",
+        argsRendered: [],
+      };
+    }
     const aggregate = detected.aggregateName;
     const op = detected.operation;
     return {

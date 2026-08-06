@@ -104,3 +104,87 @@ round-trip, or a duplicate-React bundle. Those only fail when the code
 for. Conversely, booting a docker stack to assert a string appears in a
 file would be absurdly slow. Put each assertion at the **lowest altitude
 that can actually catch the failure**.
+
+## Running any CI gate locally — the reverse index
+
+**Every CI gate runs locally.** Do not push a commit just to see whether a
+gate passes — that burns the shared ~20-slot runner pool and turns a
+3-minute local check into an hour of queue. This table is the *reverse*
+index: given a workflow (check) name, the local command that runs the same
+thing. Prerequisites: **docker** = start the daemon first
+(`dockerd >/tmp/dockerd.log 2>&1 &`, then wait for `docker info`); **pg** =
+a Postgres on `127.0.0.1:5432` with user/password `postgres` (one
+`docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:18-alpine`
+serves every pg row below, or the suite starts its own sidecar where noted);
+**mirror** = `LOOM_HEX_MIRROR=1` when hex.pm is unreachable through the
+proxy (`docs/tools.md` → "Compiling generated backends in Docker" has the
+full per-toolchain write-ups).
+
+Completeness is pinned by `test/system/local-run-mapping.test.ts` — every
+workflow file must have a row here, so a new gate without a local recipe
+fails the fast suite.
+
+| Workflow | Local command | Needs |
+|---|---|---|
+| `test.yml` | `npm test` (shards: `-- --shard=i/4`); lint job: `npm run lint && npm run test:biome-gen && npm run test:contrast && cd web && npx tsc -b && npm run test:ddl` | — |
+| `langium-generated.yml` | `npm run langium:generate && git diff --exit-code src/language/generated` | — |
+| `workflow-lint.yml` | `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color` | docker |
+| `pr-gate.yml` | nothing to run — it aggregates the other checks; its decision core: `npx vitest run test/system/pr-gate.test.ts` | — |
+| `hono-build.yml` | `npm run test:tsc` | — |
+| `dotnet-build.yml` | `npm run test:dotnet` (no host SDK? build in `mcr.microsoft.com/dotnet/sdk:10.0`) | docker |
+| `java-build.yml` | `npm run test:java` — host JDK is too old; build in `gradle:9-jdk25` per `docs/tools.md` | docker |
+| `python-build.yml` | `npm run test:python` (uv on host) | — |
+| `elixir-vanilla-build.yml` | `LOOM_HEX_MIRROR=1 npm run test:phoenix` | docker, mirror |
+| `corpus-build.yml` | `npm run test:tsc-corpus` / `test:dotnet-corpus` / `test:java-corpus` / `test:python-corpus` (shard: `LOOM_CORPUS_<BACKEND>_CASE=<feature>`) | docker (java/dotnet) |
+| `corpus-elixir-build.yml` | `LOOM_HEX_MIRROR=1 npm run test:elixir-corpus` | docker, mirror |
+| `generated-react-build.yml` | `npm run test:tsc-react` (shard: `LOOM_REACT_BUILD_CASE=<ddd>:<pack>`) | — |
+| `generated-vue-build.yml` | `npm run test:vue-build` | — |
+| `generated-svelte-build.yml` | `npm run test:svelte-build` | — |
+| `generated-angular-build.yml` | `npm run test:angular-build` | — |
+| `generated-feliz-build.yml` | `node scripts/feliz-scaffold-smoke.mjs` (+ the other `scripts/feliz-*-smoke.mjs` scenarios; needs dotnet 10 — container works) | docker |
+| `generated-flutter-build.yml` | `flutter analyze` + `flutter build web` over generated output — Flutter SDK container recipe in `docs/tools.md` → "Compiling generated FRONTENDS locally" | docker |
+| `generated-react-e2e.yml` | `npm run test:react-e2e` (pack via `LOOM_REACT_E2E_PACK`) | — |
+| `generated-vue-e2e.yml` | `npm run test:vue-e2e` | — |
+| `generated-svelte-e2e.yml` | `npm run test:svelte-e2e` | — |
+| `generated-angular-e2e.yml` | `npm run test:angular-e2e` | — |
+| `behavioral-e2e.yml` | `cd test/behavioral && npm ci && node run.mjs` (PGlite — no docker) | — |
+| `behavioral-e2e-python.yml` | `cd test/behavioral && node run-python.mjs` | pg |
+| `behavioral-e2e-dotnet.yml` | `cd test/behavioral && node run-dotnet.mjs` | pg |
+| `behavioral-e2e-dapper.yml` | `cd test/behavioral && node run-dapper.mjs` | pg |
+| `behavioral-e2e-java.yml` | `cd test/behavioral && node run-java.mjs` | pg |
+| `behavioral-e2e-elixir.yml` | `cd test/behavioral && node run-elixir.mjs` | pg, mirror |
+| `behavioral-e2e-mikroorm.yml` | `cd test/behavioral && node run-mikroorm.mjs` | pg |
+| `behavioral-ui-e2e.yml` | `cd test/behavioral && node run-ui.mjs` | — |
+| `conformance-parity.yml` | `LOOM_E2E_STRICT_PARITY=1 npx vitest run test/e2e/e2e.test.ts` (spec-level parity, no stack boot) | — |
+| `conformance-full.yml` | `LOOM_E2E=1 npm run test:e2e` | docker |
+| `differential-report.yml` | `LOOM_DIFF_REPORT=1 npx vitest run test/e2e/e2e.test.ts` | docker |
+| `schema-load.yml` | `npm run test:schema-load` (or point `LOOM_MIGRATION_PG_URL` at a running pg) | docker |
+| `migration-evolution-e2e.yml` | `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}` | docker |
+| `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{…}` (or `LOOM_TENANCY_PG_URL`) | docker |
+| `hono-obs-e2e.yml` | `npm run test:obs` | — |
+| `dotnet-obs-e2e.yml` | `npm run test:obs-dotnet` | docker |
+| `java-obs-e2e.yml` | `npm run test:obs-java` (or `LOOM_OBS_PG_URL`) | docker |
+| `python-obs-e2e.yml` | `npm run test:obs-python` (or `LOOM_OBS_PG_URL`) | docker |
+| `elixir-vanilla-obs-e2e.yml` | `npm run test:obs-phoenix` | docker |
+| `hono-oidc-e2e.yml` | `npm run test:auth-e2e` (dockerized Keycloak) | docker |
+| `dotnet-oidc-e2e.yml` | `npm run test:auth-e2e-dotnet` | docker |
+| `java-oidc-e2e.yml` | `npm run test:auth-e2e-java` | docker |
+| `python-oidc-e2e.yml` | `npm run test:auth-e2e-python` | docker |
+| `elixir-oidc-e2e.yml` | `npm run test:auth-e2e-phoenix` | docker, mirror |
+| `auth-oidc-compose-e2e.yml` | `npm run test:auth-e2e-compose` (full generated compose stack + dev Keycloak) | docker |
+| `elixir-vanilla-vo-e2e.yml` | `LOOM_VO_E2E_PHOENIX_VANILLA=1 npx vitest run test/e2e/vo-roundtrip-elixir-vanilla.test.ts` | docker, mirror |
+| `phoenix-ui-e2e.yml` | `npm run test:phoenix-ui-e2e` | docker, mirror |
+| `api-call-e2e.yml` | `LOOM_API_CALL_CALLER=<node\|python\|dotnet\|java\|elixir> npm run test:api-call` (pg via `LOOM_API_CALL_PG_URL`; elixir caller adds mirror) | pg |
+| `channels-e2e.yml` | `npm run test:channels` family — `test:channels{,-python,-dotnet,-java,-elixir}`, `-rabbit*`, `-kafka*`, `-auth` (pg via `LOOM_CHANNELS_PG_URL`; redis/rabbit/kafka via docker) | docker, pg |
+| `email-e2e.yml` | `npm run test:email{,-python,-dotnet,-java,-elixir}` (pg + a Mailpit container: `LOOM_MAILPIT_SMTP`/`LOOM_MAILPIT_API`) | docker, pg |
+| `context-integration-e2e.yml` | `bash scripts/context-integration-e2e.sh <node\|python\|dotnet\|java\|elixir>` | pg |
+| `k8s-build.yml` | `npm run test:k8s` (helm + kubeconform on PATH) | — |
+| `k8s-e2e.yml` | `kind create cluster` then `npm run test:k8s-e2e` (kind + kubectl + helm) | docker |
+| `generated-a11y.yml` | `LOOM_A11Y_E2E=1 LOOM_A11Y_PACK=<pack> npx vitest run test/e2e/generated-a11y-e2e.test.ts` (Playwright chromium) | — |
+| `frontend-fullstack-e2e.yml` | `cd test/behavioral && node run-ui.mjs <case>` (non-React cases) | — |
+| `playground-e2e.yml` | `cd web && npm ci && npm run e2e` (network-gated: esm.sh/jsdelivr/npm) | network |
+| `playground-e2e-no-network.yml` | `cd web && npx playwright test --project=chromium <workspace/history/builder/requirements/editor specs>` + `node scripts/check-eager-chunks.mjs` | — |
+| `playground-realm-check.yml` | `cd web && npm run e2e:realm` | — |
+| `pages.yml` | `node docs/build.mjs && cd web && npm ci && npm run typecheck && npm run test:ddl && npm run e2e:smoke && npm run build` (deploy half is CI-only) | — |
+| `ci-red-alarm.yml` | CI-only housekeeping (main-red notifier) — nothing to reproduce locally | — |
+| `cleanup-artifacts.yml` | CI-only housekeeping (artifact tidy) — nothing to reproduce locally | — |

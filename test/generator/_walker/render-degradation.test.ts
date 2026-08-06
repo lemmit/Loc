@@ -97,7 +97,9 @@ const KNOWN_DEGRADATIONS: ReadonlyMap<string, string> = new Map([
  * like code.
  */
 const KNOWN_VERBATIM_INTRINSICS: ReadonlySet<string> = new Set([
-  "feliz", // S4: fs-expr.ts HAS the F# table, wired only to the action path
+  // `feliz` was retired here by the F# table in `fs-expr.ts`
+  // (`FS_INTRINSIC_RENDERERS` + `renderFsIntrinsic`), wired into BOTH the view
+  // path (`felizTarget.renderIntrinsic`) and the MVU update path.
   "flutter", // S4: DART_LEAVES has no intrinsic table
   "phoenixLiveView", // S4: heex-walker-core.ts renders collection ops, not intrinsics
 ]);

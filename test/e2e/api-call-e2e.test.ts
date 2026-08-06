@@ -93,6 +93,11 @@ interface CallerSpec {
   boot(cwd: string, port: number, pg: Pg, ordersUrl: string): BootSpec;
   /** Boot budget.  A JIT/JVM/BEAM cold start in a container is not a node boot. */
   readonly readyMs: number;
+  /** Set on the legs that build INSIDE a container.  Those builds run as root
+   *  on a bind mount, so `.gradle/`, `obj/` and `_build/` come back owned by
+   *  root and the host user cannot remove them — teardown needs to hand them
+   *  back first, and it does so in this image (already pulled by this leg). */
+  readonly image?: string;
 }
 
 /** Package caches, mounted into BOTH the install and the boot container.
@@ -210,6 +215,7 @@ const CALLERS: Record<string, CallerSpec> = {
         ["-v", `${cacheDir("dotnet", "nuget")}:/root/.nuget`],
       ),
     readyMs: 300_000,
+    image: DOTNET_IMAGE,
   },
   java: {
     // `--no-daemon`: a Gradle daemon would outlive the container's foreground
@@ -236,6 +242,7 @@ const CALLERS: Record<string, CallerSpec> = {
         ["-v", `${cacheDir("java", "gradle")}:/home/gradle/.gradle`, "-e", "JAVA_TOOL_OPTIONS"],
       ),
     readyMs: 420_000,
+    image: JAVA_IMAGE,
   },
   elixir: {
     // `mix deps.get` needs hex.pm, which some egress proxies reject for
@@ -270,6 +277,7 @@ const CALLERS: Record<string, CallerSpec> = {
         ],
       ),
     readyMs: 420_000,
+    image: ELIXIR_IMAGE,
   },
 };
 
@@ -354,6 +362,39 @@ const PG_PORT = 55434;
 
 function sh(cmd: string, cwd?: string): string {
   return execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/** Remove the scratch tree, coping with root-owned build artefacts.
+ *
+ *  The dockerised legs build on a bind mount as root, so `.gradle/9.6.1`,
+ *  `obj/` and `_build/dev` come back owned by root: `rmSync` then throws
+ *  EACCES no matter how `force` is spelled, and — because this runs in
+ *  `afterAll` — vitest fails the SUITE after every assertion has already
+ *  passed.  That is exactly how this gate sat red on 100% of main pushes
+ *  while reporting `5 passed`.  Hand ownership back in the image the leg
+ *  already pulled, then retry; a leaked temp dir is a warning, never a
+ *  red gate. */
+function removeTree(target: string, image?: string): void {
+  try {
+    rmSync(target, { recursive: true, force: true });
+    return;
+  } catch {
+    /* root-owned leftovers from a container build — fall through */
+  }
+  if (image) {
+    const uid = process.getuid?.() ?? 0;
+    const gid = process.getgid?.() ?? 0;
+    try {
+      sh(`docker run --rm -v "${target}":/target ${image} chown -R ${uid}:${gid} /target`);
+    } catch {
+      /* best effort: still try the remove below */
+    }
+  }
+  try {
+    rmSync(target, { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`[api-call-e2e] could not remove ${target}: ${String(err)}`);
+  }
 }
 
 async function waitFor(check: () => Promise<boolean>, ms: number, what: string): Promise<void> {
@@ -495,7 +536,7 @@ describe.skipIf(!ENABLED)(`typed in-system api call (api-call-e2e, caller=${CALL
         /* already gone */
       }
     }
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (dir) removeTree(dir, CALLERS[CALLER]?.image);
   }, 60_000);
 
   const tail = (app: string): string => {
