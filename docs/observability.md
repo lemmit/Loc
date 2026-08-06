@@ -361,9 +361,14 @@ not enabled.
 Prerequisites:
 - **Hono**: Node only — runs in pure Node, no sidecar required (the
   generated pg pool is lazy).
-- **.NET**: docker (for the postgres sidecar) + `dotnet` SDK 8+.
+- **.NET**: docker (for the postgres sidecar) + the `net10.0` SDK — not on
+  the sandbox host, so build in `mcr.microsoft.com/dotnet/sdk:10.0` (see
+  [`tools.md`](tools.md#compiling-generated-backends-in-docker), including
+  the proxy-CA step NuGet needs).
 - **Phoenix**: docker + `mix` + Erlang/OTP.
-- **Java**: docker (for the postgres sidecar) + JDK 21 + Gradle.
+- **Java**: docker (for the postgres sidecar) + a **Java 25** toolchain with
+  Gradle 9.1+ — the sandbox host's JDK 21 / Gradle 8.14 cannot build the
+  emitted project; use `gradle:9-jdk25`.
 - **Python**: docker (for the postgres sidecar) + `uv`.
 
 When the env var is set but a prereq is missing, the suite **fails
