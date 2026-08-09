@@ -104,7 +104,11 @@ const KNOWN_VERBATIM_INTRINSICS: ReadonlySet<string> = new Set([
   // (`DART_INTRINSIC_RENDERERS` + `renderDartIntrinsic`) — Flutter has only
   // ONE dispatch path (view and Notifier/action bodies both route through the
   // shared `emitExpr`), so one seam (`flutterTarget.renderIntrinsic`) covers both.
-  "phoenixLiveView", // S4: heex-walker-core.ts renders collection ops, not intrinsics
+  // `phoenixLiveView` was retired here by reusing the domain-side
+  // `ELIXIR_INTRINSIC_RENDERERS` table (`render-expr.ts`) directly in
+  // `heex-walker-core.ts`'s `renderMethodCall` — HEEx page bodies always
+  // render in-memory (never an Ecto query filter), so the plain `String.*`/
+  // `Decimal.*` arm is the only one a page body ever needs.
 ]);
 
 async function generateFor(framework: string, platform: string): Promise<Map<string, string>> {
