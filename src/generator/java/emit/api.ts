@@ -11,6 +11,7 @@ import {
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import {
@@ -582,6 +583,14 @@ export function renderApiExceptionAdvice(
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralErrorStatuses);
   const referencedInUseStatus = resolveErrorStatus("ReferencedInUse", structuralErrorStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
+  // M-T5.20 — the domain floor and the `requires` denial resolve through the
+  // same `httpStatus` map as the structural conflicts above, instead of the
+  // hardcoded 422 / 403 literals they used to be. Defaults collapse to those
+  // same literals, so output is byte-identical with no override.
+  const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
+  const domainTitle = problemTitle(domainStatus);
+  const forbiddenTitle = problemTitle(forbiddenStatus);
   return lines(
     `package ${basePkg}.api;`,
     ``,
@@ -644,22 +653,23 @@ export function renderApiExceptionAdvice(
     ``,
     `    @ExceptionHandler(ForbiddenException.class)`,
     `    public ResponseEntity<ProblemDetail> onForbidden(ForbiddenException e, WebRequest request) {`,
-    `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", 403);`,
+    `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", ${forbiddenStatus});`,
     `        httpMetrics.recordDomainFault("forbidden");`,
-    `        return respond(problem(403, "Forbidden", e.getMessage(), request), 403);`,
+    `        return respond(problem(${forbiddenStatus}, "${forbiddenTitle}", e.getMessage(), request), ${forbiddenStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(DomainException.class)`,
     `    public ResponseEntity<ProblemDetail> onDomain(DomainException e, WebRequest request) {`,
     // RS-15 (owner decision, 2026-07-29): a domain-floor rejection — a tripped
-    // `precondition`, a violated `invariant` — is 422, not 400.  The request is
-    // well-formed; the domain refuses it on SEMANTIC grounds, which is what RFC
-    // 9110 reserves 422 for.  400 stays for a malformed/unparseable request.
-    // 422 was already a declared response here (MethodArgumentNotValid), so the
-    // published contract does not move.
-    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 422);`,
+    // `precondition`, a violated `invariant` — is 422 by DEFAULT.  The request
+    // is well-formed; the domain refuses it on SEMANTIC grounds, which is what
+    // RFC 9110 reserves 422 for.  400 stays for a malformed/unparseable
+    // request.  M-T5.20 makes the rung remappable via `httpStatus DomainError
+    // -> <Code>`, resolved through the SAME map every structural conflict
+    // uses, so the runtime arm and its OpenAPI declaration can't drift.
+    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", ${domainStatus});`,
     `        httpMetrics.recordDomainFault("domain_error");`,
-    `        return respond(problem(422, "Unprocessable Entity", e.getMessage(), request), 422);`,
+    `        return respond(problem(${domainStatus}, "${domainTitle}", e.getMessage(), request), ${domainStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,

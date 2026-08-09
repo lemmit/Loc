@@ -28,7 +28,7 @@ import {
   problemTitle,
 } from "../../../ir/util/openapi-errors.js";
 import { lines } from "../../../util/code-builder.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
 import { isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";

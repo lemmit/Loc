@@ -57,7 +57,6 @@ import {
   aggregateUsesMoneyDeep,
   findGateUsesCurrentUser,
   findUsesCurrentUser,
-  operationIsGuarded,
   operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import {
@@ -74,6 +73,7 @@ import {
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opCreate,
@@ -1093,15 +1093,28 @@ export function buildRoutesFile(
   const disallowedStatus = resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", ctx.structuralErrorStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", ctx.structuralErrorStatuses);
+  // M-T5.20 — the domain floor and the `requires` denial resolve through the
+  // api's `httpStatus` map exactly like the structural conflicts above,
+  // instead of the hardcoded 422 / 403 literals they used to be. Defaults
+  // collapse to those same literals, so output is byte-identical with no
+  // override. `denialOverridesFor`-equivalent merge: neither rung has a
+  // per-context tag (both surface in this app-global handler), so both maps
+  // are read — `errorStatusOverrides` for a directly-declared name,
+  // `structuralErrorStatuses` for the app-wide fold M-T5.20 widened to carry
+  // every mapped name, not just the four structural conflicts.
+  const domainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
   // The status literals this router's `problem()` helper is actually called
   // with — the always-present base set plus each structural-conflict status
   // whose arm is emitted (gated exactly as the arms below). With no override
   // every conflict is 409, so the union stays `403 | 404 | 409 | 422 | 500`.
-  // NOTE the domain floor is **422**, not 400 (RS-15) — this handler emits no
-  // 400 at all, so the literal must not be in the union either: an unused
-  // member would let a future `problem(400, …)` typecheck against a status the
-  // route never declares.
-  const emittedProblemStatuses = new Set<number>([403, 404, 422, 500, disallowedStatus]);
+  const emittedProblemStatuses = new Set<number>([
+    forbiddenStatus,
+    404,
+    domainStatus,
+    500,
+    disallowedStatus,
+  ]);
   if ((agg.uniqueKeys?.length ?? 0) > 0) emittedProblemStatuses.add(uniquenessStatus);
   if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg))
     emittedProblemStatuses.add(concurrencyStatus);
@@ -1138,10 +1151,12 @@ export function buildRoutesFile(
   );
   lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
-    `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
+    `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: ${forbiddenStatus}`)}`,
   );
   lines.push(`      recordDomainFault("forbidden");`);
-  lines.push(`      return problem(403, "Forbidden", err.message);`);
+  lines.push(
+    `      return problem(${forbiddenStatus}, ${JSON.stringify(problemTitle(forbiddenStatus))}, err.message);`,
+  );
   lines.push(`    }`);
   lines.push(`    if (err instanceof DisallowedError) {`);
   lines.push(
@@ -1152,10 +1167,12 @@ export function buildRoutesFile(
   lines.push(`    }`);
   lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
-    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 422`)}`,
+    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: ${domainStatus}`)}`,
   );
   lines.push(`      recordDomainFault("domain_error");`);
-  lines.push(`      return problem(422, "Unprocessable Entity", err.message);`);
+  lines.push(
+    `      return problem(${domainStatus}, ${JSON.stringify(problemTitle(domainStatus))}, err.message);`,
+  );
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
