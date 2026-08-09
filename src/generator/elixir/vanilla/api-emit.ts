@@ -57,11 +57,12 @@ import {
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isVanillaDocAgg } from "./document-emit.js";
+import { denialOverrides } from "./denial.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { findRoutes, renderFindActions } from "./find-controller.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
-  GUARD_RESCUE,
+  guardRescue,
   isReturningOperation,
   opHasGuards,
   opHasWhenGate,
@@ -481,7 +482,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)${denialArms}
     end
-${GUARD_RESCUE}
+${guardRescue(denialOverrides(ctx))}
   end`;
     })
     .join("\n");
