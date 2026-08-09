@@ -59,9 +59,12 @@ describe("python VO invariant → 422 at the wire", () => {
     expect(wm).toContain('    @model_validator(mode="after")');
     expect(wm).toContain("        if not (self.lo < self.hi):");
     // A messaged rule carries the author text via PydanticCustomError (its
-    // stable `type` surfaces as errors[].code — the i18n key).
+    // stable `type` surfaces as errors[].code — the i18n key) plus the field's
+    // `loc`, which only `ValidationError.from_exception_data` can supply from a
+    // `model_validator` (M-T1.11) — so `errors[].pointer` names the field.
     expect(wm).toContain('"lo must be below hi"');
-    expect(wm).toContain("from pydantic_core import PydanticCustomError");
+    expect(wm).toContain("from pydantic_core import InitErrorDetails, PydanticCustomError");
+    expect(wm).toContain('loc=("lo",),');
   });
 
   it("a VO with no invariants stays byte-identical (fields only, BaseModel only)", async () => {
