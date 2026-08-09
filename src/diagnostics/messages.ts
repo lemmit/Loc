@@ -1298,18 +1298,20 @@ export const DIAGNOSTIC_MESSAGES = {
     `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
   "loom.chart-unsupported-target": (p: { what: unknown; name: unknown; uiFramework: unknown }) =>
     `${p.what} uses 'Chart', which deployable '${p.name}' can't render ` +
-    `(frontend '${p.uiFramework}'). Chart ships on react — on every ` +
-    `react design pack. Host this ui on a react deployable, or bind the grouped ` +
-    `projection to 'Table' — it renders the same rows on every frontend.`,
+    `(frontend '${p.uiFramework}'). Chart ships on react (on every react design pack) and on ` +
+    `phoenixLiveView (server-rendered inline SVG). Host this ui on one of those, or bind the ` +
+    `grouped projection to 'Table' — it renders the same rows on every frontend.`,
   "loom.ui-projection-read-unsupported#frontend-has-no-client": (p: {
     what: unknown;
     name: unknown;
     dName: unknown;
     fw: unknown;
+    frameworks: unknown;
   }) =>
     `${p.what} reads projection '${p.name}', which deployable '${p.dName}' can't render ` +
-    `(frontend '${p.fw}' generates no projection client). Projection reads ` +
-    `ship on react today; host this ui there, or read the source aggregate directly.`,
+    `(frontend '${p.fw}' generates no projection read). Projection reads ` +
+    `ship on ${p.frameworks}; host this ui on one of those, or read the source ` +
+    `aggregate directly.`,
   "loom.auth-ui-unsupported-framework": (p: { name: unknown; uiFramework: unknown }) =>
     `Deployable '${p.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${p.uiFramework}' isn't supported yet.`,
   "loom.ui-realtime-unsupported#backend-serves-no-sse": (p: {

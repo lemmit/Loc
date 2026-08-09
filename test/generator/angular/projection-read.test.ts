@@ -202,3 +202,44 @@ describe("angular projection read in a page", () => {
     expect(await dashPage()).toContain("formatMoney(salesTotals.data()!.revenue)");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The LIST-shaped read on the fork.
+//
+// Angular's projections module has NO `.parse` boundary (see the header): the
+// `HttpClient` generic IS the whole contract, so getting the response type
+// wrong is not a runtime surprise but a build break — the walker binds a
+// list-shaped read with the collection arms (`.length`), which do not exist on
+// the single-row interface the service used to declare for every projection.
+// ---------------------------------------------------------------------------
+
+const LIST_SHAPED = SRC.replace(
+  "      projection SalesTotals {",
+  `      projection SalesByStatus {
+        status: OrderStatus
+        orderCount: int
+        from Order as o
+        group by o.status
+        select status = o.status, orderCount = count()
+      }
+      projection SalesTotals {`,
+).replace(
+  `        QueryView {
+          of: Sales.SalesTotals,`,
+  `        QueryView {
+          of: Sales.SalesByStatus,
+          empty: Text { "No rows" },
+          data: rows => Table(Column("Status", o => o.status), rows: rows)
+        },
+        QueryView {
+          of: Sales.SalesTotals,`,
+);
+
+describe("angular projection client — the response type follows the read shape", () => {
+  it("types a grouped read as an ARRAY of rows", async () => {
+    const m = (await files(LIST_SHAPED)).get("src/api/projections.ts")!;
+    expect(m).toContain("this.http.get<SalesByStatusRow[]>(");
+    // The whole-table aggregation on the same system stays one row.
+    expect(m).toContain("this.http.get<SalesTotalsRow>(");
+  });
+});

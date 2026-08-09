@@ -160,3 +160,50 @@ describe("Stat with a nested display primitive", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// The SHORTHAND projection's response shape.
+//
+// `projection BigOrders { from Order as o where Confirmed }` — no declared row
+// fields, no `select` — returns the filtered SOURCE ROWS: a JSON array whose
+// element shape is the source aggregate's own wire shape.  It is UNKEYED, so
+// `isSingletonProjection` answers true, and the client's array-vs-object
+// decision used to be made from `isGroupedProjection` alone.  Result: a
+// `z.object` client for a route that returns an array — a `.parse` that throws
+// on the first load, on every frontend, from a model with no diagnostic at all.
+//
+// The fix moved the question to `projectionReadShape`, which asks "is this the
+// whole-table aggregation" rather than "is this grouped".
+// ---------------------------------------------------------------------------
+
+const SHORTHAND = SRC.replace(
+  "      projection SalesTotals {",
+  `      projection BigOrders { from Order as o where Confirmed }
+      projection SalesTotals {`,
+).replace(
+  `        QueryView {
+          of: Sales.SalesTotals,`,
+  `        QueryView {
+          of: Sales.BigOrders,
+          empty: Text { "No big orders" },
+          data: rows => Table(Column("Code", o => o.code), rows: rows)
+        },
+        QueryView {
+          of: Sales.SalesTotals,`,
+);
+
+describe("shorthand projection client", () => {
+  it("wraps the row in z.array — the shorthand read returns the source ROWS", async () => {
+    const m = (await files(SHORTHAND)).get("src/api/projections.ts")!;
+    expect(m).toContain("export const BigOrdersRow = z.object({");
+    expect(m).toContain("export const BigOrdersResponse = z.array(BigOrdersRow);");
+    // The whole-table aggregation on the same system stays the bare object.
+    expect(m).toContain("export const SalesTotalsResponse = z.object({");
+  });
+
+  it("binds it with the COLLECTION arms, not the singleton object check", async () => {
+    const page = (await files(SHORTHAND)).get("src/pages/dash.tsx")!;
+    expect(page).toContain("bigOrders.data.length === 0");
+    expect(page).not.toContain("bigOrders.data.orders");
+  });
+});

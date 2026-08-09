@@ -1,4 +1,5 @@
 import type { BoundedContextIR } from "../../ir/types/loom-ir.js";
+import { projectionReadShape } from "../../ir/util/projection-read.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { readableProjections } from "../_frontend/projections-module.js";
@@ -76,12 +77,18 @@ export function buildAngularProjectionsModule(contexts: BoundedContextIR[]): str
   out.push(`export class ProjectionsService {`);
   out.push("  private readonly http = inject(HttpClient);");
   for (const { proj } of projections) {
-    // A singleton read takes no id and no query params — the projection IS the
+    // A projection read takes no id and no query params — the projection IS the
     // row — so the method is nullary, unlike the aggregate services' `byId`.
+    // The RESPONSE TYPE follows `projectionReadShape`: a whole-table
+    // aggregation returns one row, a grouped or shorthand read an array.  There
+    // is no `.parse` boundary on this fork (see the header), so the generic IS
+    // the whole contract — typing an array read as one object hands the walker
+    // a `.map` over a non-array and fails `ng build`.
+    const rowType = `${upperFirst(proj.name)}Row${projectionReadShape(proj) === "many" ? "[]" : ""}`;
     out.push("");
     out.push(`  ${lowerFirst(proj.name)}() {`);
     out.push(
-      `    return this.http.get<${upperFirst(proj.name)}Row>(\`\${API_BASE_URL}/projections/${snake(proj.name)}\`);`,
+      `    return this.http.get<${rowType}>(\`\${API_BASE_URL}/projections/${snake(proj.name)}\`);`,
     );
     out.push("  }");
   }
@@ -91,7 +98,9 @@ export function buildAngularProjectionsModule(contexts: BoundedContextIR[]): str
   for (const { proj } of projections) {
     const T = upperFirst(proj.name);
     out.push(
-      `/** \`${proj.name}\` singleton projection read — one row, no arguments. */`,
+      `/** \`${proj.name}\` projection read — ${
+        projectionReadShape(proj) === "many" ? "one row per group" : "one row"
+      }, no arguments. */`,
       `export function use${T}() {`,
       "  const service = inject(ProjectionsService);",
       "  return injectQuery(() => ({",
