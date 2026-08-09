@@ -24,6 +24,7 @@
 // relational table).
 // ---------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import { snake } from "../../../util/naming.js";
 import type {
   EnrichedAggregateIR,
@@ -123,9 +124,7 @@ export function validateIndexSuggestions(sys: EnrichedSystemIR, diags: LoomDiagn
           diags.push({
             severity: "warning",
             code: "loom.index-suggestion",
-            message:
-              `'${agg.name}.${f.name}' is read on a query filter but has no index. ` +
-              `Consider ${where}.`,
+            message: diagMessage("loom.index-suggestion", { name: agg.name, fName: f.name, where }),
             source: `${ctx.name}/${agg.name}`,
           });
         }

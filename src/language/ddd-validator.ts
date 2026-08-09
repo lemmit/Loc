@@ -12,6 +12,7 @@ import {
   type ValidationAcceptor,
   type ValidationChecks,
 } from "langium";
+import { diagMessage } from "../diagnostics/messages.js";
 import type { DddServices } from "./ddd-module.js";
 import type {
   Api,
@@ -128,7 +129,7 @@ export function runChecked(
     const message = err instanceof Error ? err.message : String(err);
     accept(
       "error",
-      `Validator check '${name}' crashed and was skipped; the remaining checks still ran. (${oneLine(message)})`,
+      diagMessage("loom.validator-check-crashed", { name, message: oneLine(message) }),
       { node, code: "loom.validator-check-crashed" },
     );
     console.error(`[loom] validator check '${name}' threw:`, err);
@@ -428,11 +429,10 @@ export class DddValidator {
         const authBlocks = sysMembers.filter((sm) => sm.$type === "AuthBlock") as AuthBlock[];
         if (authBlocks.length > 1) {
           for (const ab of authBlocks.slice(1)) {
-            accept(
-              "error",
-              `system '${m.name}' declares more than one 'auth { ... }' block; keep just the first.`,
-              { node: ab, code: "loom.duplicate-auth-block" },
-            );
+            accept("error", diagMessage("loom.duplicate-auth-block", { name: m.name }), {
+              node: ab,
+              code: "loom.duplicate-auth-block",
+            });
           }
         }
         for (const ab of authBlocks) guard("auth-block", ab, () => checkAuthBlock(ab, m, accept));
@@ -505,7 +505,12 @@ export class DddValidator {
           } else if (prior !== style) {
             accept(
               "warning",
-              `api '${api.name}' sets urlStyle '${style}' on subdomain '${sub}', which another api already surfaces as '${prior}'.  The first-declared style ('${prior}') wins; route slugs use it.`,
+              diagMessage("loom.subdomain-conflicting-urlstyle", {
+                name: api.name,
+                style,
+                sub,
+                prior,
+              }),
               { node: api, property: "urlStyle", code: "loom.subdomain-conflicting-urlstyle" },
             );
           }

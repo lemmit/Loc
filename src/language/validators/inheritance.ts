@@ -10,6 +10,7 @@
 // the meantime.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { Aggregate, IdType, Model, Repository } from "../generated/ast.js";
 import {
   isAggregate,
@@ -44,7 +45,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     // error, not ours — `base` is undefined and we stay quiet.)
     if (agg.superType && base) {
       if (base === agg) {
-        accept("error", `Aggregate '${agg.name}' cannot extend itself.`, {
+        accept("error", diagMessage("loom.extends-self", { name: agg.name }), {
           node: agg,
           property: "superType",
           code: "loom.extends-self",
@@ -52,8 +53,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       } else if (!base.isAbstract) {
         accept(
           "error",
-          `Aggregate '${agg.name}' extends '${base.name}', which is not abstract. ` +
-            `Only an 'abstract aggregate' may be extended.`,
+          diagMessage("loom.extends-non-abstract", { name: agg.name, baseName: base.name }),
           { node: agg, property: "superType", code: "loom.extends-non-abstract" },
         );
       }
@@ -65,8 +65,10 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     if (agg.inheritanceUsing && !agg.isAbstract && !agg.superType) {
       accept(
         "error",
-        `'inheritanceUsing(${agg.inheritanceUsing})' is only valid on an 'abstract' base ` +
-          `or an 'extends' subtype; '${agg.name}' is neither.`,
+        diagMessage("loom.inheritance-modifier-misplaced", {
+          inheritanceUsing: agg.inheritanceUsing,
+          name: agg.name,
+        }),
         { node: agg, property: "inheritanceUsing", code: "loom.inheritance-modifier-misplaced" },
       );
     }
@@ -79,13 +81,10 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       for (const m of agg.members) {
         if (isCreate(m) || isDestroy(m) || isOperation(m)) {
           const kw = isCreate(m) ? "create" : isDestroy(m) ? "destroy" : "operation";
-          accept(
-            "error",
-            `Abstract aggregate '${agg.name}' cannot declare a '${kw}' action — abstract ` +
-              `bases are never instantiated and have no polymorphic dispatch in v1. ` +
-              `Declare it on each concrete subtype.`,
-            { node: m, code: "loom.abstract-aggregate-behavior" },
-          );
+          accept("error", diagMessage("loom.abstract-aggregate-behavior", { name: agg.name, kw }), {
+            node: m,
+            code: "loom.abstract-aggregate-behavior",
+          });
         }
       }
     }
@@ -102,9 +101,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
         const why = agg.persistedAs === "eventLog" ? "persistedAs: eventLog" : "shape: document";
         accept(
           "error",
-          `'${agg.name}' is ${why} but extends the sharedTable (TPH) base '${base.name}'. ` +
-            `An event-sourced / document concrete cannot share the base table — declare ` +
-            `'inheritanceUsing: ownTable' on '${agg.name}' (D-ES-TPH).`,
+          diagMessage("loom.es-tph-forced-own-table", { name: agg.name, why, baseName: base.name }),
           {
             node: agg,
             property: agg.inheritanceUsing ? "inheritanceUsing" : "name",
@@ -133,12 +130,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       if (baseLayout === "sharedTable" && agg.inheritanceUsing === "ownTable" && !forcesOwn) {
         accept(
           "error",
-          `'${agg.name}' declares inheritanceUsing: ownTable under the sharedTable (TPH) base ` +
-            `'${base.name}' — a per-concrete storage override (mixed strategy) is not supported ` +
-            `yet. The override concrete would live in its own table, outside the shared one, so ` +
-            `'find all ${base.name}' and polymorphic '${base.name} id' references can't see it. ` +
-            `Make '${agg.name}' sharedTable to keep the whole hierarchy in one table, or make ` +
-            `the entire hierarchy ownTable (TPC).`,
+          diagMessage("loom.tph-own-override-unsupported", { name: agg.name, baseName: base.name }),
           { node: agg, property: "inheritanceUsing", code: "loom.tph-own-override-unsupported" },
         );
       }
@@ -179,9 +171,10 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
             const names = cycle.map((a) => a.name);
             accept(
               "error",
-              `Aggregate '${names[0]}' is part of an 'extends' cycle: ` +
-                `${[...names, names[0]].join(" → ")}. Inheritance must form a chain, not a loop — ` +
-                `break the cycle so one abstract base sits at the top.`,
+              diagMessage("loom.extends-cycle", {
+                names: names[0],
+                names2: [...names, names[0]].join(" → "),
+              }),
               { node: cycle[0], property: "superType", code: "loom.extends-cycle" },
             );
           }
@@ -202,8 +195,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     if (target?.isAbstract) {
       accept(
         "error",
-        `'repository ${repo.name} for ${target.name}': '${target.name}' is an abstract ` +
-          `aggregate and has no repository of its own. Repositories belong to concrete subtypes.`,
+        diagMessage("loom.abstract-repository", { name: repo.name, targetName: target.name }),
         { node: repo, property: "aggregate", code: "loom.abstract-repository" },
       );
     }
@@ -232,15 +224,11 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     if (!isAggregate(base) || !base.isAbstract) continue;
     const baseLayout = base.inheritanceUsing ?? DEFAULT_LAYOUT;
     if (baseLayout === "ownTable") {
-      accept(
-        "error",
-        `'${base.name} id' references the abstract base '${base.name}', which uses ` +
-          `inheritanceUsing: ownTable (TPC) — there is no single table to key against, so the ` +
-          `foreign-key target is ambiguous across the per-concrete tables. Reference a concrete ` +
-          `subtype's id (e.g. 'Customer id'), or change '${base.name}' to ` +
-          `inheritanceUsing: sharedTable (TPH) to allow polymorphic references.`,
-        { node: idType, property: "target", code: "loom.polymorphic-id-ref-unsupported" },
-      );
+      accept("error", diagMessage("loom.polymorphic-id-ref-unsupported", { name: base.name }), {
+        node: idType,
+        property: "target",
+        code: "loom.polymorphic-id-ref-unsupported",
+      });
       continue;
     }
     // sharedTable base: reject if any concrete overrides to `ownTable`.  The
@@ -254,11 +242,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       const names = ownSiblings.map((a) => `'${a.name}'`).join(", ");
       accept(
         "error",
-        `'${base.name} id' references the abstract base '${base.name}', but its hierarchy mixes ` +
-          `storage strategies: ${names} override(s) to inheritanceUsing: ownTable and live in a ` +
-          `separate table, so a polymorphic '${base.name} id' would silently miss them. Reference ` +
-          `a concrete subtype's id instead, or make every concrete sharedTable (TPH) so the ` +
-          `whole hierarchy shares one table.`,
+        diagMessage("loom.polymorphic-id-ref-mixed-strategy", { name: base.name, names }),
         { node: idType, property: "target", code: "loom.polymorphic-id-ref-mixed-strategy" },
       );
     }

@@ -30,6 +30,7 @@
 // scope — a store action can't see page state — so it needs no code).
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type { EnrichedLoomModel, StmtIR, StoreIR } from "../../types/loom-ir.js";
 import { classifyFelizAsyncEffect } from "../../util/feliz-async-effect.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -91,10 +92,11 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
               diags.push({
                 severity: "error",
                 code: "loom.store-url-field-unsupported",
-                message:
-                  `${where}: field '${f.name}' (${k}) cannot be URL-synced — ` +
-                  `\`persist: url\` fields must be scalar (string/number/bool/enum/id). ` +
-                  `Use \`persist: local\` for structural state.`,
+                message: diagMessage("loom.store-url-field-unsupported", {
+                  where,
+                  name: f.name,
+                  k,
+                }),
                 source: where,
               });
             }
@@ -113,10 +115,11 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
               diags.push({
                 severity: "error",
                 code: "loom.store-action-view-effect",
-                message:
-                  `${where} action '${action.name}': \`${s.name}(…)\` is a view-scoped effect — ` +
-                  `a store has no router/socket to ${s.name} on.  Move it to the calling page's ` +
-                  `action (the page owns navigation; the store action only mutates state).`,
+                message: diagMessage("loom.store-action-view-effect", {
+                  where,
+                  name: action.name,
+                  sName: s.name,
+                }),
                 source: where,
               });
             }
@@ -153,9 +156,10 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
             diags.push({
               severity: "error",
               code: "loom.store-action-cycle",
-              message:
-                `store action '${node}' is part of a call cycle (${[...path, node].join(" → ")}) — ` +
-                `store actions must compose acyclically so each store's update reduction terminates.`,
+              message: diagMessage("loom.store-action-cycle", {
+                node,
+                path: [...path, node].join(" → "),
+              }),
               source: node,
             });
           }
@@ -188,10 +192,12 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
               diags.push({
                 severity: "error",
                 code: "loom.store-state-inline-write",
-                message:
-                  `${surfaceWhere} action '${action.name}': cannot write store state inline ` +
-                  `(\`${storeSeg}.${fieldSeg} := …\`).  Store state changes only inside a store ` +
-                  `action — add an \`action\` to \`store ${storeSeg}\` and call it (\`${storeSeg}.<action>()\`).`,
+                message: diagMessage("loom.store-state-inline-write", {
+                  surfaceWhere,
+                  name: action.name,
+                  storeSeg,
+                  fieldSeg,
+                }),
                 source: surfaceWhere,
               });
             }
@@ -234,11 +240,10 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
             diags.push({
               severity: "error",
               code: "loom.store-lifetime-liveview-unsupported",
-              message:
-                `${where}: \`persist: ${lifetimeKeyword(store.lifetime)}\` is not supported on the ` +
-                `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
-                `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
-                `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
+              message: diagMessage("loom.store-lifetime-liveview-unsupported", {
+                where,
+                lifetime: lifetimeKeyword(store.lifetime),
+              }),
               source: where,
             });
           }
@@ -254,12 +259,13 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
                 diags.push({
                   severity: "error",
                   code: "loom.store-cross-store-on-liveview-unsupported",
-                  message:
-                    `${where}: calls \`${s.store}.${s.name}(…)\`, a DIFFERENT store's action, ` +
-                    `on the phoenixLiveView frontend.  A LiveView store action is a pure struct ` +
-                    `transform over its OWN store's per-page assign and can't reach store ` +
-                    `'${s.store}'.  Move the cross-store coordination to the calling page's action ` +
-                    `(call \`${store.name}.${action.name}()\` then \`${s.store}.${s.name}()\` from the page).`,
+                  message: diagMessage("loom.store-cross-store-on-liveview-unsupported", {
+                    where,
+                    store: s.store,
+                    name: s.name,
+                    storeName: store.name,
+                    actionName: action.name,
+                  }),
                   source: where,
                 });
               }
@@ -355,14 +361,12 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
               diags.push({
                 severity: "error",
                 code: "loom.feliz-async-effect-unsupported",
-                message:
-                  `${where}: \`match await …\` (an async effect) is used on ui '${uiName}', hosted by ` +
-                  `the Feliz (F#/Fable) deployable '${dep.name}', but this shape is not rendered on the ` +
-                  `Feliz frontend yet — ${reason}.  Supported in a PAGE action: \`match await ` +
-                  `<api>.<Agg>.<op>(args?) { <Variant> b => … … else? => … }\` — an aggregate instance op ` +
-                  `(with or without params), one or more named success/error arms, and an optional ` +
-                  `\`else\`.  Otherwise host this ui on an SPA frontend (React/Vue/Svelte/Angular), or ` +
-                  `drive the op through a form primitive (CreateForm/OperationForm).  Tracked in M-T6.15.`,
+                message: diagMessage("loom.feliz-async-effect-unsupported", {
+                  where,
+                  uiName,
+                  name: dep.name,
+                  reason,
+                }),
                 source: where,
               });
             });

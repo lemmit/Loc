@@ -14,6 +14,7 @@
 //   loom.duration-arg-type       — the amount must be int-typed
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { durationUnitOf } from "../../util/temporal.js";
 import type { Model, PostfixChain } from "../generated/ast.js";
 import { isCallSuffix, isNameRef, isPostfixChain } from "../generated/ast.js";
@@ -44,7 +45,7 @@ export function checkDurationConstructors(model: Model, accept: ValidationAccept
 
     // Arity: exactly one positional argument.
     if (first.args.length !== 1 || first.args[0]!.name) {
-      accept("error", `'${unit}' takes exactly 1 argument — write '${unit}(<int>)'.`, {
+      accept("error", diagMessage("loom.duration-arity", { unit }), {
         node: first.args.length > 0 ? first.args[first.args.length === 1 ? 0 : 1]! : chain,
         code: "loom.duration-arity",
       });
@@ -62,8 +63,7 @@ export function checkDurationConstructors(model: Model, accept: ValidationAccept
     ) {
       accept(
         "error",
-        `'${unit}' takes an 'int' amount, got '${typeToString(actual)}'. ` +
-          `Fractional spans are written in the finer unit ('hours(36)', not 'days(1.5)').`,
+        diagMessage("loom.duration-arg-type", { unit, actual: typeToString(actual) }),
         { node: arg, property: "value", code: "loom.duration-arg-type" },
       );
     }

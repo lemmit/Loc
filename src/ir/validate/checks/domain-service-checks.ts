@@ -45,6 +45,7 @@
 // `extern`/`api`-call rejection rides a future target-resolution slice.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -92,7 +93,7 @@ function checkOperationBody(
         diags.push({
           severity: "error",
           code: "loom.domain-service-no-emit",
-          message: `${where}: 'emit ${stmt.eventName}' is not allowed — a stateless domain service has no identity to attribute an event to.  Emit from the aggregate or workflow that owns the fact.`,
+          message: diagMessage("loom.domain-service-no-emit", { where, eventName: stmt.eventName }),
           source,
         });
         break;
@@ -102,7 +103,11 @@ function checkOperationBody(
         diags.push({
           severity: "error",
           code: "loom.domain-service-no-mutation",
-          message: `${where}: '${stmt.target.segments.join(".")} ${assignVerb(stmt.kind)}' writes to aggregate state, but a domain service has no 'this' to mutate.  To mutate a passed-in aggregate, call its own operation (e.g. 'src.withdraw(amount)') — the mutating tier; or return a value instead.`,
+          message: diagMessage("loom.domain-service-no-mutation", {
+            where,
+            segments: stmt.target.segments.join("."),
+            kind: assignVerb(stmt.kind),
+          }),
           source,
         });
         break;
@@ -126,7 +131,11 @@ function checkOperationBody(
           diags.push({
             severity: "error",
             code: "loom.domain-service-no-repo-write",
-            message: `${where}: repository WRITE '${recvName}.${e.member}(…)' is not allowed — a domain service may run read-only queries (the 'reading' tier), but persistence writes (save/insert/update/delete/add/remove/commit) belong to the orchestrator (workflow / command handler).`,
+            message: diagMessage("loom.domain-service-no-repo-write", {
+              where,
+              recvName,
+              member: e.member,
+            }),
             source,
           });
         }
@@ -134,7 +143,7 @@ function checkOperationBody(
         diags.push({
           severity: "error",
           code: "loom.domain-service-no-workflow-start",
-          message: `${where}: starting workflow '${recvName}' is not allowed — a domain-layer service cannot reach into the application layer.`,
+          message: diagMessage("loom.domain-service-no-workflow-start", { where, recvName }),
           source,
         });
       }
@@ -170,7 +179,11 @@ function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnos
     diags.push({
       severity: "error",
       code: "loom.domain-service-infra-call-from-aggregate",
-      message: `${where}: call to domain service '${ref.service}.${ref.op}(…)' reaches beyond the aggregate boundary (a repository read, or mutating other passed-in aggregates), which the domain layer may not do from inside an aggregate operation.  Move the call into the orchestrating workflow / command handler, which loads the aggregates and owns the commit.`,
+      message: diagMessage("loom.domain-service-infra-call-from-aggregate", {
+        where,
+        service: ref.service,
+        op: ref.op,
+      }),
       source,
     });
   };
@@ -209,7 +222,7 @@ function checkAnemic(ctx: BoundedContextIR, svc: DomainServiceIR, diags: LoomDia
   diags.push({
     severity: "warning",
     code: "loom.domain-service-single-aggregate",
-    message: `domainService '${svc.name}': every operation takes a single aggregate parameter — consider declaring the behaviour as an 'operation' on that aggregate instead of a domain service.`,
+    message: diagMessage("loom.domain-service-single-aggregate", { name: svc.name }),
     source: `${ctx.name}/${svc.name}`,
   });
 }

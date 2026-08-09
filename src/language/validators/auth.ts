@@ -11,6 +11,7 @@
 //   - every `claims:` entry must target a real `user { … }` field
 
 import type { ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { isKnownProvider, KNOWN_PROVIDERS, lookupPreset } from "../../util/auth-providers.js";
 import { type AuthBlock, isUserBlock, type System } from "../generated/ast.js";
 
@@ -18,7 +19,7 @@ export function checkAuthBlock(auth: AuthBlock, system: System, accept: Validati
   // 1. An auth block needs a user block to define the identity shape.
   const userBlock = system.members.find(isUserBlock);
   if (!userBlock) {
-    accept("error", "auth block requires a `user { … }` block to define the identity shape.", {
+    accept("error", diagMessage("loom.auth-without-user"), {
       node: auth,
       code: "loom.auth-without-user",
     });
@@ -31,7 +32,10 @@ export function checkAuthBlock(auth: AuthBlock, system: System, accept: Validati
   if (provider !== undefined && !isKnownProvider(provider)) {
     accept(
       "error",
-      `unknown auth provider '${provider}'.  Known providers: ${KNOWN_PROVIDERS.join(", ")} (or omit \`provider:\` and supply a raw \`oidc { issuer }\`).`,
+      diagMessage("loom.auth-unknown-provider", {
+        provider,
+        knownProviders: KNOWN_PROVIDERS.join(", "),
+      }),
       { node: auth, property: "provider", code: "loom.auth-unknown-provider" },
     );
   }
@@ -44,26 +48,27 @@ export function checkAuthBlock(auth: AuthBlock, system: System, accept: Validati
   if (!hasExplicitIssuer && !hasPresetIssuer) {
     accept(
       "error",
-      provider && preset?.requiresIssuer
-        ? `provider '${provider}' is self-hosted and requires an \`oidc { issuer: … }\` block.`
-        : 'oidc requires an `issuer` (env-bound).  Add an `oidc { issuer: env("OIDC_ISSUER") }` block.',
+      diagMessage("loom.auth-missing-issuer", {
+        selfHosted: provider && preset?.requiresIssuer,
+        provider,
+      }),
       { node: auth, property: "oidc", code: "loom.auth-missing-issuer" },
     );
   }
 
   // clientId is always required for an OIDC client.
   if (auth.oidc?.clientId === undefined) {
-    accept(
-      "error",
-      'oidc requires a `clientId` (env-bound).  Add `clientId: env("OIDC_CLIENT_ID")` to the `oidc { … }` block.',
-      { node: auth, property: "oidc", code: "loom.auth-missing-client-id" },
-    );
+    accept("error", diagMessage("loom.auth-missing-client-id"), {
+      node: auth,
+      property: "oidc",
+      code: "loom.auth-missing-client-id",
+    });
   }
 
   // 4. Claim mappings must target real user fields.
   for (const entry of auth.claims?.entries ?? []) {
     if (!userFields.has(entry.field)) {
-      accept("error", `claim mapping targets unknown user field '${entry.field}'.`, {
+      accept("error", diagMessage("loom.auth-unknown-claim-field", { field: entry.field }), {
         node: entry,
         property: "field",
         code: "loom.auth-unknown-claim-field",

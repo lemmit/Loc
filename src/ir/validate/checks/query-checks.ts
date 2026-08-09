@@ -3,6 +3,7 @@
 // `retrieval` validation.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
@@ -39,11 +40,11 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
         diags.push({
           severity: "error",
           code: "loom.find-where-not-queryable",
-          message:
-            `repository '${repo.name}' find '${find.name}': ` +
-            `where-clause is not queryable (${offending}). ` +
-            `Allowed: comparisons, &&/||/!, parens, ` +
-            `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+          message: diagMessage("loom.find-where-not-queryable", {
+            name: repo.name,
+            findName: find.name,
+            offending,
+          }),
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
         continue;
@@ -58,9 +59,12 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
           diags.push({
             severity: "error",
             code: "loom.find-where-unknown-field",
-            message:
-              `repository '${repo.name}' find '${find.name}': ` +
-              `where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+            message: diagMessage("loom.find-where-unknown-field", {
+              name: repo.name,
+              findName: find.name,
+              unknown,
+              aggName: agg.name,
+            }),
             source: `${ctx.name}/${repo.name}.${find.name}`,
           });
         }
@@ -76,10 +80,11 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
         diags.push({
           severity: "error",
           code: "loom.find-where-column-column",
-          message:
-            `repository '${repo.name}' find '${find.name}': ` +
-            `comparison between two columns (${bothCols}) is not queryable. ` +
-            `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          message: diagMessage("loom.find-where-column-column", {
+            name: repo.name,
+            findName: find.name,
+            bothCols,
+          }),
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
       }
@@ -102,10 +107,10 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
       if (offending) {
         diags.push({
           severity: "error",
-          message:
-            `aggregate '${agg.name}': a 'filter' capability predicate is not selectable (${offending}). ` +
-            `Capability filters install at the query layer, so they must lower to the queryable subset: ` +
-            `comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, 'currentUser.<field>', literals.`,
+          message: diagMessage("loom.criterion-not-selectable#not-selectable", {
+            name: agg.name,
+            offending,
+          }),
           source: `${ctx.name}/${agg.name}`,
           code: "loom.criterion-not-selectable",
         });
@@ -119,7 +124,10 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
       if (unknown) {
         diags.push({
           severity: "error",
-          message: `aggregate '${agg.name}': a 'filter' capability predicate references unknown field ${unknown} on '${agg.name}'.`,
+          message: diagMessage("loom.criterion-not-selectable#unknown-field", {
+            name: agg.name,
+            unknown,
+          }),
           source: `${ctx.name}/${agg.name}`,
           code: "loom.criterion-not-selectable",
         });
@@ -163,11 +171,11 @@ export function validateRawSeedColumns(ctx: BoundedContextIR, diags: LoomDiagnos
           diags.push({
             severity: "error",
             code: "loom.seed-raw-non-literal-column",
-            message:
-              `seed raw '${row.aggregate}.${f.name}': a raw-seed column must be a scalar / enum / id ` +
-              `literal (or 'now()'); the value '${describeSeedValue(f.value)}' is computed at ` +
-              `generate time, which the direct-INSERT seed path can't render. ` +
-              `Use a literal value, or the domain seed path ('seed { … }' without 'raw').`,
+            message: diagMessage("loom.seed-raw-non-literal-column", {
+              aggregate: row.aggregate,
+              name: f.name,
+              value: describeSeedValue(f.value),
+            }),
             source: `${ctx.name}/seed ${seed.dataset}`,
           });
         }
@@ -219,9 +227,7 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
       diags.push({
         severity: "error",
         code: "loom.retrieval-where-not-queryable",
-        message:
-          `retrieval '${r.name}': where-clause is not queryable (${offending}). ` +
-          `Allowed: comparisons, &&/||/!, parens, 'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+        message: diagMessage("loom.retrieval-where-not-queryable", { name: r.name, offending }),
         source: src,
       });
     } else if (agg) {
@@ -230,7 +236,11 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
         diags.push({
           severity: "error",
           code: "loom.retrieval-where-unknown-field",
-          message: `retrieval '${r.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          message: diagMessage("loom.retrieval-where-unknown-field", {
+            name: r.name,
+            unknown,
+            aggName: agg.name,
+          }),
           source: src,
         });
       }
@@ -239,9 +249,7 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
         diags.push({
           severity: "error",
           code: "loom.retrieval-where-column-column",
-          message:
-            `retrieval '${r.name}': comparison between two columns (${bothCols}) is not queryable. ` +
-            `eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          message: diagMessage("loom.retrieval-where-column-column", { name: r.name, bothCols }),
           source: src,
         });
       }
@@ -256,7 +264,11 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
         diags.push({
           severity: "error",
           code: "loom.retrieval-sort-unknown-field",
-          message: `retrieval '${r.name}': sort references unknown field '${head.name}' on aggregate '${agg.name}'.`,
+          message: diagMessage("loom.retrieval-sort-unknown-field", {
+            name: r.name,
+            headName: head.name,
+            aggName: agg.name,
+          }),
           source: src,
         });
       }
@@ -276,9 +288,7 @@ export function validateRetrievals(ctx: BoundedContextIR, diags: LoomDiagnostic[
       diags.push({
         severity: "error",
         code: "loom.retrieval-loads-unsupported",
-        message:
-          `retrieval '${r.name}': explicit 'loads:' is not supported yet — ` +
-          `retrievals load the whole aggregate. (Per-operation autoload is planned.)`,
+        message: diagMessage("loom.retrieval-loads-unsupported", { name: r.name }),
         source: src,
       });
     }
@@ -320,11 +330,11 @@ export function validateFindGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]
         diags.push({
           severity: "error",
           code: "loom.find-gate-not-current-user",
-          message:
-            `find '${repo.name}.${find.name}': a \`requires\` gate runs before the query (no row ` +
-            `exists yet), so it may only reference \`currentUser\` (and constants) — \`${offending}\` ` +
-            "is not available here. Use `where` to scope which rows return; use `requires` to " +
-            "allow / deny the caller.",
+          message: diagMessage("loom.find-gate-not-current-user", {
+            name: repo.name,
+            findName: find.name,
+            offending,
+          }),
           source: `find/${repo.name}.${find.name}`,
         });
       }
@@ -345,9 +355,7 @@ export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagno
       diags.push({
         severity: "error",
         code: "loom.projection-gate-without-source",
-        message:
-          `projection '${proj.name}': a \`requires\` gate guards a query-time read, but this ` +
-          "projection declares no `from` source. Add a `from <Aggregate>` clause, or drop the gate.",
+        message: diagMessage("loom.projection-gate-without-source", { name: proj.name }),
         source: `projection/${proj.name}`,
       });
       continue;
@@ -357,11 +365,10 @@ export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagno
       diags.push({
         severity: "error",
         code: "loom.projection-gate-not-current-user",
-        message:
-          `projection '${proj.name}': a \`requires\` gate runs before the query (no row exists ` +
-          `yet), so it may only reference \`currentUser\` (and constants) — \`${offending}\` is not ` +
-          "available here. Use `where` to scope which rows return; use `requires` to allow / deny " +
-          "the caller.",
+        message: diagMessage("loom.projection-gate-not-current-user", {
+          name: proj.name,
+          offending,
+        }),
         source: `projection/${proj.name}`,
       });
     }

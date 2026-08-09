@@ -2,6 +2,7 @@
 // `string.matches(regex)` literal-pattern gate.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { intrinsicMatcherSig } from "../../util/intrinsic-matchers.js";
 import {
   type CallSuffix,
@@ -40,12 +41,11 @@ export function checkMatchExpressions(model: Model, accept: ValidationAcceptor):
       // arm can read it once without double-evaluation.  A call subject is
       // a PostfixChain carrying a CallSuffix or a calling MemberSuffix.
       if (subjectIsCall(m.subject!)) {
-        accept(
-          "error",
-          `A variant 'match' subject must be a simple reference or let-bound name — not a call. ` +
-            `Bind the result to a 'let' first, then match on that name (avoids double-evaluation).`,
-          { node: m, property: "subject", code: "loom.match-subject-not-simple" },
-        );
+        accept("error", diagMessage("loom.match-subject-not-simple"), {
+          node: m,
+          property: "subject",
+          code: "loom.match-subject-not-simple",
+        });
       }
       // Variant exhaustiveness / unknown-variant / duplicate-variant are
       // checked in the IR validator, where the scrutinee's resolved union

@@ -14,6 +14,7 @@
 // as real methods — so this gate scopes strictly to top-level functions.)
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   type FunctionDecl,
   isFunctionDecl,
@@ -48,13 +49,11 @@ export function checkTopLevelFunctions(model: Model, accept: ValidationAcceptor)
   //     call site trusts the DECLARED type, so a lying body must be caught here).
   for (const fn of fns.values()) {
     if (!fn.body) {
-      accept(
-        "error",
-        `A top-level 'function' must be expression-form ('function ${fn.name}(…): T = <expr>'). ` +
-          `Block-form top-level functions (a '{ … }' body) aren't supported yet — express it as a ` +
-          `single expression, or make it a member of an aggregate / value object.`,
-        { node: fn, property: "name", code: "loom.function-toplevel-block" },
-      );
+      accept("error", diagMessage("loom.function-toplevel-block", { name: fn.name }), {
+        node: fn,
+        property: "name",
+        code: "loom.function-toplevel-block",
+      });
       continue;
     }
     const declared = resolveTypeRef(fn.returnType);
@@ -97,13 +96,11 @@ export function checkTopLevelFunctions(model: Model, accept: ValidationAcceptor)
   };
   for (const [name, fn] of fns) {
     if (reaches(name, name, new Set())) {
-      accept(
-        "error",
-        `Top-level 'function ${name}' is part of a recursion cycle. Expression-form functions ` +
-          `inline at their call sites, so they must not call themselves — directly or through ` +
-          `another top-level function that calls back.`,
-        { node: fn, property: "name", code: "loom.function-recursive" },
-      );
+      accept("error", diagMessage("loom.function-recursive", { name }), {
+        node: fn,
+        property: "name",
+        code: "loom.function-recursive",
+      });
     }
   }
 }

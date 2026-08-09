@@ -1,3 +1,4 @@
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type {
   BoundedContextIR,
   EnrichedAggregateIR,
@@ -110,11 +111,11 @@ export function validateStampReadsBeforeFlush(
         diags.push({
           severity: "error",
           code: "loom.stamp-read-before-flush",
-          message:
-            `aggregate '${agg.name}' create '${c.name}' reads an audit stamp field ` +
-            `(${CREATE_STAMP_FIELDS.join("/")}) that 'with auditable' only populates at persist time. ` +
-            `The value is unset while the create body runs (it lands when the unit of work flushes). ` +
-            `Remove the in-body read, or compute the value explicitly instead of relying on the audit stamp.`,
+          message: diagMessage("loom.stamp-read-before-flush#aggregate-create-reads", {
+            name: agg.name,
+            cName: c.name,
+            createStampFields: CREATE_STAMP_FIELDS.join("/"),
+          }),
           source: `${ctx.name}/${agg.name}`,
         });
       });
@@ -128,11 +129,11 @@ export function validateStampReadsBeforeFlush(
         diags.push({
           severity: "error",
           code: "loom.stamp-read-before-flush",
-          message:
-            `aggregate '${agg.name}' operation '${op.name}' reads an audit stamp field ` +
-            `(${UPDATE_STAMP_FIELDS.join("/")}) that 'with auditable' updates only at persist time. ` +
-            `The new value is not applied until this operation's unit of work flushes, so the body would ` +
-            `observe the prior value. Remove the in-body read, or compute the value explicitly.`,
+          message: diagMessage("loom.stamp-read-before-flush#aggregate-operation-reads", {
+            name: agg.name,
+            opName: op.name,
+            updateStampFields: UPDATE_STAMP_FIELDS.join("/"),
+          }),
           source: `${ctx.name}/${agg.name}`,
         });
       });

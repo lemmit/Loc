@@ -2,6 +2,7 @@
 // sanity, aggregate / entity-part / value-object structural rules.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { isInferredContainment } from "../containment.js";
 import type {
   Aggregate,
@@ -82,7 +83,7 @@ export function checkSlotTypePosition(model: Model, accept: ValidationAcceptor):
     const ok = holder?.$type === "Parameter" && enclosing?.$type === "Component";
     if (ok) continue;
     const where = enclosing?.$type ?? holder?.$type ?? "<unknown>";
-    accept("error", `'slot' is only valid on a component's parameter list; found on ${where}.`, {
+    accept("error", diagMessage("loom.slot-out-of-position", { where }), {
       node,
       code: "loom.slot-out-of-position",
     });
@@ -105,18 +106,19 @@ export function checkActionTypePosition(model: Model, accept: ValidationAcceptor
     const ok = holder?.$type === "Parameter" && enclosing?.$type === "Component";
     if (!ok) {
       const where = enclosing?.$type ?? holder?.$type ?? "<unknown>";
-      accept(
-        "error",
-        `'action' is only valid on a component's parameter list; found on ${where}.`,
-        { node: a, code: "loom.action-out-of-position" },
-      );
+      accept("error", diagMessage("loom.action-out-of-position", { where }), {
+        node: a,
+        code: "loom.action-out-of-position",
+      });
       continue;
     }
     const argBase = a.arg?.base?.$type;
     if (argBase === "SlotType" || argBase === "ActionType") {
       accept(
         "error",
-        `'action(${argBase === "SlotType" ? "slot" : "action"})' is not allowed — the callback argument must be a data type (primitive, aggregate, value object, …), not another UI marker.`,
+        diagMessage("loom.action-nested-marker", {
+          argBase: argBase === "SlotType" ? "slot" : "action",
+        }),
         { node: a, property: "arg", code: "loom.action-nested-marker" },
       );
     }
@@ -167,11 +169,11 @@ export function checkTypeReferences(model: Model, accept: ValidationAcceptor): v
     // Bare aggregate name in type position: must be spelt `X id`.
     if (isAggregate(target)) {
       const aggName = target.name;
-      accept(
-        "error",
-        `References across aggregate boundaries need an id link — write '${aggName} id' (or '${aggName} id[]' for many-to-many).`,
-        { node, property: "target", code: "loom.bare-aggregate-in-type" },
-      );
+      accept("error", diagMessage("loom.bare-aggregate-in-type", { aggName }), {
+        node,
+        property: "target",
+        code: "loom.bare-aggregate-in-type",
+      });
       continue;
     }
     // Entity-part from a different aggregate: must go through the root.
@@ -181,7 +183,10 @@ export function checkTypeReferences(model: Model, accept: ValidationAcceptor): v
       if (enclosing && owner && enclosing !== owner) {
         accept(
           "error",
-          `Entity part '${target.name}' belongs to aggregate '${owner.name}'; cross-aggregate references must go through the root: use '${owner.name} id'.`,
+          diagMessage("loom.cross-aggregate-entity-part", {
+            name: target.name,
+            ownerName: owner.name,
+          }),
           { node, property: "target", code: "loom.cross-aggregate-entity-part" },
         );
       }
@@ -233,9 +238,7 @@ export function checkAmbiguousPartRefs(model: Model, accept: ValidationAcceptor)
         : `aggregates ${names.map((n) => `'${n}'`).join(", ")}`;
     accept(
       "error",
-      `Ambiguous entity-part reference '${target.name} id' — '${target.name}' is declared in ${list}. ` +
-        `Entity parts are aggregate-local; reference the owning aggregate's root instead (e.g. '${names[0]} id'), ` +
-        `or rename one of the parts so the link is unambiguous.`,
+      diagMessage("loom.ambiguous-part-ref", { name: target.name, list, names: names[0] }),
       { node, property: "target", code: "loom.ambiguous-part-ref" },
     );
   }
@@ -265,8 +268,7 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
     if ((counts.get(eventName(o)) ?? 0) > 1) {
       accept(
         "warning",
-        `Workflow '${wf.name}' declares more than one on(...) reactor for event '${eventName(o)}'. ` +
-          `Each inbound event routes to one reactor; if these are intentional alternates, distinguish them by their 'by' clause.`,
+        diagMessage("loom.on-duplicate-subscription", { name: wf.name, o: eventName(o) }),
         { node: o, property: "event", code: "loom.on-duplicate-subscription" },
       );
     }
@@ -333,12 +335,10 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
   if (wf.transactional) {
     const continuations = wf.members.filter((m) => isOnDecl(m) || isHandleDecl(m));
     for (const c of continuations) {
-      accept(
-        "error",
-        `Workflow '${wf.name}' is 'transactional' but declares a continuation handler. ` +
-          `A reactor / handle runs in its own transaction — drop 'transactional', or remove the continuation.`,
-        { node: c, code: "loom.transactional-with-continuations" },
-      );
+      accept("error", diagMessage("loom.transactional-with-continuations", { name: wf.name }), {
+        node: c,
+        code: "loom.transactional-with-continuations",
+      });
     }
   }
 }
@@ -357,8 +357,7 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
     for (const ap of appliers) {
       accept(
         "error",
-        `Workflow '${wf.name}' declares apply(...) but is not event-sourced. ` +
-          `Add 'eventSourced' to the workflow header, or remove the applier.`,
+        diagMessage("loom.workflow-applier-on-non-event-sourced", { name: wf.name }),
         { node: ap, code: "loom.workflow-applier-on-non-event-sourced" },
       );
     }
@@ -372,8 +371,7 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
     if ((counts.get(eventOf(ap)) ?? 0) > 1) {
       accept(
         "error",
-        `Workflow '${wf.name}' declares more than one applier for event '${eventOf(ap)}'. ` +
-          `An event folds into state exactly one way — declare a single apply(${eventOf(ap)}).`,
+        diagMessage("loom.workflow-duplicate-applier", { name: wf.name, ap: eventOf(ap) }),
         { node: ap, property: "event", code: "loom.workflow-duplicate-applier" },
       );
     }
@@ -390,19 +388,16 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
   for (const body of handlerBodies) {
     for (const stmt of body) {
       if (isAssignOrCallStmt(stmt) && stmt.op) {
-        accept(
-          "error",
-          `Workflow '${wf.name}' is event-sourced — a handler body must not mutate 'this' directly. ` +
-            `Replace the assignment with an 'emit' and fold it in an apply(...) block.`,
-          { node: stmt, code: "loom.workflow-event-sourced-mutation" },
-        );
+        accept("error", diagMessage("loom.workflow-event-sourced-mutation", { name: wf.name }), {
+          node: stmt,
+          code: "loom.workflow-event-sourced-mutation",
+        });
       } else if (isEmitStmt(stmt)) {
         const ev = stmt.event.ref?.name ?? stmt.event.$refText;
         if (!appliedEvents.has(ev)) {
           accept(
             "error",
-            `Event '${ev}' is emitted in workflow '${wf.name}' but no applier folds it. ` +
-              `Add an apply(${ev}: ${ev}) block, or the event is recorded but never reflected in state.`,
+            diagMessage("loom.workflow-emitted-event-no-applier", { ev, name: wf.name }),
             { node: stmt, code: "loom.workflow-emitted-event-no-applier" },
           );
         }
@@ -425,12 +420,10 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   // Rule 1 — appliers require an event-sourced aggregate.
   if (!isEventSourced) {
     for (const ap of appliers) {
-      accept(
-        "error",
-        `Aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
-          `Appliers fold events into state; add 'persistedAs: eventLog' to the aggregate header, or remove the applier.`,
-        { node: ap, code: "loom.applier-on-non-event-sourced" },
-      );
+      accept("error", diagMessage("loom.applier-on-non-event-sourced#ast", { name: agg.name }), {
+        node: ap,
+        code: "loom.applier-on-non-event-sourced",
+      });
     }
     return;
   }
@@ -441,12 +434,10 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   const creates = agg.members.filter(isCreate);
   if (creates.length > 1) {
     for (const c of creates.slice(1)) {
-      accept(
-        "error",
-        `Aggregate '${agg.name}' is persistedAs: eventLog and declares multiple 'create' actions. ` +
-          `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
-        { node: c, code: "loom.event-sourced-multiple-creates" },
-      );
+      accept("error", diagMessage("loom.event-sourced-multiple-creates#ast", { name: agg.name }), {
+        node: c,
+        code: "loom.event-sourced-multiple-creates",
+      });
     }
   }
 
@@ -459,8 +450,7 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
     if ((seenApplier.get(eventName(ap)) ?? 0) > 1) {
       accept(
         "error",
-        `Aggregate '${agg.name}' declares more than one applier for event '${eventName(ap)}'. ` +
-          `An event folds into state exactly one way — declare a single apply(${eventName(ap)}).`,
+        diagMessage("loom.duplicate-applier#ast", { name: agg.name, ap: eventName(ap) }),
         { node: ap, property: "event", code: "loom.duplicate-applier" },
       );
     }
@@ -475,21 +465,17 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   for (const cmd of commands) {
     for (const stmt of cmd.body) {
       if (isAssignOrCallStmt(stmt) && stmt.op) {
-        accept(
-          "error",
-          `Aggregate '${agg.name}' is event-sourced — a command body must not mutate 'this' directly. ` +
-            `Replace the assignment with an 'emit' and fold it in an apply(...) block.`,
-          { node: stmt, code: "loom.event-sourced-command-mutation" },
-        );
+        accept("error", diagMessage("loom.event-sourced-command-mutation", { name: agg.name }), {
+          node: stmt,
+          code: "loom.event-sourced-command-mutation",
+        });
       } else if (isEmitStmt(stmt)) {
         const ev = stmt.event.ref?.name ?? stmt.event.$refText;
         if (!appliedEvents.has(ev)) {
-          accept(
-            "error",
-            `Event '${ev}' is emitted but no applier folds it. ` +
-              `Add an apply(${ev}: ${ev}) block to aggregate '${agg.name}', or the event is recorded but never reflected in state.`,
-            { node: stmt, code: "loom.emitted-event-no-applier" },
-          );
+          accept("error", diagMessage("loom.emitted-event-no-applier", { ev, name: agg.name }), {
+            node: stmt,
+            code: "loom.emitted-event-no-applier",
+          });
         }
       }
     }
@@ -501,20 +487,19 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
       if (isEmitStmt(stmt)) {
         accept(
           "error",
-          `apply(${eventName(ap)}) must not emit — an applier reacts to an event by folding it into state. ` +
-            `Move the 'emit' to the command body that decides it.`,
+          diagMessage("loom.applier-impure#apply-must-not-emit-an", { ap: eventName(ap) }),
           { node: stmt, code: "loom.applier-impure" },
         );
       } else if (isAssignOrCallStmt(stmt) && !stmt.op) {
         accept(
           "error",
-          `apply(${eventName(ap)}) must not call out — applier bodies are deterministic, replayable folds (assignments and 'let' only).`,
+          diagMessage("loom.applier-impure#apply-must-not-call-out", { ap: eventName(ap) }),
           { node: stmt, code: "loom.applier-impure" },
         );
       } else if (isPreconditionStmt(stmt)) {
         accept(
           "error",
-          `apply(${eventName(ap)}) must not guard — by the time an event is applied the decision is already made; put the guard in the command.`,
+          diagMessage("loom.applier-impure#apply-must-not-guard-by", { ap: eventName(ap) }),
           { node: stmt, code: "loom.applier-impure" },
         );
       }
@@ -622,11 +607,11 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
       // server can identify the target / detect concurrency conflicts.
       // A nullable token cannot serve that role — the wire contract
       // would accept `null` and silently disable the check.
-      accept(
-        "error",
-        `Token field '${m.name}' on aggregate '${agg.name}' cannot be nullable; \`token\` requires a non-optional type.`,
-        { node: m, property: "access", code: "loom.token-nullable" },
-      );
+      accept("error", diagMessage("loom.token-nullable", { name: m.name, aggName: agg.name }), {
+        node: m,
+        property: "access",
+        code: "loom.token-nullable",
+      });
     }
     if (isProperty(m) && m.provenanced && !hasExtern && !fieldIsWritten(agg, m.name)) {
       // A provenanced field that no operation ever assigns produces no
@@ -635,7 +620,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
       // may legitimately be the writer.
       accept(
         "warning",
-        `Provenanced field '${m.name}' on aggregate '${agg.name}' is never written; no trace records will be produced.`,
+        diagMessage("loom.provenanced-never-written", { name: m.name, aggName: agg.name }),
         { node: m, property: "provenanced", code: "loom.provenanced-never-written" },
       );
     }
@@ -661,18 +646,17 @@ function checkUnique(u: Unique, agg: Aggregate, accept: ValidationAcceptor): voi
 
   if (agg.persistedAs === "eventLog" || agg.shape === "document" || agg.shape === "embedded") {
     const how = agg.persistedAs === "eventLog" ? "event-sourced" : `${agg.shape}-shaped`;
-    accept(
-      "error",
-      `\`unique (...)\` on ${how} aggregate '${agg.name}' is not supported — uniqueness is enforced by a DB unique index, which needs a single relational table to constrain.`,
-      { node: u, code: "loom.unique-on-event-sourced" },
-    );
+    accept("error", diagMessage("loom.unique-on-event-sourced", { how, name: agg.name }), {
+      node: u,
+      code: "loom.unique-on-event-sourced",
+    });
     return;
   }
 
   const seen = new Set<string>();
   u.columns.forEach((col, i) => {
     if (seen.has(col)) {
-      accept("error", `\`unique\` on aggregate '${agg.name}' lists column '${col}' twice.`, {
+      accept("error", diagMessage("loom.unique-duplicate-column", { name: agg.name, col }), {
         node: u,
         property: "columns",
         index: i,
@@ -682,20 +666,22 @@ function checkUnique(u: Unique, agg: Aggregate, accept: ValidationAcceptor): voi
     seen.add(col);
     if (!fieldNames.has(col)) {
       const known = [...fieldNames].join(", ") || "<none>";
-      accept(
-        "error",
-        `\`unique\` on aggregate '${agg.name}' references unknown field '${col}'. Known fields: ${known}.`,
-        { node: u, property: "columns", index: i, code: "loom.unique-unknown-field" },
-      );
+      accept("error", diagMessage("loom.unique-unknown-field", { name: agg.name, col, known }), {
+        node: u,
+        property: "columns",
+        index: i,
+        code: "loom.unique-unknown-field",
+      });
       return;
     }
     const prop = props.find((p) => p.name === col);
     if (prop?.type?.array) {
-      accept(
-        "error",
-        `\`unique\` column '${col}' on aggregate '${agg.name}' is a collection; a uniqueness key must list single-valued fields.`,
-        { node: u, property: "columns", index: i, code: "loom.unique-collection-field" },
-      );
+      accept("error", diagMessage("loom.unique-collection-field", { col, name: agg.name }), {
+        node: u,
+        property: "columns",
+        index: i,
+        code: "loom.unique-collection-field",
+      });
     }
   });
 }
@@ -816,10 +802,12 @@ export function checkInferredContainment(p: Property, accept: ValidationAcceptor
   ) =>
     accept(
       "error",
-      `Field '${p.name}' contains entity '${label}', so '${modifier}' does not apply — ` +
-        `it is only valid on value properties. Drop it (write 'contains ${p.name}: ${label}${
-          p.type.array ? "[]" : ""
-        }' if you want the keyword explicit).`,
+      diagMessage("loom.entity-field-modifier", {
+        name: p.name,
+        label,
+        modifier,
+        array: p.type.array ? "[]" : "",
+      }),
       { node: p, property, code: "loom.entity-field-modifier" },
     );
   if (p.provenanced) reject("provenanced", "provenanced");
@@ -828,12 +816,11 @@ export function checkInferredContainment(p: Property, accept: ValidationAcceptor
   if (p.sensitivity) reject("sensitivity", "sensitive(...)");
   if (p.check) reject("check", "check");
   if (p.type.array && p.type.optional) {
-    accept(
-      "error",
-      `Field '${p.name}' contains entity '${label}' as both a collection and optional — ` +
-        `an empty collection already encodes absence; drop the '?'.`,
-      { node: p, property: "type", code: "loom.entity-field-optional-collection" },
-    );
+    accept("error", diagMessage("loom.entity-field-optional-collection", { name: p.name, label }), {
+      node: p,
+      property: "type",
+      code: "loom.entity-field-optional-collection",
+    });
   }
 }
 

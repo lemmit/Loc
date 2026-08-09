@@ -18,6 +18,7 @@
 //     of arguments.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   type Aggregate,
   type Criterion,
@@ -74,17 +75,17 @@ function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
   if (c.alias && c.params.some((p) => p.name === c.alias)) {
     accept(
       "error",
-      `criterion '${c.name}' binds the candidate alias '${c.alias}', but a parameter of the same name already exists — rename one so a bare '${c.alias}' is unambiguous.`,
+      diagMessage("loom.criterion-alias-collision", { name: c.name, alias: c.alias }),
       { node: c, property: "alias", code: "loom.criterion-alias-collision" },
     );
   }
   // --- target kind ----------------------------------------------------
   if (!candidate && !isBoolTarget(c)) {
-    accept(
-      "error",
-      `criterion '${c.name}' has an unsupported candidate type. v1 supports 'of <Aggregate>' (a predicate over that aggregate) or 'of bool' (a pure ambient predicate); predicates over primitives / value objects / enums are reserved for the forthcoming 'from <Criterion>(args)' parameter-binding surface.`,
-      { node: c, property: "target", code: "loom.criterion-unsupported-target" },
-    );
+    accept("error", diagMessage("loom.criterion-unsupported-target", { name: c.name }), {
+      node: c,
+      property: "target",
+      code: "loom.criterion-unsupported-target",
+    });
   }
 
   // --- purity: no mutating operation calls ----------------------------
@@ -97,7 +98,7 @@ function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
       if (isMemberSuffix(n) && n.call && findOperation(candidate, n.member)) {
         accept(
           "error",
-          `criterion '${c.name}' is impure: it calls the operation '${n.member}'. Criteria are pure predicates — call a 'function' (pure) instead of an 'operation' (mutating).`,
+          diagMessage("loom.criterion-impure#member-call", { name: c.name, member: n.member }),
           { node: n, code: "loom.criterion-impure" },
         );
       }
@@ -114,7 +115,7 @@ function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
         ) {
           accept(
             "error",
-            `criterion '${c.name}' is impure: it calls the operation '${head.name}'. Criteria are pure predicates — call a 'function' (pure) instead of an 'operation' (mutating).`,
+            diagMessage("loom.criterion-impure#free-call", { name: c.name, headName: head.name }),
             { node: head, code: "loom.criterion-impure" },
           );
         }
@@ -128,11 +129,11 @@ function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
     const byName = new Map<string, Criterion>();
     for (const m of ctx.members) if (isCriterion(m)) byName.set(m.name, m);
     if (participatesInCycle(c, byName)) {
-      accept(
-        "error",
-        `criterion '${c.name}' is part of a reference cycle. A criterion may not (transitively) reference itself.`,
-        { node: c, property: "name", code: "loom.criterion-cycle" },
-      );
+      accept("error", diagMessage("loom.criterion-cycle", { name: c.name }), {
+        node: c,
+        property: "name",
+        code: "loom.criterion-cycle",
+      });
     }
   }
 }
@@ -251,9 +252,14 @@ function checkCriterionReference(
   if (got !== want) {
     accept(
       "error",
-      argc === undefined && want > 0
-        ? `criterion '${crit.name}' expects ${want} argument${want === 1 ? "" : "s"}; reference it as '${crit.name}(…)'.`
-        : `criterion '${crit.name}' expects ${want} argument${want === 1 ? "" : "s"}, but ${got} ${got === 1 ? "was" : "were"} supplied.`,
+      diagMessage("loom.criterion-arity", {
+        argc: argc === undefined && want > 0,
+        name: crit.name,
+        want,
+        want2: want === 1 ? "" : "s",
+        got,
+        got2: got === 1 ? "was" : "were",
+      }),
       { node: ref, code: "loom.criterion-arity" },
     );
     return;
@@ -264,7 +270,11 @@ function checkCriterionReference(
   if (critCandidate && host && critCandidate !== host) {
     accept(
       "error",
-      `criterion '${crit.name}' is over '${critCandidate.name}', but it is used here against '${host.name}'. A criterion can only filter the aggregate it is declared 'of'.`,
+      diagMessage("loom.criterion-target-mismatch", {
+        name: crit.name,
+        critCandidateName: critCandidate.name,
+        hostName: host.name,
+      }),
       { node: ref, code: "loom.criterion-target-mismatch" },
     );
   }

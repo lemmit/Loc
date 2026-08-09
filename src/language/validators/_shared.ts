@@ -18,6 +18,7 @@
 //   * Page / api walking helpers used by `ui.ts`.
 
 import type { AstNode } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   type Aggregate,
   type DerivedProp,
@@ -331,7 +332,7 @@ export function checkBlankMessage(
   accept: import("langium").ValidationAcceptor,
 ): void {
   if (message !== undefined && message.trim() === "") {
-    accept("error", "A 'message' clause must not be blank.", {
+    accept("error", diagMessage("loom.blank-message"), {
       node,
       property: "message",
       code: "loom.blank-message",

@@ -24,6 +24,7 @@
 // checked structurally.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { Migration, Model } from "../generated/ast.js";
 import { isMigration, isProperty, isSqlStep, isTableRename } from "../generated/ast.js";
 
@@ -53,11 +54,15 @@ function checkMigration(
   accept: ValidationAcceptor,
 ): void {
   if (seenNames.has(m.name)) {
-    accept("error", `Duplicate migration block name ${JSON.stringify(m.name)}.`, {
-      node: m,
-      property: "name",
-      code: "loom.migration-duplicate-name",
-    });
+    accept(
+      "error",
+      diagMessage("loom.migration-duplicate-name", { name: JSON.stringify(m.name) }),
+      {
+        node: m,
+        property: "name",
+        code: "loom.migration-duplicate-name",
+      },
+    );
   } else {
     seenNames.add(m.name);
   }
@@ -71,7 +76,7 @@ function checkMigration(
       if (step.fromTable === to) {
         accept(
           "error",
-          `Table rename '${step.fromTable} -> ${to}' names the same aggregate on both sides — a rename must change the name.`,
+          diagMessage("loom.rename-to-self#table", { fromTable: step.fromTable, to }),
           { node: step, property: "toAggregate", code: "loom.rename-to-self" },
         );
         continue;
@@ -81,7 +86,9 @@ function checkMigration(
       if (seenSource.has(step.fromTable)) {
         accept(
           "error",
-          `Table '${step.fromTable}' is renamed more than once — an aggregate can be renamed FROM only once (ambiguous origin).`,
+          diagMessage("loom.rename-duplicate-source#table-is-renamed-more-than", {
+            fromTable: step.fromTable,
+          }),
           { node: step, property: "fromTable", code: "loom.rename-duplicate-source" },
         );
       } else {
@@ -90,7 +97,7 @@ function checkMigration(
       if (seenTarget.has(to)) {
         accept(
           "error",
-          `Two renames target aggregate '${to}' — an aggregate can be renamed TO only once (ambiguous destination).`,
+          diagMessage("loom.rename-duplicate-target#two-renames-target-aggregate", { to }),
           { node: step, property: "toAggregate", code: "loom.rename-duplicate-target" },
         );
       } else {
@@ -101,7 +108,7 @@ function checkMigration(
     if (isSqlStep(step)) {
       // Raw `sql "…"` step (M-T2.3) — structural check only: non-empty.
       if (step.sql.trim() === "") {
-        accept("error", "Empty sql step — a raw migration statement must not be blank.", {
+        accept("error", diagMessage("loom.migration-sql-empty"), {
           node: step,
           property: "sql",
           code: "loom.migration-sql-empty",
@@ -118,19 +125,19 @@ function checkMigration(
       // fit are IR-level checks — phase ⑦ — where the lowered ExprIR exists.)
       const fields = step.aggregate.ref?.members.filter(isProperty).map((p) => p.name) ?? [];
       if (step.aggregate.ref && !fields.includes(step.field)) {
-        accept(
-          "error",
-          `'${step.field}' is not a field of aggregate '${agg}' — a backfill targets a live field (it names the newly-added column).`,
-          { node: step, property: "field", code: "loom.backfill-unknown-field" },
-        );
+        accept("error", diagMessage("loom.backfill-unknown-field", { field: step.field, agg }), {
+          node: step,
+          property: "field",
+          code: "loom.backfill-unknown-field",
+        });
       }
       const key = `${agg}.${step.field}`;
       if (seenBackfill.has(key)) {
-        accept(
-          "error",
-          `Field '${key}' is backfilled more than once in this block — one backfill per column per block (ambiguous value).`,
-          { node: step, property: "field", code: "loom.backfill-duplicate" },
-        );
+        accept("error", diagMessage("loom.backfill-duplicate", { key }), {
+          node: step,
+          property: "field",
+          code: "loom.backfill-duplicate",
+        });
       } else {
         seenBackfill.add(key);
       }
@@ -138,11 +145,11 @@ function checkMigration(
     }
     const stepTo = step.renamedTo ?? step.field;
     if (step.field === stepTo) {
-      accept(
-        "error",
-        `Rename of '${agg}.${step.field}' names the same field on both sides — a rename must change the name.`,
-        { node: step, property: "renamedTo", code: "loom.rename-to-self" },
-      );
+      accept("error", diagMessage("loom.rename-to-self#field", { agg, field: step.field }), {
+        node: step,
+        property: "renamedTo",
+        code: "loom.rename-to-self",
+      });
       continue;
     }
     const sourceKey = `${agg}.${step.field}`;
@@ -150,7 +157,7 @@ function checkMigration(
     if (seenSource.has(sourceKey)) {
       accept(
         "error",
-        `Field '${sourceKey}' is renamed more than once — a column can be renamed FROM only once (ambiguous origin).`,
+        diagMessage("loom.rename-duplicate-source#field-is-renamed-more-than", { sourceKey }),
         { node: step, property: "field", code: "loom.rename-duplicate-source" },
       );
     } else {
@@ -159,7 +166,7 @@ function checkMigration(
     if (seenTarget.has(targetKey)) {
       accept(
         "error",
-        `Two renames target '${targetKey}' — a column can be renamed TO only once (ambiguous destination).`,
+        diagMessage("loom.rename-duplicate-target#two-renames-target-a-column", { targetKey }),
         { node: step, property: "renamedTo", code: "loom.rename-duplicate-target" },
       );
     } else {

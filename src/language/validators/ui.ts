@@ -1,6 +1,7 @@
 // UI / page / menu / theme / helper-import / api-body-ref checks.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type {
   ActionDecl,
   Api,
@@ -54,16 +55,19 @@ export function checkComponent(model: Model, accept: ValidationAcceptor): void {
       if (comp.body) {
         accept(
           "error",
-          `Extern component '${comp.name}' must not declare a 'body:' — its rendering is owned by the hand-written module at '${comp.externPath ?? "?"}'. Remove the body, or drop 'extern from' to make it a normal component.`,
+          diagMessage("loom.extern-component-has-body", {
+            name: comp.name,
+            externPath: comp.externPath ?? "?",
+          }),
           { node: comp, property: "body", code: "loom.extern-component-has-body" },
         );
       }
     } else if (!comp.body) {
-      accept(
-        "error",
-        `Component '${comp.name}' requires a 'body:' (or mark it 'extern from "<path>"' to hand rendering to a hand-written module).`,
-        { node: comp, property: "name", code: "loom.component-missing-body" },
-      );
+      accept("error", diagMessage("loom.component-missing-body", { name: comp.name }), {
+        node: comp,
+        property: "name",
+        code: "loom.component-missing-body",
+      });
     }
     // Duplicate named action on one component — lowering's `indexActions` Map
     // would silently overwrite the earlier body (named-actions-and-stores.md,
@@ -84,11 +88,11 @@ function checkDuplicateActions(
   const seen = new Set<string>();
   for (const a of actions) {
     if (seen.has(a.name)) {
-      accept(
-        "error",
-        `Duplicate action '${a.name}' on ${surface}; action names must be unique on a page/component.`,
-        { node: a, property: "name", code: "loom.duplicate-action" },
-      );
+      accept("error", diagMessage("loom.duplicate-action", { name: a.name, surface }), {
+        node: a,
+        property: "name",
+        code: "loom.duplicate-action",
+      });
       continue;
     }
     seen.add(a.name);
@@ -279,7 +283,11 @@ export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
     if (ch && (ch.delivery ?? "broadcast") !== "broadcast") {
       accept(
         "error",
-        `ui '${ui.name}' subscribes to channel '${ch.name}', but its delivery is '${ch.delivery}'.  Only 'delivery: broadcast' channels are UI-observable; 'queue' is work distribution.`,
+        diagMessage("loom.ui-channel-not-broadcast", {
+          name: ui.name,
+          chName: ch.name,
+          delivery: ch.delivery,
+        }),
         { node: m, property: "channel", code: "loom.ui-channel-not-broadcast" },
       );
     }
@@ -294,11 +302,11 @@ export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
   for (const m of ui.members) {
     if (m.$type !== "UiFunction") continue;
     if (isWalkerPrimitive(m.name)) {
-      accept(
-        "error",
-        `extern function '${m.name}' shadows a walker-stdlib primitive.  Pick a different name.`,
-        { node: m, property: "name", code: "loom.extern-function-shadows-stdlib" },
-      );
+      accept("error", diagMessage("loom.extern-function-shadows-stdlib", { name: m.name }), {
+        node: m,
+        property: "name",
+        code: "loom.extern-function-shadows-stdlib",
+      });
     }
     if (fnSeen.has(m.name)) {
       accept("error", `ui '${ui.name}' declares function '${m.name}' more than once.`, {
@@ -331,8 +339,11 @@ export function checkStore(store: Store, accept: ValidationAcceptor): void {
   if (store.lifetime != null && !STORE_LIFETIMES.has(store.lifetime)) {
     accept(
       "error",
-      `store '${store.name}': unknown lifetime '${store.lifetime}' — ` +
-        `\`persist:\` accepts ${[...STORE_LIFETIMES].join(" | ")}.`,
+      diagMessage("loom.store-lifetime-invalid", {
+        name: store.name,
+        lifetime: store.lifetime,
+        storeLifetimes: [...STORE_LIFETIMES].join(" | "),
+      }),
       { node: store, property: "lifetime", code: "loom.store-lifetime-invalid" },
     );
   }
@@ -372,7 +383,7 @@ export function checkUiNotification(n: UiNotification, ui: Ui, accept: Validatio
       if (stmt.target.args.length === 0) {
         accept(
           "error",
-          `'refetch(…)' in ${where} needs at least one aggregate to refetch, e.g. 'refetch(Order)'.`,
+          diagMessage("loom.ui-handler-refetch-target#refetch-in-needs-at-least", { where }),
           { node: stmt, code: "loom.ui-handler-refetch-target" },
         );
         continue;
@@ -381,24 +392,26 @@ export function checkUiNotification(n: UiNotification, ui: Ui, accept: Validatio
         if (!isNameRef(arg)) {
           accept(
             "error",
-            `'refetch(…)' arguments in ${where} must each name an aggregate (e.g. 'refetch(Order)').`,
+            diagMessage("loom.ui-handler-refetch-target#refetch-arguments-in-must", { where }),
             { node: arg, code: "loom.ui-handler-refetch-target" },
           );
         } else if (!aggregateNames.has(arg.name)) {
           accept(
             "error",
-            `Unknown refetch target '${arg.name}' in ${where} — it must name an aggregate declared in this system.`,
+            diagMessage("loom.ui-handler-refetch-target#unknown-refetch-target", {
+              name: arg.name,
+              where,
+            }),
             { node: arg, code: "loom.ui-handler-refetch-target" },
           );
         }
       }
       continue;
     }
-    accept(
-      "error",
-      `Unsupported statement in ${where}.  A handler body supports 'toast(<message expression>)' (one argument) and 'refetch(<Aggregate>[, …])'.`,
-      { node: stmt, code: "loom.ui-handler-unsupported" },
-    );
+    accept("error", diagMessage("loom.ui-handler-unsupported", { where }), {
+      node: stmt,
+      code: "loom.ui-handler-unsupported",
+    });
   }
 }
 

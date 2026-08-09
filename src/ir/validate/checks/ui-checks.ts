@@ -28,6 +28,7 @@
 //        `checkFrontendCollectionOps` for the emitter evidence.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import { isCollectionOp } from "../../../util/collection-ops.js";
 import { isWalkerPrimitive } from "../../../util/walker-primitive-names.js";
 import type {
@@ -431,11 +432,7 @@ function checkUnknownPageElements(
       diags.push({
         severity: "error",
         code: "loom.unknown-page-element",
-        message:
-          `${where}: \`${name}(…)\` names no walker primitive, component, value object, or ` +
-          `\`extern\` function, so the frontend renders nothing for it — in a text slot the ` +
-          `content is silently DROPPED (\`Text(${name}(…))\` emits an empty element).  Check the ` +
-          `spelling, declare a \`component ${name}(…)\`, or import it as an \`extern\` function.`,
+        message: diagMessage("loom.unknown-page-element", { where, name }),
         source: where,
       });
     });
@@ -457,14 +454,7 @@ function checkFrontendCollectionOps(
     diags.push({
       severity: "error",
       code: "loom.frontend-collection-op-unsupported",
-      message:
-        `${where}: uses the collection op \`.${op}\` on a collection in a page/component ` +
-        `expression, but the frontend walker has no renderer for it — it emits verbatim ` +
-        `(\`.${op}\`), so the generated project fails to compile (TS2339 on React/Vue/Svelte/` +
-        `Angular, and the equivalent on Feliz/Flutter).  Collection ops are a backend ` +
-        `vocabulary: compute the value server-side — a repository \`find\`, an aggregate ` +
-        `\`derived\`, or a \`projection\` read model — and bind the result in the page.  ` +
-        `(\`.map\` is the one op the frontends do render.)`,
+      message: diagMessage("loom.frontend-collection-op-unsupported", { where, op }),
       source: where,
     });
   };
@@ -548,12 +538,10 @@ function checkInstanceEffectRouteId(
       diags.push({
         severity: "error",
         code: "loom.instance-effect-needs-route-id",
-        message:
-          `page '${page.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
-          `on the record identified by the page's route \`:id\` — but this page (route ` +
-          `"${page.route ?? "/"}") declares no \`:id\` param, so no record is in scope.  Host the ` +
-          `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
-          `(OperationForm).  M-T6.17.`,
+        message: diagMessage("loom.instance-effect-needs-route-id", {
+          name: page.name,
+          route: page.route ?? "/",
+        }),
         source: `page '${page.name}'`,
       });
     });
@@ -591,12 +579,15 @@ function checkAsyncEffectArgs(
         diags.push({
           severity: "error",
           code: "loom.match-await-arg-mismatch",
-          message:
-            `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes ${args.length} ` +
-            `argument(s), but operation \`${resolved!.op}(${sig})\` expects ${params.length} ` +
-            `(${params.filter((p) => p.type.kind !== "optional").length} required).  The awaited call's ` +
-            `arguments build the request payload — a mismatch ships a broken request.  Pass one argument ` +
-            `per parameter, in order.`,
+          message: diagMessage("loom.match-await-arg-mismatch", {
+            where,
+            aggregate: resolved!.aggregate,
+            op: resolved!.op,
+            length: args.length,
+            sig,
+            paramsLength: params.length,
+            length2: params.filter((p) => p.type.kind !== "optional").length,
+          }),
           source: where,
         });
       }
@@ -612,10 +603,16 @@ function checkAsyncEffectArgs(
         diags.push({
           severity: "error",
           code: "loom.match-await-arg-type",
-          message:
-            `${where}: \`match await ${resolved!.aggregate}.${resolved!.op}(…)\` passes a ${argFam} ` +
-            `literal (\`${arg.value}\`) for parameter \`${params[i]!.name}: ${typeLabel(params[i]!.type)}\` ` +
-            `(a ${paramFam} type).  The argument encodes into the request payload — pass a ${paramFam} value.`,
+          message: diagMessage("loom.match-await-arg-type", {
+            where,
+            aggregate: resolved!.aggregate,
+            op: resolved!.op,
+            argFam,
+            value: arg.value,
+            name: params[i]!.name,
+            type: typeLabel(params[i]!.type),
+            paramFam,
+          }),
           source: where,
         });
       }
@@ -749,10 +746,11 @@ function checkDataGridSelection(
       diags.push({
         severity: "error",
         code: "loom.datagrid-selection-not-state",
-        message:
-          `${where}: DataGrid 'selection:' must name a \`String[]\` field declared in this ` +
-          `${where.startsWith("component") ? "component" : "page"}'s \`state { }\` block, but ${label} ` +
-          `isn't one. Declare \`state { selectedIds: String[] }\` and bind \`selection: selectedIds\`.`,
+        message: diagMessage("loom.datagrid-selection-not-state", {
+          where,
+          where2: where.startsWith("component") ? "component" : "page",
+          label,
+        }),
         source: where,
       });
       return;
@@ -762,10 +760,11 @@ function checkDataGridSelection(
       diags.push({
         severity: "error",
         code: "loom.datagrid-selection-not-array",
-        message:
-          `${where}: DataGrid 'selection: ${arg.name}' needs a \`String[]\` state field — ` +
-          `the grid reports the selected rows' ids — but '${arg.name}' is declared ` +
-          `\`${typeLabel(t)}\`. Change it to \`${arg.name}: String[]\`.`,
+        message: diagMessage("loom.datagrid-selection-not-array", {
+          where,
+          name: arg.name,
+          t: typeLabel(t),
+        }),
         source: where,
       });
     }
@@ -808,10 +807,10 @@ function checkChartArgs(
       diags.push({
         severity: "error",
         code: "loom.chart-kind-invalid",
-        message:
-          `${where}: Chart 'kind:' must be the string literal "line" or "bar"` +
-          `${kind !== undefined ? ` — got "${kind}"` : ""}. v1 ships exactly those two kinds; ` +
-          `anything richer (pie, area, scatter) is an \`extern component\`.`,
+        message: diagMessage("loom.chart-kind-invalid", {
+          where,
+          kind: kind !== undefined ? ` — got "${kind}"` : "",
+        }),
         source: where,
       });
     }
@@ -838,7 +837,7 @@ function checkChartArgs(
       diags.push({
         severity: "error",
         code: "loom.chart-of-not-grouped",
-        message: `${where}: Chart 'of:' — ${why}.`,
+        message: diagMessage("loom.chart-of-not-grouped", { where, why }),
         source: where,
       });
     }
@@ -855,21 +854,24 @@ function checkChartArgs(
         diags.push({
           severity: "error",
           code: "loom.chart-accessor-not-field",
-          message:
-            `${where}: Chart '${slot}:' must be a simple accessor lambda naming one row field ` +
-            `(\`r => r.<field>\`) — the chart keys its ${slot === "x" ? "category axis" : "series"} ` +
-            `on the field NAME, so a computed expression has nothing to key on.`,
+          message: diagMessage("loom.chart-accessor-not-field#not-a-simple-accessor", {
+            where,
+            slot,
+            slot2: slot === "x" ? "category axis" : "series",
+          }),
           source: where,
         });
       } else if (grouped && proj && !(proj.wireShape ?? []).some((f) => f.name === field)) {
         diags.push({
           severity: "error",
           code: "loom.chart-accessor-not-field",
-          message:
-            `${where}: Chart '${slot}: r => r.${field}' — '${field}' is not a declared row field ` +
-            `of projection '${projName}' (declared: ${(proj.wireShape ?? [])
-              .map((f) => `'${f.name}'`)
-              .join(", ")}).`,
+          message: diagMessage("loom.chart-accessor-not-field#not-a-row-field", {
+            where,
+            slot,
+            field,
+            projName,
+            wireShape: (proj.wireShape ?? []).map((f) => `'${f.name}'`).join(", "),
+          }),
           source: where,
         });
       }
@@ -1023,9 +1025,10 @@ function checkStmt(
       diags.push({
         severity: "error",
         code: "loom.unresolved-action-ref",
-        message:
-          `${ctx.where}: call \`${stmt.name}(…)\` references no sibling action and resolves to no ` +
-          `function — declare an \`action ${stmt.name}(…)\` on this page/component, or fix the name.`,
+        message: diagMessage("loom.unresolved-action-ref#call-references-no-sibling", {
+          where: ctx.where,
+          name: stmt.name,
+        }),
         source: ctx.where,
       });
     }
@@ -1115,10 +1118,7 @@ function checkLambdaPurity(
     diags.push({
       severity: "error",
       code: "loom.effect-in-lambda",
-      message:
-        `${ctx.where}: inline handler \`${arrow}\` performs an effect (\`${token}\`) in the page body. ` +
-        `Only a named \`action\` may carry effects — declare one and reference it by name ` +
-        `(e.g. \`action doIt(…) { … }\` then \`onClick: doIt\`). Render-tree lambdas must be pure.`,
+      message: diagMessage("loom.effect-in-lambda#effect", { where: ctx.where, arrow, token }),
       source: ctx.where,
     });
     return;
@@ -1131,12 +1131,12 @@ function checkLambdaPurity(
   diags.push({
     severity: "error",
     code: "loom.effect-in-lambda",
-    message:
-      `${ctx.where}: inline handler \`${arrow}\` performs a remote mutation ` +
-      `(\`${mut.aggName}.${mut.op}(…)\`) in the page body. Only a named \`action\` may carry ` +
-      `effects — declare one and await the command so its Result is handled (e.g. ` +
-      `\`action doIt(…) { match await ${mut.aggName}.${mut.op}(…) { … } }\` then \`onClick: doIt\`). ` +
-      `Render-tree lambdas must be pure.`,
+    message: diagMessage("loom.effect-in-lambda#remote-mutation", {
+      where: ctx.where,
+      arrow,
+      aggName: mut.aggName,
+      op: mut.op,
+    }),
     source: ctx.where,
   });
 }
@@ -1162,11 +1162,14 @@ function checkActionParams(
     diags.push({
       severity: "error",
       code: "loom.action-op-has-params",
-      message:
-        `${ctx.where}: \`Action(${recv.name}.${opName})\` targets operation '${agg.name}.${opName}', ` +
-        `which takes ${op.params.length} parameter(s) (${op.params.map((p) => p.name).join(", ")}). ` +
-        `\`Action\` renders a one-shot button that submits no parameters, so they would be silently dropped. ` +
-        `Use \`OperationForm(of: ${agg.name}, op: ${opName})\` — it renders the parameter inputs.`,
+      message: diagMessage("loom.action-op-has-params", {
+        where: ctx.where,
+        name: recv.name,
+        opName,
+        aggName: agg.name,
+        length: op.params.length,
+        params: op.params.map((p) => p.name).join(", "),
+      }),
       source: ctx.where,
     });
   }
@@ -1203,28 +1206,39 @@ function checkActionPayload(
       diags.push({
         severity: "error",
         code: "loom.action-payload-mismatch",
-        message:
-          `${ctx.where}: \`${call.name} { ${handlerSlot}: ${action.name} }\` supplies a payload value, ` +
-          `but action '${action.name}' is nullary — declare a single payload parameter to receive it.`,
+        message: diagMessage("loom.action-payload-mismatch#supplies-a-payload-value", {
+          where: ctx.where,
+          name: call.name,
+          handlerSlot,
+          actionName: action.name,
+        }),
         source: ctx.where,
       });
     } else if (!supplied && arity > 0) {
       diags.push({
         severity: "error",
         code: "loom.action-payload-mismatch",
-        message:
-          `${ctx.where}: \`${call.name} { ${handlerSlot}: ${action.name} }\` supplies no payload ` +
-          `(two-way \`into:\` binding), but action '${action.name}' declares ${arity} parameter(s) ` +
-          `(${action.params.map((p) => p.name).join(", ")}) — make it nullary.`,
+        message: diagMessage("loom.action-payload-mismatch#into-binding-arity", {
+          where: ctx.where,
+          name: call.name,
+          handlerSlot,
+          actionName: action.name,
+          arity,
+          params: action.params.map((p) => p.name).join(", "),
+        }),
         source: ctx.where,
       });
     } else if (arity > 1) {
       diags.push({
         severity: "error",
         code: "loom.action-payload-mismatch",
-        message:
-          `${ctx.where}: action '${action.name}' referenced by \`${call.name} { ${handlerSlot}: … }\` ` +
-          `declares ${arity} parameters; a handler action takes at most one payload parameter.`,
+        message: diagMessage("loom.action-payload-mismatch#action-referenced-by-declares", {
+          where: ctx.where,
+          name: action.name,
+          callName: call.name,
+          handlerSlot,
+          arity,
+        }),
         source: ctx.where,
       });
     }
@@ -1282,9 +1296,12 @@ function checkHandlerSlotRefs(
     diags.push({
       severity: "error",
       code: "loom.unresolved-action-ref",
-      message:
-        `${ctx.where}: \`${call.name} { ${slot}: ${arg.name} }\` references '${arg.name}', which is ` +
-        `not a sibling action on this page/component — declare \`action ${arg.name}(…)\`, or fix the name.`,
+      message: diagMessage("loom.unresolved-action-ref#references-which-is-not", {
+        where: ctx.where,
+        name: call.name,
+        slot,
+        argName: arg.name,
+      }),
       source: ctx.where,
     });
   }
@@ -1309,11 +1326,12 @@ function checkMethodCallReceiver(
   diags.push({
     severity: "error",
     code: "loom.method-call-unresolved-receiver",
-    message:
-      `${ctx.where}: method call \`${describeReceiver(call.receiver)}.${call.member}(…)\` has an ` +
-      `unresolved receiver '${root.name}'. A method-call receiver must resolve to a page/component ` +
-      `parameter, state / derived value, lambda binding, or a declared api handle ` +
-      `(\`api <Handle>: <Api>\`). Declare the handle, or fix the reference.`,
+    message: diagMessage("loom.method-call-unresolved-receiver", {
+      where: ctx.where,
+      receiver: describeReceiver(call.receiver),
+      member: call.member,
+      name: root.name,
+    }),
     source: ctx.where,
   });
 }
@@ -1356,13 +1374,11 @@ function checkProjectionRead(
   diags.push({
     severity: "error",
     code: "loom.ui-projection-read-unsupported",
-    message:
-      `${ctx.where}: reads projection '${e.member}' (\`${root.name}.${e.member}\`), which a ui ` +
-      `cannot consume. Only an UNKEYED QUERY-TIME projection (no 'keyed by', a 'from … select' ` +
-      `comprehension — whole-table singleton or 'group by' list) is readable from a page today. ` +
-      `A keyed projection returns rows parameterised by key and a folded one is read by key off ` +
-      `its materialized table; neither has a frontend client yet, so this would emit an ` +
-      `unresolved receiver.`,
+    message: diagMessage("loom.ui-projection-read-unsupported#not-ui-consumable", {
+      where: ctx.where,
+      member: e.member,
+      name: root.name,
+    }),
     source: ctx.where,
   });
 }
@@ -1397,12 +1413,11 @@ function checkMissingEffectMarker(
   diags.push({
     severity: "error",
     code: "loom.missing-effect-marker",
-    message:
-      `${ctx.where}: action body calls \`${m.aggName}.${m.op}(…)\`, a remote mutating command on ` +
-      `aggregate '${m.aggName}', with no effect marker — it has an invisible async boundary. Mark it ` +
-      `\`match await ${m.aggName}.${m.op}(…) { … }\` so its Result is handled ` +
-      `(async-actions-and-effects.md Stage 2b — every remote call is explicitly awaited and its ` +
-      `Result matched).`,
+    message: diagMessage("loom.missing-effect-marker", {
+      where: ctx.where,
+      aggName: m.aggName,
+      op: m.op,
+    }),
     source: ctx.where,
   });
 }

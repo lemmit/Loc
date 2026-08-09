@@ -23,6 +23,7 @@
 // integration renderer lands (removed / made backend-conditional then).
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   type BoundedContext,
   isAggregate,
@@ -62,25 +63,26 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
     if (inSubjectDecl && node.target) {
       accept(
         "error",
-        `A nested 'test' already belongs to its enclosing subject — drop the ` +
-          `'for ${node.target.$refText}' head (name a subject with 'for' only when ` +
-          `the test is hoisted out of it).`,
+        diagMessage("loom.test-redundant-for#a-nested-test-already-belongs", {
+          $refText: node.target.$refText,
+        }),
         { node, property: "target", code: "loom.test-redundant-for" },
       );
     } else if (inContext && target === c) {
       accept(
         "error",
-        `A 'test' nested in context '${c.name}' already targets it — drop the ` +
-          `'for ${node.target?.$refText}' head.`,
+        diagMessage("loom.test-redundant-for#a-test-nested-in-context", {
+          name: c.name,
+          $refText: node.target?.$refText,
+        }),
         { node, property: "target", code: "loom.test-redundant-for" },
       );
     } else if (!inSubjectDecl && !inContext && !node.target) {
-      accept(
-        "error",
-        `A 'test' declared outside its subject must name it: ` +
-          `\`test ${JSON.stringify(node.name)} for <Subject> { … }\`.`,
-        { node, property: "name", code: "loom.test-needs-target" },
-      );
+      accept("error", diagMessage("loom.test-needs-target", { name: JSON.stringify(node.name) }), {
+        node,
+        property: "name",
+        code: "loom.test-needs-target",
+      });
     }
 
     // Honest gate: a context integration test emits ONLY on the node backend so
@@ -96,13 +98,11 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
           ? (c as BoundedContext) // nested in a context with no `for`
           : undefined;
     if (ctxNode && !integrationBackendHostsContext(model, ctxNode)) {
-      accept(
-        "warning",
-        `Context integration tests emit on the node, python, dotnet, java, and elixir ` +
-          `backends (test-placement.md Phase 3a/3b). Context '${ctxNode.name}' is not hosted ` +
-          `by an integration-capable deployable, so this 'test' produces no runnable test yet.`,
-        { node, property: "name", code: "loom.context-test-unsupported" },
-      );
+      accept("warning", diagMessage("loom.context-test-unsupported", { name: ctxNode.name }), {
+        node,
+        property: "name",
+        code: "loom.context-test-unsupported",
+      });
     }
   }
 }
