@@ -51,6 +51,12 @@ export const CHROME_MESSAGES: Record<string, string> = {
   // supplies their values (`localizedChromeIcuText`), and the runtime's
   // `intl-messageformat` substitutes and locale-formats the numbers.
   [chromeKey("pageOf")]: "Page {page} of {pages}",
+  // `Table`'s pager says "Prev" where `DataGrid`'s says "Previous".  Two keys,
+  // not one: collapsing them onto a canonical English would re-word one of the
+  // two controls and break the i18n-off byte-identical guarantee — the same
+  // reason `openMenu` and `toggleNavigation` stayed apart.  "Next" IS shared,
+  // because both spell it identically.
+  [chromeKey("prev")]: "Prev",
   // The empty-state text of a `<select>` picker.  One key rather than one per
   // call site: it is the same sentence to a translator, and every pack that
   // spells it spells it identically (unlike the nav-toggle pair, which packs
@@ -192,6 +198,24 @@ export const FORM_CHROME: Record<string, string> = {
   [chromeKey("cancel")]: "Cancel",
 };
 
+/** Chrome a paged `Table` renders — "Prev" / "Next" / the position counter.
+ *
+ *  Merged-when-already-enabled rather than contributed off the `Table` call
+ *  node, for the same reason `FORM_CHROME` is: the pager is CONDITIONAL, and
+ *  here the condition is not even readable off the call node.  A `Table` pages
+ *  only when it carries a `page:` state ref AND its rows come from a read the
+ *  walker classified as server-controlled — and that second half is a
+ *  walk-context fact (`primitives/table.ts`'s `serverControls`), invisible to
+ *  the target-agnostic extraction pass.  A contribution would therefore either
+ *  over-claim (catalog keys no pager emits) or under-claim (a binding no locale
+ *  can reach); the gate below sidesteps the question, because emitter and merge
+ *  site then answer the identical one — is this UI i18n-enabled. */
+export const TABLE_PAGER_CHROME: Record<string, string> = {
+  [chromeKey("prev")]: "Prev",
+  [chromeKey("next")]: "Next",
+  [chromeKey("pageOf")]: "Page {page} of {pages}",
+};
+
 /** Every chrome table merged into a catalog ONLY when the UI is already
  *  i18n-enabled — never flipping the runtime on by itself.
  *
@@ -200,5 +224,5 @@ export const FORM_CHROME: Record<string, string> = {
  *  (`system/i18n-catalog.ts` for `.loom/messages.en.json`, and
  *  `_frontend/i18n-runtime.ts` for each app's `locales/en.json`). */
 export function chromeMergedWhenEnabled(): Record<string, string> {
-  return { ...APP_SHELL_CHROME, ...FORM_CHROME };
+  return { ...APP_SHELL_CHROME, ...FORM_CHROME, ...TABLE_PAGER_CHROME };
 }
