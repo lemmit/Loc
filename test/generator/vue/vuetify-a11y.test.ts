@@ -61,7 +61,9 @@ describe("vuetify pack — a11y backfill", () => {
     // chrome (D-PACK-CHROME), so under i18n it binds as `:aria-label='t(…)'`
     // rather than a raw attribute — what this test is for is the `<nav>` + a
     // name, not which of the two spellings the app opted into.
-    expect(listPage).toMatch(/<nav (aria-label="Breadcrumb"|:aria-label='t\("pack\.vuetify\.breadcrumbsLandmark\.)/);
+    expect(listPage).toMatch(
+      /<nav (aria-label="Breadcrumb"|:aria-label='t\("pack\.vuetify\.breadcrumbsLandmark\.)/,
+    );
     expect(listPage).toContain("loom-breadcrumbs");
     // The <ul>-rendering Vuetify component is gone (that was the `list` violation).
     expect(listPage).not.toContain("<v-breadcrumbs");
