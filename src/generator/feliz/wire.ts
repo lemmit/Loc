@@ -35,6 +35,7 @@ import type {
   OperationIR,
   PageIR,
   PayloadIR,
+  ProjectionIR,
   StmtIR,
   TypeIR,
   WorkflowIR,
@@ -84,6 +85,16 @@ export interface FelizRead {
   /** For a byId read, the `Page` union case hosting it (`ProductDetail`) — the
    *  arm `pageCmd` fires the fetch from.  Undefined for list reads. */
   pageCase?: string;
+  /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
+   *  read.  It is SINGLE-shaped like a byId (`Remote<'T option>`, rendered by
+   *  `View.remoteOne`) but INIT-fired and id-less like a list read, which is
+   *  why it cannot simply reuse `single`: that flag conflates the record shape
+   *  with "fired on page entry, keyed off the route id".  A projection has no
+   *  id to key on, so it needs the two facts separated.
+   *
+   *  `aggregate` carries the PROJECTION name for such a read — it is only ever
+   *  used for naming (field / decoder / api fn), never to look an aggregate up. */
+  projection?: boolean;
   /** SERVER-paged list read (M-T2.6) — present when the hosting `QueryView`'s
    *  `of:` threads page/sort controls, which is what a scaffolded list page
    *  emits.  Absent for a plain `.all` (an FK-select's option source, a
@@ -235,6 +246,48 @@ export function felizByIdRead(aggregate: string, pageCase: string): FelizRead {
     binding: lowerFirst(field),
     single: true,
     pageCase,
+  };
+}
+
+/** The Model field name for a projection read (`SalesTotals` → `SalesTotals`).
+ *  Unprefixed: a projection name is already a read-model noun, so `AllX`/`XById`
+ *  style decoration would only invent a cardinality it does not have. */
+export function projectionFieldName(projection: string): string {
+  return upperFirst(projection);
+}
+
+/** The F# record type a projection read decodes into (`SalesTotalsRow`) —
+ *  mirrors the backend's `<Proj>Row` and the other frontends' `<Proj>Response`,
+ *  all three built from the same `wireShape`, so they cannot drift. */
+export function projectionRowType(projection: string): string {
+  return `${upperFirst(projection)}Row`;
+}
+
+/** Build the `FelizRead` for a singleton query-time projection.
+ *
+ *  Decoded as `'Row option` (via `Decode.map Some`) rather than a bare `'Row`
+ *  so the EXISTING `View.remoteOne` matcher renders it — the walker already
+ *  classifies a singleton projection as single-record (`controls.ts` derives
+ *  `single` from the read, ahead of `autoPaged`), so the whole byId rendering
+ *  path applies unchanged: no new matcher, no new pack template. */
+export function felizProjectionRead(projection: string): FelizRead {
+  const field = projectionFieldName(projection);
+  const row = projectionRowType(projection);
+  return {
+    field,
+    msgCase: `${field}Loaded`,
+    apiFn: lowerFirst(field),
+    aggregate: projection,
+    resultType: `${row} option`,
+    // `Decode.map Some` lifts the ONE decoded object into the `option` the
+    // remoteOne matcher expects; the route always yields a row (aggregates over
+    // an empty table still produce zeroes), so there is no `None` wire case.
+    decoderExpr: `(Decode.map Some Decoders.${lowerFirst(row)})`,
+    route: `${API_BASE_PATH}/projections/${snake(projection)}`,
+    binding: lowerFirst(field),
+    // SINGLE-shaped but NOT page-entry-keyed — see `FelizRead.projection`.
+    single: false,
+    projection: true,
   };
 }
 
@@ -1002,9 +1055,13 @@ export function collectPageReads(
   aggregatesByName: ReadonlySet<string>,
   nameCtx: PageNameCtx,
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  projectionsByName: ReadonlySet<string> = new Set(),
 ): FelizRead[] {
   if (!page.body) return [];
-  const detCtx = { apiParamNames, aggregatesByName };
+  // `projectionsByName` arms the detector's Pattern H (`<apiHandle>.<Proj>`).
+  // Defaulted to empty so every existing caller keeps its output byte-identical:
+  // absent, Pattern H is inert and only aggregate reads are collected.
+  const detCtx = { apiParamNames, aggregatesByName, projectionsByName };
   const pagedCtx = { ...detCtx, bcByAggregate };
   // The byId read is keyed to the hosting page's `Page` case, which is the
   // aggregate-qualified emit name (`OrderDetail`) — NOT the bare scaffold page
@@ -1014,6 +1071,14 @@ export function collectPageReads(
   const seen = new Set<string>();
   for (const { of: ofArg, explicitPaged } of queryViewOfArgs(page.body)) {
     const detected = tryDetectApiHook(ofArg, detCtx);
+    if (detected?.kind === "projection") {
+      const projRead = felizProjectionRead(detected.aggregateName);
+      if (!out.some((r) => r.field === projRead.field)) {
+        seen.add(projRead.field);
+        out.push(projRead);
+      }
+      continue;
+    }
     if (detected?.kind !== "aggregate") continue;
     // List (`.all`) or single (`byId`) reads.  A byId read is keyed to the
     // hosting page's `Page` case so `pageCmd` can fire it on entry.
@@ -2059,6 +2124,30 @@ export function renderWireTypes(
     });
   }
 
+  // Projection ROW records (M-T1.3 Phase 1) — flat, like the error payloads
+  // above, and built from the SAME `wireShape` the backend's `<Proj>Row` and the
+  // other frontends' `<Proj>Response` are built from, so the three cannot drift.
+  // A projection read's `aggregate` is the projection name, which resolves to no
+  // aggregate above, so its record has to be added here rather than found there.
+  const projByName = new Map<string, ProjectionIR>();
+  for (const c of contexts) for (const pr of c.projections ?? []) projByName.set(pr.name, pr);
+  for (const r of reads) {
+    if (!r.projection) continue;
+    const proj = projByName.get(r.aggregate);
+    const typeName = projectionRowType(r.aggregate);
+    if (!proj || seenRecord.has(typeName)) continue;
+    seenRecord.add(typeName);
+    records.push({
+      typeName,
+      decoderName: lowerFirst(typeName),
+      fields: (proj.wireShape ?? []).map((f) => ({
+        name: f.name,
+        type: f.type,
+        optional: f.optional,
+      })),
+    });
+  }
+
   if (records.length === 0) return { domain: "", decoders: "" };
 
   // A field is optional from EITHER signal — the wire-shape `optional` flag or
@@ -2532,8 +2621,13 @@ export function renderViewModule(
   hasIdSelect = false,
   hasFieldErrors = false,
 ): string {
-  const hasList = reads.some((r) => !r.single);
-  const hasSingle = reads.some((r) => r.single);
+  // A projection read is SINGLE-shaped (`Remote<'T option>` → `remoteOne`) but
+  // carries `single: false` because that flag also means "page-entry keyed"
+  // (see `FelizRead.projection`).  Both predicates therefore ask about the
+  // SHAPE, not the firing rule — otherwise a projection-only page would emit
+  // `remoteList` it never calls and omit the `remoteOne` it does.
+  const hasList = reads.some((r) => !r.single && !r.projection);
+  const hasSingle = reads.some((r) => r.single || r.projection);
   // The per-field form-error matcher — factored here beside the Remote matchers
   // (the codebase's convention for repeated view logic) instead of inlined at
   // every input.  Shows the message only for a touched field, else nothing.
