@@ -68,11 +68,17 @@ describe(".loom/messages.en.json catalog artifact", () => {
     expect(Object.values(catalog)).toContain("Storefront");
     // The scaffold synthesises List/New/Detail pages with humanised chrome.
     expect(Object.values(catalog)).toContain("Orders");
-    // Keys are page/menu (authored) or chrome.* (the always-rendered app-shell
-    // chrome merged for an i18n-enabled system, M-T1.11).
+    // Keys are page/menu (authored), chrome.* (the always-rendered app-shell
+    // chrome merged for an i18n-enabled system, M-T1.11) or pack.* (the active
+    // design pack's DECLARED chrome, D-PACK-CHROME).  Exhaustive on purpose —
+    // a stray namespace is a key no `ddd i18n sync` consumer knows how to route.
     expect(
       Object.keys(catalog).every(
-        (k) => k.startsWith("page.") || k.startsWith("menu.") || k.startsWith("chrome."),
+        (k) =>
+          k.startsWith("page.") ||
+          k.startsWith("menu.") ||
+          k.startsWith("chrome.") ||
+          k.startsWith("pack."),
       ),
     ).toBe(true);
     // The app-shell chrome rode in (404 + skip link).

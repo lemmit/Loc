@@ -112,7 +112,12 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // Same gate as the other five frontends: a string-less ui gets no `pgettext`
   // binding anywhere and stays byte-identical.
   const i18nUi = heexI18nUi(sys, deployable);
-  pack.setChromeI18n(i18nUi !== undefined);
+  // `pack?.` — a JSON-API-only deployable renders no template at all, and the
+  // IR-level shell tests call this orchestrator without one.  Every other pack
+  // use in this function already sits behind a `hasLiveView`-shaped branch, so
+  // hoisting an UNguarded call here would newly require a pack that path never
+  // needed.
+  pack?.setChromeI18n(i18nUi !== undefined);
 
   // Shared cross-controller helper modules (Slice 4).  Emitted once
   // per project; controllers `alias` the public functions.  The 23505 → 409

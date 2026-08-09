@@ -22,6 +22,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import Handlebars from "handlebars";
 import { describe, expect, it } from "vitest";
 import { loadPack, resolvePackDir } from "../../src/generator/_packs/loader-fs.js";
 import {
@@ -177,6 +178,29 @@ describe("pack-declared chrome — the helpers", () => {
     expect(() =>
       assertDeclaredChromeIsSane({ name: "ok", chrome: { x: "Add {item}" } }),
     ).not.toThrow();
+  });
+});
+
+describe("pack templates parse", () => {
+  // `Handlebars.compile` is LAZY — it defers parsing to the first render — so a
+  // malformed template survives `loadPack` (which compiles every emit eagerly)
+  // and only blows up when some `.ddd` happens to reach it.  This slice hit
+  // exactly that: `{{{chromeValue "chooseFile"}}}}` before JSX's own `}` reads
+  // as Handlebars' raw-block close `}}}}`, and the pack loaded clean while
+  // every File-field render threw.  Parsing every template here turns that into
+  // a test failure naming the file.
+  it("every `.hbs` in every pack is syntactically valid Handlebars", () => {
+    const broken: string[] = [];
+    for (const { dir } of PACKS) {
+      for (const file of hbsFiles(dir)) {
+        try {
+          Handlebars.parse(readFileSync(file, "utf-8"));
+        } catch (e) {
+          broken.push(`${file}: ${(e as Error).message.split("\n")[0]}`);
+        }
+      }
+    }
+    expect(broken).toEqual([]);
   });
 });
 
