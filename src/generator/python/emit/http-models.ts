@@ -113,6 +113,9 @@ export function renderPyWireModels(ctx: BoundedContextIR): string {
   const pydanticNames = [
     "BaseModel",
     uses("Field") ? "Field" : null,
+    // A messaged single-field rule raises through `ValidationError.
+    // from_exception_data` so the error carries the field's `loc` (M-T1.11).
+    uses("ValidationError") ? "ValidationError" : null,
     uses("model_validator") ? "model_validator" : null,
   ].filter((n): n is string => n != null);
   return lines(
@@ -122,7 +125,9 @@ export function renderPyWireModels(ctx: BoundedContextIR): string {
     uses("Decimal") ? "from decimal import Decimal" : null,
     uses("datetime") || uses("Decimal") ? "" : null,
     ctx.valueObjects.length > 0 ? `from pydantic import ${pydanticNames.join(", ")}` : null,
-    uses("PydanticCustomError") ? "from pydantic_core import PydanticCustomError" : null,
+    uses("PydanticCustomError")
+      ? `from pydantic_core import ${uses("InitErrorDetails") ? "InitErrorDetails, PydanticCustomError" : "PydanticCustomError"}`
+      : null,
     enumNames.length > 0 ? "" : null,
     enumNames.length > 0 ? `from app.domain.value_objects import ${enumNames.join(", ")}` : null,
     ctx.valueObjects.length === 0 ? "\n__all__: list[str] = []" : body,

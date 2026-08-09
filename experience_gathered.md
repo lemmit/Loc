@@ -4740,6 +4740,19 @@ out of the *first* compile — both older than this slice, both in the shared
   keyed. Hono and Java both carried `message` through the same lift; one of three
   copies was wrong.
 
+A THIRD bug appeared the moment the same fixture got a wire golden, and it is
+the same shape one level out: python answered `errors[0].pointer: ""` where
+every other backend answered `/amount`. An error raised from a Pydantic
+`model_validator` carries **no `loc`** — `PydanticCustomError` has nowhere to
+put one — so the field the error points at was simply absent, while Hono's
+refine passes `path` and gets it for free. `ValidationError.from_exception_data`
+is the one Pydantic API that lets a raise name its own `loc` (and `input` is a
+REQUIRED key of `InitErrorDetails` under `mypy --strict`). Worth noting *how* it
+surfaced: the structural per-backend tests all passed, the emitted project
+compiled clean on all five real compilers, and only a five-way RUNTIME diff
+against a golden showed the field was missing. A pointer is a value, and values
+are what the compile tiers are blind to.
+
 The lesson is narrower than "add a fixture". A carrier shared by two ref-kinds
 (`this-prop` and `param`) or by two construction sites (create vs operation) is
 **one code path with two input classes**, and a per-backend unit test written
