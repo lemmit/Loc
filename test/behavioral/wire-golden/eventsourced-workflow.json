@@ -28,6 +28,25 @@
         "status": "Placed",
         "version": 2
       }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "status": "Placed",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
     }
   ]
 }
