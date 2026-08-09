@@ -34,7 +34,18 @@ export const BACKEND_PINS = {
   dependencies: {
     hono: "^4.12.0",
     "@hono/node-server": "^2.0.0",
-    "@hono/zod-openapi": "^1.0.0",
+    // `1.5.2` shipped a `.openapi()` declaration-merging regression: chaining
+    // `.refine(...)` after `.openapi("Name")` (routes-builder.ts's
+    // `emitWireSchema`) loses the callback's contextual param type — a
+    // `strict`/`noImplicitAny` TS7006 on every corpus feature with a
+    // cross-field invariant, confirmed via `npm view` bisection (1.5.1 clean,
+    // 1.5.2 broken, both against zod 4.4.3) and reproducing with ZERO Loom
+    // code touched (a hand-written `z.string().transform((s, ctx) => …)`
+    // template broke too, on the 1.5.2+zod-4.4.3 pairing specifically).  Not
+    // this repo's bug — an upstream type regression on a floating `^1.0.0`
+    // range.  Re-verify (bisect the same way) before widening this back to a
+    // plain caret; a later patch may fix it forward.
+    "@hono/zod-openapi": "^1.0.0 <1.5.2 || >1.5.2 <2.0.0",
     zod: "^4.0.0",
     "drizzle-orm": "^0.45.0",
     pg: "^8.13.0",
