@@ -385,6 +385,14 @@ export function usesIntl(dart: string): boolean {
   return dart.includes("NumberFormat") || dart.includes("DateFormat");
 }
 
+/** True when rendered Dart calls into `dart:math` (`math.min`/`math.max`/
+ *  `math.pow`, emitted by three `DART_INTRINSIC_RENDERERS` arms in
+ *  `dart-expr.ts` — `min`/`max`/`round`), so a file emitter should add
+ *  `import 'dart:math' as math;`.  The on-demand-import twin of `usesIntl`. */
+export function usesMath(dart: string): boolean {
+  return dart.includes("math.");
+}
+
 /** Money(value, currency?, decimals?) — a currency-prefixed amount, formatted
  *  through `intl`'s `NumberFormat` (grouping separators + fixed fraction digits)
  *  rather than a bare `double.toString()` — the Dart twin of the JS frontends'

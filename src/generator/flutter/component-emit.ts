@@ -32,7 +32,7 @@ import { lines } from "../../util/code-builder.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
-import { flutterPack, usesIntl } from "./pack.js";
+import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import {
   buildStateFields,
   buildStateInits,
@@ -302,6 +302,8 @@ export function renderComponentsFile(
   // The generated translation runtime (M-T1.11) — a sibling of this file under
   // `lib/`, imported only when a component body resolved a `t(…)` call.
   if (/(?<![A-Za-z0-9_$.])t\(/.test(blocks.join("\n"))) imports.push("import 'i18n.dart';");
+  // `min`/`max`/`round` scalar intrinsics route through `math.*` (`dart-expr.ts`).
+  if (usesMath(blocks.join("\n"))) imports.push("import 'dart:math' as math;");
   return `${lines(
     "// User components — one widget per `component Foo(params) { body }` a ui",
     "// hosts (StatelessWidget, or StatefulWidget when it carries `state`).",
