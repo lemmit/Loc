@@ -42,6 +42,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
+import { collectWireValidationMessages } from "../_i18n/validation-catalog.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateAngularForContexts } from "../angular/index.js";
@@ -103,6 +104,7 @@ import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
 import { renderExternHookImpl } from "./emit/extern.js";
 import { renderId } from "./emit/ids.js";
+import { CS_MESSAGES_PATH, renderCsMessages } from "./emit/messages.js";
 import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
@@ -933,6 +935,13 @@ function emitProjectFromContexts(
   // exception the guarded write's stale-write raises.  A project with neither
   // stays byte-identical.
   const hasConcurrency = aggregatesNeedConcurrency(merged.aggregates);
+  // Validation-message catalog (M-T1.11): a messaged rule's wire `code` resolves
+  // SERVER-side against this project's catalog.  No messaged rule ⇒ no catalog
+  // file and a byte-identical exception filter.
+  const validationMessages = collectWireValidationMessages(contexts);
+  if (validationMessages.length > 0) {
+    out.set(CS_MESSAGES_PATH, renderCsMessages(ns, validationMessages));
+  }
   out.set(
     "Api/DomainExceptionFilter.cs",
     renderExceptionFilter(ns, {
@@ -940,6 +949,7 @@ function emitProjectFromContexts(
       usingDapper,
       hasUniqueKeys,
       hasVersioned: hasConcurrency,
+      localizeMessages: validationMessages.length > 0,
       // App-wide structural-conflict `httpStatus` overrides (M-T3.4a) — the
       // resolved statuses are identical across every hosted context (folded
       // app-wide in enrichment), so any context carries the same map.
@@ -1737,11 +1747,17 @@ function emitInfrastructure(
   if (ctx.workflows.length > 0 || ctx.projections.length > 0) {
     out.set("Infrastructure/Persistence/PersistencePorts.cs", renderPersistencePortAdapters(ns));
   }
+  // Validation-message catalog (M-T1.11) — same gate as the system-mode emitter.
+  const validationMessages = collectWireValidationMessages([ctx]);
+  if (validationMessages.length > 0) {
+    out.set(CS_MESSAGES_PATH, renderCsMessages(ns, validationMessages));
+  }
   out.set(
     "Api/DomainExceptionFilter.cs",
     renderExceptionFilter(ns, {
       usesValidators,
       structuralStatuses: ctx.structuralErrorStatuses,
+      localizeMessages: validationMessages.length > 0,
     }),
   );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));

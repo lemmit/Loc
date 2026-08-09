@@ -312,6 +312,15 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       // use matches the (also-escaped) binding.
       return escapePythonIdent(snake(e.name));
     case "param":
+      // Wire DTO (`wireField`): an operation's params ARE the request model's
+      // own fields, carried verbatim in camelCase — exactly like `this-prop`
+      // below.  Without this the `@model_validator` refine for a messaged (or
+      // cross-field) PRECONDITION rendered a bare `amount >= 1`, which is an
+      // `F821 Undefined name` — a NameError at request time.  It went unseen
+      // because a message-LESS single-field precondition never reaches the
+      // refine (it becomes `Field(ge=1)`), and no fixture compiled a messaged
+      // one until `test/fixtures/corpus/validation-messages.ddd`.
+      if (ctx.wireField) return `${ctx.thisName}.${e.name}`;
       return snake(e.name);
     case "this-prop":
       // Wire DTO: the verbatim camelCase attribute.  Inside the aggregate

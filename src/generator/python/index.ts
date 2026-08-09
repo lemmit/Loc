@@ -34,6 +34,7 @@ import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
 import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
+import { collectWireValidationMessages } from "../_i18n/validation-catalog.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateAngularForContexts } from "../angular/index.js";
@@ -60,6 +61,7 @@ import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
 import { renderPyContextIntegrationTest } from "./emit/integration-tests.js";
+import { PY_MESSAGES_MODULE_PATH, renderPyMessagesModule } from "./emit/messages.js";
 import { renderPythonMetricsFile } from "./emit/metrics.js";
 import {
   emitPythonMigrations,
@@ -612,6 +614,14 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     out.set("app/scheduling.py", renderPyTimerScheduler(ownedTimers, eventByName, hasDispatch));
   }
 
+  // Validation-message catalog (M-T1.11): the wire `code` a messaged rule
+  // attaches resolves SERVER-side against this project's catalog.  No messaged
+  // rule ⇒ no module and a byte-identical problem handler.
+  const validationMessages = collectWireValidationMessages(args.contexts);
+  if (validationMessages.length > 0) {
+    out.set(PY_MESSAGES_MODULE_PATH, renderPyMessagesModule(validationMessages));
+  }
+
   out.set("app/http/__init__.py", "");
   out.set(
     "app/http/problem.py",
@@ -623,6 +633,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       // carries the map folded across every api's `httpStatus`. The global
       // exception handlers have no per-context tag, so they read it here.
       (args.sys as EnrichedSystemIR).structuralErrorStatuses,
+      validationMessages.length > 0,
     ),
   );
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
@@ -1453,6 +1464,10 @@ function renderProblemPy(
    *  their hardcoded 409s resolve through this map (`httpStatus <Conflict>
    *  <Code>` override, defaulting to 409 → byte-identical). */
   structuralErrorStatuses?: Record<string, number>,
+  /** True when this project ships `app/i18n.py` — the 422 handler then resolves
+   *  each messaged rule's wire `code` against the catalog for the request
+   *  locale.  False ⇒ byte-identical to pre-catalog output (M-T1.11). */
+  localizeMessages = false,
 ): string {
   // Structural-conflict statuses resolved through the `httpStatus` mapper: the
   // 23505 unique-violation handler → UniquenessConflict, the ConcurrencyError
@@ -1523,6 +1538,14 @@ function renderProblemPy(
 
 `
     : "";
+  // The catalog lookup (M-T1.11) — imported only when this project has an
+  // authored validation message, so a message-less app's imports are unchanged.
+  const i18nImport = localizeMessages ? "\nfrom app.i18n import localize_message" : "";
+  // Resolve the code against the catalog for the request locale, falling back to
+  // Pydantic's message (the authored text `PydanticCustomError` carries).
+  const localizeLine = localizeMessages
+    ? '\n                entry["message"] = localize_message(code, entry["message"])'
+    : "";
   return `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
 from typing import Any, cast
@@ -1540,7 +1563,7 @@ ${versionedImport}    DisallowedError,
     ForbiddenError,
 )
 from app.obs.log import log
-from app.obs.metrics import record_domain_fault
+from app.obs.metrics import record_domain_fault${i18nImport}
 
 
 class ProblemDetails(BaseModel):
@@ -1684,7 +1707,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
             # rule's default Pydantic type is omitted (byte-identical body).
             code = str(e.get("type", ""))
             if code.startswith("msg."):
-                entry["code"] = code
+                entry["code"] = code${localizeLine}
             errors.append(entry)
         # RS-29 — the WIRE-VALIDATION rung's title/detail, byte-identical to the
         # other four backends.  Deliberately NOT the status reason phrase: the

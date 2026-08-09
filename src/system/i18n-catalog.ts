@@ -1,3 +1,4 @@
+import { collectWireValidationMessages } from "../generator/_i18n/validation-catalog.js";
 import { chromeMergedWhenEnabled } from "../generator/_walker/i18n-chrome.js";
 import { collectUiMessages } from "../generator/_walker/i18n-extract.js";
 import type { EnrichedSystemIR } from "../ir/types/loom-ir.js";
@@ -32,6 +33,15 @@ export function buildMessageCatalog(sys: EnrichedSystemIR): Record<string, strin
   // gate), so a string-less system stays `{}`.
   if (byKey.size > 0) {
     for (const [key, message] of Object.entries(chromeMergedWhenEnabled())) byKey.set(key, message);
+  }
+  // BACKEND validation messages (M-T1.11) — an authored `message "…"` on an
+  // `invariant` / `check` / `precondition`, keyed by the `msg.<hash>` code the
+  // wire validators put on `errors[].code` and every backend's own catalog is
+  // keyed by.  Merged in AFTER the chrome gate deliberately: these are server-side
+  // strings, so a UI-less system with authored rule messages has a real catalog
+  // to translate without pulling in app-shell chrome no frontend renders.
+  for (const sub of sys.subdomains) {
+    for (const { code, text } of collectWireValidationMessages(sub.contexts)) byKey.set(code, text);
   }
   const out: Record<string, string> = {};
   for (const key of [...byKey.keys()].sort()) out[key] = byKey.get(key)!;

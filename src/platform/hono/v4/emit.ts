@@ -10,6 +10,7 @@
 // Hono-framework builders now live in this package (P2b) — siblings.
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
 import { brokerChannelBindings } from "../../../generator/_channels/bindings.js";
+import { collectWireValidationMessages } from "../../../generator/_i18n/validation-catalog.js";
 import { renderHonoBaseLogCall } from "../../../generator/_obs/render-hono.js";
 import type { SourceMapRecorder } from "../../../generator/_trace/sourcemap.js";
 import {
@@ -25,6 +26,10 @@ import {
 } from "../../../generator/typescript/emit/audit-stamp.js";
 import { renderChannelsModule } from "../../../generator/typescript/emit/channels.js";
 import { renderDomainServices } from "../../../generator/typescript/emit/domain-service.js";
+import {
+  MESSAGES_MODULE_PATH,
+  renderMessagesModule,
+} from "../../../generator/typescript/emit/messages.js";
 import {
   emitTypescriptMigrations,
   emitTypescriptProvenanceMigration,
@@ -206,11 +211,12 @@ export class ConcurrencyError extends Error {
  *  `defaultHook` (passed to `new OpenAPIHono({ defaultHook })` so Zod parse
  *  failures translate to 422 ProblemDetails with per-field `errors[]`
  *  consumed by the frontend ACL's `applyServerErrors`). */
-const PROBLEM_DETAILS_TS = `// Auto-generated.  Do not edit by hand.
+function problemDetailsTs(localizeMessages: boolean): string {
+  return `// Auto-generated.  Do not edit by hand.
 import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
-
+${localizeMessages ? 'import { localizeMessage } from "./messages";\n' : ""}
 /** RFC 7807 ProblemDetails body — the base 5 spec fields plus the §3.2
  *  \`errors[]\` extension (per-field \`{ pointer, message }\` array) that
  *  the runtime emits on 422 validation responses.  Consumed by the
@@ -260,7 +266,19 @@ export function defaultHook(result: { success: boolean; error?: { issues: Readon
   const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
   const errors = (result.error?.issues ?? []).map((issue) => ({
     pointer: pointerOf(issue.path),
-    message: issue.message,
+    ${
+      // The message-LESS shape is kept EXACTLY as it was so a project with no
+      // authored message emits a byte-identical file (the acme baseline fixture
+      // is the gate).  Under a catalog the code resolves SERVER-side (M-T1.11).
+      localizeMessages
+        ? `// The SERVER localises the message too (M-T1.11): the code resolves
+    // against the generated catalog for the request locale, falling back to the
+    // authored text the refine carries.  Resolved HERE rather than in the refine
+    // because a zod "message" is fixed when the schema is CONSTRUCTED (module
+    // load), where no request — and so no locale — exists yet.
+    message: localizeMessage(issue.params?.loomCode, issue.message),`
+        : `message: issue.message,`
+    }
     // A messaged invariant/precondition carries a stable content-hash code (via
     // the refine's params.loomCode) so a client can localise the error;
     // structural zod errors (type/min) have none.
@@ -287,6 +305,7 @@ export function newApp(): OpenAPIHono {
   return new OpenAPIHono({ defaultHook });
 }
 `;
+}
 
 /** Provenance lineage types — emitted only when the model declares at
  *  least one `provenanced` field that is actually written.  Each
@@ -469,7 +488,15 @@ export function generateTypeScriptForContexts(
   // the same error class + 409 arm the `versioned` guarded write does.
   const emitConcurrency = aggregatesNeedConcurrency(merged.aggregates);
   out.set("domain/errors.ts", errorsTs(emitConcurrency));
-  out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);
+  // Validation-message catalog (M-T1.11): a messaged rule's wire `code` resolves
+  // SERVER-side against this project's catalog, so a localised client is no
+  // longer the only way to see a translated rule.  No messaged rule ⇒ no catalog
+  // module and a byte-identical problem-details file.
+  const validationMessages = collectWireValidationMessages(contexts);
+  if (validationMessages.length > 0) {
+    out.set(MESSAGES_MODULE_PATH, renderMessagesModule(validationMessages));
+  }
+  out.set("http/problem-details.ts", problemDetailsTs(validationMessages.length > 0));
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
   // Per-aggregate dataSource lookup — feeds `pgSchema(...)` /
   // `<schema>.table(...)` / `tablePrefix` routing in `renderSchema`.

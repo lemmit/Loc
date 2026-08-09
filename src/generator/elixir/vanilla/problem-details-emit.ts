@@ -31,6 +31,11 @@ export function renderVanillaProblemDetailsModule(
    *  here is what stops a remap from moving the per-controller arms while this
    *  one stayed a literal. */
   notFoundStatus = 404,
+  /** True when this project ships a `priv/gettext` catalog carrying its authored
+   *  validation messages (M-T1.11) — a changeset error's `loom_code` then
+   *  resolves through gettext for the request locale.  False ⇒ byte-identical to
+   *  pre-catalog output. */
+  localizeMessages = false,
 ): string {
   // Optimistic-concurrency 409 (`versioned` capability, D-VERSIONED).  A stale
   // write raises `Ecto.StaleEntryError`, which the repository rescues into
@@ -39,6 +44,52 @@ export function renderVanillaProblemDetailsModule(
   // `unique (...)` 409 uses via `problem_response/4`) so a dashboard can tell a
   // concurrency conflict from a business-rule refusal.  Gated on `hasVersioned`
   // so a version-free app is byte-identical (strict additivity).
+  // Server-side message localization (M-T1.11).  Phoenix is one of the two
+  // backends whose ECOSYSTEM already owns this, so nothing is hand-rolled: the
+  // catalog is the same real `priv/gettext` tree the HEEx frontend translates
+  // through, and the resolution is gettext's.
+  //
+  // `pgettext` reconciles the two key models exactly as it does on the frontend
+  // half (see `elixir/i18n.ts`): the Loom content-hash code is the msgctxt and
+  // the authored English the msgid.  gettext's own "an empty translation renders
+  // the msgid" rule IS the fallback, so an untranslated locale returns the
+  // authored text with no branch here.
+  //
+  // The RUNTIME `Gettext.pgettext/4` rather than the same-named MACRO: the
+  // msgctxt arrives as a changeset-error metadata value, and the macros require
+  // compile-time literals (they are what `mix gettext.extract` reads — the `.pot`
+  // this project ships is generated instead).
+  const localizeFn = localizeMessages
+    ? `
+
+  # Resolve a messaged rule's stable wire code (M-T1.11) against this project's
+  # gettext catalog for the request locale, falling back to the authored text.
+  defp localize(nil, message), do: message
+
+  defp localize(code, message) do
+    Gettext.with_locale(gettext_locale(), fn ->
+      Gettext.pgettext(${appModule}Web.Gettext, code, message)
+    end)
+  end
+
+  # The ambient request locale carries the Accept-Language header VERBATIM
+  # (D-CTX-SHAPE — it is the request-stable input, not a catalog-shaped one), so
+  # the normalisation to a lookup tag lives here: the first listed language,
+  # without its \`;q=\` weight.  An unknown tag is not an error for gettext —
+  # it has no translations, so the msgid (the authored English) is returned.
+  defp gettext_locale do
+    tag =
+      ${appModule}.RequestContext.locale()
+      |> String.split(",")
+      |> List.first("")
+      |> String.split(";")
+      |> List.first("")
+      |> String.trim()
+      |> String.downcase()
+
+    if tag == "", do: "en", else: tag
+  end`
+    : "";
   const conflictFn = hasVersioned
     ? `
 
@@ -267,7 +318,9 @@ ${responseFns}
         String.replace(acc, "%{#{key}}", error_opt_to_string(value))
       end)
 
-    base = %{pointer: pointer_of([field]), message: interpolated}
+    base = %{pointer: pointer_of([field]), message: ${
+      localizeMessages ? "localize(Keyword.get(opts, :loom_code), interpolated)" : "interpolated"
+    }}
 
     # A messaged rule carries a "loom_code" metadata key (the stable
     # content-hash wire code / i18n key) on the changeset error; a message-less
@@ -278,7 +331,7 @@ ${responseFns}
     end
   end
 
-  defp render_changeset_error(_), do: nil
+  defp render_changeset_error(_), do: nil${localizeFn}
 
   # Interpolate an Ecto error opt value into the message.  Enum.reduce above
   # evaluates this for EVERY opt (even ones whose placeholder isn't in the

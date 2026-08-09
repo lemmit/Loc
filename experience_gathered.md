@@ -4717,3 +4717,51 @@ Two things worth keeping:
   import line, and `mypy --strict` passes an unused import happily — it is
   `ruff` in the compile tier that rejects it.  A fixture that never compiles
   cannot find this class at all, which is the whole argument for adding one.
+
+## 83. A "carrier" the emitter shares with a second ref-kind it never compiled (2026-08-09)
+
+Adding the backend message catalog (M-T1.11) meant writing the first corpus
+fixture in the repo with a `message "…"` clause. Two silent codegen bugs fell
+out of the *first* compile — both older than this slice, both in the shared
+"messaged rule routes onto the refine/`.Must` carrier" path:
+
+- **Python:** `@model_validator` refines render against the request DTO with
+  `wireField: true`, and that mode mapped `this-prop` → `self.<name>` but left
+  `param` a bare name. So a messaged **precondition** emitted
+  `if not (amount >= 1)` — ruff `F821 Undefined name`, a `NameError` at request
+  time. Invisible because a message-LESS single-field precondition never reaches
+  the refine (it becomes `Field(ge=1)`), so the only inputs that exercise the
+  param arm are a messaged one or a cross-field one, and **no fixture had
+  either**.
+- **.NET:** `renderOperationValidator` lifted preconditions as
+  `{ expr, source }` — dropping `message`. An authored precondition silently
+  degraded to the derived `"Invariant violated: <src>"` default AND lost its
+  wire `code`, so a .NET client could not localise a rule every other backend
+  keyed. Hono and Java both carried `message` through the same lift; one of three
+  copies was wrong.
+
+The lesson is narrower than "add a fixture". A carrier shared by two ref-kinds
+(`this-prop` and `param`) or by two construction sites (create vs operation) is
+**one code path with two input classes**, and a per-backend unit test written
+against the easy class passes forever. Both bugs sat behind a *conditional*
+emission whose condition no fixture satisfied — the same shape as §78's "no CI
+job reaches it", except here the gate existed and the INPUT did not. Before
+trusting "the corpus covers this area", grep the fixtures for the clause that
+turns the emission on: `grep -l 'message "' test/fixtures/corpus/*.ddd` returned
+nothing.
+
+Two smaller ones from the same session, both found only by the real compiler:
+
+- **Elixir requires same-name clauses grouped.** Appending a helper right after
+  the *first* `defp render_changeset_error/1` clause split the pair, and
+  `--warnings-as-errors` rejected it. When splicing into an emitted Elixir
+  module, append after the LAST clause of a multi-clause function, not after the
+  one whose text you happened to match.
+- **A dynamic key needs the RUNTIME gettext function, not the macro.**
+  `pgettext/2` in a `~H` template is a macro requiring compile-time literals (it
+  is what `mix gettext.extract` reads). A changeset error's `msgctxt` is a
+  runtime value, so the 422 path needs `Gettext.pgettext(backend, ctx, msgid)` —
+  the arity-4 module function. Checking that against the actual hex tarball
+  (`curl repo.hex.pm/tarballs/gettext-0.26.2.tar` + grep) took one minute and
+  removed a guess that a compile would only have caught after a 2-minute docker
+  round-trip.

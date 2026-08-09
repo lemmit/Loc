@@ -80,9 +80,15 @@ export function emitVanillaShellFiles(
    *  catalog are emitted and the `gettext` dep + `html_helpers` import ride
    *  along.  Undefined ⇒ every emitted file is byte-identical to pre-i18n. */
   i18nUi: UiIR | undefined = undefined,
+  /** This deployable's authored backend validation messages (M-T1.11) — the
+   *  SECOND source of catalog entries beside the ui.  Non-empty turns the
+   *  Gettext backend + `priv/gettext` tree + hex dep on even for a
+   *  JSON-API-only deployable, whose 422 handler resolves through them. */
+  validationMessages: readonly { code: string; text: string }[] = [],
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
-  const i18nEnabled = i18nUi !== undefined;
+  // Either source of translatable strings turns the runtime on.
+  const i18nEnabled = i18nUi !== undefined || validationMessages.length > 0;
   // The SECOND-tier i18n gate (D-I18N-HEEX-ICU): an ICU engine ships only for a
   // ui that actually INTERPOLATES.  A translatable-but-literal-only app keeps
   // the byte-identical dep list it had before this slice.
@@ -134,7 +140,10 @@ export function emitVanillaShellFiles(
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(
     `lib/${appName}_web.ex`,
-    renderVanillaWebModule(appName, appModule, hasLiveView, i18nEnabled, icuEnabled),
+    // The TEMPLATE-side gate is the ui, not the merged catalog: `pgettext/2` in
+    // `html_helpers` exists for `~H` templates, and a JSON-API-only deployable
+    // has none (its 422 handler calls the gettext runtime fully-qualified).
+    renderVanillaWebModule(appName, appModule, hasLiveView, i18nUi !== undefined, icuEnabled),
   );
   out.set(
     `lib/${appName}_web/endpoint.ex`,
@@ -180,24 +189,32 @@ export function emitVanillaShellFiles(
       }),
     );
     out.set(`lib/${appName}_web/nav.ex`, renderLiveNav(appModule));
-    // Translation runtime (M-T1.11) — the Gettext backend every `~H` template
-    // calls into, plus the source-language catalog built from the SAME
-    // `buildUiCatalog` the other five frontends' runtimes read.  Only when the
-    // ui actually has extractable strings; otherwise byte-identical (no
-    // module, no `priv/gettext`, no `gettext` dep).
-    if (i18nUi) {
-      out.set(`lib/${appName}_web/gettext.ex`, renderGettextBackend(appName, appModule));
-      out.set(`priv/gettext/${GETTEXT_DOMAIN}.pot`, renderGettextCatalog(i18nUi, "pot"));
-      out.set(
-        `priv/gettext/en/LC_MESSAGES/${GETTEXT_DOMAIN}.po`,
-        renderGettextCatalog(i18nUi, "po"),
-      );
-      // ICU formatting runs OVER gettext's result, so it ships only alongside
-      // it — and only for a ui with an interpolated message.
-      if (icuEnabled) {
-        out.set(`lib/${appName}/cldr.ex`, renderCldrBackend(appModule));
-        out.set(`lib/${appName}_web/i18n.ex`, renderIcuRuntime(appModule));
-      }
+  }
+  // Translation runtime (M-T1.11) — the Gettext backend, plus the source-language
+  // catalog built from the SAME `buildUiCatalog` the other five frontends'
+  // runtimes read, MERGED with this deployable's backend validation messages.
+  // Two halves, one `.po` tree: a Loom key is globally unique and is always the
+  // `msgctxt`, so `mix gettext.merge` and every `.po` importer see one catalog.
+  //
+  // NOT LiveView-gated (it used to be, when the ui was the only source of
+  // strings): a JSON-API-only deployable with an authored `message "…"` needs
+  // the backend + catalog too, and its 422 handler resolves through them.
+  // Neither half ⇒ byte-identical (no module, no `priv/gettext`, no dep).
+  if (i18nEnabled) {
+    out.set(`lib/${appName}_web/gettext.ex`, renderGettextBackend(appName, appModule));
+    out.set(
+      `priv/gettext/${GETTEXT_DOMAIN}.pot`,
+      renderGettextCatalog(i18nUi, "pot", validationMessages),
+    );
+    out.set(
+      `priv/gettext/en/LC_MESSAGES/${GETTEXT_DOMAIN}.po`,
+      renderGettextCatalog(i18nUi, "po", validationMessages),
+    );
+    // ICU formatting runs OVER gettext's result, so it ships only alongside
+    // it — and only for a ui with an interpolated message.
+    if (icuEnabled) {
+      out.set(`lib/${appName}/cldr.ex`, renderCldrBackend(appModule));
+      out.set(`lib/${appName}_web/i18n.ex`, renderIcuRuntime(appModule));
     }
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));

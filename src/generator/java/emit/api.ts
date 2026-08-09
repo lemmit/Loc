@@ -574,6 +574,10 @@ export function renderApiExceptionAdvice(
    *  (M-T3.4a). Every hardcoded 409 site below resolves through it, defaulting
    *  to 409 → byte-identical output with no override. */
   structuralErrorStatuses?: Record<string, number>,
+  /** True when this project ships `src/main/resources/messages.properties` — the
+   *  422 handler then resolves each field error through `MessageSource` for the
+   *  request locale.  False ⇒ byte-identical to pre-catalog output (M-T1.11). */
+  localizeMessages = false,
 ): string {
   // Structural-conflict statuses resolved through the `httpStatus` mapper
   // (expressible-builtins.md §3 / M-T3.4a): a literal 409 by default, or the
@@ -602,6 +606,12 @@ export function renderApiExceptionAdvice(
     // The optimistic-lock → 409 handler (+ its import) is emitted only when some
     // aggregate is `versioned` — a version-free project stays byte-identical.
     hasVersioned && `import org.springframework.orm.ObjectOptimisticLockingFailureException;`,
+    // MessageSource + the request locale (M-T1.11) — only when this project ships
+    // a message bundle, so a message-less app's imports are unchanged.
+    localizeMessages && `import java.util.Locale;`,
+    localizeMessages && `import org.springframework.context.MessageSource;`,
+    localizeMessages && `import org.springframework.context.NoSuchMessageException;`,
+    localizeMessages && `import org.springframework.validation.FieldError;`,
     `import org.springframework.http.HttpStatus;`,
     `import org.springframework.http.MediaType;`,
     `import org.springframework.http.ProblemDetail;`,
@@ -618,13 +628,18 @@ export function renderApiExceptionAdvice(
     `import ${basePkg}.domain.common.ForbiddenException;`,
     `import ${basePkg}.config.CatalogLog;`,
     `import ${basePkg}.config.HttpMetrics;`,
+    localizeMessages && `import ${basePkg}.config.RequestContext;`,
     ``,
     `@RestControllerAdvice`,
     `public class ApiExceptionAdvice {`,
     `    private final HttpMetrics httpMetrics;`,
+    localizeMessages && `    private final MessageSource messages;`,
     ``,
-    `    public ApiExceptionAdvice(HttpMetrics httpMetrics) {`,
+    localizeMessages
+      ? `    public ApiExceptionAdvice(HttpMetrics httpMetrics, MessageSource messages) {`
+      : `    public ApiExceptionAdvice(HttpMetrics httpMetrics) {`,
     `        this.httpMetrics = httpMetrics;`,
+    localizeMessages && `        this.messages = messages;`,
     `    }`,
     ``,
     // Wire-boundary validation (422): the per-command Spring Validators
@@ -638,11 +653,25 @@ export function renderApiExceptionAdvice(
     `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", 422);`,
     `        httpMetrics.recordDomainFault("domain_error");`,
     `        var problem = problem(422, "Validation failed", "One or more fields are invalid.", request);`,
+    // The lookup locale is the AMBIENT request locale (D-CTX-SHAPE), not Spring's
+    // own LocaleContextHolder: RequestContext.locale() is the one request-stable
+    // value every other governance slice reads, and two locale sources could
+    // disagree.  It carries the Accept-Language header verbatim, so
+    // forLanguageTag gets the first listed tag.
+    localizeMessages &&
+      `        var locale = Locale.forLanguageTag(RequestContext.locale().split(",")[0].split(";")[0].trim());`,
     `        problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()`,
     `            .map(err -> {`,
     `                var entry = new java.util.LinkedHashMap<String, Object>();`,
     `                entry.put("pointer", "/" + err.getField());`,
-    `                entry.put("message", err.getDefaultMessage());`,
+    // A FieldError IS a MessageSourceResolvable: MessageSource tries its codes
+    // (the `msg.<hash>` i18n key) and falls back to getDefaultMessage() — the
+    // authored English — when the bundle has no entry for this locale.  The
+    // message-less sentinel code resolves to nothing and keeps its default, so
+    // no branching is needed here (M-T1.11).
+    localizeMessages
+      ? `                entry.put("message", resolveMessage(err, locale));`
+      : `                entry.put("message", err.getDefaultMessage());`,
     `                var code = err.getCode();`,
     `                if (code != null && code.startsWith("msg.")) entry.put("code", code);`,
     `                return entry;`,
@@ -651,6 +680,19 @@ export function renderApiExceptionAdvice(
     `        return respond(problem, 422);`,
     `    }`,
     ``,
+    // A FieldError with NO default message (nothing the wire validators emit, but
+    // Spring can raise one for a binding failure) would make getMessage throw and
+    // turn this 422 into a 500.  Fall back to the pre-catalog behaviour instead —
+    // the same "a render must survive a message shape the DSL admits" reasoning as
+    // the Phoenix backend's error-opt stringifier.
+    localizeMessages && `    private String resolveMessage(FieldError err, Locale locale) {`,
+    localizeMessages && `        try {`,
+    localizeMessages && `            return messages.getMessage(err, locale);`,
+    localizeMessages && `        } catch (NoSuchMessageException ex) {`,
+    localizeMessages && `            return err.getDefaultMessage();`,
+    localizeMessages && `        }`,
+    localizeMessages && `    }`,
+    localizeMessages && ``,
     `    @ExceptionHandler(ForbiddenException.class)`,
     `    public ResponseEntity<ProblemDetail> onForbidden(ForbiddenException e, WebRequest request) {`,
     `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", ${forbiddenStatus});`,

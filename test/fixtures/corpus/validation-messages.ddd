@@ -1,0 +1,91 @@
+// Authored validation messages + the backend message CATALOG (M-T1.11).
+//
+// Exercises every rule kind that can carry a `message "…"` clause — an
+// aggregate `invariant`, an inline field `check`, an operation `precondition`,
+// and a value-object `invariant` — so each backend's wire-validator carrier AND
+// its generated catalog (a `const` map on node/.NET/python, a
+// `messages.properties` ResourceBundle on java, a `priv/gettext` tree on elixir)
+// are compiled by the corpus gate.
+//
+// It also keeps a MESSAGE-LESS rule beside each messaged one: a message-less
+// rule must stay on its native validator chain (`z.number().min`,
+// `.MinimumLength`, `Field(min_length=…)`, `validate_length`), so this fixture
+// compiles both paths rather than only the new one.
+system MessagedRules {
+  subdomain Sales {
+    context Catalog {
+      valueobject Sku {
+        code: string
+        // Value-object invariants reach the wire through the `<Vo>Request`
+        // validator, the third `available`-set shape the catalog collects over.
+        invariant code.length >= 3 message "SKU code needs at least 3 characters"
+        invariant code.length <= 32
+      }
+      aggregate Product {
+        // Inline field `check` with a trailing message — its key is a content
+        // hash of the text (D-I18N-KEY's inline-literal rule).
+        name: string check name.length > 0 message "Name is required"
+        sku: Sku
+        quantity: int
+        reorderLevel: int
+
+        // A messaged aggregate invariant over a create-input field.
+        invariant quantity >= 0 message "Quantity cannot be negative"
+        // Message-LESS, and single-field-shaped: must stay on the native chain.
+        invariant reorderLevel >= 1
+
+        create(name: string, sku: Sku, quantity: int, reorderLevel: int) {
+          name := name
+          sku := sku
+          quantity := quantity
+          reorderLevel := reorderLevel
+        }
+
+        operation restock(amount: int) {
+          // A messaged precondition — the operation-request carrier.
+          precondition amount >= 1 message "Restock amount must be at least 1"
+          quantity := quantity + amount
+        }
+
+        operation ship(amount: int) {
+          // Message-less precondition beside the messaged one above, so both
+          // arms of each backend's precondition branch are compiled.
+          precondition amount >= 1
+          quantity := quantity - amount
+        }
+
+        test "restock adds to quantity" {
+          let p = Product.create({ name: "Widget", sku: Sku { code: "WID" }, quantity: 2, reorderLevel: 1 })
+          p.restock(3)
+          expect(p.quantity).toBe(5)
+        }
+      }
+      repository Products for Product {
+        find byName(n: string): Product[] where this.name == n
+      }
+    }
+  }
+  api CatalogApi from Sales
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 4000
+  }
+
+  test e2e "a messaged rule answers 422 with its authored text and its stable code" against d {
+    let p = api.products.create({ name: "Widget", sku: { code: "WID" }, quantity: 2, reorderLevel: 1 })
+    let read = api.products.getById(p)
+    expect(read.quantity).toBe(2)
+    api.products.restock(p, { amount: 3 })
+    let after = api.products.getById(p)
+    expect(after.quantity).toBe(5)
+    // The messaged precondition rejects at the wire boundary (422).  The
+    // `errors[].code` it carries is what the generated catalog is keyed by, and
+    // what the server now resolves the message through.
+    expect(api.products.restock(p, { amount: 0 })).toThrow(422)
+  }
+}
