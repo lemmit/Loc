@@ -371,6 +371,13 @@ describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
   // take a framework back out and watch the diagnostic return — the same
   // mutation discipline a new gate owes (CLAUDE.md, "Mutation-prove a new gate
   // before trusting it"), applied to a gate that has run out of subjects.
+  //
+  // Mutating module state is safe HERE and only here: vitest.config.ts sets no
+  // `isolate` / `pool` override, so the default fork-per-file + fresh module
+  // registry keeps the deletion inside this file, and the `finally` restores it
+  // for the rest of this one.  Turning isolation off would make this leak into
+  // whatever file shares the worker — so if that config ever changes, this test
+  // is the thing to revisit.
   it("still FIRES for a framework outside the set — proven by removing one", async () => {
     expect(await codes(onFrontend("flutter"))).not.toContain("loom.ui-projection-read-unsupported");
     PROJECTION_READ_FRAMEWORKS.delete("flutter");
