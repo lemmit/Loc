@@ -65,15 +65,16 @@ const REGISTERED: Ratchet[] = [
     file: "test/generator/elixir/heex-parity.test.ts",
     name: "KNOWN_HEEX_GAPS",
     kind: "record",
-    // 2 = `DataGrid` + `Chart`.  DataGrid is TanStack-backed and holds a
-    // CLIENT row model, which LiveView has no analogue for (every interaction
-    // would be a server round-trip, and multi-column ORDER BY has no backend
-    // support).  Chart (M-T1.3 Phase 4) is recharts-backed on react/mantine
-    // v9 only; a JS-free LiveView charting story is a Phase 5+ design
-    // (Chart.js hook), and a Chart on any non-react target is a compile
-    // error (`loom.chart-unsupported-target`).  Neither leaves Phoenix
-    // degraded silently — `Table` is the universal fallback for both.
-    max: 2,
+    // 1 = `DataGrid`.  It is TanStack-backed and holds a CLIENT row model,
+    // which LiveView has no analogue for (every interaction would be a server
+    // round-trip, and multi-column ORDER BY has no backend support); `Table`
+    // is the fallback, server-driven on HEEx, so Phoenix is not silently
+    // degraded.  Lowered 2→1 as the drain (M-T9.8): `Chart` shipped its HEEx
+    // renderer.  Its pinned reason — "no JS-free LiveView charting" — was
+    // false: the rows a chart plots are a grouped projection's, already
+    // server-side in an assign, so the geometry is arithmetic and the output
+    // is inline SVG with no library and no JS.
+    max: 1,
   },
   // Per-backend corpus compile-tier skips (a widening gate FIXES the emitter
   // and drops the entry — see each file's header).
