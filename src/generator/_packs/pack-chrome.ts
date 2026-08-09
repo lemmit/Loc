@@ -158,8 +158,8 @@ interface ChromeSpelling {
   text(expr: string): string;
   /** A whole bound attribute: `name={expr}` / `:name='expr'` / `[name]='expr'`. */
   attr(name: string, expr: string): string;
-  /** The runtime import line for a whole-FILE template, or "" when the format
-   *  resolves the call ambiently (HEEx's `html_helpers`). */
+  /** The runtime import line for a whole-FILE template — a JS `import { t }`,
+   *  or on HEEx the `use Gettext, backend: …` that defines `pgettext/2`. */
   importLine(specifier: string): string;
 }
 
@@ -226,9 +226,15 @@ const SPELLINGS: Record<PackFormat, ChromeSpelling> = {
     literal: elixirLiteral,
     text: (expr) => `<%= ${expr} %>`,
     attr: (name, expr) => `${name}={${expr}}`,
-    // `pgettext/2` resolves ambiently in every `~H` template through
-    // `html_helpers`' `use Gettext, backend: …` — there is nothing to import.
-    importLine: () => "",
+    // `pgettext/2` resolves ambiently in a LAYOUT, through `html_helpers`'
+    // `use Gettext, backend: …` — but NOT in `core_components.ex`, which is a
+    // plain `use Phoenix.Component` module and imports nothing.  So the "import"
+    // a HEEx pack asks for is the Gettext USE, and the specifier it passes is
+    // its own web module (`{{{chromeImport webModule}}}`).
+    //
+    // Gettext ≥ 0.26 split the backend from the macros: `import <App>Web.Gettext`
+    // brings in nothing, and only `use Gettext, backend: …` defines `pgettext/2`.
+    importLine: (webModule) => `  use Gettext, backend: ${webModule}.Gettext\n`,
   },
 };
 
