@@ -1,0 +1,136 @@
+// Vanilla LiveView PROJECTION-READ fixture (M-T1.3 Phase 1 + Phase 4, HEEx leg).
+//
+// A LiveView page reading query-time projections, in all three response shapes,
+// plus both `Chart` kinds.  The Phoenix leg emits no projection CLIENT — the
+// deployable hosts its contexts in the same OTP app, so each read is an
+// in-process `<Ctx>.QueryProjections.<Proj>.run/1` call inside a page-private
+// `defp load_<proj>(socket)` that also rekeys the WIRE row (camelCase atom keys,
+// because that map is JSON-encoded onto the HTTP response) to the snake_case
+// every other HEEx member read uses.
+//
+// What only a real `mix compile --warnings-as-errors` can prove here, and why
+// each shape is present:
+//
+//   SalesTotals   — the whole-table aggregation: ONE row, so the loader binds
+//                   `row = …` and the page reads `@sales_totals.field`.
+//   SalesByStatus — GROUPED: one row per group, so the loader maps the list.
+//                   Its `orderCount` column is the rekey's load-bearing case
+//                   (`row.orderCount` → `:order_count`), read back by BOTH a
+//                   `Table` column lambda and a `Chart` accessor.
+//   BigOrders     — SHORTHAND (no declared fields, no `select`): the filtered
+//                   SOURCE ROWS, i.e. also a list.  It was the shape
+//                   `projectionReadShape` used to get wrong on every frontend.
+//
+// The two charts render through the generated `LoomChart` function component —
+// inline SVG, no charting library and no JS hook, which is why this fixture
+// adds no asset surface at all.  Two default-id `<.table>`s on one page are
+// deliberate: their DOM ids must differ for LiveView's patching.
+system VanillaProjectionRead {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft Confirmed Cancelled }
+
+      aggregate Order {
+        code: string
+        placedAt: datetime
+        total: money
+        lineCount: int
+        status: OrderStatus
+        derived display: string = code
+      }
+      repository Orders for Order { }
+
+      criterion Confirmed of Order as o = o.status == OrderStatus.Confirmed
+
+      // Whole-table aggregation — the singleton KPI row.
+      projection SalesTotals {
+        orders: int
+        revenue: money
+        avgLines: decimal
+        from Order as o
+        where Confirmed
+        select orders = count, revenue = sum(o.total), avgLines = avg(o.lineCount)
+      }
+
+      // Grouped — one row per status, with a camelCase column the loader must
+      // rekey for the page body to reach it.
+      projection SalesByStatus {
+        status: OrderStatus
+        orderCount: int
+        revenue: money
+        from Order as o
+        group by o.status
+        select status = o.status, orderCount = count(), revenue = sum(o.total)
+      }
+
+      // Grouped on a COMPUTED key (`date_trunc`) — the daily series a line
+      // chart plots; the key rides the wire as a datetime.
+      projection RevenueByDay {
+        day: datetime
+        revenue: money
+        from Order as o
+        group by o.placedAt.startOfDay()
+        select day = o.placedAt.startOfDay(), revenue = sum(o.total)
+      }
+
+      // Shorthand — the filtered source rows, the LIST shape with the source
+      // aggregate's own wire shape.
+      projection BigOrders { from Order as o where Confirmed }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+
+  ui SalesDash {
+    api Sales: SalesApi
+    page Dash {
+      route: "/dash"
+      title: "Dashboard"
+      body: Stack {
+        Heading { "Sales" },
+        QueryView {
+          of: Sales.SalesTotals,
+          loading: Loader {},
+          data: t => Group {
+            Stat { "Orders", t.orders },
+            Stat { "Revenue", Money { t.revenue } },
+            Stat { "Avg lines", t.avgLines }
+          }
+        },
+        Chart { kind: "bar", of: Sales.SalesByStatus, x: r => r.status, y: r => r.orderCount },
+        Chart { kind: "line", of: Sales.RevenueByDay, x: r => r.day, y: r => r.revenue, testid: "revenue-chart" },
+        QueryView {
+          of: Sales.SalesByStatus,
+          empty: Empty { "No sales yet." },
+          data: rows => Table {
+            rows: rows,
+            Column { "Status",  r => r.status },
+            Column { "Orders",  r => r.orderCount },
+            Column { "Revenue", r => Money { r.revenue } }
+          }
+        },
+        QueryView {
+          of: Sales.BigOrders,
+          empty: Empty { "No confirmed orders." },
+          data: rows => Table {
+            rows: rows,
+            Column { "Code",  o => o.code },
+            Column { "Total", o => Money { o.total } }
+          }
+        }
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir
+    design: coreComponents
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: SalesApi
+    ui: SalesDash { Sales: phoenixApp }
+    port: 4000
+  }
+}

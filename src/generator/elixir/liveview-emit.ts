@@ -1089,9 +1089,17 @@ function renderHandleParams(
   // (`{:ok, record} | {:error, :not_found}`); `list` → the collection
   // via `list_<agg>s()` (`{:ok, list}`).
   const loadBlocks: string[] = [];
+  // A page may read the SAME projection more than once — a `Chart` and a
+  // `Table` over one grouped read is the ordinary dashboard shape — and every
+  // read of it resolves to the same assign.  Load it once: a second block would
+  // re-run the query and overwrite the assign with an identical value.
+  const loadedProjections = new Set<string>();
   for (const qb of queryBindings) {
     if (qb.source === "projection") {
-      if (projectionReads.has(qb.aggregate)) loadBlocks.push(renderProjectionLoadBlock(qb));
+      if (projectionReads.has(qb.aggregate) && !loadedProjections.has(qb.aggregate)) {
+        loadedProjections.add(qb.aggregate);
+        loadBlocks.push(renderProjectionLoadBlock(qb));
+      }
       continue;
     }
     const ctxModule = contextModuleByAggName.get(qb.aggregate);
