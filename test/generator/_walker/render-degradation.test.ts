@@ -100,7 +100,10 @@ const KNOWN_VERBATIM_INTRINSICS: ReadonlySet<string> = new Set([
   // `feliz` was retired here by the F# table in `fs-expr.ts`
   // (`FS_INTRINSIC_RENDERERS` + `renderFsIntrinsic`), wired into BOTH the view
   // path (`felizTarget.renderIntrinsic`) and the MVU update path.
-  "flutter", // S4: DART_LEAVES has no intrinsic table
+  // `flutter` was retired here by the Dart table in `dart-expr.ts`
+  // (`DART_INTRINSIC_RENDERERS` + `renderDartIntrinsic`) — Flutter has only
+  // ONE dispatch path (view and Notifier/action bodies both route through the
+  // shared `emitExpr`), so one seam (`flutterTarget.renderIntrinsic`) covers both.
   "phoenixLiveView", // S4: heex-walker-core.ts renders collection ops, not intrinsics
 ]);
 

@@ -52,7 +52,7 @@ import {
 import { flutterI18nEnabled, renderFlutterI18nModule } from "./i18n.js";
 import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
 import { renderFlutterModalRuntime } from "./modal-runtime.js";
-import { flutterPack, usesIntl } from "./pack.js";
+import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 
@@ -439,6 +439,8 @@ function renderStatelessPage(
   // The generated translation runtime (M-T1.11) — imported only when a text slot
   // in this page actually resolved to a `t(…)` call.
   if (usesI18n(bodyWidget)) imports.push("import '../i18n.dart';");
+  // `min`/`max`/`round` scalar intrinsics route through `math.*` (`dart-expr.ts`).
+  if (usesMath(bodyWidget)) imports.push("import 'dart:math' as math;");
   const idBinding = routeArgBindings(opts.routeParams, opts.usesRouteId);
   return `${lines(
     ...imports,
@@ -581,6 +583,9 @@ function renderConsumerPage(
   if (usesI18n(bodyWidget) || usesI18n(projSource)) {
     imports.push("import '../i18n.dart';");
   }
+  // `min`/`max`/`round` scalar intrinsics route through `math.*` — over the
+  // same `scan` (view body + Notifier source) the other content sniffs above use.
+  if (usesMath(scan)) imports.push("import 'dart:math' as math;");
   // A FileUpload primitive picks a file via file_picker (the http / config /
   // models / dart:convert imports it also needs are added by the content scans
   // above — the widget emits `apiUri(` / `FileRef.fromJson` / `jsonDecode`).

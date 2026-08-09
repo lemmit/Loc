@@ -33,7 +33,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/nami
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
-import { DART_LEAVES, dartString, dartZeroValue } from "./dart-expr.js";
+import { DART_LEAVES, dartString, dartZeroValue, renderDartIntrinsic } from "./dart-expr.js";
 import {
   createFormWidgetName,
   destroyFormWidgetName,
@@ -621,4 +621,13 @@ export const flutterTarget: WalkerTarget = {
   exprConvert: (value, target, from) => DART_LEAVES.convert(value, target, from),
   exprList: (elements) => DART_LEAVES.list(elements),
   exprObject: (fields) => DART_LEAVES.object(fields),
+
+  // Scalar intrinsics — the ONE table both the page-view walk and the
+  // Notifier/action-body walk consume (both route through the shared
+  // `emitExpr`), so `s.replace(a, b)` cannot mean one thing in a page body
+  // and another in an action.  Before this seam was supplied, EITHER path
+  // fell through to `emitExpr`'s verbatim `recv.member(args)` — Loom's own
+  // spelling, which is not Dart.
+  renderIntrinsic: (receiverType, member, recv, args) =>
+    renderDartIntrinsic(receiverType, member, recv, args),
 };
