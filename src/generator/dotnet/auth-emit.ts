@@ -100,8 +100,8 @@ function claimPathFor(field: string, auth: AuthIR): string {
 
 /** The User-constructor argument expression reading a field from the
  *  verified token payload.  string / string[] are mapped; other field
- *  types fall back to `default!` (a documented .NET OIDC limitation —
- *  use string / string[] claims). */
+ *  types fall back to a type-appropriate default (a documented .NET OIDC
+ *  limitation — use string / string[] claims). */
 function csClaimRead(f: FieldIR, auth: AuthIR): string {
   const param = upperFirst(f.name);
   const path = JSON.stringify(claimPathFor(f.name, auth));
@@ -113,6 +113,21 @@ function csClaimRead(f: FieldIR, auth: AuthIR): string {
     return f.optional
       ? `${param}: ClaimString(payload, ${path})`
       : `${param}: ClaimString(payload, ${path}) ?? string.Empty`;
+  }
+  // A declared NON-OPTIONAL array claim absent from the token is the EMPTY
+  // SET, not `null`.  Only `string[]` has a real reader (ClaimStringList,
+  // which already yields an empty list for a missing claim); every other
+  // element type fell through to `default!` — a NULL `List<T>` on a
+  // non-nullable record property.  Everything that consumes such a claim
+  // calls a method on it (`mask unless currentUser.levels.contains(…)` →
+  // `.Contains(…)`, likewise a `requires` gate or a policy), so the read
+  // threw NullReferenceException and answered **500** instead of redacting:
+  // the fail-OPEN-shaped crash of the one feature whose failure is a data
+  // leak.  Mirrors Java's `stubValue(t)` → `List.of()` fallback and the
+  // dev stub's own empty-list literal on this side, so both .NET
+  // principal-construction sites now agree.
+  if (!f.optional && t.kind === "array") {
+    return `${param}: ${stubCsharpValueForType(t)}`;
   }
   return `${param}: default!`;
 }
