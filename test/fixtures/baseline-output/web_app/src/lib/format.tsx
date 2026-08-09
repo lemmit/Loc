@@ -1,4 +1,5 @@
 // Auto-generated.  Do not edit by hand.
+import { t } from "../i18n";
 import { Text, Tooltip, Code, Group, Stack } from "@mantine/core";
 import type { ReactNode } from "react";
 
@@ -60,8 +61,8 @@ export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
 export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
-    ? <Text component="span" fw={500}>Yes</Text>
-    : <Text component="span" c="dimmed">No</Text>;
+    ? <Text component="span" fw={500}>{t("pack.mantine.boolTrue.dudzcg", "Yes")}</Text>
+    : <Text component="span" c="dimmed">{t("pack.mantine.boolFalse.r5wqai", "No")}</Text>;
 }
 
 /** Locale-aware numeric value.  Used for int / long / decimal cells
