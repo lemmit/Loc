@@ -102,7 +102,14 @@ export function refineClauseFor(inv: InvariantIR, ctx: ClassifyContext): string 
   const opts = path
     ? `{ path: [${JSON.stringify(path)}], message: ${message}${code} }`
     : `{ message: ${message}${code} }`;
-  return `.refine((data) => ${guarded}, ${opts})`;
+  // The explicit `any` isn't a type-safety regression: zod 4's `.refine<Ch
+  // extends (arg: core.output<this>) => …>` constrains its generic FROM the
+  // callback, which needs the callback's parameter type BEFORE it can be
+  // inferred — a circularity plain contextual typing doesn't resolve under
+  // the pinned TypeScript version, so `data` fell back to an IMPLICIT any
+  // (TS7006 under `strict`) with no annotation at all. Naming it explicitly
+  // restores exactly that same effective type while satisfying `noImplicitAny`.
+  return `.refine((data: any) => ${guarded}, ${opts})`;
 }
 
 // ---------------------------------------------------------------------------

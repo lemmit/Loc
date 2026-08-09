@@ -1315,7 +1315,7 @@ import { z } from "@hono/zod-openapi";
  * failures both surface as typed Zod issues — invalid input becomes
  * a 400 with the field name attached, not an uncaught throw.
  */
-export const moneySchema = z.string().transform((s, ctx) => {
+export const moneySchema = z.string().transform((s: string, ctx: any) => {
   if (!/^-?\\d+(\\.\\d+)?$/.test(s)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

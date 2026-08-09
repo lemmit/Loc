@@ -2189,7 +2189,13 @@ export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR
     return `(${expr} == null ? null : ${wireToDomainExpr(expr, peelNullable(t), ctx)})`;
   }
   if (info.isCollection) {
-    return `${expr}.map((e) => ${wireToDomainExpr("e", peelCollection(t), ctx)})`;
+    // Explicit `any` — same rationale as zod-refine.ts's `.refine((data: any)
+    // => …)`: the request body's zod-inferred element type doesn't always
+    // survive TS's contextual-typing chain under the pinned TS/zod versions
+    // (TS7006 under `strict`), so an un-annotated `(e) =>` here isn't reliably
+    // inferred. The real safety is the zod runtime validation upstream of
+    // this conversion, not this expression's static type.
+    return `${expr}.map((e: any) => ${wireToDomainExpr("e", peelCollection(t), ctx)})`;
   }
   switch (info.refKind) {
     case "primitive":
