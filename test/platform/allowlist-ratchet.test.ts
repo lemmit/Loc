@@ -91,15 +91,21 @@ const REGISTERED: Ratchet[] = [
     max: 0,
   },
   { file: "test/e2e/corpus-tsc-build.test.ts", name: "TS_COMPILE_SKIP", kind: "record", max: 0 },
-  // The .NET Dapper adapter's compile tier.  Both entries are the SAME bug —
-  // query-time projection handlers are EF-LINQ over `AppDbContext` — and the
-  // folded read controller already has the raw-Npgsql port they need, so this
-  // is a port with a precedent, not an open design question.
+  // The .NET Dapper adapter's compile tier.  Two of the three entries are the
+  // SAME bug — query-time projection handlers are EF-LINQ over `AppDbContext`
+  // (M-T6.25) — and the folded read controller already has the raw-Npgsql port
+  // they need, so that pair is a port with a precedent, not an open design
+  // question.  The third (`policy-deny`, M-T6.26) is the `deny` authz sentinel:
+  // no `whereToSql` arm, so codegen THROWS, and `writeScopeFilter` is not read
+  // by dapper.ts at all even though the shared command layer already dispatches
+  // to `GetByIdForWriteAsync` for it.  Raised 2 -> 3 when the `deny` corpus
+  // fixture first put that adapter through the feature; the read half alone is
+  // 3 lines, but landing it without the write half would be a hollow cell.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 2,
+    max: 3,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
   // not gaps — these never reach the compiler.

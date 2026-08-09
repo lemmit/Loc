@@ -1,0 +1,106 @@
+// `policy { deny [write] on <Aggregate> }` — the DENY-WINS carve-out
+// (authorization Phase 4, docs/auth.md; design record in
+// docs/old/plans/authorization-phase4-deny.md).
+//
+// Deny is ALL-OR-NOTHING at the aggregate — no level word — and, unlike the
+// `allow` read ladder, it is NOT restricted to tenant-owned aggregates.  The
+// two forms ride two different seams, so this fixture declares both:
+//
+//   - `deny on Secret`        → READ denied.  Enrichment appends the always-false
+//                               sentinel to the aggregate's read `contextFilters`,
+//                               so every root read (findAll / findById / every
+//                               find) matches nothing and the aggregate is
+//                               invisible.  The write command-load reuses the read
+//                               filter, so mutations 404 too.
+//   - `deny write on Account` → WRITE denied.  The sentinel becomes the
+//                               `writeScopeFilter`, so the command load behind
+//                               update/destroy matches nothing while reads stay
+//                               open — a read-only aggregate.
+//
+// `Ledger` is the CONTROL: same shape, no deny rule, so a backend that renders
+// the always-false fragment into the wrong query site (or into every site) is
+// visible as a diff against it rather than as uniform silence.
+//
+// Both denied aggregates are `with crudish` so the update/destroy command loads
+// — the `writeScopeFilter` seam — are actually emitted; a deny fixture without
+// them would compile the read half only.
+//
+// WHY THIS FIXTURE EXISTS.  The `deny` emission has per-backend generator tests
+// (`test/generator/policy-deny.test.ts`) that pin each always-false fragment in
+// isolation, and IR tests for lowering/enrichment/precedence — but until this
+// file there was no fixture carrying `deny` ANYWHERE, so the feature never
+// reached the per-backend corpus COMPILE tier and its emitted schema never
+// reached `schema-load`.  A fragment can render exactly right and still not
+// compile in place: the Elixir write-scope command load has to underscore its
+// now-principal-free parameter or `--warnings-as-errors` rejects the module.
+// That trap is per-backend and only a real build sees it.
+//
+// The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
+system PolicyDeny {
+  user { id: guid  tenantId: string }
+
+  tenancy by user.tenantId of Org
+
+  subdomain Core {
+    context Vault {
+      // READ-denied — invisible to every caller, mutations 404.
+      aggregate Secret with tenantOwned, crudish {
+        code: string
+      }
+      // WRITE-denied — reads stay open, mutations match no row.
+      aggregate Account with tenantOwned, crudish {
+        balance: int
+      }
+      // Denied WITHOUT a tenant filter — `crossTenant` opts out of the tenant
+      // floor, so the always-false term is the ONLY predicate on every read.
+      // Deny is not restricted to tenant-owned aggregates, and this standalone
+      // shape is the one most likely to leave a now-unused principal parameter
+      // or import behind under `--warnings-as-errors`.
+      aggregate Note crossTenant with crudish {
+        // DELIBERATELY named `text` — do not "tidy" this to `body`.  The Python
+        // schema emitter narrowed its imports with a `\btext\b` scan over the
+        // emitted module, and `text` is the one lowercase SQLAlchemy helper in
+        // that list, so a column of this name pulled in an import nothing
+        // invoked and ruff failed the whole python build on F401.  This field
+        // is what pins the fix (`\btext\(`).
+        text: string
+      }
+      // Control — no deny rule, so both seams stay unfiltered here.
+      aggregate Ledger with tenantOwned, crudish {
+        label: string
+      }
+      // The tenant registry (`tenancy by … of Org`), named-and-verified.
+      aggregate Org with crudish {
+        name: string
+      }
+
+      repository Secrets for Secret {
+        // A named find on the read-denied aggregate: the deny term must be
+        // AND-ed into the author's own `where`, not just the auto findAll.
+        find byCode(c: string): Secret[] where this.code == c
+      }
+      repository Accounts for Account { }
+      repository Notes for Note { }
+      repository Ledgers for Ledger { }
+      repository Orgs for Org { }
+
+      policy {
+        deny on Secret
+        deny on Note
+        deny write on Account
+      }
+    }
+  }
+
+  api VaultApi from Core
+  storage primary { type: postgres }
+  resource vaultState { for: Vault, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Vault]
+    dataSources: [vaultState]
+    serves: VaultApi
+    port: 4000
+    auth: required
+  }
+}

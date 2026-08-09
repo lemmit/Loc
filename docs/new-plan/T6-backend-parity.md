@@ -237,6 +237,20 @@ over-requires. It has no caller in generated code (every write path goes
 through `base_changeset`); threading defaults onto crudish create params would
 ripple through every param-driven surface on all five backends.
 
+## M-T6.26 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `open` · **S–M** · P2 ⭐ security-adjacent
+
+Found by `test/fixtures/corpus/policy-deny.ddd` the moment it joined the corpus (the fixture's own PR): the dotnet compile tier runs BOTH persistence adapters, and `deny` had never been through either.
+
+Two halves, both in `src/generator/dotnet/emit/dapper.ts`:
+
+- **Read.** `whereToSql` has no `authz-filter` case, so the `deny` sentinel falls to its `default:` and the emitter throws — `dapper: capability filter on 'Secret' is outside the Dapper SQL subset`. The fragment itself is trivial (`1 = 0`), so this is a 3-line arm.
+- **Write.** `writeScopeFilter` is not read by `dapper.ts` at all, while the EF repository emitter honours it and the SHARED command layer (`cqrs/commands.ts`) already dispatches to `GetByIdForWriteAsync` whenever an aggregate carries one. So the write half is not merely unrendered — the command layer calls a method the Dapper repository never emits.
+
+**Do not land the read arm alone.** It would turn the corpus fixture green while `deny write on` stayed unenforceable — a hollow cell of exactly the kind M-T9.8 sweeps for. Land both, or gate the pair honestly in `validateDapperSupport` (`loom.dapper-unsupported`) and move the fixture from `DAPPER_COMPILE_SKIP` to `DAPPER_UNSUPPORTED`. Note the asymmetry that makes this a crash rather than a boundary today: `tenancy-hierarchy`'s scope sentinel IS rejected by the validator; the deny sentinel escapes it.
+
+Sibling of M-T6.23 (the same class on the node/mikroorm adapter) and M-T6.25 (the other dapper compile-tier gap). Adapter-axis gaps like this are invisible to the "five backends" framing — the persistence adapter is a second axis.
+Sources: `test/e2e/corpus-dotnet-dapper-build.test.ts` (`DAPPER_COMPILE_SKIP.policy-deny`), `src/generator/dotnet/emit/dapper.ts`, [authorization-phase4-deny](../old/plans/authorization-phase4-deny.md).
+
 ## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
 
 Four of the five query-time projection handler shapes inject `AppDbContext` and
