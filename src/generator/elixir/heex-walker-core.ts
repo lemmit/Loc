@@ -1242,14 +1242,31 @@ export interface PrimitiveSpec {
    *  argument that's an array of children expressions is rendered
    *  as nested HEEx. */
   takesChildren?: boolean;
-  /** Static attributes always emitted on the tag (e.g. an a11y
-   *  `role="toolbar"` / `aria-label="Actions"` the primitive's contract
-   *  requires).  Rendered verbatim, after the derived named attributes. */
+  /** Static attributes emitted on the tag (e.g. an a11y `role="toolbar"` /
+   *  `aria-label="Actions"` the primitive's contract requires).
+   *
+   *  They are DEFAULTS, not overrides: an entry whose attribute name a derived
+   *  named attribute already emitted is dropped.  `Toolbar`'s contract is
+   *  `{role:"toolbar", needsName:true}` with "Actions" as the fallback name, so
+   *  an author's `label:` has to win — emitting both would put two `aria-label`
+   *  attributes on one tag, and the contract default would silently outrank the
+   *  authored (and translated) name. */
   extraAttrs?: string[];
   /** When set, a `label:` named arg is emitted as an `aria-label` attribute
    *  (the accessible name) rather than a literal `label=` attribute.  Used by
-   *  the command `Button` whose visible text can be an unhelpful glyph. */
+   *  the primitives whose visible text can't serve as the name: the command
+   *  `Button` (an unhelpful glyph) and the `Toolbar` (a group with no text of
+   *  its own).  Without it the author's `label:` falls through the generic
+   *  named-attr branch and lands as a bogus `label=` attribute on a `<div>`. */
   labelAsAriaLabel?: boolean;
+}
+
+/** The attribute NAME of a rendered HEEx attribute fragment (`aria-label={…}` →
+ *  `aria-label`).  Used to let a derived attribute suppress the same-named
+ *  contract default in {@link PrimitiveSpec.extraAttrs}. */
+function attrName(fragment: string): string {
+  const eq = fragment.indexOf("=");
+  return eq === -1 ? fragment : fragment.slice(0, eq);
 }
 
 /** The i18n catalog ROLE of a primitive's positional slot, from the shared
@@ -1302,10 +1319,13 @@ export function renderPrimitive(
         const value = renderAttrValue(arg, ctx, false);
         namedAttrs.push(`data-testid=${value}`);
       } else if (name === "label" && spec.labelAsAriaLabel) {
-        // A command button's `label:` is its accessible name (aria-label),
-        // not a literal `label=` attribute — and a user-visible slot, so a plain
-        // literal rides the translation runtime under i18n (M-T1.11) instead of
-        // shipping the name in English at every locale.
+        // A command button's / toolbar's `label:` is its accessible name
+        // (aria-label), not a literal `label=` attribute — and a user-visible
+        // slot, so it rides the translation runtime under i18n (M-T1.11)
+        // instead of shipping the name in English at every locale.  An
+        // INTERPOLATED name translates too: `localizedHeexAttr` funnels both
+        // shapes, so the ICU branch is reached here rather than falling through
+        // to the raw `<>` concat `loom.user-visible-concat` bans in source.
         const value =
           localizedHeexAttr(arg, ctx, namedRole(expr.name, "label")) ??
           renderAttrValue(arg, ctx, true);
@@ -1324,8 +1344,14 @@ export function renderPrimitive(
   const styleHeexAttr = styleIrToHeex(expr);
   if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
 
-  // Contract-required static a11y attributes (e.g. Toolbar's role/name).
-  if (spec.extraAttrs) namedAttrs.push(...spec.extraAttrs);
+  // Contract-required static a11y attributes (e.g. Toolbar's role/name), as
+  // DEFAULTS — an entry whose attribute a derived one already emitted is
+  // dropped, so an authored `label:` beats the contract's fallback name instead
+  // of the tag carrying two `aria-label`s.
+  if (spec.extraAttrs) {
+    const emitted = new Set(namedAttrs.map(attrName));
+    namedAttrs.push(...spec.extraAttrs.filter((a) => !emitted.has(attrName(a))));
+  }
 
   // Other primitives — render children (if any).  A POSITIONAL child may be a
   // user-visible text slot (`Text`/`Bold`/`Badge`/`Button`/… index 0), so it is
