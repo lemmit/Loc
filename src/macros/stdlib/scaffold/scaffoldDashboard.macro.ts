@@ -10,7 +10,16 @@ import {
   primType,
   singletonProjection,
 } from "../../api/index.js";
-import { ALIAS, dashboardProjectionName, ROW_COUNT, summableFields } from "./_dashboard-shared.js";
+import {
+  ALIAS,
+  dashboardProjectionName,
+  dashboardSeriesName,
+  ROW_COUNT,
+  SERIES_COUNT,
+  SERIES_DAY,
+  seriesDateField,
+  summableFields,
+} from "./_dashboard-shared.js";
 
 /** Emit the read model a DASHBOARD reads: one SINGLETON query-time
  * `projection` per aggregate, aggregating the whole table in SQL.
@@ -84,6 +93,39 @@ export default defineMacro({
         });
       }
       out.push(singletonProjection(projName, agg.name, ALIAS, members, selects));
+
+      // The per-day SERIES beside the totals (M-T1.3 Phase 5): one row per day
+      // with that day's count — what a dashboard chart plots.  It rides the
+      // GROUPED read model (M-T4.2) with the catalogued
+      // `datetime.startOfDay()` key, so buckets are cut by `date_trunc('day',
+      // …)` in SQL rather than by loading rows and grouping in the browser.
+      //
+      // Emitted only when the aggregate HAS a datetime column to group on; the
+      // ui side derives the same answer, so it renders no chart tile rather
+      // than binding a projection that was never emitted.
+      const dateField = seriesDateField(agg);
+      if (!dateField) continue;
+      const seriesName = dashboardSeriesName(agg.name);
+      if (ctx.members.some((d) => "name" in d && d.name === seriesName)) continue;
+      // Built TWICE rather than shared: an AST node has one container, and the
+      // `group by` entry and the `select` expression are two positions in the
+      // tree — reusing one node would re-parent it.  The select↔group-by match
+      // compares structure, so two identical trees are the same key.
+      const dayBucket = () =>
+        memberAccess(memberAccess(nameRefExpr(ALIAS), dateField), "startOfDay", { call: true });
+      out.push(
+        singletonProjection(
+          seriesName,
+          agg.name,
+          ALIAS,
+          [field(SERIES_DAY, primType("datetime")), field(SERIES_COUNT, primType("int"))],
+          [
+            { field: SERIES_DAY, expr: dayBucket() },
+            { field: SERIES_COUNT, expr: callExpr("count", []) },
+          ],
+          { groupBys: [dayBucket()] },
+        ),
+      );
     }
     return out;
   },
