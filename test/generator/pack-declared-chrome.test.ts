@@ -224,11 +224,14 @@ describe("pack-declared chrome — every declared role is actually rendered", ()
  *  placeholder — not something a locale could translate. */
 const NOT_USER_VISIBLE: ReadonlyArray<{ text: string; reason: string }> = [
   { text: "%sveltekit.body%", reason: "SvelteKit's own HTML placeholder token" },
-  { text: "& VariantProps", reason: "TypeScript intersection in a generic bound" },
+  {
+    text: "& VariantProps",
+    reason: "a TypeScript intersection type — the `>…<` match spans two generic argument lists",
+  },
   { text: "= FieldPath", reason: "TypeScript default type argument" },
   { text: "`'s `", reason: "a backtick fragment inside a JS/TS comment" },
   { text: "`, not `", reason: "a backtick fragment inside a JS/TS comment" },
-  { text: "child", reason: "the `<T,>`-style generic parameter list in chakra's format helpers" },
+  { text: "child", reason: "a JSX example inside a code comment (chakra format-helpers)" },
   {
     text: "if assigns.multiple, do: field.name",
     reason: "Elixir code inside a HEEx attribute expression",
