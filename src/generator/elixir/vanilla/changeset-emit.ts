@@ -24,6 +24,7 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { baseOf, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
@@ -70,11 +71,15 @@ function isManaged(f: AggField): boolean {
  *  a smuggled value is simply dropped) nor `validate_required`d (that runs
  *  BEFORE the stamp and rejects the create — the 422 `tenant_id can't be blank`
  *  bug for `tenantOwned`). */
-function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
+function filterCastableFields(
+  fields: readonly AggField[],
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): AggField[] {
   const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
   const managedTs = managedTimestampNames(agg);
   const stampedFields = stampedFieldNames(agg);
-  return (agg.fields as AggField[]).filter(
+  return fields.filter(
     (f) =>
       f.name !== "id" &&
       !isManaged(f) &&
@@ -85,12 +90,30 @@ function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
   );
 }
 
-/** Update-editable scalar columns — {@link castScalarFields} minus `token` /
- *  `internal` / `immutable` (mirrors `wire-projection.forUpdateInput`).  A
- *  client PATCH may modify only these; `managed` is already dropped upstream. */
+function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
+  return filterCastableFields(agg.fields as AggField[], agg, ctx);
+}
+
+/** A TPH/TPC concrete subtype's canonical `update` carries only its OWN
+ *  declared fields — the abstract base's fields are not update params
+ *  (`docs/inheritance.md`; the `inheritance.ddd` / `payments.ddd` corpus
+ *  fixtures assert this explicitly: "the canonical update of a TPH subtype
+ *  carries only the subtype's own writable field"). Falls back to the full
+ *  merged field list for a non-subtype aggregate. */
+function updateSourceFields(agg: AggregateIR, ctx: BoundedContextIR): readonly AggField[] {
+  const base = baseOf(agg, ctx.aggregates);
+  return base ? (ownFieldsOf(agg, base) as AggField[]) : (agg.fields as AggField[]);
+}
+
+/** Update-editable scalar columns — {@link filterCastableFields} over
+ *  {@link updateSourceFields}, minus `token` / `internal` / `immutable`
+ *  (mirrors `wire-projection.forUpdateInput`).  A client PATCH may modify
+ *  only these; `managed` is already dropped upstream. */
 const UPDATE_EXCLUDED_ACCESS: ReadonlySet<string> = new Set(["token", "internal", "immutable"]);
 function updateScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
-  return castScalarFields(agg, ctx).filter((f) => !UPDATE_EXCLUDED_ACCESS.has(f.access ?? ""));
+  return filterCastableFields(updateSourceFields(agg, ctx), agg, ctx).filter(
+    (f) => !UPDATE_EXCLUDED_ACCESS.has(f.access ?? ""),
+  );
 }
 
 /** Whether an aggregate needs a dedicated `update_changeset/2` distinct from
