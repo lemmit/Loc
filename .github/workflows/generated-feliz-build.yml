@@ -150,6 +150,19 @@ jobs:
                   }
                 }
                 repository Products for Product { }
+                // M-T1.3 Phase 1 — a query-time SINGLETON projection.  Unlike
+                // every other read in this app it is id-less AND single-shaped,
+                // so it fires from `init` yet renders through `View.remoteOne`;
+                // the Fable compile below is what proves the emitted
+                // `Remote<CatalogSizeRow option>` actually typechecks.
+                criterion InStock of Product as p = p.inStock == true
+                projection CatalogSize {
+                  products: int
+                  stockValue: money
+                  from Product as p
+                  where InStock
+                  select products = count, stockValue = sum(p.price)
+                }
               }
             }
 
@@ -249,6 +262,29 @@ jobs:
                       testid: "product-grid")
                   },
                   Button { "Back to products", to: "/products" }
+                }
+              }
+              // M-T1.3 Phase 1 — the projection read.  Its own page so the
+              // backend-less smoke above keeps asserting exactly what it did:
+              // this one never gets visited, and the value here is the Fable
+              // compile — a projection read is FOUR coordinated emissions (row
+              // record + decoder, nullary Api fn, Model field + Msg + init Cmd,
+              // update arm) and any one of them being wrong is an F# type error.
+              page Insights {
+                route: "/insights"
+                body: Stack {
+                  Heading { "Insights", level: 1 },
+                  QueryView {
+                    of:      Shop.CatalogSize,
+                    loading: Text { "Loading…" },
+                    error:   Text { "Failed to load" },
+                    empty:   Text { "No data." },
+                    data:    t => Card { "Catalog",
+                      Text { t.products },
+                      Money { t.stockValue }
+                    }
+                  },
+                  Button { "Back home", to: "/" }
                 }
               }
               page ProductNew {
