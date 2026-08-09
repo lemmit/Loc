@@ -22,7 +22,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
                 onSubmit={handleSubmit(async (vals) => {
                   try {
                     await mut.mutateAsync(vals);
-                    toaster.create({ type: "success", title: "{{humanOp}} succeeded" });
+                    toaster.create({ type: "success", title: {{{chromeValue "operationSucceeded" operation=humanOp}}} });
                     onClose();
                   } catch (e) {
                     const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
@@ -37,7 +37,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
                 <Dialog.Body>
                   <VStack gap={4}>
                     {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
-                    {{/each}}{{else}}<Text color="gray.500">This operation has no parameters.</Text>
+                    {{/each}}{{else}}<Text color="gray.500">{{{chrome "noParameters"}}}</Text>
                     {{/if}}</VStack>
                 </Dialog.Body>
                 <Dialog.Footer>

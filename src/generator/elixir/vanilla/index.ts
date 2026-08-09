@@ -104,6 +104,16 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
 
+  // i18n (M-T1.11): the mounted ui, but only when it has extractable
+  // user-visible strings.  Resolved HERE rather than at the shell-emit call
+  // site because pack-DECLARED chrome (`pack.json`'s `chrome` map, bound into
+  // every `pack.render`) has to be switched on before the first template
+  // renders — the sidebar and the assets pipeline both run earlier below.
+  // Same gate as the other five frontends: a string-less ui gets no `pgettext`
+  // binding anywhere and stays byte-identical.
+  const i18nUi = heexI18nUi(sys, deployable);
+  pack.setChromeI18n(i18nUi !== undefined);
+
   // Shared cross-controller helper modules (Slice 4).  Emitted once
   // per project; controllers `alias` the public functions.  The 23505 → 409
   // conflict branch is emitted only when some aggregate declares a `unique (...)`
@@ -780,7 +790,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     // i18n (M-T1.11): the mounted ui, but only when it has extractable
     // user-visible strings — that is the single gate for the Gettext backend,
     // the `priv/gettext` catalog, the hex dep and the `html_helpers` import.
-    heexI18nUi(sys, deployable),
+    i18nUi,
     // The SECOND catalog source (M-T1.11) — turns the gettext runtime on even for
     // a JSON-API-only deployable with an authored `message "…"`.
     validationMessages,

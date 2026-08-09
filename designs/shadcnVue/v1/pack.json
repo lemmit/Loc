@@ -116,6 +116,14 @@
     "field-input-file": "field-input-file.hbs",
     "primitive-file-upload": "primitive-file-upload.hbs"
   },
+  "chrome": {
+    "addItem": "Add {item}",
+    "arrayUnsupported": "(arrays not yet supported in forms)",
+    "boolFalse": "No",
+    "boolTrue": "Yes",
+    "closeDialog": "Close",
+    "removeItem": "Remove"
+  },
   "imports": {
     "primitive-button": [
       {

@@ -21,6 +21,7 @@
 import Handlebars from "handlebars";
 import type { PackFormat } from "../../util/builtin-formats.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { assertDeclaredChromeIsSane, chromeHelpers } from "./pack-chrome.js";
 import { flattenRequired, REQUIRED_PRIMITIVES } from "./required-primitives.js";
 
 /** Output format the pack's templates produce.  `tsx` is the v0
@@ -123,6 +124,16 @@ export interface PackManifest {
    *  source module.  Default imports aren't supported in v0
    *  because no built-in primitive needs them. */
   imports?: Record<string, ImportSpec[]>;
+  /** Optional pack-DECLARED chrome: `role → English`.  The user-visible
+   *  strings this pack bakes into its own templates ("Remove", "Add {item}",
+   *  "This operation has no parameters.") — the ones the IR-walking
+   *  content-hash extraction pass can never see, because they exist only in a
+   *  `.hbs`.  Templates spell them through the `{{{chrome …}}}` /
+   *  `{{{chromeAttr …}}}` / `{{{chromeValue …}}}` / `{{{chromeImport …}}}`
+   *  helpers; each entry becomes a `pack.<family>.<role>.<hash>` catalog key.
+   *  See `pack-chrome.ts` for the key shape, the validation rules and why this
+   *  is a declaration rather than a scrape of the templates. */
+  chrome?: Record<string, string>;
   /** Opt-in: this pack's `form-op-module` + `primitive-modal` templates
    *  thread the loaded record into the operation-form component, so a
    *  `this.<field>` parameter default (`reschedule(to: datetime = this.eta)`)
@@ -164,6 +175,19 @@ export interface LoadedPack {
   /** Render a logical template against the given context.  Throws
    *  with a clear message if the name isn't in the manifest. */
   render(name: string, context: unknown): string;
+  /** Turn pack-DECLARED chrome (`pack.json`'s `chrome` map) into translated
+   *  `t()` / `pgettext()` bindings for the rest of this generation.
+   *
+   *  Off by default, which is what makes an i18n-OFF app byte-identical BY
+   *  CONSTRUCTION: the helpers return the literal bytes the template used to
+   *  spell inline until a frontend opts in, and a frontend opts in only for a
+   *  UI that is ALREADY i18n-enabled by its authored strings (the same gate
+   *  `APP_SHELL_CHROME` / `FORM_CHROME` use).  Pack chrome therefore never
+   *  flips the translation runtime on for a string-less app.
+   *
+   *  Safe to mutate: `loadPack` re-reads and re-compiles per call, so one
+   *  deployable's setting cannot leak into another's. */
+  setChromeI18n(enabled: boolean): void;
 }
 
 let helpersRegistered = false;
@@ -371,6 +395,18 @@ export function compilePack(
     );
   }
 
+  // Pack-declared chrome (`pack.json`'s `chrome` map).  Validated at LOAD so a
+  // bad declaration names the pack that owns it, rather than surfacing as
+  // mangled markup inside a generated project.
+  assertDeclaredChromeIsSane(manifest);
+  // Helpers are bound per i18n state and injected into EVERY render below.
+  // Passing them as run-time helpers (rather than registering globally, as
+  // `registerPackHelpers` must for its manifest tables) keeps them scoped to
+  // this pack — and Handlebars threads run-time helpers through partials, so a
+  // primitive reached via `{{> primitive-button}}` sees the same bindings.
+  let chromeI18n = false;
+  let helpers = chromeHelpers(manifest, chromeI18n);
+
   const render = (name: string, context: unknown): string => {
     const t = templates.get(name);
     if (!t) {
@@ -378,12 +414,16 @@ export function compilePack(
         `loader: pack ${manifest.name}: no template registered for "${name}".  Add it to pack.json's emits map (or place a shared default under one of vite/, api/, docker/) and create the .hbs file.`,
       );
     }
-    return t.fn(context);
+    return t.fn(context, { helpers });
   };
   return {
     manifest,
     rootDir,
     templates,
     render,
+    setChromeI18n(enabled: boolean) {
+      chromeI18n = enabled;
+      helpers = chromeHelpers(manifest, chromeI18n);
+    },
   };
 }

@@ -24,6 +24,7 @@ import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
+import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
 import { renderActionHandlers } from "../../_walker/walker-core.js";
 import type {
   ActionMutationState,
@@ -361,6 +362,27 @@ export function renderCustomLayoutPage(
     usesState || usesStateForTitle || usesStateForDerived || usesStateForActions;
   const effectiveUsesRouteId = usesRouteId || usesRouteIdForActions;
 
+  const form = formOfs.reduce<{
+    decls: string;
+    moduleScope: string;
+    usesNavigate: boolean;
+  }>(
+    (acc, state) => {
+      const w = renderFormOfWiring(state, pack, srcImportPrefix);
+      return {
+        decls: acc.decls + w.decls,
+        moduleScope: acc.moduleScope + w.moduleScope,
+        usesNavigate: acc.usesNavigate || w.usesNavigate,
+      };
+    },
+    { decls: "", moduleScope: "", usesNavigate: false },
+  );
+  // An operation-form module is a PACK fragment that lands in THIS file, so any
+  // pack-DECLARED chrome it renders ("This operation has no parameters.", the
+  // success toast) binds a `t` this page's import block must carry — and that
+  // block is serialized on the next line.  Which is why the form wiring runs
+  // here rather than further down with the rest of the page assembly.
+  if (needsPackChromeT(form.moduleScope)) addImportToMap(imports, I18N_MODULE, "t");
   // Drain the walked body's react-hook imports (a hoisted DataGrid child needs
   // `useMemo`/`useState`/`useEffect`) so they merge into the shell's single
   // react import line below instead of emitting a second, clashing one.
@@ -421,21 +443,6 @@ export function renderCustomLayoutPage(
   // emit functions (no textual merge needed; renderImportLines
   // dedupes by module).  Only page-scope decls + module-scope
   // helpers concatenate here.
-  const form = formOfs.reduce<{
-    decls: string;
-    moduleScope: string;
-    usesNavigate: boolean;
-  }>(
-    (acc, state) => {
-      const w = renderFormOfWiring(state, pack, srcImportPrefix);
-      return {
-        decls: acc.decls + w.decls,
-        moduleScope: acc.moduleScope + w.moduleScope,
-        usesNavigate: acc.usesNavigate || w.usesNavigate,
-      };
-    },
-    { decls: "", moduleScope: "", usesNavigate: false },
-  );
   const actionWiring = renderActionMutations(actionMutations, srcImportPrefix);
   const hasParams = params.length > 0;
   // The magic route `id` (`byId(id)`) binds from `useParams` too, even when
@@ -1003,6 +1010,9 @@ export function renderUserComponentFile(
     },
     { decls: "", moduleScope: "", usesNavigate: false },
   );
+  // See the page renderer above: a pack fragment's chrome binds `t` in this
+  // file, and the import block is rendered on the next line.
+  if (needsPackChromeT(form.moduleScope)) addImportToMap(imports, I18N_MODULE, "t");
   const bodyReactSpecifiers = takeReactSpecifiers(imports);
   const mantineImport = renderImportLines(imports);
   // Components don't have routes — useNavigate/Link still legal in

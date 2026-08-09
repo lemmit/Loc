@@ -17,6 +17,7 @@ import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
+import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
 import type { ApiHookUse } from "../../_walker/walker-core.js";
 import {
   closeUsedActions,
@@ -471,6 +472,13 @@ export function renderVuePage(input: VuePageShellInput): string {
       const names = result.imports.get(spec.from) ?? new Set<string>();
       for (const n of spec.named) names.add(n);
       result.imports.set(spec.from, names);
+    }
+    // Pack-DECLARED chrome inside the dialog (an array field's "Remove", a file
+    // picker's placeholder) binds a `t` this page must import.  The walk never
+    // sees this template either, so — like the component imports above — the
+    // rendered output is what gets asked.
+    if (needsPackChromeT(dialogBlocks[dialogBlocks.length - 1] ?? "")) {
+      addImportToMap(result.imports, I18N_MODULE, "t");
     }
   }
   // Id-target lookup hooks (`X id` form fields render as selects fed
@@ -1148,6 +1156,10 @@ export function renderVueComponentFile(
       const set = result.imports.get(spec.from) ?? new Set<string>();
       for (const n of spec.named) set.add(n);
       result.imports.set(spec.from, set);
+    }
+    // See the page renderer above — pack-declared chrome in the dialog needs `t`.
+    if (needsPackChromeT(dialogBlocks[dialogBlocks.length - 1] ?? "")) {
+      addImportToMap(result.imports, I18N_MODULE, "t");
     }
   }
   // Id-target select hooks (`X id` form fields render as `useAll<Target>()`

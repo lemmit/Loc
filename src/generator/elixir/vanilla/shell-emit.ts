@@ -14,6 +14,7 @@
 import type { UiIR } from "../../../ir/types/loom-ir.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import type { LoadedPack } from "../../_packs/loader.js";
+import { packChromeCatalog } from "../../_packs/pack-chrome.js";
 import type { ApiRoute } from "../api-emit.js";
 import {
   GETTEXT_DEP,
@@ -202,13 +203,18 @@ export function emitVanillaShellFiles(
   // Neither half ⇒ byte-identical (no module, no `priv/gettext`, no dep).
   if (i18nEnabled) {
     out.set(`lib/${appName}_web/gettext.ex`, renderGettextBackend(appName, appModule));
+    // The active HEEx pack's DECLARED chrome (D-PACK-CHROME) — English baked
+    // into the pack's own `.hbs`, which no IR walk sees.  `pack ?` because a
+    // JSON-API-only deployable reaches this with no pack at all, and since
+    // #2480 that deployable can still have a catalog (authored rule messages).
+    const packChrome = pack ? packChromeCatalog(pack.manifest) : {};
     out.set(
       `priv/gettext/${GETTEXT_DOMAIN}.pot`,
-      renderGettextCatalog(i18nUi, "pot", validationMessages),
+      renderGettextCatalog(i18nUi, "pot", validationMessages, packChrome),
     );
     out.set(
       `priv/gettext/en/LC_MESSAGES/${GETTEXT_DOMAIN}.po`,
-      renderGettextCatalog(i18nUi, "po", validationMessages),
+      renderGettextCatalog(i18nUi, "po", validationMessages, packChrome),
     );
     // ICU formatting runs OVER gettext's result, so it ships only alongside
     // it — and only for a ui with an interpolated message.

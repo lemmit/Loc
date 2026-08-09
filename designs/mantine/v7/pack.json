@@ -77,6 +77,16 @@
     "field-input-file": "field-input-file.hbs",
     "primitive-file-upload": "primitive-file-upload.hbs"
   },
+  "chrome": {
+    "addItem": "Add {item}",
+    "arrayUnsupported": "(arrays not yet supported in forms)",
+    "boolFalse": "No",
+    "boolTrue": "Yes",
+    "chooseFile": "Choose file",
+    "noParameters": "This operation has no parameters.",
+    "operationSucceeded": "{operation} succeeded",
+    "removeItem": "Remove"
+  },
   "imports": {
     "primitive-chart": [
       {

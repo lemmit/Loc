@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-// Formatting helpers for the Angular templates — plain functions (Angular
+{{{chromeImport "./i18n"}}}// Formatting helpers for the Angular templates — plain functions (Angular
 // templates interpolate strings, so there are no format components); cell
 // templates call them inside \{{ … }} interpolations.
 
@@ -38,7 +38,7 @@ export function formatDateTime(iso: string | null | undefined): string {
 /** Boolean as Yes / No. */
 export function formatBool(value: boolean | null | undefined): string {
   if (isEmpty(value)) return EMPTY;
-  return value ? "Yes" : "No";
+  return value ? {{{chromeValue "boolTrue"}}} : {{{chromeValue "boolFalse"}}};
 }
 
 /** Locale-aware numeric value — 1234567 renders as 1,234,567. */

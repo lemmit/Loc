@@ -35,6 +35,7 @@ import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { packChromeCatalog } from "../_packs/pack-chrome.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
@@ -173,9 +174,12 @@ export function generateAngularForContexts(
   // (Angular templates resolve interpolations against the instance).  A
   // string-less ui emits neither the runtime nor a prefix → byte-identical.
   const i18nEnabled = ui ? collectUiMessages(ui).length > 0 : false;
+  // Pack-DECLARED chrome rides the SAME already-enabled gate (see the React
+  // generator for the rationale) — never flips the runtime on by itself.
+  pack.setChromeI18n(i18nEnabled);
   if (i18nEnabled && ui) {
     out.set("src/lib/i18n.ts", renderI18nModule());
-    out.set("src/lib/locales/en.json", renderLocaleCatalog(ui));
+    out.set("src/lib/locales/en.json", renderLocaleCatalog(ui, packChromeCatalog(pack.manifest)));
   }
 
   // Extern frontend functions (extern-function-hook-escape-hatch.md §3): the

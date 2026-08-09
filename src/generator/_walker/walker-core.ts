@@ -76,6 +76,7 @@ import { registerApiHook } from "./api-hook-register.js";
 import { storeMemberLocal, upperFirstName } from "./js-target-helpers.js";
 import { emitUserComponent } from "./primitives/controls.js";
 import { WALKER_PRIMITIVES } from "./registry.js";
+import { wirePackChromeImport } from "./render-primitive.js";
 import { describeReceiver, positionalArgs } from "./shared/args.js";
 import type { WalkerTarget } from "./target.js";
 
@@ -493,6 +494,13 @@ export function walkBody(
     usedStores: new Map(),
   };
   const tsx = walk(body, ctx, 0);
+  // PACK-DECLARED chrome (`pack.json`'s `chrome` map) reaches the page through
+  // a `.hbs` this walk rendered, so no emitter here registered the `t` those
+  // bindings resolve against — the string lives in the template, behind the
+  // pack's own conditionals.  Ask the rendered body instead.  One place rather
+  // than per primitive: the body is the superset of every pack fragment the
+  // walk produced (primitives, form fields, modals).
+  wirePackChromeImport(ctx, tsx);
   return {
     tsx,
     imports: ctx.imports,
