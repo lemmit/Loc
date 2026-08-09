@@ -22,6 +22,7 @@
 // `ref.watch(<var>Provider)` and the emitted `<var>Provider` always agree.
 
 import type { EnrichedBoundedContextIR, ExprIR, UiIR } from "../../ir/types/loom-ir.js";
+import { groupedProjectionNames, readableProjectionNames } from "../../ir/util/projection-read.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
@@ -57,6 +58,16 @@ export interface FlutterRead {
    *  produced, so the generated project had a dangling `import '../reads.dart'`
    *  and would not pass `flutter analyze`. */
   params?: ReadonlyArray<{ name: string; dartType: string }>;
+  /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
+   *  read.  Deliberately its own flag rather than a reuse of `single`: a
+   *  SINGLETON projection is single-SHAPED (one object, no envelope) yet
+   *  paramless, while `single` here means "a byId `.family` keyed by a route
+   *  id" — a projection has no id to key by.  `aggregate` carries the
+   *  `<Proj>Row` class name, so the `fromJson` call site needs no new branch.
+   *
+   *  A GROUPED (`group by`) projection is the LIST shape — one row per group
+   *  (M-T1.3 Phase 4) — and is carried by `single: false` on the same flag. */
+  projection?: boolean;
 }
 
 /** Resolve a repository find by name on the aggregate that owns it.  Returns
@@ -130,11 +141,12 @@ function queryViewOfArgs(body: ExprIR): ExprIR[] {
   return out;
 }
 
-/** Collect the `.all` / `.byId` reads a ui's pages issue — deduped by `varName`
- *  across the whole ui.  Only aggregate-rooted reads (`<handle>.<Agg>.all` /
- *  `.byId(id)`) project a provider; projection / workflow-instance reads are skipped
- *  (a follow-up), so the caller's hoist over the same detector stays consistent
- *  (an un-emitted provider would just be an unresolved var, never silent). */
+/** Collect the reads a ui's pages issue — deduped by `varName` across the whole
+ *  ui.  Aggregate-rooted reads (`<handle>.<Agg>.all` / `.byId(id)` / a named
+ *  find) and query-time PROJECTION reads (`<handle>.<Proj>`, M-T1.3 Phase 1)
+ *  project a provider; workflow-instance reads are still skipped (a follow-up),
+ *  so the caller's hoist over the same detector stays consistent (an un-emitted
+ *  provider would just be an unresolved var, never silent). */
 export function collectFlutterReads(
   ui: UiIR | undefined,
   contexts: readonly EnrichedBoundedContextIR[],
@@ -142,7 +154,12 @@ export function collectFlutterReads(
   if (!ui) return [];
   const apiParamNames = new Set((ui.apiParams ?? []).map((p) => p.name));
   const aggregatesByName = new Set(contexts.flatMap((c) => c.aggregates.map((a) => a.name)));
-  const detCtx = { apiParamNames, aggregatesByName };
+  // The SHARED readability predicate — the same set the walker's detector and
+  // the IR-level gate use, so a page that resolves a projection read and this
+  // collector cannot disagree about which projections are readable.
+  const projectionsByName = readableProjectionNames(contexts);
+  const groupedProjections = groupedProjectionNames(contexts);
+  const detCtx = { apiParamNames, aggregatesByName, projectionsByName };
   const pagedCtx = { ...detCtx, bcByAggregate: bcByAggregateOf(contexts) };
   const out: FlutterRead[] = [];
   const seen = new Set<string>();
@@ -150,6 +167,23 @@ export function collectFlutterReads(
     if (!page.body) continue;
     for (const ofArg of queryViewOfArgs(page.body)) {
       const detected = tryDetectApiHook(ofArg, detCtx);
+      if (detected?.kind === "projection") {
+        // Paramless by construction — the projection IS the row, so there is
+        // no id and no query key, and the provider is the bare
+        // `FutureProvider` rather than any `.family`.
+        const varName = readVarName(detected.aggregateName, detected.operation);
+        if (seen.has(varName)) continue;
+        seen.add(varName);
+        out.push({
+          varName,
+          aggregate: `${upperFirst(detected.aggregateName)}Row`,
+          single: !groupedProjections.has(detected.aggregateName),
+          routePath: `/projections/${snake(detected.aggregateName)}`,
+          paged: false,
+          projection: true,
+        });
+        continue;
+      }
       if (detected?.kind !== "aggregate") continue;
       const isLifecycle = detected.operation === "all" || detected.operation === "byId";
       // A PARAMETERIZED repository find (anything that is not `.all` / `.byId`)
@@ -229,6 +263,39 @@ export function renderAppConfig(): string {
  *  `FutureProvider.family<T?, String>` (GET `/<coll>/$id`, 404 → `null`). */
 function renderReadProvider(read: FlutterRead): string {
   const { aggregate, varName, routePath } = read;
+  if (read.projection) {
+    // A SINGLETON projection returns ONE object and a GROUPED one a bare array
+    // — neither is the paged `{items: […]}` envelope a `.all` read unwraps, and
+    // neither takes an argument.  Tested BEFORE the `single` branch below,
+    // which means "byId `.family` keyed by a route id": a projection has no id.
+    //
+    // The singleton yields `Row?`, not `Row`, for the same reason Feliz lifts
+    // it into `Row option`: the walker renders a `QueryView`'s authored
+    // `empty:` slot as a `== null` guard on the bound value, and against a
+    // NON-nullable Dart type that comparison is a dead-code warning
+    // (`unnecessary_null_comparison`) — `flutter analyze` fails on it, and
+    // dropping the guard instead would silently discard markup the author
+    // wrote.  404 → null keeps the branch genuinely reachable, exactly as the
+    // byId provider below does.
+    const returnType = read.single ? `${aggregate}?` : `List<${aggregate}>`;
+    return lines(
+      `final ${varName}Provider = FutureProvider<${returnType}>((ref) async {`,
+      `  final res = await http.get(apiUri('${routePath}'));`,
+      read.single ? "  if (res.statusCode == 404) return null;" : null,
+      "  if (res.statusCode != 200) {",
+      `    throw Exception('GET ${routePath} failed (\${res.statusCode})');`,
+      "  }",
+      ...(read.single
+        ? [`  return ${aggregate}.fromJson(jsonDecode(res.body) as Map<String, dynamic>);`]
+        : [
+            "  final rows = jsonDecode(res.body) as List<dynamic>;",
+            "  return rows",
+            `      .map((e) => ${aggregate}.fromJson(e as Map<String, dynamic>))`,
+            "      .toList();",
+          ]),
+      "});",
+    );
+  }
   if (read.params) {
     // A parameterized find → a `.family` keyed by a Dart RECORD of the declared
     // params, matching the call the page walker already emits.  A record (not a
