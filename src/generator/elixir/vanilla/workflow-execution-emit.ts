@@ -92,7 +92,7 @@ import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
-import { denialTerm } from "./denial.js";
+import { denialOverrides, denialTerm, respondErrorTail } from "./denial.js";
 import { renderFunctionBodyLines } from "./function-emit.js";
 
 export interface VanillaWorkflowExecResult {
@@ -1628,17 +1628,7 @@ ${actions}
   def respond(conn, {:error, %Ecto.Changeset{} = changeset}),
     do: ProblemDetails.validation_error_response(conn, changeset)
 
-  def respond(conn, {:error, :not_found}),
-    do: ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
-
-  def respond(conn, {:error, {:forbidden, detail}}),
-    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
-
-  def respond(conn, {:error, {:precondition_failed, detail}}),
-    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)
-
-  def respond(conn, {:error, reason}),
-    do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
+${respondErrorTail("respond", "  ", groups[0] ? denialOverrides(groups[0].ctx) : undefined)}
 
   defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
   defp serialize(other), do: other

@@ -143,6 +143,18 @@ export interface ApiStatusContext {
   readonly errorPayloadNames?: ReadonlySet<string>;
 }
 
+/** The `httpStatus` map the DOMAIN FLOOR (`DomainError`) and `Forbidden` rungs
+ *  resolve against (M-T5.20) — the same merge `denialOverrides` performs for
+ *  the elixir backend: `errorStatusOverrides` (per-subdomain, carries every
+ *  declared name) with `structuralErrorStatuses` (the app-wide fold) layered
+ *  on top. Neither rung has a per-context tag of its own — both surface in
+ *  app-global handlers — so this merge is what lets `httpStatus DomainError ->
+ *  400` reach the declared response set here, matching the resolved status
+ *  each backend's own runtime handler answers with. */
+function denialOverridesFor(statuses: ApiStatusContext | undefined): Record<string, number> {
+  return { ...statuses?.errorStatusOverrides, ...statuses?.structuralErrorStatuses };
+}
+
 /** Route classes NOT yet lifted into `ApiOperationIR`.  Exported so a
  *  consumer can surface an honest "not derived yet" rather than treating the
  *  operation set as exhaustive. */
@@ -308,7 +320,11 @@ function operationErrorStatuses(
   op: OperationIR,
   statuses: ApiStatusContext | undefined,
 ): number[] {
-  const out = new Set(errorStatuses("operation", operationIsGuarded(op)));
+  const out = new Set(
+    errorStatuses("operation", operationIsGuarded(op), (name) =>
+      resolveErrorStatus(name, denialOverridesFor(statuses)),
+    ),
+  );
   if (op.when) out.add(resolveErrorStatus("Disallowed", statuses?.structuralErrorStatuses));
   if (op.name === "update" && aggregateIsVersioned(agg)) {
     out.add(resolveErrorStatus("ConcurrencyConflict", statuses?.structuralErrorStatuses));
@@ -420,7 +436,9 @@ export function deriveAggregateOperations(
       // typed from it and narrowing it to an id is a wire-visible retype of
       // every existing call site — a separate, deliberate change.
       entityType(agg.name),
-      errorStatuses("create"),
+      errorStatuses("create", false, (name) =>
+        resolveErrorStatus(name, denialOverridesFor(statuses)),
+      ),
     );
   }
 

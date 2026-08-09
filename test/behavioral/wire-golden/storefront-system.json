@@ -1,0 +1,678 @@
+{
+  "case": "storefront-system",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/products",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/products/{id}",
+      "status": 200,
+      "body": {
+        "display": "WIDGET-1",
+        "id": "<volatile:key>",
+        "price": {
+          "amount": 9.99,
+          "currency": "USD"
+        },
+        "sku": "WIDGET-1",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/products",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "display": "WIDGET-1",
+            "id": "<volatile:key>",
+            "price": {
+              "amount": 9.99,
+              "currency": "USD"
+            },
+            "sku": "WIDGET-1",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 3,
+      "method": "DELETE",
+      "path": "/api/products/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/products/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Product {id} not found",
+        "instance": "/api/products/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/products",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/customers/by_email?email=lookup@acme.test",
+      "status": 200,
+      "body": {
+        "display": "Email Lookup",
+        "email": "lookup@acme.test",
+        "id": "<volatile:key>",
+        "name": "Email Lookup",
+        "version": 1
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "display": "Email Lookup",
+            "email": "lookup@acme.test",
+            "id": "<volatile:key>",
+            "name": "Email Lookup",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "DELETE",
+      "path": "/api/customers/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Customer {id} not found",
+        "instance": "/api/customers/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/customers/by_email?email=lookup@acme.test",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/customers/by_email",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 13,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "POST",
+      "path": "/api/products",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "POST",
+      "path": "/api/wallets",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/api/wallets/{id}/top_up",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/wallets/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 50,
+          "currency": "USD"
+        },
+        "closedAt": null,
+        "id": "<volatile:key>",
+        "openedAt": "<timestamp>",
+        "ownerId": "<volatile:key>",
+        "status": "Open",
+        "version": 2
+      }
+    },
+    {
+      "seq": 18,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 19,
+      "method": "POST",
+      "path": "/api/customers/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 20,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 200,
+      "body": {
+        "display": "Updated",
+        "email": "up2@acme.test",
+        "id": "<volatile:key>",
+        "name": "Updated",
+        "version": 2
+      }
+    },
+    {
+      "seq": 21,
+      "method": "POST",
+      "path": "/api/products",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 22,
+      "method": "POST",
+      "path": "/api/products/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 23,
+      "method": "GET",
+      "path": "/api/products/{id}",
+      "status": 200,
+      "body": {
+        "display": "UPD-2",
+        "id": "<volatile:key>",
+        "price": {
+          "amount": 7.5,
+          "currency": "USD"
+        },
+        "sku": "UPD-2",
+        "version": 2
+      }
+    },
+    {
+      "seq": 24,
+      "method": "POST",
+      "path": "/api/wallets",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 25,
+      "method": "POST",
+      "path": "/api/wallets/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 26,
+      "method": "GET",
+      "path": "/api/wallets/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 25,
+          "currency": "USD"
+        },
+        "closedAt": null,
+        "id": "<volatile:key>",
+        "openedAt": "<timestamp>",
+        "ownerId": "<volatile:key>",
+        "status": "Open",
+        "version": 2
+      }
+    },
+    {
+      "seq": 27,
+      "method": "GET",
+      "path": "/api/wallets/by_owner?owner=<uuid>",
+      "status": 200,
+      "body": [
+        {
+          "balance": {
+            "amount": 25,
+            "currency": "USD"
+          },
+          "closedAt": null,
+          "id": "<volatile:key>",
+          "openedAt": "<timestamp>",
+          "ownerId": "<volatile:key>",
+          "status": "Open",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 28,
+      "method": "GET",
+      "path": "/api/wallets/open_by_owner?owner=<uuid>",
+      "status": 200,
+      "body": [
+        {
+          "balance": {
+            "amount": 25,
+            "currency": "USD"
+          },
+          "closedAt": null,
+          "id": "<volatile:key>",
+          "openedAt": "<timestamp>",
+          "ownerId": "<volatile:key>",
+          "status": "Open",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 29,
+      "method": "POST",
+      "path": "/api/wallets/{id}/debit",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 30,
+      "method": "GET",
+      "path": "/api/wallets/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 20,
+          "currency": "USD"
+        },
+        "closedAt": null,
+        "id": "<volatile:key>",
+        "openedAt": "<timestamp>",
+        "ownerId": "<volatile:key>",
+        "status": "Open",
+        "version": 3
+      }
+    },
+    {
+      "seq": 31,
+      "method": "POST",
+      "path": "/api/wallets/{id}/freeze",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 32,
+      "method": "GET",
+      "path": "/api/wallets/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 20,
+          "currency": "USD"
+        },
+        "closedAt": null,
+        "id": "<volatile:key>",
+        "openedAt": "<timestamp>",
+        "ownerId": "<volatile:key>",
+        "status": "Frozen",
+        "version": 4
+      }
+    },
+    {
+      "seq": 33,
+      "method": "GET",
+      "path": "/api/wallets/by_owner?owner=<uuid>",
+      "status": 200,
+      "body": [
+        {
+          "balance": {
+            "amount": 20,
+            "currency": "USD"
+          },
+          "closedAt": null,
+          "id": "<volatile:key>",
+          "openedAt": "<timestamp>",
+          "ownerId": "<volatile:key>",
+          "status": "Frozen",
+          "version": 4
+        }
+      ]
+    },
+    {
+      "seq": 34,
+      "method": "GET",
+      "path": "/api/wallets/open_by_owner?owner=<uuid>",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 35,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 36,
+      "method": "POST",
+      "path": "/api/orders/{id}/add_line",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 37,
+      "method": "POST",
+      "path": "/api/orders/{id}/confirm",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 38,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "customerId": "<volatile:key>",
+        "id": "<volatile:key>",
+        "lineCount": 1,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "productId": "<volatile:key>",
+            "quantity": 2,
+            "unitPrice": {
+              "amount": 7.5,
+              "currency": "USD"
+            }
+          }
+        ],
+        "placedAt": "<timestamp>",
+        "status": "Confirmed",
+        "version": 3
+      }
+    },
+    {
+      "seq": 39,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 40,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "customerId": "<volatile:key>",
+        "id": "<volatile:key>",
+        "lineCount": 1,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "productId": "<volatile:key>",
+            "quantity": 2,
+            "unitPrice": {
+              "amount": 7.5,
+              "currency": "USD"
+            }
+          }
+        ],
+        "placedAt": "<timestamp>",
+        "status": "Shipped",
+        "version": 4
+      }
+    },
+    {
+      "seq": 41,
+      "method": "GET",
+      "path": "/api/wallets?dir=asc&sort=openedAt",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "balance": {
+              "amount": 50,
+              "currency": "USD"
+            },
+            "closedAt": null,
+            "id": "<volatile:key>",
+            "openedAt": "<timestamp>",
+            "ownerId": "<volatile:key>",
+            "status": "Open",
+            "version": 2
+          },
+          {
+            "balance": {
+              "amount": 20,
+              "currency": "USD"
+            },
+            "closedAt": null,
+            "id": "<volatile:key>",
+            "openedAt": "<timestamp>",
+            "ownerId": "<volatile:key>",
+            "status": "Frozen",
+            "version": 4
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 42,
+      "method": "DELETE",
+      "path": "/api/wallets/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 43,
+      "method": "GET",
+      "path": "/api/wallets/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Wallet {id} not found",
+        "instance": "/api/wallets/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 44,
+      "method": "GET",
+      "path": "/api/wallets",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "balance": {
+              "amount": 50,
+              "currency": "USD"
+            },
+            "closedAt": null,
+            "id": "<volatile:key>",
+            "openedAt": "<timestamp>",
+            "ownerId": "<volatile:key>",
+            "status": "Open",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 45,
+      "method": "GET",
+      "path": "/api/wallets/by_owner?owner=<uuid>",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 46,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "customerId": "<volatile:key>",
+            "id": "<volatile:key>",
+            "lineCount": 1,
+            "lines": [
+              {
+                "id": "<volatile:key>",
+                "productId": "<volatile:key>",
+                "quantity": 2,
+                "unitPrice": {
+                  "amount": 7.5,
+                  "currency": "USD"
+                }
+              }
+            ],
+            "placedAt": "<timestamp>",
+            "status": "Shipped",
+            "version": 4
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 47,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 48,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 49,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    }
+  ]
+}

@@ -41,6 +41,7 @@ import {
 import { renderPyStatements } from "./render-stmt.js";
 import { resourceImportLines } from "./resource-clients.js";
 import {
+  conflictResolver,
   errorResponsesKwarg,
   ID_PARAM,
   pyWireToDomain,
@@ -566,7 +567,7 @@ function workflowRoute(
     "session: SessionDep",
   ].join(", ");
   const out: string[] = [
-    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf))})`,
+    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf), [], conflictResolver(ctx))})`,
     // A route-invoked workflow runs in a child frame under the request root, so
     // its audit / provenance rows are distinguishable from a direct operation's.
     "@in_child_context",
@@ -729,7 +730,7 @@ function instanceRoutes(wf: WorkflowIR): string {
         `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
         `    __stream = await ${fns.load}(session, ${idAsKey})`,
         "    if not __stream:",
-        `        raise AggregateNotFoundError("not_found")`,
+        `        raise AggregateNotFoundError(f"${T} {id} not found")`,
         `    row = ${fns.fold}(${idAsKey}, __stream)`,
         `    return {${proj("row")}}`,
       )
@@ -738,7 +739,7 @@ function instanceRoutes(wf: WorkflowIR): string {
         `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
         `    row = await session.get(${row}, id)`,
         "    if row is None:",
-        `        raise AggregateNotFoundError("not_found")`,
+        `        raise AggregateNotFoundError(f"${T} {id} not found")`,
         `    return {${proj("row")}}`,
       );
   return [list, byId].join("\n\n\n");

@@ -69,7 +69,7 @@ function pushesOnMain(source: string): boolean {
     // `branches: [main]` — the only form used here; the flow-seq check keeps a
     // `branches: [main-something]` from matching by substring.
     const m = line.match(/^ {4}branches:\s*\[(.+)\]\s*$/);
-    if (m && m[1].split(",").some((b) => stripQuotes(b.trim()) === "main")) return true;
+    if (m?.[1].split(",").some((b) => stripQuotes(b.trim()) === "main")) return true;
   }
   return false;
 }

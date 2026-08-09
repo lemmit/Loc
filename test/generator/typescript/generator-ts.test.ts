@@ -1711,7 +1711,7 @@ describe("typescript generator", () => {
       const routes = files.get("http/reservation.routes.ts")!;
       // `fromTime < toTime` is cross-field — falls through to .refine.
       expect(routes).toMatch(
-        /CreateReservationRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("CreateReservationRequest"\)\.refine\(\(data\) => data\.fromTime < data\.toTime, \{ path: \["fromTime"\], message: "Invariant violated: [^"]*" \}\)/,
+        /CreateReservationRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("CreateReservationRequest"\)\.refine\(\(data: any\) => data\.fromTime < data\.toTime, \{ path: \["fromTime"\], message: "Invariant violated: [^"]*" \}\)/,
       );
     });
   });

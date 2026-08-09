@@ -1,7 +1,7 @@
 import { emitsRestCreate } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
 import { type ApiOperationIR, relativeOpPath } from "../../../ir/util/api-surface.js";
-import { errorStatuses, type OpErrorKind } from "../../../ir/util/openapi-errors.js";
+import { errorStatuses, type OpErrorKind, problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   type OpIdTokens,
@@ -713,6 +713,12 @@ export function renderExceptionFilter(
   const disallowedStatus = resolveErrorStatus("Disallowed", options?.structuralStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", options?.structuralStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", options?.structuralStatuses);
+  // M-T5.20 — the domain floor and the `requires` denial resolve through the
+  // same `httpStatus` map as the structural conflicts above, instead of the
+  // hardcoded 422 / 403 literals they used to be. Defaults collapse to those
+  // same literals, so output is byte-identical with no override.
+  const domainStatus = resolveErrorStatus("DomainError", options?.structuralStatuses);
+  const forbiddenStatus = resolveErrorStatus("Forbidden", options?.structuralStatuses);
   // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
   // without uniqueness is byte-identical to before the feature (the proposal's
   // strict-additivity guarantee — only a `unique` index can raise 23505).
@@ -884,10 +890,10 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             ${renderDotnetLogCall("forbidden", [
               { name: "message", valueExpr: "fe.Message" },
-              { name: "status", valueExpr: "403" },
+              { name: "status", valueExpr: `${forbiddenStatus}` },
             ])}
             global::${ns}.Observability.HttpMetrics.RecordDomainFault("forbidden");
-            context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
+            context.Result = Problem(context, ${forbiddenStatus}, "${problemTitle(forbiddenStatus)}", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -909,10 +915,10 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             ${renderDotnetLogCall("domainError", [
               { name: "message", valueExpr: "de.Message" },
-              { name: "status", valueExpr: "422" },
+              { name: "status", valueExpr: `${domainStatus}` },
             ])}
             global::${ns}.Observability.HttpMetrics.RecordDomainFault("domain_error");
-            context.Result = Problem(context, 422, "Unprocessable Entity", de.Message, trace_id);
+            context.Result = Problem(context, ${domainStatus}, "${problemTitle(domainStatus)}", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
@@ -927,18 +933,23 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         if (context.Exception is ExternHandlerException xh)
         {
             // 500 — the user handler threw, which is an internal
-            // failure from the framework's POV — but the envelope
-            // names the offending op + aggregate so operators don't
-            // have to grep logs to find the cause.  The original
-            // exception (xh.InnerException) is logged in full
-            // server-side via the catalog's extern_handler_threw
-            // event — same shape the Hono onError arm emits.
+            // failure from the framework's POV, so the body is
+            // sanitized to "internal" like every other 500 arm (RS-28).
+            //
+            // This previously sent xh.Message, whose intent was to name
+            // the offending op + aggregate so operators didn't have to grep
+            // logs.  But that message interpolates the INNER exception the
+            // user handler threw — driver text, URLs, connection strings —
+            // into a public, potentially unauthenticated response.  The
+            // operator-facing half is unaffected: aggregate, op and the full
+            // inner exception all reach the catalog's extern_handler_threw
+            // event below.  Same shape the Hono onError arm emits.
             ${renderDotnetLogCallWithException("externHandlerThrew", "xh", [
               { name: "aggregate", valueExpr: "xh.AggName" },
               { name: "op", valueExpr: "xh.OpName" },
               { name: "error", valueExpr: "xh.Message" },
             ])}
-            context.Result = Problem(context, 500, "Internal Server Error", xh.Message, trace_id);
+            context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
             context.ExceptionHandled = true;
             return;
         }

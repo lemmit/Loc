@@ -70,28 +70,49 @@ export type OpErrorKind =
 export function errorStatuses(
   kind: OpErrorKind,
   guarded = false,
-  /** Resolver for the structural-conflict built-ins (M-T3.4a) — maps a conflict
-   *  name to its `httpStatus`-overridden status, defaulting to 409. Passed by
-   *  every backend so the destroy FK-restrict declaration (`ReferencedInUse`)
-   *  moves in lockstep with its runtime arm. Omitted ⇒ literal 409 (the
-   *  byte-identical default). */
+  /** Resolver for the app-global denial-ladder rungs — maps an error name to
+   *  its `httpStatus`-overridden status, defaulting to that name's stdlib code.
+   *  Originally only the structural conflicts (M-T3.4a: the destroy FK-restrict
+   *  `ReferencedInUse`); M-T5.20 extended it to the `DomainError` domain floor
+   *  and the `Forbidden` rung so the DECLARED response set moves in lockstep
+   *  with the runtime handler arm. (`NotFound` is deliberately excluded — see
+   *  the note below.) Omitted ⇒ the literal defaults (409 / 422 / 403 —
+   *  byte-identical output). */
   resolve?: (name: string) => number,
 ): number[] {
   const referencedInUse = resolve?.("ReferencedInUse") ?? 409;
+  // The domain floor (RS-15: a well-formed request the domain refuses on
+  // semantic grounds). 422 by default, which is ALSO the wire-validation tier's
+  // status — so with no override the two collapse to a single declared 422 and
+  // the emitted set is unchanged.
+  const domain = resolve?.("DomainError") ?? 422;
+  const forbidden = resolve?.("Forbidden") ?? 403;
+  // NOTE the 404 rung is deliberately NOT resolved here (M-T5.20 gap): the
+  // aggregate-not-found 404 has TWO producers and they differ per backend — the
+  // exception handler (Hono's `AggregateNotFoundError` → onError) and a bare
+  // framework return (`NotFound()` / `ResponseEntity.notFound()` / a `None`
+  // check) on the find / getById / projection / workflow read paths.  Moving
+  // only the handler arm would make Hono's getById answer the override while
+  // .NET's answered 404, i.e. trade one drift for a worse cross-backend one.
+  // Closing it means converting every bare-404 return site too.
+  const set = (...statuses: number[]): number[] => [...new Set(statuses)].sort((a, b) => a - b);
   switch (kind) {
+    // 400 = a malformed/unparseable body; 422 = the wire-validation tier
+    // (`errors[]`); `domain` = the domain floor.  The first two are framework
+    // tiers, not remappable rungs, so they stay literal.
     case "create":
-      return [400, 422];
+      return set(400, 422, domain);
     case "getById":
       return [404];
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
     // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
     // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
     case "destroy":
-      return [404, referencedInUse];
+      return set(404, referencedInUse);
     case "operation":
-      return guarded ? [400, 403, 404, 422] : [400, 404, 422];
+      return guarded ? set(400, forbidden, 404, 422, domain) : set(400, 404, 422, domain);
     case "workflow":
-      return guarded ? [400, 403, 422] : [400, 422];
+      return guarded ? set(400, forbidden, 422, domain) : set(400, 422, domain);
     case "findOptional":
       return guarded ? [403, 404] : [404];
     case "findList":
@@ -111,6 +132,11 @@ export function problemTitle(status: number): string {
   switch (status) {
     case 400:
       return "Bad Request";
+    // Codes an `httpStatus <Error> -> <Code>` override may retarget a rung to
+    // (M-T3.4a / M-T5.20) — kept here so a remapped rung's 7807 title and its
+    // OpenAPI `description` stay a real reason phrase, not the generic fallback.
+    case 402:
+      return "Payment Required";
     case 403:
       return "Forbidden";
     case 404:
@@ -119,8 +145,16 @@ export function problemTitle(status: number): string {
       return "Conflict";
     case 422:
       return "Unprocessable Entity";
+    case 423:
+      return "Locked";
+    case 428:
+      return "Precondition Required";
+    case 429:
+      return "Too Many Requests";
     case 500:
       return "Internal Server Error";
+    case 502:
+      return "Bad Gateway";
     default:
       return "Error";
   }

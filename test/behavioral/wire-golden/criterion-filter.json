@@ -1,0 +1,148 @@
+{
+  "case": "criterion-filter",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "archived": false,
+        "code": "C1",
+        "id": "<volatile:key>",
+        "region": "EU",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders/recent",
+      "status": 200,
+      "body": [
+        {
+          "archived": false,
+          "code": "C1",
+          "id": "<volatile:key>",
+          "region": "EU",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "archived": false,
+        "code": "C1B",
+        "id": "<volatile:key>",
+        "region": "EU",
+        "version": 2
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders/recent",
+      "status": 200,
+      "body": [
+        {
+          "archived": false,
+          "code": "C1B",
+          "id": "<volatile:key>",
+          "region": "EU",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "archived": false,
+            "code": "C1B",
+            "id": "<volatile:key>",
+            "region": "EU",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/orders/recent",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    }
+  ]
+}

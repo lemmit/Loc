@@ -49,7 +49,7 @@ describe("message clause — wire refine carrier", () => {
   it("renders a messaged invariant as a refine with the text + a stable loomCode", async () => {
     const { reactApi } = await gen();
     expect(reactApi).toContain(
-      `.refine((data) => data.name.length >= 2 && data.name.length <= 120, { path: ["name"], message: "Name must be 2-120 characters"`,
+      `.refine((data: any) => data.name.length >= 2 && data.name.length <= 120, { path: ["name"], message: "Name must be 2-120 characters"`,
     );
   });
 
@@ -61,7 +61,7 @@ describe("message clause — wire refine carrier", () => {
   it("renders a messaged precondition as a refine (not the native .min chain)", async () => {
     const { reactApi } = await gen();
     expect(reactApi).toContain(
-      `.refine((data) => data.amount >= 1, { path: ["amount"], message: "Amount must be positive"`,
+      `.refine((data: any) => data.amount >= 1, { path: ["amount"], message: "Amount must be positive"`,
     );
     // The precondition's native `.min(1)` optimisation is bypassed for a
     // messaged rule so the text survives.

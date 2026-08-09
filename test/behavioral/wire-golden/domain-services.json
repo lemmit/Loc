@@ -1,0 +1,180 @@
+{
+  "case": "domain-services",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/accounts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/accounts/by_holder?holder=alice",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 100,
+          "currency": "USD"
+        },
+        "holder": "alice",
+        "id": "<volatile:key>",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/accounts/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/accounts/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 100,
+          "currency": "USD"
+        },
+        "holder": "alice2",
+        "id": "<volatile:key>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/accounts/by_holder?holder=alice2",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 100,
+          "currency": "USD"
+        },
+        "holder": "alice2",
+        "id": "<volatile:key>",
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/accounts/{id}/deposit",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/accounts/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 125,
+          "currency": "USD"
+        },
+        "holder": "alice2",
+        "id": "<volatile:key>",
+        "version": 3
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/api/accounts/{id}/withdraw",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/accounts/{id}",
+      "status": 200,
+      "body": {
+        "balance": {
+          "amount": 100,
+          "currency": "USD"
+        },
+        "holder": "alice2",
+        "id": "<volatile:key>",
+        "version": 4
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/accounts",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "balance": {
+              "amount": 100,
+              "currency": "USD"
+            },
+            "holder": "alice2",
+            "id": "<volatile:key>",
+            "version": 4
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 10,
+      "method": "DELETE",
+      "path": "/api/accounts/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/accounts/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Account {id} not found",
+        "instance": "/api/accounts/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/accounts/by_holder?holder=alice2",
+      "status": 404,
+      "body": {
+        "detail": "not_found",
+        "instance": "/api/accounts/by_holder",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/accounts",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    }
+  ]
+}

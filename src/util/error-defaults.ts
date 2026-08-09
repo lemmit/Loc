@@ -22,6 +22,15 @@ const STDLIB_ERROR_STATUS: Readonly<Record<string, number>> = {
   ValidationError: 422,
   ParseError: 400,
   Forbidden: 403,
+  // The DOMAIN FLOOR (RS-15): a rejection the domain makes on a well-formed
+  // request — a false `precondition`, a tripped `invariant`, any
+  // `DomainError`-class throw the wire validator cannot express.  RFC 9110
+  // §15.5.21: well-formed but semantically rejected.  Added here (M-T5.20) so
+  // the rung resolves through the SAME `httpStatus <Error> -> <Code>` override
+  // path as every other one; it used to be a hardcoded integer literal at each
+  // backend's handler arm, which is why moving it 400 → 422 in #2300 cost five
+  // edits that nothing but a five-way assertion kept in agreement.
+  DomainError: 422,
   TransportFailure: 502,
   UnexpectedStatus: 502,
   DeserializeError: 502,

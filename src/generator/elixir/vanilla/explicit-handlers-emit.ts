@@ -48,6 +48,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import type { ApiRoute } from "../api-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { denialOverrides, respondErrorTail } from "./denial.js";
 import {
   type BodyLine,
   collectParamRefs,
@@ -590,17 +591,7 @@ ${actions.join("\n\n")}
   def respond(conn, {:error, %Ecto.Changeset{} = changeset}),
     do: ProblemDetails.validation_error_response(conn, changeset)
 
-  def respond(conn, {:error, :not_found}),
-    do: ProblemDetails.problem_response(conn, 404, "Not Found", "Resource not found")
-
-  def respond(conn, {:error, {:forbidden, detail}}),
-    do: ProblemDetails.problem_response(conn, 403, "Forbidden", detail)
-
-  def respond(conn, {:error, {:precondition_failed, detail}}),
-    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", detail)
-
-  def respond(conn, {:error, reason}),
-    do: ProblemDetails.problem_response(conn, 400, "Bad Request", inspect(reason))
+${respondErrorTail("respond", "  ", contexts[0] ? denialOverrides(contexts[0]) : undefined)}
 
   # A collection result (a find handler declaring an Agg-Response array, whose
   # body returns the raw entity list) projects each element — an Ecto schema

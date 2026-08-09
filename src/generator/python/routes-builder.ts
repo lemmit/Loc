@@ -407,7 +407,7 @@ function derivedResponsesKwarg(op: ApiOperationIR): string {
 /** `resolveErrorStatus` bound to a context's `httpStatus` override map — the
  *  structural-conflict status resolver every route in the file threads
  *  (M-T3.4a). With no override every conflict resolves to 409 (byte-identical). */
-function conflictResolver(ctx: EnrichedBoundedContextIR): (name: string) => number {
+export function conflictResolver(ctx: EnrichedBoundedContextIR): (name: string) => number {
   return (name) => resolveErrorStatus(name, ctx.structuralErrorStatuses);
 }
 

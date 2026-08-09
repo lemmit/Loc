@@ -2,11 +2,18 @@
 system RU {
   subdomain D {
     context Shop {
-      error NotFound { resource: string }
+      // `attemptedCode` is deliberately MULTI-WORD (RS-30).  A declared error's
+      // fields become RFC 7807 §3.2 extension members, and the single-word
+      // `resource` cannot test their CASING — snake and camel are the same
+      // string.  Elixir shipped `%{attempted_code: …}` against the other four's
+      // `attemptedCode` for exactly as long as this fixture had only one-word
+      // fields.  The golden below now records the camelCase key, so the rule is
+      // gated at runtime on all seven behavioural legs.
+      error NotFound { resource: string, attemptedCode: string }
       aggregate Order with crudish {
         code: string
         reserved: bool
-        operation reject(): string or NotFound { return NotFound { resource: code } }
+        operation reject(): string or NotFound { return NotFound { resource: code, attemptedCode: code } }
         operation accept(): string or NotFound { reserved := true  return code }
       }
       repository Orders for Order { }

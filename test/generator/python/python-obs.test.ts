@@ -195,9 +195,12 @@ describe("python observability", () => {
     // (parity with Hono/.NET/Java/vanilla) and returns a sanitized 500.
     expect(problem).toContain("@app.exception_handler(Exception)");
     expect(problem).toContain('log("error", "internal_error", error=str(err), status=500)');
-    expect(problem).toContain(
-      'return problem(request, 500, "Internal Server Error", "An unexpected error occurred.")',
-    );
+    // RS-26: the detail is the bare literal "internal", identical on all five
+    // backends.  Python used to send its own prose sentence here — no leak, but
+    // not byte-identical, and byte-identity is the premise of the M-T9.11 wire
+    // golden.  Pinned cross-backend by
+    // test/conformance/internal-fault-parity.test.ts.
+    expect(problem).toContain('return problem(request, 500, "Internal Server Error", "internal")');
   });
 
   it("the dispatcher's drop path logs event_unrouted on the catalog stream", async () => {

@@ -21,11 +21,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import {
-  operationIsGuarded,
-  workflowEmitsCommandRoute,
-  workflowIsGuarded,
-} from "../../../ir/types/loom-ir.js";
+import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -58,14 +54,29 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
-import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
-import { defaultErrorStatus, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
+import { unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 import { servedOperationEntries, servesHistory } from "./api-emit.js";
+import { denialOverrides, denialStatus } from "./denial.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
+
+/** Substitute the shared derivation's literal 404 with elixir's
+ *  `httpStatus`-resolved `NotFound` status (M-T5.20, elixir leg — the
+ *  `notFound` rung `denialStatus` already resolves for the RUNTIME arm via
+ *  `not_found_response`/`problem_response`).  The shared `errorStatuses()`
+ *  matrix (`src/ir/util/openapi-errors.ts`) deliberately leaves 404 a raw
+ *  literal — `NotFound` has two producers on the four non-elixir backends
+ *  (an exception-handler arm AND ~10 bare-404 return sites), so converting
+ *  only the declaration there would document a status the runtime never
+ *  answers.  Elixir has ONE producer (`ProblemDetails.not_found_response` /
+ *  `problem_response`), already fully resolved, so its declared side can
+ *  safely follow without that hazard. */
+function withResolvedNotFound(statuses: readonly number[], notFoundStatus: number): number[] {
+  if (notFoundStatus === 404) return [...statuses];
+  return [...new Set(statuses.map((s) => (s === 404 ? notFoundStatus : s)))].sort((a, b) => a - b);
+}
 
 // ---------------------------------------------------------------------------
 // OpenApiSpex emission for Phoenix LiveView / Ash.
@@ -397,15 +408,6 @@ function renderApiSpec(
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   const schemasModule = `${webModule}.Api.Schemas`;
 
-  // Structural-conflict resolver (M-T3.4a) — the app-wide `httpStatus` map is
-  // identical on every hosted context (folded across every api by
-  // `enrichLoomModel`), so read it off any aggregate's context.  Every 409 the
-  // spec declares for a structural conflict (destroy FK-restrict, `when` gate,
-  // versioned stale-write) resolves through this so the declaration moves in
-  // lockstep with the runtime arm.  Absent ⇒ 409 default ⇒ byte-identical.
-  const structuralStatuses = allAggregates[0]?.ctx.structuralErrorStatuses;
-  const resolveConflict = (name: string): number => resolveErrorStatus(name, structuralStatuses);
-
   // Build paths map entries
   const pathEntries: string[] = [];
 
@@ -512,6 +514,7 @@ function renderApiSpec(
     const derivedOps = isAbstractBase(agg)
       ? []
       : deriveAggregateOperations(agg, specRepo, apiStatusContext(ctx));
+    const notFoundStatus = denialStatus("notFound", denialOverrides(ctx));
     const served = servedOperationEntries(agg, derivedOps);
     const specPath = (o: ApiOperationIR): string => `/${aggSlug}${relativeOpPath(o)}`;
     const respMod = `${schemasModule}.${agg.name}Response`;
@@ -581,7 +584,7 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${respMod}}}
-            }${statusResponseEntries([...(derivedOps.find((o) => o.kind === "getById")?.errorStatuses ?? [404])], schemasModule)}
+            }${statusResponseEntries(withResolvedNotFound(derivedOps.find((o) => o.kind === "getById")?.errorStatuses ?? [404], notFoundStatus), schemasModule)}
           }
         }${
           // DELETE /<aggs>/{id} — documented iff the ROUTER mounts it: the
@@ -599,7 +602,7 @@ ${pagingQueryParams()}
             %OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: ${idParamSchema(agg.idValueType)}}
           ],
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${statusResponseEntries([...derivedOps.find((o) => o.kind === "destroy")!.errorStatuses], schemasModule)}
+            204 => %OpenApiSpex.Response{description: "No Content"}${statusResponseEntries(withResolvedNotFound(derivedOps.find((o) => o.kind === "destroy")!.errorStatuses, notFoundStatus), schemasModule)}
           }
         }`
             : ""
@@ -628,7 +631,15 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :array, items: ${schemasModule}.${AUDIT_ENTRY_TYPE}}}}
-            }${statusResponseEntries(historyFind.requires ? [403, 404] : [404], schemasModule)}
+            }${statusResponseEntries(
+              withResolvedNotFound(
+                historyFind.requires
+                  ? [denialStatus("forbidden", denialOverrides(ctx)), 404]
+                  : [404],
+                notFoundStatus,
+              ),
+              schemasModule,
+            )}
           }
         }
       }`,
@@ -680,7 +691,7 @@ ${pagingQueryParams()}
               }}}
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
-            }${statusResponseEntries([...entry.errorStatuses], schemasModule)}
+            }${statusResponseEntries(withResolvedNotFound(entry.errorStatuses, notFoundStatus), schemasModule)}
           }
         }
       }`,
@@ -702,7 +713,7 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.CanResponse}}
-            }${statusResponseEntries([...probe.errorStatuses], schemasModule)}
+            }${statusResponseEntries(withResolvedNotFound(probe.errorStatuses, notFoundStatus), schemasModule)}
           }
         }
       }`,
@@ -751,7 +762,10 @@ ${pagingQueryParams()}
               // The declared set (gated 403 included, union-absent status
               // resolved) is the derived one — the union arm here used to
               // omit the 403 a gated union find answers.
-              statusResponseEntries([...entry.errorStatuses], schemasModule)
+              statusResponseEntries(
+                withResolvedNotFound(entry.errorStatuses, notFoundStatus),
+                schemasModule,
+              )
             }
           }
         }

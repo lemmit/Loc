@@ -66,7 +66,9 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../../ir/util/handler-contracts.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
@@ -588,20 +590,36 @@ export function buildExplicitRoutesFile(
   body.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // M-T5.20 — the denial ladder resolves through the api's `httpStatus` map,
+  // exactly like the aggregate + workflow routers. This file serves ROUTES from
+  // possibly several contexts; every context carries the SAME app-wide fold, so
+  // the first one is representative. Defaults 422 / 403 ⇒ byte-identical.
+  const structuralMap = contexts[0]?.structuralErrorStatuses;
+  const exDomainStatus = resolveErrorStatus("DomainError", structuralMap);
+  const exForbiddenStatus = resolveErrorStatus("Forbidden", structuralMap);
+  const exProblemUnion = [
+    ...new Set<number>([400, exForbiddenStatus, 404, 422, exDomainStatus, 500]),
+  ]
+    .sort((a, b) => a - b)
+    .join(" | ");
   body.push(
-    `    const problem = (status: 400 | 403 | 404 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: ${exProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   body.push(
-    `    if (err instanceof ForbiddenError) return problem(403, "Forbidden", err.message);`,
+    `    if (err instanceof ForbiddenError) return problem(${exForbiddenStatus}, ${JSON.stringify(problemTitle(exForbiddenStatus))}, err.message);`,
   );
   body.push(
-    `    if (err instanceof DomainError) return problem(422, "Unprocessable Entity", err.message);`,
+    `    if (err instanceof DomainError) return problem(${exDomainStatus}, ${JSON.stringify(problemTitle(exDomainStatus))}, err.message);`,
   );
   body.push(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
+    // RS-28: the extern arm sanitizes like every other 500.  `err.message`
+    // interpolates the INNER exception the user handler threw — driver text,
+    // URLs, connection strings — into a public body.  op + aggregate already
+    // reach the operator via the `extern_handler_threw` catalog event.
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
   body.push(`    console.error(err);`);
   body.push(`    return problem(500, "Internal Server Error", "internal");`);

@@ -28,6 +28,7 @@ import {
   type ReadPort,
   readPortsForOperation,
 } from "../../../ir/util/domain-service-read-ports.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opOperation,
@@ -40,6 +41,7 @@ import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.js";
 import { emitsCommandRoute } from "../../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../../ir/util/workflow-instances.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
 
@@ -243,21 +245,32 @@ export function buildWorkflowsFile(
   body.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // M-T5.20 — the workflow router's denial ladder resolves through the api's
+  // `httpStatus` map, exactly like the aggregate router's. Defaults 422 / 403
+  // (with the reason-phrase titles the literals used) ⇒ byte-identical.
+  const wfDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  const wfForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  const wfProblemUnion = [
+    ...new Set<number>([400, wfForbiddenStatus, 404, 422, wfDomainStatus, 500]),
+  ]
+    .sort((a, b) => a - b)
+    .join(" | ");
   // RFC 7807 responder — application/problem+json + x-request-id header.
   body.push(
-    `    const problem = (status: 400 | 403 | 404 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: ${wfProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   body.push(
-    `    if (err instanceof ForbiddenError) return problem(403, "Forbidden", err.message);`,
+    `    if (err instanceof ForbiddenError) return problem(${wfForbiddenStatus}, ${JSON.stringify(problemTitle(wfForbiddenStatus))}, err.message);`,
   );
   body.push(
-    `    if (err instanceof DomainError) return problem(422, "Unprocessable Entity", err.message);`,
+    `    if (err instanceof DomainError) return problem(${wfDomainStatus}, ${JSON.stringify(problemTitle(wfDomainStatus))}, err.message);`,
   );
   body.push(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
   body.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", err.message); }`,
+    // RS-28 — sanitized; the inner exception reaches the log, not the wire.
+    `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
   body.push(`    console.error(err);`);
   body.push(`    return problem(500, "Internal Server Error", "internal");`);
@@ -588,11 +601,21 @@ function emitWorkflowRoute(
   out.push(
     `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // M-T5.20 — the domain floor's DECLARED status is the resolved value the
+  // router's onError arm answers with (default 422 ⇒ collapses into the line
+  // above, byte-identical).
+  const wfRouteDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  if (wfRouteDomainStatus !== 400 && wfRouteDomainStatus !== 422) {
+    out.push(
+      `      ${wfRouteDomainStatus}: { description: ${JSON.stringify(problemTitle(wfRouteDomainStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   // A `requires` guard denies with 403 (ForbiddenError → onError) — declare
   // it so the published contract documents the authorization outcome.
   if (workflowIsGuarded(wf)) {
+    const wfRouteForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
     out.push(
-      `      403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `      ${wfRouteForbiddenStatus}: { description: ${JSON.stringify(problemTitle(wfRouteForbiddenStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
   }
   out.push(`    },`);
@@ -864,17 +887,23 @@ function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
     // Single-stream load + fold for the given correlation id; an empty stream
     // means no such instance.
     out.push(`    const __stream = await ${helpers.load}(db, ${idAsKey});`);
-    out.push(`    if (__stream.length === 0) throw new AggregateNotFoundError("not_found");`);
+    // RS-27 extends here: a workflow INSTANCE read is addressed by id, so its
+    // 404 carries the same sentence the aggregate getById route does.  Main's
+    // fix covered the aggregate routes; these two surfaces were left on the
+    // machine token.
+    out.push(
+      `    if (__stream.length === 0) throw new AggregateNotFoundError(\`${T} \${id} not found\`);`,
+    );
     out.push(`    const row = ${helpers.fold}(${idAsKey}, __stream);`);
   } else if (usingMikro) {
     out.push(`    const row = await db.findOne(${rowClass}, { ${corr}: id });`);
-    out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+    out.push(`    if (!row) throw new AggregateNotFoundError(\`${T} \${id} not found\`);`);
   } else {
     out.push(
       `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,
     );
     out.push(`    const row = rows[0];`);
-    out.push(`    if (!row) throw new AggregateNotFoundError("not_found");`);
+    out.push(`    if (!row) throw new AggregateNotFoundError(\`${T} \${id} not found\`);`);
   }
   out.push(`    return httpCtx.json(row as unknown as z.infer<typeof ${T}InstanceResponse>, 200);`);
   out.push(`  },`);

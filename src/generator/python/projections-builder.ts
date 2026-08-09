@@ -119,7 +119,8 @@ function projectionRoutes(proj: ProjectionIR): string {
     `async def ${slug}_get(${key}, session: SessionDep) -> dict[str, object]:`,
     `    row = await session.get(${row}, key)`,
     "    if row is None:",
-    `        raise AggregateNotFoundError("not_found")`,
+    // RS-27 extends here — a projection row read by correlation KEY is by-id.
+    `        raise AggregateNotFoundError(f"${T} {key} not found")`,
     `    return {${project("row")}}`,
   );
   return [list, byKey].join("\n\n\n");

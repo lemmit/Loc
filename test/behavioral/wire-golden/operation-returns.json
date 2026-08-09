@@ -121,6 +121,7 @@
       "path": "/api/orders/{id}/reject",
       "status": 404,
       "body": {
+        "attemptedCode": "OR2",
         "detail": "Not Found",
         "instance": "/api/orders/{id}/reject",
         "resource": "OR2",
