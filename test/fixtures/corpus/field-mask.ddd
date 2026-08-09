@@ -76,4 +76,67 @@ system MaskedAudit {
     port: 4000
     auth: required
   }
+
+  // The compile tier proves the redaction COMPILES.  Whether it REDACTS is a
+  // value question, and an unredacted salary is a data leak — the one failure
+  // mode of this feature that matters — so it needs a caller that reads the
+  // field back as an unprivileged principal.
+  //
+  // The behavioral harness authenticates as the dev-stub principal, which
+  // carries no `unmask` permission (`test/behavioral/cases.mjs`'s DEV_CLAIMS).
+  // That is exactly the interesting side: the `unless` guard is FALSE, so every
+  // read of a masked field must come back redacted while the unmasked fields on
+  // the same row keep their values.  (The privileged side needs a principal
+  // with an array-valued claim, which only some backends map today — a
+  // deliberate gap, not an oversight; asserting the redaction is what proves
+  // the gate is load-bearing, since a mask that never fires is a leak and a
+  // mask that always fires is merely useless.)
+  test e2e "a principal without `unmask` reads the masked fields as null" against d {
+    let e = api.employees.create({ name: "Ada", salary: 90000, nationalId: "NID-1", grade: 2 })
+
+    let read = api.employees.getById(e)
+    expect(read.name).toBe("Ada")
+    expect(read.grade).toBe(2)
+    // The two masked fields — both wraps live in ONE projection expression, so
+    // a backend that emitted only the first redaction leaks the second here.
+    expect(read.salary).toBe(null)
+    expect(read.nationalId).toBe(null)
+
+    // The AUDITED operation: its handler renders the same masked projection
+    // twice (before + after snapshots) into one method body.  It must still
+    // answer like any other command, and the read after it must still redact.
+    api.employees.promote(e, { newGrade: 5 })
+    let promoted = api.employees.getById(e)
+    expect(promoted.grade).toBe(5)
+    expect(promoted.salary).toBe(null)
+    expect(promoted.nationalId).toBe(null)
+
+    // The LIST route projects through the same mapper, once per row — the
+    // position where a per-row projection can quietly skip the mask.
+    let listed = api.employees.all()
+    expect(listed.total).toBe(1)
+    expect(listed.items.length).toBe(1)
+    expect(listed.items.first().salary).toBe(null)
+    expect(listed.items.first().name).toBe("Ada")
+
+    // A DECLARED FIND — a third projection site, and the one that returns the
+    // row through a repository query rather than the by-id read.
+    let found = api.employees.byName({ name: "Ada" })
+    expect(found.nationalId).toBe(null)
+    expect(found.grade).toBe(5)
+
+    // The WRITE side is not masked: the update body carries both sensitive
+    // fields (they are inputs, not outputs), and the read that follows redacts
+    // them again — which is the asymmetry the feature is: write-visible,
+    // read-redacted.
+    api.employees.update(e, { name: "Ada L", salary: 120000, nationalId: "NID-2", grade: 5 })
+    let updated = api.employees.getById(e)
+    expect(updated.name).toBe("Ada L")
+    expect(updated.salary).toBe(null)
+
+    api.employees.destroy(e)
+    expect(api.employees.getById(e)).toThrow(404)
+    let empty = api.employees.all()
+    expect(empty.total).toBe(0)
+  }
 }

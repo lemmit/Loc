@@ -212,6 +212,27 @@ function checkUnresolvedRef(
   source: string,
   diags: LoomDiagnostic[],
 ): void {
+  // The CALL twin of the same hole.  A name applied to arguments lowers to a
+  // `callKind: "free"` Call (never a `ref`), which the renderer also emits
+  // VERBATIM — so `expect(number(t.revenue)).toBe(40)` shipped `number(...)`,
+  // a ReferenceError in the generated suite, past a bare-name gate that only
+  // looked at `ref`.  Everything an e2e body may legitimately call lowers to
+  // something else first (`money("…")`/`decimal(x)` → convert, `now()` →
+  // literal), so a residual free call is always an undefined identifier.
+  if (e.kind === "call" && e.callKind === "free") {
+    diags.push({
+      severity: "error",
+      code: "loom.e2e-unresolved-call",
+      message:
+        `e2e test '${testName}': '${e.name}(…)' resolves to no function. ` +
+        `An e2e body drives the deployable over HTTP and resolves no domain names; ` +
+        `the conversions it may call (money(…), decimal(…), string(…), int(…)) are ` +
+        `built in. Emitting it verbatim would ship an undefined identifier in the ` +
+        `generated test.`,
+      source,
+    });
+    return;
+  }
   if (e.kind !== "ref" || e.refKind !== "unknown" || bound.has(e.name)) return;
   diags.push({
     severity: "error",

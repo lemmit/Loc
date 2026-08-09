@@ -316,6 +316,21 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
   // not lift (same class as projection reads).  Lifting it would make this
   // attributable — and this entry stale.
   "corpus/audit-history": ["api.orders.history (no derived operation)"],
+  // The QUERY-TIME projection reads (`GET /api/projections/<snake>`) — same
+  // `notLifted` class as the folded projection above, one shape further along:
+  // a singleton whole-table aggregation and the grouped read models.  The
+  // derivation lists aggregate routes; a projection is not an aggregate, so
+  // these credit no derived operation even though they are the whole point of
+  // their fixtures.
+  "corpus/projection-aggregation": [
+    "api.orderVolume.list (no such aggregate)",
+    "api.salesTotals.list (no such aggregate)",
+  ],
+  "corpus/projection-groupby": [
+    "api.revenueByDay.list (no such aggregate)",
+    "api.salesByStatus.list (no such aggregate)",
+    "api.volumeByCustomerAndStatus.list (no such aggregate)",
+  ],
 };
 
 /**
@@ -334,7 +349,6 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   "channels-broker",
   "extern",
   "extern-handlers",
-  "field-mask",
   "outbox",
   // `deny` compiles on all five backends (that is what the fixture was added
   // for — see docs/new-plan T3 M-T3.3), but nothing calls a denied aggregate's
@@ -342,8 +356,6 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // unproven.  Registered rather than silently absent: before this fixture the
   // feature had no `.ddd` at all, so it could not even appear on this list.
   "policy-deny",
-  "projection-aggregation",
-  "projection-groupby",
   "resources",
   "tenancy-hierarchy",
 ];

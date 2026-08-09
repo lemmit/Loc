@@ -433,7 +433,7 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       if (e.body) return `(${e.param}) => ${renderE2EExpr(e.body, ctx)}`;
       return `(${e.param}) => { /* block-body lambdas not supported in e2e tests */ }`;
     case "member": {
-      const recv = renderE2EExpr(e.receiver, ctx);
+      const recv = parenAwaited(renderE2EExpr(e.receiver, ctx));
       // Property-style collection ops (`lines.count`, `lines.distinct`) lower to
       // a MEMBER node, which carries no `isCollectionOp` marker — and inside a
       // test body every expression is placeholder-typed, so `receiverType` is
@@ -445,7 +445,7 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       return `${recv}.${e.member}`;
     }
     case "method-call": {
-      const recv = renderE2EExpr(e.receiver, ctx);
+      const recv = parenAwaited(renderE2EExpr(e.receiver, ctx));
       const args = e.args.map((a) => renderE2EExpr(a, ctx));
       if (e.isCollectionOp) {
         const op = E2E_COLLECTION_RENDERERS[e.member];
@@ -453,6 +453,16 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
         // against the same catalogue this table is pinned to, so a miss is a
         // catalogue/table drift the completeness test catches at build time.
         if (op) return op(`(${recv})`, args, e);
+      }
+      // `contains` on an UNTYPED receiver — the same ambiguity `count` /
+      // `distinct` have above, one arm further along.  Inside an e2e body every
+      // expression is placeholder-typed, so a `contains` over a wire STRING
+      // (`string(row.day).contains("…T00:00:00")`) carries no `isCollectionOp`
+      // marker and fell through to `.contains(…)`, which no JS value has: an
+      // emitted TypeError, from valid `.ddd`.  Only the runtime value can tell a
+      // string from an array, so the dispatch belongs in a helper.
+      if (e.member === "contains" && args.length === 1) {
+        return `__contains(${recv}, ${args[0]})`;
       }
       return `${recv}.${e.member}(${args.join(", ")})`;
     }
@@ -470,13 +480,32 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       // emission so the request shape matches what the route's Zod
       // schema parses.
       const v = renderE2EExpr(e.value, ctx);
+      // NOT the domain idioms for `money`.  An e2e body holds WIRE values: a
+      // `money`-typed thing here is the JSON string the backend sent
+      // ("40.00"), not a decimal.js `Decimal` — so `.toString()`/`.toNumber()`
+      // are a TypeError on the value that actually arrives, and the coercion
+      // has to go through the same `__num` the collection folds use.  (The
+      // domain-idiom arms shipped because no fixture had ever converted a wire
+      // money value; `projection-aggregation`'s aggregates were the first.)
       if (e.target === "string") {
-        if (e.from === "money") return `${v}.toString()`;
         return `String(${v})`;
       }
-      if (e.target === "long" || e.target === "decimal") {
-        if (e.from === "money") return `${v}.toNumber()`;
-        return v;
+      if (e.target === "int" || e.target === "long" || e.target === "decimal") {
+        // Unconditionally through `__num`, NOT gated on `e.from`: the source of
+        // a conversion in an e2e body is a WIRE value, and whether it arrives as
+        // a JSON number or a JSON string is a per-backend serialization choice
+        // (`money` is a string everywhere; a SQL `avg` reaches the wire as a
+        // string on some drivers and a number on others).  Keying the coercion
+        // off the DECLARED type therefore drops it exactly where it is needed —
+        // a projection row's `revenue` member types as `money` only if the
+        // member is typed at all, and `decimal(totals.revenue)` then rendered
+        // bare and compared a string to a number.  `__num` is the identity on
+        // numbers, so the unconditional form is safe on both.
+        return `__num(${v})`;
+      }
+      if (e.target === "datetime") {
+        // Wire timestamps are compared as INSTANTS — see `__instant`.
+        return `__instant(${v})`;
       }
       if (e.target === "money") {
         // NOT `new Decimal(...)`: the emitted suite imports only vitest, so a
@@ -528,10 +557,32 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
   }
 }
 
+/** Parenthesize a receiver that is an awaited api call before a `.member`
+ *  rides on it.  `await` binds LOOSER than member access, so
+ *  `api.orders.getById(o).placedAt` rendered `await __get(…).placedAt` —
+ *  which reads `.placedAt` off the PROMISE (always `undefined`) and leaves the
+ *  request in flight, so the assertion compares undefined and the late response
+ *  lands after the test's database has closed.  An inline call as a receiver is
+ *  ordinary `.ddd` (`expect(api.customers.getById(c).name).toBe(…)`), so the
+ *  parens belong in the renderer, not in a rule against writing it. */
+function parenAwaited(rendered: string): string {
+  return rendered.startsWith("await ") ? `(${rendered})` : rendered;
+}
+
 function renderLiteral(lit: string, value: string): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "new Date().toISOString()";
   if (lit === "null") return "null";
+  // `money` crosses the wire as a STRING on every backend — the request schema
+  // is `z.string()` (Hono `moneySchema`) / `decimal` / `BigDecimal`, and the
+  // response field is `z.string()` too.  Rendering the literal bare emitted a
+  // JSON NUMBER into the request body, which every backend rejects with 422:
+  // `api.orders.create({ total: money("10.00") })` could not be written at all
+  // until the first fixture tried (projection-aggregation).  Quoting also makes
+  // the literal comparable to a read-back value (`expect(o.total).toBe(
+  // money("10.00"))`), which is a string on the wire.  `decimal` stays bare —
+  // it rides as a JSON number.
+  if (lit === "money") return JSON.stringify(value);
   return value;
 }
 
@@ -876,6 +927,37 @@ function __count(v: unknown): unknown {
     src: `// Property-style \`distinct\` — same runtime dispatch as \`__count\`.
 function __distinct(v: unknown): unknown {
   return Array.isArray(v) ? [...new Set(v)] : (v as { distinct?: unknown })?.distinct;
+}`,
+  },
+  {
+    name: "__contains",
+    src: `// Membership over a wire value — arrays and strings both answer \`contains\` in
+// the DSL, and an e2e body cannot tell them apart at generation time (every
+// expression there is placeholder-typed).  JS spells both \`includes\`, so the
+// dispatch is only about the receiver's runtime shape.
+function __contains(haystack: unknown, needle: unknown): boolean {
+  if (typeof haystack === "string") return haystack.includes(String(needle));
+  if (Array.isArray(haystack)) return haystack.includes(needle);
+  return false;
+}`,
+  },
+  {
+    name: "__instant",
+    src: `// Canonical instant for a wire timestamp — what \`datetime(x)\` renders to.
+//
+// The five backends do NOT agree on the SPELLING of an instant: node emits
+// \`2026-08-01T00:00:00.000Z\` (\`Date#toISOString\`), and the others have each
+// carried a different fractional width at some point
+// (\`…00Z\`, \`…000000Z\`, \`…0000000Z\`).  The goldens normalize timestamps away, so
+// a test that pins one backend's spelling is pinning the wrong thing — the
+// contract an e2e body means to assert is the INSTANT.  Comparing through this
+// makes the assertion portable without weakening it: a wrong instant still
+// fails, and a wrong FORMAT is a separate (open) question the fixture comments
+// name rather than smuggle into an equality.
+function __instant(v: unknown): string {
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) throw new Error(\`not a timestamp: \${JSON.stringify(v)}\`);
+  return d.toISOString();
 }`,
   },
   {
