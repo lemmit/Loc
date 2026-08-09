@@ -348,6 +348,51 @@ describe("pack-declared chrome — catalogs and emission", () => {
     expect(format).toContain('import { t } from "../i18n";');
   });
 
+  // An operation dialog is the one pack fragment rendered OUTSIDE the walk —
+  // the page shell splices it in, and on React/Svelte it did so AFTER the
+  // import block had been serialized.  So the binding and its `t` are asserted
+  // together, per frontend, on a scaffolded detail page (where op dialogs
+  // actually appear) whose aggregate has an array field.
+  const OP_DIALOG_SYSTEM = (platform: string, design: string) => `
+  system Shop {
+    subdomain Sales {
+      context Sales {
+        aggregate Order with crudish {
+          status: string
+          tags: string[]
+          operation retag(newTags: string[]) { status := "tagged" }
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    ui Web with scaffold(subdomains: [Sales]) { api Sales: SalesApi }
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Sales]
+      dataSources: [salesState]
+      serves: SalesApi
+      port: 3000
+    }
+    deployable web { platform: ${platform} targets: api ui: Web { Sales: api } design: ${design} port: 3100 }
+  }
+`;
+
+  for (const [platform, design, family, suffix, importLine] of [
+    ["react", "mantine", "mantine", "pages/orders/detail.tsx", 'from "../../i18n"'],
+    ["vue", "vuetify", "vuetify", "pages/orders/detail.vue", 'from "../../i18n"'],
+    ["svelte", "flowbite", "flowbite", "orders/[id]/+page.svelte", 'from "$lib/i18n"'],
+  ] as const) {
+    it(`${platform}: an op dialog's pack chrome binds AND the page imports its \`t\``, async () => {
+      const files = await generateSystemFiles(OP_DIALOG_SYSTEM(platform, design));
+      const page = fileEndingWith(files, suffix);
+      expect(page).toContain(`t("pack.${family}.arrayUnsupported.`);
+      expect(page).toContain(importLine);
+    });
+  }
+
   it("a string-less UI stays byte-identical — pack chrome never flips i18n on", async () => {
     // No authored text anywhere: the `Heading` is gone, so `collectUiMessages`
     // is empty and the whole translation runtime stays off.  Pack chrome must
