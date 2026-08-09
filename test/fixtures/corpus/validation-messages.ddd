@@ -83,6 +83,19 @@ system MessagedRules {
     api.products.restock(p, { amount: 3 })
     let after = api.products.getById(p)
     expect(after.quantity).toBe(5)
+    // The message-LESS twin of the same rule shape: `ship`'s precondition has no
+    // authored text, so its denial must keep the derived default AND contribute
+    // no catalog entry — the byte-identical half of this fixture, exercised at
+    // runtime rather than only in the emitted source.
+    api.products.ship(p, { amount: 1 })
+    let shipped = api.products.getById(p)
+    expect(shipped.quantity).toBe(4)
+    // The two derived reads, so the aggregate's whole route surface has a caller.
+    let listed = api.products.all({ sort: "name", dir: "asc" })
+    expect(listed.items.length).toBe(1)
+    expect(listed.total).toBe(1)
+    let byName = api.products.byName({ n: "Widget" })
+    expect(byName.length).toBe(1)
     // The messaged precondition rejects at the wire boundary (422).  The
     // `errors[].code` it carries is what the generated catalog is keyed by, and
     // what the server now resolves the message through.
