@@ -34,6 +34,35 @@
 // A genuine "this target cannot express this slot" case is a WAIVER with a
 // reason, not a silent pass: the waiver list is the honest inventory of what is
 // still missing, and it only ever shrinks.
+//
+// --- and the second half: extracted ⇒ rendered THROUGH THE RUNTIME ----------
+//
+// The substring check above is deliberately weak — property one is precisely
+// that the sentinel is present "either way".  That makes it blind to the defect
+// one rung up: a pack that renders the slot as RAW ENGLISH, bypassing `t()`.
+// The string reaches the page, so the gate passes; the catalog still carries a
+// key nothing resolves, so a translator's work is still dropped on the floor —
+// the same dead-catalog class, one level in.
+//
+// `it("translates …")` closes that: for every slot it looks the sentinel up in
+// the EMITTED `.loom/messages.en.json` and asserts the page carries that KEY.
+// A raw-English render has no key, so it fails; a translated one carries it on
+// every engine (`t("<key>", …)`, `I18n.t "<key>"`, `pgettext("<key>", …)`).
+// Reading the key from the emitted catalog rather than re-deriving it is what
+// makes "the emitted key equals the catalog key" the thing under test.
+//
+// It found two defects on its first run, one per engine — each had got the half
+// the other missed:
+//   * `keyValue` — `KeyValueRow`'s label never touched the i18n seam at all
+//     (`emitKeyValueRow` read the raw literal), so eleven JSX packs, Feliz and
+//     Flutter shipped it in English at every locale.  It is a POSITIONAL slot
+//     rendered in ATTRIBUTE position, which is exactly how it fell between the
+//     text-slot work and the D-I18N-ATTR named-slot work.
+//   * `toolbarAria` on both HEEx packs — worse than untranslated: `Toolbar`'s
+//     spec hardcoded `aria-label="Actions"` and never set `labelAsAriaLabel`,
+//     so the authored `label:` landed in a junk `label=` attribute on a `<div>`
+//     and the accessible name was the English contract default at every locale.
+//     The substring gate passed on that dead attribute.
 
 import { describe, expect, it } from "vitest";
 import { USER_VISIBLE_SLOTS } from "../../src/util/user-visible-slots.js";
@@ -190,6 +219,14 @@ const WAIVERS: Readonly<Record<string, string>> = {
   // frontend that can't express one states it here, with a reason.)
 };
 
+/** `<target>:<role>` → why that target renders the slot but cannot route it
+ *  through the translation runtime TODAY.  Ratchets exactly like `WAIVERS`: a
+ *  waived cell must STILL be untranslated, so a fix that lands without deleting
+ *  its line fails the gate. */
+const TRANSLATION_WAIVERS: Readonly<Record<string, string>> = {
+  // (empty — every target translates every slot it renders.)
+};
+
 // --- harness ---------------------------------------------------------------
 
 /** Phoenix mounts its `ui:` on the elixir BACKEND deployable — there is no
@@ -312,7 +349,51 @@ describe("user-visible slots — every extracted slot is rendered by every pack"
             ).toContain(sentinel);
           }
         });
+
+        it(`translates ${probe.primitive}`, async () => {
+          const build = t.platform === "elixir" ? phoenixSystem : system;
+          const files = await generateSystemFiles(build(t, probe.body, probe.state ?? ""));
+          const page = pageSourceOf(files, t);
+          const catalog = catalogOf(files);
+          for (const [role, sentinel] of Object.entries(probe.sentinels)) {
+            // A slot that isn't rendered at all is the OTHER gate's finding —
+            // don't report it twice as a translation failure.
+            if (WAIVERS[`${t.id}:${role}`]) continue;
+            const key = keyFor(catalog, sentinel);
+            const waiver = TRANSLATION_WAIVERS[`${t.id}:${role}`];
+            if (waiver) {
+              expect(
+                page,
+                `${t.id}:${role} now translates — delete the translation waiver`,
+              ).not.toContain(key);
+              continue;
+            }
+            expect(
+              page,
+              `${t.id}: the ${role} slot renders as RAW ENGLISH — the catalog carries ` +
+                `"${sentinel}" under ${key}, but the page never resolves that key, so a ` +
+                `translation of it can never reach the screen`,
+            ).toContain(key);
+          }
+        });
       }
     });
   }
 });
+
+/** The emitted source-language catalog — the SAME artefact a translator works
+ *  from, so the key asserted below is the key they would translate. */
+function catalogOf(files: Map<string, string>): Record<string, string> {
+  const entry = [...files].find(([p]) => p.endsWith(".loom/messages.en.json"));
+  expect(entry, "no .loom/messages.en.json was emitted").toBeDefined();
+  return JSON.parse(entry![1]) as Record<string, string>;
+}
+
+/** The catalog key carrying `sentinel` as its source message.  Fails loudly
+ *  rather than returning undefined: a sentinel missing from the catalog means
+ *  the EXTRACTION half broke, which would otherwise read as a render failure. */
+function keyFor(catalog: Record<string, string>, sentinel: string): string {
+  const hit = Object.entries(catalog).find(([, message]) => message === sentinel);
+  expect(hit, `"${sentinel}" was never extracted into the catalog`).toBeDefined();
+  return hit![0];
+}

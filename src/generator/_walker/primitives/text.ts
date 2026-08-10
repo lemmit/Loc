@@ -4,7 +4,7 @@
 // value child via the shared `walk`.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedChromeAria, localizedText } from "../i18n-emit.js";
+import { localizedChromeAria, localizedPositionalAttr, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   boolNamed,
@@ -292,13 +292,22 @@ export function emitKeyValueRow(
   const positionals = positionalArgs(call);
   const labelArg = positionals[0];
   const childArg = positionals[1];
-  const labelStr =
-    labelArg && labelArg.kind === "literal" && labelArg.lit === "string" ? labelArg.value : "";
   const childJsx = childArg
     ? walk(childArg, ctx, depth + 2)
     : ctx.target.renderComment("missing value");
   return renderPrimitive(ctx, "primitive-key-value-row", {
-    label: ctx.target.escapeText(labelStr),
+    // The label is a user-visible slot (`keyValue`), and the packs split on how
+    // they render it — a `<span>` on the seven layout-markup packs, a component
+    // PROP on the eight that delegate to a `<KeyValueRow>`.  So both spellings
+    // of the one name are supplied, from the same `messageKey()`:
+    //   `label`     — the text/children token, for `<span>{{{label}}}</span>`;
+    //   `labelAttr` — the complete bound attribute, for `<KeyValueRow{{{labelAttr}}}>`.
+    // Before this the emitter read the raw literal and escaped it, so the slot
+    // was extracted into the catalog and rendered in English on every target.
+    label: localizedText(call, ctx, "keyValue", '""'),
+    // A missing label kept its pre-change `label=""` rather than dropping the
+    // attribute — the degenerate case is not what this change is about.
+    labelAttr: labelArg ? localizedPositionalAttr(call, ctx, "keyValue", "label") : ' label=""',
     childJsx,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),

@@ -220,7 +220,11 @@ function primitiveSkeleton(_c: Ctx): string {
 /** KeyValueRow(label, value) — a detail-page field row (label + value cell).
  *  `label` is raw text; `childJsx` is an already-walked value element. */
 function primitiveKeyValueRow(c: Ctx): string {
-  const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; prop.text "${String(c.label ?? "")}" ]`;
+  // The label is a user-visible slot: raw text normally, an already-rendered
+  // `Html.text (I18n.t …)` ELEMENT under i18n (M-T1.11).  `textOrChildren` takes
+  // either form — splicing the element into the F# string literal this used to
+  // build would have rendered the whole call as visible text.
+  const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; ${textOrChildren(String(c.label ?? ""))} ]`;
   // The `data-testid` rides the VALUE cell, not the whole row — the detail page
   // object reads `field(name).innerText()` expecting just the value ("Confirmed"),
   // so it must not include the label text.

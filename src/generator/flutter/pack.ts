@@ -352,7 +352,11 @@ function primitiveLoader(_c: Ctx): string {
 // --- Data-display -----------------------------------------------------------
 /** KeyValueRow(label, value) — a detail-page field row. */
 function primitiveKeyValueRow(c: Ctx): string {
-  const label = `SizedBox(width: 160, child: Text('${dartStr(String(c.label ?? ""))}', style: Theme.of(context).textTheme.bodySmall))`;
+  // The label is a user-visible slot: raw text normally, an already-rendered
+  // `Text(t(…))` widget under i18n (M-T1.11).  `styledText` takes either form
+  // and keeps the style either way — splicing the widget into the Dart string
+  // literal this used to build would have rendered the call as visible text.
+  const label = `SizedBox(width: 160, child: ${styledText(String(c.label ?? ""), "Theme.of(context).textTheme.bodySmall")})`;
   const value = `Expanded(child: DefaultTextStyle.merge(child: ${asWidget(String(c.childJsx ?? ""))}, style: Theme.of(context).textTheme.bodyMedium))`;
   return `Padding(${arg(testidKey(c))}padding: const EdgeInsets.symmetric(vertical: 4), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${label}, ${value}]))`;
 }

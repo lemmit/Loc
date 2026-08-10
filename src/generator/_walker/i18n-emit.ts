@@ -226,7 +226,41 @@ export function localizedNamedAttr(
   name: string,
   attrName: string,
 ): string {
-  const arg = namedArgValue(call, name);
+  return localizedAttrOf(namedArgValue(call, name), ctx, role, attrName);
+}
+
+/** The POSITIONAL twin of {@link localizedNamedAttr} — a user-visible slot the
+ *  author writes in positional position but the design packs render as an
+ *  ATTRIBUTE (`KeyValueRow { "Status", … }` → `<KeyValueRow label="Status">`).
+ *
+ *  That combination is why `keyValue` outlived both earlier i18n passes: the
+ *  text-slot work reaches positional args but yields a CHILDREN token, which is
+ *  unusable inside `label="…"`; the D-I18N-ATTR work yields an attribute
+ *  fragment but reads NAMED args only.  The slot fell through the gap and eleven
+ *  JSX packs, Feliz and Flutter shipped it in English at every locale.
+ *
+ *  Same three branches, same `messageKey()`, so the emitted key equals the
+ *  catalog key exactly as it does for a named slot. */
+export function localizedPositionalAttr(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  attrName: string,
+  argIndex = 0,
+): string {
+  return localizedAttrOf(positionalArgs(call)[argIndex], ctx, role, attrName);
+}
+
+/** The shared body behind {@link localizedNamedAttr} and
+ *  {@link localizedPositionalAttr} — the literal / dynamic / i18n-off branches
+ *  over an ALREADY-RESOLVED slot arg, so the two entry points differ only in
+ *  where they read that arg from. */
+function localizedAttrOf(
+  arg: ExprIR | undefined,
+  ctx: WalkContext,
+  role: string,
+  attrName: string,
+): string {
   const literal = literalString(arg);
   if (literal === undefined) {
     // INTERPOLATED (`` title: `Order {o.id}` ``) — a real translatable message.
