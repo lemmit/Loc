@@ -3,6 +3,7 @@
 // EntityParts.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { isInferredContainment } from "../containment.js";
 import type { DddServices } from "../ddd-module.js";
 import type {
@@ -66,11 +67,11 @@ export function checkBindableInputArgs(model: Model, accept: ValidationAcceptor)
     if (!BINDABLE_INPUTS.has(bc.type)) continue;
     for (const entry of bc.entries) {
       if (entry.name === "value") {
-        accept(
-          "warning",
-          `'${bc.type}' binds to page state via 'bind:', not 'value:'. Did you mean 'bind: …'? With 'value:' the input renders uncontrolled and the state never wires up.`,
-          { node: entry, property: "name", code: "loom.bindable-input-value-arg" },
-        );
+        accept("warning", diagMessage("loom.bindable-input-value-arg", { type: bc.type }), {
+          node: entry,
+          property: "name",
+          code: "loom.bindable-input-value-arg",
+        });
       }
     }
   }
@@ -124,12 +125,11 @@ export function checkFileUploadBinding(model: Model, accept: ValidationAcceptor)
     if (!field) continue; // unresolved ref — not this check's concern
     const t = resolveTypeRef(field.type);
     if (t.kind === "primitive" && t.name === "File") continue;
-    accept(
-      "error",
-      `'FileUpload' must bind a 'File'-typed state field, but '${name}' is ${describeType(t)}. ` +
-        `Declare 'state { ${name}: File }' (a FileRef the upload writes back).`,
-      { node: bindEntry, property: "value", code: "loom.file-upload-not-file-field" },
-    );
+    accept("error", diagMessage("loom.file-upload-not-file-field", { name, t: describeType(t) }), {
+      node: bindEntry,
+      property: "value",
+      code: "loom.file-upload-not-file-field",
+    });
   }
 }
 
@@ -159,22 +159,20 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
     let reported = false;
     for (const m of ctx?.members ?? []) {
       if (isValueObject(m) && m.name === name) {
-        accept(
-          "error",
-          `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
-          { node, code: "loom.legacy-vo-call" },
-        );
+        accept("error", diagMessage("loom.legacy-vo-call", { name }), {
+          node,
+          code: "loom.legacy-vo-call",
+        });
         reported = true;
         break;
       }
       if (isAggregate(m)) {
         for (const inner of m.members) {
           if (inner.$type === "EntityPart" && (inner as EntityPart).name === name) {
-            accept(
-              "error",
-              `v2 syntax: construct entity part '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
-              { node, code: "loom.legacy-part-call" },
-            );
+            accept("error", diagMessage("loom.legacy-part-call", { name }), {
+              node,
+              code: "loom.legacy-part-call",
+            });
             reported = true;
             break;
           }
@@ -189,19 +187,17 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
     // must be rejected here too — otherwise a file-scope `valueobject Price`
     // lets `Price(1)` pass validation and emit a class-called-as-function (C4).
     if (model.members.some((m) => isValueObject(m) && m.name === name)) {
-      accept(
-        "error",
-        `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
-        { node, code: "loom.legacy-vo-call" },
-      );
+      accept("error", diagMessage("loom.legacy-vo-call", { name }), {
+        node,
+        code: "loom.legacy-vo-call",
+      });
       continue;
     }
     if (model.members.some((m) => isPayloadDecl(m) && m.name === name && m.variants.length === 0)) {
-      accept(
-        "error",
-        `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
-        { node, code: "loom.legacy-vo-call" },
-      );
+      accept("error", diagMessage("loom.legacy-vo-call", { name }), {
+        node,
+        code: "loom.legacy-vo-call",
+      });
     }
   }
 }
@@ -338,8 +334,12 @@ export function checkConstructionFields(model: Model, accept: ValidationAcceptor
       if (!fields.has(entry.name)) {
         accept(
           "error",
-          `'${bc.type}' has no field '${entry.name}'.` +
-            (fields.size > 0 ? ` Declared fields: ${[...fields].join(", ")}.` : ""),
+          diagMessage("loom.unknown-construction-field", {
+            type: bc.type,
+            name: entry.name,
+            size: fields.size > 0,
+            fields: [...fields].join(", "),
+          }),
           { node: entry, property: "name", code: "loom.unknown-construction-field" },
         );
       }
@@ -352,7 +352,11 @@ export function checkConstructionFields(model: Model, accept: ValidationAcceptor
       if (missing.length > 0) {
         accept(
           "error",
-          `'${bc.type}' construction is missing required field${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
+          diagMessage("loom.construction-missing-field", {
+            type: bc.type,
+            length: missing.length === 1 ? "" : "s",
+            missing: missing.join(", "),
+          }),
           { node: bc, property: "type", code: "loom.construction-missing-field" },
         );
       }
@@ -431,15 +435,22 @@ export function checkFactoryCreateFields(model: Model, accept: ValidationAccepto
       if (serverOwned.has(name)) {
         accept(
           "error",
-          `'${agg.name}.create' can't set '${name}' — it's a server-owned (${serverOwned.get(name)}) field, ` +
-            `populated automatically and absent from the factory input. Remove it.`,
+          diagMessage("loom.create-server-field", {
+            name: agg.name,
+            name2: name,
+            serverOwned: serverOwned.get(name),
+          }),
           { node: entry, property: "name", code: "loom.create-server-field" },
         );
       } else {
         accept(
           "error",
-          `'${agg.name}' has no create-input field '${name}'.` +
-            (createInput.size > 0 ? ` Create inputs: ${[...createInput].join(", ")}.` : ""),
+          diagMessage("loom.create-unknown-field", {
+            name: agg.name,
+            name2: name,
+            size: createInput.size > 0,
+            createInput: [...createInput].join(", "),
+          }),
           { node: entry, property: "name", code: "loom.create-unknown-field" },
         );
       }
@@ -544,7 +555,13 @@ export function checkFactoryCreateFieldTypes(model: Model, accept: ValidationAcc
       if (actFam === "skip" || actFam === "obj" || actFam === expFam) continue;
       accept(
         "error",
-        `'${agg.name}.create' field '${name}' expects a ${expFam === "num" ? "numeric" : expFam === "bool" ? "boolean" : "text"} value ('${typeToString(expected)}') but got '${typeToString(actual)}'.`,
+        diagMessage("loom.create-field-type", {
+          name: agg.name,
+          name2: name,
+          expFam: expFam === "num" ? "numeric" : expFam === "bool" ? "boolean" : "text",
+          expected: typeToString(expected),
+          actual: typeToString(actual),
+        }),
         { node: entry, property: "value", code: "loom.create-field-type" },
       );
     }
@@ -666,18 +683,17 @@ export function checkBuilderCallType(
     //    which talks about walker primitives and misroutes the fix) so it names
     //    the actual remedy.
     if (resolveAggregateByName(name, bc, model)) {
-      accept(
-        "error",
-        `'${name}' is an aggregate — construct it with '${name}.create({ … })', not '${name} { … }'. ` +
-          `The '{ }' builder literal is for value objects and entity parts.`,
-        { node: bc, property: "type", code: "loom.aggregate-not-a-builder" },
-      );
+      accept("error", diagMessage("loom.aggregate-not-a-builder", { name }), {
+        node: bc,
+        property: "type",
+        code: "loom.aggregate-not-a-builder",
+      });
       continue;
     }
-    accept(
-      "error",
-      `Unknown builder type '${name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, CreateForm, Card).`,
-      { node: bc, property: "type", code: "loom.unknown-builder-type" },
-    );
+    accept("error", diagMessage("loom.unknown-builder-type", { name }), {
+      node: bc,
+      property: "type",
+      code: "loom.unknown-builder-type",
+    });
   }
 }

@@ -15,6 +15,7 @@
 // lives in `src/ir/validate/checks/tenancy-checks.ts` (phase ⑦).
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../../util/principal.js";
 import {
   isMemberSuffix,
@@ -31,11 +32,10 @@ export function checkTenancyDecls(system: System, accept: ValidationAcceptor): v
 
   // At most one `tenancy by` per system — flag the extras, keep the first.
   for (const extra of decls.slice(1)) {
-    accept(
-      "error",
-      `system '${system.name}' declares more than one 'tenancy by' line; keep just the first.`,
-      { node: extra, code: "loom.tenancy-duplicate" },
-    );
+    accept("error", diagMessage("loom.tenancy-duplicate", { name: system.name }), {
+      node: extra,
+      code: "loom.tenancy-duplicate",
+    });
   }
 }
 
@@ -73,12 +73,9 @@ export function checkOrgPathReferences(model: Model, accept: ValidationAcceptor)
     const first = node.suffixes[0];
     if (!first || !isMemberSuffix(first)) continue;
     if (first.member !== PRINCIPAL_ORG_PATH && first.member !== PRINCIPAL_ROOT_ORG) continue;
-    accept(
-      "error",
-      `'currentUser.${first.member}' requires a 'tenancy by user.<claim> of <Registry>' ` +
-        `declaration — it is derived from the caller's tenant materialized path, resolved from ` +
-        `the tenancy claim and registry.  Add the tenancy line, or drop the '${first.member}' reference.`,
-      { node: first, code: "loom.orgpath-without-tenancy" },
-    );
+    accept("error", diagMessage("loom.orgpath-without-tenancy", { member: first.member }), {
+      node: first,
+      code: "loom.orgpath-without-tenancy",
+    });
   }
 }

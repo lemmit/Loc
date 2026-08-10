@@ -7,6 +7,7 @@
 // scope provider; no IR-level lookup is needed.
 
 import type { ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { DataSourceKind } from "../../ir/types/loom-ir.js";
 import {
   isCacheStore,
@@ -43,8 +44,7 @@ export function checkDataSource(ds: Resource, accept: ValidationAcceptor): void 
   if (api && kind && kind !== "api") {
     accept(
       "error",
-      `resource '${ds.name}' binds api '${api.name}', which is only valid on kind: api.  ` +
-        `Got kind: ${kind}.  Bind a storage for kind '${kind}', or change the kind to 'api'.`,
+      diagMessage("loom.resource-api-target-kind", { name: ds.name, apiName: api.name, kind }),
       { node: ds, property: "use", code: "loom.resource-api-target-kind" },
     );
   }

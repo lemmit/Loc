@@ -15,6 +15,7 @@
 // resolved scrutinee type that arrives with union narrowing + emission.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { Model, TypeAtom, TypeRef } from "../generated/ast.js";
 import {
   isDomainServiceOperation,
@@ -54,13 +55,7 @@ function checkUnionPosition(t: TypeRef, accept: ValidationAcceptor): void {
   // A domainService operation's `or`-union return (domain-services.md) — the
   // same designed-in-outcome shape as an aggregate operation return.
   if (isDomainServiceOperation(container)) return;
-  accept(
-    "error",
-    `An inline 'or' union is a transport shape — it may only appear as a repository find ` +
-      `return type, a payload field, or an operation return, not in this position. Name it ` +
-      `with 'payload X = A | B' to use it elsewhere.`,
-    { node: t, code: "loom.union-position" },
-  );
+  accept("error", diagMessage("loom.union-position"), { node: t, code: "loom.union-position" });
 }
 
 /** Stable structural key for a variant atom — base identity plus the postfix
@@ -93,21 +88,19 @@ function checkVariants(variants: (TypeRef | TypeAtom)[], accept: ValidationAccep
   const seen = new Set<string>();
   for (const v of variants) {
     if (isSlotType(v.base)) {
-      accept(
-        "error",
-        `'slot' is a UI-only marker, not a union variant — every variant must be a carrier type.`,
-        { node: v, property: "base", code: "loom.union-variant-not-carrier" },
-      );
+      accept("error", diagMessage("loom.union-variant-not-carrier"), {
+        node: v,
+        property: "base",
+        code: "loom.union-variant-not-carrier",
+      });
       continue;
     }
     const key = atomKey(v);
     if (seen.has(key)) {
-      accept(
-        "error",
-        `Duplicate union variant — each variant must be a distinct type so the wire ` +
-          `discriminator stays unambiguous.`,
-        { node: v, code: "loom.union-duplicate-variant" },
-      );
+      accept("error", diagMessage("loom.union-duplicate-variant"), {
+        node: v,
+        code: "loom.union-duplicate-variant",
+      });
       continue;
     }
     seen.add(key);

@@ -39,6 +39,7 @@
 // accept) — but a name declared/bound *nowhere* is unambiguously the bug.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { DURATION_UNITS } from "../../util/temporal.js";
 import type { DddServices } from "../ddd-module.js";
 import {
@@ -222,12 +223,10 @@ export function checkUnknownNameRefs(
     if (universe.has(name)) continue;
     if (!inCheckedZone(node)) continue;
     const hint = suggest(name, node);
-    accept(
-      "error",
-      hint
-        ? `Unknown name '${name}' — did you mean '${hint}'?`
-        : `Unknown name '${name}' — no parameter, local, field, enum value, or declaration with this name is in scope.`,
-      { node, property: "name", code: "loom.unknown-name" },
-    );
+    accept("error", diagMessage("loom.unknown-name", { hint, name }), {
+      node,
+      property: "name",
+      code: "loom.unknown-name",
+    });
   }
 }

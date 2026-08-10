@@ -8,6 +8,7 @@
 // uniqueness and well-formed field lists.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { BoundedContext, Model } from "../generated/ast.js";
 import { isBoundedContext, isEventDecl, isPayloadDecl, isValueObject } from "../generated/ast.js";
 
@@ -33,16 +34,26 @@ function checkContextPayloads(ctx: BoundedContext, accept: ValidationAcceptor): 
     // Rule 1 — no two payloads in a context share a name, and a payload
     // may not shadow a value object / event of the same name.
     if (seen.has(m.name)) {
-      accept("error", `Duplicate payload '${m.name}' in context '${ctx.name}'.`, {
-        node: m,
-        property: "name",
-        code: "loom.payload-name-conflict",
-      });
+      accept(
+        "error",
+        diagMessage("loom.payload-name-conflict#duplicate-payload-in-context", {
+          name: m.name,
+          ctxName: ctx.name,
+        }),
+        {
+          node: m,
+          property: "name",
+          code: "loom.payload-name-conflict",
+        },
+      );
     } else if (peerNames.has(m.name)) {
       accept(
         "error",
-        `Payload '${m.name}' collides with a ${peerNames.get(m.name)} of the same name in ` +
-          `context '${ctx.name}'.`,
+        diagMessage("loom.payload-name-conflict#payload-collides-with-a", {
+          name: m.name,
+          peerNames: peerNames.get(m.name),
+          ctxName: ctx.name,
+        }),
         { node: m, property: "name", code: "loom.payload-name-conflict" },
       );
     }
@@ -52,11 +63,15 @@ function checkContextPayloads(ctx: BoundedContext, accept: ValidationAcceptor): 
     const fieldNames = new Set<string>();
     for (const f of m.fields) {
       if (fieldNames.has(f.name)) {
-        accept("error", `Duplicate field '${f.name}' in payload '${m.name}'.`, {
-          node: f,
-          property: "name",
-          code: "loom.payload-duplicate-field",
-        });
+        accept(
+          "error",
+          diagMessage("loom.payload-duplicate-field", { name: f.name, mName: m.name }),
+          {
+            node: f,
+            property: "name",
+            code: "loom.payload-duplicate-field",
+          },
+        );
       }
       fieldNames.add(f.name);
     }

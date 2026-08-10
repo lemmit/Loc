@@ -8,6 +8,7 @@
 // warning are later slices.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { Model, Seed } from "../generated/ast.js";
 import { isBoundedContext, isBuilderCall, isObjectLit, isSeed } from "../generated/ast.js";
 
@@ -29,10 +30,11 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
       if (aggCtx && aggCtx !== ownCtx) {
         accept(
           "error",
-          `Seed row references aggregate '${agg.name}' from context ` +
-            `'${aggCtx.name}', but the seed is declared in context ` +
-            `'${ownCtx.name}'. A seed may only populate aggregates of its ` +
-            `own context.`,
+          diagMessage("loom.seed-foreign-aggregate", {
+            name: agg.name,
+            aggCtxName: aggCtx.name,
+            ownCtxName: ownCtx.name,
+          }),
           { node: row, property: "aggregate", code: "loom.seed-foreign-aggregate" },
         );
       }
@@ -44,35 +46,37 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
     const seen = new Set<string>();
     for (const f of row.value?.fields ?? []) {
       if (seen.has(f.name)) {
-        accept("error", `Duplicate field '${f.name}' in seed row '${agg?.name ?? "?"}'.`, {
-          node: f,
-          property: "name",
-          code: "loom.seed-duplicate-field",
-        });
+        accept(
+          "error",
+          diagMessage("loom.seed-duplicate-field", { name: f.name, name2: agg?.name ?? "?" }),
+          {
+            node: f,
+            property: "name",
+            code: "loom.seed-duplicate-field",
+          },
+        );
       }
       seen.add(f.name);
 
       if (!seed.raw && f.name === "id") {
         // Rule 3 — an explicit `id` requires the `raw` path; the domain
         // `create` path mints ids (D-SEED-PATH / D-SEED-XREF).
-        accept(
-          "error",
-          "An explicit `id` requires `seed raw { … }` — the domain create path mints ids. " +
-            "Cross-references use explicit ids on the raw path (D-SEED-XREF).",
-          { node: f, property: "name", code: "loom.seed-id-needs-raw" },
-        );
+        accept("error", diagMessage("loom.seed-id-needs-raw"), {
+          node: f,
+          property: "name",
+          code: "loom.seed-id-needs-raw",
+        });
       }
 
       if (seed.raw && (isObjectLit(f.value) || isBuilderCall(f.value))) {
         // Rule 4 — raw rows are direct column inserts: scalar / enum / id
         // literals only.  Value-object / containment columns route through
         // the domain path.
-        accept(
-          "error",
-          `Raw seed column '${f.name}' is a value object / nested record — raw rows ` +
-            "support scalar / enum / id columns only; use the domain path for value objects.",
-          { node: f, property: "value", code: "loom.seed-raw-unsupported-column" },
-        );
+        accept("error", diagMessage("loom.seed-raw-unsupported-column", { name: f.name }), {
+          node: f,
+          property: "value",
+          code: "loom.seed-raw-unsupported-column",
+        });
       }
     }
   }

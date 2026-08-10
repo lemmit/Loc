@@ -14,6 +14,7 @@
 // computation (`src/ir/util/permission-closure.ts`) is cycle-safe.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { isSubdomain, type Model } from "../generated/ast.js";
 
 export function checkPermissionImplies(model: Model, accept: ValidationAcceptor): void {
@@ -28,7 +29,7 @@ export function checkPermissionImplies(model: Model, accept: ValidationAcceptor)
       for (const d of blk.decls) {
         d.implies.forEach((target, i) => {
           if (target === d.name) {
-            accept("error", `permission '${d.name}' cannot 'implies' itself.`, {
+            accept("error", diagMessage("loom.permission-implies-self", { name: d.name }), {
               node: d,
               property: "implies",
               index: i,
@@ -39,8 +40,11 @@ export function checkPermissionImplies(model: Model, accept: ValidationAcceptor)
           if (!declared.has(target)) {
             accept(
               "error",
-              `permission '${d.name}' implies '${target}', which is not a permission declared ` +
-                `in subdomain '${sub.name}'. Declare it in a 'permissions { … }' block, or fix the name.`,
+              diagMessage("loom.permission-implies-unknown", {
+                name: d.name,
+                target,
+                subName: sub.name,
+              }),
               { node: d, property: "implies", index: i, code: "loom.permission-implies-unknown" },
             );
           }

@@ -4,6 +4,7 @@
 // rejection logic on the lhs of an assignment.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type {
   ActionDecl,
   Aggregate,
@@ -186,11 +187,11 @@ export function checkCreate(c: Create, agg: Aggregate, accept: ValidationAccepto
     if (!isPostfixChain(node) || !isThisRef(node.head)) continue;
     const first = node.suffixes[0];
     if (first && isMemberSuffix(first) && first.member === "id") {
-      accept(
-        "error",
-        `Cannot read 'this.id' inside the create action on aggregate '${agg.name}' — the id is not assigned until persistence, after the body runs.`,
-        { node: first, property: "member", code: "loom.this-id-in-create" },
-      );
+      accept("error", diagMessage("loom.this-id-in-create", { name: agg.name }), {
+        node: first,
+        property: "member",
+        code: "loom.this-id-in-create",
+      });
     }
   }
 }
@@ -382,7 +383,12 @@ export function checkConstructionArgTypes(
       ) {
         accept(
           "error",
-          `Field '${entry.name}' of '${bc.type}' expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+          diagMessage("loom.construction-field-type", {
+            name: entry.name,
+            type: bc.type,
+            expected: typeToString(expected),
+            actual: typeToString(actual),
+          }),
           { node: entry, property: "value", code: "loom.construction-field-type" },
         );
       }
@@ -640,7 +646,12 @@ export function checkComponentPropTypes(model: Model, accept: ValidationAcceptor
       ) {
         accept(
           "error",
-          `Prop '${param.name}' of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+          diagMessage("loom.component-prop-type", {
+            name: param.name,
+            label,
+            expected: typeToString(expected),
+            actual: typeToString(actual),
+          }),
           { node: arg.node, property: "value", code: "loom.component-prop-type" },
         );
       }
@@ -829,7 +840,12 @@ function checkArgTypesPositional(
     ) {
       accept(
         "error",
-        `Argument ${i + 1} of ${label} expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
+        diagMessage("loom.call-arg-type", {
+          i: i + 1,
+          label,
+          expected: typeToString(expected),
+          actual: typeToString(actual),
+        }),
         { node: args[i]!, code: "loom.call-arg-type" },
       );
     }
@@ -847,7 +863,12 @@ function checkCallArgs(
   if (args.length !== params.length) {
     accept(
       "error",
-      `${label} expects ${params.length} argument${params.length === 1 ? "" : "s"}, got ${args.length}.`,
+      diagMessage("loom.call-arg-count", {
+        label,
+        length: params.length,
+        length2: params.length === 1 ? "" : "s",
+        argsLength: args.length,
+      }),
       { node, code: "loom.call-arg-count" },
     );
     return;

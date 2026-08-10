@@ -3,6 +3,7 @@
 // `api.<x>.<verb>` / `ui.<x>.<verb>` magic-call resolution.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import type {
   AggregateIR,
@@ -46,10 +47,11 @@ export function validateAggregateTestBodies(ctx: BoundedContextIR, diags: LoomDi
         diags.push({
           severity: "error",
           code: "loom.aggregate-test-context",
-          message:
-            `aggregate '${agg.name}' test '${test.name}': ${reason} ` +
-            `Aggregate-level tests are bound to a value-object / pure-function context — they don't have a 'this' aggregate to mutate.  ` +
-            `Move the operation invocation inside an aggregate operation or rewrite the test to assert via 'expect' / 'expect-throws'.`,
+          message: diagMessage("loom.aggregate-test-context", {
+            name: agg.name,
+            testName: test.name,
+            reason,
+          }),
           source: `${ctx.name}/${agg.name}.test:${test.name}`,
         });
       }
@@ -92,10 +94,10 @@ export function validateContextIntegrationTests(
         diags.push({
           severity: "error",
           code: "loom.integration-find-must-bind",
-          message:
-            `context '${ctx.name}' integration test '${test.name}': a repository read inside ` +
-            `'expect(...)' must be let-bound first — write \`let x = <Agg>.findById(...)\` then ` +
-            `assert over \`x\` (the integration renderer awaits the read at statement level).`,
+          message: diagMessage("loom.integration-find-must-bind", {
+            name: ctx.name,
+            testName: test.name,
+          }),
           source: `${ctx.name}.test:${test.name}`,
         });
       }
@@ -172,9 +174,11 @@ export function validateE2ETest(
       diags.push({
         severity: "error",
         code: "loom.e2e-unsupported-statement",
-        message:
-          `e2e test '${test.name}': '${badKind}' is not supported in an e2e test body. ` +
-          `Only expect, expect-throws, let, expression, and ${magicId}.<...> calls are allowed.`,
+        message: diagMessage("loom.e2e-unsupported-statement", {
+          name: test.name,
+          badKind,
+          magicId,
+        }),
         source,
       });
       continue;
@@ -212,11 +216,7 @@ function checkUnresolvedRef(
   diags.push({
     severity: "error",
     code: "loom.e2e-unresolved-ref",
-    message:
-      `e2e test '${testName}': '${e.name}' is not a 'let' binding or a magic receiver ('api'/'ui'). ` +
-      `An e2e body drives the deployable over HTTP, so it resolves no domain names — ` +
-      `an enum value belongs there as its wire string (e.g. "${e.name}"). ` +
-      `Emitting it verbatim would ship an undefined identifier in the generated test.`,
+    message: diagMessage("loom.e2e-unresolved-ref", { testName, name: e.name }),
     source,
   });
 }
@@ -282,9 +282,11 @@ function checkMagicCall(
       diags.push({
         severity: "error",
         code: "loom.e2e-unknown-workflow",
-        message:
-          `e2e: unknown workflow '${magicId}.workflows.${method}' on this deployable. ` +
-          `Available workflows: ${known || "(none)"}.`,
+        message: diagMessage("loom.e2e-unknown-workflow", {
+          magicId,
+          method,
+          known: known || "(none)",
+        }),
         source,
       });
     }
@@ -303,9 +305,11 @@ function checkMagicCall(
       diags.push({
         severity: "error",
         code: "loom.e2e-unknown-method",
-        message:
-          `e2e: unknown projection read '${magicId}.${aggregateSlug}.${method}'. ` +
-          `A folded projection exposes: byKey, list.`,
+        message: diagMessage("loom.e2e-unknown-method#projection", {
+          magicId,
+          aggregateSlug,
+          method,
+        }),
         source,
       });
       return;
@@ -320,9 +324,11 @@ function checkMagicCall(
     diags.push({
       severity: "error",
       code: "loom.e2e-unknown-aggregate",
-      message:
-        `e2e: unknown aggregate '${magicId}.${aggregateSlug}' on this deployable. ` +
-        `Available aggregates: ${known || "(none)"}.`,
+      message: diagMessage("loom.e2e-unknown-aggregate", {
+        magicId,
+        aggregateSlug,
+        known: known || "(none)",
+      }),
       source,
     });
     return;
@@ -364,9 +370,12 @@ function checkMagicCall(
   diags.push({
     severity: "error",
     code: "loom.e2e-unknown-method",
-    message:
-      `e2e: unknown method '${magicId}.${aggregateSlug}.${method}'. ` +
-      `Available: ${knownVerbs.join(", ")}.`,
+    message: diagMessage("loom.e2e-unknown-method#aggregate-verb", {
+      magicId,
+      aggregateSlug,
+      method,
+      knownVerbs: knownVerbs.join(", "),
+    }),
     source,
   });
 }

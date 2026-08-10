@@ -1,3 +1,4 @@
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type { SystemIR, TypeIR } from "../../types/loom-ir.js";
 import {
   classifyTenantStance,
@@ -71,10 +72,10 @@ function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
       diags.push({
         severity: "error",
         code: "loom.tenant-registry-without-tenancy",
-        message:
-          `aggregate '${r.agg}' implements 'tenantRegistry' but system '${sys.name}' declares no ` +
-          `'tenancy by user.<claim> of <Registry>' line.  The registry tree (parent + dataKey) is ` +
-          `only meaningful under a tenancy declaration — add it, or drop 'implements tenantRegistry'.`,
+        message: diagMessage("loom.tenant-registry-without-tenancy", {
+          agg: r.agg,
+          name: sys.name,
+        }),
         source: `${r.ctx}/${r.agg}`,
       });
     }
@@ -87,10 +88,12 @@ function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
       diags.push({
         severity: "error",
         code: "loom.tenancy-registry-duplicate",
-        message:
-          `system '${sys.name}' has ${registries.length} aggregates implementing 'tenantRegistry' ` +
-          `(${registries.map((x) => `'${x.agg}'`).join(", ")}); the tenant registry is singular — ` +
-          `keep it on exactly one aggregate (the '${sys.tenancy.registryName}' named in 'tenancy by … of').`,
+        message: diagMessage("loom.tenancy-registry-duplicate", {
+          name: sys.name,
+          length: registries.length,
+          registries: registries.map((x) => `'${x.agg}'`).join(", "),
+          registryName: sys.tenancy.registryName,
+        }),
         source: `${r.ctx}/${r.agg}`,
       });
     }
@@ -104,11 +107,10 @@ function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
     diags.push({
       severity: "error",
       code: "loom.tenancy-registry-not-target",
-      message:
-        `aggregate '${only.agg}' implements 'tenantRegistry' but the tenancy registry is ` +
-        `'${sys.tenancy.registryName}' ('tenancy by … of ${sys.tenancy.registryName}').  The tree ` +
-        `capability belongs on the registry itself — move 'implements tenantRegistry' onto ` +
-        `'${sys.tenancy.registryName}'.`,
+      message: diagMessage("loom.tenancy-registry-not-target", {
+        agg: only.agg,
+        registryName: sys.tenancy.registryName,
+      }),
       source: `${only.ctx}/${only.agg}`,
     });
   }
@@ -144,9 +146,11 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
           diags.push({
             severity: "error",
             code: "loom.policy-duplicate-target",
-            message:
-              `policy in context '${ctx.name}' selects a read level for '${rule.aggregate}' more ` +
-              `than once (\`${rule.source}\`); keep exactly one \`allow … on ${rule.aggregate}\`.`,
+            message: diagMessage("loom.policy-duplicate-target#read", {
+              name: ctx.name,
+              aggregate: rule.aggregate,
+              source: rule.source,
+            }),
             source: src,
           });
           continue;
@@ -158,10 +162,11 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
           diags.push({
             severity: "error",
             code: "loom.policy-unknown-aggregate",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` names '${rule.aggregate}', which ` +
-              `is not an aggregate in this context.  A read level scopes a tenant-owned aggregate ` +
-              `declared in the same context.`,
+            message: diagMessage("loom.policy-unknown-aggregate#read", {
+              name: ctx.name,
+              source: rule.source,
+              aggregate: rule.aggregate,
+            }),
             source: src,
           });
           continue;
@@ -170,10 +175,11 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
           diags.push({
             severity: "error",
             code: "loom.policy-target-not-tenant-owned",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` targets '${rule.aggregate}', which ` +
-              `is not \`with tenantOwned\`.  A read level refines the tenant floor, so it applies only ` +
-              `to tenant-owned aggregates (crossTenant / unscoped / the registry have no tenant scope).`,
+            message: diagMessage("loom.policy-target-not-tenant-owned#read", {
+              name: ctx.name,
+              source: rule.source,
+              aggregate: rule.aggregate,
+            }),
             source: src,
           });
           continue;
@@ -182,11 +188,11 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
           diags.push({
             severity: "error",
             code: "loom.policy-level-requires-hierarchy",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` uses the '${rule.level}' read level, ` +
-              `which needs a tenant hierarchy — mark the registry \`implements tenantRegistry\` (the ` +
-              `materialized-path tree).  Under flat tenancy only 'local' is defined (every org is its ` +
-              `own root).`,
+            message: diagMessage("loom.policy-level-requires-hierarchy#read", {
+              name: ctx.name,
+              source: rule.source,
+              level: rule.level,
+            }),
             source: src,
           });
         }
@@ -228,9 +234,11 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
           diags.push({
             severity: "error",
             code: "loom.policy-duplicate-target",
-            message:
-              `policy in context '${ctx.name}' selects a write level for '${rule.aggregate}' more ` +
-              `than once (\`${rule.source}\`); keep exactly one \`allow write … on ${rule.aggregate}\`.`,
+            message: diagMessage("loom.policy-duplicate-target#write", {
+              name: ctx.name,
+              aggregate: rule.aggregate,
+              source: rule.source,
+            }),
             source: src,
           });
           continue;
@@ -242,10 +250,11 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
           diags.push({
             severity: "error",
             code: "loom.policy-unknown-aggregate",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` names '${rule.aggregate}', which ` +
-              `is not an aggregate in this context.  A write level scopes a tenant-owned aggregate ` +
-              `declared in the same context.`,
+            message: diagMessage("loom.policy-unknown-aggregate#write", {
+              name: ctx.name,
+              source: rule.source,
+              aggregate: rule.aggregate,
+            }),
             source: src,
           });
           continue;
@@ -254,10 +263,11 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
           diags.push({
             severity: "error",
             code: "loom.policy-target-not-tenant-owned",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` targets '${rule.aggregate}', which ` +
-              `is not \`with tenantOwned\`.  A write level refines the tenant floor, so it applies only ` +
-              `to tenant-owned aggregates.`,
+            message: diagMessage("loom.policy-target-not-tenant-owned#write", {
+              name: ctx.name,
+              source: rule.source,
+              aggregate: rule.aggregate,
+            }),
             source: src,
           });
           continue;
@@ -266,10 +276,10 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
           diags.push({
             severity: "error",
             code: "loom.policy-write-global-unsupported",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` uses \`write global\`, which is not ` +
-              `offered — root-subtree-wide mutation is a footgun.  Use \`write deep\` (the caller's own ` +
-              `subtree) or \`write local\` (the floor).  A caller can still \`allow global\` for READS.`,
+            message: diagMessage("loom.policy-write-global-unsupported", {
+              name: ctx.name,
+              source: rule.source,
+            }),
             source: src,
           });
           continue;
@@ -278,10 +288,10 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
           diags.push({
             severity: "error",
             code: "loom.policy-level-requires-hierarchy",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` uses the 'deep' write level, which ` +
-              `needs a tenant hierarchy — mark the registry \`implements tenantRegistry\` (the ` +
-              `materialized-path tree).  Under flat tenancy only 'local' is defined.`,
+            message: diagMessage("loom.policy-level-requires-hierarchy#write", {
+              name: ctx.name,
+              source: rule.source,
+            }),
             source: src,
           });
           continue;
@@ -295,10 +305,12 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
             diags.push({
               severity: "error",
               code: "loom.policy-write-wider-than-read",
-              message:
-                `policy in context '${ctx.name}': \`${rule.source}\` grants a wider WRITE scope than ` +
-                `the READ scope for '${rule.aggregate}' (read is '${readLevel}').  You cannot write ` +
-                `what you cannot read — add \`allow deep on ${rule.aggregate}\` (or \`allow global\`).`,
+              message: diagMessage("loom.policy-write-wider-than-read", {
+                name: ctx.name,
+                source: rule.source,
+                aggregate: rule.aggregate,
+                readLevel,
+              }),
               source: src,
             });
           }
@@ -339,10 +351,13 @@ function validatePolicyDenies(sys: SystemIR, diags: LoomDiagnostic[]): void {
           diags.push({
             severity: "error",
             code: "loom.policy-deny-duplicate",
-            message:
-              `policy in context '${ctx.name}' denies ${rule.access} on '${rule.aggregate}' more ` +
-              `than once (\`${rule.source}\`); one \`deny ${rule.access === "write" ? "write " : ""}` +
-              `on ${rule.aggregate}\` is total — keep exactly one.`,
+            message: diagMessage("loom.policy-deny-duplicate", {
+              name: ctx.name,
+              access: rule.access,
+              aggregate: rule.aggregate,
+              source: rule.source,
+              access2: rule.access === "write" ? "write " : "",
+            }),
             source: src,
           });
           continue;
@@ -354,10 +369,11 @@ function validatePolicyDenies(sys: SystemIR, diags: LoomDiagnostic[]): void {
           diags.push({
             severity: "error",
             code: "loom.policy-deny-unknown-aggregate",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` names '${rule.aggregate}', which ` +
-              `is not an aggregate in this context.  A deny carve-out scopes an aggregate declared ` +
-              `in the same context.`,
+            message: diagMessage("loom.policy-deny-unknown-aggregate", {
+              name: ctx.name,
+              source: rule.source,
+              aggregate: rule.aggregate,
+            }),
             source: src,
           });
           continue;
@@ -369,10 +385,12 @@ function validatePolicyDenies(sys: SystemIR, diags: LoomDiagnostic[]): void {
           diags.push({
             severity: "warning",
             code: "loom.policy-deny-shadows-allow",
-            message:
-              `policy in context '${ctx.name}': \`${rule.source}\` shadows an \`allow\` ${rule.access} ` +
-              `rule for '${rule.aggregate}' — deny wins, so the allow is dead.  Remove the allow, or ` +
-              `the deny if you meant to keep the grant.`,
+            message: diagMessage("loom.policy-deny-shadows-allow", {
+              name: ctx.name,
+              source: rule.source,
+              access: rule.access,
+              aggregate: rule.aggregate,
+            }),
             source: src,
           });
         }
@@ -415,12 +433,17 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
       diags.push({
         severity: "error",
         code: "loom.tenancy-claim-type-mismatch",
-        message:
-          `system '${sys.name}': tenancy claim 'user.${tenancy.claimField}' is typed ` +
-          `'${typeName(claimType)}' but registry '${registry.name}' has a ${registry.idValueType} id. ` +
-          `The derived registry self-scope filter compares ${registry.name}.id to the claim, so ` +
-          `declare the claim as '${tenancy.claimField}: ${registry.idValueType}'` +
-          `${registry.idValueType === "guid" ? ` (or '${tenancy.claimField}: string', bound as a guid at the accessor site)` : ""}.`,
+        message: diagMessage("loom.tenancy-claim-type-mismatch", {
+          name: sys.name,
+          claimField: tenancy.claimField,
+          claimType: typeName(claimType),
+          registryName: registry.name,
+          idValueType: registry.idValueType,
+          idValueType2:
+            registry.idValueType === "guid"
+              ? ` (or '${tenancy.claimField}: string', bound as a guid at the accessor site)`
+              : "",
+        }),
         source: `${sys.name}/tenancy`,
       });
     }
@@ -443,11 +466,11 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
         diags.push({
           severity: "error",
           code: "loom.tenant-owned-claim-type",
-          message:
-            `system '${sys.name}': tenancy claim 'user.${tenancy.claimField}' is typed ` +
-            `'${typeName(claimType)}' but 'tenantOwned' provides 'tenantId: string' — the ` +
-            `stamp/filter comparison mis-compiles typed backends.  Declare the claim as ` +
-            `'${tenancy.claimField}: string' (guid values round-trip as text).`,
+          message: diagMessage("loom.tenant-owned-claim-type", {
+            name: sys.name,
+            claimField: tenancy.claimField,
+            claimType: typeName(claimType),
+          }),
           source: `${sys.name}/tenancy`,
         });
       }
@@ -466,9 +489,7 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
           diags.push({
             severity: "error",
             code: "loom.tenancy-conflicting-stance",
-            message:
-              `aggregate '${agg.name}' is marked both 'crossTenant' and 'with tenantOwned'; ` +
-              `the stances are mutually exclusive — keep exactly one.`,
+            message: diagMessage("loom.tenancy-conflicting-stance", { name: agg.name }),
             source: `${ctx.name}/${agg.name}`,
           });
           continue;
@@ -480,10 +501,10 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
             diags.push({
               severity: "error",
               code: "loom.tenant-owned-without-tenancy",
-              message:
-                `aggregate '${agg.name}' implements 'tenantOwned' but system '${sys.name}' ` +
-                `declares no 'tenancy by user.<claim> of <Registry>' line.  Add the tenancy ` +
-                `declaration, or drop 'with tenantOwned'.`,
+              message: diagMessage("loom.tenant-owned-without-tenancy", {
+                name: agg.name,
+                sysName: sys.name,
+              }),
               source: `${ctx.name}/${agg.name}`,
             });
           }
@@ -491,10 +512,10 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
             diags.push({
               severity: "warning",
               code: "loom.cross-tenant-without-tenancy",
-              message:
-                `aggregate '${agg.name}' is marked 'crossTenant' but system '${sys.name}' ` +
-                `declares no 'tenancy by' line — there is no tenant scoping to opt out of, ` +
-                `so the flag has no effect.`,
+              message: diagMessage("loom.cross-tenant-without-tenancy", {
+                name: agg.name,
+                sysName: sys.name,
+              }),
               source: `${ctx.name}/${agg.name}`,
             });
           }
@@ -509,11 +530,10 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
             diags.push({
               severity: "error",
               code: "loom.tenancy-registry-marked",
-              message:
-                `aggregate '${agg.name}' is the tenancy registry (named in ` +
-                `'tenancy by ... of ${agg.name}') and must not be marked ` +
-                `${owned ? "'with tenantOwned'" : "'crossTenant'"} — the registry is ` +
-                `self-keyed; drop the marker.`,
+              message: diagMessage("loom.tenancy-registry-marked", {
+                name: agg.name,
+                owned: owned ? "'with tenantOwned'" : "'crossTenant'",
+              }),
               source: `${ctx.name}/${agg.name}`,
             });
           }
@@ -527,9 +547,7 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
           diags.push({
             severity: "error",
             code: "loom.tenancy-stance-unmarked",
-            message:
-              `aggregate '${agg.name}' declares no tenancy stance; add ` +
-              `\`with tenantOwned\` (tenant data) or \`crossTenant\` (shared data).`,
+            message: diagMessage("loom.tenancy-stance-unmarked", { name: agg.name }),
             source: `${ctx.name}/${agg.name}`,
           });
         }
@@ -544,10 +562,11 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
               diags.push({
                 severity: "warning",
                 code: "loom.unique-missing-tenant-scope",
-                message:
-                  `\`${uk.source}\` on tenant-owned aggregate '${agg.name}' omits the tenant ` +
-                  `discriminator — this is a GLOBAL unique across all tenants. Did you mean ` +
-                  `\`unique (tenantId, ${uk.columns.join(", ")})\`?`,
+                message: diagMessage("loom.unique-missing-tenant-scope", {
+                  source: uk.source,
+                  name: agg.name,
+                  columns: uk.columns.join(", "),
+                }),
                 source: `${ctx.name}/${agg.name}`,
               });
             }

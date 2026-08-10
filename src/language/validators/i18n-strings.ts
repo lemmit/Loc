@@ -23,6 +23,7 @@
 // is arithmetic, not text composition, and is left alone.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { USER_VISIBLE_SLOTS, type UserVisibleSlot } from "../../util/user-visible-slots.js";
 import type { BuilderCall, Expression } from "../generated/ast.js";
 import { isBinaryChain, isParenExpr, isStringLit } from "../generated/ast.js";
@@ -73,12 +74,10 @@ export function checkUserVisibleConcat(
       if (!entry) continue;
       const chain = stringConcat(entry.value);
       if (!chain) continue;
-      accept(
-        "error",
-        `String concatenation in a user-visible '${bc.type}' slot won't translate to languages with different word order, plural rules, or formatting. ` +
-          'Use a backtick template interpolation — e.g. `Order {order.id}` rather than "Order " + order.id. See docs/old/proposals/i18n-strings.md.',
-        { node: chain, code: "loom.user-visible-concat" },
-      );
+      accept("error", diagMessage("loom.user-visible-concat", { type: bc.type }), {
+        node: chain,
+        code: "loom.user-visible-concat",
+      });
     }
   }
 }

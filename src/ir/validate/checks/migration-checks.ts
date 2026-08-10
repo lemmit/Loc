@@ -1,3 +1,4 @@
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type { AggregateIR, EnrichedLoomModel, ExprIR, TypeIR } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
 import { sqlRenderableExpr } from "../../util/sql-renderable-expr.js";
@@ -40,9 +41,11 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
       diags.push({
         severity: "error",
         code: "loom.backfill-target-unsupported",
-        message: `backfill '${intent.aggregate}.${intent.field}': a ${
-          agg.persistedAs === "eventLog" ? "persistedAs: eventLog" : "shape: document"
-        } aggregate stores no scalar columns to backfill — use a raw sql step over its payload instead.`,
+        message: diagMessage("loom.backfill-target-unsupported#backfill-a-aggregate-stores", {
+          aggregate: intent.aggregate,
+          field: intent.field,
+          persistedAs: agg.persistedAs === "eventLog" ? "persistedAs: eventLog" : "shape: document",
+        }),
         source,
       });
       continue;
@@ -55,7 +58,10 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
       diags.push({
         severity: "error",
         code: "loom.backfill-target-unsupported",
-        message: `backfill '${intent.aggregate}.${intent.field}': the field is not a single scalar column (value-object, collection and entity fields cannot be backfilled — Phoenix stores a value object as one map column, so a leaf UPDATE would not be portable).`,
+        message: diagMessage("loom.backfill-target-unsupported#backfill-the-field-is-not", {
+          aggregate: intent.aggregate,
+          field: intent.field,
+        }),
         source,
       });
       continue;
@@ -66,7 +72,11 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
       diags.push({
         severity: "error",
         code: "loom.migration-expr-unsupported",
-        message: `backfill '${intent.aggregate}.${intent.field}': ${renderable.reason}.`,
+        message: diagMessage("loom.migration-expr-unsupported", {
+          aggregate: intent.aggregate,
+          field: intent.field,
+          reason: renderable.reason,
+        }),
         source,
       });
       continue;
@@ -77,7 +87,12 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
       diags.push({
         severity: "error",
         code: "loom.backfill-type-mismatch",
-        message: `backfill '${intent.aggregate}.${intent.field}': expression type '${fit.got}' does not fit the field's type '${fit.expected}'.`,
+        message: diagMessage("loom.backfill-type-mismatch", {
+          aggregate: intent.aggregate,
+          field: intent.field,
+          got: fit.got,
+          expected: fit.expected,
+        }),
         source,
       });
     }

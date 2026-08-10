@@ -9,6 +9,7 @@
 // reacts to the tick.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import { descriptorFor } from "../../../platform/metadata.js";
 import type {
   BoundedContextIR,
@@ -91,7 +92,11 @@ export function validateTimerSources(sys: SystemIR, diags: LoomDiagnostic[]): vo
         diags.push({
           severity: "error",
           code: "loom.timer-event-shape",
-          message: `timerSource '${ts.name}' fires '${ts.event}', which is already emitted by domain logic in context '${ctx.name}'. A timer's 'for:' event must be infrastructure-emitted only — declare a dedicated tick event (e.g. 'event ${ts.event}Tick { at: datetime }').`,
+          message: diagMessage("loom.timer-event-shape#not-infrastructure-only", {
+            name: ts.name,
+            event: ts.event,
+            ctxName: ctx.name,
+          }),
           source: sys.name,
         });
       }
@@ -102,7 +107,10 @@ export function validateTimerSources(sys: SystemIR, diags: LoomDiagnostic[]): vo
         diags.push({
           severity: "warning",
           code: "loom.timer-event-shape",
-          message: `tick event '${ts.event}' (fired by timerSource '${ts.name}') has no 'at: datetime' field; the reacting workflow body cannot read the fire time.`,
+          message: diagMessage("loom.timer-event-shape#no-at-field", {
+            event: ts.event,
+            name: ts.name,
+          }),
           source: sys.name,
         });
       }
@@ -123,7 +131,10 @@ export function validateTimerSources(sys: SystemIR, diags: LoomDiagnostic[]): vo
         diags.push({
           severity: "error",
           code: "loom.timer-needs-state",
-          message: `timerSource '${ts.name}' is owned by deployable '${owner}', whose platform binds no relational state. Single-fire delivery needs a Postgres advisory lock — host the context on a database-backed backend.`,
+          message: diagMessage("loom.timer-needs-state#owner-binds-no-state", {
+            name: ts.name,
+            owner,
+          }),
           source: sys.name,
         });
       }
@@ -131,7 +142,10 @@ export function validateTimerSources(sys: SystemIR, diags: LoomDiagnostic[]): vo
       diags.push({
         severity: "error",
         code: "loom.timer-needs-state",
-        message: `timerSource '${ts.name}' fires an event in context '${ts.context}', which no database-backed deployable owns. Single-fire delivery needs a Postgres advisory lock — host the context on a backend that binds a relational 'state' resource.`,
+        message: diagMessage("loom.timer-needs-state#context-has-no-db-owner", {
+          name: ts.name,
+          context: ts.context,
+        }),
         source: sys.name,
       });
     }
@@ -143,7 +157,7 @@ export function validateTimerSources(sys: SystemIR, diags: LoomDiagnostic[]): vo
         diags.push({
           severity: "warning",
           code: "loom.timer-source-unbound",
-          message: `timerSource '${ts.name}' fires '${ts.event}', but no workflow reacts to it ('on(_: ${ts.event})' / 'create(_: ${ts.event}) by …'). The timer will run and emit into the void.`,
+          message: diagMessage("loom.timer-source-unbound", { name: ts.name, event: ts.event }),
           source: sys.name,
         });
       }

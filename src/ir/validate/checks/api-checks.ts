@@ -7,6 +7,7 @@
 // the IR-validate altitude rather than the AST-side validators.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type {
   BoundedContextIR,
   CommandHandlerIR,
@@ -100,10 +101,11 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
           diags.push({
             severity: "error",
             code: "loom.handler-param-reserved-id",
-            message:
-              `context '${ctx.name}': ${kind} '${h.name}' has a parameter named 'id', which is ` +
-              `reserved — a bare 'id' in a handler body resolves to the current entity's implicit id, ` +
-              `not the parameter. Rename it (e.g. 'orderId').`,
+            message: diagMessage("loom.handler-param-reserved-id", {
+              name: ctx.name,
+              kind,
+              hName: h.name,
+            }),
             source: `${ctx.name}/${h.name}`,
           });
         }
@@ -118,10 +120,7 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
       diags.push({
         severity: "error",
         code: "loom.query-handler-saves",
-        message:
-          `context '${ctx.name}': queryHandler '${q.name}' mutates state (a save, op-call, emit, ` +
-          `create, or assignment). A queryHandler must be read-only — use a commandHandler or a ` +
-          `workflow for anything that writes.`,
+        message: diagMessage("loom.query-handler-saves", { name: ctx.name, qName: q.name }),
         source: `${ctx.name}/${q.name}`,
       });
     }
@@ -134,10 +133,12 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
       diags.push({
         severity: "error",
         code: "loom.command-handler-multi-aggregate",
-        message:
-          `context '${ctx.name}': commandHandler '${c.name}' touches ${touched.size} aggregates ` +
-          `(${[...touched].sort().join(", ")}). A commandHandler orchestrates a single aggregate — ` +
-          `a cross-aggregate orchestration must be a workflow.`,
+        message: diagMessage("loom.command-handler-multi-aggregate", {
+          name: ctx.name,
+          cName: c.name,
+          size: touched.size,
+          touched: [...touched].sort().join(", "),
+        }),
         source: `${ctx.name}/${c.name}`,
       });
     }
@@ -177,9 +178,11 @@ export function validateRoutes(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
           diags.push({
             severity: "error",
             code: "loom.route-handler-unresolved",
-            message:
-              `api '${api.name}': route '${label}' targets context '${route.target.context}', ` +
-              `which is not a bounded context in this model.`,
+            message: diagMessage("loom.route-handler-unresolved#api-route-targets-context", {
+              name: api.name,
+              label,
+              context: route.target.context,
+            }),
             source: `${sys.name}/${api.name}`,
           });
           continue;
@@ -193,10 +196,12 @@ export function validateRoutes(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
           diags.push({
             severity: "error",
             code: "loom.route-handler-unresolved",
-            message:
-              `api '${api.name}': route '${label}' targets '${route.target.context}.${route.target.handler}', ` +
-              `but context '${route.target.context}' has no commandHandler, queryHandler, or workflow handle ` +
-              `named '${route.target.handler}'.`,
+            message: diagMessage("loom.route-handler-unresolved#api-route-targets-but-context", {
+              name: api.name,
+              label,
+              context: route.target.context,
+              handler: route.target.handler,
+            }),
             source: `${sys.name}/${api.name}`,
           });
           continue;
@@ -217,11 +222,14 @@ export function validateRoutes(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
             diags.push({
               severity: "error",
               code: "loom.read-context-repo-write",
-              message:
-                `api '${api.name}': route '${label}' is a read (${route.method}) but targets ` +
-                `${targetKind} '${route.target.context}.${route.target.handler}', which writes. A read ` +
-                `position (an api read route, a queryHandler, or a 'reading' service) may not reach the ` +
-                `mutating repository face — bind the read to a queryHandler.`,
+              message: diagMessage("loom.read-context-repo-write", {
+                name: api.name,
+                label,
+                method: route.method,
+                targetKind,
+                context: route.target.context,
+                handler: route.target.handler,
+              }),
               source: `${sys.name}/${api.name}`,
             });
           }

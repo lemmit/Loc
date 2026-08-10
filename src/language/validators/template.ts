@@ -10,6 +10,7 @@
 //   loom.interp-hole-type — the hole expression is not stringifiable
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { isTemplateStr, type Model } from "../generated/ast.js";
 import {
   type DddType,
@@ -65,9 +66,7 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
         if (kind === "unsupported") {
           accept(
             "error",
-            `Unsupported template format '${hole.format?.trim()}'. Supported ICU formats are ` +
-              `\`number\` (incl. \`::currency/USD\`, \`::percent\`), \`date\`/\`time\`, ` +
-              `\`plural\`/\`selectordinal\`, and \`select\`.`,
+            diagMessage("loom.interp-format-unsupported", { format: hole.format?.trim() }),
             { node, property: "holes", index: i, code: "loom.interp-format-unsupported" },
           );
           continue;
@@ -79,7 +78,7 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
           if (isImplicitlyStringifiable(t)) continue;
           accept(
             "error",
-            `A 'select' format expects a string or enum value, but this hole is '${typeToString(t)}'.`,
+            diagMessage("loom.interp-hole-type#select-format", { t: typeToString(t) }),
             { node, property: "holes", index: i, code: "loom.interp-hole-type" },
           );
           continue;
@@ -90,7 +89,7 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
           if (t.kind === "primitive" && t.name === "datetime") continue;
           accept(
             "error",
-            `A '${kind}' format expects a 'datetime' value, but this hole is '${typeToString(t)}'.`,
+            diagMessage("loom.interp-hole-type#date-format", { kind, t: typeToString(t) }),
             { node, property: "holes", index: i, code: "loom.interp-hole-type" },
           );
           continue;
@@ -100,8 +99,7 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
         if (isNumericType(t)) continue;
         accept(
           "error",
-          `A '${kind}' format expects a numeric value (int, decimal, or money), but this hole ` +
-            `is '${typeToString(t)}'.`,
+          diagMessage("loom.interp-hole-type#number-format", { kind, t: typeToString(t) }),
           { node, property: "holes", index: i, code: "loom.interp-hole-type" },
         );
         continue;
@@ -112,9 +110,7 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
       if (isString || isImplicitlyStringifiable(t)) continue;
       accept(
         "error",
-        `Cannot interpolate a '${typeToString(t)}' — a template hole must be a string or a ` +
-          `stringifiable value (number, bool, enum, an 'X id', or an aggregate with a ` +
-          `'derived display'). Convert it first (e.g. wrap in a 'derived' that formats it).`,
+        diagMessage("loom.interp-hole-type#not-stringifiable", { t: typeToString(t) }),
         { node, property: "holes", index: i, code: "loom.interp-hole-type" },
       );
     }

@@ -22,6 +22,7 @@
 // `genericInstance` out of the storage-side emitters entirely.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { Model, TypeRef } from "../generated/ast.js";
 import {
   isCapability,
@@ -43,12 +44,10 @@ export function checkSelfType(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isSelfType(node)) continue;
     if (!AstUtils.getContainerOfType(node, isCapability)) {
-      accept(
-        "error",
-        "`Self id` is only valid inside a `capability` body (it resolves to the " +
-          "implementing aggregate's type). Use a concrete `<Aggregate> id` here.",
-        { node, code: "loom.self-outside-capability" },
-      );
+      accept("error", diagMessage("loom.self-outside-capability"), {
+        node,
+        code: "loom.self-outside-capability",
+      });
     }
   }
 }
@@ -84,12 +83,11 @@ function checkTypeRefPosition(t: TypeRef, accept: ValidationAcceptor): void {
   if (isQueryHandler(container)) return;
   // A payload field: a `Property` whose owner is a `PayloadDecl`.
   if (isProperty(container) && isPayloadDecl(container.$container)) return;
-  accept(
-    "error",
-    `A generic carrier ('${t.ctors.join(" ")}') is a transport shape — it may only appear as a ` +
-      `repository find return type or a payload field, not in this position.`,
-    { node: t, property: "ctors", code: "loom.generic-position" },
-  );
+  accept("error", diagMessage("loom.generic-position", { ctors: t.ctors.join(" ") }), {
+    node: t,
+    property: "ctors",
+    code: "loom.generic-position",
+  });
 }
 
 function checkTypeRefCarrier(t: TypeRef, accept: ValidationAcceptor): void {
@@ -102,9 +100,10 @@ function checkTypeRefCarrier(t: TypeRef, accept: ValidationAcceptor): void {
   if (t.ctors.length > 1) {
     accept(
       "error",
-      `Nested generic carriers are not supported yet — '${t.ctors.join(" ")}' applies ` +
-        `'${t.ctors[t.ctors.length - 1]}' to another generic instance. v1 allows a single ` +
-        `carrier constructor (P3b adds nesting).`,
+      diagMessage("loom.generic-arg-not-carrier#nested-generic-carriers", {
+        ctors: t.ctors.join(" "),
+        ctors2: t.ctors[t.ctors.length - 1],
+      }),
       { node: t, property: "ctors", code: "loom.generic-arg-not-carrier" },
     );
     return;
@@ -116,8 +115,7 @@ function checkTypeRefCarrier(t: TypeRef, accept: ValidationAcceptor): void {
   if (isSlotType(t.base)) {
     accept(
       "error",
-      `'${t.ctors[0]}' requires a carrier type argument; 'slot' is a UI-only marker, ` +
-        `not a boundary-crossing carrier.`,
+      diagMessage("loom.generic-arg-not-carrier#requires-a-carrier-type", { ctors: t.ctors[0] }),
       { node: t, property: "base", code: "loom.generic-arg-not-carrier" },
     );
   }

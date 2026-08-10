@@ -4,6 +4,7 @@
 // current-user scope, permission refs, and whole-model expr integrity.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import { allPlatformDescriptors } from "../../../platform/metadata.js";
 import { isStdlibError, STRUCTURAL_CONFLICT_ERRORS } from "../../../util/error-defaults.js";
 import { bodyTypeOf } from "../../../util/expr-body-type.js";
@@ -54,7 +55,7 @@ export function validateWorkspaceUniqueness(
         severity: "error",
         code: "loom.duplicate-valueobject",
         source: `valueobject ${vo.name}`,
-        message: `duplicate root-level value object '${vo.name}' — declare it once in the workspace.`,
+        message: diagMessage("loom.duplicate-valueobject", { name: vo.name }),
       });
     } else {
       rootVoSeen.add(vo.name);
@@ -68,7 +69,7 @@ export function validateWorkspaceUniqueness(
         severity: "error",
         code: "loom.duplicate-enum",
         source: `enum ${e.name}`,
-        message: `duplicate root-level enum '${e.name}' — declare it once in the workspace.`,
+        message: diagMessage("loom.duplicate-enum", { name: e.name }),
       });
     } else {
       rootEnumSeen.add(e.name);
@@ -82,7 +83,7 @@ export function validateWorkspaceUniqueness(
         severity: "error",
         code: "loom.duplicate-system",
         source: `system ${s.name}`,
-        message: `duplicate system '${s.name}' — declare each system once across the workspace.`,
+        message: diagMessage("loom.duplicate-system", { name: s.name }),
       });
     } else {
       sysSeen.add(s.name);
@@ -99,7 +100,7 @@ export function validateWorkspaceUniqueness(
         severity: "error",
         code: "loom.duplicate-context",
         source: `context ${c.name}`,
-        message: `duplicate context '${c.name}' — context names must be unique across the workspace.`,
+        message: diagMessage("loom.duplicate-context", { name: c.name }),
       });
     } else {
       ctxSeen.add(c.name);
@@ -122,7 +123,7 @@ export function validateWorkspaceUniqueness(
           severity: "error",
           code: "loom.valueobject-shadows-root",
           source: `${c.name}.${vo.name}`,
-          message: `context '${c.name}' declares value object '${vo.name}' that shadows the root-level declaration; rename one of them.`,
+          message: diagMessage("loom.valueobject-shadows-root", { name: c.name, voName: vo.name }),
         });
       }
     }
@@ -134,7 +135,7 @@ export function validateWorkspaceUniqueness(
           severity: "error",
           code: "loom.enum-shadows-root",
           source: `${c.name}.${e.name}`,
-          message: `context '${c.name}' declares enum '${e.name}' that shadows the root-level declaration; rename one of them.`,
+          message: diagMessage("loom.enum-shadows-root", { name: c.name, eName: e.name }),
         });
       }
     }
@@ -186,11 +187,7 @@ export function validateDuplicateTables(sys: EnrichedSystemIR, diags: LoomDiagno
         severity: "error",
         code: "loom.duplicate-table",
         source: `${sys.name}.${ctx.name}.${agg.name}`,
-        message:
-          `aggregates ${who} all map to the same database table \`${key}\` — ` +
-          `their migrations would create and clobber one relation. Give the ` +
-          `owning contexts distinct \`dataSource\` schemas (\`schema: "..."\`) so ` +
-          `each lands in its own Postgres schema, or rename one aggregate.`,
+        message: diagMessage("loom.duplicate-table", { who, key }),
       });
     }
   }
@@ -221,10 +218,7 @@ export function validateUniqueColumns(loom: EnrichedLoomModel, diags: LoomDiagno
               severity: "error",
               code: "loom.unique-valueobject-field",
               source: `${ctx.name}/${agg.name}`,
-              message:
-                `\`unique\` column '${col}' on aggregate '${agg.name}' is a value object, which ` +
-                `stores as several columns — a uniqueness key must list single-column ` +
-                `(scalar / enum / id) fields.`,
+              message: diagMessage("loom.unique-valueobject-field", { col, name: agg.name }),
             });
           }
         }
@@ -269,9 +263,7 @@ export function validateFindNameCollisions(ctx: BoundedContextIR, diags: LoomDia
         diags.push({
           severity: "error",
           code: "loom.find-reserved-name",
-          message:
-            `repository '${repo.name}' find '${find.name}': name collides with the auto-emitted repository method '${find.name}(...)'. ` +
-            `Choose a different find name (e.g. 'persist', 'fetchById').`,
+          message: diagMessage("loom.find-reserved-name", { name: repo.name, findName: find.name }),
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
       }
@@ -279,7 +271,7 @@ export function validateFindNameCollisions(ctx: BoundedContextIR, diags: LoomDia
         diags.push({
           severity: "error",
           code: "loom.duplicate-find",
-          message: `repository '${repo.name}' declares find '${find.name}' more than once.`,
+          message: diagMessage("loom.duplicate-find", { name: repo.name, findName: find.name }),
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
       }
@@ -342,10 +334,12 @@ export function validateGenericInstancesUnimplemented(
     diags.push({
       severity: "error",
       code: "loom.generic-carrier-unsupported",
-      message:
-        `${where} uses the generic carrier '${ctor}', but the backend(s) serving this context ` +
-        `(${unsupported.sort().join(", ")}) don't emit it yet (payload-transport-layer.md, P3b). ` +
-        `It's supported on: ${[...SUPPORTED_PAGED_BACKENDS].sort().join(", ")}.`,
+      message: diagMessage("loom.generic-carrier-unsupported", {
+        where,
+        ctor,
+        unsupported: unsupported.sort().join(", "),
+        supportedPagedBackends: [...SUPPORTED_PAGED_BACKENDS].sort().join(", "),
+      }),
       source: `${ctx.name}/${where}`,
     });
   };
@@ -481,10 +475,12 @@ export function validateUnionFindShapes(
       diags.push({
         severity: "error",
         code: "loom.union-find-shape-unsupported",
-        message:
-          `find '${find.name}' on repository '${repo.name}': ${why}. Supported v1 shape: ` +
-          `\`find ${find.name}(...): ${repo.aggregateName} or <Error>\` (absence → the error's ` +
-          `HTTP status) or \`: ${repo.aggregateName} option\` (absence → 404).`,
+        message: diagMessage("loom.union-find-shape-unsupported", {
+          name: find.name,
+          repoName: repo.name,
+          why,
+          aggregateName: repo.aggregateName,
+        }),
         source: `${ctx.name}/repository ${repo.name}.${find.name}`,
       });
     }
@@ -511,12 +507,11 @@ export function validateUnionsUnimplemented(
     diags.push({
       severity: "error",
       code: "loom.union-unsupported",
-      message:
-        `${where} uses a discriminated union (\`A or B\` / \`payload = A | B\` / \`T option\`), but ` +
-        `the backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit it yet ` +
-        `(payload-transport-layer.md, P4c–d). It's supported on: ${[...SUPPORTED_UNION_BACKENDS]
-          .sort()
-          .join(", ")}.`,
+      message: diagMessage("loom.union-unsupported", {
+        where,
+        unsupported: unsupported.sort().join(", "),
+        supportedUnionBackends: [...SUPPORTED_UNION_BACKENDS].sort().join(", "),
+      }),
       source: `${ctx.name}/${where}`,
     });
   };
@@ -582,12 +577,12 @@ export function validateWhenGateSupport(
       diags.push({
         severity: "error",
         code: "loom.when-unsupported",
-        message:
-          `operation '${agg.name}.${op.name}' declares a \`when\` gate, but the backend(s) ` +
-          `serving this context (${unsupported.sort().join(", ")}) don't emit the gate or the ` +
-          `can-${op.name} query yet. It's supported on: ${[...SUPPORTED_WHEN_BACKENDS]
-            .sort()
-            .join(", ")}.`,
+        message: diagMessage("loom.when-unsupported", {
+          name: agg.name,
+          opName: op.name,
+          unsupported: unsupported.sort().join(", "),
+          supportedWhenBackends: [...SUPPORTED_WHEN_BACKENDS].sort().join(", "),
+        }),
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
     }
@@ -624,11 +619,11 @@ export function validateOperationReturnsUnimplemented(
       diags.push({
         severity: "error",
         code: "loom.operation-return-unsupported",
-        message:
-          `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but the ` +
-          `backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit the ` +
-          `producer-side route translation yet (exception-less.md). It's supported on: node, ` +
-          `dotnet, python, java, elixir.`,
+        message: diagMessage("loom.operation-return-unsupported", {
+          name: agg.name,
+          opName: op.name,
+          unsupported: unsupported.sort().join(", "),
+        }),
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
     }
@@ -656,11 +651,11 @@ export function validateUnmappedErrorStatuses(
         diags.push({
           severity: "warning",
           code: "loom.unmapped-error-status",
-          message:
-            `error '${name}' returned by '${agg.name}.${op.name}' has no stdlib default HTTP ` +
-            `status and no api \`httpStatus ${name} -> <code>\` mapping, so it defaults to 500. Add ` +
-            `a \`httpStatus ${name} -> <code>\` line to the api serving this context to set an ` +
-            `explicit status.`,
+          message: diagMessage("loom.unmapped-error-status", {
+            name,
+            aggName: agg.name,
+            opName: op.name,
+          }),
           source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
         });
       }
@@ -685,11 +680,7 @@ export function validateReservedStructuralErrorNames(
     diags.push({
       severity: "warning",
       code: "loom.reserved-structural-error-name",
-      message:
-        `error '${p.name}' collides with a built-in structural-conflict name ` +
-        `(M-T3.4a). That name is reserved: its HTTP status defaults to 409 and a ` +
-        `\`httpStatus ${p.name} -> <code>\` line retargets the framework conflict, not ` +
-        `just this payload. Rename the error to avoid the shadow.`,
+      message: diagMessage("loom.reserved-structural-error-name", { name: p.name }),
       source: `${ctx.name}/error ${p.name}`,
     });
   }
@@ -745,9 +736,10 @@ export function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagn
         diags.push({
           severity: "error",
           code: "loom.extern-on-private-operation",
-          message:
-            `aggregate '${agg.name}' operation '${op.name}': 'extern' isn't valid on a private operation. ` +
-            `Private operations are callable only from inside the aggregate, so there's nowhere for an external handler to plug in. Make the operation public, or drop 'extern'.`,
+          message: diagMessage("loom.extern-on-private-operation", {
+            name: agg.name,
+            opName: op.name,
+          }),
           source: `${ctx.name}/${agg.name}.${op.name}`,
         });
       }
@@ -756,9 +748,11 @@ export function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagn
         diags.push({
           severity: "error",
           code: "loom.extern-body-not-precondition",
-          message:
-            `aggregate '${agg.name}' operation '${op.name}': 'extern' bodies may only contain 'precondition' statements (found '${stmt.kind}'). ` +
-            `The user-supplied handler owns mutation, emit, and any other logic — leave the .ddd body to the gates that run before it.`,
+          message: diagMessage("loom.extern-body-not-precondition", {
+            name: agg.name,
+            opName: op.name,
+            kind: stmt.kind,
+          }),
           source: `${ctx.name}/${agg.name}.${op.name}`,
         });
       }
@@ -807,10 +801,7 @@ export function validateEventSourcedDiscipline(
       diags.push({
         severity: "error",
         code: "loom.applier-on-non-event-sourced",
-        message:
-          `aggregate '${agg.name}' declares apply(...) but is not event-sourced. ` +
-          `Appliers fold events into state; they only apply to a 'persistedAs: eventLog' aggregate. ` +
-          `Add 'persistedAs: eventLog' to the aggregate header, or remove the applier.`,
+        message: diagMessage("loom.applier-on-non-event-sourced#ir", { name: agg.name }),
         source: `${ctx.name}/${agg.name}`,
       });
     }
@@ -828,9 +819,10 @@ export function validateEventSourcedDiscipline(
       diags.push({
         severity: "error",
         code: "loom.event-sourced-multiple-creates",
-        message:
-          `aggregate '${agg.name}' is persistedAs: eventLog and declares ${creates.length} 'create' actions. ` +
-          `An event-sourced aggregate has a single canonical creator (v1) — keep one 'create(...)'.`,
+        message: diagMessage("loom.event-sourced-multiple-creates#ir", {
+          name: agg.name,
+          length: creates.length,
+        }),
         source: `${ctx.name}/${agg.name}`,
       });
     }
@@ -845,9 +837,7 @@ export function validateEventSourcedDiscipline(
         diags.push({
           severity: "error",
           code: "loom.duplicate-applier",
-          message:
-            `aggregate '${agg.name}' declares ${count} appliers for event '${eventName}'. ` +
-            `An event folds into state exactly one way — declare a single apply(${eventName}).`,
+          message: diagMessage("loom.duplicate-applier#ir", { name: agg.name, count, eventName }),
           source: `${ctx.name}/${agg.name}`,
         });
       }
@@ -875,10 +865,10 @@ export function validateEventSourcedDiscipline(
           diags.push({
             severity: "error",
             code: "loom.event-sourced-direct-mutation",
-            message:
-              `aggregate '${agg.name}' ${cmd.label} mutates 'this' directly, but the aggregate is event-sourced. ` +
-              `Command bodies on a 'persistedAs: eventLog' aggregate decide and 'emit'; the state change belongs in an apply(...) block. ` +
-              `Replace the assignment with an 'emit', and fold it in an applier.`,
+            message: diagMessage("loom.event-sourced-direct-mutation", {
+              name: agg.name,
+              label: cmd.label,
+            }),
             source: `${ctx.name}/${agg.name}`,
           });
         }
@@ -886,10 +876,11 @@ export function validateEventSourcedDiscipline(
           diags.push({
             severity: "error",
             code: "loom.emitted-event-unhandled",
-            message:
-              `aggregate '${agg.name}' ${cmd.label} emits '${stmt.eventName}' but no applier folds it. ` +
-              `Every emitted event needs a matching apply(${stmt.eventName}: ${stmt.eventName}) on the aggregate, ` +
-              `or the event is recorded but never reflected in state.`,
+            message: diagMessage("loom.emitted-event-unhandled", {
+              name: agg.name,
+              label: cmd.label,
+              eventName: stmt.eventName,
+            }),
             source: `${ctx.name}/${agg.name}`,
           });
         }
@@ -903,28 +894,29 @@ export function validateEventSourcedDiscipline(
           diags.push({
             severity: "error",
             code: "loom.applier-emits",
-            message:
-              `aggregate '${agg.name}' apply(${ap.event}) emits an event. ` +
-              `An applier reacts to an event by folding it into state — it must not emit. ` +
-              `Move the 'emit' to the command body that decides it.`,
+            message: diagMessage("loom.applier-emits", { name: agg.name, event: ap.event }),
             source: `${ctx.name}/${agg.name}`,
           });
         } else if (stmt.kind === "call") {
           diags.push({
             severity: "error",
             code: "loom.applier-impure-call",
-            message:
-              `aggregate '${agg.name}' apply(${ap.event}) calls '${stmt.name}'. ` +
-              `Applier bodies must be deterministic, replayable folds — assignments and 'let' only, no side-effecting calls.`,
+            message: diagMessage("loom.applier-impure-call", {
+              name: agg.name,
+              event: ap.event,
+              stmtName: stmt.name,
+            }),
             source: `${ctx.name}/${agg.name}`,
           });
         } else if (stmt.kind === "precondition" || stmt.kind === "requires") {
           diags.push({
             severity: "error",
             code: "loom.applier-guard",
-            message:
-              `aggregate '${agg.name}' apply(${ap.event}) contains a '${stmt.kind}' statement. ` +
-              `Guards belong in the command that decides the event; by the time it is applied the decision is already made.`,
+            message: diagMessage("loom.applier-guard", {
+              name: agg.name,
+              event: ap.event,
+              kind: stmt.kind,
+            }),
             source: `${ctx.name}/${agg.name}`,
           });
         }
@@ -1002,7 +994,7 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
         diags.push({
           severity: "error",
           code: "loom.scaffold-unexpanded",
-          message: `un-expanded scaffold primitive '${e.name}' — walker-primitive-expander could not resolve its target aggregate/workflow/view; check that the referenced symbol exists in the surrounding context.`,
+          message: diagMessage("loom.scaffold-unexpanded", { name: e.name }),
           source,
         });
       }
@@ -1019,8 +1011,7 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
           diags.push({
             severity: "error",
             code: "loom.distinct-non-scalar",
-            message:
-              "`.distinct` requires a scalar or value-object element — it can't dedupe a collection of entities or id references.",
+            message: diagMessage("loom.distinct-non-scalar"),
             source,
           });
         }
@@ -1028,8 +1019,7 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
           diags.push({
             severity: "error",
             code: "loom.collection-op-in-ui",
-            message:
-              "collection op '.distinct' isn't available in a page body — only 'map' and 'join' render on the frontend; do the transformation in a view or derived property instead.",
+            message: diagMessage("loom.collection-op-in-ui#distinct"),
             source,
           });
         }
@@ -1042,7 +1032,7 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
           diags.push({
             severity: "error",
             code: "loom.join-non-string",
-            message: "`.join` requires a string collection.",
+            message: diagMessage("loom.join-non-string"),
             source,
           });
         }
@@ -1056,8 +1046,7 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
             diags.push({
               severity: "error",
               code: "loom.reduction-non-comparable",
-              message:
-                "`.min`/`.max` require a comparable projection (number, money, string, or datetime).",
+              message: diagMessage("loom.reduction-non-comparable"),
               source,
             });
           }
@@ -1069,7 +1058,7 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
           diags.push({
             severity: "error",
             code: "loom.collection-op-in-ui",
-            message: `collection op '.${e.member}' isn't available in a page body — only 'map' and 'join' render on the frontend; do the transformation in a view or derived property instead.`,
+            message: diagMessage("loom.collection-op-in-ui#any-op", { member: e.member }),
             source,
           });
         }
@@ -1151,9 +1140,9 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
         diags.push({
           severity: "error",
           code: "loom.match-non-union-subject",
-          message: `variant 'match' subject is not a union — its type is ${
-            subjectType ? typeKey(subjectType) : "unresolved"
-          }. A variant match discriminates an 'or'-union value by variant.`,
+          message: diagMessage("loom.match-non-union-subject", {
+            subjectType: subjectType ? typeKey(subjectType) : "unresolved",
+          }),
           source,
         });
         return;
@@ -1167,9 +1156,10 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
           diags.push({
             severity: "error",
             code: "loom.match-unknown-variant",
-            message: `variant 'match' arm names '${variantTag(arm.varType)}', which is not a variant of the subject union {${[
-              ...subjectType.variants.map(variantTag),
-            ].join(" | ")}}.`,
+            message: diagMessage("loom.match-unknown-variant", {
+              varType: variantTag(arm.varType),
+              variants: [...subjectType.variants.map(variantTag)].join(" | "),
+            }),
             source,
           });
           continue;
@@ -1179,9 +1169,9 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
           diags.push({
             severity: "error",
             code: "loom.match-duplicate-variant",
-            message: `variant 'match' matches '${variantTag(
-              arm.varType,
-            )}' more than once — each variant may appear in at most one arm.`,
+            message: diagMessage("loom.match-duplicate-variant", {
+              varType: variantTag(arm.varType),
+            }),
             source,
           });
           continue;
@@ -1198,11 +1188,9 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
           diags.push({
             severity: "warning",
             code: "loom.match-non-exhaustive",
-            message: `variant 'match' does not cover ${missingTags
-              .map((t) => `'${t}'`)
-              .join(
-                ", ",
-              )} and has no 'else' arm — the expression is undefined for those variants. Add the missing arm(s) or an 'else => …'.`,
+            message: diagMessage("loom.match-non-exhaustive", {
+              missingTags: missingTags.map((t) => `'${t}'`).join(", "),
+            }),
             source,
           });
         }
@@ -1406,10 +1394,7 @@ export function validateFieldDefaults(ctx: BoundedContextIR, diags: LoomDiagnost
       diags.push({
         severity: "error",
         code: "loom.field-default-not-constant",
-        message:
-          `default for '${owner}.${f.name}' reads ${found}, but a field default is evaluated where no instance exists yet — ` +
-          `notably the create-request wire schema, which every client sees. ` +
-          `Write it as 'derived ${f.name}: … = …' if it is computed from other fields, or give the field an instance-independent default.`,
+        message: diagMessage("loom.field-default-not-constant", { owner, name: f.name, found }),
         source: `${ctx.name}/${owner}.${f.name}`,
       });
     }
@@ -1433,9 +1418,7 @@ export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagn
         diags.push({
           severity: "error",
           code: "loom.currentuser-not-in-request-scope",
-          message:
-            `currentUser is only available in per-request handlers (operations, workflows, repository find where filters). ` +
-            `Found in ${location}; remove the reference or move the logic into a per-request body.`,
+          message: diagMessage("loom.currentuser-not-in-request-scope", { location }),
           source: `${ctx.name}/${location}`,
         });
       }
@@ -1499,9 +1482,7 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
         diags.push({
           severity: "error",
           code: "loom.unknown-permission",
-          message:
-            `permissions.${name}: no permission named '${name}' is declared in this subdomain's 'permissions { ... }' block. ` +
-            `Either add the declaration or fix the reference.`,
+          message: diagMessage("loom.unknown-permission", { name }),
           source: `${ctx.name}/${location}`,
         });
       }

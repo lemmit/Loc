@@ -16,6 +16,7 @@
 // naturally exempt: they don't exist at this layer.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { type FindDecl, isFindDecl, isProjection, type Model } from "../generated/ast.js";
 import { envForNode, typeOf, typeToString } from "../type-system.js";
 
@@ -60,13 +61,10 @@ export function checkRepositoryFinds(model: Model, accept: ValidationAcceptor): 
     if (!isFindDecl(node)) continue;
     checkGateIsBool(node.gate, node, accept);
     if (!returnsCollection(node)) continue;
-    accept(
-      "warning",
-      `repository find '${node.name}' is a wire-shaped list query — pass a criterion to ` +
-        `'run' (Repo.run(<Criterion>(args))) or name a 'retrieval' instead of accreting a ` +
-        `bespoke list finder on the repository. (A unique-key reconstitution find returning a ` +
-        `single 'T' / 'T?' stays fine.)`,
-      { node, property: "name", code: "loom.repository-find-deprecated" },
-    );
+    accept("warning", diagMessage("loom.repository-find-deprecated", { name: node.name }), {
+      node,
+      property: "name",
+      code: "loom.repository-find-deprecated",
+    });
   }
 }

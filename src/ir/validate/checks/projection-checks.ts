@@ -18,6 +18,7 @@
 // check here.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import type { BoundedContextIR, ExprIR, ProjectionIR, StmtIR } from "../../types/loom-ir.js";
 import {
   isMaterializedProjection,
@@ -103,9 +104,10 @@ function validateWorkflowSource(
     diags.push({
       severity: "error",
       code: "loom.projection-workflow-source-not-observable",
-      message:
-        `projection '${proj.name}': workflow '${wf.name}' has no observable instance state ` +
-        "(it needs a single id-shaped correlation/state field), so it can't be a projection source.",
+      message: diagMessage("loom.projection-workflow-source-not-observable", {
+        name: proj.name,
+        wfName: wf.name,
+      }),
       source: at,
     });
     return;
@@ -114,11 +116,10 @@ function validateWorkflowSource(
     diags.push({
       severity: "error",
       code: "loom.projection-workflow-source-eventsourced-unsupported",
-      message:
-        `projection '${proj.name}': workflow '${wf.name}' is event-sourced, whose instances are a ` +
-        "per-request fold of its event stream (no state table). A projection over an event-sourced " +
-        "workflow source is not emitted yet — source it from a state-backed (non-event-sourced) " +
-        "workflow, or fold the events into a keyed 'projection' instead.",
+      message: diagMessage("loom.projection-workflow-source-eventsourced-unsupported", {
+        name: proj.name,
+        wfName: wf.name,
+      }),
       source: at,
     });
   }
@@ -126,10 +127,7 @@ function validateWorkflowSource(
     diags.push({
       severity: "error",
       code: "loom.projection-workflow-source-join-unsupported",
-      message:
-        `projection '${proj.name}': a 'join' follow over a workflow source is not supported ` +
-        "(by-id joins resolve an aggregate's identity, not a workflow instance). Read the " +
-        "workflow's instance fields directly in 'select', or source the projection from an aggregate.",
+      message: diagMessage("loom.projection-workflow-source-join-unsupported", { name: proj.name }),
       source: at,
     });
   }
@@ -137,10 +135,9 @@ function validateWorkflowSource(
     diags.push({
       severity: "error",
       code: "loom.projection-workflow-source-ignoring-unsupported",
-      message:
-        `projection '${proj.name}': an 'ignoring' capability-filter bypass over a workflow source ` +
-        "has no effect — a workflow instance read carries no capability query-filters. Remove the " +
-        "'ignoring' clause.",
+      message: diagMessage("loom.projection-workflow-source-ignoring-unsupported", {
+        name: proj.name,
+      }),
       source: at,
     });
   }
@@ -173,7 +170,7 @@ function validateProjectionSource(
     diags.push({
       severity: "error",
       code: "loom.projection-source-self",
-      message: `projection '${proj.name}': a projection cannot source itself ('from ${proj.name}').`,
+      message: diagMessage("loom.projection-source-self", { name: proj.name }),
       source: at,
     });
     return;
@@ -184,10 +181,10 @@ function validateProjectionSource(
     diags.push({
       severity: "error",
       code: "loom.projection-source-not-materialized",
-      message:
-        `projection '${proj.name}': source projection '${src.name}' is query-time (a live read with ` +
-        "no persisted read-model table), so there is nothing to read `from`. Source it from a folded " +
-        "('on(e) { … }') projection, or from the underlying aggregate directly.",
+      message: diagMessage("loom.projection-source-not-materialized", {
+        name: proj.name,
+        srcName: src.name,
+      }),
       source: at,
     });
     return;
@@ -196,10 +193,7 @@ function validateProjectionSource(
     diags.push({
       severity: "error",
       code: "loom.projection-source-join-unsupported",
-      message:
-        `projection '${proj.name}': a 'join' follow over a projection source is not supported ` +
-        "(by-id joins resolve an aggregate's identity, not a read-model row). Read the source row's " +
-        "fields directly in 'select', or source the projection from an aggregate.",
+      message: diagMessage("loom.projection-source-join-unsupported", { name: proj.name }),
       source: at,
     });
   }
@@ -207,10 +201,7 @@ function validateProjectionSource(
     diags.push({
       severity: "error",
       code: "loom.projection-source-ignoring-unsupported",
-      message:
-        `projection '${proj.name}': an 'ignoring' capability-filter bypass over a projection source ` +
-        "has no effect — a read-model row read carries no capability query-filters. Remove the " +
-        "'ignoring' clause.",
+      message: diagMessage("loom.projection-source-ignoring-unsupported", { name: proj.name }),
       source: at,
     });
   }
@@ -243,11 +234,10 @@ function validateQueryComprehension(
     diags.push({
       severity: "error",
       code: "loom.projection-query-and-fold-unsupported",
-      message:
-        `projection '${proj.name}' declares both a 'from ${q.source}' query source ` +
-        `and 'on(e)' event folds. A query source and event folds together ` +
-        `(seed-then-update) is a reserved combination — use EITHER a query-time ` +
-        `projection ('from … select …') OR a folded one ('on(e) { … }'), not both.`,
+      message: diagMessage("loom.projection-query-and-fold-unsupported", {
+        name: proj.name,
+        source: q.source,
+      }),
       source: `${ctx.name}/${proj.name}`,
     });
   }
@@ -267,10 +257,11 @@ function validateQueryComprehension(
         diags.push({
           severity: "error",
           code: "loom.projection-shorthand-nonaggregate",
-          message:
-            `projection '${proj.name}': the shorthand (select-less) form is supported for an ` +
-            `AGGREGATE source only; source '${q.source}' is a ${q.sourceKind}. Add an explicit ` +
-            `'select' (its rows are already served directly by the ${q.sourceKind}'s own read).`,
+          message: diagMessage("loom.projection-shorthand-nonaggregate", {
+            name: proj.name,
+            source: q.source,
+            sourceKind: q.sourceKind,
+          }),
           source: `${ctx.name}/${proj.name}`,
         });
       }
@@ -278,10 +269,10 @@ function validateQueryComprehension(
       diags.push({
         severity: "error",
         code: "loom.projection-fields-without-select",
-        message:
-          `projection '${proj.name}' declares row fields but no 'select' to fill them, so every ` +
-          `row would be empty. Add a 'select <field> = <expr>, …', or drop the fields for the ` +
-          `shorthand form (the row then mirrors the '${q.source}' source's wire shape).`,
+        message: diagMessage("loom.projection-fields-without-select", {
+          name: proj.name,
+          source: q.source,
+        }),
         source: `${ctx.name}/${proj.name}`,
       });
     }
@@ -312,14 +303,13 @@ function validateQueryComprehension(
     diags.push({
       severity: "error",
       code: "loom.projection-groupby-missing",
-      message:
-        `projection '${proj.name}' mixes aggregation ` +
-        `(${aggregating.map((s) => s.field).join(", ")}) with per-row select(s) ` +
-        `(${perRow.join(", ")}). That is a GROUP BY — one row per distinct ` +
-        `${perRow.join("/")} — so declare the grouping: add ` +
-        `'group by ${perRow.map((f) => `<source>.${f}`).join(", ")}' before the ` +
-        `'select'. Or aggregate ALL fields (a single-row total), or select all ` +
-        `of them per-row.`,
+      message: diagMessage("loom.projection-groupby-missing", {
+        name: proj.name,
+        aggregating: aggregating.map((s) => s.field).join(", "),
+        perRow: perRow.join(", "),
+        perRow2: perRow.join("/"),
+        perRow3: perRow.map((f) => `<source>.${f}`).join(", "),
+      }),
       source: `${ctx.name}/${proj.name}`,
     });
   }
@@ -351,11 +341,12 @@ function validateQueryComprehension(
         diags.push({
           severity: "error",
           code: "loom.projection-aggregate-arg-not-columnar",
-          message:
-            `projection '${proj.name}': 'select ${s.field} = ${s.aggregate.op}(…)' aggregates a ` +
-            `computed expression. An aggregation argument must be a plain column of the ` +
-            `'${q.source}' source, written '<alias>.<field>' (e.g. '${s.aggregate.op}(o.total)') — ` +
-            `SQL aggregates a column, not a per-row computation.`,
+          message: diagMessage("loom.projection-aggregate-arg-not-columnar", {
+            name: proj.name,
+            field: s.field,
+            op: s.aggregate.op,
+            source: q.source,
+          }),
           source: `${ctx.name}/${proj.name}`,
         });
       }
@@ -370,10 +361,13 @@ function validateQueryComprehension(
     diags.push({
       severity: "error",
       code: "loom.projection-select-unresolved",
-      message:
-        `projection '${proj.name}': 'select ${s.field} = …' references '${unresolved}', which ` +
-        `resolves to nothing — not a field of the '${q.source}' source, not a 'join' alias, ` +
-        `not a parameter${hint}. It would be emitted as an undeclared identifier.`,
+      message: diagMessage("loom.projection-select-unresolved", {
+        name: proj.name,
+        field: s.field,
+        unresolved,
+        source: q.source,
+        hint,
+      }),
       source: `${ctx.name}/${proj.name}`,
     });
   }
@@ -419,10 +413,7 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
     diags.push({
       severity: "error",
       code: "loom.projection-groupby-source-unsupported",
-      message:
-        `projection '${proj.name}' declares 'group by', but ${why}. A grouped ` +
-        `projection reads (and groups) an AGGREGATE source's table in SQL — ` +
-        `add 'from <Aggregate>'.`,
+      message: diagMessage("loom.projection-groupby-source-unsupported", { name: proj.name, why }),
       source: at,
     });
     return;
@@ -436,10 +427,10 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
     diags.push({
       severity: "error",
       code: "loom.projection-groupby-keyed-unsupported",
-      message:
-        `projection '${proj.name}' declares both 'keyed by ${proj.correlationField}' and ` +
-        `'group by'. A grouped projection's rows ARE the groups (one per distinct ` +
-        `key combination), not id-keyed entities — drop the 'keyed by'.`,
+      message: diagMessage("loom.projection-groupby-keyed-unsupported", {
+        name: proj.name,
+        correlationField: proj.correlationField,
+      }),
       source: at,
     });
   }
@@ -447,10 +438,7 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
     diags.push({
       severity: "error",
       code: "loom.projection-groupby-join-unsupported",
-      message:
-        `projection '${proj.name}': 'join' and 'group by' don't compose — a join is a ` +
-        `by-id bulk load AFTER the query, so its columns can't participate in the SQL ` +
-        `GROUP BY. Group by source columns only, or drop the 'group by'.`,
+      message: diagMessage("loom.projection-groupby-join-unsupported", { name: proj.name }),
       source: at,
     });
   }
@@ -459,11 +447,7 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
     diags.push({
       severity: "error",
       code: "loom.projection-groupby-no-aggregate",
-      message:
-        `projection '${proj.name}' declares 'group by' but no aggregate 'select' ` +
-        `(count/sum/avg/min/max) to compute per group — that is just DISTINCT. Add an ` +
-        `aggregate select (e.g. 'orders = count()'), or drop the 'group by' for the ` +
-        `per-row read.`,
+      message: diagMessage("loom.projection-groupby-no-aggregate", { name: proj.name }),
       source: at,
     });
   }
@@ -479,11 +463,10 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
       diags.push({
         severity: "error",
         code: "loom.projection-groupby-key-not-columnar",
-        message:
-          `projection '${proj.name}': a 'group by' column must be a plain field of the ` +
-          `'${q.source}' source (e.g. '<alias>.<field>'), optionally bucketed by a ` +
-          `supported grouping transform ('<alias>.<datetime field>.startOfDay()'), so it ` +
-          `can be grouped in SQL — other computed grouping keys are not supported yet.`,
+        message: diagMessage("loom.projection-groupby-key-not-columnar", {
+          name: proj.name,
+          source: q.source,
+        }),
         source: at,
       });
     } else if (!keys.some((k) => sameGroupKey(k, key))) {
@@ -501,10 +484,10 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
       diags.push({
         severity: "error",
         code: "loom.projection-groupby-select-not-grouped",
-        message:
-          `projection '${proj.name}': 'select ${s.field} = …' is per-row but not one of the ` +
-          `'group by' columns, so it has no single value per group. Select a grouping ` +
-          `column directly, aggregate it (sum/min/max/…), or add it to the 'group by'.`,
+        message: diagMessage("loom.projection-groupby-select-not-grouped", {
+          name: proj.name,
+          field: s.field,
+        }),
         source: at,
       });
     }
@@ -517,10 +500,10 @@ function validateKey(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagn
     diags.push({
       severity: "error",
       code: "loom.projection-key-unknown",
-      message:
-        `projection '${proj.name}' is keyed by '${proj.correlationField}', ` +
-        `which is not a declared state field.  Declare it as an id-shaped field, ` +
-        `e.g. '${proj.correlationField}: <Aggregate> id'.`,
+      message: diagMessage("loom.projection-key-unknown", {
+        name: proj.name,
+        correlationField: proj.correlationField,
+      }),
       source: `${ctx.name}/${proj.name}`,
     });
     return;
@@ -529,10 +512,10 @@ function validateKey(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomDiagn
     diags.push({
       severity: "error",
       code: "loom.projection-key-not-id",
-      message:
-        `projection '${proj.name}' is keyed by '${proj.correlationField}', ` +
-        `which is not id-shaped.  A projection's routing key must be an 'id' field ` +
-        `(the row's primary key), e.g. '${proj.correlationField}: <Aggregate> id'.`,
+      message: diagMessage("loom.projection-key-not-id", {
+        name: proj.name,
+        correlationField: proj.correlationField,
+      }),
       source: `${ctx.name}/${proj.name}`,
     });
   }
@@ -549,9 +532,11 @@ function validateHandlers(
       diags.push({
         severity: "error",
         code: "loom.projection-duplicate-on",
-        message:
-          `projection '${proj.name}' declares more than one 'on(${h.param}: ${h.event})' handler. ` +
-          `Fold each event type in a single handler.`,
+        message: diagMessage("loom.projection-duplicate-on", {
+          name: proj.name,
+          param: h.param,
+          event: h.event,
+        }),
         source: `${ctx.name}/${proj.name}`,
       });
     }
@@ -566,10 +551,12 @@ function validateHandlers(
         diags.push({
           severity: "error",
           code: "loom.projection-event-unkeyed",
-          message:
-            `projection '${proj.name}' folds '${h.event}', but that event has no ` +
-            `'${proj.correlationField}' field to route by.  Add the field to the event, ` +
-            `or supply an explicit 'by <expr>' that extracts the key from '${h.param}'.`,
+          message: diagMessage("loom.projection-event-unkeyed", {
+            name: proj.name,
+            event: h.event,
+            correlationField: proj.correlationField,
+            param: h.param,
+          }),
           source: `${ctx.name}/${proj.name}`,
         });
       }
@@ -584,11 +571,12 @@ function validateHandlers(
         diags.push({
           severity: "error",
           code: "loom.projection-fold-impure",
-          message:
-            `projection '${proj.name}' fold 'on(${h.param}: ${h.event})' ${impurity}. ` +
-            `A projection fold must be a pure, replayable function of the event — ` +
-            `assignments and 'let' only.  To read a repository or emit, use a reactor ` +
-            `('on(e: Event)' in a workflow) instead.`,
+          message: diagMessage("loom.projection-fold-impure", {
+            name: proj.name,
+            param: h.param,
+            event: h.event,
+            impurity,
+          }),
           source: `${ctx.name}/${proj.name}`,
         });
       }

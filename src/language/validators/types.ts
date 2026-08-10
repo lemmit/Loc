@@ -3,6 +3,7 @@
 // invariants, derived fields, and function bodies.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { intrinsicMatcherSig, isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { intrinsicFor, intrinsicMinArity, intrinsicsForReceiver } from "../../util/intrinsics.js";
 import type {
@@ -125,11 +126,11 @@ export function checkSlotMemberAccess(model: Model, accept: ValidationAcceptor):
     for (const suffix of chain.suffixes) {
       if (!flagged && recvType.kind === "slot" && isMemberSuffix(suffix)) {
         const ms = suffix as MemberSuffix;
-        accept(
-          "error",
-          `'${ms.member}' is not accessible on a slot value — slots are opaque JSX and have no addressable members.  Use a primitive- or aggregate-typed param if the body needs to read fields off this value.`,
-          { node: ms, property: "member", code: "loom.slot-member-access" },
-        );
+        accept("error", diagMessage("loom.slot-member-access", { member: ms.member }), {
+          node: ms,
+          property: "member",
+          code: "loom.slot-member-access",
+        });
         flagged = true;
         // Cascade suppression for the rest of this chain — one
         // diagnostic per offending access is enough.
@@ -182,16 +183,16 @@ export function checkUnknownMemberAccess(model: Model, accept: ValidationAccepto
           !ms.call &&
           BARE_REJECTED_COLLECTION_ACCESSORS.has(ms.member)
         ) {
-          accept(
-            "error",
-            `'${ms.member}' over a collection needs a lambda — write '<collection>.${ms.member}(x => …)'. A bare '.${ms.member}' has no renderable form.`,
-            { node: ms, property: "member", code: "loom.bare-collection-accessor" },
-          );
+          accept("error", diagMessage("loom.bare-collection-accessor", { member: ms.member }), {
+            node: ms,
+            property: "member",
+            code: "loom.bare-collection-accessor",
+          });
           break;
         }
         const record = absentRecordMember(recvType, ms.member);
         if (record) {
-          accept("error", `'${ms.member}' is not a member of '${record}'.`, {
+          accept("error", diagMessage("loom.unknown-member", { member: ms.member, record }), {
             node: ms,
             property: "member",
             code: "loom.unknown-member",
@@ -231,11 +232,11 @@ export function checkAvgProjection(model: Model, accept: ValidationAcceptor): vo
         // UI page-body position — no renderable frontend form (parity with the
         // IR-level `loom.collection-op-in-ui` gate the desugar bypasses).
         if (AstUtils.getContainerOfType(ms, isUi)) {
-          accept(
-            "error",
-            "collection op '.avg' isn't available in a page body — only 'map' and 'join' render on the frontend; do the transformation in a view or derived property instead.",
-            { node: ms, property: "member", code: "loom.collection-op-in-ui" },
-          );
+          accept("error", diagMessage("loom.collection-op-in-ui#avg"), {
+            node: ms,
+            property: "member",
+            code: "loom.collection-op-in-ui",
+          });
         }
         // λ-body must be a numeric primitive.
         const lambdaArg = ms.args[0]?.value;
@@ -249,11 +250,11 @@ export function checkAvgProjection(model: Model, accept: ValidationAcceptor): vo
             bodyT.kind !== "unknown" &&
             !(bodyT.kind === "primitive" && AVG_NUMERIC_PRIMITIVES.has(bodyT.name))
           ) {
-            accept(
-              "error",
-              "`.avg` requires a numeric projection (int, long, decimal, or money).",
-              { node: ms, property: "member", code: "loom.avg-non-numeric" },
-            );
+            accept("error", diagMessage("loom.avg-non-numeric"), {
+              node: ms,
+              property: "member",
+              code: "loom.avg-non-numeric",
+            });
           }
         }
       }
@@ -280,7 +281,10 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
           if (!ms.call) {
             accept(
               "error",
-              `'${ms.member}' is an intrinsic operation and needs a call — write '.${ms.member}${sig.signature.split("):")[0]})'.`,
+              diagMessage("loom.intrinsic-bare", {
+                member: ms.member,
+                signature: sig.signature.split("):")[0],
+              }),
               { node: ms, property: "member", code: "loom.intrinsic-bare" },
             );
             break;
@@ -290,7 +294,11 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
             const expected = min === sig.params.length ? `${min}` : `${min}–${sig.params.length}`;
             accept(
               "error",
-              `'${ms.member}' takes ${expected} argument(s) — signature: ${ms.member}${sig.signature}.`,
+              diagMessage("loom.intrinsic-arity", {
+                member: ms.member,
+                expected,
+                signature: sig.signature,
+              }),
               { node: ms, property: "args", code: "loom.intrinsic-arity" },
             );
             break;
@@ -298,7 +306,7 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
           for (let i = 0; i < ms.args.length; i++) {
             const argWrap = ms.args[i]!;
             if (argWrap.name) {
-              accept("error", `'${ms.member}' takes positional arguments only.`, {
+              accept("error", diagMessage("loom.intrinsic-named-arg", { member: ms.member }), {
                 node: argWrap,
                 property: "name",
                 code: "loom.intrinsic-named-arg",
@@ -314,7 +322,13 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
             ) {
               accept(
                 "error",
-                `'${ms.member}' argument ${i + 1} is '${typeToString(actual)}' but the signature ${ms.member}${sig.signature} expects '${typeToString(expected)}'.`,
+                diagMessage("loom.intrinsic-arg-type", {
+                  member: ms.member,
+                  i: i + 1,
+                  actual: typeToString(actual),
+                  signature: sig.signature,
+                  expected: typeToString(expected),
+                }),
                 { node: argWrap, property: "value", code: "loom.intrinsic-arg-type" },
               );
             }
@@ -335,7 +349,11 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
             .join(", ");
           accept(
             "error",
-            `'${recvType.name}' has no intrinsic '.${ms.member}()'${known ? ` — available: ${known}` : ""}.`,
+            diagMessage("loom.intrinsic-unknown", {
+              name: recvType.name,
+              member: ms.member,
+              known: known ? ` — available: ${known}` : "",
+            }),
             { node: ms, property: "member", code: "loom.intrinsic-unknown" },
           );
           break;
@@ -460,7 +478,7 @@ export function checkSingleTernary(node: TernaryExpr, accept: ValidationAcceptor
   const env = envForNode(node);
   const condT = typeOf(node.cond, env);
   if (condT.kind !== "unknown" && !(condT.kind === "primitive" && condT.name === "bool")) {
-    accept("error", `Ternary condition must be of type 'bool', got '${typeToString(condT)}'.`, {
+    accept("error", diagMessage("loom.ternary-condition", { condT: typeToString(condT) }), {
       node,
       property: "cond",
       code: "loom.ternary-condition",
@@ -473,9 +491,10 @@ export function checkSingleTernary(node: TernaryExpr, accept: ValidationAcceptor
   if (ternaryJoin(thenT, elseT) === undefined) {
     accept(
       "error",
-      `Ternary branches have incompatible types: then-branch is '${typeToString(thenT)}', ` +
-        `else-branch is '${typeToString(elseT)}'.  One branch's type must be assignable to ` +
-        `the other (both numeric, an optional and its inner, or a null literal against an optional).`,
+      diagMessage("loom.ternary-branches", {
+        thenT: typeToString(thenT),
+        elseT: typeToString(elseT),
+      }),
       { node, property: "elseExpr", code: "loom.ternary-branches" },
     );
   }
@@ -796,7 +815,10 @@ export function checkFunction(
   if (!sawReturn) {
     accept(
       "error",
-      `Block-body function '${fn.name}' must 'return' a value of type '${typeToString(declared)}'.`,
+      diagMessage("loom.function-block-no-return", {
+        name: fn.name,
+        declared: typeToString(declared),
+      }),
       { node: fn, property: "name", code: "loom.function-block-no-return" },
     );
   }

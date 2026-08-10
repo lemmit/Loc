@@ -10,6 +10,7 @@
 // systems it keeps its legacy single-deployable meaning (loose context).
 
 import { type AstNode, AstUtils, type URI, UriUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { DddServices } from "../ddd-module.js";
 import type { Model } from "../generated/ast.js";
 import {
@@ -128,12 +129,10 @@ export function checkTopLevelDomainComposition(
       : `the project declares ${systemCount} 'system { ... }' blocks`;
   for (const node of foldable) {
     const kw = foldableKeyword(node);
-    accept(
-      "error",
-      `A top-level '${kw}' composes into the project's single 'system', but ${reason}. ` +
-        "Declare exactly one 'system { ... }' across the import graph (it may hold just the name, theme, user and deployment), or nest this declaration inside it.",
-      { node, code: "loom.top-level-domain-needs-single-system" },
-    );
+    accept("error", diagMessage("loom.top-level-domain-needs-single-system", { kw, reason }), {
+      node,
+      code: "loom.top-level-domain-needs-single-system",
+    });
   }
 }
 
@@ -177,22 +176,18 @@ export function checkProjectSingletons(
 
   if (userCount > 1) {
     for (const node of localUser) {
-      accept(
-        "error",
-        `The project declares ${userCount} 'user { ... }' blocks, but a system admits at most one. ` +
-          "Keep a single user block (it may live in any file that composes into the system).",
-        { node, code: "loom.duplicate-user-block" },
-      );
+      accept("error", diagMessage("loom.duplicate-user-block", { userCount }), {
+        node,
+        code: "loom.duplicate-user-block",
+      });
     }
   }
   if (themeCount > 1) {
     for (const node of localTheme) {
-      accept(
-        "error",
-        `The project declares ${themeCount} 'theme { ... }' blocks, but a system admits at most one. ` +
-          "Keep a single theme block (it may live in any file that composes into the system).",
-        { node, code: "loom.duplicate-theme-block" },
-      );
+      accept("error", diagMessage("loom.duplicate-theme-block", { themeCount }), {
+        node,
+        code: "loom.duplicate-theme-block",
+      });
     }
   }
 }

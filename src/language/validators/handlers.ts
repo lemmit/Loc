@@ -17,6 +17,7 @@
 // `api-checks.ts`; these two are purely structural and gate at the AST side.)
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   type CommandHandler,
   isCommandHandler,
@@ -43,20 +44,17 @@ export function checkHandlerBodies(model: Model, accept: ValidationAcceptor): vo
     const kind = isCommandHandler(node) ? "commandHandler" : "queryHandler";
     const braced = hasBracedBody(node);
     if (node.extern && braced) {
-      accept(
-        "error",
-        `extern ${kind} '${node.name}' must be bodyless — its implementation is a ` +
-          `scaffold-once, user-owned file the generated dispatch calls, not a DSL body. ` +
-          `End the declaration with ';', or drop 'extern' to make it a normal handler.`,
-        { node, property: "name", code: "loom.extern-handler-has-body" },
-      );
+      accept("error", diagMessage("loom.extern-handler-has-body", { kind, name: node.name }), {
+        node,
+        property: "name",
+        code: "loom.extern-handler-has-body",
+      });
     } else if (!node.extern && !braced) {
-      accept(
-        "error",
-        `${kind} '${node.name}' requires a '{ … }' body. Mark it 'extern' (and end with ';') ` +
-          `to hand the implementation to a scaffold-once user-owned file.`,
-        { node, property: "name", code: "loom.handler-missing-body" },
-      );
+      accept("error", diagMessage("loom.handler-missing-body", { kind, name: node.name }), {
+        node,
+        property: "name",
+        code: "loom.handler-missing-body",
+      });
     }
   }
 }

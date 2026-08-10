@@ -3,6 +3,7 @@
 // storage map.
 
 import type { ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type { Platform } from "../../ir/types/loom-ir.js";
 import {
   backendPlatformNames,
@@ -133,7 +134,13 @@ export function checkDeployable(
       const menu = [...hostable].sort().join(", ") || "none";
       accept(
         "error",
-        `Deployable '${d.name}' (platform '${d.platform}') cannot host ui '${ui?.name}' framework '${uiFramework}'. This platform hosts: ${menu}. A runtime-coupled framework (e.g. 'phoenixLiveView'/LiveView) can only run on its own runtime; a static-bundle framework (e.g. 'react') runs on any static-asset host.`,
+        diagMessage("loom.ui-framework-unhostable", {
+          name: d.name,
+          platform: d.platform,
+          uiName: ui?.name,
+          uiFramework,
+          menu,
+        }),
         {
           node: d,
           property: d.hosts && d.hosts.length > 0 ? "hosts" : d.uiSugar ? "uiSugar" : "uiCompose",
@@ -184,7 +191,7 @@ export function checkDeployable(
     if (d.auth === "ui" && target.auth !== "required") {
       accept(
         "error",
-        `Frontend deployable '${d.name}' declares 'auth: ui' but its target '${target.name}' is not 'auth: required'; the guard has no session endpoint to probe.`,
+        diagMessage("loom.auth-ui-target-open", { name: d.name, targetName: target.name }),
         { node: d, property: "auth", code: "loom.auth-ui-target-open" },
       );
     }
@@ -209,11 +216,11 @@ export function checkDeployable(
     // `auth: ui` is the frontend guard; a backend enforces auth via
     // `auth: required` instead.
     if (d.auth === "ui") {
-      accept(
-        "error",
-        `Deployable '${d.name}' declares 'auth: ui', which is only valid on a frontend deployable; backends use 'auth: required'.`,
-        { node: d, property: "auth", code: "loom.auth-ui-on-backend" },
-      );
+      accept("error", diagMessage("loom.auth-ui-on-backend", { name: d.name }), {
+        node: d,
+        property: "auth",
+        code: "loom.auth-ui-on-backend",
+      });
     }
   }
 
@@ -294,11 +301,15 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     const avail = menu.length
       ? `Available: ${menu.map((v) => `'${v}'`).join(", ")}.`
       : `Platform '${family}' exposes no '${name}:' choices (realization axes apply to backend deployables).`;
-    accept("error", `'${name}: ${value}' on deployable '${d.name}' ${reason}. ${avail}`, {
-      node: d,
-      property: name,
-      code: "loom.platform-knob-out-of-menu",
-    });
+    accept(
+      "error",
+      diagMessage("loom.platform-knob-out-of-menu", { name, value, dName: d.name, reason, avail }),
+      {
+        node: d,
+        property: name,
+        code: "loom.platform-knob-out-of-menu",
+      },
+    );
   }
 
   // R3 — the backend's fixed emission STYLE must support the resolved
@@ -310,7 +321,12 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
   if (styleLayout && !styleLayout.ok) {
     accept(
       "error",
-      `'directoryLayout: ${styleLayout.layout}' on deployable '${d.name}' is not supported by the '${styleLayout.style}' emission style. Supported: ${styleLayout.supported.map((v) => `'${v}'`).join(", ")}.`,
+      diagMessage("loom.platform-knob-style-layout-mismatch", {
+        layout: styleLayout.layout,
+        name: d.name,
+        style: styleLayout.style,
+        supported: styleLayout.supported.map((v) => `'${v}'`).join(", "),
+      }),
       {
         node: d,
         property: "directoryLayout",

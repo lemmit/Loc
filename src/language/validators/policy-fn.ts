@@ -17,6 +17,7 @@
 //     = A()` (transitive self-reference).
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   isAggregate,
   isBoundedContext,
@@ -56,11 +57,11 @@ export function checkPolicyFns(model: Model, accept: ValidationAcceptor): void {
 function checkOnePolicyFn(fn: PolicyDecl, accept: ValidationAcceptor): void {
   // --- return type ----------------------------------------------------
   if (!returnsBool(fn)) {
-    accept(
-      "error",
-      `policy function '${fn.name}' must return 'bool' — an authorization predicate is a boolean point gate.`,
-      { node: fn, property: "returnType", code: "loom.policy-fn-return-type" },
-    );
+    accept("error", diagMessage("loom.policy-fn-return-type", { name: fn.name }), {
+      node: fn,
+      property: "returnType",
+      code: "loom.policy-fn-return-type",
+    });
   }
 
   // --- reference cycle ------------------------------------------------
@@ -69,11 +70,11 @@ function checkOnePolicyFn(fn: PolicyDecl, accept: ValidationAcceptor): void {
     const byName = new Map<string, PolicyDecl>();
     for (const m of ctx.members) if (isPolicyFn(m)) byName.set(m.name as string, m);
     if (participatesInCycle(fn, byName)) {
-      accept(
-        "error",
-        `policy function '${fn.name}' is part of a reference cycle. A policy function may not (transitively) reference itself.`,
-        { node: fn, property: "name", code: "loom.policy-fn-cycle" },
-      );
+      accept("error", diagMessage("loom.policy-fn-cycle", { name: fn.name }), {
+        node: fn,
+        property: "name",
+        code: "loom.policy-fn-cycle",
+      });
     }
   }
 }
@@ -178,9 +179,14 @@ function checkPolicyFnReference(
   if (got !== want) {
     accept(
       "error",
-      argc === undefined && want > 0
-        ? `policy function '${fn.name}' expects ${want} argument${want === 1 ? "" : "s"}; reference it as '${fn.name}(…)'.`
-        : `policy function '${fn.name}' expects ${want} argument${want === 1 ? "" : "s"}, but ${got} ${got === 1 ? "was" : "were"} supplied.`,
+      diagMessage("loom.policy-fn-arity", {
+        argc: argc === undefined && want > 0,
+        name: fn.name,
+        want,
+        want2: want === 1 ? "" : "s",
+        got,
+        got2: got === 1 ? "was" : "were",
+      }),
       { node: ref, code: "loom.policy-fn-arity" },
     );
   }

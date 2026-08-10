@@ -11,6 +11,7 @@
 // (the same hand-listed-and-test-pinned pattern as walker-stdlib.ts).
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import { AA_NORMAL, bestForegroundRatio, generateShades, isHexColor } from "../../util/color.js";
 import type { BuilderCall, Model, ThemeBlock } from "../generated/ast.js";
 
@@ -45,11 +46,11 @@ export function checkImageAltText(model: Model, accept: ValidationAcceptor): voi
     const showsImage = hasEntry(bc, "src") || (bc.type === "Image" && hasPositional(bc));
     if (!showsImage) continue;
 
-    accept(
-      "error",
-      `'${bc.type}' renders an image but has no text alternative. Add 'alt: "…"' describing it, or 'decorative: true' if it conveys nothing (renders alt=""). Alt text is human content Loom can't derive — a missing alt fails WCAG 1.1.1.`,
-      { node: bc, property: "type", code: "loom.a11y-missing-alt" },
-    );
+    accept("error", diagMessage("loom.a11y-missing-alt", { type: bc.type }), {
+      node: bc,
+      property: "type",
+      code: "loom.a11y-missing-alt",
+    });
   }
 }
 
@@ -72,11 +73,11 @@ export function checkIconOnlyButtonName(model: Model, accept: ValidationAcceptor
     if (hasPositional(bc)) continue;
     if (hasEntry(bc, "label")) continue;
 
-    accept(
-      "warning",
-      `Icon-only 'Button' has no accessible name — a screen reader announces the meaningless default "Button". Add visible text ('Button { "Delete", icon: "trash" }') or an accessible name ('label: "Delete"', emitted as aria-label). A control without a name fails WCAG 4.1.2.`,
-      { node: bc, property: "type", code: "loom.a11y-icon-only-no-name" },
-    );
+    accept("warning", diagMessage("loom.a11y-icon-only-no-name"), {
+      node: bc,
+      property: "type",
+      code: "loom.a11y-icon-only-no-name",
+    });
   }
 }
 
@@ -133,7 +134,12 @@ export function checkThemeContrast(model: Model, accept: ValidationAcceptor): vo
       if (ratio < AA_NORMAL) {
         accept(
           "warning",
-          `theme '${prop.name}' colour '${hex}' has no readable text on it (best contrast ${ratio.toFixed(2)}:1, WCAG-AA needs ${AA_NORMAL}:1). A control filled with it can't carry legible white or dark text — pick a colour a text colour clears AA on.`,
+          diagMessage("loom.a11y-theme-contrast", {
+            name: prop.name,
+            hex,
+            ratio: ratio.toFixed(2),
+            aaNormal: AA_NORMAL,
+          }),
           { node: prop, property: "value", code: "loom.a11y-theme-contrast" },
         );
       }

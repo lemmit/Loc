@@ -24,6 +24,7 @@
 // deployable-wiring checks live in `ir/validate/checks/system-checks.ts`.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import {
   CHANNEL_COMPATIBILITY,
   CHANNEL_TRANSPORT_TYPES,
@@ -46,7 +47,11 @@ export function checkChannels(model: Model, accept: ValidationAcceptor): void {
       if (!has) {
         accept(
           "error",
-          `channel '${ch.name}' key '${ch.key}' is not a field of carried event '${ev.name}'.`,
+          diagMessage("loom.channel-key-missing-field", {
+            name: ch.name,
+            key: ch.key,
+            evName: ev.name,
+          }),
           { node: ch, property: "key", code: "loom.channel-key-missing-field" },
         );
       }
@@ -65,13 +70,28 @@ export function checkChannels(model: Model, accept: ValidationAcceptor): void {
     if (!CHANNEL_TRANSPORT_TYPES.has(storageType)) {
       accept(
         "error",
-        `channelSource '${cs.name}' binds channel '${ch.name}' to storage '${cs.use?.ref?.name}' of type '${storageType}', which is not a channel transport. Supported transports${ok ? ` for ${delivery}/${retention}` : ""}: ${[...(ok ?? CHANNEL_TRANSPORT_TYPES)].join(", ")}.`,
+        diagMessage("loom.channelsource-unsupported-transport", {
+          name: cs.name,
+          chName: ch.name,
+          refName: cs.use?.ref?.name,
+          storageType,
+          ok: ok ? ` for ${delivery}/${retention}` : "",
+          ok2: [...(ok ?? CHANNEL_TRANSPORT_TYPES)].join(", "),
+        }),
         { node: cs, property: "use", code: "loom.channelsource-unsupported-transport" },
       );
     } else if (ok && !ok.has(storageType)) {
       accept(
         "error",
-        `channelSource '${cs.name}' binds channel '${ch.name}' (${delivery}/${retention}) to storage '${cs.use?.ref?.name}' of type '${storageType}', which can't realise it. Compatible: ${[...ok].join(", ")}.`,
+        diagMessage("loom.channelsource-incompatible", {
+          name: cs.name,
+          chName: ch.name,
+          delivery,
+          retention,
+          refName: cs.use?.ref?.name,
+          storageType,
+          ok: [...ok].join(", "),
+        }),
         { node: cs, property: "use", code: "loom.channelsource-incompatible" },
       );
     } else if (
@@ -93,7 +113,16 @@ export function checkChannels(model: Model, accept: ValidationAcceptor): void {
         .map(([t]) => t);
       accept(
         "error",
-        `channelSource '${cs.name}' binds channel '${ch.name}' (${delivery}/${retention}) to storage '${cs.use?.ref?.name}' of type '${storageType}'. That combination is compatible but not yet provisioned by a shipped ${storageType} driver.${alternatives.length ? ` Use ${alternatives.join(" or ")} instead,` : ""} or pick a combo ${storageType} does ship (${shipped.length ? shipped.join(", ") : "none"}).`,
+        diagMessage("loom.channelsource-not-yet-shipped", {
+          name: cs.name,
+          chName: ch.name,
+          delivery,
+          retention,
+          refName: cs.use?.ref?.name,
+          storageType,
+          length: alternatives.length ? ` Use ${alternatives.join(" or ")} instead,` : "",
+          length2: shipped.length ? shipped.join(", ") : "none",
+        }),
         { node: cs, property: "use", code: "loom.channelsource-not-yet-shipped" },
       );
     }

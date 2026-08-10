@@ -40,6 +40,7 @@
 //      resolver and a route would dispatch ambiguously.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { diagMessage } from "../../diagnostics/messages.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -134,9 +135,7 @@ function checkHandlerNames(ctx: BoundedContext, accept: ValidationAcceptor): voi
       if (seen.has(m.name)) {
         accept(
           "error",
-          `Duplicate handler '${m.name}' in context '${ctx.name}'; a ${kind} shares its name ` +
-            `with another handler or a workflow 'handle'. A 'route -> ${ctx.name}.${m.name}' would ` +
-            `be ambiguous — handler and workflow-handle names must be unique within a context.`,
+          diagMessage("loom.duplicate-handler", { name: m.name, ctxName: ctx.name, kind }),
           { node: m, property: "name", code: "loom.duplicate-handler" },
         );
       } else {

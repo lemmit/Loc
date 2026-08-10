@@ -3,6 +3,7 @@
 // resource-op expressions.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import { createInputFields, omittableCreateInputs } from "../../enrich/wire-projection.js";
 import { verbsForKind } from "../../resource-verbs.js";
 import type {
@@ -74,11 +75,11 @@ export function validateEventConsumersCarried(
           diags.push({
             severity: "warning",
             code: "loom.reactor-event-uncarried",
-            message:
-              `workflow '${wf.name}': ${cons.label} subscribes to event '${cons.event}', but no ` +
-              `'channel' carries it. In-process dispatch is channel-routed, so this consumer never ` +
-              `fires — declare a channel (e.g. 'channel C { carries: ${cons.event} }') in the ` +
-              `event's context.`,
+            message: diagMessage("loom.reactor-event-uncarried", {
+              name: wf.name,
+              label: cons.label,
+              event: cons.event,
+            }),
             source: `${c.name}/${wf.name}`,
           });
         }
@@ -98,11 +99,11 @@ export function validateEventConsumersCarried(
           diags.push({
             severity: "warning",
             code: "loom.projection-event-uncarried",
-            message:
-              `projection '${proj.name}': on(${h.param}: ${h.event}) folds event '${h.event}', but ` +
-              `no 'channel' carries it. In-process dispatch is channel-routed, so this fold never ` +
-              `runs and the read-model row is never written — declare a channel (e.g. ` +
-              `'channel C { carries: ${h.event} }') in the event's context.`,
+            message: diagMessage("loom.projection-event-uncarried", {
+              name: proj.name,
+              param: h.param,
+              event: h.event,
+            }),
             source: `${c.name}/${proj.name}`,
           });
         }
@@ -135,11 +136,14 @@ export function validateEventChannelAmbiguous(
           diags.push({
             severity: "warning",
             code: "loom.reactor-channel-ambiguous",
-            message:
-              `workflow '${wf.name}': ${cons.label} subscribes to event '${cons.event}', which is ` +
-              `carried by ${carriers.length} channels (${carriers.join(", ")}). In-process dispatch ` +
-              `records the first by declaration order ('${carriers[0]}') — carry '${cons.event}' on a ` +
-              `single channel to keep routing unambiguous.`,
+            message: diagMessage("loom.reactor-channel-ambiguous", {
+              name: wf.name,
+              label: cons.label,
+              event: cons.event,
+              length: carriers.length,
+              carriers: carriers.join(", "),
+              carriers2: carriers[0],
+            }),
             source: `${c.name}/${wf.name}`,
           });
         }
@@ -167,7 +171,7 @@ export function validateWorkflows(
       diags.push({
         severity: "error",
         code: "loom.duplicate-workflow",
-        message: `context '${ctx.name}': workflow '${wf.name}' is declared more than once.`,
+        message: diagMessage("loom.duplicate-workflow", { name: ctx.name, wfName: wf.name }),
         source: `${ctx.name}/${wf.name}`,
       });
     } else {
@@ -178,7 +182,11 @@ export function validateWorkflows(
       diags.push({
         severity: "error",
         code: "loom.workflow-name-collision",
-        message: `context '${ctx.name}': workflow '${wf.name}' collides with the ${clash} of the same name.`,
+        message: diagMessage("loom.workflow-name-collision", {
+          name: ctx.name,
+          wfName: wf.name,
+          clash,
+        }),
         source: `${ctx.name}/${wf.name}`,
       });
     }
@@ -217,7 +225,11 @@ function validateWorkflowFunctions(wf: WorkflowIR, diags: LoomDiagnostic[], ctxN
       diags.push({
         severity: "error",
         code: "loom.workflow-function-uses-state",
-        message: `context '${ctxName}': workflow '${wf.name}' function '${fn.name}' reads the workflow's state (\`this\`). A workflow function is a pure helper over its parameters — pass the value in as an argument instead.`,
+        message: diagMessage("loom.workflow-function-uses-state", {
+          ctxName,
+          name: wf.name,
+          fnName: fn.name,
+        }),
         source: `${ctxName}/${wf.name}`,
       });
     }
@@ -254,9 +266,10 @@ function validateWorkflowCreates(wf: WorkflowIR, diags: LoomDiagnostic[], ctxNam
     diags.push({
       severity: "error",
       code: "loom.canonical-create-duplicate-workflow",
-      message:
-        `workflow '${wf.name}' declares ${canonical.length} unnamed 'create' starters; ` +
-        `at most one canonical create is allowed. Name the additional entry points (e.g. 'create byImport(...)').`,
+      message: diagMessage("loom.canonical-create-duplicate-workflow", {
+        name: wf.name,
+        length: canonical.length,
+      }),
       source: src,
     });
   }
@@ -272,9 +285,11 @@ function validateWorkflowCreates(wf: WorkflowIR, diags: LoomDiagnostic[], ctxNam
       diags.push({
         severity: "error",
         code: "loom.create-name-conflict-workflow",
-        message:
-          `workflow '${wf.name}' declares ${count} 'create' starters named '${name}'; ` +
-          `create names must be unique within a workflow.`,
+        message: diagMessage("loom.create-name-conflict-workflow", {
+          name: wf.name,
+          count,
+          name2: name,
+        }),
         source: src,
       });
     }
@@ -295,10 +310,7 @@ function validateWorkflowCreates(wf: WorkflowIR, diags: LoomDiagnostic[], ctxNam
       diags.push({
         severity: "error",
         code: "loom.event-create-overlap-workflow",
-        message:
-          `workflow '${wf.name}' declares ${count} event-triggered 'create' starters on event ` +
-          `'${event}'; an event may start at most one create per workflow (the runtime can't ` +
-          `choose which instance to allocate).`,
+        message: diagMessage("loom.event-create-overlap-workflow", { name: wf.name, count, event }),
         source: src,
       });
     }
@@ -361,10 +373,7 @@ function validateWorkflowCorrelation(
   if (idFields.length === 0) {
     diags.push({
       severity: "error",
-      message:
-        `workflow '${wf.name}' has event consumers (reactors / event-triggered creates) but no ` +
-        `correlation field. Declare one id-shaped state field (e.g. 'orderId: Order id') for the ` +
-        `runtime to route inbound events to.`,
+      message: diagMessage("loom.workflow-correlation-required", { name: wf.name }),
       source: src,
       code: "loom.workflow-correlation-required",
     });
@@ -373,10 +382,11 @@ function validateWorkflowCorrelation(
   if (idFields.length > 1) {
     diags.push({
       severity: "error",
-      message:
-        `workflow '${wf.name}' has ${idFields.length} id-shaped state fields ` +
-        `(${idFields.map((f) => f.name).join(", ")}); the correlation field can't be inferred. ` +
-        `A workflow with event consumers must declare exactly one id-shaped field.`,
+      message: diagMessage("loom.correlation-field-ambiguous", {
+        name: wf.name,
+        length: idFields.length,
+        idFields: idFields.map((f) => f.name).join(", "),
+      }),
       source: src,
       code: "loom.correlation-field-ambiguous",
     });
@@ -391,10 +401,13 @@ function validateWorkflowCorrelation(
       if (byTarget !== corrTarget) {
         diags.push({
           severity: "error",
-          message:
-            `workflow '${wf.name}': the 'by' expression on ${sub.label} yields ` +
-            `${byTarget ? `'${byTarget} id'` : "a non-id value"}, but the correlation field ` +
-            `'${corr.name}' is '${corrTarget} id'. A 'by' clause must route by the correlation field's type.`,
+          message: diagMessage("loom.correlation-type-mismatch", {
+            name: wf.name,
+            label: sub.label,
+            byTarget: byTarget ? `'${byTarget} id'` : "a non-id value",
+            corrName: corr.name,
+            corrTarget,
+          }),
           source: src,
           code: "loom.correlation-type-mismatch",
         });
@@ -411,9 +424,12 @@ function validateWorkflowCorrelation(
       if (!hasMatch) {
         diags.push({
           severity: "error",
-          message:
-            `workflow '${wf.name}': ${sub.label} omits 'by' but event '${sub.event}' has no ` +
-            `field named '${corr.name}' to infer routing from. Add a 'by <expr>' clause.`,
+          message: diagMessage("loom.correlation-uninferrable", {
+            name: wf.name,
+            label: sub.label,
+            event: sub.event,
+            corrName: corr.name,
+          }),
           source: src,
           code: "loom.correlation-uninferrable",
         });
@@ -453,7 +469,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-unknown-name",
-            message: `workflow '${wf.name}': ${st.kind} references unknown name '${st.expr.name}'.`,
+            message: diagMessage("loom.workflow-unknown-name", {
+              name: wf.name,
+              kind: st.kind,
+              exprName: st.expr.name,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
         }
@@ -464,7 +484,10 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-emit-unknown-event",
-            message: `workflow '${wf.name}': emit refers to unknown event '${st.eventName}'.`,
+            message: diagMessage("loom.workflow-emit-unknown-event", {
+              name: wf.name,
+              eventName: st.eventName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -476,7 +499,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-emit-missing-field",
-              message: `workflow '${wf.name}': emit '${ev.name}' is missing field '${f}'.`,
+              message: diagMessage("loom.workflow-emit-missing-field", {
+                name: wf.name,
+                evName: ev.name,
+                f,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
           }
@@ -486,7 +513,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-emit-unknown-field",
-              message: `workflow '${wf.name}': emit '${ev.name}' has unknown field '${f}'.`,
+              message: diagMessage("loom.workflow-emit-unknown-field", {
+                name: wf.name,
+                evName: ev.name,
+                f,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
           }
@@ -500,7 +531,10 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-create-unknown-aggregate",
-            message: `workflow '${wf.name}': '${st.aggName}.create(...)' references unknown aggregate '${st.aggName}'.`,
+            message: diagMessage("loom.workflow-create-unknown-aggregate", {
+              name: wf.name,
+              aggName: st.aggName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -523,7 +557,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-create-missing-field",
-              message: `workflow '${wf.name}': '${st.aggName}.create(...)' is missing required field '${r}'.`,
+              message: diagMessage("loom.workflow-create-missing-field", {
+                name: wf.name,
+                aggName: st.aggName,
+                r,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
           }
@@ -534,7 +572,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-create-unknown-field",
-              message: `workflow '${wf.name}': '${st.aggName}.create(...)' has unknown field '${p}'.`,
+              message: diagMessage("loom.workflow-create-unknown-field", {
+                name: wf.name,
+                aggName: st.aggName,
+                p,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
           }
@@ -549,7 +591,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-unknown-repository",
-            message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references unknown repository '${st.repoName}'.`,
+            message: diagMessage("loom.workflow-unknown-repository", {
+              name: wf.name,
+              repoName: st.repoName,
+              method: st.method,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -558,7 +604,12 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-unknown-repository-method",
-            message: `workflow '${wf.name}': repository '${st.repoName}' has no method '${st.method}'.  Available: getById, ${repo.finds.map((f) => f.name).join(", ") || "(no declared finds)"}.`,
+            message: diagMessage("loom.workflow-unknown-repository-method", {
+              name: wf.name,
+              repoName: st.repoName,
+              method: st.method,
+              finds: repo.finds.map((f) => f.name).join(", ") || "(no declared finds)",
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -573,10 +624,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-currentuser-find",
-            message:
-              `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references a currentUser-bound find, ` +
-              `which workflows don't yet pass the user into.  Use 'getById' with an explicit id parameter, ` +
-              `or call the user-aware find from the route layer instead.`,
+            message: diagMessage("loom.workflow-currentuser-find", {
+              name: wf.name,
+              repoName: st.repoName,
+              method: st.method,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -589,7 +641,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-load-array-unsupported",
-              message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns an array; v1 supports only single non-nullable aggregates.  Split iteration into a follow-up workflow or use getById.`,
+              message: diagMessage("loom.workflow-load-array-unsupported", {
+                name: wf.name,
+                repoName: st.repoName,
+                method: st.method,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -598,7 +654,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-load-nullable-unsupported",
-              message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns a nullable; v1 supports only single non-nullable aggregates.  Use getById (throws → 404) instead.`,
+              message: diagMessage("loom.workflow-load-nullable-unsupported", {
+                name: wf.name,
+                repoName: st.repoName,
+                method: st.method,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -619,7 +679,10 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.workflow-run-unknown-repository",
-              message: `workflow '${wf.name}': a criterion query on '${st.repoName}' references unknown repository '${st.repoName}'.`,
+              message: diagMessage(
+                "loom.workflow-run-unknown-repository#workflow-a-criterion-query",
+                { name: wf.name, repoName: st.repoName },
+              ),
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -630,7 +693,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.findall-unknown-criterion",
-              message: `workflow '${wf.name}': criterion query on '${st.repoName}' references unknown criterion '${critName}'.`,
+              message: diagMessage("loom.findall-unknown-criterion", {
+                name: wf.name,
+                repoName: st.repoName,
+                critName,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -640,7 +707,13 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.findall-criterion-mismatch",
-              message: `workflow '${wf.name}': criterion '${critName}' is over '${candidate || "bool"}', but the criterion query on '${st.repoName}' queries '${st.aggName}'.  It needs a criterion 'of ${st.aggName}'.`,
+              message: diagMessage("loom.findall-criterion-mismatch", {
+                name: wf.name,
+                critName,
+                candidate: candidate || "bool",
+                repoName: st.repoName,
+                aggName: st.aggName,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -649,7 +722,13 @@ function validateWorkflowBody(
             diags.push({
               severity: "error",
               code: "loom.findall-criterion-arity",
-              message: `workflow '${wf.name}': criterion '${critName}' takes ${crit.params.length} argument(s), but the criterion query on '${st.repoName}' passed ${st.retrievalArgs.length}.`,
+              message: diagMessage("loom.findall-criterion-arity", {
+                name: wf.name,
+                critName,
+                length: crit.params.length,
+                repoName: st.repoName,
+                retrievalArgsLength: st.retrievalArgs.length,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
             break;
@@ -658,7 +737,11 @@ function validateWorkflowBody(
             diags.push({
               severity: "warning",
               code: "loom.findall-no-page",
-              message: `workflow '${wf.name}': criterion query '${critName}' on '${st.repoName}' reads the full result set — an unbounded list read.  Supply 'page: { offset: 0, limit: N }' to bound it.`,
+              message: diagMessage("loom.findall-no-page", {
+                name: wf.name,
+                critName,
+                repoName: st.repoName,
+              }),
               source: `${ctx.name}/${wf.name}`,
             });
           }
@@ -672,7 +755,10 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-run-unknown-repository",
-            message: `workflow '${wf.name}': '${st.repoName}.run(...)' references unknown repository '${st.repoName}'.`,
+            message: diagMessage("loom.workflow-run-unknown-repository#workflow-run-references", {
+              name: wf.name,
+              repoName: st.repoName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -682,7 +768,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-run-unknown-retrieval",
-            message: `workflow '${wf.name}': '${st.repoName}.run(${st.retrievalName}(...))' references unknown retrieval '${st.retrievalName}'.`,
+            message: diagMessage("loom.workflow-run-unknown-retrieval", {
+              name: wf.name,
+              repoName: st.repoName,
+              retrievalName: st.retrievalName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -692,7 +782,13 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-run-retrieval-mismatch",
-            message: `workflow '${wf.name}': retrieval '${st.retrievalName}' is over '${target}', but '${st.repoName}' is a repository for '${st.aggName}'.`,
+            message: diagMessage("loom.workflow-run-retrieval-mismatch", {
+              name: wf.name,
+              retrievalName: st.retrievalName,
+              target,
+              repoName: st.repoName,
+              aggName: st.aggName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
         }
@@ -714,7 +810,7 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-foreach-source",
-            message: `workflow '${wf.name}': 'for ${st.var} in ...' must iterate a 'let xs = Repo.run(...)' result (the only aggregate array in v1).`,
+            message: diagMessage("loom.workflow-foreach-source", { name: wf.name, var: st.var }),
             source: `${ctx.name}/${wf.name}`,
           });
         }
@@ -726,7 +822,10 @@ function validateWorkflowBody(
               diags.push({
                 severity: "error",
                 code: "loom.workflow-foreach-unknown-binding",
-                message: `workflow '${wf.name}': in 'for ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                message: diagMessage(
+                  "loom.workflow-foreach-unknown-binding#workflow-in-for-references",
+                  { name: wf.name, var: st.var, target: inner.target, op: inner.op },
+                ),
                 source: `${ctx.name}/${wf.name}`,
               });
             }
@@ -745,7 +844,7 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.iflet-bad-source",
-            message: `workflow '${wf.name}': 'if let ${st.var} = ...' must bind 'Repo.find(<Criterion>)' — the only optional source in v1.`,
+            message: diagMessage("loom.iflet-bad-source", { name: wf.name, var: st.var }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -755,7 +854,10 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-run-unknown-repository",
-            message: `workflow '${wf.name}': a criterion query on '${st.repoName}' references unknown repository '${st.repoName}'.`,
+            message: diagMessage(
+              "loom.workflow-run-unknown-repository#workflow-a-criterion-query",
+              { name: wf.name, repoName: st.repoName },
+            ),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -766,7 +868,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.findall-unknown-criterion",
-            message: `workflow '${wf.name}': criterion query on '${st.repoName}' references unknown criterion '${critName}'.`,
+            message: diagMessage("loom.findall-unknown-criterion", {
+              name: wf.name,
+              repoName: st.repoName,
+              critName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -776,7 +882,13 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.findall-criterion-mismatch",
-            message: `workflow '${wf.name}': criterion '${critName}' is over '${candidate || "bool"}', but the criterion query on '${st.repoName}' queries '${st.aggName}'.  It needs a criterion 'of ${st.aggName}'.`,
+            message: diagMessage("loom.findall-criterion-mismatch", {
+              name: wf.name,
+              critName,
+              candidate: candidate || "bool",
+              repoName: st.repoName,
+              aggName: st.aggName,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -785,7 +897,13 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.findall-criterion-arity",
-            message: `workflow '${wf.name}': criterion '${critName}' takes ${crit.params.length} argument(s), but the criterion query on '${st.repoName}' passed ${st.retrievalArgs.length}.`,
+            message: diagMessage("loom.findall-criterion-arity", {
+              name: wf.name,
+              critName,
+              length: crit.params.length,
+              repoName: st.repoName,
+              retrievalArgsLength: st.retrievalArgs.length,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -798,7 +916,10 @@ function validateWorkflowBody(
                 diags.push({
                   severity: "error",
                   code: "loom.workflow-foreach-unknown-binding",
-                  message: `workflow '${wf.name}': in 'if let ${st.var}', '${inner.target}.${inner.op}(...)' references unknown binding '${inner.target}'.`,
+                  message: diagMessage(
+                    "loom.workflow-foreach-unknown-binding#workflow-in-if-let-references",
+                    { name: wf.name, var: st.var, target: inner.target, op: inner.op },
+                  ),
                   source: `${ctx.name}/${wf.name}`,
                 });
               }
@@ -819,7 +940,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-unknown-binding",
-            message: `workflow '${wf.name}': '${st.target}.${st.op}(...)' references unknown let-binding '${st.target}', or '${st.target}' isn't bound to an aggregate.`,
+            message: diagMessage("loom.workflow-unknown-binding", {
+              name: wf.name,
+              target: st.target,
+              op: st.op,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -831,7 +956,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-unknown-operation",
-            message: `workflow '${wf.name}': aggregate '${aggName}' has no operation '${st.op}'.`,
+            message: diagMessage("loom.workflow-unknown-operation", {
+              name: wf.name,
+              aggName,
+              op: st.op,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -840,7 +969,11 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-private-operation",
-            message: `workflow '${wf.name}': '${aggName}.${op.name}' is private.  Workflows can only call public operations.`,
+            message: diagMessage("loom.workflow-private-operation", {
+              name: wf.name,
+              aggName,
+              opName: op.name,
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
           break;
@@ -874,7 +1007,10 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-eventsourced-assign",
-            message: `workflow '${wf.name}': an event-sourced workflow can't assign its own state directly ('${st.target.segments.join(".")}').  Change state by emitting an event with a matching 'apply' clause.`,
+            message: diagMessage("loom.workflow-eventsourced-assign", {
+              name: wf.name,
+              segments: st.target.segments.join("."),
+            }),
             source: `${ctx.name}/${wf.name}`,
           });
         }
@@ -885,7 +1021,7 @@ function validateWorkflowBody(
           diags.push({
             severity: "error",
             code: "loom.workflow-unrecognised-statement",
-            message: `workflow '${wf.name}': statement isn't a recognised workflow form.  Allowed: precondition, let (factory / repo / scalar), name.op(args), emit, own-state assignment ('field := value').`,
+            message: diagMessage("loom.workflow-unrecognised-statement", { name: wf.name }),
             source: `${ctx.name}/${wf.name}`,
           });
         }
@@ -903,7 +1039,7 @@ function validateWorkflowBody(
     diags.push({
       severity: "warning",
       code: "loom.transactional-no-effect",
-      message: `workflow '${wf.name}': declared 'transactional' but does not mutate any aggregate or emit any event — the keyword has no effect.`,
+      message: diagMessage("loom.transactional-no-effect", { name: wf.name }),
       source: `${ctx.name}/${wf.name}`,
     });
   }
@@ -916,7 +1052,10 @@ function validateWorkflowBody(
     diags.push({
       severity: "error",
       code: "loom.isolation-requires-transactional",
-      message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
+      message: diagMessage("loom.isolation-requires-transactional", {
+        name: wf.name,
+        isolation: wf.isolation,
+      }),
       source: `${ctx.name}/${wf.name}`,
     });
   }
@@ -941,7 +1080,13 @@ function checkResourceOpExpr(
     diags.push({
       severity: "error",
       code: "loom.resource-verb-invalid",
-      message: `workflow '${wf.name}': '${op.resourceName}.${op.verb}(...)' — '${op.verb}' is not a valid verb for a ${op.resourceKind} resource.  Available: ${verbsForKind(op.resourceKind).join(", ") || "(none)"}.`,
+      message: diagMessage("loom.resource-verb-invalid", {
+        name: wf.name,
+        resourceName: op.resourceName,
+        verb: op.verb,
+        resourceKind: op.resourceKind,
+        resourceKind2: verbsForKind(op.resourceKind).join(", ") || "(none)",
+      }),
       source: `${ctx.name}/${wf.name}`,
     });
   }
@@ -949,7 +1094,11 @@ function checkResourceOpExpr(
     diags.push({
       severity: "error",
       code: "loom.resource-op-in-transaction",
-      message: `workflow '${wf.name}': resource operation '${op.resourceName}.${op.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
+      message: diagMessage("loom.resource-op-in-transaction", {
+        name: wf.name,
+        resourceName: op.resourceName,
+        verb: op.verb,
+      }),
       source: `${ctx.name}/${wf.name}`,
     });
   }

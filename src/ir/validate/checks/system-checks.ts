@@ -4,6 +4,7 @@
 // auth + permission registration, inheritance + event-sourced storage.
 // -------------------------------------------------------------------------
 
+import { diagMessage } from "../../../diagnostics/messages.js";
 import {
   platformFamily,
   platformOwnsBackend,
@@ -146,7 +147,13 @@ export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomD
           diags.push({
             severity: "error",
             code: "loom.projection-whole-table-aggregation-unsupported",
-            message: `projection '${p.name}': 'select ${s.field} = ${s.aggregate.op}(…)' is a whole-table aggregation, which deployable '${d.name}' (platform '${d.platform}') can't generate yet — only the node (Hono) backend has ported it. Host the projection on a supported deployable, or express the read per-row.`,
+            message: diagMessage("loom.projection-whole-table-aggregation-unsupported", {
+              name: p.name,
+              field: s.field,
+              op: s.aggregate.op,
+              dName: d.name,
+              platform: d.platform,
+            }),
             source: `${c.name}/${p.name}`,
           });
         }
@@ -175,7 +182,11 @@ export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagn
         diags.push({
           severity: "error",
           code: "loom.projection-groupby-unsupported-backend",
-          message: `projection '${p.name}' uses 'group by' (the grouped read model), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Host the projection on a supported deployable, or express the read per-row.`,
+          message: diagMessage("loom.projection-groupby-unsupported-backend", {
+            name: p.name,
+            dName: d.name,
+            platform: d.platform,
+          }),
           source: `${c.name}/${p.name}`,
         });
       }
@@ -198,7 +209,11 @@ export function validatePagedQueryHandlerBackend(sys: SystemIR, diags: LoomDiagn
         diags.push({
           severity: "error",
           code: "loom.paged-query-handler-unsupported-backend",
-          message: `queryHandler '${h.name}' returns a \`paged\` envelope, which is currently only emitted on the node (Hono) backend; deployable '${d.name}' (platform '${d.platform}') can't generate it yet.`,
+          message: diagMessage("loom.paged-query-handler-unsupported-backend", {
+            name: h.name,
+            dName: d.name,
+            platform: d.platform,
+          }),
           source: `${c.name}/${h.name}`,
         });
       }
@@ -221,7 +236,11 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
         diags.push({
           severity: "error",
           code: "loom.projection-query-time-unsupported",
-          message: `projection '${p.name}' uses the query-time comprehension ('from'/'where'/'join'/'select'), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Express the read as a folded 'projection', or host it on a supported deployable.`,
+          message: diagMessage("loom.projection-query-time-unsupported", {
+            name: p.name,
+            dName: d.name,
+            platform: d.platform,
+          }),
           source: `${c.name}/${p.name}`,
         });
       }
@@ -253,7 +272,12 @@ export function validateWorkflowSourceProjectionBackend(
         diags.push({
           severity: "error",
           code: "loom.projection-workflow-source-unsupported-backend",
-          message: `projection '${p.name}' is sourced 'from ${p.query.source}' (a workflow's instance rows), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Host it on a supported backend, or source the projection from an aggregate.`,
+          message: diagMessage("loom.projection-workflow-source-unsupported-backend", {
+            name: p.name,
+            source: p.query.source,
+            dName: d.name,
+            platform: d.platform,
+          }),
           source: `${c.name}/${p.name}`,
         });
       }
@@ -284,7 +308,12 @@ export function validateProjectionSourceProjectionBackend(
         diags.push({
           severity: "error",
           code: "loom.projection-source-unsupported-backend",
-          message: `projection '${p.name}' is sourced 'from ${p.query.source}' (another projection's read-model rows), which deployable '${d.name}' (platform '${d.platform}') can't generate yet. Host it on a supported backend, or source the projection from an aggregate.`,
+          message: diagMessage("loom.projection-source-unsupported-backend", {
+            name: p.name,
+            source: p.query.source,
+            dName: d.name,
+            platform: d.platform,
+          }),
           source: `${c.name}/${p.name}`,
         });
       }
@@ -321,13 +350,11 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
       diags.push({
         severity: "error",
         code: "loom.datagrid-unsupported-target",
-        message:
-          `page '${page.name}' uses 'DataGrid', which deployable '${d.name}' can't render ` +
-          `(frontend '${fw || "unknown"}'). DataGrid is a TanStack row model, so it ships wherever ` +
-          `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
-          `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
-          `analogue). Use 'Table' — it supports column sort and pagination on every frontend, ` +
-          `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
+        message: diagMessage("loom.datagrid-unsupported-target", {
+          name: page.name,
+          dName: d.name,
+          fw: fw || "unknown",
+        }),
         source: `${ui.name}/${page.name}`,
       });
     }
@@ -361,11 +388,11 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
       diags.push({
         severity: "error",
         code: "loom.chart-unsupported-target",
-        message:
-          `${what} uses 'Chart', which deployable '${d.name}' can't render ` +
-          `(frontend '${d.uiFramework ?? "unknown"}'). Chart ships on react — on every ` +
-          `react design pack. Host this ui on a react deployable, or bind the grouped ` +
-          `projection to 'Table' — it renders the same rows on every frontend.`,
+        message: diagMessage("loom.chart-unsupported-target", {
+          what,
+          name: d.name,
+          uiFramework: d.uiFramework ?? "unknown",
+        }),
         source: `${ui.name}/${what}`,
       });
     }
@@ -409,10 +436,12 @@ export function validateUiProjectionReadFramework(sys: SystemIR, diags: LoomDiag
         diags.push({
           severity: "error",
           code: "loom.ui-projection-read-unsupported",
-          message:
-            `${what} reads projection '${name}', which deployable '${d.name}' can't render ` +
-            `(frontend '${fw || "unknown"}' generates no projection client). Projection reads ` +
-            `ship on react today; host this ui there, or read the source aggregate directly.`,
+          message: diagMessage("loom.ui-projection-read-unsupported#frontend-has-no-client", {
+            what,
+            name,
+            dName: d.name,
+            fw: fw || "unknown",
+          }),
           source: `${ui.name}/${what}`,
         });
       }
@@ -448,7 +477,10 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
       diags.push({
         severity: "error",
         code: "loom.auth-ui-unsupported-framework",
-        message: `Deployable '${d.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${d.uiFramework ?? "unknown"}' isn't supported yet.`,
+        message: diagMessage("loom.auth-ui-unsupported-framework", {
+          name: d.name,
+          uiFramework: d.uiFramework ?? "unknown",
+        }),
         source: d.name,
       });
     }
@@ -500,11 +532,13 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         diags.push({
           severity: "warning",
           code: "loom.ui-realtime-unsupported",
-          message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its ${
-            target
+          message: diagMessage("loom.ui-realtime-unsupported#backend-serves-no-sse", {
+            name: d.name,
+            uiName,
+            target: target
               ? `target backend '${target.name}' (platform '${backendPlatform}')`
-              : `backend platform '${backendPlatform}'`
-          } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python) or remove the handlers.`,
+              : `backend platform '${backendPlatform}'`,
+          }),
           source: d.name,
         });
         continue;
@@ -513,7 +547,11 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
       diags.push({
         severity: "warning",
         code: "loom.ui-realtime-unsupported",
-        message: `Deployable '${d.name}': ui '${uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${framework}' has no realtime consumption, so the handlers are silently dropped.`,
+        message: diagMessage("loom.ui-realtime-unsupported#frontend-has-no-consumer", {
+          name: d.name,
+          uiName,
+          framework,
+        }),
         source: d.name,
       });
     }
@@ -564,16 +602,11 @@ export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagno
           diags.push({
             severity: "error",
             code: "loom.flutter-primitive-unsupported",
-            message:
-              `${where}: uses the '${e.name}' primitive, but the Flutter frontend has no renderer ` +
-              `for it yet (FileUpload is the one deferred primitive — a standalone multipart upload ` +
-              `needs the File-type-on-Flutter foundation) — so hosting deployable '${d.name}' ` +
-              `(platform 'flutter') would emit a \`// flutter pack: no renderer\` comment where the ` +
-              `widget should be and the element would silently vanish.  Host this page on an SPA ` +
-              `frontend (react / vue / svelte / angular) or a Feliz/Phoenix deployable, or use the ` +
-              `supported primitives (display / layout, the Field/MultilineField/PasswordField/` +
-              `NumberField/Toggle/SelectField inputs, Tabs, forms, and Modal) until '${e.name}' ` +
-              `gains a Flutter renderer.`,
+            message: diagMessage("loom.flutter-primitive-unsupported", {
+              where,
+              name: e.name,
+              dName: d.name,
+            }),
             source: where,
           });
         });
@@ -631,7 +664,10 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             diags.push({
               severity: "error",
               code: "loom.default-deny-ungated",
-              message: `denyByDefault: '${a.name}.${op.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+              message: diagMessage("loom.default-deny-ungated#denybydefault-is-reachable", {
+                name: a.name,
+                opName: op.name,
+              }),
               source: `${a.name}/${op.name}`,
             });
           }
@@ -645,7 +681,9 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             diags.push({
               severity: "error",
               code: "loom.default-deny-ungated",
-              message: `denyByDefault: workflow '${entry.label}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+              message: diagMessage("loom.default-deny-ungated#denybydefault-workflow", {
+                label: entry.label,
+              }),
               source: `${wf.name}/${entry.key}`,
             });
           }
@@ -664,7 +702,10 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             diags.push({
               severity: "error",
               code: "loom.default-deny-ungated",
-              message: `denyByDefault: find '${repo.name}.${find.name}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+              message: diagMessage("loom.default-deny-ungated#denybydefault-find-is-reachable", {
+                name: repo.name,
+                findName: find.name,
+              }),
               source: `find/${repo.name}.${find.name}`,
             });
           }
@@ -681,7 +722,11 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
           diags.push({
             severity: "error",
             code: "loom.audit-history-ungated",
-            message: `denyByDefault: '${repo.aggregateName}' is \`audited\`, so it serves \`GET /${snake(plural(repo.aggregateName))}/{id}/history\`, but its list read declares no \`requires\` gate — the change history is reachable by any authenticated caller. Declare \`find all(): ${repo.aggregateName}[] requires <expr>\` on '${repo.name}'; history inherits that gate (use \`requires true\` to allow anonymous access).`,
+            message: diagMessage("loom.audit-history-ungated", {
+              aggregateName: repo.aggregateName,
+              aggregateName2: snake(plural(repo.aggregateName)),
+              name: repo.name,
+            }),
             source: `find/${repo.name}.history`,
           });
         }
@@ -816,7 +861,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       code: "loom.ui-id-ref-unknown-aggregate",
-      message: `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but no aggregate '${target}' is declared in the system.`,
+      message: diagMessage("loom.ui-id-ref-unknown-aggregate", { deployableName, source, target }),
       source: `${deployableName}/${source}`,
     });
     return;
@@ -828,9 +873,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       code: "loom.ui-id-ref-unmounted",
-      message:
-        `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' is not mounted on this deployable's modules.  ` +
-        `Mount the module containing '${target}' on the deployable's targeted backend, or remove the reference.`,
+      message: diagMessage("loom.ui-id-ref-unmounted", { deployableName, source, target }),
       source: `${deployableName}/${source}`,
     });
     return;
@@ -841,9 +884,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       code: "loom.ui-id-ref-no-display",
-      message:
-        `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' has no 'derived display' clause.  ` +
-        `Add 'derived display: string = <field>' to '${target}' so the form's <Select> picker can label options.`,
+      message: diagMessage("loom.ui-id-ref-no-display", { deployableName, source, target }),
       source: `${deployableName}/${source}`,
     });
   }
@@ -889,10 +930,7 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
     diags.push({
       severity: "error",
       code: "loom.duplicate-host-port",
-      message:
-        `Host port ${port} is published by more than one service (${owners.join(", ")}); ` +
-        `\`docker compose up\` would abort with a port-in-use error. Give each deployable a ` +
-        `distinct \`port:\`.`,
+      message: diagMessage("loom.duplicate-host-port", { port, owners: owners.join(", ") }),
       source: sys.name,
     });
   }
@@ -910,11 +948,10 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
     diags.push({
       severity: "error",
       code: "loom.duplicate-service-slug",
-      message:
-        `Deployables ${names.map((n) => `'${n}'`).join(", ")} all resolve to the same ` +
-        `docker-compose service slug '${slug}', so they would silently merge into one output ` +
-        `directory and one compose service. Rename them to distinct slugs (names must differ by ` +
-        `more than case / punctuation).`,
+      message: diagMessage("loom.duplicate-service-slug", {
+        names: names.map((n) => `'${n}'`).join(", "),
+        slug,
+      }),
       source: sys.name,
     });
   }
@@ -981,11 +1018,10 @@ export function validateChannelWiring(sys: SystemIR, diags: LoomDiagnostic[]): v
       diags.push({
         severity: "warning",
         code: "loom.channelsource-unbound",
-        message:
-          `channelSource '${cs.name}' (channel '${cs.channelName}') is listed by no ` +
-          `deployable's 'channels:' clause — the binding is declared but inert: no broker ` +
-          `is provisioned and events stay on in-process dispatch. Add it to a deployable ` +
-          `that produces or consumes '${cs.channelName}', or remove it.`,
+        message: diagMessage("loom.channelsource-unbound", {
+          name: cs.name,
+          channelName: cs.channelName,
+        }),
         source: `${sys.name}/${cs.name}`,
       });
     }
@@ -1020,11 +1056,13 @@ export function validateChannelWiring(sys: SystemIR, diags: LoomDiagnostic[]): v
         diags.push({
           severity: "warning",
           code: "loom.deployable-channel-unrelated",
-          message:
-            `Deployable '${dep.name}' lists channelSource '${cs.name}', but it neither ` +
-            `hosts channel '${cs.channelName}'\`s owning context ('${owner.ctxName}') nor ` +
-            `consumes any event it carries (${owner.carries.join(", ") || "none"}). ` +
-            `This wiring routes nothing — remove it, or host a producing/consuming context.`,
+          message: diagMessage("loom.deployable-channel-unrelated", {
+            name: dep.name,
+            csName: cs.name,
+            channelName: cs.channelName,
+            ctxName: owner.ctxName,
+            carries: owner.carries.join(", ") || "none",
+          }),
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -1040,12 +1078,12 @@ export function validateChannelWiring(sys: SystemIR, diags: LoomDiagnostic[]): v
       diags.push({
         severity: "error",
         code: "loom.channel-consumer-unwired",
-        message:
-          `Deployable '${dep.name}' consumes events of channel '${chName}' ` +
-          `(${owner.carries.filter((e) => consumed.has(e)).join(", ")}), which is bound to a ` +
-          `broker via channelSource '${csNames[0]}' on another deployable — but '${dep.name}' ` +
-          `doesn't list the binding. Once traffic rides the broker this consumer would ` +
-          `silently receive nothing. Add \`channels: [${csNames[0]}]\` to '${dep.name}'.`,
+        message: diagMessage("loom.channel-consumer-unwired", {
+          name: dep.name,
+          chName,
+          carries: owner.carries.filter((e) => consumed.has(e)).join(", "),
+          csNames: csNames[0],
+        }),
         source: `${sys.name}/${dep.name}`,
       });
     }
@@ -1101,13 +1139,14 @@ export function validateRelayTargetNotSubscribed(sys: SystemIR, diags: LoomDiagn
         diags.push({
           severity: "error",
           code: "loom.relay-target-not-subscribed",
-          message:
-            `Deployable '${d.name}': ui '${uiName}' subscribes to channel ` +
-            `'${p.channelName}' (context '${owner}') via an 'on ${p.name}.<Event>' handler, ` +
-            `but its relay backend '${relay.name}' neither hosts '${owner}' nor binds the ` +
-            `channel — the SSE relay can't legally serve those events, so the handler receives ` +
-            `nothing. Host '${owner}' on '${relay.name}', or add a channelSource for ` +
-            `'${p.channelName}' to its 'channels:' clause.`,
+          message: diagMessage("loom.relay-target-not-subscribed", {
+            name: d.name,
+            uiName,
+            channelName: p.channelName,
+            owner,
+            pName: p.name,
+            relayName: relay.name,
+          }),
           source: d.name,
         });
       }
@@ -1153,14 +1192,15 @@ export function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[
         diags.push({
           severity: "error",
           code: "loom.persistence-mode-unsupported",
-          message:
-            `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
-            `(persistedAs: ${agg.persistedAs ?? "state"}, ` +
-            `needs dataSource kind: ${kind}) but lists no matching dataSource. ` +
-            `Declare ` +
-            `\`dataSource ${lowerFirst(ctxName)}${kind === "state" ? "State" : "EventLog"} ` +
-            `{ for: ${ctxName}, kind: ${kind}, use: <storage> }\` ` +
-            `and add it to '${dep.name}'\`s 'dataSources:' list.`,
+          message: diagMessage("loom.persistence-mode-unsupported", {
+            name: dep.name,
+            ctxName,
+            aggName: agg.name,
+            persistedAs: agg.persistedAs ?? "state",
+            kind,
+            ctxName2: lowerFirst(ctxName),
+            kind2: kind === "state" ? "State" : "EventLog",
+          }),
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -1191,10 +1231,13 @@ export function validateDataSourceCoverage(sys: SystemIR, diags: LoomDiagnostic[
       diags.push({
         severity: "warning",
         code: "loom.datasource-unused",
-        message:
-          `Deployable '${dep.name}' lists resource '${ds.name}' (kind: ${ds.kind}) for ` +
-          `context '${ds.contextName}', but ${reason}.  This binding routes no data — ` +
-          `remove it, or add an aggregate whose persistedAs needs kind: ${ds.kind}.`,
+        message: diagMessage("loom.datasource-unused", {
+          name: dep.name,
+          dsName: ds.name,
+          kind: ds.kind,
+          contextName: ds.contextName,
+          reason,
+        }),
         source: `${sys.name}/${dep.name}`,
       });
     }
@@ -1232,13 +1275,12 @@ export function validateFileFieldObjectStorage(sys: SystemIR, diags: LoomDiagnos
         diags.push({
           severity: "error",
           code: "loom.file-field-needs-object-storage",
-          message:
-            `Deployable '${dep.name}' hosts aggregate '${ctxName}.${agg.name}' ` +
-            `which has a \`File\` field ('${fileField}'), but binds no object-store ` +
-            `dataSource.  A \`File\` stores its bytes in an object store — declare a ` +
-            `\`storage <s> { type: localDisk }\` (or \`s3\`), a ` +
-            `\`dataSource <ds> { for: ${ctxName}, kind: objectStore, use: <s> }\`, and ` +
-            `add '<ds>' to '${dep.name}'\`s 'dataSources:' list.`,
+          message: diagMessage("loom.file-field-needs-object-storage", {
+            name: dep.name,
+            ctxName,
+            aggName: agg.name,
+            fileField,
+          }),
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -1284,11 +1326,14 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
         diags.push({
           severity: "error",
           code: "loom.saving-shape-unsupported",
-          message:
-            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
-            `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
-            `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
-            `aggregate on a deployable whose platform emits shape(${shape}).`,
+          message: diagMessage("loom.saving-shape-unsupported", {
+            name: dep.name,
+            platform: dep.platform,
+            ctxName,
+            aggName: agg.name,
+            shape,
+            supported: supported.join(", "),
+          }),
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -1530,13 +1575,11 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         diags.push({
           severity: "error",
           code: "loom.vanilla-document-unsupported",
-          message:
-            `aggregate '${ctxName}.${agg.name}' is shape: document on elixir, which emits ` +
-            `scalar custom finds + named operations but not ${bits.join(" and ")} ` +
-            `(audited returning / provenanced ops, collection mutation, value-object/derived/` +
-            `function reads, or non-scalar find predicates). Simplify them to scalar form, host this ` +
-            `aggregate on a backend with full document support (node / dotnet / python / java), ` +
-            `or use shape: relational / shape: embedded.`,
+          message: diagMessage("loom.vanilla-document-unsupported", {
+            ctxName,
+            name: agg.name,
+            bits: bits.join(" and "),
+          }),
           source: `${sys.name}/${dep.name}`,
         });
       }
@@ -1612,14 +1655,12 @@ export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagn
               diags.push({
                 severity: "error",
                 code: "loom.vanilla-op-call-position",
-                message:
-                  `operation '${ctxName}.${agg.name}.${op.name}' calls sibling operation ` +
-                  `'${e.name}' outside 'return' tail position, which the elixir backend can't ` +
-                  `lower — an operation compiles to a context function returning a tagged ` +
-                  `{:ok,_}|{:error,_} tuple, so its result can only be passed through as the ` +
-                  `whole 'return' value, not composed into a larger expression or bound with ` +
-                  `'let'. Use a bare 'return ${e.name}(...)', or host this context on a backend ` +
-                  `with full support (node / dotnet / python / java).`,
+                message: diagMessage("loom.vanilla-op-call-position", {
+                  ctxName,
+                  name: agg.name,
+                  opName: op.name,
+                  eName: e.name,
+                }),
                 source: `${sys.name}/${dep.name}`,
               });
             });
@@ -1817,11 +1858,12 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
           if (wireLeafKind(f.type) !== "entity") continue;
           diags.push({
             severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform java) hosts workflow '${ctxName}.${wf.name}' with ` +
-              `instance-view field '${f.name}' of entity type — workflow-instance read models on the ` +
-              `java backend do not yet emit a '<Part>Response' DTO. Drop the field from the observable ` +
-              `state, or host it on a node / dotnet / python deployable.`,
+            message: diagMessage("loom.java-workflow-instance-field-unsupported", {
+              name: dep.name,
+              ctxName,
+              wfName: wf.name,
+              fName: f.name,
+            }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.java-workflow-instance-field-unsupported",
           });
@@ -1834,11 +1876,12 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
           if (wireLeafKind(f.type) !== "entity") continue;
           diags.push({
             severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform java) hosts projection '${ctxName}.${proj.name}' with ` +
-              `row field '${f.name}' of entity type — projection read models on the java backend do not ` +
-              `yet emit a '<Part>Response' DTO. Drop the field, or host it on a node / dotnet / python ` +
-              `deployable.`,
+            message: diagMessage("loom.java-projection-field-unsupported", {
+              name: dep.name,
+              ctxName,
+              projName: proj.name,
+              fName: f.name,
+            }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.java-projection-field-unsupported",
           });
@@ -2000,12 +2043,12 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
           diags.push({
             severity: "error",
             code: "loom.context-filter-unsupported",
-            message:
-              `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
-              `'${ctxName}.${agg.name}' with a 'filter' capability predicate that references ` +
-              `currentUser (e.g. a tenancy filter), but the deployable has no auth — there is no ` +
-              `request-scoped principal to scope reads by. Add 'auth: required' (and a system ` +
-              `'user {}' block), or remove the principal-referencing filter.`,
+            message: diagMessage("loom.context-filter-unsupported#no-auth-user", {
+              name: dep.name,
+              platform: dep.platform,
+              ctxName,
+              aggName: agg.name,
+            }),
             source: `${sys.name}/${dep.name}`,
           });
           continue;
@@ -2029,15 +2072,16 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
               `filters are not yet wired on the ${fam} backend`;
         diags.push({
           severity: "error",
-          message:
-            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
-            `'${ctxName}.${agg.name}' with a 'filter' capability predicate that ${reason}. ` +
-            `Host this aggregate on a .NET deployable${
-              nonRelationalUnsupported
-                ? ""
-                : " (or a node / elixir deployable, which wire tenancy filters)"
-            }, or remove the unsupported capability filter. ` +
-            `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
+          message: diagMessage("loom.context-filter-unsupported#unsupported-predicate", {
+            name: dep.name,
+            platform: dep.platform,
+            ctxName,
+            aggName: agg.name,
+            reason,
+            nonRelationalUnsupported: nonRelationalUnsupported
+              ? ""
+              : " (or a node / elixir deployable, which wire tenancy filters)",
+          }),
           source: `${sys.name}/${dep.name}`,
           code: "loom.context-filter-unsupported",
         });
@@ -2203,12 +2247,13 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
           diags.push({
             severity: "error",
             code: "loom.filter-bypass-unsupported",
-            message:
-              `Deployable '${dep.name}' (platform ${dep.platform}) serves ${read.site} on ` +
-              `aggregate '${ctxName}.${read.aggName}' with an 'ignoring' filter-bypass clause, but ` +
-              `this backend does not honor capability-filter bypass yet — the honoring backends are ` +
-              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir (Ecto). Host this read ` +
-              `on a supported backend, or remove the 'ignoring' clause.`,
+            message: diagMessage("loom.filter-bypass-unsupported", {
+              name: dep.name,
+              platform: dep.platform,
+              site: read.site,
+              ctxName,
+              aggName: read.aggName,
+            }),
             source: `${sys.name}/${dep.name}`,
           });
           continue;
@@ -2220,10 +2265,12 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
             diags.push({
               severity: "error",
               code: "loom.filter-bypass-unknown-capability",
-              message:
-                `${capitalizeSite(read.site)} on aggregate '${ctxName}.${read.aggName}' ignores ` +
-                `capability '${cap}', but that aggregate does not implement '${cap}'. Implement it ` +
-                `(with ${cap} / implements ${cap}) or correct the capability name in the 'ignoring' clause.`,
+              message: diagMessage("loom.filter-bypass-unknown-capability", {
+                site: capitalizeSite(read.site),
+                ctxName,
+                aggName: read.aggName,
+                cap,
+              }),
               source: `${sys.name}/${dep.name}`,
             });
             continue;
@@ -2232,10 +2279,12 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
             diags.push({
               severity: "error",
               code: "loom.filter-bypass-no-filter",
-              message:
-                `${capitalizeSite(read.site)} on aggregate '${ctxName}.${read.aggName}' ignores ` +
-                `capability '${cap}', but '${cap}' contributes no query-filter to bypass (it is a ` +
-                `stamps-only / fields-only capability). Remove '${cap}' from the 'ignoring' clause.`,
+              message: diagMessage("loom.filter-bypass-no-filter", {
+                site: capitalizeSite(read.site),
+                ctxName,
+                aggName: read.aggName,
+                cap,
+              }),
               source: `${sys.name}/${dep.name}`,
             });
           }
@@ -2269,11 +2318,7 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     const reject = (subject: string, reason: string): void => {
       diags.push({
         severity: "error",
-        message:
-          `Deployable '${dep.name}' selects 'persistence: dapper', but ${subject} ${reason}. ` +
-          `The Dapper adapter is at full parity with EF Core (M-T6.9); the only shapes it now ` +
-          `rejects have no relational persistence mapping at all (efcore included) — restructure ` +
-          `the model as the message suggests.`,
+        message: diagMessage("loom.dapper-unsupported", { name: dep.name, subject, reason }),
         source: `${sys.name}/${dep.name}`,
         code: "loom.dapper-unsupported",
       });
@@ -2451,11 +2496,7 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
     const reject = (subject: string, reason: string): void => {
       diags.push({
         severity: "error",
-        message:
-          `Deployable '${dep.name}' selects 'persistence: mikroorm', but ${subject} ${reason}. ` +
-          `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
-          `rejects have no relational persistence mapping at all (drizzle included) — restructure ` +
-          `the model as the message suggests.`,
+        message: diagMessage("loom.mikroorm-unsupported", { name: dep.name, subject, reason }),
         source: `${sys.name}/${dep.name}`,
         code: "loom.mikroorm-unsupported",
       });
@@ -2724,11 +2765,12 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
     const report = (subject: string, label: string): void => {
       diags.push({
         severity: "error",
-        message:
-          `Deployable '${dep.name}' selects 'persistence: ${adapter}', but ${subject} uses ` +
-          `a predicate the ${adapter} adapter cannot lower to SQL: ${label}. ` +
-          `The ${adapter} find-predicate subset is narrower than EF Core's — ` +
-          `use 'persistence: efcore'/'drizzle', or restructure the predicate.`,
+        message: diagMessage("loom.find-predicate-unsupported", {
+          name: dep.name,
+          adapter,
+          subject,
+          label,
+        }),
         source: `${sys.name}/${dep.name}`,
         code: "loom.find-predicate-unsupported",
       });
@@ -2806,10 +2848,13 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
       diags.push({
         severity: "error",
         code: "loom.resource-missing-capability",
-        message:
-          `resource '${resource.name}' (sourceType '${sourceType}') does not offer ` +
-          `${missing.map((c) => `'${c}'`).join(", ")} required by context ` +
-          `'${need.contextName}' for kind '${need.kind}'.`,
+        message: diagMessage("loom.resource-missing-capability", {
+          name: resource.name,
+          sourceType,
+          missing: missing.map((c) => `'${c}'`).join(", "),
+          contextName: need.contextName,
+          kind: need.kind,
+        }),
         source: `${sys.name}/${resource.name}`,
       });
     }
@@ -2857,11 +2902,14 @@ export function validateRemoteApiOpSupport(sys: SystemIR, diags: LoomDiagnostic[
             diags.push({
               severity: "error",
               code: "loom.remote-api-op-unsupported",
-              message:
-                `workflow '${wf.name}' calls '${op.resourceName}.${op.operationId}' on the ` +
-                `in-system api '${op.apiName}', but deployable '${dep.name}' (platform ` +
-                `'${dep.platform}') emits no typed client for it yet (M-T4.8 slices 3-5).  ` +
-                `Use the untyped 'get'/'post' verbs over a 'storage restApi' binding until then.`,
+              message: diagMessage("loom.remote-api-op-unsupported", {
+                name: wf.name,
+                resourceName: op.resourceName,
+                operationId: op.operationId,
+                apiName: op.apiName,
+                depName: dep.name,
+                platform: dep.platform,
+              }),
               source: `${sys.name}/${ctx.name}/${wf.name}`,
             });
           });
@@ -2893,9 +2941,7 @@ export function validateApiResourceBindings(sys: SystemIR, diags: LoomDiagnostic
       diags.push({
         severity: "error",
         code: "loom.resource-api-unserved",
-        message:
-          `resource '${r.name}' binds api '${apiName}', but no backend deployable serves it, ` +
-          `so its address cannot be derived.  Add 'serves: ${apiName}' to the deployable that hosts it.`,
+        message: diagMessage("loom.resource-api-unserved", { name: r.name, apiName }),
         source: `${sys.name}/${r.name}`,
       });
       continue;
@@ -2904,10 +2950,12 @@ export function validateApiResourceBindings(sys: SystemIR, diags: LoomDiagnostic
       diags.push({
         severity: "error",
         code: "loom.resource-api-ambiguous-server",
-        message:
-          `resource '${r.name}' binds api '${apiName}', which ${servers.length} deployables serve ` +
-          `(${servers.map((d) => `'${d.name}'`).join(", ")}).  The caller's address would be ambiguous — ` +
-          `have exactly one deployable serve it.`,
+        message: diagMessage("loom.resource-api-ambiguous-server", {
+          name: r.name,
+          apiName,
+          length: servers.length,
+          servers: servers.map((d) => `'${d.name}'`).join(", "),
+        }),
         source: `${sys.name}/${r.name}`,
       });
       continue;
@@ -2923,9 +2971,11 @@ export function validateApiResourceBindings(sys: SystemIR, diags: LoomDiagnostic
       diags.push({
         severity: "error",
         code: "loom.resource-api-self-call",
-        message:
-          `deployable '${dep.name}' wires resource '${r.name}', which binds api '${apiName}' that ` +
-          `'${dep.name}' itself serves.  Call the context directly instead — it is already in-process.`,
+        message: diagMessage("loom.resource-api-self-call", {
+          name: dep.name,
+          rName: r.name,
+          apiName,
+        }),
         source: `${sys.name}/${r.name}`,
       });
     }
@@ -2969,7 +3019,7 @@ function validateManualIndexes(
     diags.push({
       severity: "error",
       code: "loom.resource-index-non-state",
-      message: `${label}: \`index:\` needs a relational table to sit on, so it is only valid on a \`kind: state\` binding (this is \`kind: ${r.kind}\`).`,
+      message: diagMessage("loom.resource-index-non-state", { label, kind: r.kind }),
       source: `${sys.name}/${label}`,
     });
     return;
@@ -2995,7 +3045,11 @@ function validateManualIndexes(
       diags.push({
         severity: "error",
         code: "loom.resource-index-unknown-entity",
-        message: `${label}: \`index:\` targets '${spec.entity}', which is not an aggregate or contained part in context '${r.contextName}'.`,
+        message: diagMessage("loom.resource-index-unknown-entity", {
+          label,
+          entity: spec.entity,
+          contextName: r.contextName,
+        }),
         source: `${sys.name}/${label}`,
       });
       continue;
@@ -3005,7 +3059,11 @@ function validateManualIndexes(
         diags.push({
           severity: "error",
           code: "loom.resource-index-unknown-column",
-          message: `${label}: \`index:\` references '${spec.entity}.${col}', but '${col}' is not a field on '${spec.entity}'.`,
+          message: diagMessage("loom.resource-index-unknown-column", {
+            label,
+            entity: spec.entity,
+            col,
+          }),
           source: `${sys.name}/${label}`,
         });
       }
@@ -3031,7 +3089,7 @@ function checkConfigBlock(
       diags.push({
         severity: "warning",
         code: "loom.config-key-unknown",
-        message: `${label}: config key '${entry.key}' is not recognised by sourceType '${sourceType}' — it will be ignored.`,
+        message: diagMessage("loom.config-key-unknown", { label, key: entry.key, sourceType }),
         source: `${sysName}/${label}`,
       });
       continue;
@@ -3042,7 +3100,7 @@ function checkConfigBlock(
       diags.push({
         severity: "error",
         code: "loom.config-key-type",
-        message: `${label}: config key '${entry.key}' expects ${expected}.`,
+        message: diagMessage("loom.config-key-type", { label, key: entry.key, expected }),
         source: `${sysName}/${label}`,
       });
     }
@@ -3053,7 +3111,7 @@ function checkConfigBlock(
         diags.push({
           severity: "error",
           code: "loom.config-key-required",
-          message: `${label}: required config key '${spec.name}' (sourceType '${sourceType}') is missing.`,
+          message: diagMessage("loom.config-key-required", { label, name: spec.name, sourceType }),
           source: `${sysName}/${label}`,
         });
       }
@@ -3224,12 +3282,13 @@ export function validateInheritanceStorage(
     diags.push({
       severity: "error",
       code: "loom.tph-backend-unsupported",
-      message:
-        `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
-        `${how}, but TPH storage emission is implemented for the ${tphList} backends only — ` +
-        `${hostNote}. Host the context on one of those deployables, or declare ` +
-        `'inheritanceUsing: ownTable' to use the per-concrete (TPC) layout (all backends). ` +
-        `Tracked in aggregate-inheritance.md I2/I3.`,
+      message: diagMessage("loom.tph-backend-unsupported", {
+        name: agg.name,
+        role,
+        how,
+        tphList,
+        hostNote,
+      }),
       source: `${ctx.name}/${agg.name}`,
     });
   }
@@ -3265,12 +3324,7 @@ export function validateEventSourcedStorage(
     diags.push({
       severity: "error",
       code: "loom.event-sourcing-backend-unsupported",
-      message:
-        `aggregate '${agg.name}' is persistedAs: eventLog, but event-sourced storage emission ` +
-        `is implemented for the Hono (node), .NET (dotnet), Java (java), Python (python) and elixir ` +
-        `backends — ${hostNote}. Host the context on a supported deployable, or drop ` +
-        `persistedAs: eventLog to use state persistence (all backends). ` +
-        `Tracked in workflow-and-applier.md (appliers A2).`,
+      message: diagMessage("loom.event-sourcing-backend-unsupported", { name: agg.name, hostNote }),
       source: `${ctx.name}/${agg.name}`,
     });
   }
@@ -3304,16 +3358,7 @@ export function validateEventSourcedWorkflowStorage(
     diags.push({
       severity: "error",
       code: "loom.event-sourced-workflow-unsupported",
-      message:
-        `workflow '${wf.name}' is eventSourced, but event-sourced workflow storage ` +
-        `(a per-correlation event stream folded through its apply(...) blocks) is ` +
-        `implemented on the Hono (node), .NET (dotnet), Python (FastAPI), Java (Spring) ` +
-        `and elixir backends — this context is also hosted by ${hosts}. Host ` +
-        `the context on a supported deployable, drop the eventSourced modifier ` +
-        `to use a state-based saga (a persisted correlation-state row, supported on ` +
-        `node / dotnet / java / python / elixir), or move the event-fold logic ` +
-        `into an event-sourced aggregate (persistedAs: eventLog). ` +
-        `Tracked in workflow-and-applier.md (A2-S5b).`,
+      message: diagMessage("loom.event-sourced-workflow-unsupported", { name: wf.name, hosts }),
       source: `${ctx.name}/${wf.name}`,
     });
   }
@@ -3345,13 +3390,11 @@ export function validateProvenancedStorage(
     diags.push({
       severity: "error",
       code: "loom.provenanced-backend-unsupported",
-      message:
-        `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
-        `(trace capture + history) is emitted for the Hono (node), .NET (dotnet), Java (java), ` +
-        `Python (python) and elixir backends only — ${hostNote}. Host ` +
-        `the context on a node / dotnet / java / python / elixir deployable, or drop the 'provenanced' ` +
-        `modifier to use a plain field (all backends). Tracked in provenance.md / ` +
-        `type-system-feature-migration.md (DBT-1).`,
+      message: diagMessage("loom.provenanced-backend-unsupported", {
+        name: agg.name,
+        names,
+        hostNote,
+      }),
       source: `${ctx.name}/${agg.name}`,
     });
   }
@@ -3399,10 +3442,11 @@ export function validateFieldMask(
         diags.push({
           severity: "error",
           code: "loom.field-mask-not-current-user",
-          message:
-            `aggregate '${agg.name}' field '${f.name}': a \`mask unless\` predicate is evaluated ` +
-            `at read projection as a param-free caller check, so it may only reference \`currentUser\` ` +
-            `(and constants) — \`${offending}\` is not available here.`,
+          message: diagMessage("loom.field-mask-not-current-user", {
+            name: agg.name,
+            fName: f.name,
+            offending,
+          }),
           source: `${ctx.name}/${agg.name}.${f.name}`,
         });
       }
@@ -3412,11 +3456,11 @@ export function validateFieldMask(
     diags.push({
       severity: "error",
       code: "loom.field-mask-unsupported",
-      message:
-        `aggregate '${agg.name}' has \`mask unless\` field(s) ${names}, but read-mask redaction ` +
-        `is not emitted by the ${unsupported.join("/")} backend(s) yet (node emits it; the other ` +
-        `backends are the stacked follow-on). Drop the \`mask unless\` clause for those targets, ` +
-        `or track authorization.md §5 (M-T3.2 item 6).`,
+      message: diagMessage("loom.field-mask-unsupported", {
+        name: agg.name,
+        names,
+        unsupported: unsupported.join("/"),
+      }),
       source: `${ctx.name}/${agg.name}`,
     });
   }
@@ -3437,10 +3481,7 @@ export function validateFieldMask(
         diags.push({
           severity: "error",
           code: "loom.field-mask-projection-source",
-          message:
-            `projection '${proj.name}' sources from aggregate '${src}', which has a \`mask unless\` ` +
-            `field — query-time projection responses are not yet read-masked, so this would expose ` +
-            `the masked field. Read the aggregate through its own routes, or drop the mask.`,
+          message: diagMessage("loom.field-mask-projection-source", { name: proj.name, src }),
           source: `${ctx.name}/projection/${proj.name}`,
         });
       }
@@ -3486,11 +3527,13 @@ export function validateAuditedOperationSupport(
     diags.push({
       severity: "error",
       code: "loom.audited-backend-unsupported",
-      message:
-        `aggregate '${agg.name}' has 'audited' ${kind}(s) ${names.join(", ")}, but per-operation ` +
-        `audit-record emission for ${kind}s is implemented for the ${capable} backend(s) only — ${hostNote}. ` +
-        `Host the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
-        `Tracked in audit-and-logging.md.`,
+      message: diagMessage("loom.audited-backend-unsupported", {
+        name: agg.name,
+        kind,
+        names: names.join(", "),
+        capable,
+        hostNote,
+      }),
       source: `${ctx.name}/${agg.name}`,
     });
   };
@@ -3529,10 +3572,11 @@ export function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnos
       diags.push({
         severity: "warning",
         code: "loom.datasource-knob-unwired",
-        message:
-          `resource '${ds.name}' sets '${knob.property}', but ${knob.description}.  ` +
-          `The value is accepted by validation and persisted in the IR but no current ` +
-          `emitter consumes it — this is a no-op at runtime.`,
+        message: diagMessage("loom.datasource-knob-unwired", {
+          name: ds.name,
+          property: knob.property,
+          description: knob.description,
+        }),
         source: `${sys.name}/${ds.name}`,
       });
     }
@@ -3571,7 +3615,7 @@ export function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
         diags.push({
           severity: "error",
           code: "loom.user-duplicate-field",
-          message: `system '${sys.name}': user block declares field '${f.name}' more than once.`,
+          message: diagMessage("loom.user-duplicate-field", { name: sys.name, fName: f.name }),
           source: `${sys.name}/user`,
         });
       }
@@ -3586,9 +3630,7 @@ export function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
       diags.push({
         severity: "error",
         code: "loom.auth-no-user-block",
-        message:
-          `deployable '${d.name}' has 'auth: required' but system '${sys.name}' declares no 'user { ... }' block. ` +
-          `Add a system-level user block describing the JWT claim shape (e.g. 'user { id: string, role: string }').`,
+        message: diagMessage("loom.auth-no-user-block", { name: d.name, sysName: sys.name }),
         source: `${sys.name}/${d.name}`,
       });
     }
@@ -3613,7 +3655,7 @@ export function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): voi
         diags.push({
           severity: "error",
           code: "loom.duplicate-permission",
-          message: `subdomain '${mod.name}': permission '${p.name}' is declared more than once.`,
+          message: diagMessage("loom.duplicate-permission", { name: mod.name, pName: p.name }),
           source: `${sys.name}/${mod.name}/permissions.${p.name}`,
         });
       }
