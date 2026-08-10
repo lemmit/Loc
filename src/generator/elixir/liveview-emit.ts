@@ -30,6 +30,7 @@ import type {
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
+import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   E2E_FIXTURES_TS,
@@ -52,12 +53,27 @@ import {
 import { heexI18nEnabled } from "./i18n.js";
 import { buildPlaywrightPageObject } from "./page-objects-emit.js";
 import { exprUsesBind, REALTIME_TOPIC, renderMessageExprElixir } from "./realtime-liveview.js";
+import { renderExpr as renderDomainExpr } from "./render-expr.js";
 import { renderStoreModule } from "./store-emit.js";
 
 /** One router entry the orchestrator splices into router.ex. */
 export interface LiveRoute {
   route: string;
   liveModule: string;
+}
+
+/** Where a page-body projection read lands on the Phoenix leg (M-T1.3 Phase 1).
+ *  Resolved once per deployable from the hosted contexts, then consumed by the
+ *  `handle_params` load block. */
+interface ProjectionRead {
+  /** `<App>.<Ctx>.QueryProjections.<Proj>` — the module exposing `run/1`. */
+  module: string;
+  /** The projection's read-side `requires` predicate rendered as Elixir
+   *  (reading the `current_user` local), or null when the read is ungated. */
+  gate: string | null;
+  /** The row's WIRE field names in `wireShape` order — the camelCase atom keys
+   *  `run/1` returns, which the loader rekeys to snake_case. */
+  fields: readonly string[];
 }
 
 export function emitLiveViewPages(args: {
@@ -139,8 +155,32 @@ export function emitLiveViewPages(args: {
   // (matching the domain emitter).  An aggregate's parts live in its
   // owning context's module namespace.
   const partContextModule = new Map<string, string>();
+  // Frontend-readable query-time projections a page body may read (M-T1.3
+  // Phase 1), keyed by projection name.  The Phoenix leg needs no api client
+  // for these: a LiveView deployable hosts its contexts in the SAME OTP app, so
+  // what the SPA frontends fetch over `GET /projections/<slug>` is an
+  // in-process `run/1` call here.
+  const projectionReads = new Map<string, ProjectionRead>();
   for (const ctx of contexts) {
     const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
+    for (const proj of ctx.projections ?? []) {
+      if (!isFrontendReadableProjection(proj)) continue;
+      projectionReads.set(proj.name, {
+        module: `${ctxModule}.QueryProjections.${upperFirst(proj.name)}`,
+        // The read-side `requires` gate, rendered exactly as the
+        // `QueryProjectionsController` action renders it (same expression, same
+        // `current_user` local).  Without it the LiveView would serve rows the
+        // HTTP route 403s — the same read, authorized on one seam only.
+        gate: proj.query?.requires
+          ? renderDomainExpr(proj.query.requires, {
+              thisName: "record",
+              contextModule: ctxModule,
+              foundation: "vanilla",
+            })
+          : null,
+        fields: (proj.wireShape ?? []).map((f) => f.name),
+      });
+    }
     for (const agg of ctx.aggregates) {
       aggregatesByName.set(agg.name, agg);
       contextByAggName.set(agg.name, ctx);
@@ -150,6 +190,10 @@ export function emitLiveViewPages(args: {
     for (const en of ctx.enums) enumsByName.set(en.name, en);
     for (const vo of ctx.valueObjects) valueObjectsByName.set(vo.name, vo);
   }
+
+  // Whether any page renders a `Chart { … }` — drives the one-per-deployable
+  // `LoomChart` function-component emission below.
+  let anyChart = false;
 
   // Walk each user component once to capture its `Action` bindings +
   // nested component usage, so each page can hoist the handlers for the
@@ -192,6 +236,7 @@ export function emitLiveViewPages(args: {
       usedStores: w.usedStores,
       handlers: w.handlers,
     });
+    anyChart ||= w.usesChart;
   }
 
   // Name-context for `pageEmitName` (slice 3c — derives the emitted name from
@@ -208,7 +253,7 @@ export function emitLiveViewPages(args: {
     const emitName = pageEmitName(page, nameCtx);
     const liveModule = `${appModule}Web.${upperFirst(emitName)}Live`;
     const filePath = `lib/${appName}_web/live/${snake(emitName)}_live.ex`;
-    const source = renderLiveView({
+    const { source, usesChart } = renderLiveView({
       page,
       liveModule,
       appName,
@@ -219,11 +264,13 @@ export function emitLiveViewPages(args: {
       enumsByName,
       valueObjectsByName,
       contextModuleByAggName,
+      projectionReads,
       partContextModule,
       componentInfo,
       authEnabled,
       i18nEnabled,
     });
+    anyChart ||= usesChart;
     out.set(filePath, source);
     sourcemap?.file(filePath, source, page.origin, pageConstructId(ui.name, page));
     routes.push({ route: page.route, liveModule });
@@ -282,6 +329,13 @@ export function emitLiveViewPages(args: {
     );
   }
 
+  // `Chart { … }` → the shared inline-SVG function component the call sites
+  // invoke fully qualified (M-T1.3 Phase 4).  One per deployable, and only when
+  // a chart is actually rendered — a chartless app is byte-identical.
+  if (anyChart) {
+    out.set(`lib/${appName}_web/components/loom_chart.ex`, renderLoomChartComponent(webModule));
+  }
+
   return { files: out, routes };
 }
 
@@ -308,6 +362,10 @@ interface RenderArgs {
    *  keyed by aggregate PascalCase name.  Used to build the
    *  `change_<agg>(%<Ctx>.<Agg>{})` create-form changeset in mount/3. */
   contextModuleByAggName: ReadonlyMap<string, string>;
+  /** Frontend-readable query-time projections, keyed by projection name — the
+   *  `run/1` module (and any `requires` gate) a `QueryView { of:
+   *  <api>.<Projection> }` load resolves to. */
+  projectionReads: ReadonlyMap<string, ProjectionRead>;
   /** Module-qualified context keyed by entity-part name — qualifies a
    *  page-body `new Part { … }` struct literal (`%<Ctx>.<Part>{…}`). */
   partContextModule: ReadonlyMap<string, string>;
@@ -446,7 +504,7 @@ function buildActionHandlers(
   });
 }
 
-function renderLiveView(a: RenderArgs): string {
+function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   const {
     page,
     liveModule,
@@ -523,6 +581,7 @@ function renderLiveView(a: RenderArgs): string {
     walked.queryBindings,
     walked.formBindings,
     contextModuleByAggName,
+    a.projectionReads,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   // Hoist `Action(...)` handlers from the page body + every component
@@ -561,14 +620,20 @@ function renderLiveView(a: RenderArgs): string {
   // seam.  Persists the completed entry and assigns the FileRef into state.
   const uploadHandlers = renderUploadProgressHandlers(walked.uploadBindings, appName);
 
-  return `# Auto-generated.
+  // One `defp load_<proj>(socket)` per projection the page reads (M-T1.3
+  // Phase 1) — the in-process `run/1` call plus the wire→snake rekey.
+  const projectionLoaders = renderProjectionLoaders(walked.queryBindings, a.projectionReads);
+
+  return {
+    usesChart: walked.usesChart,
+    source: `# Auto-generated.
 defmodule ${liveModule} do
   use ${webModule}, :live_view
 ${aliasLines.length > 0 ? `\n${aliasLines}\n` : ""}
 ${mount}
 
 ${handleParams}
-${handleEventClauses}${uploadHandlers}${realtimeClauses}
+${handleEventClauses}${uploadHandlers}${realtimeClauses}${projectionLoaders}
   @impl true
   def render(assigns) do
     ~H"""
@@ -576,7 +641,8 @@ ${indent(heex, 4)}
     """
   end
 end
-`;
+`,
+  };
 }
 
 function renderHandleEventClauses(handlers: HandleEventClause[]): string {
@@ -612,7 +678,11 @@ function renderTableControlClauses(
   queryBindings: readonly QueryBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
 ): string {
-  const listBindings = queryBindings.filter((qb) => qb.kind === "list");
+  // Aggregate list reads only — a query-time projection has no page/sort
+  // surface to re-run (its `run/1` takes no arguments).
+  const listBindings = queryBindings.filter(
+    (qb) => qb.kind === "list" && qb.source !== "projection",
+  );
   if (tableControls.length === 0 || listBindings.length === 0) return "";
 
   // One page carries one set of list controls; collapse (a second Table sharing
@@ -711,9 +781,15 @@ function renderRealtimeHandleInfo(
     byEvent.set(n.eventType, list);
   }
 
-  // First QueryBinding per aggregate — a `refetch(<Agg>)` reloads it.
+  // First QueryBinding per aggregate — a `refetch(<Agg>)` reloads it.  A
+  // projection binding is keyed by PROJECTION name, and `refetch` names an
+  // aggregate, so projection reads stay out of the map (an event-driven
+  // projection refresh is a separate, unclaimed slice).
   const qbByAgg = new Map<string, import("./heex-walker.js").QueryBinding>();
-  for (const qb of queryBindings) if (!qbByAgg.has(qb.aggregate)) qbByAgg.set(qb.aggregate, qb);
+  for (const qb of queryBindings) {
+    if (qb.source === "projection") continue;
+    if (!qbByAgg.has(qb.aggregate)) qbByAgg.set(qb.aggregate, qb);
+  }
 
   const clauses: string[] = [];
   for (const [eventType, handlers] of [...byEvent.entries()].sort(([a], [b]) =>
@@ -920,6 +996,78 @@ ${okArm}
       end`;
 }
 
+/** The `handle_params` load line for a `QueryView { of: <api>.<Projection> }`
+ *  (M-T1.3 Phase 1) — a call into the page-private loader below. */
+function renderProjectionLoadBlock(qb: import("./heex-walker.js").QueryBinding): string {
+  return `    socket = assign(socket, :${qb.assign}, ${projectionLoaderName(qb.aggregate)}(socket))`;
+}
+
+/** The page-private loader function name for one projection read. */
+function projectionLoaderName(projection: string): string {
+  return `load_${snake(projection)}`;
+}
+
+/** The page-private loader for each projection a page reads (M-T1.3 Phase 1) —
+ *  one `defp load_<proj>(socket)` per DISTINCT projection, spliced into the
+ *  LiveView module body.
+ *
+ *  Two jobs, both of which are why this is a function rather than an inline
+ *  `assign`:
+ *
+ *  1. THE READ.  One in-process `run/1` call — the projection module lives in
+ *     the same OTP app as the LiveView, so what the four SPA frontends fetch
+ *     over `GET /projections/<slug>` needs no api client at all here.
+ *     `current_user` is threaded exactly as the `QueryProjectionsController`
+ *     action threads it, so the source aggregate's capability filter (tenancy,
+ *     soft delete) and any read-side `requires` gate scope the read identically
+ *     on both seams; a denied read assigns the `:error` sentinel the view's
+ *     error arm renders — the LiveView shape of the route's 403.
+ *
+ *  2. THE REKEY.  `run/1` returns the WIRE row: camelCase atom keys, because
+ *     that map is JSON-encoded straight onto the HTTP response.  Every other
+ *     record a HEEx body reads is an Ecto struct with snake_case fields, and the
+ *     walker snake-cases every member access accordingly — so a raw wire row
+ *     would answer `@totals.row_count` with a KeyError on a map that has
+ *     `:rowCount`.  Rekeying once, HERE, off the projection's `wireShape` keeps
+ *     the whole page body (nested `Table` column lambdas included) on the one
+ *     naming convention the walker already speaks, instead of teaching the
+ *     walker a second one and having to propagate it through every binding. */
+function renderProjectionLoaders(
+  queryBindings: readonly QueryBinding[],
+  projectionReads: ReadonlyMap<string, ProjectionRead>,
+): string {
+  const seen = new Set<string>();
+  const fns: string[] = [];
+  for (const qb of queryBindings) {
+    if (qb.source !== "projection" || seen.has(qb.aggregate)) continue;
+    const read = projectionReads.get(qb.aggregate);
+    if (!read) continue;
+    seen.add(qb.aggregate);
+    const rekey = `%{${read.fields.map((f) => `${snake(f)}: row.${f}`).join(", ")}}`;
+    // A grouped projection returns one row PER GROUP, so the rekey maps the
+    // list; the whole-table singleton rekeys the one row it returns.
+    const body =
+      qb.kind === "list"
+        ? `      ${read.module}.run(current_user)
+      |> Enum.map(fn row -> ${rekey} end)`
+        : `      row = ${read.module}.run(current_user)
+      ${rekey}`;
+    const guarded = read.gate
+      ? `    if ${read.gate} do
+${body}
+    else
+      :error
+    end`
+      : body.replace(/^ {6}/gm, "    ");
+    fns.push(`  defp ${projectionLoaderName(qb.aggregate)}(socket) do
+    current_user = Map.get(socket.assigns, :current_user)
+
+${guarded}
+  end`);
+  }
+  return fns.length > 0 ? `\n${fns.join("\n\n")}\n` : "";
+}
+
 function renderHandleParams(
   page: PageIR,
   ui: UiIR,
@@ -927,6 +1075,7 @@ function renderHandleParams(
   queryBindings: import("./heex-walker.js").QueryBinding[],
   formBindings: import("./heex-walker.js").FormBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
+  projectionReads: ReadonlyMap<string, ProjectionRead>,
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
@@ -940,7 +1089,19 @@ function renderHandleParams(
   // (`{:ok, record} | {:error, :not_found}`); `list` → the collection
   // via `list_<agg>s()` (`{:ok, list}`).
   const loadBlocks: string[] = [];
+  // A page may read the SAME projection more than once — a `Chart` and a
+  // `Table` over one grouped read is the ordinary dashboard shape — and every
+  // read of it resolves to the same assign.  Load it once: a second block would
+  // re-run the query and overwrite the assign with an identical value.
+  const loadedProjections = new Set<string>();
   for (const qb of queryBindings) {
+    if (qb.source === "projection") {
+      if (projectionReads.has(qb.aggregate) && !loadedProjections.has(qb.aggregate)) {
+        loadedProjections.add(qb.aggregate);
+        loadBlocks.push(renderProjectionLoadBlock(qb));
+      }
+      continue;
+    }
     const ctxModule = contextModuleByAggName.get(qb.aggregate);
     if (!ctxModule) continue; // unresolved — validator catches upstream
     // Operation forms for this aggregate bind to the loaded record —
@@ -1242,3 +1403,134 @@ end
 
 // Suppress unused-import lints for re-exports.
 void plural;
+
+/** The shared `LoomChart` function component — the HEEx leg of the `Chart`
+ *  primitive (M-T1.3 Phase 4), emitted once per deployable when any page
+ *  renders a chart.
+ *
+ *  Inline SVG, no charting library and no JavaScript: the rows a chart plots
+ *  are a grouped query-time projection's, already loaded into a LiveView assign
+ *  by `defp load_<proj>/1`, so the scale/axis maths is ordinary Elixir
+ *  arithmetic done during render.  The JSX targets need a library because their
+ *  rows arrive asynchronously in the BROWSER; LiveView's don't.
+ *
+ *  Value coercion is the same problem the TSX emit solves with `Number(...)`,
+ *  in Elixir spelling: a `money` column rides the wire as a STRING (RS-24) and
+ *  a `decimal` as a float, so `number_of/1` accepts binary / Decimal / number
+ *  and anything unplottable degrades to 0.0 rather than raising mid-render. */
+function renderLoomChartComponent(webModule: string): string {
+  return `# Auto-generated.
+defmodule ${webModule}.Components.LoomChart do
+  @moduledoc """
+  Inline-SVG chart for the \`Chart { … }\` page primitive.
+
+  Server-rendered and JS-free: the plotted rows are already in a LiveView
+  assign (a grouped query-time projection's read), so the geometry is plain
+  arithmetic.  Bar and line kinds share one axis/scale computation.
+  """
+  use Phoenix.Component
+
+  @width 600
+  @height 200
+
+  attr :kind, :string, default: "bar", values: ~w(bar line)
+  attr :rows, :any, required: true
+  attr :x, :atom, required: true
+  attr :y, :atom, required: true
+  attr :label, :string, required: true
+  attr :testid, :string, default: nil
+
+  @doc "Bar or line chart over the rows of a grouped query-time projection."
+  def chart(assigns) do
+    points =
+      assigns.rows
+      |> rows_of()
+      |> Enum.map(fn row ->
+        {label_of(Map.get(row, assigns.x)), number_of(Map.get(row, assigns.y))}
+      end)
+
+    # A flat or empty series still has to render an axis, so the scale falls
+    # back to 1.0 rather than dividing by zero.  Negative sums clamp to the
+    # baseline: SVG rejects a negative rect height outright.
+    peak = Enum.max([0.0 | Enum.map(points, fn {_l, v} -> v end)])
+    peak = if peak > 0.0, do: peak, else: 1.0
+    step = @width / max(length(points), 1)
+
+    marks =
+      points
+      |> Enum.with_index()
+      |> Enum.map(fn {{label, value}, i} ->
+        h = max(value / peak * @height, 0.0)
+
+        %{
+          label: label,
+          value: value,
+          x: i * step + step * 0.15,
+          y: @height - h,
+          w: step * 0.7,
+          h: h,
+          cx: i * step + step / 2,
+          cy: @height - h
+        }
+      end)
+
+    assigns =
+      assigns
+      |> assign(:marks, marks)
+      |> assign(:width, @width)
+      |> assign(:height, @height)
+      |> assign(:polyline, Enum.map_join(marks, " ", fn m -> "#{m.cx},#{m.cy}" end))
+
+    ~H"""
+    <figure class="loom-chart" role="img" aria-label={@label} data-testid={@testid}>
+      <svg
+        viewBox={"0 0 #{@width} #{@height}"}
+        class="w-full h-64 text-indigo-600"
+        aria-hidden="true"
+      >
+        <line x1="0" y1={@height} x2={@width} y2={@height} stroke="currentColor" stroke-opacity="0.25" />
+        <%= if @kind == "line" do %>
+          <polyline points={@polyline} fill="none" stroke="currentColor" stroke-width="2" />
+          <circle :for={m <- @marks} cx={m.cx} cy={m.cy} r="4" fill="currentColor" />
+        <% else %>
+          <rect :for={m <- @marks} x={m.x} y={m.y} width={m.w} height={m.h} fill="currentColor" />
+        <% end %>
+      </svg>
+      <figcaption class="sr-only">{@label}</figcaption>
+      <ol class="flex justify-between text-xs text-gray-500">
+        <li :for={m <- @marks} class="truncate px-1">{m.label}</li>
+      </ol>
+    </figure>
+    """
+  end
+
+  # A failed read assigns the :error sentinel (see the page's load_<proj>/1), so
+  # the chart degrades to an empty axis instead of raising on a non-list.
+  defp rows_of(rows) when is_list(rows), do: rows
+  defp rows_of(_), do: []
+
+  defp label_of(nil), do: ""
+  defp label_of(v) when is_binary(v), do: v
+  defp label_of(v) when is_atom(v), do: Atom.to_string(v)
+  defp label_of(%Date{} = v), do: Date.to_iso8601(v)
+  defp label_of(%DateTime{} = v), do: DateTime.to_iso8601(v)
+  defp label_of(%NaiveDateTime{} = v), do: NaiveDateTime.to_iso8601(v)
+  defp label_of(v), do: to_string(v)
+
+  # money rides the wire as a STRING, decimal as a float, count as an integer —
+  # one plottable float out of all three.
+  defp number_of(nil), do: 0.0
+  defp number_of(%Decimal{} = v), do: Decimal.to_float(v)
+  defp number_of(v) when is_number(v), do: v * 1.0
+
+  defp number_of(v) when is_binary(v) do
+    case Float.parse(v) do
+      {f, _rest} -> f
+      :error -> 0.0
+    end
+  end
+
+  defp number_of(_), do: 0.0
+end
+`;
+}

@@ -104,8 +104,13 @@ describe("HEEx simple-display primitives (parity finding #5)", () => {
 });
 
 describe("HEEx Money primitive (parity finding #5)", () => {
-  it("renders the amount via Decimal.to_string, with an optional currency prefix", async () => {
+  // `to_string/1`, not `Decimal.to_string/1`: a money slot is handed a
+  // `%Decimal{}` (aggregate field — String.Chars dispatches to the same
+  // rendering), a STRING (query-time projection field — money rides the Elixir
+  // wire as a string) or a float LITERAL, as here.  The narrower cast raised
+  // FunctionClauseError on the latter two — including on this very fixture.
+  it("renders the amount via to_string, with an optional currency prefix", async () => {
     const heex = await landingHeex(`Stack { Money(value: 9.99, currency: "USD", testid: "m1") }`);
-    expect(heex).toMatch(/<span class="money"[^>]*data-testid="m1">USD <%= Decimal\.to_string\(/);
+    expect(heex).toMatch(/<span class="money"[^>]*data-testid="m1">USD <%= to_string\(/);
   });
 });

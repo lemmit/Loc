@@ -61,6 +61,7 @@ import {
   renderBreadcrumbs as renderBreadcrumbsHeex,
   renderButton as renderButtonHeex,
   renderCard as renderCardHeex,
+  renderChart as renderChartHeex,
   renderCodeBlock as renderCodeBlockHeex,
   renderContainer as renderContainerHeex,
   renderDateDisplay as renderDateDisplayHeex,
@@ -521,16 +522,22 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: { role: "table", owns: "Column" },
   },
   // Kind-discriminated (line | bar) chart over a GROUPED query-time projection
-  // (M-T1.3 Phase 4).  react + mantine@v9 only for now — the pack matrix is
-  // the cost item, so it lands on the lead pack first behind an honest gate
-  // (`loom.chart-unsupported-target`).  `heex` is intentionally absent and
-  // pinned in heex-parity — the LiveView chart story (a Chart.js hook or a
-  // parity pin, no JS-free option) is Phase 5+ work, not a markup mapping.
+  // (M-T1.3 Phase 4).  On the JSX side: react + mantine@v9 only for now — the
+  // pack matrix is the cost item, so it lands on the lead pack first behind an
+  // honest gate (`loom.chart-unsupported-target`).
+  //
+  // HEEx renders it WITHOUT a charting library: the rows are already on the
+  // server in an assign, so the geometry is arithmetic and the chart is inline
+  // SVG (`renderChart` → the generated `LoomChart.chart/1` component).  That is
+  // why this is the one primitive whose HEEx leg reaches every design pack while
+  // the TSX leg is still pack-gated.
+  //
   // A chart is an image of data: `role="img"` + a derived `aria-label`.
   Chart: {
     group: "layout",
     admissibleInSource: true,
     tsx: emitChart,
+    heex: renderChartHeex,
     a11y: { role: "img", needsName: true },
   },
   Money: {

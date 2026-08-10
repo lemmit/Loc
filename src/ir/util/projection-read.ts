@@ -23,6 +23,7 @@ import type { BoundedContextIR, ProjectionIR } from "../types/loom-ir.js";
 import {
   isGroupedProjection,
   isQueryTimeProjection,
+  isShorthandProjection,
   isSingletonProjection,
 } from "../types/loom-ir.js";
 
@@ -47,12 +48,28 @@ export function isFrontendReadableProjection(p: ProjectionIR): boolean {
 }
 
 /** The RESPONSE SHAPE a frontend read of this projection yields — `"one"`
- *  object for the whole-table aggregation, `"many"` rows (a JSON array) for a
- *  `group by` projection.  The client emitter, the walker's query-shape
- *  derivation, and the validator all key their list-vs-object handling on this
- *  one answer, same single-detector discipline as the readability predicate. */
+ *  object, or `"many"` rows (a JSON array).  The client emitter, the walker's
+ *  query-shape derivation, and the validator all key their list-vs-object
+ *  handling on this one answer, same single-detector discipline as the
+ *  readability predicate.
+ *
+ *  Exactly ONE readable form yields a single object: the whole-table
+ *  aggregation, which collapses the source table to one row by construction.
+ *  Both of the others return an array —
+ *
+ *    - a `group by` projection: one row per distinct group (M-T1.3 Phase 4);
+ *    - a SHORTHAND projection (`projection P { from A as a where … }`, no
+ *      declared fields, no `select`): the filtered SOURCE ROWS themselves.
+ *
+ *  The shorthand arm is the one this predicate originally got wrong, and it was
+ *  wrong invisibly: `isSingletonProjection` answers "unkeyed", which a shorthand
+ *  read is, and the shape question was answered from `isGroupedProjection`
+ *  alone.  So every frontend emitted a `z.object` client for a route that
+ *  returns an array — a `.parse` that throws on the first load, from a model
+ *  with no diagnostic at all.  Ask "is it the whole-table aggregation", not "is
+ *  it grouped". */
 export function projectionReadShape(p: ProjectionIR): "one" | "many" {
-  return isGroupedProjection(p) ? "many" : "one";
+  return isGroupedProjection(p) || isShorthandProjection(p) ? "many" : "one";
 }
 
 /** Names of every frontend-readable projection across the given contexts. */
@@ -66,14 +83,31 @@ export function readableProjectionNames(contexts: Iterable<BoundedContextIR>): R
   return names;
 }
 
-/** Names of every frontend-readable GROUPED projection (the `"many"` shape)
- *  across the given contexts.  The `Chart` primitive's `of:` domain, and the
- *  walker's list-vs-single discriminator for a projection read. */
+/** Names of every frontend-readable GROUPED projection across the given
+ *  contexts — the `Chart` primitive's `of:` domain.  Narrower than
+ *  `listShapedProjectionNames`: a chart plots aggregates PER GROUP, which a
+ *  shorthand row dump is not, even though both ride the wire as an array. */
 export function groupedProjectionNames(contexts: Iterable<BoundedContextIR>): ReadonlySet<string> {
   const names = new Set<string>();
   for (const ctx of contexts) {
     for (const p of ctx.projections ?? []) {
       if (isFrontendReadableProjection(p) && isGroupedProjection(p)) names.add(p.name);
+    }
+  }
+  return names;
+}
+
+/** Names of every frontend-readable projection whose response is the LIST shape
+ *  (`projectionReadShape === "many"`).  The walker's list-vs-single
+ *  discriminator for a projection read, and the client emitter's `z.array`
+ *  wrap — both must ask the SHAPE question, not the grouping one. */
+export function listShapedProjectionNames(
+  contexts: Iterable<BoundedContextIR>,
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const ctx of contexts) {
+    for (const p of ctx.projections ?? []) {
+      if (isFrontendReadableProjection(p) && projectionReadShape(p) === "many") names.add(p.name);
     }
   }
   return names;

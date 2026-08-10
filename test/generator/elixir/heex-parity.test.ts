@@ -69,13 +69,13 @@ const KNOWN_HEEX_GAPS: Record<string, string> = {
   // server-driven sort + pagination (M-T1.1 slice 8), and a `DataGrid` on a
   // non-React frontend is a compile error, not a blank space.
   DataGrid: "TanStack client row model has no LiveView analogue; use Table (server-driven on HEEx)",
-  // DEFERRED — Chart (M-T1.3 Phase 4) is react + mantine@v9 only for now,
-  // behind `loom.chart-unsupported-target`.  A LiveView chart is not a markup
-  // mapping: HEEx has no JS-free charting option, so the Phase 5+ design is a
-  // Chart.js client hook (a dedicated change with a `mix compile` validation
-  // cycle), not a `primitive-chart.heex.hbs`.
-  Chart:
-    "no JS-free LiveView charting; the Phase 5+ story is a Chart.js hook, not a markup mapping",
+  // Chart's entry is GONE, and the reason it carried is worth keeping as a
+  // caution: it read "no JS-free LiveView charting; the story is a Chart.js
+  // hook".  That premise was simply false — a chart plots a grouped
+  // projection's rows, which on LiveView are ALREADY in a server assign, so the
+  // geometry is arithmetic and the output is inline SVG with no JS and no
+  // library.  A pinned gap is a claim about the target, and this one went
+  // unexamined for a whole phase because the pin made it look decided.
 };
 
 describe("HEEx walker parity (finding #5)", () => {

@@ -53,8 +53,11 @@
 // ---------------------------------------------------------------------------
 
 import type { BoundedContextIR, ProjectionIR } from "../../ir/types/loom-ir.js";
-import { contextUsesMoney, isGroupedProjection } from "../../ir/types/loom-ir.js";
-import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
+import { contextUsesMoney } from "../../ir/types/loom-ir.js";
+import {
+  isFrontendReadableProjection,
+  projectionReadShape,
+} from "../../ir/util/projection-read.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { zodForResponse } from "./api-module.js";
 
@@ -140,10 +143,12 @@ export function buildProjectionsApiModule(
   for (const { proj } of projections) {
     const T = upperFirst(proj.name);
     const slug = snake(proj.name);
-    // A grouped (`group by`) projection returns the LIST shape — one row per
-    // group (M-T1.3 Phase 4) — so its Response wraps the object row in
-    // `z.array`.  The singleton stays the bare object, byte-identical.
-    const grouped = isGroupedProjection(proj);
+    // A LIST-shaped projection (one row per `group by` group, or a shorthand
+    // read's filtered source rows) wraps the object row in `z.array`; only the
+    // whole-table aggregation stays the bare object.  Asked through
+    // `projectionReadShape` so the client, the walker's binding and the
+    // validator can't answer it three different ways.
+    const grouped = projectionReadShape(proj) === "many";
     // The row schema mirrors the backend's `<Proj>Row` field-for-field — same
     // `wireShape`, so the two can't drift.
     lines.push(`export const ${T}${grouped ? "Row" : "Response"} = z.object({`);
