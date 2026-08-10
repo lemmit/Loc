@@ -135,6 +135,27 @@ jobs:
                 repository Products for Product {
                   find byName(term: string): Product[] where this.name == term
                 }
+                // M-T1.3 Phase 1 — query-time PROJECTION reads, both shapes:
+                // a SINGLETON (one object, `FutureProvider<Row?>`) and a
+                // GROUPED one (one row per group, `FutureProvider<List<Row>>`).
+                // Both are id-less and paramless, so neither is a `.family` —
+                // and `flutter analyze` is what proves the emitted Dart types
+                // line up, which no assertion on emitted text can.
+                criterion InStock of Product as p = p.inStock == true
+                projection CatalogSize {
+                  products: int
+                  stockValue: int
+                  from Product as p
+                  where InStock
+                  select products = count, stockValue = sum(p.price)
+                }
+                projection ProductsByStatus {
+                  status: Status
+                  n: int
+                  from Product as p
+                  group by p.status
+                  select status = p.status, n = count
+                }
               }
             }
             storage db { type: postgres }
@@ -221,6 +242,24 @@ jobs:
                   }
                 }
                 body: Stack { Heading { "Restock", level: 1 }, Text { note }, Button { "Restock", onClick: restock } }
+              }
+              // M-T1.3 Phase 1 — the projection reads.  Their own page so the
+              // existing pages' assertions stay untouched.
+              page Insights {
+                route: "/insights"
+                body: Stack {
+                  Heading { "Insights", level: 1 },
+                  QueryView {
+                    of: Shop.CatalogSize,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No data." },
+                    data: t => Card { "Catalog", Text { t.products }, Text { t.stockValue } }
+                  },
+                  QueryView {
+                    of: Shop.ProductsByStatus,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No groups." },
+                    data: rows => Stack { For { each: rows, g => Text { g.n } } }
+                  }
+                }
               }
               page NewCategory { route: "/categories/new"  body: Stack { Heading { "New category", level: 1 }, WorkflowForm { runs: addCategory } } }
               page ProductAdmin { route: "/products/:id"  body: Stack {
