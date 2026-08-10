@@ -27,12 +27,12 @@ import {
   type ReadPort,
   readPortsForOperation,
 } from "../../../ir/util/domain-service-read-ports.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opOperation,

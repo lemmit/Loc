@@ -1679,10 +1679,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `is not emitted by the ${p.unsupported} backend(s) yet (node emits it; the other ` +
     `backends are the stacked follow-on). Drop the \`mask unless\` clause for those targets, ` +
     `or track authorization.md §5 (M-T3.2 item 6).`,
-  "loom.field-mask-projection-source": (p: { name: unknown; src: unknown }) =>
-    `projection '${p.name}' sources from aggregate '${p.src}', which has a \`mask unless\` ` +
-    `field — query-time projection responses are not yet read-masked, so this would expose ` +
-    `the masked field. Read the aggregate through its own routes, or drop the mask.`,
+  "loom.field-mask-projection-source": (p: { name: unknown; src: unknown; via?: unknown }) =>
+    `projection '${p.name}' ${p.via === "join" ? `joins` : `sources from`} aggregate '${p.src}', ` +
+    `which has a \`mask unless\` field — query-time projection responses are not yet read-masked, ` +
+    `so this would expose the masked field. Read the aggregate through its own routes, or drop ` +
+    `the mask.`,
   "loom.audited-backend-unsupported": (p: {
     name: unknown;
     kind: unknown;

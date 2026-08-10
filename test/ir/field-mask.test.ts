@@ -94,4 +94,47 @@ describe("field mask — IR gates", () => {
     const codes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
     expect(codes).toContain("loom.field-mask-projection-source");
   });
+
+  // A `join` reaches the masked aggregate just as directly as `from` does.
+  // Before this was checked, `select leaked = c.ssn` off a join alias VALIDATED
+  // CLEAN and emitted the raw column on all five backends, while the identical
+  // read through `from` was a hard error — so the bound was bypassable by
+  // adding a join.  Verified on node before the fix: the emitted projection
+  // route read `customerById.get(...)!.ssn` in the clear, while the same
+  // aggregate's own `GET /{id}` went through `repo.toWireMasked(...)`.
+  it("rejects a masked aggregate reached through a `join`, not just through `from`", async () => {
+    const src = `system S {
+  user { id: string  role: string }
+  subdomain M {
+    context C {
+      aggregate Customer with crudish {
+        name: string
+        ssn: string mask unless currentUser.role == "admin"
+      }
+      aggregate Order with crudish {
+        customerId: Customer id
+        total: int
+      }
+      projection OrderLeak keyed by orderId {
+        orderId: Order id
+        who: string
+        leaked: string
+        from Order as o
+        join Customer as c on o.customerId
+        select orderId = o.id, who = c.name, leaked = c.ssn
+      }
+    }
+  }
+  storage db { type: postgres }
+  resource st { for: C, kind: state, use: db }
+  deployable api { platform: node  contexts: [C]  dataSources: [st]  port: 8080  auth: required }
+}`;
+    const { model } = await parseString(src, { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
+    expect(diags.map((d) => d.code)).toContain("loom.field-mask-projection-source");
+    // The message must name the JOINED aggregate, not the `from` source —
+    // pointing at `Order` would send the author to the wrong declaration.
+    const d = diags.find((x) => x.code === "loom.field-mask-projection-source")!;
+    expect(d.message).toContain("joins aggregate 'Customer'");
+  });
 });

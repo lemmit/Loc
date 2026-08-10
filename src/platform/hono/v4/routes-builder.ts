@@ -74,12 +74,12 @@ import {
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opCreate,

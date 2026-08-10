@@ -3499,6 +3499,25 @@ export function validateFieldMask(
           message: diagMessage("loom.field-mask-projection-source", { name: proj.name, src }),
           source: `${ctx.name}/projection/${proj.name}`,
         });
+        continue;
+      }
+      // A `join` reaches the masked aggregate just as directly as `from` does —
+      // `select leaked = c.ssn` off a join alias emitted the raw column on all
+      // five backends while the identical read through `from` was rejected.
+      // Checking only the source made the bound bypassable by adding a join,
+      // which is the opposite of a bound.  Same rule, same diagnostic.
+      const joined = (proj.query?.joins ?? []).find((j) => maskedAggNames.has(j.aggregate));
+      if (joined) {
+        diags.push({
+          severity: "error",
+          code: "loom.field-mask-projection-source",
+          message: diagMessage("loom.field-mask-projection-source", {
+            name: proj.name,
+            src: joined.aggregate,
+            via: "join",
+          }),
+          source: `${ctx.name}/projection/${proj.name}`,
+        });
       }
     }
   }
