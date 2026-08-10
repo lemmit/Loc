@@ -295,6 +295,18 @@ export const flutterTarget: WalkerTarget = {
     );
   },
 
+  /** A `Chart`'s plotted rows.  The shared default is literal JavaScript
+   *  (`?? []`, `.map`, an object literal, `Number(...)`), none of which is
+   *  Dart; and the per-row projection it builds for the JS chart libraries
+   *  buys nothing here, because the pack maps straight into `LoomChartPoint`.
+   *  What this seam owns is unwrapping the read: `of:` renders to the Riverpod
+   *  `AsyncValue` the page watches, so the chart takes its loaded rows and
+   *  paints empty until they arrive — the same "no loading arm" contract the
+   *  tsx leg gets from `?? []`. */
+  renderChartData({ queryExpr }) {
+    return `(${queryExpr}.asData?.value ?? const [])`;
+  },
+
   /** CLIENT-side page window.  The shared default is literal JavaScript
    *  (`.slice(…)`, `Math.max`, `Math.ceil`), which is not Dart — emitting it
    *  produced `Math.max(1, Math.ceil((rows).length / 3))` in a `.dart` file.

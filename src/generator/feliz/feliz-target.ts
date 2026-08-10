@@ -292,9 +292,11 @@ export const felizTarget: WalkerTarget = {
   // no page-top hoist to make).
   buildHookUse: (detected) => {
     // A query-time PROJECTION read (M-T1.3 Phase 1) resolves to its own Model
-    // field — `Remote<<Proj>Row option>`, filled by the init Cmd and rendered
-    // through `View.remoteOne`, exactly like a byId read's arm.  No import and
-    // no hoist: Elmish has neither (see `feliz/projection-read.ts`).
+    // field, filled by the init Cmd.  Its Remote payload — and so which
+    // `View.*` matcher renders it — follows the projection's RESPONSE SHAPE:
+    // `Remote<<Proj>Row option>` + `remoteOne` for the whole-table aggregation,
+    // `Remote<<Proj>Row list>` + `remoteList` for a `group by` read (see
+    // `felizProjectionRead`).  No import and no hoist: Elmish has neither.
     if (detected.kind === "projection") {
       const field = projectionFieldName(detected.aggregateName);
       return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
@@ -790,6 +792,20 @@ export const felizTarget: WalkerTarget = {
       `(${rowsExpr} |> List.sortWith (fun a b -> ` +
       `let c = (match ${k} with ${arms} | _ -> 0) in if ${d} = "desc" then -c else c))`
     );
+  },
+
+  /** A `Chart`'s plotted data is the `Remote<'T list>` Model field ITSELF, not
+   *  a mapped row array: `View.chart` matches on the Remote (so a chart renders
+   *  empty while loading, like every other Feliz read) and applies the `x:`/`y:`
+   *  accessors the pack builds.  The default seam's `?? []` + `.map` + `Number`
+   *  are JavaScript, and the per-row projection it does for the JS chart
+   *  libraries buys nothing here — F# reads the record's fields directly. */
+  renderChartData({ queryExpr }) {
+    // `queryExpr` is the Model FIELD name — `buildHookUse` returns it bare
+    // because Elmish has no hook to hoist, and each consumer names the record
+    // it reads from.  The QueryView pack renderer prefixes `model.` for exactly
+    // the same reason.
+    return `model.${queryExpr}`;
   },
 
   /** Client-side page window.  `List.skip` raises when the count exceeds the

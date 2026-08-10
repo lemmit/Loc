@@ -363,12 +363,8 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
 
 /** Frontends that can render `Chart` (M-T1.3 Phase 4).
  *
- *  react reaches a charting LIBRARY through its design pack; heex needs none —
- *  the rows are already server-side in a LiveView assign, so it renders inline
- *  SVG from arithmetic (`renderChart` → the generated `LoomChart` component).
- *  The remaining frontends have no chart emitter at all. */
-const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView"]);
-
+ *  react reaches a charting LIBRARY through its design pack; the other three
+ *  need none — see the rollout note on the gate below. */
 /** `Chart` on a target that can't render it (M-T1.3 Phase 4).
  *
  *  The gate was per-PACK during the staged rollout (mantine v9 was the only
@@ -376,9 +372,22 @@ const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView"]);
  *  backfill is complete — all EIGHT tsx packs ship both — so `primitive-chart`
  *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
  *  it a pack-LOAD failure rather than something to re-check here.  What remains
- *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`: vue,
- *  svelte, angular, feliz and flutter have no chart emitter and would render an
- *  unsupported-primitive comment, so they stay honest gaps. */
+ *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`.
+ *
+ *  Phoenix, Feliz and Flutter join react by rendering the chart THEMSELVES —
+ *  inline SVG (HEEx, Feliz) and a `CustomPainter` (Flutter), computed from rows
+ *  the client (or the LiveView socket) has already decoded, with no charting
+ *  library and no dependency added.  None of the three has a `.hbs` pack matrix
+ *  to backfill, so unlike the tsx leg there was no per-pack library to choose —
+ *  which is what made them the cheap legs.  Vue, Svelte and Angular have no
+ *  chart renderer and would render an unsupported-primitive comment, so they
+ *  stay honest gaps.
+ *
+ *  NOTE for the sibling ports: this one-line Set is edited by every frontend's
+ *  chart PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
+ *  already present plus yours — never by taking one side wholesale. */
+const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter"]);
+
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.uiName) continue;

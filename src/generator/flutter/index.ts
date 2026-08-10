@@ -35,6 +35,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
+import { renderFlutterChartRuntime } from "./chart-runtime.js";
 import {
   type ComponentWalkCtx,
   emittableComponentParams,
@@ -192,6 +193,11 @@ export function generateFlutterForContexts(
   // the same marker the per-page import sniffs so neither can dangle.
   if (rendered.some((r) => r.source.includes("LoomModalHost("))) {
     out.set("lib/modal.dart", renderFlutterModalRuntime());
+  }
+  // The chart painter — same use-driven rule and the same marker discipline as
+  // the modal bridge above, so the file and the per-page import cannot dangle.
+  if (rendered.some((r) => r.source.includes("LoomChart("))) {
+    out.set("lib/chart.dart", renderFlutterChartRuntime());
   }
 
   if (rendered.length > 0) {
@@ -433,6 +439,7 @@ function renderStatelessPage(
   // (an unused Dart import is an analyzer warning, and `flutter analyze` is a
   // per-PR gate).  Same content-sniff as `apiUri(` below.
   if (bodyWidget.includes("LoomModalHost(")) imports.push("import '../modal.dart';");
+  if (bodyWidget.includes("LoomChart(")) imports.push("import '../chart.dart';");
   if (opts.usesComponent) imports.push("import '../components.dart';");
   // An `Action(<instance>.<op>)` button POSTs inline via `apiUri(` — the only
   // page-body reference to it — so import http + the base-URL helper on demand.
@@ -562,6 +569,7 @@ function renderConsumerPage(
   // sibling above sniffs the same marker).  A controlled Modal only exists on a
   // page WITH state, so this is the branch that actually fires.
   if (bodyWidget.includes("LoomModalHost(")) imports.push("import '../modal.dart';");
+  if (bodyWidget.includes("LoomChart(")) imports.push("import '../chart.dart';");
   // Content scan over BOTH the Notifier projection AND the rendered body: a
   // `match await` method (projSource) decodes JSON + reifies wire models, and a
   // `FileUpload` (bodyWidget) does the same inline plus references `FileRef` in

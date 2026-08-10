@@ -429,6 +429,33 @@ function primitiveEnumBadge(c: Ctx): string {
 }
 
 /** Stat(label, value) — a labelled metric block. */
+/** Chart(kind:, of:, x:, y:) — `LoomChart(...)` (lib/chart.dart), a
+ *  `CustomPainter` over the rows the page already watches (M-T1.3 Phase 4).
+ *
+ *  No charting package: the rows are decoded on this side, so the geometry is
+ *  arithmetic — see `chart-runtime.ts` for why the widget takes a flat point
+ *  list rather than a generic row type + accessors.
+ *
+ *  The accessors are applied HERE because this is where the walker's `x:`/`y:`
+ *  field names are in scope.  Both coercions are total over what a projection
+ *  row can hold: `toString()` for the category label (a `group by` key is a
+ *  string, an enum or an id), and `as num).toDouble()` for the series — the
+ *  Dart spelling of the tsx leg's `Number(...)`, identity on a `double` and a
+ *  widening on an `int`. */
+function primitiveChart(c: Ctx): string {
+  const isBar = c.isLine ? "false" : "true";
+  // The name is DERIVED ("Bar chart of SalesByStatus: revenue by status"), not
+  // an authored slot, so it arrives as raw text rather than through the walker's
+  // escaping seam (the tsx leg splices it into `aria-label="…"`) — and so it is
+  // quoted HERE.  `JSON.stringify` is an exact Dart double-quoted literal.
+  const label = JSON.stringify(String(c.ariaLabel ?? ""));
+  const rows = String(c.dataExpr ?? "const []");
+  const x = String(c.dataKey ?? "");
+  const y = String(c.seriesField ?? "");
+  const point = `LoomChartPoint(r.${x}.toString(), (r.${y} as num).toDouble())`;
+  return `LoomChart(isBar: ${isBar}, label: ${label}, points: ${rows}.map((r) => ${point}).toList())`;
+}
+
 function primitiveStat(c: Ctx): string {
   const label = styledText(String(c.label ?? ""), "Theme.of(context).textTheme.bodySmall");
   const value = styledText(String(c.value ?? ""), "Theme.of(context).textTheme.headlineSmall");
@@ -708,6 +735,7 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-date-display": primitiveDateDisplay,
   "primitive-enum-badge": primitiveEnumBadge,
   "primitive-stat": primitiveStat,
+  "primitive-chart": primitiveChart,
   "primitive-image": primitiveImage,
   "primitive-avatar": primitiveAvatar,
   "primitive-icon": primitiveIcon,

@@ -20,6 +20,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime } from "../../ir/util/channels.js";
+import { uiUsesChart } from "../../ir/util/chart.js";
 import { uiUsesDataGrid } from "../../ir/util/data-grid.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
@@ -585,6 +586,12 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   // predicate, so Feliz agrees with every other frontend about which projections
   // are readable even though it emits them completely differently.
   const projectionNames = readableProjectionNames(contexts);
+  // The read's SHAPE (one object vs a list of group rows) is a property of the
+  // projection, so the collector needs the node, not just the name — see
+  // `felizProjectionRead`.
+  const projectionIRs = new Map(
+    contexts.flatMap((c) => (c.projections ?? []).map((p) => [p.name, p] as const)),
+  );
   for (const page of ui.pages) {
     for (const r of collectPageReads(
       page,
@@ -593,6 +600,7 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
       nameCtx,
       bcByAggregate,
       projectionNames,
+      projectionIRs,
     )) {
       if (seen.has(r.field)) continue;
       seen.add(r.field);
@@ -971,6 +979,10 @@ function renderAppFs(
   // Any form with a message-bearing (required) field → the `View.fieldError`
   // helper must ship even on a form-only page that has no reads.
   const hasFieldErrors = formRecords.some(formHasFieldErrors);
+  // `Chart` ships the `View.chart` helper (inline SVG, no charting library) and
+  // is emitted only when a body actually plots one — the same use-driven rule
+  // the React leg applies to its chart DEPENDENCY.
+  const usesChart = uiUsesChart(ui);
   // Http/Api are needed for reads, mutations, forms (POST) AND async effects
   // (POST + decode); the auth probe also uses `Http.get`; a FileUpload POSTs
   // its bytes to /files.  The Thoth record/decoder layer is needed for reads
@@ -1239,8 +1251,9 @@ function renderAppFs(
     hasHttp && api,
     // View helpers — Remote matchers (reads) + the per-field `fieldError` matcher
     // (validated forms), so a form-only page still gets the helper.
-    (hasReads || hasFieldErrors) && "",
-    (hasReads || hasFieldErrors) && renderViewModule(reads, hasIdSelect, hasFieldErrors),
+    (hasReads || hasFieldErrors || usesChart) && "",
+    (hasReads || hasFieldErrors || usesChart) &&
+      renderViewModule(reads, hasIdSelect, hasFieldErrors, usesChart),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
     routed && "",
     routed && renderRouting(pages, nameCtx),

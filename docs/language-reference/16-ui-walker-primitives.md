@@ -132,7 +132,7 @@ State is an Angular signal: `readonly draftName = signal("")`; reads call `draft
 
 > **Pack vs. framework.** The four tabs above mix two axes. The next section isolates the *pack* axis — same framework (React), two design systems — so you can see the difference the `design:` pin alone makes.
 
-## `Chart` — grouped-projection series (react on every pack; Phoenix/HEEx)
+## `Chart` — grouped-projection series (react, Phoenix/HEEx, Feliz, Flutter)
 
 A `Chart` renders a GROUPED query-time projection (`group by`, M-T4.2) as a line or bar series. `kind:` is `"line"` or `"bar"` (kind-discriminated — there is no separate `LineChart`), `of:` names a grouped projection through an api handle, and `x:`/`y:` are accessor lambdas over the projection's declared row:
 
@@ -165,7 +165,22 @@ On **Phoenix/LiveView** the same declaration renders with no charting library an
 
 `LoomChart` is emitted once per deployable (only when a page actually charts) and draws inline SVG — `<rect>` per group for `bar`, a `<polyline>` for `line` — inside a `role="img"` figure carrying the same derived accessible name the React leg emits. The value coercion the tsx leg spells `Number(...)` is `number_of/1` here, because a `money` column rides the Elixir wire as a string and a `decimal` as a float.
 
-The `of:` projection must be **grouped** — a singleton (whole-table aggregation) has one row and nothing to chart (`loom.chart-of-not-grouped`); `x:`/`y:` must be plain accessors to declared row fields (`loom.chart-accessor-not-field`). On the tsx side `Chart` ships on **every react design pack** — the eight tsx packs all emit a `primitive-chart` template, so it is part of `REQUIRED_PRIMITIVES.tsx.core`. Each pack binds its own charting library, and the dependency enters the generated `package.json` only when a page actually uses a Chart: `@mantine/charts` (mantine v7/v9), `@mui/x-charts` (mui v5/v7), and recharts directly (shadcn v3/v4, chakra v2/v3, which ship no chart component of their own). The remaining frontends — vue, svelte, angular, feliz, flutter — are rejected honestly (`loom.chart-unsupported-target`); a `Table` over the same projection is the universal fallback.
+**Feliz and Flutter reach the same conclusion in their own languages**, for the same reason: the rows are already decoded on that side, so the geometry is arithmetic and the output is markup. Neither adds a dependency, and neither has a design-pack matrix to backfill — which is what made them the cheap legs.
+
+```fsharp
+// Feliz — App.fs; View.chart draws inline SVG from the Remote list
+(View.chart true "Bar chart of SalesByStatus: revenue by status" model.SalesByStatus (fun r -> string r.status) (fun r -> float r.revenue))
+```
+
+```dart
+// Flutter — lib/pages/dash_page.dart; LoomChart is a CustomPainter in lib/chart.dart
+LoomChart(isBar: true, label: "Bar chart of SalesByStatus: revenue by status",
+    points: (salesByStatusRead.asData?.value ?? const []).map((r) => LoomChartPoint(r.status.toString(), (r.revenue as num).toDouble())).toList()),
+```
+
+All four carry the same a11y contract — `role="img"` (`Semantics(image: true)` on Flutter) plus the derived accessible name.
+
+The `of:` projection must be **grouped** — a singleton (whole-table aggregation) has one row and nothing to chart (`loom.chart-of-not-grouped`); `x:`/`y:` must be plain accessors to declared row fields (`loom.chart-accessor-not-field`). On the tsx side `Chart` ships on **every react design pack** — the eight tsx packs all emit a `primitive-chart` template, so it is part of `REQUIRED_PRIMITIVES.tsx.core`. Each pack binds its own charting library, and the dependency enters the generated `package.json` only when a page actually uses a Chart: `@mantine/charts` (mantine v7/v9), `@mui/x-charts` (mui v5/v7), and recharts directly (shadcn v3/v4, chakra v2/v3, which ship no chart component of their own). The remaining frontends — vue, svelte and angular — are rejected honestly (`loom.chart-unsupported-target`); a `Table` over the same projection is the fallback there.
 
 ## Design-pack divergence (`pack`)
 

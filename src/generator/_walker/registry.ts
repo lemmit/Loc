@@ -522,16 +522,14 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: { role: "table", owns: "Column" },
   },
   // Kind-discriminated (line | bar) chart over a GROUPED query-time projection
-  // (M-T1.3 Phase 4).  On the JSX side: react + mantine@v9 only for now — the
-  // pack matrix is the cost item, so it lands on the lead pack first behind an
-  // honest gate (`loom.chart-unsupported-target`).
-  //
-  // HEEx renders it WITHOUT a charting library: the rows are already on the
-  // server in an assign, so the geometry is arithmetic and the chart is inline
-  // SVG (`renderChart` → the generated `LoomChart.chart/1` component).  That is
-  // why this is the one primitive whose HEEx leg reaches every design pack while
-  // the TSX leg is still pack-gated.
-  //
+  // (M-T1.3 Phase 4).  The `tsx` renderer serves react — all eight packs, each
+  // binding its own charting library — AND, through the `renderChartData` seam
+  // plus their procedural packs, Feliz and Flutter, which render it as inline
+  // SVG / a `CustomPainter` with no library at all.  HEEx has its own renderer
+  // below on the same terms: the rows are already server-side in an assign, so
+  // the geometry is arithmetic (`renderChart` → the generated `LoomChart.chart/1`
+  // component).  Vue, Svelte and Angular stay behind the honest gate
+  // (`loom.chart-unsupported-target`).
   // A chart is an image of data: `role="img"` + a derived `aria-label`.
   Chart: {
     group: "layout",
