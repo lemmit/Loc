@@ -224,6 +224,7 @@ export function emitVanillaShellFiles(
     }
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
+  out.set(`lib/${appName}_web/body_parser.ex`, renderVanillaBodyParser(appModule));
   out.set(
     `lib/${appName}_web/controllers/not_found_controller.ex`,
     renderVanillaNotFoundController(appModule),
@@ -571,7 +572,7 @@ ${liveViewPlugs}${spaStaticPlug}  plug Plug.RequestId
   plug ${appModule}.RequestContext
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
-  plug Plug.Parsers,
+  plug ${appModule}Web.BodyParser,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
@@ -752,6 +753,69 @@ ${routeLines}
   # error response here, at the single point every mistyped request lands.
   scope "/", ${appModule}Web do
     match :*, "/*path", NotFoundController, :not_found
+  end
+end
+`;
+}
+
+function renderVanillaBodyParser(appModule: string): string {
+  // `Plug.Parsers` runs in the ENDPOINT, before the router, so a body it cannot
+  // read never reaches a generated controller.  It propagates to
+  // `Phoenix.Endpoint.RenderErrors`, which owns TWO things we then cannot
+  // control: the response FORMAT (rendering through `json`, whose MIME type is
+  // `application/json` — not the `application/problem+json` every other error
+  // on this API sends), and the dev/prod SWITCH (`debug_errors: true`, the
+  // generated dev config, answers a full HTML debug page).
+  //
+  // Both are symptoms of the same thing: the fault is handled by phoenix's
+  // machinery instead of by ours.  Rescuing inside a wrapper is the last point
+  // where it is still ours — before RenderErrors exists as a concept — so one
+  // change fixes the content type AND makes the answer identical in dev and
+  // prod.  (Fixing `ErrorJSON`'s body left the content type wrong and the dev
+  // HTML in place; routing error views through a `problem_json` format broke
+  // negotiation for `Accept: */*`.  Both were downstream of the raise.)
+  return `# Auto-generated.
+defmodule ${appModule}Web.BodyParser do
+  @moduledoc """
+  \`Plug.Parsers\` with its failures answered by this app rather than by
+  \`Phoenix.Endpoint.RenderErrors\` — see the RFC 7807 contract in
+  docs/conformance-semantics.md (RS-9).  Opts are \`Plug.Parsers\`' own.
+  """
+  @behaviour Plug
+
+  @impl true
+  def init(opts), do: Plug.Parsers.init(opts)
+
+  @impl true
+  def call(conn, opts) do
+    Plug.Parsers.call(conn, opts)
+  rescue
+    e in [
+      Plug.Parsers.ParseError,
+      Plug.Parsers.UnsupportedMediaTypeError,
+      Plug.Parsers.RequestTooLargeError
+    ] ->
+      status = Plug.Exception.status(e)
+      title = Plug.Conn.Status.reason_phrase(status)
+
+      # The exception message names the decoder and echoes the raw input, so it
+      # is neither safe nor portable as a \`detail\`.  400 gets the one wording
+      # every backend sends for this fault; the rest get the reason phrase.
+      detail = if status == 400, do: "Malformed JSON in request body", else: title
+
+      body =
+        Jason.encode!(%{
+          type: "about:blank",
+          title: title,
+          status: status,
+          detail: detail,
+          instance: conn.request_path
+        })
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/problem+json")
+      |> Plug.Conn.send_resp(status, body)
+      |> Plug.Conn.halt()
   end
 end
 `;
@@ -952,13 +1016,6 @@ defmodule ${appModule}Web.ErrorJSON do
   # Phoenix passes the raised exception when there is one; its message is a
   # better \`detail\` than the bare reason phrase ("no route found for PUT
   # /api/items").  Falls back to the phrase so the member is never absent.
-  # A body Plug.Parsers could not read.  Its exception message names the
-  # decoder and the raw input, so it is neither safe nor portable as a
-  # \`detail\`; every backend sends this one wording for the same fault, and the
-  # cross-backend wire golden compares it byte-for-byte.
-  defp detail_for(%{reason: %Plug.Parsers.ParseError{}}, _title),
-    do: "Malformed JSON in request body"
-
   defp detail_for(%{reason: %{message: message}}, _title) when is_binary(message), do: message
   defp detail_for(_assigns, title), do: title
 

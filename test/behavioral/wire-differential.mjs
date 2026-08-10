@@ -239,11 +239,24 @@ const __wire = [];
 // recorded \`path\` is TEMPLATED (\`/api/x/{id}\`), which is right for aligning
 // two runs and useless as a URL to request.  Not itself compared.
 const __urls = [];
+// The credentials the tier itself used.  Without them the probes below measure the
+// AUTH arm instead of the framework arm on any \`auth {}\` system — and the two
+// disagree across backends for a reason that has nothing to do with RS-9 (node
+// mounts auth as \`app.use("*", …)\` ahead of routing, so an unauthenticated
+// miss is 401; phoenix routes first, so it is 404).  Forwarding them keeps the
+// probe pointed at the thing it is meant to measure.
+let __authHeaders = {};
 const __record = (dispatch) => async (req) => {
   const out = await dispatch(req);
   try {
     const r = out?.response;
-    if (r) { __urls.push(req.url); __wire.push(__toWireEntry(__wire.length, req.method, req.url, r.status, r.body ?? "")); }
+    if (r) {
+      __urls.push(req.url);
+      for (const [k, v] of Object.entries(req.headers ?? {})) {
+        if (!/^content-(type|length)$/i.test(k)) __authHeaders[k] = v;
+      }
+      __wire.push(__toWireEntry(__wire.length, req.method, req.url, r.status, r.body ?? ""));
+    }
   } catch { /* recording must never affect the tier's pass/fail */ }
   return out;
 };
@@ -271,11 +284,11 @@ const __frameworkProbes = async (dispatch) => {
   if (!collection) return;
   const usedPatch = __wire.some((e) => e.method === "PATCH");
   const origin = collection.origin;
-  const json = { "content-type": "application/json" };
+  const json = { ...__authHeaders, "content-type": "application/json" };
   if (!usedPatch) {
     await dispatch({ method: "PATCH", url: origin + collection.pathname, headers: json, body: "{}" });
   }
-  await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: {} });
+  await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: { ...__authHeaders } });
   await dispatch({ method: "POST", url: origin + collection.pathname, headers: json, body: "{not json" });
 };`;
 }
