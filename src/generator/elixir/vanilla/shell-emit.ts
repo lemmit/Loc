@@ -766,21 +766,63 @@ defmodule ${appModule}Web.NotFoundController do
   Catch-all for a request no route matched — an unknown path, or a verb an
   existing path does not serve.  Answers the same RFC 7807 envelope every
   domain error on this API answers, under \`application/problem+json\`.
+
+  The two cases get different statuses.  A phoenix router keys on
+  (method, path), so its miss carries no reason and both used to answer 404 —
+  but RFC 9110 §15.5.6 reserves 405 for a resource that exists and does not
+  serve the method, and the difference is what tells a caller to fix the verb
+  rather than the URL.  \`Phoenix.Router.route_info/4\` separates them: ask the
+  router the same path under the other verbs.
   """
 
+  @probe_methods ~w(GET POST PUT PATCH DELETE)
+
   def not_found(conn, _params) do
+    allow =
+      Enum.filter(@probe_methods, fn method ->
+        method != conn.method and serves?(method, conn)
+      end)
+
+    case allow do
+      [] ->
+        respond(conn, 404, "Not Found", "no route found for #{conn.method} #{conn.request_path}")
+
+      methods ->
+        conn
+        |> put_resp_header("allow", Enum.join(methods, ", "))
+        |> respond(
+          405,
+          "Method Not Allowed",
+          "method #{conn.method} is not supported for #{conn.request_path}"
+        )
+    end
+  end
+
+  # This controller IS the catch-all, registered for \`:*\`, so route_info
+  # matches it for every method on every path.  Counting those would report an
+  # \`Allow\` on all four other verbs for a URL that serves nothing — so the
+  # module's own route is excluded and only a REAL one counts.
+  defp serves?(method, conn) do
+    case Phoenix.Router.route_info(${appModule}Web.Router, method, conn.request_path, conn.host) do
+      :error -> false
+      %{plug: __MODULE__} -> false
+      _ -> true
+    end
+  end
+
+  defp respond(conn, status, title, detail) do
     body =
       Jason.encode!(%{
         type: "about:blank",
-        title: "Not Found",
-        status: 404,
-        detail: "no route found for #{conn.method} #{conn.request_path}",
+        title: title,
+        status: status,
+        detail: detail,
         instance: conn.request_path
       })
 
     conn
     |> put_resp_content_type("application/problem+json")
-    |> send_resp(404, body)
+    |> send_resp(status, body)
   end
 end
 `;

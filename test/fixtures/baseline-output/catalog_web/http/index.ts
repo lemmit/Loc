@@ -3,6 +3,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
+import { TrieRouter } from "hono/router/trie-router";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { frameworkProblemBody } from "./problem-details";
 import { sql } from "drizzle-orm";
@@ -16,6 +17,12 @@ import { CustomerRepository } from "../db/repositories/customer-repository";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "../db/schema";
 import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";
+
+// The verbs a method-mismatch probe asks about (see `allowedFor` below).
+// Deliberately not hono's exported METHODS: that list carries `options`,
+// which the CORS middleware answers for every path, so probing it would
+// report an `Allow` on routes that serve nothing.
+const PROBE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 export function createApp(
   db: NodePgDatabase<typeof schema>,
@@ -96,15 +103,37 @@ export function createApp(
     c: Context,
     status: ContentfulStatusCode,
     detail: string,
+    extraHeaders: Record<string, string> = {},
   ) => {
     baseLogger.warn({ event: "client_error", error: detail, status });
     return c.body(frameworkProblemBody(status, detail, c.req.path), status, {
       "content-type": "application/problem+json",
+      ...extraHeaders,
     });
   };
-  app.notFound((c) =>
-    frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`),
-  );
+  let methodProbe: TrieRouter<string> | null = null;
+  const allowedFor = (path: string): string[] => {
+    if (!methodProbe) {
+      methodProbe = new TrieRouter<string>();
+      for (const r of app.routes) {
+        if (r.method !== "ALL") methodProbe.add(r.method, r.path, r.method);
+      }
+    }
+    const probe = methodProbe;
+    return PROBE_METHODS.filter((m) => probe.match(m, path)[0].length > 0);
+  };
+  app.notFound((c) => {
+    const allow = allowedFor(c.req.path).filter((m) => m !== c.req.method);
+    if (allow.length > 0) {
+      return frameworkProblem(
+        c,
+        405,
+        `method ${c.req.method} is not supported for ${c.req.path}`,
+        { allow: allow.join(", ") },
+      );
+    }
+    return frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`);
+  });
   app.onError((err, c) => {
     if (err instanceof HTTPException) {
       return frameworkProblem(c, err.status as ContentfulStatusCode, err.message);

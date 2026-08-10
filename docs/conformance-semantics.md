@@ -203,10 +203,15 @@ the conforming backends, and the fix that established it.
 - **Observable.** Same status + same problem-body shape (`type: about:blank`,
   `application/problem+json`) on every backend, whichever layer refused.
 - **Conforms.** node, dotnet, java, python, elixir.
-- **Known divergence.** A wrong verb is `405` on python/dotnet/java but `404`
-  on node and elixir — hono and phoenix route on (method, path) as one key and
-  raise a plain not-found for a method mismatch, with no method-not-allowed
-  concept to hook. The *envelope* converges; the status does not.
+- **A wrong verb is `405` everywhere, with `Allow`.** This was briefly recorded
+  here as a known divergence — node and elixir answering `404` because "hono and
+  phoenix route on (method, path) as one key, with no method-not-allowed concept
+  to hook". That premise was wrong. Both routers expose the lookup:
+  `app.router.match(method, path)` on hono, `Phoenix.Router.route_info/4` on
+  phoenix. Neither was unable to tell a method mismatch from a missing path;
+  neither was asked. Both now probe the other verbs on a miss and answer `405`
+  with an `Allow` header, which is the machine-readable half of RFC 9110
+  §15.5.6 — a caller learns to fix the verb rather than the URL.
 - **Provenance.** #1620 (hardened changeset-error renderer), the two-tier
   400/422 model dispositioned in `generated-code-review-2026-06-30.md`. Tier:
   **T1** (structural envelope is T0 via the spec; the 400-vs-422 *routing* is

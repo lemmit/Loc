@@ -247,6 +247,7 @@ export function renderHttpIndex(
       'import type { Context } from "hono";',
       'import { cors } from "hono/cors";',
       'import { HTTPException } from "hono/http-exception";',
+      'import { TrieRouter } from "hono/router/trie-router";',
       'import type { ContentfulStatusCode } from "hono/utils/http-status";',
       'import { frameworkProblemBody } from "./problem-details";',
       usingMikro ? null : 'import { sql } from "drizzle-orm";',
@@ -271,6 +272,12 @@ export function renderHttpIndex(
         : 'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";',
       // (NoopDomainEventDispatcher stays imported on the no-dispatch path —
       // the realtime tee wraps it there.)
+      "",
+      "// The verbs a method-mismatch probe asks about (see `allowedFor` below).",
+      "// Deliberately not hono's exported METHODS: that list carries `options`,",
+      "// which the CORS middleware answers for every path, so probing it would",
+      "// report an `Allow` on routes that serve nothing.",
+      'const PROBE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;',
       "",
       "export function createApp(",
       usingMikro ? "  db: EntityManager," : "  db: NodePgDatabase<typeof schema>,",
@@ -375,15 +382,55 @@ export function renderHttpIndex(
       "    c: Context,",
       "    status: ContentfulStatusCode,",
       "    detail: string,",
+      "    extraHeaders: Record<string, string> = {},",
       "  ) => {",
       `    ${renderHonoBaseLogCall("clientError", "error: detail, status")}`,
       "    return c.body(frameworkProblemBody(status, detail, c.req.path), status, {",
       '      "content-type": "application/problem+json",',
+      "      ...extraHeaders,",
       "    });",
       "  };",
-      "  app.notFound((c) =>",
-      "    frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`),",
-      "  );",
+      // `app.notFound` fires for BOTH a path that does not exist and a path
+      // that exists under a different verb — hono keys its router on
+      // (method, path), so the miss carries no reason and everything came back
+      // 404.  RFC 9110 §15.5.6 reserves 405 for the second, and the difference
+      // matters to the caller: one means "fix the URL", the other "fix the
+      // verb", and only the second can carry an `Allow` header they can act on.
+      //
+      // A second router answers it.  Built from `app.routes`, which by this
+      // point carries every mounted sub-router's routes at their FULL paths, so
+      // one probe covers the whole surface.
+      //
+      // Two details are load-bearing:
+      //   * `ALL` entries are skipped.  That is the method `app.use("*", …)`
+      //     registers middleware under, and it matches every path — counting it
+      //     would report every unknown URL as a method mismatch.
+      //   * built LAZILY, on the first miss.  `app.doc()` below registers the
+      //     spec route AFTER these handlers, so a probe built eagerly here
+      //     would answer 404 for a `POST /openapi.json`.
+      "  let methodProbe: TrieRouter<string> | null = null;",
+      "  const allowedFor = (path: string): string[] => {",
+      "    if (!methodProbe) {",
+      "      methodProbe = new TrieRouter<string>();",
+      "      for (const r of app.routes) {",
+      '        if (r.method !== "ALL") methodProbe.add(r.method, r.path, r.method);',
+      "      }",
+      "    }",
+      "    const probe = methodProbe;",
+      "    return PROBE_METHODS.filter((m) => probe.match(m, path)[0].length > 0);",
+      "  };",
+      "  app.notFound((c) => {",
+      "    const allow = allowedFor(c.req.path).filter((m) => m !== c.req.method);",
+      "    if (allow.length > 0) {",
+      "      return frameworkProblem(",
+      "        c,",
+      "        405,",
+      "        `method ${c.req.method} is not supported for ${c.req.path}`,",
+      '        { allow: allow.join(", ") },',
+      "      );",
+      "    }",
+      "    return frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`);",
+      "  });",
       "  app.onError((err, c) => {",
       // HTTPException is what Hono itself throws for the faults it detects
       // (unreadable body, an aborted request); anything else reaching here is
