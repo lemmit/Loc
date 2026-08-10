@@ -166,3 +166,79 @@ system Helpdesk {
     expect(await denyErrors(src)).toEqual([]);
   });
 });
+
+// An explicit `commandHandler` / `queryHandler` bound through an
+// `api { route <M> "<path>" -> <Ctx>.<Handler> }` is a real HTTP endpoint on
+// all five backends, but `validateDefaultDeny` used to walk right past it —
+// it enumerated aggregate actions, workflow command entries, finds and
+// history, and never touched `ctx.commandHandlers` / `ctx.queryHandlers`.
+function handlerSys(opts: { gate: string; extern: boolean }): string {
+  const handler = opts.extern
+    ? `      extern commandHandler CancelOrder(orderId: Order id): Order id;`
+    : `      commandHandler CancelOrder(orderId: Order id): Order id {
+        ${opts.gate}
+        let o = Orders.getById(orderId)
+        o.cancel()
+        return o.id
+      }`;
+  return `
+system Shop {
+  auth { enforcement: denyByDefault }
+  user { id: string  role: string }
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        code: string
+        status: string
+        operation cancel() requires currentUser.role == "agent" { status := "cancelled" }
+      }
+      repository Orders for Order { }
+${handler}
+    }
+  }
+  api ShopApi from Sales {
+    route POST "/orders/cancel" -> Ordering.CancelOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable d {
+    platform: node
+    contexts: [Ordering]
+    dataSources: [st]
+    serves: ShopApi
+    port: 4000
+    auth: required
+  }
+}`;
+}
+
+describe("default-deny — route-bound explicit handlers", () => {
+  it("flags an ungated route-bound commandHandler", async () => {
+    const errs = await denyErrors(handlerSys({ gate: "", extern: false }));
+    expect(errs.join("\n")).toContain("commandHandler 'Ordering.CancelOrder'");
+    expect(errs.join("\n")).toContain('route POST "/orders/cancel"');
+  });
+
+  it("accepts a route-bound commandHandler whose body declares a gate", async () => {
+    const errs = await denyErrors(
+      handlerSys({ gate: 'requires currentUser.role == "agent"', extern: false }),
+    );
+    expect(errs.join("\n")).not.toContain("CancelOrder");
+  });
+
+  it("`requires true` is the intentionally-public escape here too", async () => {
+    const errs = await denyErrors(handlerSys({ gate: "requires true", extern: false }));
+    expect(errs.join("\n")).not.toContain("CancelOrder");
+  });
+
+  // An `extern` handler has NO body, so "add a `requires`" would be an
+  // instruction it is impossible to follow.  The diagnostic has to name what
+  // is actually actionable instead, or it is the audit-history trap again.
+  it("tells an `extern` handler something it can actually act on", async () => {
+    const errs = await denyErrors(handlerSys({ gate: "", extern: true }));
+    const msg = errs.find((m) => m.includes("CancelOrder"))!;
+    expect(msg).toContain("has no body");
+    expect(msg).toContain("drop `extern`");
+    expect(msg).not.toContain("Add a `requires <expr>` to its body");
+  });
+});

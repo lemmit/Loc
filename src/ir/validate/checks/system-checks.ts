@@ -748,6 +748,65 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
       }
     }
   }
+
+  // Explicit handlers (`commandHandler` / `queryHandler`) reachable through an
+  // `api { route <METHOD> "<path>" -> <Ctx>.<Handler> }` binding.  These are
+  // real HTTP endpoints on all five backends, and default-deny walked right
+  // past them: it enumerated aggregate actions, workflow command entries,
+  // finds and history, but never `ctx.commandHandlers` / `ctx.queryHandlers`.
+  //
+  // Scoped to ROUTE-BOUND handlers deliberately — an unrouted handler has no
+  // transport surface, so demanding a gate from it would be noise.  The route
+  // is the reachability proof, exactly as `visibility === "public"` is for an
+  // aggregate operation.
+  const ctxByName = new Map<string, (typeof sys.subdomains)[number]["contexts"][number]>();
+  for (const sd of sys.subdomains) for (const c of sd.contexts) ctxByName.set(c.name, c);
+  for (const api of sys.apis) {
+    for (const route of api.routes) {
+      const c = ctxByName.get(route.target.context);
+      if (!c || !guarded.has(c.name)) continue;
+      const cmd = (c.commandHandlers ?? []).find((h) => h.name === route.target.handler);
+      const qry = cmd
+        ? undefined
+        : (c.queryHandlers ?? []).find((h) => h.name === route.target.handler);
+      const handler = cmd ?? qry;
+      // A workflow `handle` can also be a route target; those are already
+      // covered by `workflowCommandEntries` above, so skip rather than
+      // double-report.
+      if (!handler) continue;
+      if (isGated(handler.statements)) continue;
+      const params = {
+        kind: cmd ? "commandHandler" : "queryHandler",
+        ctx: c.name,
+        handler: handler.name,
+        method: route.method,
+        path: route.path,
+      };
+      // An `extern` handler has NO body — there is nowhere to put a gate — so
+      // "add a `requires`" would be an unsatisfiable instruction.  Say what is
+      // actually actionable instead (drop `extern`, or drop the route).  The
+      // two arms are separate `diags.push` calls, not a ternary on `message:`,
+      // because the catalog scanner (`diagnostic-catalog.test.ts`) reads the key
+      // off a DIRECT `diagMessage("literal", …)` call expression — a ternary or
+      // a computed key reads to it as inline wording.
+      const source = `${c.name}/handler/${handler.name}`;
+      if (handler.extern) {
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-handler-extern", params),
+          source,
+        });
+      } else {
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-handler", params),
+          source,
+        });
+      }
+    }
+  }
 }
 
 /** The client-reachable command endpoints of a workflow: each command-triggered

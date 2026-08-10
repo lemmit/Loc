@@ -18,11 +18,14 @@ Four root causes. Everything else in this doc is a symptom of one of them.
 
 - **A — Loom has no construct for SYSTEM READS.** Every read that isn't aggregate
   CRUD is hand-rolled: its own route shape, its own gate story (or none), its own
-  default-deny status. There are three of them today and they have three
-  different answers.
-- **B — the two read surfaces cannot compose.** Gated projections and
-  `mask unless` are mutually exclusive by validator (`loom.field-mask-projection-source`),
-  and the diagnostic's own remedy points authors back at the *ungated* CRUD routes.
+  default-deny status. There are FOUR of them today and they have four
+  different answers — one of which is "ungated, and ungateable".
+- **B — the two read surfaces cannot compose, and the mask is launderable.**
+  Gated projections and `mask unless` are mutually exclusive by validator
+  (`loom.field-mask-projection-source`), and the diagnostic's own remedy points
+  authors back at the *ungated* CRUD routes. Worse, **§B0**: a masked value can be
+  `emit`ted into an event, folded into a materialized projection, and served in
+  cleartext on a route that cannot be gated at all — verified end-to-end.
 - **C — the generated default is the unsecured surface.** The scaffold binds
   `.all`, not a projection, so the no-code path lands on reads `denyByDefault`
   cannot see.
@@ -46,9 +49,10 @@ a class with no construct behind it:
 | audit history | `/<agg>/{id}/history` | **borrowed** from `find all`'s `requires` (`enrich/enrichments.ts` `ensureHistoryFind`) | yes (`loom.audit-history-ungated`) |
 | workflow instances | `/workflows/<wf>/instances`, `/instances/{id}` | **none** | **no** |
 | provenance | — | n/a | n/a — write substrate only, **no read endpoint exists** |
-| query-time projections | `/projections/<name>` | first-class `requires` | yes |
+| query-time projections | `/projections/<name>` | first-class `requires` | **no** — `validateDefaultDeny` never walks projections, despite `auth.md` claiming it does |
+| **materialized projections** | `/projections/<name>`, `/<name>/{key}` | **none, and none possible** — `requires` on a folded projection is rejected by `loom.projection-gate-without-source` | **no** |
 
-Three reads over compiler-owned tables, three different answers. Provenance is
+Four reads, four different answers. Provenance is
 exactly where audit was before #2378: a table nothing can read. It will hit this
 same question the moment it gets a route — which is the tell that the answer
 should be a construct, not a fourth one-off.
@@ -79,6 +83,69 @@ Not as another bespoke route. **Size: M**, blocked on A1.
 
 So today the choice is: gated projection **or** field redaction, never both — and
 the diagnostic's own remedy is the ungated CRUD surface.
+
+### B0 — the mask is launderable through an event into a materialized projection
+**Verified end-to-end on node, 2026-08-05.** This `.ddd` validates with ZERO
+diagnostics and serves the masked value in cleartext on an ungated route:
+
+```ddd
+aggregate Employee with crudish {
+  salary: decimal mask unless currentUser.role == "admin"
+  operation bump() { salary := salary + 1.0
+                     emit SalaryChanged { employeeId: id, amount: salary } }   // ← unchecked
+}
+projection SalaryIndex keyed by employeeId {          // materialized (folded)
+  employeeId: Employee id
+  amount: decimal
+  on (e: SalaryChanged) by e.employeeId { amount := e.amount }
+}
+```
+```ts
+// http/projections.ts — no gate, no principal, no mask
+app.openapi(createRoute({ method: "get", path: "/salary_index", … }),
+  async (httpCtx) => {
+    const rows = await db.select().from(schema.salaryIndexes);
+    return httpCtx.json(rows as …, 200);
+  });
+```
+
+`maskUnless` exists in exactly three places — per-backend wire serialization,
+audit-history diffing, and the `loom.field-mask-*` validators. **There is no
+check on `emit`, none on a projection fold, and no mask marker on a projection
+state field**: the mask is a property of the aggregate's *wire projection*, not a
+taint on the value.
+
+Two compounding facts:
+- **A materialized projection cannot be gated at all.** `requires` on a folded
+  projection is rejected by `loom.projection-gate-without-source` ("a `requires`
+  gate guards a query-time read, but this projection declares no `from` source").
+  So its read routes are ungated *by construction*, with no author surface — a
+  **fourth** member of the §1 system-read class, and the only one that is an
+  author-declared construct.
+- **`validateDefaultDeny` does not enumerate projections at all** (despite
+  `auth.md` listing query-time projections as covered). Confirmed by reading it.
+
+Fixing this is a design fork, not a patch — the candidates are (a) reject
+`emit <Event>(f: this.<maskedField>)` as the narrowest honest gate, or (b)
+propagate a taint onto projection state fields. **(a) is far smaller** and
+catches it at the single entry point, but it forbids a legal-looking `emit`, so
+it wants sign-off. Either way a folded projection needs *some* gate surface.
+
+### ~~B2 — SQL-pushdown aggregation leak~~ — **RETRACTED, not real**
+I recorded this as a live leak; it is not. The `from`/`join` rule fires on the
+SOURCE, before the projection's arm is chosen, so it dominates the grouped,
+whole-table, per-row and shorthand arms alike. Grouped additionally forbids
+non-aggregate sources and joins outright (`loom.projection-groupby-source-unsupported`,
+`loom.projection-groupby-join-unsupported`). The pushdown is unreachable through
+an aggregate source; the only way in is the B0 launder, and there the *cleartext*
+read is the severe consequence, not the aggregation.
+
+Worth keeping from the analysis, for whenever the `from`/`join` rule is relaxed
+into real per-field redaction: the discriminant is **where** the masked column
+appears, not which aggregation reads it. `count` cannot name a column (its `arg`
+is absent by construction) — but a masked column used as a `group by` KEY is
+returned verbatim as a response value, and one used in `where` is a decision
+oracle. Both leak with `count` alone.
 
 ### B1 — teach projections field masking, or explicitly retire `mask unless`
 **The unblocker.** Until this lands, "projections are the read surface" is false

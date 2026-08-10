@@ -1345,6 +1345,22 @@ export const DIAGNOSTIC_MESSAGES = {
     findName: unknown;
   }) =>
     `denyByDefault: find '${p.name}.${p.findName}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-handler": (p: {
+    kind: unknown;
+    ctx: unknown;
+    handler: unknown;
+    method: unknown;
+    path: unknown;
+  }) =>
+    `denyByDefault: ${p.kind} '${p.ctx}.${p.handler}' is bound to \`route ${p.method} "${p.path}"\` on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` to its body (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-handler-extern": (p: {
+    kind: unknown;
+    ctx: unknown;
+    handler: unknown;
+    method: unknown;
+    path: unknown;
+  }) =>
+    `denyByDefault: ${p.kind} '${p.ctx}.${p.handler}' is \`extern\` — it has no body, so it cannot carry a \`requires\` gate — yet it is bound to \`route ${p.method} "${p.path}"\` on an 'auth: required' deployable. Give it a body (drop \`extern\`) so it can declare a gate, or remove the route binding.`,
   "loom.audit-history-ungated": (p: {
     aggregateName: unknown;
     aggregateName2: unknown;
