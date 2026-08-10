@@ -5,6 +5,12 @@
 
 import type { ExprIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { provableStringType } from "../../../util/expr-body-type.js";
+import {
+  localizedChromeIcuText,
+  localizedChromeIcuValue,
+  localizedChromeText,
+  localizedChromeValue,
+} from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
   actionHandlerName,
@@ -17,7 +23,7 @@ import {
   slugify,
   stringNamed,
 } from "../shared/args.js";
-import type { ClientPagingResult, ClientPagingSpec, StateRef } from "../target.js";
+import type { ClientPagingResult, ClientPagingSpec, PagerChrome, StateRef } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -172,7 +178,11 @@ export function emitTable(
       rowsExpr = paged.rowsExpr;
       totalPagesExpr = paged.totalPagesExpr;
     }
-    pagerMarkup = ctx.target.renderPager!({ page: pageRef, totalPagesExpr });
+    pagerMarkup = ctx.target.renderPager!({
+      page: pageRef,
+      totalPagesExpr,
+      chrome: pagerChrome(ctx),
+    });
   }
 
   // A named-action reference (`onRowClick: add`) binds the hoisted handler
@@ -453,5 +463,32 @@ function jsClientPaging(spec: ClientPagingSpec): ClientPagingResult {
   return {
     rowsExpr: sliced,
     totalPagesExpr: `Math.max(1, Math.ceil(${lengthExpr} / ${pageSize}))`,
+  };
+}
+
+/** Resolve the pager's three strings against this walk's i18n decision, once,
+ *  so every target reads the SAME decision instead of each re-deciding — or, as
+ *  before, each hard-coding the English.
+ *
+ *  The counter's holes stay open (a function of `page`/`pages`) because the two
+ *  expressions are the target's own: a page read is `page` on React, `page()` on
+ *  Angular, `model.Page` on Feliz, and Feliz binds the count to a local before
+ *  the label reads it. */
+function pagerChrome(ctx: WalkContext): PagerChrome {
+  return {
+    prevText: localizedChromeText(ctx, "prev"),
+    nextText: localizedChromeText(ctx, "next"),
+    pageOfText: (page, pages) =>
+      localizedChromeIcuText(ctx, "pageOf", [
+        { name: "page", expr: page },
+        { name: "pages", expr: pages },
+      ]),
+    prevValue: localizedChromeValue(ctx, "prev"),
+    nextValue: localizedChromeValue(ctx, "next"),
+    pageOfValue: (page, pages) =>
+      localizedChromeIcuValue(ctx, "pageOf", [
+        { name: "page", expr: page },
+        { name: "pages", expr: pages },
+      ]),
   };
 }

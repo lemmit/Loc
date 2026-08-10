@@ -113,9 +113,9 @@ export const svelteTarget: WalkerTarget = {
       "display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-top: 0.75rem;";
     return (
       `<div style="${style}" data-testid="pager">` +
-      `<button type="button" disabled={${p} <= 1} onclick={() => { ${p} = ${p} - 1; }}>Prev</button>` +
-      `<span>Page {${p}} of {${pages}}</span>` +
-      `<button type="button" disabled={${p} >= ${pages}} onclick={() => { ${p} = ${p} + 1; }}>Next</button>` +
+      `<button type="button" disabled={${p} <= 1} onclick={() => { ${p} = ${p} - 1; }}>${spec.chrome.prevText}</button>` +
+      `<span>${spec.chrome.pageOfText(p, pages)}</span>` +
+      `<button type="button" disabled={${p} >= ${pages}} onclick={() => { ${p} = ${p} + 1; }}>${spec.chrome.nextText}</button>` +
       `</div>`
     );
   },

@@ -349,9 +349,17 @@ describe("pack-chrome i18n — loader aria-label", () => {
       // table; primitive chrome comes from `CHROME_MESSAGES`.
       expect(CHROME_MESSAGES[key] ?? APP_SHELL_CHROME[key]).toBe(catalog[key]);
     }
-    // The grid's chrome is NOT here — nothing on this page renders a pager.
+    // The GRID's own chrome is not here — nothing on this page renders one, and
+    // "Previous" is contributed off the `DataGrid` call node.  "Next" and the
+    // counter ARE here even so: they are shared with `Table`'s pager, whose
+    // condition is not call-node-readable and therefore rides the
+    // merged-when-already-enabled gate (`TABLE_PAGER_CHROME`).  That is the
+    // documented cost of that gate — an over-merged key a translator translates
+    // once and this app never shows — taken deliberately over the alternative,
+    // a binding no locale could reach.
     expect(catalog["chrome.previous"]).toBeUndefined();
-    expect(catalog["chrome.next"]).toBeUndefined();
+    expect(catalog["chrome.filter"]).toBeUndefined();
+    expect(catalog["chrome.next"]).toBe("Next");
   });
 });
 
@@ -856,5 +864,138 @@ describe("pack-chrome i18n — select placeholder", () => {
     expect(catalog[chromeKey("deleteConfirm")]).toBe(CHROME_MESSAGES[chromeKey("deleteConfirm")]);
     const page = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
     expect(page).toContain('t("chrome.deleteConfirm"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `Table` pager — the same three strings, three lines away from the grid's
+// ---------------------------------------------------------------------------
+//
+// `Table`'s pager is not pack markup at all: each `WalkerTarget` builds it as a
+// literal string in `renderPager`, which made "Prev" / "Next" / "Page N of M"
+// the one class of user-visible text living in the GENERATOR rather than in a
+// template — and the one no locale could reach.  They now arrive pre-resolved
+// through `PagerSpec.chrome`, in two forms (`PagerChrome`): the four JSX targets
+// splice a rendered fragment, Feliz and Flutter take a target-native value.
+//
+// Merged-when-already-enabled (`TABLE_PAGER_CHROME`), NOT contributed off the
+// `Table` call node — the pager is conditional on `serverControls`, a
+// walk-context fact the target-agnostic extraction pass cannot see.  The last
+// two tests are that gate in both directions.
+
+/** A one-page system whose body is a client-paged `Table`. */
+const PAGED_TABLE = (platform: string, design: string, extra = "", framework = "") => `
+  system S {
+    subdomain Sales {
+      context Orders {
+        aggregate Customer { name: string }
+        repository Customers for Customer { find recent(): Customer }
+      }
+    }
+    api SalesApi from Sales
+    storage pg { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: pg }
+    ui WebApp {${framework === "" ? "" : `\n      framework: ${framework}`}
+      api Sales: SalesApi
+      page X {
+        route: "/x"
+        state { pageNum: int = 1 }
+        body: Stack { ${extra}QueryView { of: Sales.Customer.recent, data: rows => Table(
+          Column("Name", o => o.name),
+          rows: rows,
+          page: pageNum,
+          pageSize: 5
+        ) } }
+      }
+    }
+    deployable api {
+      platform: node
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 3000
+    }
+    deployable web {
+      platform: ${platform}
+      targets: api
+      ui: WebApp { Sales: api }${design === "" ? "" : `\n      design: ${design}`}
+      port: 3001
+    }
+  }
+`;
+
+/** The `Heading` that makes the UI translatable — the merge gate's ON switch. */
+const TRANSLATABLE = `Heading { "Customers" }, `;
+
+describe("pack-chrome i18n — the Table pager", () => {
+  it.each([
+    ["react", "mantine", "", "pages/x.tsx", `{t("chrome.prev", "Prev")}`],
+    ["static", "shadcnVue", "vue", "pages/x.vue", `{{ t("chrome.prev", "Prev") }}`],
+    ["static", "shadcnSvelte", "svelte", "x/+page.svelte", `{t("chrome.prev", "Prev")}`],
+    [
+      "static",
+      "angularMaterial",
+      "angular",
+      "pages/x.component.ts",
+      `{{ t("chrome.prev", "Prev") }}`,
+    ],
+  ])("%s/%s binds Prev, Next and the counter", async (platform, design, framework, file, prevBinding) => {
+    const files = await generateSystemFiles(PAGED_TABLE(platform, design, TRANSLATABLE, framework));
+    const page = pageOf(files, file);
+    expect(page).toContain(prevBinding);
+    expect(page).toContain(`t("chrome.pageOf", "Page {page} of {pages}", { page: `);
+    // Not a literal left anywhere near the pager.
+    expect(page).not.toContain(">Prev<");
+    expect(page).not.toContain(">Page {");
+    const catalog = catalogOf(files);
+    expect(catalog["chrome.prev"]).toBe("Prev");
+    expect(catalog["chrome.next"]).toBe("Next");
+    expect(catalog["chrome.pageOf"]).toBe("Page {page} of {pages}");
+  });
+
+  it("Feliz: the labels are VALUES, and the counter keeps its own sprintf when off", async () => {
+    const on = await generateSystemFiles(PAGED_TABLE("feliz", "", TRANSLATABLE));
+    const app = pageOf(on, "App.fs");
+    expect(app).toContain(`prop.text (I18n.t "chrome.prev" "Prev")`);
+    expect(app).toContain(`I18n.tf "chrome.pageOf" "Page {page} of {pages}"`);
+    expect(app).not.toContain(`sprintf "Page %d of %d"`);
+
+    // …and with nothing else to translate, the target's own sentence stands.
+    const off = pageOf(await generateSystemFiles(PAGED_TABLE("feliz", "")), "App.fs");
+    expect(off).toContain(`prop.text (sprintf "Page %d of %d" model.PageNum __tp)`);
+    expect(off).toContain(`prop.text "Prev"`);
+  });
+
+  it("Flutter: `const Text` survives i18n-off and is dropped when the label binds", async () => {
+    // Dart rejects `const` over a `t(...)` call, so constness has to follow the
+    // label — which is also what keeps the i18n-off output byte-identical.
+    const off = pageOf(await generateSystemFiles(PAGED_TABLE("flutter", "")), "x_page.dart");
+    expect(off).toContain(`child: const Text('Prev')`);
+    expect(off).toContain(`Text('Page \${state.pageNum} of `);
+
+    const on = pageOf(
+      await generateSystemFiles(PAGED_TABLE("flutter", "", TRANSLATABLE)),
+      "x_page.dart",
+    );
+    expect(on).toContain(`child: Text(t('chrome.prev', 'Prev'))`);
+    expect(on).toContain(
+      `Text(t('chrome.pageOf', 'Page {page} of {pages}', <String, Object>{'page'`,
+    );
+    expect(on).not.toContain("const Text('Prev')");
+  });
+
+  it("a paged Table alone does NOT turn i18n on (the pager is conditional)", async () => {
+    // The other half of the merge-gate design.  `Table`'s pager depends on
+    // `serverControls` — a walk-context fact, not a call-node one — so a
+    // contribution could not be gated accurately in the extraction pass.  Merged
+    // instead, which leaves a string-less app exactly as it was: raw English, no
+    // runtime, no catalog, no `intl-messageformat`.
+    const files = await generateSystemFiles(PAGED_TABLE("react", "mantine"));
+    const page = pageOf(files, "pages/x.tsx");
+    expect(page).toContain(">Prev</button>");
+    expect(page).toContain("<span>Page {pageNum} of {");
+    expect(page).not.toContain("chrome.");
+    expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
+    expect([...files].some(([p]) => p.endsWith("src/i18n.ts"))).toBe(false);
   });
 });

@@ -734,6 +734,37 @@ export function renderDeepScopeEcto(
   return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
 }
 
+/** The `"guid-from-string"` registry self-scope (`this.id ==
+ *  currentUser.<claim>` — a `guid` id keyed by a `string` claim) as an Ecto
+ *  `where:` predicate that survives a MALFORMED claim (M-T3.7(c)).
+ *
+ *  The plain `record.id == ^(current_user && current_user.<claim>)` form binds
+ *  raw token text against a `:binary_id` field, so Ecto's planner casts it and
+ *  an authenticated token carrying `tenantId: "not-a-guid"` raised
+ *  `Ecto.Query.CastError` — a 500 for an ordinary bad token.  (The same cast is
+ *  why a nil actor raised rather than reading empty, despite the fail-closed
+ *  intent.)  Cast in ELIXIR instead, to nil on failure, and compare through a
+ *  `fragment` — the same escape `renderDeepScopeEcto` uses, because a fragment
+ *  param binds as-is: nil is NULL, so `id = NULL` is false for every row and
+ *  the read is the EMPTY result a foreign-but-well-formed claim already gives.
+ *  A fragment keeps the comparison on the uuid column itself, so the primary-key
+ *  index still serves it (casting the COLUMN to text would not).
+ *
+ *  `dump/1`, not `cast/1`: binding as-is cuts both ways — a fragment param
+ *  never goes through the field type, so Postgrex needs the RAW 16-byte binary
+ *  a `uuid` column encodes to.  `cast/1` yields the hyphenated string and
+ *  Postgrex rejects it ("expected a binary of 16 bytes"), which would have
+ *  broken every WELL-FORMED claim while fixing the malformed one.  Both are
+ *  `{:ok, _} | :error`, so the failure arm is unchanged.
+ *
+ *  Already pinned — the caller must NOT run this through `pinPrincipal`, exactly
+ *  as for the deep-scope sentinel. */
+export function renderGuidClaimSelfScopeEcto(thisName: string, claimField: string): string {
+  const claim = `current_user && current_user.${snake(claimField)}`;
+  const casted = `^(case Ecto.UUID.dump(${claim}) do {:ok, uuid} -> uuid; :error -> nil end)`;
+  return `fragment("? = ?", ${thisName}.id, ${casted})`;
+}
+
 /** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
  *  descending flag — the only collection op carrying a 2nd arg). */
 function isDescendingSort(e: Extract<ExprIR, { kind: "method-call" }>): boolean {

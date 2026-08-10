@@ -86,6 +86,15 @@ system VanillaI18nIcu {
               // escape path through `elixirI18nString`, and the reason it
               // escapes `{`/`}` at all.
               Button { "↻", label: `Refresh order {order.code}` },
+              // Tier 2d — the same attribute-position hole on a primitive that
+              // ALSO carries a contract-default `aria-label`.  `Toolbar` was the
+              // one user-visible slot interpolation never reached: with no
+              // `labelAsAriaLabel` the author's `label:` fell through to a bogus
+              // `label=` attribute (raw `<>` concat, untranslated) while the
+              // hardcoded "Actions" stayed the accessible name.  Compiling it
+              // proves the authored name wins WITHOUT emitting two `aria-label`
+              // attributes — which is a HEEx compile error, not a style nit.
+              Toolbar { label: `Actions for {order.code}`, Text { "…" } },
               // …and the same hole in a named TEXT slot, for contrast.
               Divider { label: `Details for {order.code}` }
             }
