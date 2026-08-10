@@ -97,7 +97,7 @@ async function homeLive(body: string): Promise<string> {
 }
 
 describe("HEEx page bodies — a value-object construction does not collide with a same-named primitive", () => {
-  it("renders `Money(9.99, \"USD\").currency` as a plain map, not the Money display primitive's markup", async () => {
+  it('renders `Money(9.99, "USD").currency` as a plain map, not the Money display primitive\'s markup', async () => {
     const live = await homeLive('Text(Money(9.99, "USD").currency)');
     expect(live).toContain('%{amount: Decimal.new("9.99"), currency: "USD"}.currency');
     // The bug's signature: the display primitive's markup leaking into an
