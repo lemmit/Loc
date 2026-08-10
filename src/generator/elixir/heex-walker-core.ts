@@ -939,6 +939,31 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   if (expr.name === "toast") {
     return renderToast(expr, ctx);
   }
+  // A VALUE-OBJECT construction (`Money(9.99, "USD")`) — checked BEFORE the
+  // primitive-name registry below, since a domain VO can share a name with a
+  // built-in walker primitive (`Money` is also a display primitive,
+  // `renderMoney`).  Without this the registry lookup won though first and
+  // rendered the primitive's MARKUP — `<span class="money">…</span>` — in
+  // what was meant to be a value position, and a following `.currency`
+  // member access then got appended as literal text after the closing
+  // `</span>`: `<%= <span class="money">…</span>.currency %>`, invalid HEEx.
+  // On the wire a value object is a plain record: mirror the domain-side
+  // `value-object-ctor` rendering (render-expr.ts) — a plain Elixir map
+  // (vanilla stores VOs as JSON, no `%Ctx.VO{}` struct) — backfilling
+  // positional args from the VO's declared field order exactly like the
+  // shared JSX/Feliz/Flutter walker's `declaredValueObject` already does for
+  // the same name collision (walker-core.ts).
+  const vo = ctx.valueObjectsByName.get(expr.name);
+  if (vo) {
+    let positional = 0;
+    const fields = expr.args
+      .map((a, i) => {
+        const name = expr.argNames?.[i] ?? vo.fields[positional++]?.name;
+        return name ? `${snake(name)}: ${renderExpr(a, ctx)}` : undefined;
+      })
+      .filter((f): f is string => f !== undefined);
+    return `%{${fields.join(", ")}}`;
+  }
   // Closed-primitive library dispatch — the typed registry at
   // src/generator/_walker/registry.ts holds the renderer for every
   // primitive the HEEx target supports (a subset of what TSX
@@ -1549,6 +1574,13 @@ export function renderChild(child: ExprIR, ctx: WalkContext, role?: string): str
   if (child.kind === "literal" && child.lit === "string") {
     return escapeHeexText(child.value);
   }
+  // `match` self-wraps in `<%= %>` when rendered in template position
+  // (renderMatch) — the same reason the isHEExCall check above exists:
+  // wrapping an already-wrapped expression produces
+  // `<%= <%= cond do … end %> %>`, invalid HEEx.
+  if (child.kind === "match") {
+    return renderExpr(child, { ...ctx, position: "template" });
+  }
   return `<%= ${renderExpr(child, { ...ctx, position: "template" })} %>`;
 }
 
@@ -1559,6 +1591,10 @@ export function renderInTemplate(arg: ExprIR, ctx: WalkContext, role?: string): 
   // HEEx-generating calls should not be wrapped in <%= %>.
   if (arg.kind === "call" && isHEExCall(arg.name, ctx)) {
     return renderExpr(arg, ctx);
+  }
+  // See renderChild — `match` already wraps itself.
+  if (arg.kind === "match") {
+    return renderExpr(arg, { ...ctx, position: "template" });
   }
   return `<%= ${renderExpr(arg, { ...ctx, position: "template" })} %>`;
 }
