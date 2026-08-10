@@ -42,6 +42,8 @@ import { upperFirst } from "../../../util/naming.js";
 
 import {
   localizedChromeAttr,
+  localizedChromeIcuAria,
+  localizedChromeIcuExpr,
   localizedChromeIcuText,
   localizedChromeText,
   localizedChromeValue,
@@ -57,6 +59,17 @@ import type { DataGridColumn } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, extendLambdaParams, propagateChildFlags, walk } from "../walker-core.js";
 import { columnAccessorKey, columnIsFilterable, gridColumns } from "./data-grid-shape.js";
+
+/** The column header a per-column control names itself after, as every `.hbs`
+ *  pack already reads it off the bound TanStack header `h`.  One expression for
+ *  all fifteen — including the Angular packs, whose `[attr.aria-label]` binding
+ *  differs but whose EXPRESSION is the same JavaScript. */
+const GRID_COLUMN_HEADER = "String(h.column.columnDef.header ?? h.id)";
+
+/** The same header through Fable's dynamic access — `loomText` is the Feliz
+ *  pack's own string coercion, so the concatenation it lands in stays exactly
+ *  the sentence that pack spelled by hand. */
+const FELIZ_COLUMN_HEADER = "loomText (h?column?columnDef?header)";
 
 export function emitDataGrid(
   call: ExprIR & { kind: "call" },
@@ -120,6 +133,11 @@ export function emitDataGrid(
       pageSize,
       selection,
       testidAttr,
+      // The sort button is target-emitted on every frontend but React, so its
+      // accessible name has to reach the SPEC, not just the pack context.
+      sortByAria: localizedChromeIcuAria(ctx, "sortBy", [
+        { name: "column", expr: GRID_COLUMN_HEADER },
+      ]),
       // The grid body markup comes from the active design pack, so each pack
       // keeps its own table chrome while the reactive wiring around it belongs
       // to the target.  Rendered through a callback rather than eagerly: a
@@ -171,6 +189,25 @@ export function emitDataGrid(
           prevLabelValue: localizedChromeValue(ctx, "previous"),
           nextLabelValue: localizedChromeValue(ctx, "next"),
           filterPlaceholderValue: localizedChromeValue(ctx, "filter"),
+          // The per-column control ARIA — holed chrome in ATTRIBUTE position.
+          // The hole is the COLUMN's own header, read at runtime off the
+          // TanStack header object every one of these templates already binds
+          // (`h`), so one expression serves all fifteen packs.  The `?? h.id`
+          // fallback is the packs' own, kept verbatim.
+          sortByAria: localizedChromeIcuAria(ctx, "sortBy", [
+            { name: "column", expr: GRID_COLUMN_HEADER },
+          ]),
+          filterByAria: localizedChromeIcuAria(ctx, "filterBy", [
+            { name: "column", expr: GRID_COLUMN_HEADER },
+          ]),
+          // …and as VALUES, for the procedural pack (Feliz reaches the same
+          // header through Fable's dynamic access, so it passes its own hole).
+          sortByAriaValue: localizedChromeIcuExpr(ctx, "sortBy", [
+            { name: "column", expr: FELIZ_COLUMN_HEADER },
+          ]),
+          filterByAriaValue: localizedChromeIcuExpr(ctx, "filterBy", [
+            { name: "column", expr: FELIZ_COLUMN_HEADER },
+          ]),
           // Every target-specific key a pack may reference is defaulted here,
           // not just supplied by the target that uses it.  `emitPageObjectsForUi`
           // drives the REACT tsx walker over whichever pack is active — Vue and

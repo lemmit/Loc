@@ -24,12 +24,14 @@ import {
   chromeKey,
 } from "../../src/generator/_walker/i18n-chrome.js";
 import {
+  localizedChromeIcuExpr,
   localizedChromeIcuText,
   localizedChromeIcuValue,
 } from "../../src/generator/_walker/i18n-emit.js";
 import type { WalkContext } from "../../src/generator/_walker/walker-core.js";
 import { angularTarget } from "../../src/generator/angular/walker/angular-target.js";
 import { felizTarget } from "../../src/generator/feliz/feliz-target.js";
+import { flutterTarget } from "../../src/generator/flutter/flutter-target.js";
 import { tsxTarget } from "../../src/generator/react/walker/tsx-target.js";
 import { svelteTarget } from "../../src/generator/svelte/walker/svelte-target.js";
 import { vueTarget } from "../../src/generator/vue/walker/vue-target.js";
@@ -626,12 +628,21 @@ describe("pager counter — every pack version renders it through the token", ()
       nextLabel: "Next",
       filterPlaceholderAttr: `placeholder="Filter"`,
       pageOfLabel: "«COUNTER»",
+      sortByAria: "«SORT-ARIA»",
+      filterByAria: "«FILTER-ARIA»",
       headerBody: "",
       cellBody: "",
     });
     expect(html).toContain("«COUNTER»");
     // …and nothing left behind: the sentence must not ALSO be spelled inline.
     expect(html).not.toMatch(/Page\s*\\?\{/);
+    // The per-column control names, same rule.  Only six packs render the sort
+    // BUTTON (the others leave it to the target's `headerBody`), so that token
+    // is asserted only where the pack spells it — but NO pack may keep the raw
+    // sentence, which is what the negative match pins.
+    expect(html).toContain("«FILTER-ARIA»");
+    expect(html).not.toContain("Sort by ");
+    expect(html).not.toContain("Filter by ");
   });
 });
 
@@ -997,5 +1008,138 @@ describe("pack-chrome i18n — the Table pager", () => {
     expect(page).not.toContain("chrome.");
     expect([...files].some(([p]) => p.endsWith("locales/en.json"))).toBe(false);
     expect([...files].some(([p]) => p.endsWith("src/i18n.ts"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-column control ARIA — holed chrome in ATTRIBUTE position
+// ---------------------------------------------------------------------------
+//
+// "Sort by {column}" / "Filter by {column}" are the counter's problem one step
+// harder: an ICU message whose i18n-off form is a CONCATENATION, and which lands
+// in an attribute rather than in text.  The counter's off-path could reuse
+// `renderInterpolation` (markup text position); an attribute has no such seam,
+// and the raw spelling diverges four ways — a JS template literal on
+// React/Svelte/Vue, `'…' + String(…)` on Angular (whose template grammar has no
+// template literals), F# `+` on Feliz, Dart `${…}` interpolation on Flutter.
+//
+// Hence `renderStringConcat`: literal + expression pieces → one target-native
+// string expression, with the JS template literal as the default so the three
+// targets that already spelled it that way implement nothing.
+//
+// Unlike the pager the keys are contributed EXACTLY (`gridHasSortableColumn` /
+// `gridHasFilterableColumn`), not merged: both predicates are fully readable off
+// the call node, so no over-merge is needed.
+
+describe("renderStringConcat — the i18n-off spelling, per target", () => {
+  // The exact strings the packs and child renderers carried before this slice.
+  // Asserting against them is the byte-identity proof: the off-path is
+  // unreachable through the generator (a `DataGrid` always enables i18n, so its
+  // aria always binds), which is precisely why the seam needs pinning here.
+  const PARTS = [
+    { text: "Sort by " },
+    { expr: "String(h.column.columnDef.header ?? h.id)" },
+  ] as const;
+  const jsForm = "`Sort by ${String(h.column.columnDef.header ?? h.id)}`";
+
+  it.each([
+    ["react", tsxTarget, jsForm],
+    ["svelte", svelteTarget, jsForm],
+    ["vue", vueTarget, jsForm],
+    ["angular", angularTarget, "'Sort by ' + String(h.column.columnDef.header ?? h.id)"],
+    ["feliz", felizTarget, '("Sort by " + String(h.column.columnDef.header ?? h.id))'],
+    ["flutter", flutterTarget, "'Sort by ${String(h.column.columnDef.header ?? h.id)}'"],
+  ])("%s", (_name, target, expected) => {
+    // An unset seam IS the contract for the three JS-template-literal targets,
+    // so the default is exercised through the same helper the emitters use.
+    const ctx = { target, i18nPrefix: undefined } as unknown as WalkContext;
+    expect(localizedChromeIcuExpr(ctx, "sortBy", [{ name: "column", expr: PARTS[1].expr }])).toBe(
+      expected,
+    );
+  });
+});
+
+describe("pack-chrome i18n — per-column control ARIA", () => {
+  /** A grid whose single column opts into sorting and/or filtering. */
+  const ARIA_GRID = (sortable: boolean, filterable: boolean) => `Stack {
+    QueryView { of: Sales.Order.all, data: rows => DataGrid {
+      Column { "Status", o => o.status${sortable ? ", sortable: true" : ""}${
+        filterable ? ", filterable: true" : ""
+      } },
+      rows: rows,
+      testid: "orders-data-grid"
+    } }
+  }`;
+
+  it.each([
+    ["react", "mantine", "home.tsx", `aria-label={t("chrome.sortBy"`],
+    ["vue", "vuetify", "src/components/OrdersDataGrid.vue", `:aria-label='t("chrome.sortBy"`],
+    [
+      "svelte",
+      "flowbite",
+      "src/lib/components/OrdersDataGrid.svelte",
+      `aria-label={t("chrome.sortBy"`,
+    ],
+    [
+      "angular",
+      "angularMaterial",
+      "src/app/components/orders-data-grid.component.ts",
+      `[attr.aria-label]='t("chrome.sortBy"`,
+    ],
+  ])("%s/%s binds both control names", async (platform, design, file, sortBinding) => {
+    const files = await generateSystemFiles(SYSTEM(platform, design, ARIA_GRID(true, true)));
+    const child = gridChildOf(files, file);
+    expect(child).toContain(sortBinding);
+    expect(child).toContain(`"chrome.filterBy", "Filter by {column}", { column: `);
+    // The hole is the COLUMN's own header, so the label still says WHICH column.
+    expect(child).toContain("String(h.column.columnDef.header ?? h.id)");
+    // No raw sentence left behind on either control.
+    expect(child).not.toContain("Sort by ${");
+    expect(child).not.toContain("'Filter by ' +");
+    const catalog = catalogOf(files);
+    expect(catalog["chrome.sortBy"]).toBe("Sort by {column}");
+    expect(catalog["chrome.filterBy"]).toBe("Filter by {column}");
+  });
+
+  it("Feliz: F# values through the seam's WITH-VALUES arm", async () => {
+    const app = gridChildOf(
+      await generateSystemFiles(SYSTEM("feliz", "", ARIA_GRID(true, true))),
+      "App.fs",
+    );
+    expect(app).toContain(
+      `prop.ariaLabel (I18n.tf "chrome.sortBy" "Sort by {column}" ` +
+        `[ "column", box (loomText (h?column?columnDef?header)) ])`,
+    );
+    expect(app).toContain(
+      `prop.ariaLabel (I18n.tf "chrome.filterBy" "Filter by {column}" ` +
+        `[ "column", box (loomText (h?column?columnDef?header)) ])`,
+    );
+    expect(app).not.toContain(`("Sort by " + loomText`);
+    expect(app).not.toContain(`("Filter by " + loomText`);
+  });
+
+  it("each key is contributed by its OWN predicate, not by the grid as a whole", async () => {
+    // `sortable:` and `filterable:` are independent, so one gate would be wrong
+    // in both directions.  A sort-only grid renders a sort button and no filter
+    // input; the catalog has to say exactly that.
+    const sortOnly = catalogOf(
+      await generateSystemFiles(SYSTEM("react", "mantine", ARIA_GRID(true, false))),
+    );
+    expect(sortOnly["chrome.sortBy"]).toBe("Sort by {column}");
+    expect(sortOnly["chrome.filterBy"]).toBeUndefined();
+
+    const filterOnly = catalogOf(
+      await generateSystemFiles(SYSTEM("react", "mantine", ARIA_GRID(false, true))),
+    );
+    expect(filterOnly["chrome.filterBy"]).toBe("Filter by {column}");
+    expect(filterOnly["chrome.sortBy"]).toBeUndefined();
+
+    const neither = catalogOf(
+      await generateSystemFiles(SYSTEM("react", "mantine", ARIA_GRID(false, false))),
+    );
+    expect(neither["chrome.sortBy"]).toBeUndefined();
+    expect(neither["chrome.filterBy"]).toBeUndefined();
+    // …but the pager is unconditional, so its keys are still there.
+    expect(neither["chrome.previous"]).toBe("Previous");
   });
 });

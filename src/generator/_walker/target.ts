@@ -186,6 +186,11 @@ export interface PagerSpec {
  *  FUNCTION of its two holes rather than a finished string, because only the
  *  target knows how to spell the page read (`page` vs `page()` vs `model.Page`)
  *  and, on Feliz, binds the page count to a local first. */
+/** One piece of a {@link WalkerTarget.renderStringConcat} assembly: either raw
+ *  source-language TEXT (unescaped — the target escapes it for its own string
+ *  body) or an already-rendered EXPRESSION whose value is spliced in. */
+export type StringPart = { readonly text: string } | { readonly expr: string };
+
 export interface PagerChrome {
   /** "Prev" in markup text position. */
   prevText: string;
@@ -298,6 +303,15 @@ export interface DataGridSpec {
   selection?: string;
   /** `data-testid` attribute string for the grid root, or `""`. */
   testidAttr: string;
+  /** The sortable header button's accessible name (M-T1.11) — a complete
+   *  `aria-label` attribute fragment, no leading space, already resolved
+   *  against this walk's i18n decision (`localizedChromeIcuAria`).
+   *
+   *  On DataGrid the sort button is emitted by the TARGET, not the pack, on
+   *  every frontend except React — so unlike the pager labels this one cannot
+   *  ride the pack render context alone.  React's packs read the matching
+   *  `{{{sortByAria}}}` token instead; both come from one `chrome.sortBy`. */
+  sortByAria: string;
   /** Render the active design pack's grid body (`primitive-data-grid`).
    *
    *  A callback rather than a rendered string because the extra template
@@ -740,6 +754,27 @@ export interface WalkerTarget {
    *  `localizedAriaLabelAttr` fragment instead), so an omitted seam — the
    *  JSON-quoted default — keeps them byte-identical. */
   renderStringLiteral?(text: string): string;
+
+  /** OPTIONAL — a string built from alternating LITERAL and EXPRESSION pieces,
+   *  in the target's own expression language (M-T1.11).
+   *
+   *  The missing third of the trio.  `renderStringLiteral` spells a constant,
+   *  `renderInterpolation` splices an expression into markup TEXT position — but
+   *  a holed message in an ATTRIBUTE (`aria-label="Sort by <column>"`) is
+   *  neither: it is one string EXPRESSION assembled from both.  Without a seam
+   *  for it, the i18n-off form of such a message could only be spelled by
+   *  whichever pack template happened to contain it, which is exactly what made
+   *  those labels untranslatable in the first place.
+   *
+   *  The default is a JS template literal (`` `a${e}b` ``), so the three targets
+   *  that already spelled these labels that way — React, Svelte, Vue — stay
+   *  byte-identical without implementing anything.  Angular overrides because
+   *  its template grammar has no template literals; Feliz and Flutter override
+   *  because their markup is not JS at all.
+   *
+   *  Literal pieces arrive UNESCAPED — a target escapes them for its own string
+   *  body, exactly as `renderStringLiteral` does. */
+  renderStringConcat?(parts: ReadonlyArray<StringPart>): string;
 
   /** OPTIONAL — the SPELLING of a call into the generated translation runtime
    *  (M-T1.11).  The four JS frontends share one `t(key, default, values?)`
