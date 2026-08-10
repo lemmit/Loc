@@ -28,6 +28,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { brokerChannelBindings } from "../../_channels/bindings.js";
 import { embedSpaInto } from "../../_frontend/embedded-spa.js";
 import { prepareThemeVM } from "../../_frontend/theme-preparer.js";
+import { collectWireValidationMessages } from "../../_i18n/validation-catalog.js";
 import { generateAngularForContexts } from "../../angular/index.js";
 import { generateFelizForContexts } from "../../feliz/index.js";
 import { generateReactForContexts } from "../../react/index.js";
@@ -139,6 +140,11 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     }
   }
   const notFoundStatus = denialStatus("notFound", ladderStatuses);
+  // Validation-message catalog (M-T1.11): the authored messages this deployable's
+  // wire validators can surface.  They merge into the SAME `priv/gettext` tree the
+  // HEEx frontend translates through, and the 422 changeset-error renderer
+  // resolves each `loom_code` against it.  Empty ⇒ byte-identical output.
+  const validationMessages = collectWireValidationMessages(contexts);
   out.set(
     `lib/${appName}_web/problem_details.ex`,
     renderVanillaProblemDetailsModule(
@@ -148,6 +154,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       uniquenessStatus,
       concurrencyStatus,
       notFoundStatus,
+      validationMessages.length > 0,
     ),
   );
 
@@ -774,6 +781,9 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     // user-visible strings — that is the single gate for the Gettext backend,
     // the `priv/gettext` catalog, the hex dep and the `html_helpers` import.
     heexI18nUi(sys, deployable),
+    // The SECOND catalog source (M-T1.11) — turns the gettext runtime on even for
+    // a JSON-API-only deployable with an authored `message "…"`.
+    validationMessages,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto

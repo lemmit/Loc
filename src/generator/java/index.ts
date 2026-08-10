@@ -46,6 +46,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
+import { collectWireValidationMessages } from "../_i18n/validation-catalog.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateAngularForContexts } from "../angular/index.js";
@@ -109,6 +110,7 @@ import { renderJavaExternHook } from "./emit/extern.js";
 import { renderJavaId, renderJavaIdListConverter } from "./emit/ids.js";
 import { renderJavaContextIntegrationTest } from "./emit/integration-tests.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
+import { JAVA_MESSAGES_BUNDLE_PATH, renderJavaMessagesBundle } from "./emit/messages.js";
 import { renderHttpMetrics } from "./emit/metrics.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
@@ -326,6 +328,15 @@ function emitProjectFromContexts(
   const pkgFor = (category: JavaArtifactCategory, aggregateName?: string): string =>
     layout.packageFor(category, basePkg, aggregateName);
 
+  // Validation-message catalog (M-T1.11): a `ResourceBundle` Spring Boot
+  // auto-configures a MessageSource over, so a messaged rule's wire `code`
+  // resolves SERVER-side for the request locale.  No messaged rule ⇒ no bundle
+  // and a byte-identical ApiExceptionAdvice.
+  const validationMessages = collectWireValidationMessages(contexts);
+  if (validationMessages.length > 0) {
+    out.set(JAVA_MESSAGES_BUNDLE_PATH, renderJavaMessagesBundle(validationMessages));
+  }
+
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   // OIDC turnkey auth (D-AUTH-OIDC): the generated verifier + handshake +
   // Nimbus dep land only when an `auth { oidc }` block targets this
@@ -470,7 +481,13 @@ function emitProjectFromContexts(
   place(
     "ApiExceptionAdvice.java",
     "api-common",
-    renderApiExceptionAdvice(basePkg, hasUniqueKeys, hasConcurrency, structuralErrorStatuses),
+    renderApiExceptionAdvice(
+      basePkg,
+      hasUniqueKeys,
+      hasConcurrency,
+      structuralErrorStatuses,
+      validationMessages.length > 0,
+    ),
   );
   // Observability catalog — always-on, like dotnet's request log +
   // Hono's pino lines (the obs e2e suites assert this envelope).

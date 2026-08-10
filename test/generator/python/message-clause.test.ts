@@ -46,12 +46,18 @@ describe("python — messaged rule → wire refine + domain floor text", () => {
   it("routes a messaged invariant/check through @model_validator PydanticCustomError(code, text)", async () => {
     const { routes } = await gen();
     expect(routes).toContain('@model_validator(mode="after")');
-    expect(routes).toContain("from pydantic_core import PydanticCustomError");
-    // content-hash wire code (i18n key) + clean author text, no "Value error," prefix
+    expect(routes).toContain("from pydantic_core import InitErrorDetails, PydanticCustomError");
+    // content-hash wire code (i18n key) + clean author text, no "Value error,"
+    // prefix — and the field's `loc`, so `errors[].pointer` names the field the
+    // way every other backend's carrier does.  An error raised from a
+    // `model_validator` carries no `loc` on its own, so it is raised through
+    // `ValidationError.from_exception_data` (M-T1.11).
     expect(routes).toContain(
-      'raise PydanticCustomError("msg.j985f2", "Name must be 2-120 characters")',
+      'type=PydanticCustomError("msg.j985f2", "Name must be 2-120 characters"),',
     );
-    expect(routes).toContain('raise PydanticCustomError("msg.u3w71r", "SKU is required")');
+    expect(routes).toContain('loc=("name",),');
+    expect(routes).toContain('type=PydanticCustomError("msg.u3w71r", "SKU is required"),');
+    expect(routes).toContain('loc=("sku",),');
   });
 
   it("keeps a message-LESS single-field rule as a native Field() constraint", async () => {

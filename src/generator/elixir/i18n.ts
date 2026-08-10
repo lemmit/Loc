@@ -266,8 +266,18 @@ export function renderGettextBackend(appName: string, appModule: string): string
  *  gettext falls back to the msgid when a translation is empty, so an empty
  *  `msgstr` renders the English AND leaves `mix gettext.merge` free to treat
  *  the entry as untranslated in a real translation workflow. */
-export function renderGettextCatalog(ui: UiIR, kind: "pot" | "po"): string {
-  const catalog = buildUiCatalog(ui);
+export function renderGettextCatalog(
+  ui: UiIR | undefined,
+  kind: "pot" | "po",
+  /** Backend validation messages (M-T1.11) — `msg.<hash>` → authored English,
+   *  from `collectWireValidationMessages`. Merged into the SAME `.po` tree as the
+   *  ui strings: a Loom key is globally unique and always the `msgctxt`, so one
+   *  domain carries both halves and `mix gettext.merge` sees one catalog. An
+   *  API-only deployable (no ui) therefore still gets a real gettext tree. */
+  validationMessages: readonly { code: string; text: string }[] = [],
+): string {
+  const catalog: Record<string, string> = ui ? { ...buildUiCatalog(ui) } : {};
+  for (const m of validationMessages) catalog[m.code] = m.text;
   const header =
     kind === "pot"
       ? [
@@ -287,12 +297,17 @@ export function renderGettextCatalog(ui: UiIR, kind: "pot" | "po"): string {
           '"Language: en\\n"',
           '"Content-Type: text/plain; charset=UTF-8\\n"',
         ];
-  const entries = Object.entries(catalog).flatMap(([key, message]) => [
-    "",
-    `msgctxt ${poString(key)}`,
-    `msgid ${poString(message)}`,
-    'msgstr ""',
-  ]);
+  // Key-sorted: `buildUiCatalog` already sorts its own keys, but merging the
+  // `msg.*` half in would otherwise append them after the `page.*` ones, making
+  // the file's order depend on which half contributed a key.
+  const entries = Object.keys(catalog)
+    .sort()
+    .flatMap((key) => [
+      "",
+      `msgctxt ${poString(key)}`,
+      `msgid ${poString(catalog[key]!)}`,
+      'msgstr ""',
+    ]);
   return lines(...header, ...entries);
 }
 

@@ -85,7 +85,13 @@ export function renderOperationValidator(
   const preconditions: InvariantIR[] = [];
   for (const s of op.statements) {
     if (s.kind === "precondition") {
-      preconditions.push({ expr: s.expr, source: s.source });
+      // `message` rides along: a messaged precondition must reach the
+      // `.Must(...).WithMessage(text).WithErrorCode(msg.<hash>)` carrier, exactly
+      // as it does on Hono (`preconditionsAsInvariants`) and Java. Dropping it
+      // here silently downgraded an authored precondition message to the
+      // "Invariant violated: <src>" default — and cost it its wire `code`, so a
+      // .NET client could not localise a rule every other backend keyed.
+      preconditions.push({ expr: s.expr, source: s.source, message: s.message });
     }
   }
   return renderValidatorFile({

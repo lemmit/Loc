@@ -269,8 +269,10 @@ export function buildPyRoutesFile(
     refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
-    `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,
-    refersTo("PydanticCustomError") ? "from pydantic_core import PydanticCustomError" : null,
+    `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("ValidationError") ? "ValidationError" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,
+    refersTo("PydanticCustomError")
+      ? `from pydantic_core import ${refersTo("InitErrorDetails") ? "InitErrorDetails, PydanticCustomError" : "PydanticCustomError"}`
+      : null,
     refersTo("JSON.NULL") ? "from sqlalchemy import JSON" : null,
     refersTo("IntegrityError") ? "from sqlalchemy.exc import IntegrityError" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",

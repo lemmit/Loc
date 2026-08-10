@@ -135,6 +135,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     doc: "scaffold-macros",
     backends: ALL,
   },
+  {
+    id: "validation-messages",
+    title:
+      "authored `message \"…\"` on invariant / field check / precondition / VO invariant + the per-backend message CATALOG the wire `code` resolves against",
+    doc: "language",
+    backends: ALL,
+    note: "the FIRST corpus fixture with a `message` clause at all — before it, every backend's messaged-rule carrier AND the M-T1.11 catalog emission were uncompiled by the corpus tier (retro §78: a conditional emission needs a fixture that satisfies its condition)",
+  },
 ] as const;
 
 /** Lookup by id. */

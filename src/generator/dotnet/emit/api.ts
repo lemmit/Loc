@@ -703,9 +703,14 @@ export function renderExceptionFilter(
      *  ConcurrencyConflict) through the mapper. Undefined ⇒ 409 everywhere
      *  (byte-identical default). */
     structuralStatuses?: Record<string, number>;
+    /** True when this project ships `Localization/LoomMessages.cs` — the 422 arm
+     *  then resolves each messaged rule's wire `code` against the catalog for the
+     *  request locale.  False ⇒ byte-identical to pre-catalog output (M-T1.11). */
+    localizeMessages?: boolean;
   },
 ): string {
   const usesValidators = !!options?.usesValidators;
+  const localizeMessages = !!options?.localizeMessages;
   // Resolved structural-conflict statuses baked as literals into the arms
   // below — 409 by default, or the api's `httpStatus <Conflict> -> <Code>`
   // override.  Both the log-event `status` field and the ProblemDetails status
@@ -860,7 +865,11 @@ public sealed class DomainExceptionFilter : IExceptionFilter
                     var err = new Dictionary<string, object>
                     {
                         ["pointer"] = PointerOf(e.PropertyName),
-                        ["message"] = e.ErrorMessage,
+                        ["message"] = ${
+                          localizeMessages
+                            ? `global::${ns}.Localization.LoomMessages.Localize(e.ErrorCode, e.ErrorMessage)`
+                            : "e.ErrorMessage"
+                        },
                     };
                     // A messaged rule's WithErrorCode("msg.<hash>") surfaces as the
                     // stable content-hash wire code; a message-less rule's default

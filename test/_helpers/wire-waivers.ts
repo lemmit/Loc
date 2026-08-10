@@ -149,4 +149,47 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     reason:
       "RS-18 — elixir's crudish update runs a changeset, not the operation body, so a provenanced field keeps its previous lineage",
   },
+  // M-T6.20 — a messaged `precondition` denies through a DIFFERENT PATH on
+  // elixir, and the three entries below are the one divergence that causes.
+  //
+  // On the other four backends an op precondition is lifted by
+  // `preconditionsAsInvariants(op)` into the SAME wire validator the invariants
+  // use, so a trip answers the WIRE-VALIDATION rung: title "Validation failed",
+  // detail "One or more fields are invalid.", and an `errors[]` entry carrying
+  // the pointer + the `msg.<hash>` code.  Elixir's preconditions never reach the
+  // changeset validator — they lower to the `ensure/2` control-flow chain — so a
+  // trip answers the DOMAIN-FLOOR rung instead: the authored message as `detail`
+  // (that half works, #2300's `denialMessage`), the status reason phrase as
+  // `title`, and NO `errors[]` at all, hence no pointer and no code.
+  //
+  // Waived, not fixed: M-T6.20 §"Wire `code` — the extra reshape" is exactly this
+  // item and states the two options (reshape the precondition 422 into an
+  // `errors[]`-with-pointer body, or hang `code` off the top level).  Choosing
+  // between them and reshaping the ensure-path denial protocol is that mission,
+  // not the message-catalog slice that first compiled a messaged precondition
+  // here.  The three narrow entries ratchet independently as it lands.
+  {
+    backends: ["elixir"],
+    cases: ["validation-messages"],
+    path: "$.errors",
+    kinds: ["key-set"],
+    reason:
+      "M-T6.20 — elixir's precondition denial is the domain-floor 422, which carries no errors[] (so no pointer and no wire code)",
+  },
+  {
+    backends: ["elixir"],
+    cases: ["validation-messages"],
+    path: "$.title",
+    kinds: ["value"],
+    reason:
+      'M-T6.20 — elixir\'s precondition denial answers the domain-floor rung, so the title is the status reason phrase, not "Validation failed"',
+  },
+  {
+    backends: ["elixir"],
+    cases: ["validation-messages"],
+    path: "$.detail",
+    kinds: ["value"],
+    reason:
+      "M-T6.20 — elixir's precondition denial puts the authored message in detail (the domain-floor shape) instead of the wire-validation sentence",
+  },
 ];
