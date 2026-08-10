@@ -28,7 +28,7 @@
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 import type { MessageEntry } from "./i18n-extract.js";
-import { gridHasFilterableColumn } from "./primitives/data-grid-shape.js";
+import { gridHasFilterableColumn, gridHasSortableColumn } from "./primitives/data-grid-shape.js";
 
 /** Stable key for a pack-chrome string: `chrome.<name>`. */
 export function chromeKey(name: string): string {
@@ -57,6 +57,12 @@ export const CHROME_MESSAGES: Record<string, string> = {
   // reason `openMenu` and `toggleNavigation` stayed apart.  "Next" IS shared,
   // because both spell it identically.
   [chromeKey("prev")]: "Prev",
+  // The per-column control ARIA — a grid's sort button and filter input each
+  // need an accessible name that says WHICH column, so both are ICU messages
+  // with a `{column}` hole rather than a bare "Sort"/"Filter".  Holed chrome in
+  // ATTRIBUTE position; see `localizedChromeIcuAria`.
+  [chromeKey("sortBy")]: "Sort by {column}",
+  [chromeKey("filterBy")]: "Filter by {column}",
   // The empty-state text of a `<select>` picker.  One key rather than one per
   // call site: it is the same sentence to a translator, and every pack that
   // spells it spells it identically (unlike the nav-toggle pair, which packs
@@ -112,7 +118,12 @@ export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
     entry("previous"),
     entry("next"),
     entry("pageOf"),
-    ...(gridHasFilterableColumn(call) ? [entry("filter")] : []),
+    // Both per-column control names are contributed EXACTLY, not merged: each
+    // rides a predicate that is fully readable off the call node, so the key is
+    // present in precisely the grids that render the control.  `sortable:` and
+    // `filterable:` are independent, hence two gates rather than one.
+    ...(gridHasSortableColumn(call) ? [entry("sortBy")] : []),
+    ...(gridHasFilterableColumn(call) ? [entry("filter"), entry("filterBy")] : []),
   ],
   // A `SelectField` ALWAYS renders the picker, so this is exact — the primitive
   // is the only thing that renders `primitive-select-field`.

@@ -54,6 +54,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
@@ -62,6 +63,7 @@ import { icuFromConcat, messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
 import { elixirI18nString } from "./i18n.js";
+import { ELIXIR_INTRINSIC_RENDERERS } from "./render-expr.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -762,10 +764,21 @@ function renderMethodCall(
   // a `ref` to one of the UI's api parameters.
   const api = detectApiCall(expr, ctx);
   if (api) return renderApiCall(api, ctx);
-  // Generic chained call — emit Elixir-style.
   const recv = renderExpr(expr.receiver, ctx);
-  const args = expr.args.map((a) => renderExpr(a, ctx)).join(", ");
-  return `${recv}.${snake(expr.member)}(${args})`;
+  const args = expr.args.map((a) => renderExpr(a, ctx));
+  // Catalogued scalar intrinsic (src/util/intrinsics.ts) — `s.toUpper()` etc.
+  // Without this arm the walker fell through to the verbatim `recv.member(args)`
+  // below, snake-cased into a call Elixir has no such method for
+  // (`s.to_upper()` — not a String function) — a compile error, exactly the
+  // gap `renderMethodCall` in the domain-side `render-expr.ts` already closed
+  // for op/derived/invariant bodies via the SAME table, reused here so a page
+  // body and a domain expression agree on what `s.replace(a, b)` means.
+  if (expr.receiverType.kind === "primitive" && intrinsicFor(expr.receiverType.name, expr.member)) {
+    const snippet = ELIXIR_INTRINSIC_RENDERERS[intrinsicKey(expr.receiverType.name, expr.member)];
+    if (snippet) return snippet(recv, args);
+  }
+  // Generic chained call — emit Elixir-style.
+  return `${recv}.${snake(expr.member)}(${args.join(", ")})`;
 }
 
 /** A call to a user-defined `component` → a fully-qualified HEEx

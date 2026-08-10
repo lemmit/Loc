@@ -136,6 +136,16 @@ timeout fired and needed a manual label re-arm. v2 never waits:
   pending-never-green) and the `workflow_run.workflows` list's completeness
   both ways (a workflow missing from the list completes without
   re-evaluating; a stale name re-evaluates nothing).
+- **One SHA can carry more than one check suite, and the verdict collapses
+  them by name (`latestPerName`) before judging.** The API's `filter=latest`
+  dedupes per name *within* a suite only. Marking a draft PR ready fires a
+  second event on the same head SHA; the new suite's `cancel-in-progress`
+  kills the draft suite mid-flight, and without the collapse the fail-closed
+  "cancelled counts as FAILED" rule reads that corpse and reds the PR
+  permanently — no re-evaluation or sweep can clear it, because the cancelled
+  run never changes. Observed on #2467 and #2477, both green in every
+  component check; fixed in #2481. If a PR is ever red with a culprit list of
+  `*-passed` rollups that all show green, this is the shape to check first.
 
 **Branch protection on a personal account should require exactly two
 checks: `tests passed` and `pr-gate`.** Everything else stays non-required
