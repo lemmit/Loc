@@ -20,6 +20,7 @@
 import { EmptyFileSystem, type LangiumDocument, URI } from "langium";
 import type { Diagnostic } from "vscode-languageserver-types";
 import type { JsonDiagnostic } from "../diagnostics/contract.js";
+import { diagMessage } from "../diagnostics/messages.js";
 import { renderPgStep } from "../generator/sql-pg.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
@@ -181,7 +182,7 @@ export async function snapshot(source: string): Promise<SnapshotReport> {
     return {
       ok: false,
       files: [],
-      diagnostics: [...json, loweringDiag("Lowering failed before snapshot capture.")],
+      diagnostics: [...json, loweringDiag(diagMessage("loom.ir-internal#snapshot-lowering"))],
     };
   }
   const files = [...captureSnapshots(loom)].map(([path, content]) => ({ path, content }));
@@ -287,7 +288,7 @@ export async function diff(current: string, baseline?: string): Promise<DiffRepo
       migrations: [],
       wireChanges: [],
       breaking: false,
-      diagnostics: [...curJson, loweringDiag("Lowering the current source failed.")],
+      diagnostics: [...curJson, loweringDiag(diagMessage("loom.ir-internal#evolve-lowering"))],
     };
   }
   if (curLoom.systems.length === 0) {
@@ -302,8 +303,7 @@ export async function diff(current: string, baseline?: string): Promise<DiffRepo
           code: "loom.no-system",
           severity: "warning",
           phase: "ir-validate",
-          message:
-            "Source has no `system` block — schema migrations and the wire contract are derived per system, so there is nothing to evolve yet.",
+          message: diagMessage("loom.no-system"),
         },
       ],
     };
@@ -340,7 +340,9 @@ export async function diff(current: string, baseline?: string): Promise<DiffRepo
       diagnostics: [
         ...curJson,
         loweringDiag(
-          `Migration derivation failed: ${err instanceof Error ? err.message : String(err)}`,
+          diagMessage("loom.ir-internal#migration-derivation", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
         ),
       ],
     };

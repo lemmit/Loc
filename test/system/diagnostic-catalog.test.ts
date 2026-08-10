@@ -29,8 +29,9 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** The validator surface the catalog owns: the AST validators, the IR check
- *  leaves, and the validator registry that wraps them. */
+/** The diagnostic surface the catalog owns — every phase that raises a `loom.*`
+ *  code the user can see: macro expansion (②), the AST validators (④), the IR
+ *  check leaves (⑦), and the toolkit entry points that report a phase failure. */
 function catalogedSources(): string[] {
   const out: string[] = [];
   for (const dir of [
@@ -42,6 +43,9 @@ function catalogedSources(): string[] {
     }
   }
   out.push(path.join("src", "language", "ddd-validator.ts"));
+  out.push(path.join("src", "macros", "expander.ts"));
+  out.push(path.join("src", "api", "evolve.ts"));
+  out.push(path.join("src", "api", "index.ts"));
   return out;
 }
 
@@ -55,15 +59,29 @@ interface Site {
   sf: ts.SourceFile;
 }
 
+/** True when the message is just a parameter of the enclosing function — a
+ *  FORWARDING HELPER (`loweringDiag(message)` in `src/api/evolve.ts`), whose
+ *  wording lives at its own call sites and is catalogued there.  Nothing is
+ *  hard-coded at such a site, so there is nothing for the ratchet to catch. */
+function isForwardedParam(message: ts.Expression, sf: ts.SourceFile): boolean {
+  if (!ts.isIdentifier(message)) return false;
+  for (let n: ts.Node | undefined = message.parent; n; n = n.parent) {
+    if (!ts.isFunctionLike(n)) continue;
+    return n.parameters.some((p) => p.name.getText(sf) === message.text);
+  }
+  return false;
+}
+
 /** Every diagnostic construction site carrying a literal `loom.*` code — both
- *  shapes: Langium's `accept(sev, msg, { …, code })` and the IR checks'
- *  `{ severity, message, source, code }` object literal. */
+ *  shapes: Langium's `accept(sev, msg, { …, code })` and the IR checks' /
+ *  macro expander's `{ severity, message, code, … }` object literal. */
 function sitesIn(file: string): Site[] {
   const src = fs.readFileSync(path.join(repoRoot, file), "utf8");
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ESNext, true);
   const out: Site[] = [];
   const push = (message: ts.Expression, codeNode: ts.Expression): void => {
     if (!ts.isStringLiteral(codeNode) || !codeNode.text.startsWith("loom.")) return;
+    if (isForwardedParam(message, sf)) return;
     out.push({
       file,
       line: sf.getLineAndCharacterOfPosition(message.getStart(sf)).line + 1,
@@ -138,7 +156,26 @@ describe("validator diagnostic-message catalog", () => {
   });
 
   it("has no orphan entries", () => {
-    const used = new Set(ALL_SITES.map(keyOf).filter((k): k is string => k !== undefined));
+    // Every `diagMessage("…")` anywhere in the cataloged sources — not just the
+    // code-carrying sites — because a key can legitimately be rendered one hop
+    // away from its `code:` (the forwarding helpers above).
+    const used = new Set<string>();
+    for (const file of catalogedSources()) {
+      const sf = ts.createSourceFile(
+        file,
+        fs.readFileSync(path.join(repoRoot, file), "utf8"),
+        ts.ScriptTarget.ESNext,
+        true,
+      );
+      const visit = (n: ts.Node): void => {
+        if (ts.isCallExpression(n) && n.expression.getText(sf) === "diagMessage") {
+          const arg = n.arguments[0];
+          if (arg && ts.isStringLiteral(arg)) used.add(arg.text);
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
     const orphans = Object.keys(DIAGNOSTIC_MESSAGES).filter((k) => !used.has(k));
     expect(orphans).toEqual([]);
   });

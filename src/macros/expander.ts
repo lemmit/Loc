@@ -30,6 +30,7 @@
 import type { AstNode, LangiumDocument } from "langium";
 import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
+import { diagMessage } from "../diagnostics/messages.js";
 import {
   type Aggregate,
   type Api,
@@ -270,7 +271,7 @@ function expandHost(
         recordDiagnostic(doc, {
           severity: "error",
           code: "loom.unknown-capability",
-          message: `Unknown capability '${m.cap}' in 'implements'.`,
+          message: diagMessage("loom.unknown-capability", { cap: m.cap }),
           node: m,
           property: "cap",
         });
@@ -332,9 +333,10 @@ function applyDefaultVersioning(
       recordDiagnostic(doc, {
         severity: "error",
         code: "loom.version-field-collision",
-        message:
-          `field 'version' on aggregate '${agg.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
-          `Rename this field (e.g. '${lowerFirstSafe(agg.name)}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+        message: diagMessage("loom.version-field-collision", {
+          name: agg.name,
+          name2: lowerFirstSafe(agg.name),
+        }),
         node: declared,
         property: "name",
       });
@@ -404,7 +406,10 @@ function expandOneCall(
     recordDiagnostic(doc, {
       severity: "error",
       code: "loom.unknown-macro",
-      message: `Unknown macro or capability '${name}'.  Available macros: ${listMacroNames()}.`,
+      message: diagMessage("loom.unknown-macro#top-level", {
+        name,
+        listMacroNames: listMacroNames(),
+      }),
       node: call,
       property: "name",
     });
@@ -414,7 +419,7 @@ function expandOneCall(
     recordDiagnostic(doc, {
       severity: "error",
       code: "loom.macro-target-mismatch",
-      message: `Macro '${name}' targets '${macro.target}' but was invoked on a '${hostKind}'.`,
+      message: diagMessage("loom.macro-target-mismatch", { name, target: macro.target, hostKind }),
       node: call,
       property: "name",
     });
@@ -442,9 +447,11 @@ function expandOneCall(
       recordDiagnostic(doc, {
         severity: "error",
         code: "loom.unknown-macro",
-        message:
-          `Macro '${name}' invoked unknown macro '${childName}'.  ` +
-          `Available: ${listMacroNames()}.`,
+        message: diagMessage("loom.unknown-macro#nested", {
+          name,
+          childName,
+          listMacroNames: listMacroNames(),
+        }),
         node: call,
         property: "name",
       });
@@ -470,7 +477,11 @@ function expandOneCall(
       recordDiagnostic(doc, {
         severity: "error",
         code: "loom.macro-threw",
-        message: `Macro '${childName}' (invoked from '${name}') threw: ${(err as Error).message}`,
+        message: diagMessage("loom.macro-threw#nested", {
+          childName,
+          name,
+          message: (err as Error).message,
+        }),
         node: call,
         property: "name",
       });
@@ -510,7 +521,7 @@ function expandOneCall(
     recordDiagnostic(doc, {
       severity: "error",
       code: "loom.macro-threw",
-      message: `Macro '${name}' threw during expansion: ${(err as Error).message}`,
+      message: diagMessage("loom.macro-threw#direct", { name, message: (err as Error).message }),
       node: call,
       property: "name",
     });
@@ -567,9 +578,7 @@ function expandCapability(
     recordDiagnostic(doc, {
       severity: "error",
       code: "loom.capability-host-invalid",
-      message:
-        `Capability '${cap.name}' can only be applied to an aggregate or context (got '${hostKind}').  ` +
-        "A capability is a pure mixin over domain state, not a UI or API concern.",
+      message: diagMessage("loom.capability-host-invalid", { name: cap.name, hostKind }),
       node: at,
     });
     return;
@@ -599,9 +608,10 @@ function expandCapability(
           recordDiagnostic(doc, {
             severity: "error",
             code: "loom.version-field-collision",
-            message:
-              `field 'version' on aggregate '${agg.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
-              `Rename this field (e.g. '${lowerFirstSafe(agg.name)}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+            message: diagMessage("loom.version-field-collision", {
+              name: agg.name,
+              name2: lowerFirstSafe(agg.name),
+            }),
             node: declared,
             property: "name",
           });
@@ -697,7 +707,7 @@ function spliceMembers(
       recordDiagnostic(doc, {
         severity: "error",
         code: "loom.macro-non-ast-result",
-        message: `Macro returned a non-AST value (${typeof m}); expected an AST member or capability node.`,
+        message: diagMessage("loom.macro-non-ast-result", { v1: typeof m }),
         node: call,
       });
       continue;
@@ -711,10 +721,7 @@ function spliceMembers(
       recordDiagnostic(doc, {
         severity: "error",
         code: "loom.macro-escapes-host",
-        message:
-          "Macro emitted a node targeting a destination outside the host's subtree.  " +
-          "Macros may only modify their host or its descendants (e.g. a context-level macro " +
-          "may invoke an aggregate-level macro against an aggregate inside the context).",
+        message: diagMessage("loom.macro-escapes-host"),
         node: call,
         property: "name",
       });
@@ -832,7 +839,7 @@ function bindArgs(
       record({
         severity: "error",
         code: "loom.macro-arg-duplicate",
-        message: `Duplicate argument '${a.name}' in call to macro '${macro.name}'.`,
+        message: diagMessage("loom.macro-arg-duplicate", { name: a.name, macroName: macro.name }),
         node: a,
         property: "name",
       });
@@ -851,9 +858,11 @@ function bindArgs(
       record({
         severity: "error",
         code: "loom.macro-arg-unknown",
-        message:
-          `Unknown argument '${name}' for macro '${macro.name}'.  ` +
-          `Declared parameters: ${Object.keys(spec).join(", ") || "(none)"}.`,
+        message: diagMessage("loom.macro-arg-unknown", {
+          name,
+          macroName: macro.name,
+          spec: Object.keys(spec).join(", ") || "(none)",
+        }),
         node: arg,
         property: "name",
       });
@@ -878,7 +887,11 @@ function bindArgs(
       record({
         severity: "error",
         code: "loom.macro-arg-missing",
-        message: `Macro '${macro.name}' requires argument '${name}' (kind=${ps.kind}).`,
+        message: diagMessage("loom.macro-arg-missing", {
+          name: macro.name,
+          name2: name,
+          kind: ps.kind,
+        }),
         node: call,
       });
       failed = true;
@@ -921,7 +934,12 @@ function coerceArg(
             record({
               severity: "error",
               code: "loom.macro-arg-unresolved-ref",
-              message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+              message: diagMessage("loom.macro-arg-unresolved-ref", {
+                argName,
+                macroName,
+                of: spec.of,
+                refText,
+              }),
               node: arg,
               property: "value",
             });
@@ -944,7 +962,12 @@ function coerceArg(
               record({
                 severity: "error",
                 code: "loom.macro-arg-unresolved-ref",
-                message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+                message: diagMessage("loom.macro-arg-unresolved-ref", {
+                  argName,
+                  macroName,
+                  of: spec.of,
+                  refText,
+                }),
                 node: arg,
                 property: "value",
               });
@@ -962,7 +985,7 @@ function coerceArg(
   record({
     severity: "error",
     code: "loom.macro-arg-kind-mismatch",
-    message: `Argument '${argName}' to macro '${macroName}' expected kind '${spec.kind}'.`,
+    message: diagMessage("loom.macro-arg-kind-mismatch", { argName, macroName, kind: spec.kind }),
     node: arg,
     property: "value",
   });
@@ -1079,7 +1102,12 @@ export function collectUnresolvedMacroRefs(
     record({
       severity: "error",
       code: "loom.macro-arg-unresolved-ref",
-      message: `Argument '${arg.name}' to macro '${macroName}' references unknown ${kind} '${name}'.`,
+      message: diagMessage("loom.macro-arg-unresolved-ref", {
+        argName: arg.name,
+        macroName,
+        of: kind,
+        refText: name,
+      }),
       node: arg,
       property: "value",
     });
