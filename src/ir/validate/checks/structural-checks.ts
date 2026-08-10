@@ -28,6 +28,7 @@ import { allContexts } from "../../types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { aggregateIsEventSourced, resolveDataSourceConfig } from "../../util/resolve-datasource.js";
 import {
+  walkExprDeep,
   walkStmtExprsDeep as walkExprsInStmt,
   walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
 } from "../../util/walk.js";
@@ -1725,6 +1726,52 @@ function assignEffectReproduced(s: StmtIR, agg: AggregateIR): boolean {
   return dflt !== undefined && sameEffectValue(dflt, s.value);
 }
 
+/**
+ * The refs a lifecycle `requires` may read, per action — the contract that
+ * makes route-level gating of a canonical `create` / `destroy` possible at all.
+ *
+ * It is stated HERE, as a check, because the previous shape of this work
+ * ASSUMED it and shipped a regression: `create() { requires quantity == 0 }`
+ * parses, lowers to a `this-prop` ref, and would emit an unbound receiver on
+ * every backend (`this._quantity` in a module-scope handler, `cannot find
+ * symbol` on Java, CS1061 on .NET, `F821 Undefined name self` on Python).  A
+ * contract nothing enforces is a comment.
+ *
+ *   create  — `currentUser` only.  There is no instance until the factory
+ *             runs, and the emitted `POST /<aggs>` takes the FIELD-DERIVED
+ *             create input rather than the declared parameter list, so a
+ *             `param` ref has no wire slot to read either.
+ *   destroy — `currentUser` plus `this`.  The route already loads the row for
+ *             its 404 probe, so the loaded aggregate is a legitimate receiver.
+ *             `param` is still out: a DELETE carries no body.
+ *
+ * `requires` answers "may this caller", not "is this input sane" — the latter
+ * is a `precondition` on a named `operation`.  Returns the offending ref names,
+ * so the diagnostic can name them rather than gesture at the clause.
+ */
+function lifecycleGuardIllegalRefs(expr: ExprIR, label: "create" | "destroy"): string[] {
+  const bad: string[] = [];
+  walkExprDeep(expr, (node) => {
+    if (node.kind !== "ref") return;
+    switch (node.refKind) {
+      case "current-user":
+      case "enum-value":
+      case "helper-fn":
+      case "unknown":
+        return;
+      case "this-prop":
+      case "this-vo-prop":
+      case "this-derived":
+        if (label === "destroy") return;
+        bad.push(node.name);
+        return;
+      default:
+        bad.push(node.name);
+    }
+  });
+  return [...new Set(bad)];
+}
+
 export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const agg of ctx.aggregates) {
     // Event-sourced CREATES are rendered — a different path (`agg.creates[0]`
@@ -1741,6 +1788,29 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
     ] as const) {
       if (label === "create" && esCreateRendered) continue;
       for (const s of action?.statements ?? []) {
+        // A lifecycle guard's READABLE SURFACE, enforced rather than assumed.
+        if (s.kind === "requires") {
+          const illegal = lifecycleGuardIllegalRefs(s.expr, label);
+          if (illegal.length > 0) {
+            diags.push({
+              severity: "error",
+              code: "loom.lifecycle-guard-unreadable",
+              message:
+                `aggregate '${agg.name}': the \`${label}\` guard reads ` +
+                `${illegal.map((n) => `\`${n}\``).join(", ")}, which the gate cannot see. A ` +
+                `\`${label}\` guard may read ` +
+                (label === "create"
+                  ? "`currentUser` only — there is no instance until the factory runs, and the " +
+                    "emitted `POST` takes the field-derived create input, not the declared " +
+                    "parameter list, so a parameter has no wire slot either"
+                  : "`currentUser` and `this` (the route already loads the row) — but not a " +
+                    "parameter, because a DELETE carries no body") +
+                '. `requires` answers "may this caller"; a value check belongs in a ' +
+                "`precondition` on a named `operation`.",
+              source: `${ctx.name}/aggregate ${agg.name}.${label}`,
+            });
+          }
+        }
         if (assignEffectReproduced(s, agg)) continue;
         const reason = droppedStmtReason(s.kind, label);
         if (!reason) continue;
