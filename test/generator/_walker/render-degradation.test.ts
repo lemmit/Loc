@@ -25,20 +25,38 @@
 
 import { describe, expect, it } from "vitest";
 import { snake } from "../../../src/util/naming.js";
-import { generateSystemFiles, loadExample } from "../../_helpers/index.js";
+import { generateSystemFiles, loadExample, parseString } from "../../_helpers/index.js";
 
 const FIXTURE = "web/src/examples/expression-showcase.ddd";
 
 /** Frontends the fixture is generated for, with the hosting deployable's
- *  platform and the path fragment identifying its emitted page files. */
+ *  platform and the path fragment identifying its emitted page files.
+ *
+ *  `hosting` names the deployment TOPOLOGY the frontend actually ships in,
+ *  because the two are not interchangeable:
+ *
+ *   - `"spa"` — a CLIENT frontend served as a static bundle beside a separate
+ *     backend, wired with `targets: <backend>`.  `enrichDeployables` backfills
+ *     its `contextNames` from that target, so the page emitter sees the
+ *     backend's aggregates / value objects / repositories.
+ *   - `"self"` — a SELF-HOSTING backend that also renders the ui (Phoenix
+ *     LiveView).  It owns its contexts directly (`contexts:` / `dataSources:`)
+ *     and `targets:` is a validator ERROR on it.
+ *
+ *  Getting this wrong is not cosmetic — see `retargetFixture`. */
 const TARGETS = [
-  { framework: "react", platform: "static", pages: /\/src\/pages\/.*\.tsx$/ },
-  { framework: "vue", platform: "static", pages: /\/src\/pages\/.*\.vue$/ },
-  { framework: "svelte", platform: "static", pages: /\+page\.svelte$/ },
-  { framework: "angular", platform: "static", pages: /\/src\/app\/pages\// },
-  { framework: "feliz", platform: "feliz", pages: /\.fs$/ },
-  { framework: "flutter", platform: "flutter", pages: /lib\/pages\// },
-  { framework: "phoenixLiveView", platform: "elixir", pages: /_live\.ex$|\.html\.heex$/ },
+  { framework: "react", platform: "static", hosting: "spa", pages: /\/src\/pages\/.*\.tsx$/ },
+  { framework: "vue", platform: "static", hosting: "spa", pages: /\/src\/pages\/.*\.vue$/ },
+  { framework: "svelte", platform: "static", hosting: "spa", pages: /\+page\.svelte$/ },
+  { framework: "angular", platform: "static", hosting: "spa", pages: /\/src\/app\/pages\// },
+  { framework: "feliz", platform: "feliz", hosting: "spa", pages: /\.fs$/ },
+  { framework: "flutter", platform: "flutter", hosting: "spa", pages: /lib\/pages\// },
+  {
+    framework: "phoenixLiveView",
+    platform: "elixir",
+    hosting: "self",
+    pages: /_live\.ex$|\.html\.heex$/,
+  },
 ] as const;
 
 /**
@@ -111,19 +129,113 @@ const KNOWN_VERBATIM_INTRINSICS: ReadonlySet<string> = new Set([
   // `Decimal.*` arm is the only one a page body ever needs.
 ]);
 
-async function generateFor(framework: string, platform: string): Promise<Map<string, string>> {
-  // The fixture declares `framework: react` + `platform: static`; retarget it
-  // in-memory so one fixture covers every frontend.
-  const src = loadExample(FIXTURE)
-    .replace("framework: react", `framework: ${framework}`)
-    .replace("platform: static", `platform: ${platform}`);
-  return await generateSystemFiles(src);
+/** The fixture's own two-deployable tail: a `node` backend plus a `static`
+ *  bundle host wired to it with `targets:`.  Matched exactly (and asserted
+ *  present) so a fixture edit can never silently turn the self-hosting
+ *  retarget below into a no-op. */
+const SPA_DEPLOYABLES = `  deployable api {
+    platform: node
+    contexts: [Products]
+    dataSources: [productsState]
+    serves: CatalogApi
+    port: 3000
+  }
+
+  deployable web_app {
+    platform: static
+    targets: api
+    port: 3001
+    ui: Showcase { Catalog: api }
+  }`;
+
+/** The SELF-HOSTING tail: one deployable that owns the contexts AND renders
+ *  the ui — the shape a Phoenix LiveView app actually ships in.  The api
+ *  handle binds to the deployable itself, since it serves `CatalogApi`. */
+const SELF_HOSTED_DEPLOYABLE = (platform: string): string => `  deployable web_app {
+    platform: ${platform}
+    contexts: [Products]
+    dataSources: [productsState]
+    serves: CatalogApi
+    ui: Showcase { Catalog: web_app }
+    port: 3001
+  }`;
+
+/**
+ * Retarget the one fixture onto a frontend.
+ *
+ * The `hosting` axis is the load-bearing part.  This used to be a blind
+ *
+ *     .replace("platform: static", `platform: ${platform}`)
+ *
+ * which, for `phoenixLiveView`, produced `platform: elixir` + `targets: api`
+ * — a combination the VALIDATOR REJECTS (`loom.unknown`: "'targets:' is only
+ * valid on a frontend deployable").  `generateSystemFiles` deliberately runs
+ * validation without asserting it (many walker tests emit from
+ * diagnostic-carrying models on purpose), so nothing said so, and the leg
+ * emitted anyway — from a system where `enrichDeployables` had backfilled
+ * NOTHING.  That backfill (`contextNames` inherited from `targets:`) is gated
+ * on `descriptorFor(d.platform).isFrontend`, and `elixir` is correctly
+ * `isFrontend: false` (Phoenix self-hosts), so the deployable resolved
+ * `contextNames: []`: zero aggregates, zero value objects, zero repositories.
+ *
+ * The leg was therefore asserting "no degradation sentinel" over pages that
+ * had never resolved a single domain reference — the "gate that never reaches
+ * the thing it names" shape (experience_gathered.md §59, §63).  It is exactly
+ * why the VO-construction/primitive-name collision fixed in #2484 was
+ * invisible here: with no value objects in scope there was no collision to
+ * have.  The companion `validates cleanly` test below is what keeps this
+ * honest from now on.
+ */
+function retargetFixture(target: { framework: string; platform: string; hosting: string }): string {
+  const base = loadExample(FIXTURE).replace("framework: react", `framework: ${target.framework}`);
+  if (target.hosting === "self") {
+    expect(
+      base.includes(SPA_DEPLOYABLES),
+      "the fixture's deployable tail changed — update SPA_DEPLOYABLES, or the " +
+        "self-hosting retarget silently stops applying",
+    ).toBe(true);
+    return base.replace(SPA_DEPLOYABLES, SELF_HOSTED_DEPLOYABLE(target.platform));
+  }
+  return base.replace("platform: static", `platform: ${target.platform}`);
+}
+
+async function generateFor(target: {
+  framework: string;
+  platform: string;
+  hosting: string;
+}): Promise<Map<string, string>> {
+  return await generateSystemFiles(retargetFixture(target));
 }
 
 describe("frontend render degradation — the emitted page must not give up", () => {
+  // -------------------------------------------------------------------------
+  // The gate ON the gate.  Every assertion below reads emitted output, and
+  // `generateSystemFiles` emits from a validation-DIAGNOSTIC-carrying model
+  // without complaint (deliberately — negative/gated-feature tests depend on
+  // it).  So a retarget that produces an INVALID system still "generates", and
+  // every downstream assertion then runs against a system the compiler would
+  // have refused.
+  //
+  // That is not hypothetical: the phoenixLiveView leg did exactly this until
+  // this test existed — `platform: elixir` + `targets: api`, rejected by
+  // `loom.unknown`, emitting pages whose deployable resolved `contextNames:
+  // []`.  See `retargetFixture`.  This runs FIRST so a topology regression
+  // reports as itself rather than as a confusing downstream sentinel diff.
+  // -------------------------------------------------------------------------
+  for (const target of TARGETS) {
+    it(`${target.framework}: the retargeted fixture validates cleanly`, async () => {
+      const { errors } = await parseString(retargetFixture(target));
+      expect(
+        errors,
+        `${target.framework}: the retargeted fixture does not compile, so every ` +
+          `degradation assertion below runs against a system the validator rejects`,
+      ).toEqual([]);
+    }, 120_000);
+  }
+
   for (const target of TARGETS) {
     it(`${target.framework}: no degradation sentinel in any emitted page`, async () => {
-      const files = await generateFor(target.framework, target.platform);
+      const files = await generateFor(target);
       const pages = [...files.entries()].filter(([k]) => target.pages.test(k));
       expect(pages.length, `no page files matched for ${target.framework}`).toBeGreaterThan(0);
 
@@ -149,6 +261,51 @@ describe("frontend render degradation — the emitted page must not give up", ()
   }
 
   // -------------------------------------------------------------------------
+  // A third failure mode, and the one the sentinel scan is structurally blind
+  // to: output that is neither a give-up marker nor a Loom spelling, but
+  // simply NOT WELL-FORMED in the target language.
+  //
+  // HEEx is where this bites, because its expression slots and its markup
+  // share one syntax.  Both bugs fixed in #2484 landed here and neither
+  // tripped a sentinel — they emitted text that merely fails `mix compile`:
+  //
+  //   <%= <span class="money">…</span>.currency %>   a display primitive's
+  //                                                  MARKUP in a value slot
+  //   <%= <%= cond do … end %> %>                    a match wrapped twice
+  //
+  // Both share one signature: a `<%= … %>` region whose BODY contains another
+  // `<%=`, or a closing tag.  Neither is legal Elixir in an expression
+  // position, and neither can occur legitimately — which makes this a cheap,
+  // precise well-formedness check rather than a heuristic.  Scoped to the
+  // targets whose pages are HEEx; the JSX/F#/Dart legs get their
+  // well-formedness from their own compilers in the per-frontend build gates.
+  // -------------------------------------------------------------------------
+  for (const target of TARGETS.filter((t) => t.framework === "phoenixLiveView")) {
+    it(`${target.framework}: no nested \`<%=\` or stray closing tag inside an expression slot`, async () => {
+      const files = await generateFor(target);
+      const pages = [...files.entries()].filter(([k]) => target.pages.test(k));
+      expect(pages.length, `no page files matched for ${target.framework}`).toBeGreaterThan(0);
+
+      const bad: string[] = [];
+      for (const [path, content] of pages) {
+        // Non-greedy to the FIRST `%>`, so a well-formed slot yields its own
+        // body and a double-wrapped one yields a body still holding the inner
+        // `<%=` — exactly the discriminator.
+        for (const m of content.matchAll(/<%=([\s\S]*?)%>/g)) {
+          const body = m[1] ?? "";
+          if (body.includes("<%=")) bad.push(`nested <%= @ ${path}: ${m[0].slice(0, 90)}`);
+          else if (body.includes("</")) bad.push(`closing tag @ ${path}: ${m[0].slice(0, 90)}`);
+        }
+      }
+      expect(
+        bad,
+        `${target.framework}: emitted HEEx that will not compile — an expression slot ` +
+          `contains markup or another slot.\n${bad.join("\n")}`,
+      ).toEqual([]);
+    }, 120_000);
+  }
+
+  // -------------------------------------------------------------------------
   // The second failure mode: not "gave up", but "emitted the Loom spelling".
   // `s.toUpper()` is not JavaScript, F#, Dart or Elixir — every target must
   // translate it through a snippet table.  Untranslated, it is a compile error
@@ -159,7 +316,7 @@ describe("frontend render degradation — the emitted page must not give up", ()
     const known = KNOWN_VERBATIM_INTRINSICS.has(target.framework);
     it(`${target.framework}: no Loom intrinsic spelling survives into the page${known ? " (ratcheted)" : ""}`, async () => {
       const { INTRINSIC_SIGNATURES } = await import("../../../src/util/intrinsics.js");
-      const files = await generateFor(target.framework, target.platform);
+      const files = await generateFor(target);
       const pages = [...files.entries()].filter(([k]) => target.pages.test(k));
       const raw = new Set<string>();
       for (const [, content] of pages) {
@@ -199,7 +356,7 @@ describe("frontend render degradation — the emitted page must not give up", ()
         k.startsWith(`${target.framework}:`),
       );
       if (expected.length === 0) continue;
-      const files = await generateFor(target.framework, target.platform);
+      const files = await generateFor(target);
       const pages = [...files.entries()].filter(([k]) => target.pages.test(k));
       const seen = new Set<string>();
       for (const [, content] of pages)
