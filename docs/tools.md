@@ -613,6 +613,18 @@ LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npx vitest run \
 Unset (the default, and every CI runner with direct hex.pm access) the
 flag is a no-op and the suite runs `docker run` exactly as before.
 
+**Run the Elixir suites case by case, not as a full sweep.** The mirror is a
+single loopback process serving one `docker run` at a time, and it stops
+answering partway through the FIRST case of a long run: every case after that
+dies in `mix local.hex` with `** (Mix) request timed out after 60000ms`, a
+uniform ~63s per case, *before* any generated Elixir is compiled.  A whole-file
+`LOOM_PHOENIX_VANILLA_BUILD=1 npm run test:phoenix` therefore reports something
+like `67 failed | 1 passed` that says nothing about the emitted code — the one
+pass is case 1, and the rest never got their dependencies.  Use `-t "<fixture>"`
+to run the cases a change actually touches (each gets a fresh mirror), and
+leave the full sweep to CI, which shards `elixir-vanilla-build.yml` and has
+direct hex.pm access.
+
 ### Java images behind a fingerprinting proxy — build the jar on the host
 
 The generated Java deployable's Dockerfile is a two-stage build whose first

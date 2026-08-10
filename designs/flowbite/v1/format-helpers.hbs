@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-//
+{{{chromeImport "./i18n"}}}//
 // Plain string formatting helpers — the svelte packs' counterpart of
 // the react packs' format components (IdValue / DateTimeValue /
 // MoneyValue).  Svelte templates interpolate the returned strings
@@ -35,7 +35,7 @@ export function formatDateTime(iso: string | null | undefined): string {
 
 export function formatBool(value: boolean | null | undefined): string {
   if (isEmpty(value)) return "—";
-  return value ? "Yes" : "No";
+  return value ? {{{chromeValue "boolTrue"}}} : {{{chromeValue "boolFalse"}}};
 }
 
 export function formatNumber(

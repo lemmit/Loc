@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { Text, Tooltip, HStack } from "@chakra-ui/react";
+{{{chromeImport "../i18n"}}}import { Text, Tooltip, HStack } from "@chakra-ui/react";
 import type { ReactNode } from "react";
 
 export function EmptyValue() {
@@ -48,8 +48,8 @@ export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
 export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
-    ? <Text as="span" fontWeight={500}>Yes</Text>
-    : <Text as="span" color="gray.500">No</Text>;
+    ? <Text as="span" fontWeight={500}>{{{chrome "boolTrue"}}}</Text>
+    : <Text as="span" color="gray.500">{{{chrome "boolFalse"}}}</Text>;
 }
 
 export function NumberValue({ value, decimals = 0 }: { value: number | string | null | undefined; decimals?: number }) {

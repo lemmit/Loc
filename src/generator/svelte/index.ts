@@ -38,6 +38,7 @@ import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { buildTableSortHelper } from "../_frontend/table-sort-helper.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { packChromeCatalog } from "../_packs/pack-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { buildSvelteApiModule } from "./api-builder.js";
 import {
@@ -143,8 +144,11 @@ export function generateSvelteForContexts(
   // Empty catalog → no runtime, walk sites pass `undefined` and output stays
   // byte-identical to pre-i18n.
   const i18nEnabled = collectUiMessages(ui).length > 0;
+  // Pack-DECLARED chrome rides the SAME already-enabled gate (see the React
+  // generator for the rationale) — never flips the runtime on by itself.
+  pack.setChromeI18n(i18nEnabled);
   if (i18nEnabled) {
-    out.set("src/lib/locales/en.json", renderLocaleCatalog(ui));
+    out.set("src/lib/locales/en.json", renderLocaleCatalog(ui, packChromeCatalog(pack.manifest)));
     out.set("src/lib/i18n.ts", renderI18nModule());
   }
 

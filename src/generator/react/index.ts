@@ -30,6 +30,7 @@ import {
   hasAnyWorkflow,
 } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import { packChromeCatalog } from "../_packs/pack-chrome.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
@@ -206,6 +207,11 @@ export function generateReactForContexts(
   // React (a `t()` return in a JSX text node), not at compile time — safe, and
   // the reason the emitted default keeps its raw source form.
   const i18nEnabled = collectUiMessages(ui).length > 0;
+  // Pack-DECLARED chrome rides the SAME gate: on only for a UI that is already
+  // translatable by its authored strings, so a string-less app never grows a
+  // runtime it doesn't need and its output stays byte-identical.
+  pack.setChromeI18n(i18nEnabled);
+  const packChrome = packChromeCatalog(pack.manifest);
   const emitCtx = {
     sys,
     deployable,
@@ -218,7 +224,7 @@ export function generateReactForContexts(
     i18nEnabled,
   };
   if (i18nEnabled) {
-    out.set("src/locales/en.json", renderLocaleCatalog(ui));
+    out.set("src/locales/en.json", renderLocaleCatalog(ui, packChrome));
     out.set("src/i18n.ts", renderI18nModule());
   }
   const pages = emitPagesForUi(ui, emitCtx);

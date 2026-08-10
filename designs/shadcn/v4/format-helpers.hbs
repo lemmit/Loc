@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-//
+{{{chromeImport "../i18n"}}}//
 // shadcn-flavoured runtime formatting helpers.  Same exported
 // surface as the Mantine variant (IdValue / DateTimeValue /
 // BoolValue / NumberValue / EmptyValue / PlainValue / KeyValueRow)
@@ -70,8 +70,8 @@ export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
 export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
-    ? <span className="font-medium">Yes</span>
-    : <span className="text-muted-foreground">No</span>;
+    ? <span className="font-medium">{{{chrome "boolTrue"}}}</span>
+    : <span className="text-muted-foreground">{{{chrome "boolFalse"}}}</span>;
 }
 
 /** Locale-aware numeric value. */

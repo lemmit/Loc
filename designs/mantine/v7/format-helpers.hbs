@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { Text, Tooltip, Code, Group, Stack } from "@mantine/core";
+{{{chromeImport "../i18n"}}}import { Text, Tooltip, Code, Group, Stack } from "@mantine/core";
 import type { ReactNode } from "react";
 
 /** Empty placeholder for null / undefined / "" values.  Rendered as
@@ -60,8 +60,8 @@ export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
 export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
-    ? <Text component="span" fw={500}>Yes</Text>
-    : <Text component="span" c="dimmed">No</Text>;
+    ? <Text component="span" fw={500}>{{{chrome "boolTrue"}}}</Text>
+    : <Text component="span" c="dimmed">{{{chrome "boolFalse"}}}</Text>;
 }
 
 /** Locale-aware numeric value.  Used for int / long / decimal cells

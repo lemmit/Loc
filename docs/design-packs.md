@@ -169,6 +169,81 @@ The `{1}` substitution is the capture from the `*` in the input glob.
 Mantine doesn't use this because its components come from an npm
 package, not source files.
 
+### `chrome` — optional
+
+Role → English for every **user-visible string this pack bakes into its own
+templates** — an array field's `Remove`, an op dialog's `This operation has no
+parameters.`, a bool cell's `Yes`/`No`, an empty picker's `Select…`.
+
+```json
+"chrome": {
+  "removeItem": "Remove",
+  "addItem": "Add {item}",
+  "boolTrue": "Yes",
+  "boolFalse": "No"
+}
+```
+
+**Why a declaration and not a scrape of the `.hbs`.** Loom's user-visible-string
+extraction pass (M-T1.11) walks the IR, so it sees strings an author wrote in
+`.ddd` and nothing else — a word that exists only in a template is invisible to
+it, and therefore untranslatable. Scraping the templates instead would have to
+tell `Remove` apart from `VariantProps`, an `@doc` string and a CSS class, and a
+pack author would have no way to opt a string out. It would also produce no
+**role**, and the role is what makes two occurrences of `Close` in one pack
+distinguishable to a translator.
+
+Each entry becomes one catalog key:
+
+```
+pack.<family>.<role>.<hash>
+```
+
+`<family>` is `name`, not `name@version`: mantine v7 and v9 spell `Remove`
+identically and a translator should translate it once. `<hash>` is a content
+hash of the message (D-I18N-KEY), so two versions that *do* diverge get separate
+keys automatically, and **rephrasing a string re-keys it** — `ddd i18n sync`
+then sees a delete-old + add-new rather than silently keeping a translation of
+the old wording. The `pack.` namespace cannot collide with the authored-string
+keys (`page.*` / `component.*` / `menu.*`) or with the toolchain's own curated
+`chrome.*` table.
+
+Templates spell a declared string through four helpers, which are bound into
+every `pack.render(...)` (including partials):
+
+| Helper | Position | i18n OFF | i18n ON (tsx) |
+|---|---|---|---|
+| `{{{chrome "removeItem"}}}` | markup text | `Remove` | `{t("pack.…", "Remove")}` |
+| `{{{chrome "addItem" item=elementLabel}}}` | markup text, ICU holes | `Add Line` | `{t("pack.…", "Add {item}", { item: "Line" })}` |
+| `{{{chromeAttr "aria-label" "paginationLandmark"}}}` | a whole attribute | `aria-label="Pagination"` | `aria-label={t("pack.…", "Pagination")}` |
+| `{{{chromeValue "operationSucceeded" operation=humanOp}}}` | a target-language value | `"Ship succeeded"` | `t("pack.…", "{operation} succeeded", { operation: "Ship" })` |
+| `{{{chromeImport "../i18n"}}}` | the runtime import | *(nothing)* | `import { t } from "../i18n";` |
+
+`chromeAttr` takes the attribute NAME because a bound attribute changes shape
+per framework — Vue grows a `:` prefix, Angular brackets (`[attr.aria-label]`),
+HEEx an expression body. Hole values are compile-time strings from the
+template's own data, which is what lets the OFF path splice them in verbatim.
+
+**`chromeImport` is for WHOLE-FILE templates only** (`format-helpers`, a
+shadcn `components/ui/*`), and the specifier is yours to give: only the pack
+knows where its file lands relative to the generated `i18n` module. A FRAGMENT
+template (a form field, an op dialog) must not use it — its output lands inside
+a page whose import block the walker owns, and that path is wired automatically.
+HEEx packs pass the web module instead (`{{{chromeImport webModule}}}`), which
+emits `use Gettext, backend: …`.
+
+**i18n OFF is byte-identical by construction.** The binding starts off and each
+helper returns exactly the bytes the template used to spell inline; a frontend
+switches it on only for a UI that is *already* translatable by its authored
+strings. Pack chrome therefore never turns the translation runtime on for an app
+that has nothing else to translate.
+
+Two gates apply, both in `test/generator/pack-declared-chrome.test.ts`: every
+declared role must be rendered by some template in the same pack (no dead
+catalog entries), and **no pack template may leave user-visible English in a
+markup text node or a user-facing attribute** — that scan is what stops the next
+hardcoded word from shipping untranslatable.
+
 ### `helpers` — optional
 Pack-specific lookup tables consulted by helpers in templates.  Today
 the only registered helper is `lucide`, used by the shadcn pack to

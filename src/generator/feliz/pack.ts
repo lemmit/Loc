@@ -924,6 +924,10 @@ export function felizPack(): LoadedPack {
     manifest: { name: "felizBasic", version: "v1", format: "tsx", emits: {}, imports: {} },
     rootDir: "<feliz-procedural>",
     templates,
+    // No `.hbs` templates, so no pack-DECLARED chrome to bind: this pack's
+    // user-visible strings are emitted procedurally and already ride the
+    // curated `chrome.*` catalog (D-I18N-ATTR / `localizedChrome*`).
+    setChromeI18n() {},
     render(name: string, context: unknown): string {
       const fn = RENDERERS[name];
       if (!fn) return `(* feliz pack: no renderer for "${name}" *)`;

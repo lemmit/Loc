@@ -57,7 +57,13 @@ describe("vuetify pack — a11y backfill", () => {
   it("renders breadcrumbs as a nav landmark, not a <v-breadcrumbs> <ul>", async () => {
     const files = await generateSystemFiles(SYS);
     const listPage = find(files, "/pages/customers/list.vue");
-    expect(listPage).toContain('<nav aria-label="Breadcrumb"');
+    // The landmark carries an accessible name.  Its VALUE is pack-declared
+    // chrome (D-PACK-CHROME), so under i18n it binds as `:aria-label='t(…)'`
+    // rather than a raw attribute — what this test is for is the `<nav>` + a
+    // name, not which of the two spellings the app opted into.
+    expect(listPage).toMatch(
+      /<nav (aria-label="Breadcrumb"|:aria-label='t\("pack\.vuetify\.breadcrumbsLandmark\.)/,
+    );
     expect(listPage).toContain("loom-breadcrumbs");
     // The <ul>-rendering Vuetify component is gone (that was the `list` violation).
     expect(listPage).not.toContain("<v-breadcrumbs");

@@ -34,12 +34,22 @@ import { collectUiMessages } from "../_walker/i18n-extract.js";
  *  always-rendered app-shell chrome (`APP_SHELL_CHROME`) is merged only when the
  *  UI is already i18n-enabled by its authored strings — the same gate the shell
  *  emitters use — so a string-less app stays byte-identical (no runtime). */
-export function buildUiCatalog(ui: UiIR): Record<string, string> {
+export function buildUiCatalog(
+  ui: UiIR,
+  /** The active design pack's DECLARED chrome (`pack.<family>.<role>.<hash>` →
+   *  English, from `pack.json`'s `chrome` map).  Merged under the SAME
+   *  already-enabled gate as `chromeMergedWhenEnabled()`, which is what lets a
+   *  caller pass it unconditionally — including the enablement probes
+   *  (`heexI18nEnabled` and friends), which must not see a UI turn
+   *  translatable just because its pack ships chrome. */
+  packChrome: Record<string, string> = {},
+): Record<string, string> {
   const byKey = new Map<string, string>();
   // Same key ⇒ same content hash ⇒ same message; collapses repeats.
   for (const { key, message } of collectUiMessages(ui)) byKey.set(key, message);
   if (byKey.size > 0) {
     for (const [key, message] of Object.entries(chromeMergedWhenEnabled())) byKey.set(key, message);
+    for (const [key, message] of Object.entries(packChrome)) byKey.set(key, message);
   }
   const out: Record<string, string> = {};
   for (const key of [...byKey.keys()].sort()) out[key] = byKey.get(key)!;
@@ -47,8 +57,8 @@ export function buildUiCatalog(ui: UiIR): Record<string, string> {
 }
 
 /** `src/locales/en.json` — the source-language catalog for this UI. */
-export function renderLocaleCatalog(ui: UiIR): string {
-  return `${JSON.stringify(buildUiCatalog(ui), null, 2)}\n`;
+export function renderLocaleCatalog(ui: UiIR, packChrome: Record<string, string> = {}): string {
+  return `${JSON.stringify(buildUiCatalog(ui, packChrome), null, 2)}\n`;
 }
 
 /** `src/i18n.ts` — the `t(key, default, values?)` lookup + ICU-format shim. */

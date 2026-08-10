@@ -30,7 +30,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
       onSubmit={handleSubmit(async (vals) => {
         try {
           await mut.mutateAsync(vals);
-          notifications.show({ color: "green", message: "Add Line succeeded" });
+          notifications.show({ color: "green", message: t("pack.mantine.operationSucceeded.tpnozz", "{operation} succeeded", { operation: "Add Line" }) });
           onClose();
         } catch (e) {
           const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
@@ -85,7 +85,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
       onSubmit={handleSubmit(async (vals) => {
         try {
           await mut.mutateAsync(vals);
-          notifications.show({ color: "green", message: "Confirm succeeded" });
+          notifications.show({ color: "green", message: t("pack.mantine.operationSucceeded.tpnozz", "{operation} succeeded", { operation: "Confirm" }) });
           onClose();
         } catch (e) {
           const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
@@ -98,7 +98,7 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
       })}
     >
       <Stack>
-        <Text c="dimmed">This operation has no parameters.</Text>
+        <Text c="dimmed">{t("pack.mantine.noParameters.usdpad", "This operation has no parameters.")}</Text>
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onClose}>{t("chrome.cancel", "Cancel")}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-confirm-submit">Confirm</Button>
@@ -125,7 +125,7 @@ function UpdateForm({ mut, onClose }: { mut: ReturnType<typeof useUpdateOrder>; 
       onSubmit={handleSubmit(async (vals) => {
         try {
           await mut.mutateAsync(vals);
-          notifications.show({ color: "green", message: "Update succeeded" });
+          notifications.show({ color: "green", message: t("pack.mantine.operationSucceeded.tpnozz", "{operation} succeeded", { operation: "Update" }) });
           onClose();
         } catch (e) {
           const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
