@@ -450,9 +450,20 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       // Enum values use the DECLARED casing (never snake — the wire contract +
       // every other backend keep it), but the FORM depends on context:
       //   * In an Ecto query (`filterArgs`) — `from(r in X, where: r.status ==
-      //     <here>)` — the comparison is against the dumped TEXT column, and Ecto
-      //     does NOT cast an inline literal through the `Ecto.Enum` type, so emit
-      //     the declared STRING (`"Confirmed"`) to match the stored value.
+      //     <here>)` — the comparison is against an `Ecto.Enum` column, and Ecto
+      //     treats a bare literal in a query expression as an already-cast value
+      //     it only has to DUMP: `Ecto.Enum`'s dump map is keyed by the declared
+      //     ATOM, so an inline `"Confirmed"` raises at query-planning time
+      //     (`value "Confirmed" cannot be dumped to type #Ecto.Enum<…>. Or … it
+      //     must be interpolated (using ^) so it may be cast accordingly`).
+      //     Interpolating is exactly what the error asks for and what a bound
+      //     param already does here (`renderRef`'s `param` arm emits `^name`):
+      //     a PINNED value is CAST first (string → declared atom) and then
+      //     dumped back to the stored string.  So emit the declared string
+      //     PINNED — `^"Confirmed"` — which keeps the stored-string contract
+      //     while surviving a typed enum column.  (A bare `:Confirmed` atom also
+      //     dumps, but only against an `Ecto.Enum` column — the pin additionally
+      //     works wherever the column is untyped/`:string`.)
       //   * In-memory (derived / op / invariant / match / `Enum.filter`) the
       //     loaded struct field IS the declared-case ATOM, so emit `:Confirmed`
       //     (a string would never equal it — that's why a `match (visibility ==
@@ -461,10 +472,12 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       //     would trip Elixir's "quotes not required" warning under -Werror).
       //   * Document shape (`docStruct`) — the enum is stored in the jsonb blob
       //     as its declared STRING (the `<Agg>.Data` embed keeps enum fields as
-      //     `:string`), so an in-memory `record.status == <here>` comparison must
-      //     use the string form too.
+      //     `:string`), and the predicate runs IN MEMORY (`Enum.filter` over the
+      //     rehydrated embed — a `^` pin would not even be valid Elixir there),
+      //     so it keeps the bare string form.
       // Jason encodes the atom back to the declared string on the wire either way.
-      return ctx.filterArgs || ctx.docStruct ? JSON.stringify(e.name) : `:${e.name}`;
+      if (ctx.filterArgs) return `^${JSON.stringify(e.name)}`;
+      return ctx.docStruct ? JSON.stringify(e.name) : `:${e.name}`;
     case "current-user":
       return "current_user";
     case "match-binding":
