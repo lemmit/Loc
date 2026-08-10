@@ -85,10 +85,10 @@ export function renderHttpIndex(
   // COMPILE error (unimplemented abstract), so there is no boot-time registry
   // verify anymore.
   // baseLogger is needed at boot for any info/debug line that fires BEFORE the
-  // first request (auth enabled, etc.).  Gate the import so plain (no-auth)
-  // deployables don't pull it in.
-  const needsBaseLogger = authRequired;
-  const baseLoggerImport = needsBaseLogger ? `import { baseLogger } from "../obs/log";` : null;
+  // first request (auth enabled, etc.), and by the root framework-fault
+  // handlers below (which fire for requests no sub-router claimed, so the
+  // per-request child logger the sub-routers use was never bound).
+  const baseLoggerImport = `import { baseLogger } from "../obs/log";`;
   const hasWorkflows = ctx.workflows.length > 0;
   // In-process event dispatch (channels.md): when this deployable has any
   // channel-routed subscription, the generated `http/workflows.ts` exports
@@ -244,7 +244,11 @@ export function renderHttpIndex(
     lines(
       "// Auto-generated.",
       'import { OpenAPIHono } from "@hono/zod-openapi";',
+      'import type { Context } from "hono";',
       'import { cors } from "hono/cors";',
+      'import { HTTPException } from "hono/http-exception";',
+      'import type { ContentfulStatusCode } from "hono/utils/http-status";',
+      'import { frameworkProblemBody } from "./problem-details";',
       usingMikro ? null : 'import { sql } from "drizzle-orm";',
       'import { requestIdMiddleware } from "../obs/request-id";',
       'import { registry } from "../obs/metrics";',
@@ -356,6 +360,41 @@ export function renderHttpIndex(
       queryProjectionMount,
       ...explicitRouterMounts,
       fileRoutes,
+      // ── framework-originated faults ──────────────────────────────────
+      // Every sub-router carries its own `app.onError` mapping DOMAIN errors
+      // to RFC 7807.  A request that never reaches one — an unmatched path, a
+      // body the router itself refused — bypassed all of them and fell
+      // through to Hono's defaults: `text/plain` "404 Not Found" and a bare
+      // 500.  That is a SECOND error contract on a wire that already
+      // committed to `application/problem+json`, and a client cannot parse
+      // both.  These two root handlers close it.  Registered on the parent
+      // app, so they run only for requests no sub-router claimed (Hono's
+      // `route()` wraps each mounted handler in that sub-app's own
+      // errorHandler, which therefore still wins for domain errors).
+      "  const frameworkProblem = (",
+      "    c: Context,",
+      "    status: ContentfulStatusCode,",
+      "    detail: string,",
+      "  ) => {",
+      `    ${renderHonoBaseLogCall("clientError", "error: detail, status")}`,
+      "    return c.body(frameworkProblemBody(status, detail, c.req.path), status, {",
+      '      "content-type": "application/problem+json",',
+      "    });",
+      "  };",
+      "  app.notFound((c) =>",
+      "    frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`),",
+      "  );",
+      "  app.onError((err, c) => {",
+      // HTTPException is what Hono itself throws for the faults it detects
+      // (unreadable body, an aborted request); anything else reaching here is
+      // a genuine server fault and must not put its message on the wire.
+      "    if (err instanceof HTTPException) {",
+      "      return frameworkProblem(c, err.status as ContentfulStatusCode, err.message);",
+      "    }",
+      "    const message = err instanceof Error ? err.message : String(err);",
+      `    ${renderHonoBaseLogCall("internalError", "error: message, status: 500")}`,
+      '    return frameworkProblem(c, 500, "internal");',
+      "  });",
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /openapi.json by",
       "  // the cross-platform contract check.",

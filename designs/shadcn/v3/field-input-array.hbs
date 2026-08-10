@@ -3,10 +3,10 @@
           { {{path}}Fields.map((field, index) => (
             <div key={field.id} className="flex items-end gap-2">
 {{#each rowFields}}              <Input placeholder="{{label}}" {...form.register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
-{{/each}}              <Button type="button" variant="ghost" size="sm" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+{{/each}}              <Button type="button" variant="ghost" size="sm" onClick={() => remove{{arrayPascal}}(index)}>{{{chrome "removeItem"}}}</Button>
             </div>
           )) }
-          <Button type="button" variant="outline" size="sm" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>{{{chrome "addItem" item=elementLabel}}}</Button>
         </div>{{else}}<FormField
           control={form.control}
           name="{{path}}"
@@ -14,7 +14,7 @@
             <FormItem>
               <FormLabel>{{label}}</FormLabel>
               <FormControl>
-                <Input data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled />
+                <Input data-testid="{{testId}}" {{{chromeAttr "placeholder" "arrayUnsupported"}}} disabled />
               </FormControl>
               <FormMessage />
             </FormItem>

@@ -39,15 +39,10 @@ import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { ariaLabelAttr, escapeHtmlAttr } from "./a11y-emit.js";
 import { chromeKey, chromeMessage } from "./i18n-chrome.js";
 import { icuFromConcat, literalString, messageKey } from "./i18n-extract.js";
-import { addImport } from "./render-primitive.js";
+import { registerI18nImport } from "./render-primitive.js";
 import { namedArgValue, positionalArgs, unwrapTextLiteral } from "./shared/args.js";
 import type { StringPart } from "./target.js";
 import { emitExpr, renderTextContent, type WalkContext } from "./walker-core.js";
-
-/** Import specifier for the generated translation helper. Written with the
- *  default one-hop `../` shape; `renderImportLines` rewrites it to the page's
- *  real depth (`../../i18n` for a `src/pages/orders/list.tsx`). */
-const I18N_MODULE = "../i18n";
 
 /** `t()` always returns a `string`, so the interpolation seam is told so.  The
  *  four JSX/markup targets ignore `exprType` (interpolation auto-coerces), which
@@ -73,7 +68,7 @@ function translateCall(
   message: string,
   values?: ReadonlyArray<{ name: string; expr: string }>,
 ): string {
-  addImport(ctx, I18N_MODULE, "t");
+  registerI18nImport(ctx);
   return translateExpr(ctx, key, message, values);
 }
 
@@ -484,9 +479,7 @@ function fillHoles(
  *  (`SelectField`, a form's field inputs) resolves `t` against the page's own
  *  import block and must ask for it.  Exported so those call sites don't repeat
  *  the module specifier, which only this file should know. */
-export function registerI18nImport(ctx: WalkContext): void {
-  addImport(ctx, I18N_MODULE, "t");
-}
+export { registerI18nImport };
 
 /** The literal prefix of every chrome `t()` binding {@link localizedChromeText}
  *  and {@link localizedChromeAttr} emit.

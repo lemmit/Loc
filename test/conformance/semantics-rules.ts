@@ -169,11 +169,21 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   {
     id: "RS-9",
     title: "Error bodies converge on RFC 7807 with the 400/422 split",
-    trigger: "a create violating an invariant vs a create with a malformed body",
+    // The trigger now names the framework faults too.  Stating it as only "a
+    // create violating an invariant vs a create with a malformed body" was why
+    // the rule read as satisfied while a wrong verb, an unknown path and an
+    // unreadable body answered five different shapes across three statuses:
+    // those requests never reach an emitted arm, so nothing the rule described
+    // ever exercised them.
+    trigger:
+      "a create violating an invariant, a create with a malformed body, and a request the FRAMEWORK refuses (unknown path, unserved verb, unreadable body)",
     observable:
-      "malformed body → 400, well-formed-but-invalid → 422; identical problem-body shape on every backend",
+      "malformed body → 400, well-formed-but-invalid → 422; identical problem-body shape (`type: about:blank`, application/problem+json) on every backend, whether the domain or the framework refused",
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["#1620", "generated-code-review-2026-06-30"],
+    // Statically gated per-PR by framework-error-contract-parity.test.ts on the
+    // framework half — the behavioural tier cannot reach it, since the emitted
+    // suites only make requests the API serves.
     tier: "behavioral",
   },
   {

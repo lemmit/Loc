@@ -1,3 +1,4 @@
+import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 // ---------------------------------------------------------------------------
 // Explicit application/transport layer → Hono emission
 // (unfoldable-api-derivation.md, Layers 3-4; A2 slice — the Hono sibling of the
@@ -621,6 +622,13 @@ export function buildExplicitRoutesFile(
     // reach the operator via the `extern_handler_threw` catalog event.
     `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
   );
+  body.push(
+    // FRAMEWORK fault, not a domain one — hono raises `HTTPException` for the
+    // faults it detects itself (a malformed JSON body is the common one, at
+    // 400).  Without this arm it falls past every domain check into the
+    // generic 500 below, reporting a CLIENT fault as a server fault.
+    `    if (err instanceof HTTPException) { ${renderHonoLogCall("clientError", "error: err.message, status: err.status")} return c.body(frameworkProblemBody(err.status, err.message, c.req.path), err.status, { "content-type": "application/problem+json", "x-request-id": trace_id }); }`,
+  );
   body.push(`    console.error(err);`);
   body.push(`    return problem(500, "Internal Server Error", "internal");`);
   body.push(`  });`);
@@ -665,10 +673,13 @@ export function buildExplicitRoutesFile(
     imports.push(`import { moneySchema } from "../lib/schemas";`);
   }
   const problemNamed = [
+    /\bframeworkProblemBody\b/.test(bodyStr) ? "frameworkProblemBody" : null,
     /\bProblemDetails\b/.test(bodyStr) ? "ProblemDetails" : null,
     "newApp",
   ].filter((n): n is string => n !== null);
   imports.push(`import { ${problemNamed.join(", ")} } from "./problem-details";`);
+  if (/\bHTTPException\b/.test(bodyStr))
+    imports.push(`import { HTTPException } from "hono/http-exception";`);
   if (/\bIds\.\w/.test(bodyStr)) imports.push(`import * as Ids from "../domain/ids";`);
   if (errorClasses.length > 0) {
     imports.push(`import { ${errorClasses.join(", ")} } from "../domain/errors";`);

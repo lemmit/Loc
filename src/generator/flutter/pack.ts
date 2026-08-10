@@ -757,6 +757,9 @@ export function flutterPack(): LoadedPack {
     templates: new Map([
       ["primitive-modal-controlled", { fn: () => "", filePath: "<flutter-procedural>" }],
     ]) as unknown as LoadedPack["templates"],
+    // No `.hbs` templates, so no pack-DECLARED chrome to bind — see the Feliz
+    // pack for the same note.
+    setChromeI18n() {},
     render(name: string, context: unknown): string {
       const fn = RENDERERS[name];
       if (!fn) return `// flutter pack: no renderer for "${name}"`;

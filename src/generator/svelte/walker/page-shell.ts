@@ -39,6 +39,7 @@ import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { storeMemberLocal } from "../../_walker/js-target-helpers.js";
+import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
 import { indentJsx } from "../../_walker/shared/args.js";
 import type {
   ActionMutationState,
@@ -370,6 +371,21 @@ export function renderSveltePage(
   const effectiveUsesState =
     usesState || usesStateForTitle || derivedResult.usesState || actionResult.usesState;
 
+  const form = formOfs.reduce<FormWiring>(
+    (acc, st) => {
+      const w = renderFormOfWiring(st, pack);
+      return {
+        decls: acc.decls + w.decls,
+        templateScope: acc.templateScope + w.templateScope,
+        usesNavigate: acc.usesNavigate || w.usesNavigate,
+      };
+    },
+    { decls: "", templateScope: "", usesNavigate: false },
+  );
+  // An operation-form module is a PACK fragment spliced into THIS file, so any
+  // pack-DECLARED chrome it renders binds a `t` this page must import — and the
+  // import block is serialized two lines below.  Hence the form wiring runs here.
+  if (needsPackChromeT(form.templateScope)) addImportToMap(imports, I18N_MODULE, "t");
   addOpModuleImports(imports, pack, formOfs);
   const packImports = renderSvelteImportLines(imports);
   // Interactive-table sort helper — imported only when a sortable `Table`
@@ -409,17 +425,6 @@ export function renderSveltePage(
     )
     .map((line) => `  ${line}\n`)
     .join("");
-  const form = formOfs.reduce<FormWiring>(
-    (acc, st) => {
-      const w = renderFormOfWiring(st, pack);
-      return {
-        decls: acc.decls + w.decls,
-        templateScope: acc.templateScope + w.templateScope,
-        usesNavigate: acc.usesNavigate || w.usesNavigate,
-      };
-    },
-    { decls: "", templateScope: "", usesNavigate: false },
-  );
   const actionWiring = renderActionMutations(actionMutations);
 
   const navigateImport =
@@ -664,6 +669,8 @@ export function renderSvelteComponentFile(
     { decls: "", templateScope: "", usesNavigate: false },
   );
   addOpModuleImports(imports, pack, formOfs);
+  // See the page renderer above.
+  if (needsPackChromeT(form.templateScope)) addImportToMap(imports, I18N_MODULE, "t");
   const packImports = renderSvelteImportLines(imports);
   const tableHelperNames = [
     ...(usesTableSort ? ["sortRows"] : []),

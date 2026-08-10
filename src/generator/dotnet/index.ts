@@ -170,6 +170,7 @@ import {
   renderSnapshots,
   renderTestCsproj,
   renderTestsFile,
+  renderValidationProblem,
   renderVoTestsFile,
 } from "./emit.js";
 import { emitExplicitHandlers, emitExplicitRouteController } from "./explicit-handlers-emit.js";
@@ -956,6 +957,9 @@ function emitProjectFromContexts(
       structuralStatuses: contexts[0]?.structuralErrorStatuses,
     }),
   );
+  // Shared RFC 6901 pointer helper + the replacement for MVC's built-in
+  // invalid-model-state response (see renderValidationProblem).
+  out.set("Api/ValidationProblem.cs", renderValidationProblem(ns));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set(
     "Api/ListResponseWrapperFilter.cs",
@@ -1760,6 +1764,9 @@ function emitInfrastructure(
       localizeMessages: validationMessages.length > 0,
     }),
   );
+  // Shared RFC 6901 pointer helper + the replacement for MVC's built-in
+  // invalid-model-state response (see renderValidationProblem).
+  out.set("Api/ValidationProblem.cs", renderValidationProblem(ns));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
   out.set("Api/RequiredFromCtorParamFilter.cs", renderRequiredFromCtorParamFilter(ns));

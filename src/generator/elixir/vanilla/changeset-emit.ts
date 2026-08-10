@@ -24,6 +24,7 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { baseOf, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
@@ -70,11 +71,15 @@ function isManaged(f: AggField): boolean {
  *  a smuggled value is simply dropped) nor `validate_required`d (that runs
  *  BEFORE the stamp and rejects the create — the 422 `tenant_id can't be blank`
  *  bug for `tenantOwned`). */
-function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
+function filterCastableFields(
+  fields: readonly AggField[],
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): AggField[] {
   const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
   const managedTs = managedTimestampNames(agg);
   const stampedFields = stampedFieldNames(agg);
-  return (agg.fields as AggField[]).filter(
+  return fields.filter(
     (f) =>
       f.name !== "id" &&
       !isManaged(f) &&
@@ -85,12 +90,30 @@ function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
   );
 }
 
-/** Update-editable scalar columns — {@link castScalarFields} minus `token` /
- *  `internal` / `immutable` (mirrors `wire-projection.forUpdateInput`).  A
- *  client PATCH may modify only these; `managed` is already dropped upstream. */
+function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
+  return filterCastableFields(agg.fields as AggField[], agg, ctx);
+}
+
+/** A TPH/TPC concrete subtype's canonical `update` carries only its OWN
+ *  declared fields — the abstract base's fields are not update params
+ *  (`docs/inheritance.md`; the `inheritance.ddd` / `payments.ddd` corpus
+ *  fixtures assert this explicitly: "the canonical update of a TPH subtype
+ *  carries only the subtype's own writable field"). Falls back to the full
+ *  merged field list for a non-subtype aggregate. */
+function updateSourceFields(agg: AggregateIR, ctx: BoundedContextIR): readonly AggField[] {
+  const base = baseOf(agg, ctx.aggregates);
+  return base ? (ownFieldsOf(agg, base) as AggField[]) : (agg.fields as AggField[]);
+}
+
+/** Update-editable scalar columns — {@link filterCastableFields} over
+ *  {@link updateSourceFields}, minus `token` / `internal` / `immutable`
+ *  (mirrors `wire-projection.forUpdateInput`).  A client PATCH may modify
+ *  only these; `managed` is already dropped upstream. */
 const UPDATE_EXCLUDED_ACCESS: ReadonlySet<string> = new Set(["token", "internal", "immutable"]);
 function updateScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
-  return castScalarFields(agg, ctx).filter((f) => !UPDATE_EXCLUDED_ACCESS.has(f.access ?? ""));
+  return filterCastableFields(updateSourceFields(agg, ctx), agg, ctx).filter(
+    (f) => !UPDATE_EXCLUDED_ACCESS.has(f.access ?? ""),
+  );
 }
 
 /** Whether an aggregate needs a dedicated `update_changeset/2` distinct from
@@ -432,12 +455,44 @@ ${keyAliasPairs.join(",\n")}
     : "";
   const optimisticLine = versioned ? "\n    |> optimistic_lock(:version)" : "";
   const updateVcPrep = valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : "";
+  // RS-26 presence check.  `validate_required/2` alone CANNOT enforce a required
+  // field on update: it resolves through `get_field/2`, which falls back to the
+  // loaded row, so an omitted KEY is indistinguishable from one carrying the
+  // stored value.  The update contract is full-replacement, so an absent key IS
+  // a missing field — and the other four backends reject it at their
+  // deserialization boundary, before any row exists to fall back to.  Presence
+  // is therefore checked against the raw attrs, ahead of `cast`.
+  //
+  // Emitted only where there is a required field to check, so an aggregate whose
+  // updatable fields are all optional stays byte-identical.
+  const updateRequiredNames = updateFields.filter((f) => isRequiredUpdateInput(f));
+  const emitPresenceCheck = emitUpdateChangeset && updateRequiredNames.length > 0;
+  const presenceLine = emitPresenceCheck ? `\n    |> __require_keys(attrs, ${updateReqList})` : "";
+  const presenceHelper = emitPresenceCheck
+    ? `
+
+  # A full-replacement PUT carries every required field, so an ABSENT KEY is a
+  # missing field even when the loaded row still holds a value (RS-26).
+  # \`validate_required/2\` cannot see that — it reads through \`get_field/2\`, which
+  # falls back to the struct's data — so presence is checked here, against the raw
+  # attrs, before \`cast\` can hide it behind the stored value.  The error shape is
+  # \`validate_required/2\`'s own, so ProblemDetails still renders 422 with
+  # \`{"pointer":"/<field>"}\`.  A key that IS present but null falls through to
+  # \`validate_required/2\` instead, so neither case is reported twice.
+  defp __require_keys(changeset, attrs, fields) do
+    Enum.reduce(fields, changeset, fn field, cs ->
+      if Map.has_key?(attrs, Atom.to_string(field)) or Map.has_key?(attrs, field),
+        do: cs,
+        else: add_error(cs, field, "can't be blank", validation: :required)
+    end)
+  end`
+    : "";
   const updateChangesetBlock = emitUpdateChangeset
     ? `\n\n  @doc "Update changeset — the generic PATCH seam.  Casts only the update-editable wire fields and does NOT touch contained parts (their mutation goes through the aggregate's own operations)${versioned ? "; guards the write with optimistic_lock(:version)" : ""}."
   def update_changeset(struct, attrs) do
     attrs = __normalize_keys(attrs)
     ${updateVcPrep}struct
-    |> cast(attrs, ${updateColsList})
+    |> cast(attrs, ${updateColsList})${presenceLine}
     |> validate_required(${updateReqList})${validatorBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}${optimisticLine}
   end`
     : "";
@@ -483,7 +538,7 @@ defmodule ${changesetMod} do
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)${defaultBlock}
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}
-  end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${defaultHelper}${voHelper}${normalizeHelper}${ordinalHelper}
+  end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${presenceHelper}${defaultHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end

@@ -1,9 +1,14 @@
 // Auto-generated.
 import { OpenAPIHono } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { frameworkProblemBody } from "./problem-details";
 import { sql } from "drizzle-orm";
 import { requestIdMiddleware } from "../obs/request-id";
 import { registry } from "../obs/metrics";
+import { baseLogger } from "../obs/log";
 import { productRoutes } from "./product.routes";
 import { ProductRepository } from "../db/repositories/product-repository";
 import { customerRoutes } from "./customer.routes";
@@ -87,6 +92,27 @@ export function createApp(
   });
   app.route("/api/products", productRoutes(new ProductRepository(db, events)));
   app.route("/api/customers", customerRoutes(new CustomerRepository(db, events)));
+  const frameworkProblem = (
+    c: Context,
+    status: ContentfulStatusCode,
+    detail: string,
+  ) => {
+    baseLogger.warn({ event: "client_error", error: detail, status });
+    return c.body(frameworkProblemBody(status, detail, c.req.path), status, {
+      "content-type": "application/problem+json",
+    });
+  };
+  app.notFound((c) =>
+    frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`),
+  );
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) {
+      return frameworkProblem(c, err.status as ContentfulStatusCode, err.message);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    baseLogger.error({ event: "internal_error", error: message, status: 500 });
+    return frameworkProblem(c, 500, "internal");
+  });
   // OpenAPI 3.1 spec assembled from every sub-router's createRoute()
   // calls.  Diffed against the .NET-emitted /openapi.json by
   // the cross-platform contract check.

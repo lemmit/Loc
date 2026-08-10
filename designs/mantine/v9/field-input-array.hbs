@@ -3,8 +3,8 @@
           { {{path}}Fields.map((field, index) => (
             <Group key={field.id} align="flex-end" wrap="nowrap">
 {{#each rowFields}}              <TextInput label="{{label}}" {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
-{{/each}}              <Button variant="subtle" color="red" size="xs" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+{{/each}}              <Button variant="subtle" color="red" size="xs" onClick={() => remove{{arrayPascal}}(index)}>{{{chrome "removeItem"}}}</Button>
             </Group>
           )) }
-          <Button variant="light" size="xs" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
-        </Stack>{{else}}<TextInput label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled error={{expr errorExpr}} />{{/if}}
+          <Button variant="light" size="xs" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>{{{chrome "addItem" item=elementLabel}}}</Button>
+        </Stack>{{else}}<TextInput label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" {{{chromeAttr "placeholder" "arrayUnsupported"}}} disabled error={{expr errorExpr}} />{{/if}}

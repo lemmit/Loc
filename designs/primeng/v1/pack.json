@@ -61,6 +61,10 @@
     "realtime-toast": "realtime-toast.hbs",
     "realtime-toast-setup": "realtime-toast-setup.hbs"
   },
+  "chrome": {
+    "boolFalse": "No",
+    "boolTrue": "Yes"
+  },
   "imports": {
     "realtime-toast": [{ "from": "./loom-toast.service", "named": ["LoomToastService"] }],
     "primitive-button": [{ "from": "primeng/button", "named": ["ButtonModule"] }],

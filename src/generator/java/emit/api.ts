@@ -767,6 +767,30 @@ export function renderApiExceptionAdvice(
     ``,
     `    @ExceptionHandler(Exception.class)`,
     `    public ResponseEntity<ProblemDetail> onUnhandled(Exception e, WebRequest request) {`,
+    // Spring's OWN framework exceptions are CLIENT errors carrying their own
+    // 4xx: a wrong verb (HttpRequestMethodNotSupportedException → 405), an
+    // unsupported Content-Type (415), a missing query parameter (400), an
+    // unknown path (NoResourceFoundException → 404).  Every one of them
+    // implements `ErrorResponse` and knows its status.
+    //
+    // Without this branch they fell through to the catch-all below and were
+    // answered `500 "internal"` — telling a caller who used the wrong verb
+    // that the SERVER broke and the request is worth retrying.  Measured on a
+    // booted backend: `PUT /api/items` → 500.  The other four answer a 4xx.
+    //
+    // Matching on the INTERFACE rather than enumerating the concrete types
+    // keeps this correct for the framework exceptions we did not think of,
+    // and for the ones Spring adds later.
+    `        if (e instanceof org.springframework.web.ErrorResponse er) {`,
+    `            var status = er.getStatusCode().value();`,
+    `            var reason = HttpStatus.valueOf(status).getReasonPhrase();`,
+    // `getBody().getDetail()` is Spring's own human-readable explanation
+    // ("Method 'PUT' is not supported."); it is null for a few, hence the
+    // fall back to the reason phrase so `detail` is never absent.
+    `            var detail = er.getBody().getDetail() != null ? er.getBody().getDetail() : reason;`,
+    `            CatalogLog.event("client_error", "warn", "error", detail, "status", status);`,
+    `            return respond(problem(status, reason, detail, request), status);`,
+    `        }`,
     `        CatalogLog.event("internal_error", "error", "error", e.getMessage(), "status", 500);`,
     `        e.printStackTrace();`,
     `        return respond(problem(500, "Internal Server Error", "internal", request), 500);`,

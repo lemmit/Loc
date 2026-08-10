@@ -148,8 +148,8 @@
     {
       "id": "RS-9",
       "title": "Error bodies converge on RFC 7807 with the 400/422 split",
-      "trigger": "a create violating an invariant vs a create with a malformed body",
-      "observable": "malformed body → 400, well-formed-but-invalid → 422; identical problem-body shape on every backend",
+      "trigger": "a create violating an invariant, a create with a malformed body, and a request the FRAMEWORK refuses (unknown path, unserved verb, unreadable body)",
+      "observable": "malformed body → 400, well-formed-but-invalid → 422; identical problem-body shape (`type: about:blank`, application/problem+json) on every backend, whether the domain or the framework refused",
       "conforms": [
         "node",
         "dotnet",

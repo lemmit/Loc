@@ -16,7 +16,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
           onSubmit={handleSubmit(async (vals) => {
             try {
               await mut.mutateAsync(vals);
-              enqueueSnackbar("{{humanOp}} succeeded", { variant: "success" });
+              enqueueSnackbar({{{chromeValue "operationSucceeded" operation=humanOp}}}, { variant: "success" });
               setOpen(false);
             } catch (e) {
               const outcome = applyServerErrors({ error: e, setError, fieldMap: {} as const });
@@ -31,7 +31,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
           <DialogContent>
             <Stack gap={2}>
               {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
-              {{/each}}{{else}}<Typography color="text.secondary">This operation has no parameters.</Typography>
+              {{/each}}{{else}}<Typography color="text.secondary">{{{chrome "noParameters"}}}</Typography>
               {{/if}}</Stack>
           </DialogContent>
           <DialogActions>

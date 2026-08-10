@@ -58,7 +58,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
                 {
                     var err = new Dictionary<string, object>
                     {
-                        ["pointer"] = PointerOf(e.PropertyName),
+                        ["pointer"] = ValidationProblem.PointerOf(e.PropertyName),
                         ["message"] = e.ErrorMessage,
                     };
                     // A messaged rule's WithErrorCode("msg.<hash>") surfaces as the
@@ -168,40 +168,5 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             StatusCode = status,
             ContentTypes = { "application/problem+json" },
         };
-    }
-
-    // Convert a FluentValidation property path to an RFC 6901 JSON
-    // pointer matching the wire shape the frontend ACL expects.  The
-    // app's JSON output uses JsonNamingPolicy.CamelCase, so each
-    // PascalCase segment is camel-cased; array indexer notation
-    // (`Items[0].Qty`) becomes a numeric segment (`/items/0/qty`).
-    // RFC 6901 escapes apply inside each segment (`~` → `~0`,
-    // `/` → `~1`).  Empty input → empty pointer (the whole document).
-    private static string PointerOf(string propertyName)
-    {
-        if (string.IsNullOrEmpty(propertyName)) return "";
-        var segments = new List<string>();
-        foreach (var dotPart in propertyName.Split('.'))
-        {
-            var idx = 0;
-            while (idx < dotPart.Length)
-            {
-                var bracket = dotPart.IndexOf('[', idx);
-                if (bracket < 0)
-                {
-                    segments.Add(JsonNamingPolicy.CamelCase.ConvertName(dotPart.Substring(idx)));
-                    break;
-                }
-                if (bracket > idx)
-                {
-                    segments.Add(JsonNamingPolicy.CamelCase.ConvertName(dotPart.Substring(idx, bracket - idx)));
-                }
-                var close = dotPart.IndexOf(']', bracket);
-                if (close < 0) break;
-                segments.Add(dotPart.Substring(bracket + 1, close - bracket - 1));
-                idx = close + 1;
-            }
-        }
-        return "/" + string.Join("/", segments.ConvertAll(s => s.Replace("~", "~0").Replace("/", "~1")));
     }
 }

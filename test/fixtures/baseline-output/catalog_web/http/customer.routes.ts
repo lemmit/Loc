@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { ProblemDetails, newApp } from "./problem-details";
+import { ProblemDetails, frameworkProblemBody, newApp } from "./problem-details";
+import { HTTPException } from "hono/http-exception";
 import { recordDomainFault, recordDomainOperation } from "../obs/metrics";
 import { Customer } from "../domain/customer";
 import type { CustomerRepository } from "../db/repositories/customer-repository";
@@ -221,6 +222,10 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     if (err instanceof ExternHandlerError) {
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
       return problem(500, "Internal Server Error", "internal");
+    }
+    if (err instanceof HTTPException) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "client_error", error: err.message, status: err.status });
+      return c.body(frameworkProblemBody(err.status, err.message, c.req.path), err.status, { "content-type": "application/problem+json", "x-request-id": trace_id });
     }
     (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
     return problem(500, "Internal Server Error", "internal");

@@ -51,9 +51,10 @@ describe("ddd i18n — extract/init/sync", () => {
     expect(entries.length).toBeGreaterThan(0);
     expect(Object.values(catalog)).toContain("Welcome");
     // Authored page text carries the D-I18N-KEY page-scoped content-hash shape;
-    // an i18n-enabled system also merges the app-shell chrome (`chrome.*`,
-    // M-T1.11).
-    const pageKeys = entries.filter(([k]) => !k.startsWith("chrome."));
+    // an i18n-enabled system also merges the app-shell chrome (`chrome.*`) and
+    // the active design pack's DECLARED chrome (`pack.<family>.<role>.<hash>`,
+    // D-PACK-CHROME) — neither of which is authored page text.
+    const pageKeys = entries.filter(([k]) => !k.startsWith("chrome.") && !k.startsWith("pack."));
     expect(pageKeys.every(([k]) => /^page\.Welcome\./.test(k))).toBe(true);
     expect(catalog["chrome.notFound"]).toBe("Not found");
   });

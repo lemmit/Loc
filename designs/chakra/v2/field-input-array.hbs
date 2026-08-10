@@ -3,12 +3,12 @@
           { {{path}}Fields.map((field, index) => (
             <HStack key={field.id} align="flex-end">
 {{#each rowFields}}              <Input placeholder="{{label}}" {...register(`{{../path}}.${index}.{{path}}`{{#if valueAsNumber}}, { valueAsNumber: true }{{/if}})} data-testid={`{{../testId}}-${index}-{{path}}`} />
-{{/each}}              <Button colorScheme="red" size="sm" onClick={() => remove{{arrayPascal}}(index)}>Remove</Button>
+{{/each}}              <Button colorScheme="red" size="sm" onClick={() => remove{{arrayPascal}}(index)}>{{{chrome "removeItem"}}}</Button>
             </HStack>
           )) }
-          <Button size="sm" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>Add {{elementLabel}}</Button>
+          <Button size="sm" onClick={() => append{{arrayPascal}}({{{defaultRowJson}}})}>{{{chrome "addItem" item=elementLabel}}}</Button>
         </VStack>{{else}}<FormControl isInvalid={!!( {{errorExpr}} )}>
           <FormLabel>{{label}}</FormLabel>
-          <Input {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled />
+          <Input {...register("{{path}}")} data-testid="{{testId}}" {{{chromeAttr "placeholder" "arrayUnsupported"}}} disabled />
           <FormErrorMessage>{ {{errorExpr}} }</FormErrorMessage>
         </FormControl>{{/if}}
