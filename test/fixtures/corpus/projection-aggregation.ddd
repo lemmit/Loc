@@ -75,4 +75,68 @@ system ProjectionAggregationSys {
     serves: OrdersApi
     port: 4000
   }
+
+  // The aggregation ran in SQL on five backends and its ANSWERS were checked
+  // nowhere — the compile tiers see a query, not a number.  Every coercion this
+  // fixture's header calls "load-bearing" (numeric aggregates arriving as
+  // strings/Decimals, NULL over an empty table, money→string vs decimal→number)
+  // is a value question, so only a runtime caller can ask it.
+  test e2e "the aggregation is computed in SQL, and the numbers are right" against d {
+    // The EMPTY table first: `count()` must zero-default and the other four
+    // operators must survive SQL NULL, which is where a backend that maps a
+    // NULL aggregate straight onto a non-nullable response field 500s.
+    let empty = api.salesTotals.list()
+    expect(empty.orders).toBe(0)
+    let none = api.orderVolume.list()
+    expect(none.total).toBe(0)
+
+    // Two Confirmed rows and one Draft: the criterion must be folded INTO the
+    // aggregate query, so the Draft row moves `OrderVolume` (unfiltered) but
+    // not `SalesTotals` (filtered).  A backend that filtered after aggregating
+    // — or not at all — reads 3 orders here instead of 2.
+    let a = api.orders.create({ code: "O-1", total: money("10.00"), lineCount: 2, status: "Confirmed" })
+    let b = api.orders.create({ code: "O-2", total: money("30.00"), lineCount: 4, status: "Confirmed" })
+    let draft = api.orders.create({ code: "O-3", total: money("5.00"), lineCount: 1, status: "Draft" })
+
+    let totals = api.salesTotals.list()
+    expect(totals.orders).toBe(2)
+    // money and decimal cross the wire in different forms (string vs number),
+    // so the numeric fold is the portable assertion; the FORM is pinned by the
+    // wire-golden differential, which sees the raw response.
+    expect(decimal(totals.revenue)).toBe(40)
+    expect(decimal(totals.avgLines)).toBe(3)
+    expect(decimal(totals.biggest)).toBe(30)
+    expect(decimal(totals.smallest)).toBe(10)
+
+    let volume = api.orderVolume.list()
+    expect(volume.total).toBe(3)
+
+    // The aggregate's own routes beside the read model — and each write must
+    // MOVE the aggregation, which is the part a cached/stale read model fails.
+    let readBack = api.orders.getById(a)
+    expect(readBack.code).toBe("O-1")
+    api.orders.update(a, { code: "O-1b", total: money("20.00"), lineCount: 2, status: "Confirmed" })
+    let afterUpdate = api.salesTotals.list()
+    expect(decimal(afterUpdate.revenue)).toBe(50)
+    expect(afterUpdate.orders).toBe(2)
+
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(3)
+    expect(listed.total).toBe(3)
+
+    api.orders.destroy(draft)
+    expect(api.orders.getById(draft)).toThrow(404)
+    let afterDestroy = api.orderVolume.list()
+    expect(afterDestroy.total).toBe(2)
+    // …and the FILTERED projection is unmoved by deleting a row it never
+    // counted: the criterion still holds after the write.
+    let stillTwo = api.salesTotals.list()
+    expect(stillTwo.orders).toBe(2)
+    expect(decimal(stillTwo.revenue)).toBe(50)
+
+    api.orders.destroy(a)
+    api.orders.destroy(b)
+    let backToEmpty = api.salesTotals.list()
+    expect(backToEmpty.orders).toBe(0)
+  }
 }

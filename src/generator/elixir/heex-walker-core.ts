@@ -54,6 +54,10 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
+import {
+  listShapedProjectionNames,
+  readableProjectionNames,
+} from "../../ir/util/projection-read.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
@@ -105,6 +109,10 @@ export interface WalkResult {
   /** True when the body renders a `Slot()` (children passthrough), so the
    *  component emitter declares `slot :inner_block` for it. */
   usesSlot: boolean;
+  /** True when the body renders a `Chart { … }` — the deployable then emits the
+   *  shared `LoomChart` function component the call site invokes (M-T1.3
+   *  Phase 4, HEEx leg).  False ⇒ no component file, byte-identical output. */
+  usesChart: boolean;
   /** Aggregate names (PascalCase) referenced by `X id` form fields in
    *  this page's body — the LiveView emitter loads each target's
    *  record list in `mount/3` and assigns to
@@ -173,8 +181,18 @@ export interface QueryBinding {
   /** LiveView assign the page's `cond` reads ("data" / "items"). */
   assign: string;
   /** Aggregate PascalCase name resolved from the `of:` query call,
-   *  used to build the `<Ctx>.get_<agg>!` / `list_<agg>s` call. */
+   *  used to build the `<Ctx>.get_<agg>!` / `list_<agg>s` call.  For
+   *  `source: "projection"` this carries the PROJECTION name instead — the
+   *  read resolves to `<Ctx>.QueryProjections.<Proj>.run/1`. */
   aggregate: string;
+  /** Which declaration `aggregate` names, and therefore which load the emitter
+   *  builds (M-T1.3 Phase 1, HEEx leg).  `"aggregate"` (the default, and every
+   *  binding before projections were readable) → the repository read;
+   *  `"projection"` → the query-time projection's `run/1`, an IN-PROCESS call:
+   *  a LiveView deployable hosts its contexts in the SAME OTP app, so the
+   *  Phoenix leg needs no HTTP client at all — the four SPA frontends' whole
+   *  `api/projections` module collapses to one function call here. */
+  source?: "aggregate" | "projection";
   /** Arguments of the `of:` query call, rendered as HANDLER-position Elixir
    *  (state refs become `socket.assigns.<field>`, not `@<field>`) — the load
    *  block is a function body, not a template.
@@ -242,6 +260,16 @@ export interface WalkContext {
    *  were absent.  Empty default ⇒ the collection shape, i.e. the old
    *  behaviour. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
+  /** Frontend-readable projection names (M-T1.3 Phase 1) — the detector's
+   *  Pattern H set, so `QueryView { of: <api>.<Projection> }` resolves to the
+   *  projection's own read instead of falling through to the aggregate arms.
+   *  Derived at walker entry from `bcByAggregate`, the same single predicate
+   *  (`ir/util/projection-read.ts`) the JSX walker and the validator use. */
+  projectionsByName: ReadonlySet<string>;
+  /** The LIST-shaped subset of `projectionsByName` — the reads whose response
+   *  is a JSON array rather than one object (`projectionReadShape === "many"`).
+   *  Feeds `queryShape`'s single-vs-collection answer. */
+  listShapedProjections: ReadonlySet<string>;
   /** Workspace-wide enum registry — drives `renderFieldInputForField`
    *  dispatch for enum-typed fields to `<.input type="select" options={...}>`.
    *  Built once at walker entry from every loaded context's enums. */
@@ -286,10 +314,23 @@ export interface WalkContext {
    *  survives the `{...ctx}` shallow copies nested renders make (like the
    *  Set/array accumulators above). */
   slotUsed: { value: boolean };
+  /** Shared box flag set when a `Chart { … }` renders — boxed for the same
+   *  reason as `slotUsed`.  Drives the per-deployable `LoomChart` component
+   *  emission (the chart's SVG geometry is Elixir arithmetic, not markup). */
+  chartUsed: { value: boolean };
   /** Monotonic per-page counter for `Tabs` instances — boxed (survives the
    *  `{...ctx}` copies) so each Tabs gets a unique id used to scope its
    *  client-side `JS.show`/`JS.hide` toggle selectors. */
   tabSeq: { value: number };
+  /** Monotonic per-page counter for `Table` instances WITHOUT an explicit
+   *  `testid:` — boxed for the same reason as `tabSeq`.  `<.table>` requires a
+   *  DOM `id` (the Phoenix.Component contract), and every default-id table on a
+   *  page emitting the same `id="data-table"` breaks LiveView DOM patching and
+   *  duplicates the id for assistive tech.  Rare before projections were
+   *  readable (one list per page); routine after, since a dashboard page reads
+   *  several projections side by side.  The FIRST table keeps the bare
+   *  `data-table`, so single-table pages stay byte-identical. */
+  tableSeq: { value: number };
   /** Store names (PascalCase) referenced anywhere in this body — a
    *  `Cart.<field>` read or `Cart.<action>(…)` call (Stage 5).  A Set so the
    *  mutation survives the `{...ctx}` shallow copies nested renders make (like
@@ -415,6 +456,12 @@ export function walkBodyToHeex(
     appModule,
     aggregatesByName,
     bcByAggregate,
+    // Both derived from the ONE readability predicate, never re-decided here —
+    // the walker, the client emitter and the validator gate disagreeing about
+    // which projections are readable is the exact defect `projection-read.ts`
+    // exists to prevent.
+    projectionsByName: readableProjectionNames(new Set(bcByAggregate.values())),
+    listShapedProjections: listShapedProjectionNames(new Set(bcByAggregate.values())),
     enumsByName,
     valueObjectsByName,
     idOptionsBindings: new Set(),
@@ -428,7 +475,9 @@ export function walkBodyToHeex(
     actionBindings: [],
     usedComponents: new Set(),
     slotUsed: { value: false },
+    chartUsed: { value: false },
     tabSeq: { value: 0 },
+    tableSeq: { value: 0 },
     usedStores: new Set(),
     uploadBindings: [],
     tableControls: [],
@@ -496,6 +545,7 @@ export function walkBodyToHeex(
     actionBindings: ctx.actionBindings,
     usedComponents: [...ctx.usedComponents],
     usesSlot: ctx.slotUsed.value,
+    usesChart: ctx.chartUsed.value,
     idOptionsBindings: [...ctx.idOptionsBindings],
     usedStores: [...ctx.usedStores],
     uploadBindings: ctx.uploadBindings,
@@ -1966,6 +2016,8 @@ function renderRequiresGuardAt(
     appModule,
     aggregatesByName: new Map(),
     bcByAggregate: new Map(),
+    projectionsByName: new Set(),
+    listShapedProjections: new Set(),
     enumsByName: new Map(),
     valueObjectsByName: new Map(),
     idOptionsBindings: new Set(),
@@ -1979,7 +2031,9 @@ function renderRequiresGuardAt(
     actionBindings: [],
     usedComponents: new Set(),
     slotUsed: { value: false },
+    chartUsed: { value: false },
     tabSeq: { value: 0 },
+    tableSeq: { value: 0 },
     usedStores: new Set(),
     uploadBindings: [],
     tableControls: [],

@@ -16,8 +16,10 @@ import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
+import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { skipsEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
+import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
@@ -561,7 +563,12 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // attributes — never quoted literals (see attrValue).
   const testidIdx = (expr.argNames ?? []).indexOf("testid");
   const testidArg = testidIdx >= 0 ? expr.args[testidIdx] : undefined;
-  const idAttr = testidArg ? attrValue(testidArg, ctx) : `"data-table"`;
+  // Without an explicit `testid:`, each table on the page gets its own default
+  // id — `data-table`, then `data-table-2`, … — because `<.table>`'s `id` must
+  // be unique for LiveView's DOM patching (and for a11y).  The first keeps the
+  // bare name, so a single-table page is byte-identical to before.
+  const seq = ++ctx.tableSeq.value;
+  const idAttr = testidArg ? attrValue(testidArg, ctx) : `"data-table${seq > 1 ? `-${seq}` : ""}"`;
   const testidAttr = testIdAttr(expr, ctx);
 
   // ---- Interactive controls (M-T1.1, HEEx leg) ----------------------------
@@ -790,13 +797,33 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   if (skipsEntityHistoryRead("phoenixLiveView", ofNode, ctx.aggregatesByName)) {
     return `<%!-- entity history not yet supported on phoenixLiveView --%>`;
   }
-  const shape = ofNode
-    ? queryShape(ofNode, {
-        apiParamNames: new Set(ctx.ui.apiParams.map((p) => p.name)),
-        aggregatesByName: ctx.aggregatesByName,
-        bcByAggregate: ctx.bcByAggregate,
-      })
-    : { paged: false, single: false };
+  // Detector context, shared by the shape derivation and the Pattern H probe
+  // below so the two can't answer from different name sets.
+  const detectCtx = {
+    apiParamNames: new Set(ctx.ui.apiParams.map((p) => p.name)),
+    aggregatesByName: ctx.aggregatesByName,
+    bcByAggregate: ctx.bcByAggregate,
+    projectionsByName: ctx.projectionsByName,
+    listShapedProjections: ctx.listShapedProjections,
+  };
+  const shape = ofNode ? queryShape(ofNode, detectCtx) : { paged: false, single: false };
+  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3 Phase 1).  The
+  // read resolves to the query-time projection's own `run/1`, in-process: a
+  // LiveView deployable hosts its contexts in the SAME OTP app, so what the SPA
+  // frontends reach over `GET /projections/<slug>` is one function call here.
+  //
+  // Probed BEFORE the arg loop because the projection also names the assign
+  // (below) — a fact the loop's `data:` branch would otherwise decide first.
+  const detected = ofNode ? tryDetectApiHook(ofNode, detectCtx) : null;
+  const projectionRead = detected?.kind === "projection" ? detected.aggregateName : undefined;
+  // A projection read names its assign after the PROJECTION (`:order_totals`),
+  // not after the `data:` lambda's parameter.  The param-derived name is fine
+  // for the aggregate arms — a page rarely carries two — but the scaffolded
+  // dashboard puts ONE KPI `QueryView` PER AGGREGATE on `Home`, each written by
+  // the same macro with the same lambda param `t`.  Named off the param, every
+  // one of them would assign `:t` and the last load would win: every tile
+  // showing the same aggregate's numbers, with nothing to see in the diff.
+  if (projectionRead) assignName = snake(projectionRead);
   // Flag OR fact: an author may still opt in explicitly (the scaffold does),
   // but omitting the flag no longer means "not paged" / "not single".
   const isSingle = litTrue(names.indexOf("single")) || shape.single;
@@ -827,7 +854,8 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
         dataVar = snake(arg.param);
         // Map the lambda param name to a LiveView assign.
         // Convention: "rows" → @items (list pages), "data" → @data (detail pages)
-        assignName = dataVar === "rows" ? "items" : dataVar;
+        // A projection read already took its assign from the projection name.
+        if (!projectionRead) assignName = dataVar === "rows" ? "items" : dataVar;
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
         const remapping = new Map<string, string>([
           [dataVar, autoPaged ? `${assignName}.items` : assignName],
@@ -854,7 +882,21 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   // Register the query binding so the LiveView emitter loads the
   // record(s) in handle_params (the assign the cond below reads is
   // never populated otherwise — see QueryBinding).
-  const aggName = ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;
+  if (projectionRead) {
+    // The projection load takes no arguments (the read IS the row) and no
+    // `listArgs` — a query-time projection has no page/sort surface.
+    ctx.queryBindings.push({
+      kind: isSingle ? "single" : "list",
+      assign: assignName,
+      aggregate: projectionRead,
+      source: "projection",
+    });
+  }
+  const aggName = projectionRead
+    ? undefined
+    : ofArgNode
+      ? resolveQueryAggregate(ofArgNode)
+      : undefined;
   if (aggName) {
     ctx.queryBindings.push({
       kind: isSingle ? "single" : "list",
@@ -1353,11 +1395,23 @@ export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Walk
   return `<div class="animate-spin h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent" role="status" aria-label="Loading"${testidAttr}></div>`;
 }
 
-/** `Money(value, currency?, decimals?)` → a money span.  Money values are
- *  `Decimal` in the Phoenix domain, so the amount renders via
- *  `Decimal.to_string/1` (the same cast the HEEx expression renderer uses for
- *  money — heex-walker-core.ts).  An optional `currency:` literal prefixes the
- *  amount; `decimals:` is left to Decimal's natural precision. */
+/** `Money(value, currency?, decimals?)` → a money span.  An optional
+ *  `currency:` literal prefixes the amount; `decimals:` is left to the value's
+ *  natural precision.
+ *
+ *  The amount renders through `to_string/1`, not `Decimal.to_string/1`, because
+ *  the three things a `Money { … }` slot is handed are not all Decimals:
+ *
+ *    - an AGGREGATE field read is a `%Decimal{}` — `to_string/1` dispatches
+ *      String.Chars to `Decimal.to_string/1`, byte-identical output;
+ *    - a query-time PROJECTION field is already a STRING (money rides the
+ *      Elixir wire as `to_string(...)` — RS-24), and `Decimal.to_string/1`
+ *      raises FunctionClauseError on a binary;
+ *    - a LITERAL (`Money(value: 9.99)`) is a float, which raises the same way.
+ *
+ *  So the narrower cast was wrong for two of the three, and identical for the
+ *  third.  The TYPED money cast (`string(x: money)` in `render-expr.ts`) keeps
+ *  `Decimal.to_string/1` — there the operand's type is known. */
 export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let testid = "";
   let currency: string | undefined;
@@ -1373,7 +1427,7 @@ export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const val = valueArg ? renderExpr(valueArg, { ...ctx, position: "template" }) : "0";
   const prefix = currency ? `${currency} ` : "";
-  return `<span class="money"${testidAttr}>${prefix}<%= Decimal.to_string(${val}) %></span>`;
+  return `<span class="money"${testidAttr}>${prefix}<%= to_string(${val}) %></span>`;
 }
 /** `Slot()` → `{render_slot(@inner_block)}` — the children passthrough inside a
  *  user `component` body.  Flags `ctx.slotUsed` so the component emitter
@@ -1835,4 +1889,88 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     : undefined;
   const a11yAttr = bound ? ` role="img" aria-label=${bound}` : iconA11yAttr({ label, decorative });
   return `<span class="loom-icon${sizeClass}"${testidAttr}${a11yAttr}>${svg}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// Chart (M-T1.3 Phase 4, HEEx leg).
+// ---------------------------------------------------------------------------
+
+/** `Chart { kind: "bar"|"line", of: <api>.<Projection>, x: r => …, y: r => … }`
+ *  → a call into the generated `LoomChart.chart/1` function component.
+ *
+ *  The JSX targets reach a charting LIBRARY through the design pack
+ *  (`@mantine/charts`, recharts, `@mui/x-charts`).  LiveView has no such
+ *  library — and needs none: the rows are ALREADY on the server, in an assign,
+ *  so the geometry is arithmetic and the chart is inline SVG, server-rendered
+ *  and JS-free.  (The parity ledger long carried "no JS-free LiveView charting"
+ *  as the reason Phoenix had no Chart; the premise was simply wrong.)
+ *
+ *  Emission is a component CALL rather than inline markup for the same reason
+ *  the projection loader is a function: the scale/axis maths is Elixir, and
+ *  HEEx is a markup template — computing a max and a per-bar rect in `<% %>`
+ *  blocks inside the page body would be both unreadable and untestable.  The
+ *  component is emitted once per deployable (`renderLoomChartComponent`,
+ *  liveview-emit.ts) and invoked fully qualified, the same way a user
+ *  `component` is.
+ *
+ *  The data binding rides the SAME projection QueryBinding a `QueryView` push —
+ *  so the page gets its `defp load_<proj>/1`, and the chart reads the assign. */
+export function renderChart(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const names = expr.argNames ?? [];
+  const at = (name: string): ExprIR | undefined => {
+    const i = names.indexOf(name);
+    return i >= 0 ? expr.args[i] : undefined;
+  };
+  const kindArg = at("kind");
+  // `loom.chart-kind-invalid` pins the kind to "line" | "bar"; the bar default
+  // only keeps the renderer total under IR that skipped validation.
+  const isLine = kindArg?.kind === "literal" && kindArg.value === "line";
+  const ofArg = at("of");
+
+  // Pattern H, exactly as `renderQueryView` resolves it — one detector, so a
+  // chart and a query view can't disagree about what `<api>.<Proj>` means.
+  const detected = ofArg
+    ? tryDetectApiHook(ofArg, {
+        apiParamNames: new Set(ctx.ui.apiParams.map((p) => p.name)),
+        aggregatesByName: ctx.aggregatesByName,
+        projectionsByName: ctx.projectionsByName,
+      })
+    : null;
+  const projection = detected?.kind === "projection" ? detected.aggregateName : undefined;
+  if (!projection) {
+    // Unreachable from valid input — `loom.chart-of-not-grouped` (ui-checks)
+    // rejects any `of:` that isn't a grouped readable projection.
+    return `<%!-- Chart: unresolved 'of:' projection --%>`;
+  }
+  const assign = snake(projection);
+  ctx.queryBindings.push({
+    kind: "list",
+    assign,
+    aggregate: projection,
+    source: "projection",
+  });
+  ctx.chartUsed.value = true;
+
+  // `x:`/`y:` unwrap to accessor field names through the SAME leaf the TSX emit
+  // and a `DataGrid` `Column` use, then to the SNAKE keys the projection loader
+  // rekeys the wire row to (`orderCount` → `:order_count`) — the component
+  // reads them with `Map.get/2`.
+  const dataKey = snake(simpleAccessorField(at("x")) ?? "");
+  const seriesField = snake(simpleAccessorField(at("y")) ?? "");
+
+  // A chart is an image of data (registry a11y contract `role="img"` +
+  // `needsName`), so the component carries a derived accessible name — the same
+  // sentence the TSX emit derives, so the two frontends read alike to a screen
+  // reader.
+  const label = `${isLine ? "Line" : "Bar"} chart of ${projection}: ${seriesField} by ${dataKey}`;
+  const testid = testIdAttr(expr, ctx).replace(/^ data-testid=/, "");
+  const testidAttr = testid ? ` testid=${testid}` : "";
+  return (
+    `<${ctx.appModule}Web.Components.LoomChart.chart` +
+    ` kind="${isLine ? "line" : "bar"}"` +
+    ` rows={@${assign}}` +
+    ` x={:${dataKey}}` +
+    ` y={:${seriesField}}` +
+    ` label="${escapeHeexAttr(label)}"${testidAttr} />`
+  );
 }

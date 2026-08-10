@@ -25,12 +25,13 @@ import { type ApiHookDetectorContext, tryDetectApiHook } from "./api-hook-detect
  *  context each aggregate lives in, so the read's find can be looked up. */
 export interface PagedQueryContext extends ApiHookDetectorContext {
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
-  /** Names of the GROUPED (`group by`) readable projections — the reads whose
-   *  response is the LIST shape, one row per group (M-T1.3 Phase 4).  Optional
-   *  for the same reason as the detector's `projectionsByName`: a caller with
-   *  no projection read in scope leaves every projection on the singleton
-   *  (one-object) answer, byte-identical to the pre-grouped behaviour. */
-  groupedProjections?: { has(name: string): boolean };
+  /** Names of the readable projections whose response is the LIST shape —
+   *  `projectionReadShape === "many"` (a `group by` read, one row per group;
+   *  or a SHORTHAND read, the filtered source rows).  Optional for the same
+   *  reason as the detector's `projectionsByName`: a caller with no projection
+   *  read in scope leaves every projection on the singleton (one-object)
+   *  answer, byte-identical to the pre-projection behaviour. */
+  listShapedProjections?: { has(name: string): boolean };
 }
 
 /** The RESULT SHAPE a `QueryView` `of:` read yields — the two facts every
@@ -58,14 +59,13 @@ export interface QueryShape {
  *  drops the collection arms. */
 export function queryShape(ofArg: ExprIR, ctx: PagedQueryContext): QueryShape {
   const detected = tryDetectApiHook(ofArg, ctx);
-  // A PROJECTION read (M-T1.3) answers from the projection's own shape: the
-  // whole-table singleton yields one object, while a GROUPED (`group by`)
-  // projection returns the LIST shape — one row per group, never paged.  Same
-  // question, same answer-site.
+  // A PROJECTION read (M-T1.3) answers from the projection's own shape: only
+  // the whole-table aggregation yields one object; a grouped or shorthand read
+  // returns the LIST shape, never paged.  Same question, same answer-site.
   if (detected?.kind === "projection") {
     return {
       paged: false,
-      single: !ctx.groupedProjections?.has(detected.aggregateName),
+      single: !ctx.listShapedProjections?.has(detected.aggregateName),
     };
   }
   if (detected?.kind !== "aggregate") return { paged: false, single: false };

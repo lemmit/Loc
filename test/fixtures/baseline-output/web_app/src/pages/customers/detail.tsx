@@ -92,10 +92,10 @@ export default function CustomerDetail() {
           <Stack>
             <Card withBorder padding="md">
               <Stack>
-                <KeyValueRow label="Username" data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
-                <KeyValueRow label="Email" data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
-                <KeyValueRow label="Age" data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
-                <KeyValueRow label="Version" data-testid="customers-detail-version"><Text>{customerById.data.version}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.7s11ax", "Username")} data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.inbfc7", "Email")} data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.3mcq4c", "Age")} data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.q0zd4n", "Version")} data-testid="customers-detail-version"><Text>{customerById.data.version}</Text></KeyValueRow>
               </Stack>
             </Card>
             <Group>

@@ -77,6 +77,46 @@ describe("validator — e2e unresolved ref", () => {
     expect(codes).not.toContain("loom.e2e-unresolved-ref");
   });
 
+  // The CALL twin of the same hole.  A name APPLIED to arguments lowers to a
+  // `callKind: "free"` Call, never a `ref`, so the bare-name gate above did not
+  // see it — and the renderer emits a call verbatim too.  `expect(number(
+  // t.revenue)).toBe(40)` therefore shipped `number(...)` into the generated
+  // suite: a ReferenceError at run time, from valid `.ddd`, found while writing
+  // projection-aggregation's first runtime caller.
+  it("rejects a call to a function that resolves to nothing", async () => {
+    const codes = await codesFor(`
+    let o = api.orders.create({ code: "C1", status: "Draft" })
+    expect(number(o.code)).toBe(1)
+  `);
+    expect(codes).toContain("loom.e2e-unresolved-call");
+  });
+
+  it("names the offending call and points at the built-in conversions", async () => {
+    const diags = validateLoomModel(
+      await buildLoomModel(
+        SOURCE(`
+    let o = api.orders.create({ code: "C1", status: "Draft" })
+    expect(number(o.code)).toBe(1)
+  `),
+      ),
+    );
+    const d = diags.find((x) => x.code === "loom.e2e-unresolved-call");
+    expect(d?.message).toContain("'number(…)'");
+    expect(d?.message).toContain("decimal(…)");
+  });
+
+  it("accepts the built-in conversions and collection ops", async () => {
+    // These lower to `convert` / `method-call` nodes, not to a free call — the
+    // gate must not reach them, or every money/decimal assertion breaks.
+    const codes = await codesFor(`
+    let o = api.orders.create({ code: "C1", status: "Draft" })
+    let all = api.orders.all()
+    expect(string(o.code)).toBe("C1")
+    expect(all.items.count()).toBe(1)
+  `);
+    expect(codes).not.toContain("loom.e2e-unresolved-call");
+  });
+
   it("accepts an api-shaped body aimed at a UI-mounting deployable", async () => {
     // A test's kind comes from the TARGET DEPLOYABLE's platform, not from what
     // the body spells, so this classifies as `ui` while correctly spelling

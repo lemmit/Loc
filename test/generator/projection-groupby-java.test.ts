@@ -111,6 +111,42 @@ describe("java grouped projection (group by)", () => {
     );
   });
 
+  it("binds a SINGLE-column grouped row as a bare scalar — no Object[] element", async () => {
+    // The untested twin of the singleton `Object[]`-cast bug (fixture
+    // `OrderVolume`): a grouped projection may select ONE column — the
+    // validator requires an aggregate select but never a KEY select, so
+    // `group by o.status; select n = count()` is legal and groups without
+    // projecting the key.  JPA hands that back as `List<Long>`, not
+    // `List<Object[]>`, and `r[0]` inside the mapping lambda would
+    // ClassCastException at runtime while compiling green (the row-element type
+    // is erased behind the raw `Query`).  Fixture-free on purpose:
+    // `projection-groupby`'s projections all have ≥2 selects, so no corpus
+    // fixture reaches this arm.
+    const files = await generateSystemFiles(
+      SRC.replace(
+        "projection GatedByStatus {",
+        `projection CountByStatus {
+        n: int
+        from Order as o
+        group by o.status
+        select n = count()
+      }
+      projection GatedByStatus {`,
+      ),
+    );
+    let svc = "";
+    for (const [path, content] of files)
+      if (path.endsWith("OrdersQueryProjections.java")) svc = content;
+    const method = svc.slice(svc.indexOf("public List<CountByStatusRow> countByStatus()"));
+    expect(method).toContain(
+      'List<Object> rows = entityManager.createQuery("select count(e) from Order e group by e.status order by e.status")',
+    );
+    expect(method.slice(0, method.indexOf("    }"))).not.toContain("Object[]");
+    expect(method).toContain(".map(r -> new CountByStatusRow(((Number) r).intValue()))");
+    // The multi-column grouped read is untouched.
+    expect(svc).toContain("List<Object[]> rows = entityManager.createQuery(");
+  });
+
   it("emits the requires gate in the controller, BEFORE the query — like the per-row routes", async () => {
     const ctrl = await fileEndingWith("OrdersQueryProjectionsController.java");
     const route = ctrl.slice(ctrl.indexOf('@GetMapping("/gated_by_status")'));

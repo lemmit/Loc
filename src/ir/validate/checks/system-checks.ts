@@ -361,6 +361,14 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
   }
 }
 
+/** Frontends that can render `Chart` (M-T1.3 Phase 4).
+ *
+ *  react reaches a charting LIBRARY through its design pack; heex needs none —
+ *  the rows are already server-side in a LiveView assign, so it renders inline
+ *  SVG from arithmetic (`renderChart` → the generated `LoomChart` component).
+ *  The remaining frontends have no chart emitter at all. */
+const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView"]);
+
 /** `Chart` on a target that can't render it (M-T1.3 Phase 4).
  *
  *  The gate was per-PACK during the staged rollout (mantine v9 was the only
@@ -369,12 +377,12 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
  *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
  *  it a pack-LOAD failure rather than something to re-check here.  What remains
  *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`: vue,
- *  svelte, angular, feliz, flutter and HEEx have no chart template and would
- *  crash codegen, so they stay honest gaps. */
+ *  svelte, angular, feliz and flutter have no chart emitter and would render an
+ *  unsupported-primitive comment, so they stay honest gaps. */
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.uiName) continue;
-    if (d.uiFramework === "react") continue;
+    if (CHART_FRAMEWORKS.has(d.uiFramework ?? "")) continue;
     const ui = sys.uis.find((u) => u.name === d.uiName);
     if (!ui) continue;
     // Components render into pages, so a chart moved into one must not slip
@@ -424,6 +432,11 @@ export const PROJECTION_READ_FRAMEWORKS = new Set([
   "angular",
   "feliz",
   "flutter",
+  // Phoenix is the odd leg: it emits no projection CLIENT at all.  A LiveView
+  // deployable hosts its contexts in the same OTP app, so the read is an
+  // in-process `<Ctx>.QueryProjections.<Proj>.run/1` call — see
+  // `renderProjectionLoaders` (generator/elixir/liveview-emit.ts).
+  "phoenixLiveView",
 ]);
 
 /** `loom.ui-projection-read-unsupported`, the FRAMEWORK half.  The FLAVOUR half
@@ -456,6 +469,9 @@ export function validateUiProjectionReadFramework(sys: SystemIR, diags: LoomDiag
             name,
             dName: d.name,
             fw: fw || "unknown",
+            // Named from the gate itself, so a port that widens the set can't
+            // leave the message advertising a stale list.
+            frameworks: [...PROJECTION_READ_FRAMEWORKS].sort().join(", "),
           }),
           source: `${ui.name}/${what}`,
         });

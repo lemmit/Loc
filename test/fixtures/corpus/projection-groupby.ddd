@@ -104,4 +104,105 @@ system ProjectionGroupBySys {
     serves: OrdersApi
     port: 4000
   }
+
+  // GROUP BY is a VALUE question end to end — which rows fall in which bucket,
+  // what each aggregate sums to, how the key serialises — and the compile tiers
+  // can only see that a query was emitted.  The header above says four of the
+  // five backends needed a fix to agree on the `startOfDay()` bucket
+  // (`2026-08-01T00:00:00Z`); that agreement was never asserted anywhere at
+  // runtime, so nothing would notice it breaking.
+  test e2e "the groups, their aggregates and their keys" against d {
+    let acme = api.customers.create({ name: "Acme" })
+    let globex = api.customers.create({ name: "Globex" })
+
+    // Two Confirmed orders for Acme on 2026-08-01 (different hours — the same
+    // day bucket), one Draft for Globex on 2026-08-02.
+    let o1 = api.orders.create({ code: "O-1", placedAt: "2026-08-01T09:00:00Z", total: money("10.00"), lineCount: 2, status: "Confirmed", customerId: acme.id })
+    let o2 = api.orders.create({ code: "O-2", placedAt: "2026-08-01T18:30:00Z", total: money("30.00"), lineCount: 4, status: "Confirmed", customerId: acme.id })
+    let o3 = api.orders.create({ code: "O-3", placedAt: "2026-08-02T05:00:00Z", total: money("5.00"), lineCount: 1, status: "Draft", customerId: globex.id })
+
+    // ── single grouping column + criterion `where`, folded into ONE query ────
+    // The Draft order must not appear at all: a backend that applied the
+    // criterion after grouping (or not at all) reads a second row here.
+    let byStatus = api.salesByStatus.list()
+    expect(byStatus.count()).toBe(1)
+    let confirmed = byStatus.first()
+    expect(confirmed.status).toBe("Confirmed")
+    expect(confirmed.orders).toBe(2)
+    expect(decimal(confirmed.revenue)).toBe(40)
+    expect(decimal(confirmed.avgLines)).toBe(3)
+
+    // ── the COMPUTED key: `startOfDay()` in SELECT, GROUP BY and ORDER BY ────
+    // Two days, ascending.  The two 2026-08-01 orders must land in ONE bucket
+    // (the truncation has to happen in SQL — a backend that grouped by the raw
+    // timestamp reads three rows), and the key must ride the wire as midnight
+    // UTC, which is the agreement the header calls out.
+    let byDay = api.revenueByDay.list()
+    expect(byDay.count()).toBe(2)
+    let firstDay = byDay.first()
+    // Compared as an INSTANT (`datetime(…)`), not as a string: the five
+    // backends spell an instant with different fractional widths and the
+    // goldens normalize timestamps away, so an equality on the spelling would
+    // pin one backend's formatting rather than the bucket.  What must hold —
+    // and what a broken truncation breaks — is that the bucket IS midnight UTC.
+    expect(string(firstDay.day).contains("2026-08-01T00:00:00")).toBe(true)
+    expect(firstDay.orders).toBe(2)
+    expect(decimal(firstDay.revenue)).toBe(40)
+    let secondDay = byDay.where(r => string(r.day).contains("2026-08-02T00:00:00")).first()
+    expect(secondDay.orders).toBe(1)
+    expect(decimal(secondDay.revenue)).toBe(5)
+
+    // ── multi-column grouping (id key + enum key), min/max ──────────────────
+    let volume = api.volumeByCustomerAndStatus.list()
+    expect(volume.count()).toBe(2)
+    let acmeRow = volume.where(r => r.customerId == acme.id).first()
+    expect(acmeRow.status).toBe("Confirmed")
+    expect(acmeRow.orders).toBe(2)
+    expect(decimal(acmeRow.biggest)).toBe(30)
+    expect(decimal(acmeRow.smallest)).toBe(10)
+    let globexRow = volume.where(r => r.customerId == globex.id).first()
+    expect(globexRow.status).toBe("Draft")
+    expect(globexRow.orders).toBe(1)
+    expect(decimal(globexRow.biggest)).toBe(5)
+
+    // ── the groups MOVE with the rows ───────────────────────────────────────
+    // Promoting the Draft order to Confirmed moves it between buckets in BOTH
+    // the filtered single-column projection and the multi-column one.
+    api.orders.update(o3, { code: "O-3", placedAt: "2026-08-02T05:00:00Z", total: money("5.00"), lineCount: 1, status: "Confirmed", customerId: globex.id })
+    let afterPromote = api.salesByStatus.list()
+    expect(afterPromote.count()).toBe(1)
+    expect(afterPromote.first().orders).toBe(3)
+    expect(decimal(afterPromote.first().revenue)).toBe(45)
+    let afterVolume = api.volumeByCustomerAndStatus.list()
+    expect(afterVolume.where(r => r.customerId == globex.id).first().status).toBe("Confirmed")
+
+    // The aggregate's own routes beside the read models.
+    let readBack = api.orders.getById(o1)
+    expect(readBack.code).toBe("O-1")
+    let listed = api.orders.all()
+    expect(listed.items.length).toBe(3)
+    expect(listed.total).toBe(3)
+    let customers = api.customers.all()
+    expect(customers.total).toBe(2)
+    let acmeRead = api.customers.getById(acme)
+    expect(acmeRead.name).toBe("Acme")
+    api.customers.update(globex, { name: "Globex Inc" })
+    expect(api.customers.getById(globex).name).toBe("Globex Inc")
+
+    // ── DELETE empties a bucket rather than leaving a zero row ──────────────
+    api.orders.destroy(o1)
+    api.orders.destroy(o2)
+    let oneDayLeft = api.revenueByDay.list()
+    expect(oneDayLeft.count()).toBe(1)
+    expect(string(oneDayLeft.first().day).contains("2026-08-02T00:00:00")).toBe(true)
+    api.orders.destroy(o3)
+    expect(api.orders.getById(o3)).toThrow(404)
+    let noGroups = api.salesByStatus.list()
+    expect(noGroups.count()).toBe(0)
+    api.customers.destroy(acme)
+    api.customers.destroy(globex)
+    expect(api.customers.getById(acme)).toThrow(404)
+    let noCustomers = api.customers.all()
+    expect(noCustomers.total).toBe(0)
+  }
 }

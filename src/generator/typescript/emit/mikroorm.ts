@@ -92,7 +92,7 @@ import {
   projectionObject,
   provColumnEntries,
 } from "../repository-save-builder.js";
-import { toWireMethod } from "../repository-wire-builder.js";
+import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "../repository-wire-builder.js";
 import { aggregateIsAudited, insertStampEntries, updateStampEntries } from "./audit-stamp.js";
 
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
@@ -1897,6 +1897,16 @@ export function renderMikroRepository(
     ...retrievalMethods.flatMap((m) => ["", m]),
     "",
     toWireMethod(agg, ctx),
+    // Response-boundary read masking (`mask unless`) — the SAME sibling
+    // serializer the drizzle repository emits (`repository-builder.ts`).  The
+    // route handlers call `repo.toWireMasked(row, currentUser)` unconditionally
+    // for a masked aggregate, on BOTH persistence adapters, so a mikroorm
+    // repository that emitted only `toWire` shipped a call to a method that did
+    // not exist: TypeError → 500 on every read of a masked aggregate, which is
+    // the crash-shaped failure of the one feature whose quiet failure is a leak.
+    // Invisible until `field-mask` got its first runtime caller (#2468).
+    // Mask-free aggregates emit nothing here and stay byte-identical.
+    ...(aggHasFieldMask(agg) ? ["", toWireMaskedMethod(agg)] : []),
     `}`,
   );
 
@@ -2207,6 +2217,16 @@ export function renderMikroEmbeddedRepository(
     ...findMethods.flatMap((m) => ["", m]),
     "",
     toWireMethod(agg, ctx),
+    // Response-boundary read masking (`mask unless`) — the SAME sibling
+    // serializer the drizzle repository emits (`repository-builder.ts`).  The
+    // route handlers call `repo.toWireMasked(row, currentUser)` unconditionally
+    // for a masked aggregate, on BOTH persistence adapters, so a mikroorm
+    // repository that emitted only `toWire` shipped a call to a method that did
+    // not exist: TypeError → 500 on every read of a masked aggregate, which is
+    // the crash-shaped failure of the one feature whose quiet failure is a leak.
+    // Invisible until `field-mask` got its first runtime caller (#2468).
+    // Mask-free aggregates emit nothing here and stay byte-identical.
+    ...(aggHasFieldMask(agg) ? ["", toWireMaskedMethod(agg)] : []),
     `}`,
     "",
     // Containment (de)serialisers — parts only; the root uses columns.
@@ -2403,6 +2423,16 @@ export function renderMikroDocumentRepository(
     ...findMethods.flatMap((m) => ["", m]),
     "",
     toWireMethod(agg, ctx),
+    // Response-boundary read masking (`mask unless`) — the SAME sibling
+    // serializer the drizzle repository emits (`repository-builder.ts`).  The
+    // route handlers call `repo.toWireMasked(row, currentUser)` unconditionally
+    // for a masked aggregate, on BOTH persistence adapters, so a mikroorm
+    // repository that emitted only `toWire` shipped a call to a method that did
+    // not exist: TypeError → 500 on every read of a masked aggregate, which is
+    // the crash-shaped failure of the one feature whose quiet failure is a leak.
+    // Invisible until `field-mask` got its first runtime caller (#2468).
+    // Mask-free aggregates emit nothing here and stay byte-identical.
+    ...(aggHasFieldMask(agg) ? ["", toWireMaskedMethod(agg)] : []),
     `}`,
     "",
     // Document (de)serialisers — module-level so they recurse into contained
@@ -2632,6 +2662,16 @@ export function renderMikroEventSourcedRepository(
     ...findMethods.flatMap((m) => ["", m]),
     "",
     toWireMethod(agg, ctx),
+    // Response-boundary read masking (`mask unless`) — the SAME sibling
+    // serializer the drizzle repository emits (`repository-builder.ts`).  The
+    // route handlers call `repo.toWireMasked(row, currentUser)` unconditionally
+    // for a masked aggregate, on BOTH persistence adapters, so a mikroorm
+    // repository that emitted only `toWire` shipped a call to a method that did
+    // not exist: TypeError → 500 on every read of a masked aggregate, which is
+    // the crash-shaped failure of the one feature whose quiet failure is a leak.
+    // Invisible until `field-mask` got its first runtime caller (#2468).
+    // Mask-free aggregates emit nothing here and stay byte-identical.
+    ...(aggHasFieldMask(agg) ? ["", toWireMaskedMethod(agg)] : []),
     "}",
     "",
     "function eventToData(ev: Events.DomainEvent): Record<string, unknown> {",

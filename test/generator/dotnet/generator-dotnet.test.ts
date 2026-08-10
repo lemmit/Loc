@@ -1404,6 +1404,25 @@ describe(".NET generator", () => {
       expect(csproj).toContain("Microsoft.IdentityModel.Protocols.OpenIdConnect");
     });
 
+    // A declared NON-OPTIONAL array claim absent from the token is the EMPTY
+    // SET, not null.  `string[]` has a real reader (ClaimStringList, itself
+    // empty-on-missing); every OTHER element type used to fall through to
+    // `default!` — a NULL List<T> on a non-nullable record property — so a
+    // `mask unless currentUser.levels.contains(…)` threw
+    // NullReferenceException and answered 500 instead of redacting: the
+    // fail-OPEN-shaped crash of a feature whose failure is a data leak.
+    it("defaults a non-string array claim to an empty list, never `default!`", async () => {
+      const files = await emitForAuthSystem(
+        SRC_OIDC.replace("permissions: string[]", "permissions: string[] levels: int[]"),
+      );
+      const verifier = files.get("Auth/OidcUserVerifier.cs")!;
+      expect(verifier).toContain("Levels: new System.Collections.Generic.List<int>()");
+      expect(verifier).not.toContain("Levels: default!");
+      // The dev stub — the other principal-construction site — already agreed.
+      const stub = files.get("Auth/DevStubUserVerifier.cs")!;
+      expect(stub).toContain("Levels: new System.Collections.Generic.List<int>()");
+    });
+
     it("refreshes the cached OIDC configuration on a signing-key miss (IdP key rotation)", async () => {
       const files = await emitForAuthSystem(SRC_OIDC);
       const verifier = files.get("Auth/OidcUserVerifier.cs")!;

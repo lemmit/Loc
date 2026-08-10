@@ -97,10 +97,10 @@ export default function ProductDetail() {
           <Stack>
             <Card withBorder padding="md">
               <Stack>
-                <KeyValueRow label="Sku" data-testid="products-detail-sku"><Text>{productById.data.sku}</Text></KeyValueRow>
-                <KeyValueRow label="Price Amount"><Text>{productById.data.price.amount}</Text></KeyValueRow>
-                <KeyValueRow label="Price Currency"><Text>{productById.data.price.currency}</Text></KeyValueRow>
-                <KeyValueRow label="Version" data-testid="products-detail-version"><Text>{productById.data.version}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.gkg0ca", "Sku")} data-testid="products-detail-sku"><Text>{productById.data.sku}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.6rtmhu", "Price Amount")}><Text>{productById.data.price.amount}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.vd0zdh", "Price Currency")}><Text>{productById.data.price.currency}</Text></KeyValueRow>
+                <KeyValueRow label={t("page.Detail.keyValue.q0zd4n", "Version")} data-testid="products-detail-version"><Text>{productById.data.version}</Text></KeyValueRow>
               </Stack>
             </Card>
             <Group>

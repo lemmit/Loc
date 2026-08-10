@@ -1,0 +1,46 @@
+// ATTRIBUTE-position user-visible slots on the vanilla (plain Ecto/Phoenix)
+// foundation — the shapes whose HEEx emission goes through an ATTRIBUTE rather
+// than a text node: the positional `KeyValueRow` label the packs render as one,
+// plus `Toolbar { label: }` (the accessible name), `Button { label: }`,
+// `Alert { title: }` and `Divider { label: }`.
+//
+// The `KeyValueRow` label is the one this fixture is really for: it is a
+// POSITIONAL slot rendered in ATTRIBUTE position, which is how it fell between
+// the text-slot work and the named-slot D-I18N-ATTR work and shipped English on
+// thirteen of fifteen targets.  HEEx renders it in text position and was always
+// correct — so this fixture is what keeps that true while the other engines
+// change around it.
+//
+// The labelled `Toolbar` is here for a related reason: every OTHER
+// elixir-vanilla-build fixture used an UNLABELLED one, so `mix compile` never
+// reached the labelled path at all.  (That gap let a real defect through; it was
+// diagnosed and fixed in #2479, whose vanilla-i18n-icu.ddd covers the
+// INTERPOLATED form — this covers the plain-literal one.)
+//
+// Compiles the `aria-label={pgettext(...)}` / attribute-bound forms the walker
+// emits, which is the half a structural test cannot check: HEEx attribute
+// syntax is only validated by the Elixir compiler.
+
+system Shop {
+  api ShopApi from Catalog
+  subdomain Catalog {
+    context Cat {
+      aggregate Product { name: string status: string }
+      repository Products for Product { }
+    }
+  }
+  storage db { type: postgres }
+  resource s { for: Cat, kind: state, use: db }
+  ui WebApp {
+    page Home {
+      route: "/"
+      body: Stack {
+        Toolbar { label: "Row actions", Button { "New", label: "Create product" } },
+        KeyValueRow { "Status", Text { "active" } },
+        Divider { label: "Section two" },
+        Alert { "Body copy", title: "Heads up" }
+      }
+    }
+  }
+  deployable phoenixApp { platform: elixir, contexts: [Cat], dataSources: [s], serves: ShopApi, design: "coreComponents", ui: WebApp, port: 4000 }
+}

@@ -53,6 +53,7 @@ import { flutterI18nEnabled, renderFlutterI18nModule } from "./i18n.js";
 import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
 import { renderFlutterModalRuntime } from "./modal-runtime.js";
 import { flutterPack, usesIntl, usesMath } from "./pack.js";
+import { dartPackageName } from "./package-name.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 
@@ -72,7 +73,10 @@ export function generateFlutterForContexts(
   void options;
   const out = new Map<string, string>();
 
-  const pkg = snake(deployable.name) || "loom_app";
+  // Not `snake(name)` directly — a deployable named `web` (or any other package
+  // in the app's own dependency graph) would make `flutter pub get` fail before
+  // the app is even compiled.  See `package-name.ts`.
+  const pkg = dartPackageName(deployable.name);
   const title = upperFirst(deployable.uiName ?? deployable.name ?? sys.name);
 
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
