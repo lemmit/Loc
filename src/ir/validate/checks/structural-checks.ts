@@ -1626,15 +1626,46 @@ function flagStmt(
 // this repo's standing rule for a capability a backend does not emit.
 // ---------------------------------------------------------------------------
 
-/** Statements whose effect the field-derived create input does NOT reproduce,
- *  paired with what the author loses.  An `assign` is judged separately below:
- *  `field := <same-named param>` is redundant with the input and therefore
- *  harmless, while any other RHS is a real drop. */
-const DROPPED_STMT_REASON: Partial<Record<StmtIR["kind"], string>> = {
-  requires: "the authorization gate never runs — the route is left OPEN",
-  precondition: "the guard never runs — construction is left unchecked",
-  emit: "the domain event is never published",
-};
+/** What the author loses for each statement kind a lifecycle body can hold.
+ *  An `assign` is judged separately below: `field := <same-named param>` is
+ *  redundant with the field-derived input and therefore harmless, while any
+ *  other RHS is a real drop.
+ *
+ *  EXHAUSTIVE by construction — a `switch` with no `default`, so a new
+ *  `StmtIR` kind is a compile error here rather than a statement that silently
+ *  falls through and reports nothing.  The previous shape was a
+ *  `Partial<Record<…>>` plus an `assign` fallback, which quietly passed `add` /
+ *  `remove` / `call` / `expression` / `variant-match`: a
+ *  `create { files.put("x", name) }` was exactly as dropped as an `emit` and
+ *  said nothing.  That is the same silence this whole check exists to end. */
+function droppedStmtReason(kind: StmtIR["kind"], label: "create" | "destroy"): string | null {
+  const subject = label === "create" ? "construction" : "deletion";
+  switch (kind) {
+    case "requires":
+      return "the authorization gate never runs — the route is left OPEN";
+    case "precondition":
+      return `the guard never runs — ${subject} is left unchecked`;
+    case "emit":
+      return "the domain event is never published";
+    case "add":
+    case "remove":
+      return "the collection mutation never runs";
+    case "call":
+    case "expression":
+      return "the call never runs — its side effects never happen";
+    case "variant-match":
+      return "the branch never runs";
+    case "assign":
+      return label === "create"
+        ? "the assignment never runs — the field takes its value from the request body instead"
+        : "the assignment never runs";
+    // `let` binds a local that only the dropped statements could read, so it is
+    // not observable on its own; `return` is not admissible in a lifecycle body.
+    case "let":
+    case "return":
+      return null;
+  }
+}
 
 /**
  * An `assign` whose effect the emitted create ALREADY reproduces, by one of the
@@ -1654,33 +1685,64 @@ const DROPPED_STMT_REASON: Partial<Record<StmtIR["kind"], string>> = {
  * else (a literal with no matching field default, a computed expression) really
  * is lost.
  */
+const NUMERIC_LITS = new Set(["int", "long", "decimal", "money"]);
+
+/** Structural equality over two lowered expressions, ignoring source spans.
+ *
+ *  Numeric literals compare by VALUE, not spelling — a field defaulted `0` and
+ *  a body writing `0.0` (or `0.00` into a money slot) restate the same thing.
+ *  Everything else compares by SHAPE, which is the part a literal-only compare
+ *  got wrong: an enum default (`priority: Priority = Priority.low`) lowers to a
+ *  member ref, not a literal, so restating it in the body reported a drop where
+ *  nothing was lost — and that spelling is the one this check's own fixtures
+ *  were rewritten into.  Same for a value-object default (`total: Money =
+ *  Money { … }`). A diagnostic that fires where nothing is lost is what trains
+ *  readers to ignore it. */
+function sameEffectValue(a: ExprIR, b: ExprIR): boolean {
+  if (a.kind === "literal" && b.kind === "literal") {
+    if (NUMERIC_LITS.has(a.lit) && NUMERIC_LITS.has(b.lit)) {
+      return Number(a.value) === Number(b.value);
+    }
+    return a.lit === b.lit && a.value === b.value;
+  }
+  const strip = (e: ExprIR): string =>
+    JSON.stringify(e, (k, v) => (k === "origin" ? undefined : v));
+  return strip(a) === strip(b);
+}
+
 function assignEffectReproduced(s: StmtIR, agg: AggregateIR): boolean {
   if (s.kind !== "assign") return false;
   const target = s.target.segments;
   if (target.length !== 1) return false;
   const name = target[0];
-  if (s.value.kind === "ref" && s.value.name === name) return true;
-  const field = agg.fields.find((f) => f.name === name);
-  const dflt = field?.default;
-  return dflt?.kind === "literal" && s.value.kind === "literal" && dflt.value === s.value.value;
+  // `field := <same-named PARAM>`.  The `refKind` test is load-bearing: a `let`
+  // that shadows the field name reads identically here —
+  //     create(code: string, qty: int) { let total = qty * 2  total := total }
+  // — but is a real computed drop, and exempting by NAME alone silently passed
+  // exactly the case this check exists to catch.
+  if (s.value.kind === "ref" && s.value.name === name && s.value.refKind === "param") return true;
+  const dflt = agg.fields.find((f) => f.name === name)?.default;
+  return dflt !== undefined && sameEffectValue(dflt, s.value);
 }
 
 export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const agg of ctx.aggregates) {
-    // Event-sourced creates ARE rendered — different path, works today.
-    if (aggregateIsEventSourced(agg)) continue;
+    // Event-sourced CREATES are rendered — a different path (`agg.creates[0]`
+    // → the domain `_init` / fold) that works today.  Their DESTROY is not: no
+    // generator reads `canonicalDestroy.statements` on ANY persistence shape,
+    // so an ES destroy body is dropped exactly like a state-based one.  The
+    // exemption therefore scopes to the create arm; applying it per-AGGREGATE
+    // silently exempted the half it was never justified for.
+    const esCreateRendered = aggregateIsEventSourced(agg);
 
     for (const [label, action] of [
       ["create", agg.canonicalCreate],
       ["destroy", agg.canonicalDestroy],
     ] as const) {
+      if (label === "create" && esCreateRendered) continue;
       for (const s of action?.statements ?? []) {
         if (assignEffectReproduced(s, agg)) continue;
-        const reason =
-          DROPPED_STMT_REASON[s.kind] ??
-          (s.kind === "assign"
-            ? "the assignment never runs — the field takes its value from the request body instead"
-            : undefined);
+        const reason = droppedStmtReason(s.kind, label);
         if (!reason) continue;
         diags.push({
           severity: "error",

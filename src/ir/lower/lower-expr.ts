@@ -1181,25 +1181,31 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
     // names — positional backends (TS `new VO(…)`, .NET) ignore them.
     const props = vo.members.filter(isProperty);
     const fieldNames = props.map((p) => p.name);
-    // …and the DECIMAL-typed slots, so an integer-spelled argument
-    // (`Money { amount: 0, currency: "USD" }`) is retyped here rather than
-    // left for each backend to coerce.  It is a resolution, not a rendering
-    // choice: the declared field type is known at exactly this point and
-    // nowhere downstream, and a backend whose decimal is a real type rather
-    // than a widening (Java's `BigDecimal`) cannot compile `new Money(0, …)`
-    // at all.  See `retypeDecimalSlots`.
-    const decimalSlots = new Set(
-      props.filter((p) => isDecimalLike(lowerType(p.type, env))).map((p) => p.name),
-    );
-    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor", fieldNames, decimalSlots);
+    // …and each slot's DECLARED type, so a bare numeric literal argument
+    // (`Money { amount: 0, currency: "USD" }`) promotes against it — the same
+    // contextual promotion `emit` fields, `:=`, field defaults and workflow
+    // params already get.  It is a resolution, not a rendering choice: the
+    // declared slot type is known at exactly this point and nowhere
+    // downstream, and a backend whose decimal is a real type rather than a
+    // widening (Java's `BigDecimal`) cannot compile `new Money(0, …)` at all.
+    const slotTypes = new Map(props.map((p) => [p.name, lowerType(p.type, env)]));
+    return lowerBuilderCallAsCall(expr, env, name, "value-object-ctor", fieldNames, slotTypes);
   }
   const ent = findEntityByName(env, name);
   if (ent && isEntityPart(ent)) {
+    // A part's slots take the same contextual promotion as a value object's:
+    // `Line { price: 0 }` against `price: decimal` is the identical
+    // int-in-a-decimal-slot shape, and reaches the identical Java
+    // `_create(..., BigDecimal price, ...)` compile error.  Entries here are
+    // always named, so the slot mapping is unambiguous.
+    const partSlots = new Map(
+      ent.members.filter(isProperty).map((p) => [p.name, lowerType(p.type, env)]),
+    );
     const fields = expr.entries
       .filter((e) => e.name !== undefined)
       .map((e) => ({
         name: e.name as string,
-        value: lowerExpr(e.value, env),
+        value: lowerInSlot(e.value, partSlots.get(e.name as string), env),
       }));
     // A part contained by a SIBLING part (not the aggregate root) is nested:
     // its enclosing parent has no id at construction time, so the FK is stamped
@@ -1235,39 +1241,38 @@ function inferBuilderCallType(expr: BuilderCall, env: Env): TypeIR {
   return { kind: "entity", name };
 }
 
-/** A declared type whose values are decimal-valued — the slots that must not
- *  receive a bare integer literal. */
-function isDecimalLike(t: TypeIR): boolean {
-  const inner = t.kind === "optional" ? t.inner : t;
-  return inner.kind === "primitive" && (inner.name === "decimal" || inner.name === "money");
-}
-
 /**
- * Retype an integer-spelled literal argument sitting in a DECIMAL slot.
+ * Lower a builder-entry value against its DECLARED slot type, when known.
  *
- * `Money { amount: 0, currency: "USD" }` is ordinary Loom, and the literal is
- * honestly an `int` at the token level — but the slot it fills is `decimal`, so
- * an IR that keeps it as `int` is under-resolved and every backend has to guess.
- * The lenient ones (TS `number`, C# implicit conversion) guess right by
- * accident; Java's `BigDecimal` is a real type with no widening from `int`, so
- * it emitted `new Money(0, "USD")` and failed to compile.
+ * This is `lowerExprInContext` — the promotion seam `emit` fields, `:=`, field
+ * defaults and workflow params all use — reached from the builder-call path,
+ * which previously lowered every entry context-free.  Routing through the
+ * shared seam rather than post-hoc rewriting the lowered `args` matters for
+ * three reasons:
  *
- * Only LITERALS are retyped, and only int/long ones: a decimal-valued
- * expression is already decimal-typed, and coercing anything else here would be
- * a silent conversion rather than a spelling fix.
+ *   1. it promotes against the slot's OWN primitive (`money` stays `money`),
+ *      where a blanket int→decimal rewrite silently mis-resolves a `money`
+ *      slot — and TS/Python special-case `lit === "money"` only, so such a
+ *      slot would still have failed to compile;
+ *   2. it sees the AST node, so `DecLit → money` works too — a post-lowering
+ *      rewrite structurally cannot, the decimal-ness is already gone;
+ *   3. `src/language/validators/_shared.ts` requires the validator's mirror of
+ *      these promotions to stay in lockstep with `lowerExprInContext`.  A
+ *      second, divergent promotion rule is exactly the two-truths problem.
+ *
+ * ARRAY slots map element-wise: `Tiers { rates: [0, 1] }` against
+ * `rates: decimal[]` is the same int-in-a-decimal-slot shape one level down,
+ * and reaches the same Java `List<BigDecimal>` compile error.
  */
-function retypeDecimalSlots(
-  args: ExprIR[],
-  argNames: (string | undefined)[],
-  decimalSlots: ReadonlySet<string>,
-): ExprIR[] {
-  if (decimalSlots.size === 0) return args;
-  return args.map((a, i) => {
-    const slot = argNames[i];
-    if (slot === undefined || !decimalSlots.has(slot)) return a;
-    if (a.kind !== "literal" || (a.lit !== "int" && a.lit !== "long")) return a;
-    return { ...a, lit: "decimal" };
-  });
+function lowerInSlot(value: Expression, slot: TypeIR | undefined, env: Env): ExprIR {
+  if (slot === undefined) return lowerExpr(value, env);
+  if (slot.kind === "array" && isListLit(value)) {
+    return {
+      kind: "list",
+      elements: (value.elements ?? []).map((el) => lowerInSlot(el, slot.element, env)),
+    };
+  }
+  return lowerExprInContext(value, slot, env);
 }
 
 function lowerBuilderCallAsCall(
@@ -1276,22 +1281,33 @@ function lowerBuilderCallAsCall(
   name: string,
   callKind: "value-object-ctor" | "free",
   fieldNames?: string[],
-  decimalSlots?: ReadonlySet<string>,
+  slotTypes?: ReadonlyMap<string, TypeIR>,
 ): ExprIR {
   // Hoist `style:` named arg into its own IR field — see lowerStyleArg.
   // Filtering happens by index so `args` and `argNames` stay parallel.
   const styleHoist = hoistStyleArg(expr.entries, env);
   const entries = styleHoist.remainingEntries;
-  const args = entries.map((e) => lowerExpr(e.value, env));
   // Explicit entry name wins; otherwise fall back to the declared field
   // name at this position (value-object ctors — see lowerBuilderCall).
   const argNames = entries.map((e, i) => e.name || fieldNames?.[i]);
+  // A MIXED named/positional construction (`Pair { b: 2, 1 }`) makes the
+  // positional fallback alias a slot an earlier named entry already took, so
+  // `argNames` repeats and the slot mapping is a guess.  Promote only when the
+  // mapping is unambiguous — a wrong-slot promotion turns a silently
+  // mis-ordered construction into a hard compile failure, which is a worse
+  // trade than leaving it exactly as it was.
+  const unambiguous = new Set(argNames.filter((n) => n !== undefined)).size === argNames.length;
+  const args = entries.map((e, i) =>
+    slotTypes && unambiguous
+      ? lowerInSlot(e.value, slotTypes.get(argNames[i] ?? ""), env)
+      : lowerExpr(e.value, env),
+  );
   const named = argNames.some((n) => n !== undefined);
   return {
     kind: "call",
     callKind,
     name,
-    args: decimalSlots ? retypeDecimalSlots(args, argNames, decimalSlots) : args,
+    args,
     ...(named ? { argNames } : {}),
     ...(styleHoist.style ? { style: styleHoist.style } : {}),
   };

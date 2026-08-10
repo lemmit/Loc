@@ -27,6 +27,8 @@ const wrap = (agg: string): string => `
 system P {
   subdomain D {
     context Orders {
+      enum Priority { low  high }
+      valueobject Money { amount: decimal  currency: string }
 ${agg}
       repository Orders for Order { }
     }
@@ -148,5 +150,73 @@ describe("validator — the lifecycle body no backend renders", () => {
         apply(e: Opened) { }
       }`);
     expect(codes).not.toContain(CODE);
+  });
+
+  // ── cases an adversarial review of this check surfaced ───────────────────
+  // Each of these SILENTLY PASSED (or falsely fired) in the first version.
+
+  it("does not exempt a `let` that merely SHADOWS the field name", async () => {
+    // The exemption is `field := <same-named PARAM>`.  Matching on the name
+    // alone let a computed local through — the exact drop the check exists for.
+    const codes = await codesFor(`
+      aggregate Order {
+        code: string
+        total: int
+        create(code: string, qty: int) {
+          let total = qty * 2
+          code := code
+          total := total
+        }
+      }`);
+    expect(codes).toContain(CODE);
+  });
+
+  it("reports a collection mutation, which fell through the reason table", async () => {
+    // `add`/`remove`/`call`/`expression`/`variant-match` all reported NOTHING
+    // while being just as dropped as an `emit`.  The table is an exhaustive
+    // switch now, so a new StmtIR kind is a compile error instead.
+    const codes = await codesFor(`
+      aggregate Order {
+        code: string
+        tags: string[]
+        create(code: string, tag: string) { code := code  tags += tag }
+      }`);
+    expect(codes.filter((c) => c === CODE).length).toBe(1);
+  });
+
+  it("exempts an ENUM / VO / differently-spelled numeric default restated in the body", async () => {
+    // The first version compared literal `value` strings, so it FALSELY FIRED
+    // on every default that isn't a bare int/string literal — including the
+    // enum spelling this check's own fixtures were rewritten into.
+    for (const agg of [
+      `aggregate Order {
+        code: string
+        priority: Priority = Priority.low
+        create(code: string) { code := code  priority := Priority.low }
+      }`,
+      `aggregate Order {
+        code: string
+        total: decimal = 0
+        create(code: string) { code := code  total := 0.0 }
+      }`,
+      `aggregate Order {
+        code: string
+        total: Money = Money { amount: 0, currency: "USD" }
+        create(code: string) { code := code  total := Money { amount: 0, currency: "USD" } }
+      }`,
+    ]) {
+      expect(await codesFor(agg), agg).not.toContain(CODE);
+    }
+  });
+
+  it("still fires when the body value DIFFERS from the field default", async () => {
+    // The guard against the exemption above swallowing real drops.
+    const codes = await codesFor(`
+      aggregate Order {
+        code: string
+        total: int = 0
+        create(code: string) { code := code  total := 7 }
+      }`);
+    expect(codes).toContain(CODE);
   });
 });

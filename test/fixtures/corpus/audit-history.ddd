@@ -64,7 +64,11 @@ system AuditHistorySystem {
   }
 
   test e2e "entity history replays the commands that changed the row" against d {
-    let o = api.orders.create({ reference: "R1", quantity: 5, status: 0 })
+    // `status` is deliberately OMITTED: the field default now reaches the wire
+    // schema, so leaving it out exercises the very path the create-body drop
+    // used to break.  Sending `status: 0` here was the workaround for that bug
+    // — keeping it would have left the fix unproven at runtime.
+    let o = api.orders.create({ reference: "R1", quantity: 5 })
     api.orders.cancel(o, { reason: 7 })
     let trail = api.orders.history(o)
     expect(trail.count).toBe(2)
