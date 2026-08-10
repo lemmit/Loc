@@ -23,6 +23,7 @@ import { backendServesRealtime } from "../../ir/util/channels.js";
 import { uiUsesDataGrid } from "../../ir/util/data-grid.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
+import { readableProjectionNames } from "../../ir/util/projection-read.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
@@ -580,8 +581,19 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   // Paged-ness is derived from the find's return type, so the collector needs
   // the same aggregate→context index the walker resolves through.
   const bcByAggregate = bcByAggregateOf(contexts);
+  // Arms the detector's Pattern H (`<apiHandle>.<Proj>`) — the SHARED readability
+  // predicate, so Feliz agrees with every other frontend about which projections
+  // are readable even though it emits them completely differently.
+  const projectionNames = readableProjectionNames(contexts);
   for (const page of ui.pages) {
-    for (const r of collectPageReads(page, apiParamNames, aggregateNames, nameCtx, bcByAggregate)) {
+    for (const r of collectPageReads(
+      page,
+      apiParamNames,
+      aggregateNames,
+      nameCtx,
+      bcByAggregate,
+      projectionNames,
+    )) {
       if (seen.has(r.field)) continue;
       seen.add(r.field);
       out.push(r);

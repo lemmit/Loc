@@ -31,6 +31,7 @@ import {
   idLabelsFrom,
   pageMetaFieldName,
   pageMetaMember,
+  projectionFieldName,
   readFieldName,
 } from "./wire.js";
 
@@ -290,6 +291,14 @@ export const felizTarget: WalkerTarget = {
   // value QueryView matches on, and `renderApiHoisting` emits nothing (there is
   // no page-top hoist to make).
   buildHookUse: (detected) => {
+    // A query-time PROJECTION read (M-T1.3 Phase 1) resolves to its own Model
+    // field — `Remote<<Proj>Row option>`, filled by the init Cmd and rendered
+    // through `View.remoteOne`, exactly like a byId read's arm.  No import and
+    // no hoist: Elmish has neither (see `feliz/projection-read.ts`).
+    if (detected.kind === "projection") {
+      const field = projectionFieldName(detected.aggregateName);
+      return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
+    }
     // A `byId` read resolves to the `<Agg>ById` Model field (its `Remote<'T
     // option>` envelope); `all` (and any other read) to `All<Plural>`.  The
     // page-entry `Cmd` — not this call — issues the byId fetch, so the view

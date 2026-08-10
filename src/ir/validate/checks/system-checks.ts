@@ -417,7 +417,14 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
 // is unreachable" are indistinguishable from the outside, and the only honest
 // way to tell them apart is to remove a framework and watch the diagnostic
 // come back (`projection-select-unresolved.test.ts`).
-export const PROJECTION_READ_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "flutter"]);
+export const PROJECTION_READ_FRAMEWORKS = new Set([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "flutter",
+]);
 
 /** `loom.ui-projection-read-unsupported`, the FRAMEWORK half.  The FLAVOUR half
  *  (a keyed / folded projection, unreadable on every target) is F3 in
