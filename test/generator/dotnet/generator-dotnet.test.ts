@@ -821,7 +821,7 @@ describe(".NET generator", () => {
       // An unreadable body is malformed, not invalid — 400, no `errors[]`
       // (RS-9's split, matching hono / Spring).
       expect(validation).toMatch(/Status = 400/);
-      expect(validation).toMatch(/Detail = "Malformed request body\."/);
+      expect(validation).toMatch(/Detail = "Malformed JSON in request body"/);
       // The framework's own ProblemDetails (415 and friends) is normalised
       // rather than forked — same `about:blank` type, no body-borne traceId.
       expect(program).toMatch(/CustomizeProblemDetails/);

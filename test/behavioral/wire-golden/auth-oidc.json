@@ -101,6 +101,33 @@
         "total": 0,
         "totalPages": 0
       }
+    },
+    {
+      "seq": 9,
+      "method": "PATCH",
+      "path": "/api/tickets",
+      "status": 401,
+      "body": {
+        "error": "unauthorized"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 401,
+      "body": {
+        "error": "unauthorized"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/api/tickets",
+      "status": 401,
+      "body": {
+        "error": "unauthorized"
+      }
     }
   ]
 }

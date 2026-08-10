@@ -1,11 +1,11 @@
 {
-  "case": "operation-returns",
+  "case": "field-defaults",
   "oracle": "node",
   "entries": [
     {
       "seq": 0,
       "method": "POST",
-      "path": "/api/orders",
+      "path": "/api/items",
       "status": 201,
       "body": {
         "id": "<volatile:key>"
@@ -13,37 +13,47 @@
     },
     {
       "seq": 1,
-      "method": "POST",
-      "path": "/api/orders/{id}/accept",
+      "method": "GET",
+      "path": "/api/items/{id}",
       "status": 200,
       "body": {
-        "type": "string",
-        "value": "OR1"
+        "active": true,
+        "archived": false,
+        "flag": false,
+        "id": "<volatile:key>",
+        "name": "Widget",
+        "note": "none",
+        "qty": 1,
+        "version": 1
       }
     },
     {
       "seq": 2,
       "method": "POST",
-      "path": "/api/orders/{id}/update",
+      "path": "/api/items/{id}/update",
       "status": 204,
       "body": ""
     },
     {
       "seq": 3,
       "method": "GET",
-      "path": "/api/orders/{id}",
+      "path": "/api/items/{id}",
       "status": 200,
       "body": {
-        "code": "OR2",
+        "active": false,
+        "archived": true,
+        "flag": true,
         "id": "<volatile:key>",
-        "reserved": false,
-        "version": 3
+        "name": "Widget-2",
+        "note": "sent",
+        "qty": 7,
+        "version": 2
       }
     },
     {
       "seq": 4,
       "method": "POST",
-      "path": "/api/orders",
+      "path": "/api/items",
       "status": 201,
       "body": {
         "id": "<volatile:key>"
@@ -52,20 +62,28 @@
     {
       "seq": 5,
       "method": "GET",
-      "path": "/api/orders?dir=asc&sort=code",
+      "path": "/api/items?dir=asc&sort=name",
       "status": 200,
       "body": {
         "items": [
           {
-            "code": "OR2",
+            "active": false,
+            "archived": true,
+            "flag": true,
             "id": "<volatile:key>",
-            "reserved": false,
-            "version": 3
+            "name": "Widget-2",
+            "note": "sent",
+            "qty": 7,
+            "version": 2
           },
           {
-            "code": "OR3",
+            "active": true,
+            "archived": false,
+            "flag": false,
             "id": "<volatile:key>",
-            "reserved": false,
+            "name": "Widget-3",
+            "note": "none",
+            "qty": 1,
             "version": 1
           }
         ],
@@ -78,18 +96,18 @@
     {
       "seq": 6,
       "method": "DELETE",
-      "path": "/api/orders/{id}",
+      "path": "/api/items/{id}",
       "status": 204,
       "body": ""
     },
     {
       "seq": 7,
       "method": "GET",
-      "path": "/api/orders/{id}",
+      "path": "/api/items/{id}",
       "status": 404,
       "body": {
-        "detail": "Order {id} not found",
-        "instance": "/api/orders/{id}",
+        "detail": "Item {id} not found",
+        "instance": "/api/items/{id}",
         "status": 404,
         "title": "Not Found",
         "type": "about:blank"
@@ -98,15 +116,19 @@
     {
       "seq": 8,
       "method": "GET",
-      "path": "/api/orders",
+      "path": "/api/items",
       "status": 200,
       "body": {
         "items": [
           {
-            "code": "OR2",
+            "active": false,
+            "archived": true,
+            "flag": true,
             "id": "<volatile:key>",
-            "reserved": false,
-            "version": 3
+            "name": "Widget-2",
+            "note": "sent",
+            "qty": 7,
+            "version": 2
           }
         ],
         "page": 1,
@@ -117,34 +139,52 @@
     },
     {
       "seq": 9,
-      "method": "POST",
-      "path": "/api/orders/{id}/reject",
-      "status": 404,
-      "body": {
-        "attemptedCode": "OR2",
-        "detail": "Not Found",
-        "instance": "/api/orders/{id}/reject",
-        "resource": "OR2",
-        "status": 404,
-        "title": "Not Found",
-        "type": "/errors/not-found"
-      }
+      "method": "DELETE",
+      "path": "/api/items/{id}",
+      "status": 204,
+      "body": ""
     },
     {
       "seq": 10,
+      "method": "GET",
+      "path": "/api/items/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Item {id} not found",
+        "instance": "/api/items/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/items",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 12,
       "method": "PATCH",
-      "path": "/api/orders",
+      "path": "/api/items",
       "status": 405,
       "body": {
-        "detail": "method PATCH is not supported for /api/orders",
-        "instance": "/api/orders",
+        "detail": "method PATCH is not supported for /api/items",
+        "instance": "/api/items",
         "status": 405,
         "title": "Method Not Allowed",
         "type": "about:blank"
       }
     },
     {
-      "seq": 11,
+      "seq": 13,
       "method": "GET",
       "path": "/__loom_no_such_path",
       "status": 404,
@@ -157,13 +197,13 @@
       }
     },
     {
-      "seq": 12,
+      "seq": 14,
       "method": "POST",
-      "path": "/api/orders",
+      "path": "/api/items",
       "status": 400,
       "body": {
         "detail": "Malformed JSON in request body",
-        "instance": "/api/orders",
+        "instance": "/api/items",
         "status": 400,
         "title": "Bad Request",
         "type": "about:blank"

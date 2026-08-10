@@ -785,7 +785,7 @@ defmodule ${appModule}Web.NotFoundController do
 
     case allow do
       [] ->
-        respond(conn, 404, "Not Found", "no route found for #{conn.method} #{conn.request_path}")
+        respond(conn, 404, "Not Found", "no route for #{conn.method} #{conn.request_path}")
 
       methods ->
         conn
@@ -952,6 +952,13 @@ defmodule ${appModule}Web.ErrorJSON do
   # Phoenix passes the raised exception when there is one; its message is a
   # better \`detail\` than the bare reason phrase ("no route found for PUT
   # /api/items").  Falls back to the phrase so the member is never absent.
+  # A body Plug.Parsers could not read.  Its exception message names the
+  # decoder and the raw input, so it is neither safe nor portable as a
+  # \`detail\`; every backend sends this one wording for the same fault, and the
+  # cross-backend wire golden compares it byte-for-byte.
+  defp detail_for(%{reason: %Plug.Parsers.ParseError{}}, _title),
+    do: "Malformed JSON in request body"
+
   defp detail_for(%{reason: %{message: message}}, _title) when is_binary(message), do: message
   defp detail_for(_assigns, title), do: title
 

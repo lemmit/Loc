@@ -215,9 +215,14 @@ the conforming backends, and the fix that established it.
 - **Provenance.** #1620 (hardened changeset-error renderer), the two-tier
   400/422 model dispositioned in `generated-code-review-2026-06-30.md`. Tier:
   **T1** (structural envelope is T0 via the spec; the 400-vs-422 *routing* is
-  runtime). The framework half is gated per-PR by
-  `test/conformance/framework-error-contract-parity.test.ts` — statically,
-  because the behavioural tier only makes requests the API serves.
+  runtime). The framework half is gated per-PR twice over:
+  `test/conformance/framework-error-contract-parity.test.ts` pins the SEAM each
+  backend installs, and the M-T9.11 wire golden now carries three
+  **framework-fault probes** per case — a wrong verb, an unknown path, an
+  unreadable body — issued through each runner's dispatch chokepoint, so the
+  RESPONSE is compared byte-for-byte on five booted backends. The static gate
+  existed because the emitted suites only request what the API serves; the
+  probes remove that limitation rather than work around it.
 
 ### RS-10 · Rehydration trusts the store — invariants guard transitions only
 - **Guarantee.** Reading a persisted row never re-runs the aggregate's

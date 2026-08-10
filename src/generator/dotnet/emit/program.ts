@@ -1001,6 +1001,15 @@ app.UseStatusCodePages(async (StatusCodeContext statusCodeContext) =>
     var http = statusCodeContext.HttpContext;
     var status = http.Response.StatusCode;
     var title = ReasonPhrases.GetReasonPhrase(status);
+    // RFC 7807 asks \`detail\` for an explanation specific to THIS occurrence.
+    // The reason phrase just repeats \`title\`; the cross-backend wire golden
+    // showed it as the one member still diverging once the statuses converged.
+    var detail = status switch
+    {
+        404 => $"no route for {http.Request.Method} {http.Request.Path}",
+        405 => $"method {http.Request.Method} is not supported for {http.Request.Path}",
+        _ => title,
+    };
     ${asLifecycleStmt(
       renderDotnetLogCall("clientError", [
         { name: "error", valueExpr: "title" },
@@ -1012,7 +1021,7 @@ app.UseStatusCodePages(async (StatusCodeContext statusCodeContext) =>
         Type = "about:blank",
         Title = title,
         Status = status,
-        Detail = title,
+        Detail = detail,
         Instance = http.Request.Path,
     }, (JsonSerializerOptions?)null, "application/problem+json");
 });

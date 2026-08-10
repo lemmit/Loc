@@ -175,6 +175,45 @@
         "total": 0,
         "totalPages": 0
       }
+    },
+    {
+      "seq": 14,
+      "method": "PATCH",
+      "path": "/api/accounts",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/accounts",
+        "instance": "/api/accounts",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/api/accounts",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/accounts",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
     }
   ]
 }
