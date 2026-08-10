@@ -23,7 +23,15 @@ system HandlerScaffold {
         code: string
         status: string = "new"
         priority: Priority = Priority.low
-        total: Money = Money { amount: 0, currency: "USD" }
+        // NO default here, deliberately.  A VALUE-OBJECT-typed field default
+        // emits non-compiling code at the wire boundary — the default renders
+        // as the DOMAIN class into the WIRE request DTO (python: `Incompatible
+        // types ... variable has type "wire_models.Money"`; .NET: CS0246, the
+        // domain `Money` is not even in scope there).  TS survives only by
+        // structural typing.  That is a separate, pre-existing emitter gap
+        // (see the PR discussion) — this fixture exercises the SCALAR and ENUM
+        // defaults below, which is what the create-body drop was about.
+        total: Money
         create(code: string) { code := code }
         operation reprice(newTotal: Money) { total := newTotal }
         operation escalate(level: Priority) { priority := level }
