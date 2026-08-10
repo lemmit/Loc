@@ -1627,6 +1627,16 @@ export const DIAGNOSTIC_MESSAGES = {
     `The Dapper adapter renders capability filters as raw SQL and cannot bind the ` +
     `principal claims a hierarchical scope predicate reads — use 'persistence: efcore' ` +
     `on this deployable, or flatten the tenancy to a non-hierarchical registry.`,
+  "loom.dapper-unsupported#feature": (p: {
+    name: unknown;
+    ctxName: unknown;
+    projection: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
+    `the query-time projection '${p.projection}', which the Dapper adapter does not emit — the ` +
+    `generated project would reference EF Core's AppDbContext and fail to compile. Drop the ` +
+    `'persistence: dapper' clause to use the default (EF Core) adapter, which emits it, or host ` +
+    `the projection on a different deployable.`,
   "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
