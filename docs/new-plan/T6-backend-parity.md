@@ -437,7 +437,7 @@ So `POST /orders/{id}/cancel` under contention is a **silent lost update** on el
 
 Sources: M-T9.25 census sweep 3 (409/500). Relates to RS-20 (`$.version` on the wire, already waived on java) and M-T9.3 (per-PR runtime boot gates — a concurrency case belongs there).
 
-## M-T6.28 — Node's error ladder reaches three of its five sub-apps — `open` · **M** · P2 ⭐ the node twin of M-T6.25
+## M-T6.28 — Node's error ladder: the root floor exists now; two routers still can't say 409 — `partial` (re-verified in code 2026-08-10) · **M** · P2 ⭐ the node twin of M-T6.29
 Found 2026-08-02 by the M-T9.25 409/500 census sweep.
 
 Node does not install an app-global handler. `api/http/index.ts` mounts five sub-apps with `app.route(...)` and defines **no `onError`**; each router carries its own copy of the ladder. Three consequences, all in one generated app:
