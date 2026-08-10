@@ -8,6 +8,7 @@ export {
   renderListWrapperFilter,
   renderProblemDetailsFilter,
   renderRequiredFromCtorParamFilter,
+  renderValidationProblem,
 } from "./emit/api.js";
 export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";
 export { renderBaseReaderImpl, renderBaseReaderInterface } from "./emit/base-reader.js";

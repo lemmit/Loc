@@ -1548,13 +1548,15 @@ function renderProblemPy(
     : "";
   return `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
+from http import HTTPStatus
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel${integrityImport}
+from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException${integrityImport}
 
 from app.domain.errors import (
     AggregateNotFoundError,
@@ -1645,6 +1647,7 @@ def problem(
     title: str,
     detail: str,
     errors: list[dict[str, str]] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body: dict[str, object] = {
         "type": "about:blank",
@@ -1655,7 +1658,12 @@ def problem(
     }
     if errors is not None:
         body["errors"] = errors
-    return JSONResponse(body, status_code=status, media_type="application/problem+json")
+    return JSONResponse(
+        body,
+        status_code=status,
+        media_type="application/problem+json",
+        headers=headers,
+    )
 
 
 def _pointer(loc: tuple[object, ...]) -> str:
@@ -1696,6 +1704,14 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, err: RequestValidationError) -> JSONResponse:
+        # RS-9's 400/422 split: an UNREADABLE body is malformed, not invalid —
+        # no field-level pointer describes it, and hono/.NET/Spring all answer
+        # 400.  FastAPI funnels it into RequestValidationError anyway (pydantic
+        # tags it \`json_invalid\`), which is why python was the one backend
+        # answering 422 with a nonsense \`/1\` byte-offset pointer.
+        if any(str(e.get("type", "")) == "json_invalid" for e in err.errors()):
+            log("warn", "client_error", error="Malformed request body.", status=400)
+            return problem(request, 400, "Bad Request", "Malformed request body.")
         errors = []
         for e in err.errors():
             entry: dict[str, str] = {
@@ -1717,6 +1733,31 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # \`errors[]\` pointer array is what distinguishes them, and python was
         # the one backend collapsing the two.
         return problem(request, 422, "Validation failed", "One or more fields are invalid.", errors)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http(request: Request, err: StarletteHTTPException) -> JSONResponse:
+        # FRAMEWORK-originated client faults — an unmatched route (404), an
+        # a method the route does not serve (405), a media type it cannot
+        # read (415).  These
+        # never reach a route body, so none of the domain handlers above ever
+        # sees them, and Starlette's default answers \`{"detail": "..."}\` as
+        # plain application/json: a SECOND error envelope on a wire that has
+        # already committed to RFC 7807.  Route them through \`problem\` so a
+        # client parses ONE shape regardless of which layer refused.
+        #
+        # \`err.headers\` is forwarded because the framework puts semantics
+        # there — a 405 carries \`Allow\`, a 401 carries \`WWW-Authenticate\`;
+        # dropping them would trade one contract break for another.
+        title = HTTPStatus(err.status_code).phrase
+        detail = err.detail if isinstance(err.detail, str) else title
+        log("warn", "client_error", error=detail, status=err.status_code)
+        return problem(
+            request,
+            err.status_code,
+            title,
+            detail,
+            headers=dict(err.headers) if err.headers else None,
+        )
 
     @app.exception_handler(Exception)
     async def _internal(request: Request, err: Exception) -> JSONResponse:

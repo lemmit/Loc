@@ -219,6 +219,10 @@ export function emitVanillaShellFiles(
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(
+    `lib/${appName}_web/controllers/not_found_controller.ex`,
+    renderVanillaNotFoundController(appModule),
+  );
+  out.set(
     `lib/${appName}_web/controllers/health_controller.ex`,
     renderVanillaHealthController(appModule),
   );
@@ -728,6 +732,50 @@ ${rootApiScope}${liveScope}${authScope}${spaScope}
     pipe_through :api
 ${routeLines}
   end
+
+  # Framework 404 — a path no route matched, or a verb an existing path does
+  # not serve (phoenix's router raises NoRouteError for both).  Declared LAST
+  # so it fires only when nothing above did.
+  #
+  # It exists to own the CONTENT TYPE.  The ErrorJSON view already renders the
+  # RFC 7807 body, but phoenix renders it through the \`json\` format, whose
+  # MIME type is \`application/json\`, and render_errors exposes no knob for
+  # that — a controller is the only place \`application/problem+json\` can be
+  # set.  So a
+  # client that dispatches on the content type saw the API's one non-problem
+  # error response here, at the single point every mistyped request lands.
+  scope "/", ${appModule}Web do
+    match :*, "/*path", NotFoundController, :not_found
+  end
+end
+`;
+}
+
+function renderVanillaNotFoundController(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}Web.NotFoundController do
+  use ${appModule}Web, :controller
+
+  @moduledoc """
+  Catch-all for a request no route matched — an unknown path, or a verb an
+  existing path does not serve.  Answers the same RFC 7807 envelope every
+  domain error on this API answers, under \`application/problem+json\`.
+  """
+
+  def not_found(conn, _params) do
+    body =
+      Jason.encode!(%{
+        type: "about:blank",
+        title: "Not Found",
+        status: 404,
+        detail: "no route found for #{conn.method} #{conn.request_path}",
+        instance: conn.request_path
+      })
+
+    conn
+    |> put_resp_content_type("application/problem+json")
+    |> send_resp(404, body)
+  end
 end
 `;
 }
@@ -823,11 +871,44 @@ end
 }
 
 function renderVanillaErrorJson(appModule: string): string {
+  // The FRAMEWORK error view — what Phoenix renders when a request never
+  // reaches a controller (`Phoenix.Router.NoRouteError` for an unknown path or
+  // a verb the route does not serve, a 500 from a crash below the pipeline).
+  //
+  // This is RFC 7807, the same envelope `ProblemDetails` gives every DOMAIN
+  // error, because a client parses ONE error shape per API or it parses two.
+  // It used to be Phoenix's scaffold default, `%{errors: %{detail: …}}` — so a
+  // wrong verb answered a shape that appears nowhere else on the API and
+  // satisfies none of RS-9 (`type` present and "about:blank").  Measured
+  // across the five backends, framework errors produced three statuses and
+  // five body shapes while every domain error was byte-identical.
+  //
+  // `template` is "404.json" / "405.json" / "500.json"; the status prefix is
+  // the authority for the numeric member, and `status_message_from_template`
+  // gives the reason phrase ("Not Found").
   return `# Auto-generated.
 defmodule ${appModule}Web.ErrorJSON do
-  def render(template, _assigns) do
-    %{errors: %{detail: Phoenix.Controller.status_message_from_template(template)}}
+  def render(template, assigns) do
+    status = template |> String.split(".") |> hd() |> String.to_integer()
+    title = Phoenix.Controller.status_message_from_template(template)
+
+    %{
+      type: "about:blank",
+      title: title,
+      status: status,
+      detail: detail_for(assigns, title),
+      instance: instance_for(assigns)
+    }
   end
+
+  # Phoenix passes the raised exception when there is one; its message is a
+  # better \`detail\` than the bare reason phrase ("no route found for PUT
+  # /api/items").  Falls back to the phrase so the member is never absent.
+  defp detail_for(%{reason: %{message: message}}, _title) when is_binary(message), do: message
+  defp detail_for(_assigns, title), do: title
+
+  defp instance_for(%{conn: %{request_path: path}}) when is_binary(path), do: path
+  defp instance_for(_assigns), do: nil
 end
 `;
 }

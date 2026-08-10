@@ -208,6 +208,13 @@ export const LogEvents = {
     fields: ["aggregate", "message", "status"],
   },
   notFound: { event: "not_found", level: "warn", fields: ["aggregate", "id", "status"] },
+  /** A FRAMEWORK-originated client fault — the request never reached the
+   *  domain: an unmatched route, an unsupported method, an unreadable body.
+   *  Deliberately distinct from `domain_error` (which always names an
+   *  aggregate): these carry no aggregate because none was resolved, and a
+   *  dashboard wants to tell "the client called something that isn't there"
+   *  apart from "the client called something that refused". */
+  clientError: { event: "client_error", level: "warn", fields: ["error", "status"] },
 
   // ─── domain — error (system fault) ───────────────────────────────────
   externHandlerThrew: {
