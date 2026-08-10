@@ -1343,3 +1343,47 @@ system D {
     expect(files.get("api/Api.csproj")!).not.toContain("Ardalis");
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-T6.26 — the two `authz-filter` sentinels under `persistence: dapper`.
+// `deny` RENDERS (`1 = 0`, principal-free); the hierarchical `deep`/`global`
+// scope sentinel is an HONEST boundary.  Before this both fell through
+// `whereToSql`'s `default:` and CRASHED codegen — and the corpus map already
+// claimed the hierarchy case was validator-rejected, which it was not.
+// ---------------------------------------------------------------------------
+describe("dapper — authz-filter sentinels", () => {
+  const hierarchical = `
+system H {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+  api A from S
+  subdomain S {
+    context O {
+      aggregate Account with tenantOwned, crudish { balance: int }
+      aggregate Org with crudish {
+        name: string
+        implements tenantRegistry
+      }
+      repository Accounts for Account { }
+      repository Orgs for Org { }
+      policy { allow deep on Account }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080  auth: required }
+}`;
+
+  it("rejects a hierarchical scope filter with loom.dapper-unsupported instead of crashing", async () => {
+    const { errors } = await emit(hierarchical);
+    expect(
+      errors.some((e) => /hierarchical \(deep\/global\) tenancy scope filter/.test(e)),
+      `expected the deep-scope boundary diagnostic, got: ${errors.join(" | ")}`,
+    ).toBe(true);
+    // The generic `loom.dapper-unsupported` tail claims every surviving reject
+    // has no relational mapping on ANY adapter — false here, efcore renders it.
+    expect(errors.some((e) => /use 'persistence: efcore' on this deployable/.test(e))).toBe(true);
+    // And it must be a DIAGNOSTIC, not the old generator throw.
+    expect(errors.some((e) => /outside the Dapper SQL subset/.test(e))).toBe(false);
+  });
+});

@@ -82,6 +82,55 @@ describe("policy deny — .NET (EF Core)", () => {
   });
 });
 
+describe("policy deny — .NET (Dapper)", () => {
+  // M-T6.26.  The .NET backend's SECOND persistence adapter used to CRASH
+  // codegen here (`whereToSql` had no `authz-filter` arm, so the deny sentinel
+  // fell to its `default:` and threw), and never read `writeScopeFilter` at all
+  // — while the shared command layer already dispatched mutations to
+  // `GetByIdForWriteAsync` and the shared interface already declared it.
+  it("ANDs `1 = 0` into every read SELECT (deny read) and emits the write guard (deny write)", async () => {
+    const secret = await fileContaining(
+      "dotnet { persistence: dapper }",
+      "Repositories/SecretRepository",
+    );
+    const account = await fileContaining(
+      "dotnet { persistence: dapper }",
+      "Repositories/AccountRepository",
+    );
+    // Deny READ — the always-false term is spliced into EVERY read site, not
+    // just the auto findAll: GetById, FindManyByIds, the findAll page + its
+    // COUNT.  A `1 = 0` that reached only one of them would still leak.
+    const readSites = [...secret.matchAll(/1 = 0/g)].length;
+    expect(readSites).toBeGreaterThanOrEqual(4);
+    expect(secret).toContain(
+      "FROM secrets WHERE id = @id AND (tenant_id = @__cu_tenantId) AND 1 = 0",
+    );
+    expect(secret).toContain(
+      "SELECT COUNT(*) FROM secrets WHERE (tenant_id = @__cu_tenantId) AND 1 = 0",
+    );
+    // Deny WRITE — reads stay OPEN on Account (tenant floor only, no `1 = 0`),
+    // and the command load is the write-scope existence guard.  The read filter
+    // is spliced into the guard too: EF gets that from HasQueryFilter for free,
+    // Dapper has to say it, or the write scope would be wider than the read one.
+    expect(account).toContain("public async Task<Account?> GetByIdForWriteAsync(");
+    expect(account).toContain(
+      "SELECT EXISTS (SELECT 1 FROM accounts WHERE id = @id AND (1 = 0) AND (tenant_id = @__cu_tenantId))",
+    );
+    expect(account).not.toContain(
+      "FROM accounts WHERE id = @id AND (tenant_id = @__cu_tenantId) AND 1 = 0",
+    );
+  });
+
+  it("leaves an undenied aggregate's repository untouched", async () => {
+    const org = await fileContaining(
+      "dotnet { persistence: dapper }",
+      "Repositories/OrgRepository",
+    );
+    expect(org).not.toContain("1 = 0");
+    expect(org).not.toContain("GetByIdForWriteAsync");
+  });
+});
+
 describe("policy deny — Python (FastAPI/SQLAlchemy)", () => {
   it("renders the and_(is_(None), isnot(None)) contradiction", async () => {
     const secret = await fileContaining("python", "secret_repository");
