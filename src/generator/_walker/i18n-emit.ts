@@ -135,24 +135,44 @@ function localizedRawOf(
     const key = messageKey(ctx.i18nPrefix, role, literal);
     return ctx.target.renderInterpolation(translateCall(ctx, key, literal), TRANSLATED);
   }
-  // Interpolated slot (a lowered backtick template) under i18n → an ICU `t()`
-  // call: the default carries the named placeholders (`"Order {id}"`), the key
-  // is hashed over the positional form, and the holes render into a values
-  // object (`{ id: order.id }`) the shim substitutes at runtime.  Keyed
-  // identically to the catalog entry (both call `icuFromConcat` + `messageKey`).
-  if (arg && ctx.i18nPrefix) {
-    const icu = icuFromConcat(arg);
-    if (icu) {
-      const key = messageKey(ctx.i18nPrefix, role, icu.positional);
-      const values = icu.holes.map((h) => ({ name: h.name, expr: emitExpr(h.expr, ctx) }));
-      return ctx.target.renderInterpolation(
-        translateCall(ctx, key, icu.display, values),
-        TRANSLATED,
-      );
-    }
-  }
+  const icu = icuTranslateCall(arg, ctx, role);
+  if (icu) return ctx.target.renderInterpolation(icu, TRANSLATED);
   // Non-i18n / dynamic / empty — exactly the pre-i18n behaviour, at `argIndex`.
   return (arg ? renderTextContent(arg, ctx) : undefined) ?? fallback;
+}
+
+/** The INTERPOLATED-slot branch, shared by the text-position localizer above and
+ *  the three ATTRIBUTE-position ones below.
+ *
+ *  A lowered backtick template (`` `Delete {order.id}` ``) under i18n becomes an
+ *  ICU `t()` call: the default carries the named placeholders (`"Delete {id}"`),
+ *  the key is hashed over the positional form, and the holes render into a values
+ *  object (`{ id: order.id }`) the shim substitutes at runtime.  Keyed identically
+ *  to the catalog entry, because both sides call `icuFromConcat` + `messageKey`.
+ *
+ *  Returns `undefined` when there is nothing to translate — i18n is off, the slot
+ *  is absent, or the expression is not an interpolated template at all (a bare
+ *  `label: row.name` is dynamic but carries no translatable TEXT, so
+ *  `icuFromConcat` rejects it and the caller's raw-expression branch still runs).
+ *
+ *  This lives here rather than at each call site because the ATTRIBUTE helpers
+ *  originally had only two branches — literal and raw-expression — so an
+ *  interpolated `label:`/`title:` fell straight through to concatenation while the
+ *  extraction pass still wrote its ICU entry into the catalog.  That is the
+ *  dead-key shape `user-visible-slot-coverage.test.ts` cannot see (the slot DOES
+ *  render, just not through `t()`), and it emitted the very concatenation
+ *  `loom.user-visible-concat` bans in `.ddd` source. */
+function icuTranslateCall(
+  arg: ExprIR | undefined,
+  ctx: WalkContext,
+  role: string,
+): string | undefined {
+  if (!arg || !ctx.i18nPrefix) return undefined;
+  const icu = icuFromConcat(arg);
+  if (!icu) return undefined;
+  const key = messageKey(ctx.i18nPrefix, role, icu.positional);
+  const values = icu.holes.map((h) => ({ name: h.name, expr: emitExpr(h.expr, ctx) }));
+  return translateCall(ctx, key, icu.display, values);
 }
 
 /** The NAMED-arg twin of {@link localizedRaw} (`Alert.title` → `alertTitle`,
@@ -213,6 +233,9 @@ export function localizedNamedAttr(
   const arg = namedArgValue(call, name);
   const literal = literalString(arg);
   if (literal === undefined) {
+    // INTERPOLATED (`` title: `Order {o.id}` ``) — a real translatable message.
+    const icu = icuTranslateCall(arg, ctx, role);
+    if (icu) return ctx.target.renderAttrBinding(attrName, icu);
     // DYNAMIC (`title: order.status`) — no stable source string, so nothing to
     // translate, but the value is still the author's user-visible text.  Bind
     // the expression rather than dropping the attribute: silently rendering a
@@ -257,6 +280,10 @@ export function localizedAriaLabelAttr(
     const key = messageKey(ctx.i18nPrefix, role, literal);
     return ctx.target.renderAttrBinding(attrName, translateCall(ctx, key, literal));
   }
+  // INTERPOLATED (`` label: `Delete {order.id}` ``) — a real translatable
+  // message, so the accessible name translates like any other slot.
+  const icu = icuTranslateCall(arg, ctx, role);
+  if (icu) return ctx.target.renderAttrBinding(attrName, icu);
   // DYNAMIC (`label: row.name`) — no stable source string to translate, but
   // dropping it left an icon-only Button with NO accessible name at all, on a
   // control whose a11y contract says `needsName` (WCAG 4.1.2).  The
@@ -310,6 +337,10 @@ export function localizedNamedValue(
   if (literal !== undefined && ctx.i18nPrefix) {
     return translateCall(ctx, messageKey(ctx.i18nPrefix, role, literal), literal);
   }
+  // INTERPOLATED — the value-position twin of the fragment helpers' ICU branch,
+  // so Feliz's `prop.ariaLabel` / Flutter's `Semantics(label:)` translate too.
+  const icu = icuTranslateCall(arg, ctx, role);
+  if (icu) return icu;
   if (literal === undefined && arg) return emitExpr(arg, ctx);
   const text = literal ?? defaultLabel;
   if (text === undefined || text === "") return undefined;
