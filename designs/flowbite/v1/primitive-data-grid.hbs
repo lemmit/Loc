@@ -29,7 +29,7 @@
                 class="mt-1 block w-full rounded border-gray-300 p-1 text-xs"
                 type="search"
                 {{{filterPlaceholderAttr}}}
-                aria-label={`Filter by ${String(h.column.columnDef.header ?? h.id)}`}
+                {{{filterByAria}}}
                 value={String(h.column.getFilterValue() ?? "")}
                 oninput={(e) => h.column.setFilterValue(e.currentTarget.value)}
               />

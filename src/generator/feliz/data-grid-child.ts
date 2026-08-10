@@ -56,7 +56,7 @@
 // should compare.
 
 import { lines } from "../../util/code-builder.js";
-import { localizedChromeIcuValue } from "../_walker/i18n-emit.js";
+import { localizedChromeIcuExpr, localizedChromeIcuValue } from "../_walker/i18n-emit.js";
 import type { DataGridChild, DataGridColumn, DataGridSpec } from "../_walker/target.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 
@@ -215,7 +215,18 @@ function renderComponent(spec: DataGridSpec, ctx: WalkContext): string {
   // fragments are EXPRESSIONS the pack splices where `h` (a header), `c` (a
   // cell) and `table` are in scope.
   const body = spec.renderBody({
-    headerBody: headerBody(selection),
+    // Feliz builds PROPS, not markup, so the sort button's accessible name
+    // arrives as an F# VALUE (`localizedChromeIcuExpr`) rather than as the
+    // attribute fragment `spec.sortByAria` carries for the markup targets —
+    // D-I18N-ATTR's split, one more time.  With i18n off the `renderStringConcat`
+    // seam re-spells it as the same `("Sort by " + loomText …)` this file wrote
+    // by hand, so the pre-i18n output is unchanged.
+    headerBody: headerBody(
+      selection,
+      localizedChromeIcuExpr(ctx, "sortBy", [
+        { name: "column", expr: "loomText (h?column?columnDef?header)" },
+      ]),
+    ),
     cellBody: cellBody(columns, selection),
     // The pager's ICU counter (M-T1.11).  Supplied HERE rather than in
     // `emitDataGrid` alongside the other chrome tokens because its two hole
@@ -373,7 +384,7 @@ function selectionEffect(): string[] {
  *  than a hand-rolled toggle, because that handler is what reads `shiftKey` to
  *  decide multi-sort.  Re-implementing it would fork exactly the behaviour this
  *  target exists to share. */
-function headerBody(selection: boolean): string {
+function headerBody(selection: boolean, sortByAria: string): string {
   const label = `loomText (h?column?columnDef?header)`;
   const indicator =
     `(match unbox<obj> (h?column?getIsSorted()) with` +
@@ -382,7 +393,7 @@ function headerBody(selection: boolean): string {
     ` | _ -> "")`;
   const sortButton =
     `Html.button [ prop.className "inline-flex items-center gap-1 font-inherit cursor-pointer bg-transparent border-0 p-0";` +
-    ` prop.ariaLabel ("Sort by " + ${label});` +
+    ` prop.ariaLabel ${sortByAria};` +
     ` prop.onClick (fun (e: Browser.Types.MouseEvent) -> loomHandle (h?column?getToggleSortingHandler()) (box e));` +
     ` prop.text (${label} + ${indicator}) ]`;
   const plain = `Html.text (${label})`;

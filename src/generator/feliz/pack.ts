@@ -345,9 +345,15 @@ function primitiveDataGrid(c: Ctx): string {
 
   // Per-column filter input, under the header content — only for columns whose
   // `filterable:` survived resolution (`getCanFilter()` is TanStack's answer).
+  // Under i18n an `I18n.tf` call over `chrome.filterBy`; off, the
+  // `renderStringConcat` seam re-spells the same `("Filter by " + loomText …)`
+  // this pack wrote by hand.
+  const filterByAria = String(
+    c.filterByAriaValue ?? '("Filter by " + loomText (h?column?columnDef?header))',
+  );
   const filterInput = c.hasFilters
     ? `\n                  if unbox<bool> (h?column?getCanFilter()) then\n` +
-      `                    Html.input [ prop.type' "search"; prop.className "input input-xs input-bordered mt-1 w-full"; prop.placeholder ${filterPlaceholder}; prop.ariaLabel ("Filter by " + loomText (h?column?columnDef?header)); prop.value (loomText (h?column?getFilterValue())); prop.onChange (fun (v: string) -> loomHandle (h?column?setFilterValue) (box v)) ]`
+      `                    Html.input [ prop.type' "search"; prop.className "input input-xs input-bordered mt-1 w-full"; prop.placeholder ${filterPlaceholder}; prop.ariaLabel ${filterByAria}; prop.value (loomText (h?column?getFilterValue())); prop.onChange (fun (v: string) -> loomHandle (h?column?setFilterValue) (box v)) ]`
     : "";
 
   // `aria-sort` on the header cell is the a11y contract the JSX packs already
@@ -918,6 +924,10 @@ export function felizPack(): LoadedPack {
     manifest: { name: "felizBasic", version: "v1", format: "tsx", emits: {}, imports: {} },
     rootDir: "<feliz-procedural>",
     templates,
+    // No `.hbs` templates, so no pack-DECLARED chrome to bind: this pack's
+    // user-visible strings are emitted procedurally and already ride the
+    // curated `chrome.*` catalog (D-I18N-ATTR / `localizedChrome*`).
+    setChromeI18n() {},
     render(name: string, context: unknown): string {
       const fn = RENDERERS[name];
       if (!fn) return `(* feliz pack: no renderer for "${name}" *)`;

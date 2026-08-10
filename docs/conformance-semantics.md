@@ -189,13 +189,30 @@ the conforming backends, and the fix that established it.
   7807); a malformed/unparseable body is `400`, a well-formed body failing a
   domain invariant is `422`. The *wire shape* of the problem body is identical
   across backends (per-field errors in the same envelope).
-- **Trigger.** A create violating an invariant vs a create with a malformed body.
-- **Observable.** Same status + same problem-body shape on every backend.
+  The guarantee covers the faults the **framework** raises too — an unknown
+  path, a verb a path does not serve, an unreadable body. Those never reach an
+  emitted arm, which is exactly why they drifted: measured on booted backends,
+  `PUT` against a POST-only route answered `404 text/plain` (node), `405
+  application/json` (python), `405` with *no body* (dotnet), `500
+  problem+json` (java) and `404 application/json` (elixir) — five shapes,
+  three statuses, and one backend calling a client's typo a server fault.
+  Each backend now routes framework faults through the same responder its
+  domain arms use.
+- **Trigger.** A create violating an invariant, a create with a malformed body,
+  and a request the framework refuses before any handler runs.
+- **Observable.** Same status + same problem-body shape (`type: about:blank`,
+  `application/problem+json`) on every backend, whichever layer refused.
 - **Conforms.** node, dotnet, java, python, elixir.
+- **Known divergence.** A wrong verb is `405` on python/dotnet/java but `404`
+  on node and elixir — hono and phoenix route on (method, path) as one key and
+  raise a plain not-found for a method mismatch, with no method-not-allowed
+  concept to hook. The *envelope* converges; the status does not.
 - **Provenance.** #1620 (hardened changeset-error renderer), the two-tier
   400/422 model dispositioned in `generated-code-review-2026-06-30.md`. Tier:
   **T1** (structural envelope is T0 via the spec; the 400-vs-422 *routing* is
-  runtime).
+  runtime). The framework half is gated per-PR by
+  `test/conformance/framework-error-contract-parity.test.ts` — statically,
+  because the behavioural tier only makes requests the API serves.
 
 ### RS-10 · Rehydration trusts the store — invariants guard transitions only
 - **Guarantee.** Reading a persisted row never re-runs the aggregate's

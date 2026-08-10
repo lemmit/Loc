@@ -78,7 +78,7 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
   // and Svelte's — a TanStack `cell` function returns framework-specific render
   // output, and the walker produces markup.
   const body = spec.renderBody({
-    headerBody: headerBody(selection),
+    headerBody: headerBody(selection, spec.sortByAria),
     cellBody: cellBody(columns, selection),
   });
 
@@ -319,7 +319,7 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
 }
 
 /** The full header-cell content, as Angular control flow (`@if`/`@else if`). */
-function headerBody(selection: boolean): string {
+function headerBody(selection: boolean, sortByAria: string): string {
   const label = `{{ String(h.column.columnDef.header ?? h.id) }}`;
   const indicator = `{{ h.column.getIsSorted() === 'asc' ? ' ↑' : h.column.getIsSorted() === 'desc' ? ' ↓' : '' }}`;
   const style =
@@ -340,7 +340,7 @@ function headerBody(selection: boolean): string {
     `  <button`,
     `    type="button"`,
     `    style="${style}"`,
-    `    [attr.aria-label]="'Sort by ' + String(h.column.columnDef.header ?? h.id)"`,
+    `    ${sortByAria}`,
     `    (click)="h.column.toggleSorting()"`,
     `  >`,
     `    ${label}${indicator}`,

@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import { allContexts } from "../../src/ir/types/loom-ir.js";
+import { PROJECTION_READ_FRAMEWORKS } from "../../src/ir/validate/checks/system-checks.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
 
@@ -346,12 +347,12 @@ describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
 }`;
 
   // Both lists shift one framework at a time as the ports land (#2324 react,
-  // #2366 vue, #2369 svelte, #2376 angular, …).  A sibling port rebasing onto
-  // this file moves its OWN name from the second loop to the first — it never
-  // rewrites either list wholesale, for the same reason
+  // #2366 vue, #2369 svelte, #2376 angular, #2467 feliz, …).  A sibling port
+  // rebasing onto this file moves its OWN name from the second loop to the
+  // first — it never rewrites either list wholesale, for the same reason
   // `PROJECTION_READ_FRAMEWORKS` itself must be merged rather than taken from
   // one side.
-  for (const framework of ["react", "vue", "svelte", "angular"]) {
+  for (const framework of ["react", "vue", "svelte", "angular", "feliz", "flutter"]) {
     it(`is silent on ${framework} — the projection client ships there`, async () => {
       expect(await codes(onFrontend(framework))).not.toContain(
         "loom.ui-projection-read-unsupported",
@@ -359,9 +360,32 @@ describe("loom.ui-projection-read-unsupported — the FRAMEWORK half", () => {
     });
   }
 
-  for (const framework of ["flutter"]) {
-    it(`gates ${framework} honestly until its client ports`, async () => {
-      expect(await codes(onFrontend(framework))).toContain("loom.ui-projection-read-unsupported");
-    });
-  }
+  // The gated loop that used to sit here is gone: every frontend has ported, so
+  // there is no framework left to name.  It is NOT replaced by `for (const f of
+  // [])` — an empty loop registers no `it` and reads as coverage while
+  // asserting nothing.
+  //
+  // What replaces it has to answer the question the empty loop cannot: is the
+  // check still WIRED, or merely unreachable?  From the outside those look
+  // identical once the Set covers everything, so the only honest proof is to
+  // take a framework back out and watch the diagnostic return — the same
+  // mutation discipline a new gate owes (CLAUDE.md, "Mutation-prove a new gate
+  // before trusting it"), applied to a gate that has run out of subjects.
+  //
+  // Mutating module state is safe HERE and only here: vitest.config.ts sets no
+  // `isolate` / `pool` override, so the default fork-per-file + fresh module
+  // registry keeps the deletion inside this file, and the `finally` restores it
+  // for the rest of this one.  Turning isolation off would make this leak into
+  // whatever file shares the worker — so if that config ever changes, this test
+  // is the thing to revisit.
+  it("still FIRES for a framework outside the set — proven by removing one", async () => {
+    expect(await codes(onFrontend("flutter"))).not.toContain("loom.ui-projection-read-unsupported");
+    PROJECTION_READ_FRAMEWORKS.delete("flutter");
+    try {
+      expect(await codes(onFrontend("flutter"))).toContain("loom.ui-projection-read-unsupported");
+    } finally {
+      PROJECTION_READ_FRAMEWORKS.add("flutter");
+    }
+    expect(await codes(onFrontend("flutter"))).not.toContain("loom.ui-projection-read-unsupported");
+  });
 });

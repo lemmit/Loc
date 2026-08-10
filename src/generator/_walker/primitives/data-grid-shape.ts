@@ -47,6 +47,14 @@ export function columnIsFilterable(column: ExprIR & { kind: "call" }): boolean {
   return boolNamed(column, "filterable") && columnAccessorKey(column) !== undefined;
 }
 
+/** True when this `Column(...)` renders a clickable SORT header: it asked for
+ *  `sortable: true` AND resolves to a value TanStack can order by.  Mirrors
+ *  `resolveColumn`'s own `sortable` exactly — a column with no resolvable field
+ *  has the flag forced off rather than emitted and silently ignored. */
+export function columnIsSortable(column: ExprIR & { kind: "call" }): boolean {
+  return boolNamed(column, "sortable") && columnAccessorKey(column) !== undefined;
+}
+
 /** The `Column(...)` positional args of a `DataGrid(...)` call. */
 export function gridColumns(grid: ExprIR & { kind: "call" }): (ExprIR & { kind: "call" })[] {
   return positionalArgs(grid).filter(
@@ -58,4 +66,10 @@ export function gridColumns(grid: ExprIR & { kind: "call" }): (ExprIR & { kind: 
  *  turns the pack's per-column filter row (and its "Filter" placeholder) on. */
 export function gridHasFilterableColumn(grid: ExprIR & { kind: "call" }): boolean {
   return gridColumns(grid).some(columnIsFilterable);
+}
+
+/** True when ANY column of this grid is sortable — the grid-wide switch behind
+ *  the pack's sort BUTTON, and therefore behind its "Sort by {column}" name. */
+export function gridHasSortableColumn(grid: ExprIR & { kind: "call" }): boolean {
+  return gridColumns(grid).some(columnIsSortable);
 }

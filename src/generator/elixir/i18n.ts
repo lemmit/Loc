@@ -275,8 +275,14 @@ export function renderGettextCatalog(
    *  domain carries both halves and `mix gettext.merge` sees one catalog. An
    *  API-only deployable (no ui) therefore still gets a real gettext tree. */
   validationMessages: readonly { code: string; text: string }[] = [],
+  /** The active HEEx pack's DECLARED chrome (`pack.<family>.<role>.<hash>` →
+   *  English).  A `.hbs` pack bakes its own user-visible English ("No items.",
+   *  a pager landmark), which no IR walk sees — so the `.po` a translator opens
+   *  has to carry it alongside the authored strings, keyed identically to
+   *  `.loom/messages.en.json`. */
+  packChrome: Record<string, string> = {},
 ): string {
-  const catalog: Record<string, string> = ui ? { ...buildUiCatalog(ui) } : {};
+  const catalog: Record<string, string> = ui ? { ...buildUiCatalog(ui, packChrome) } : {};
   for (const m of validationMessages) catalog[m.code] = m.text;
   const header =
     kind === "pot"

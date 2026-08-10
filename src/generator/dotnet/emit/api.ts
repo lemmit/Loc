@@ -864,7 +864,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
                 {
                     var err = new Dictionary<string, object>
                     {
-                        ["pointer"] = PointerOf(e.PropertyName),
+                        ["pointer"] = ValidationProblem.PointerOf(e.PropertyName),
                         ["message"] = ${
                           localizeMessages
                             ? `global::${ns}.Localization.LoomMessages.Localize(e.ErrorCode, e.ErrorMessage)`
@@ -991,18 +991,106 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             StatusCode = status,
             ContentTypes = { "application/problem+json" },
         };
-    }${
-      usesValidators
-        ? `
+    }
+}
+`;
+}
 
-    // Convert a FluentValidation property path to an RFC 6901 JSON
-    // pointer matching the wire shape the frontend ACL expects.  The
-    // app's JSON output uses JsonNamingPolicy.CamelCase, so each
-    // PascalCase segment is camel-cased; array indexer notation
-    // (\`Items[0].Qty\`) becomes a numeric segment (\`/items/0/qty\`).
-    // RFC 6901 escapes apply inside each segment (\`~\` → \`~0\`,
-    // \`/\` → \`~1\`).  Empty input → empty pointer (the whole document).
-    private static string PointerOf(string propertyName)
+/** `Api/ValidationProblem.cs` — the RFC 6901 pointer helper (shared with
+ *  `DomainExceptionFilter`'s FluentValidation arm) plus the replacement for
+ *  MVC's built-in invalid-model-state response.
+ *
+ *  Model binding and DataAnnotations run BEFORE any controller action, so a
+ *  request they reject never reaches `DomainExceptionFilter` and MVC answers
+ *  it with its own `ValidationProblemDetails`: `type` is the rfc9110 URI (not
+ *  `about:blank`, RS-9), `title` is "One or more validation errors occurred.",
+ *  `errors` is an object-of-arrays rather than the contract's
+ *  `[{ pointer, message }]`, `traceId` rides the body, and the status is 400
+ *  where the other four backends answer 422.  That is a whole second
+ *  validation contract, reachable by any request missing a required field.
+ *
+ *  `FromModelState` replaces it with the one shape the wire already has —
+ *  except for an unparseable BODY, which is not a field-level fault at all:
+ *  those keep 400 (matching hono's `HTTPException` arm and Spring's
+ *  `HttpMessageNotReadableException`), detected by the `JsonException` MVC
+ *  hangs on the model-state entry. */
+export function renderValidationProblem(ns: string): string {
+  return `// Auto-generated.
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+
+namespace ${ns}.Api;
+
+public static class ValidationProblem
+{
+    /// <summary>
+    /// RFC 7807 answer for a request MVC rejected during model binding or
+    /// DataAnnotations validation.  Wired in Program.cs via
+    /// ApiBehaviorOptions.InvalidModelStateResponseFactory.
+    /// </summary>
+    public static IActionResult FromModelState(ActionContext context)
+    {
+        // An unreadable body is a MALFORMED request, not an invalid one: no
+        // field-level pointer describes it, and the sibling backends answer
+        // 400.  MVC records it two ways depending on where the read failed —
+        // as a JsonException hung on the model-state entry, or (when the
+        // formatter already consumed it) as a plain message under the "$"
+        // key the System.Text.Json input formatter uses for the body root.
+        // Match both: keying on only one of them silently reclassifies half
+        // the malformed bodies as field validation failures.
+        var malformed = context.ModelState.Any(entry =>
+            entry.Key.StartsWith('$')
+            || entry.Value?.Errors.Any(error => error.Exception is JsonException) == true);
+        if (malformed)
+        {
+            return new ObjectResult(new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "Bad Request",
+                Status = 400,
+                Detail = "Malformed request body.",
+                Instance = context.HttpContext.Request.Path,
+            })
+            {
+                StatusCode = 400,
+                ContentTypes = { "application/problem+json" },
+            };
+        }
+        var problem = new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = "Validation failed",
+            Status = 422,
+            Detail = "One or more fields are invalid.",
+            Instance = context.HttpContext.Request.Path,
+        };
+        problem.Extensions["errors"] = context.ModelState
+            .SelectMany(entry => entry.Value is null
+                ? Array.Empty<Dictionary<string, object>>()
+                : entry.Value.Errors.Select(error => new Dictionary<string, object>
+                {
+                    ["pointer"] = PointerOf(entry.Key),
+                    ["message"] = error.ErrorMessage,
+                }))
+            .ToArray();
+        return new ObjectResult(problem)
+        {
+            StatusCode = 422,
+            ContentTypes = { "application/problem+json" },
+        };
+    }
+
+    /// <summary>
+    /// Convert a FluentValidation / ModelState property path to an RFC 6901
+    /// JSON pointer matching the wire shape the frontend ACL expects.  The
+    /// app's JSON output uses JsonNamingPolicy.CamelCase, so each PascalCase
+    /// segment is camel-cased; array indexer notation (<c>Items[0].Qty</c>)
+    /// becomes a numeric segment (<c>/items/0/qty</c>).  RFC 6901 escapes
+    /// apply inside each segment (<c>~</c> → <c>~0</c>, <c>/</c> → <c>~1</c>).
+    /// Empty input → empty pointer (the whole document).
+    /// </summary>
+    public static string PointerOf(string propertyName)
     {
         if (string.IsNullOrEmpty(propertyName)) return "";
         var segments = new List<string>();
@@ -1028,8 +1116,6 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             }
         }
         return "/" + string.Join("/", segments.ConvertAll(s => s.Replace("~", "~0").Replace("/", "~1")));
-    }`
-        : ""
     }
 }
 `;

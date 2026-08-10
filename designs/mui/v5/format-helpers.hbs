@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { Typography, Tooltip, Stack } from "@mui/material";
+{{{chromeImport "../i18n"}}}import { Typography, Tooltip, Stack } from "@mui/material";
 import type { ReactNode } from "react";
 
 export function EmptyValue() {
@@ -48,8 +48,8 @@ export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
 export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
-    ? <Typography component="span" fontWeight={500}>Yes</Typography>
-    : <Typography component="span" color="text.secondary">No</Typography>;
+    ? <Typography component="span" fontWeight={500}>{{{chrome "boolTrue"}}}</Typography>
+    : <Typography component="span" color="text.secondary">{{{chrome "boolFalse"}}}</Typography>;
 }
 
 export function NumberValue({ value, decimals = 0 }: { value: number | string | null | undefined; decimals?: number }) {

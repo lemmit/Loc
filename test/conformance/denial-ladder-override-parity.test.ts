@@ -76,9 +76,23 @@ system Denials {
 
 const PLATFORMS = ["node", "dotnet", "java", "python", "elixir"] as const;
 
+/** Blank out generated SECRETS before the joined text is searched.
+ *
+ *  `emit` joins EVERY emitted file, `docker-compose.yml` included, and the
+ *  Phoenix service carries a freshly randomised 128-hex `SECRET_KEY_BASE`.  The
+ *  baseline assertion below is a NEGATIVE one — "418 appears nowhere" — so a
+ *  random hex run that happens to contain `418` failed the suite on an unrelated
+ *  PR.  That is ~3% of elixir runs (126 start positions x 1/4096), i.e. a flake
+ *  rare enough to look like someone else's bug and frequent enough to keep
+ *  costing runner time.
+ *
+ *  Redacting runs of 32+ hex chars cannot mask a real finding: an emitted HTTP
+ *  status is `418` in source, never a substring of a 32-character hex blob. */
+const REDACT_SECRETS = (text: string): string => text.replace(/[0-9a-f]{32,}/g, "<secret>");
+
 async function emit(platform: string, apiBody: string): Promise<string> {
   const files = await generateSystemFiles(SOURCE(platform, apiBody));
-  return [...files.values()].join("\n");
+  return REDACT_SECRETS([...files.values()].join("\n"));
 }
 
 /** The content of the ONE emitted file whose path ends with `suffix`.
@@ -160,5 +174,22 @@ describe("M-T5.20 — one `httpStatus` override moves the ladder on all five bac
       python: true,
       elixir: true,
     });
+  });
+
+  it("the secret redaction removes the flake WITHOUT blunting the assertion", () => {
+    // Both directions, because a redaction that swallowed real findings would
+    // make the baseline above pass vacuously — the exact failure mode the
+    // "418 in the DEFAULT emission" guard exists to prevent.
+    //
+    // The left-hand value is the real `SECRET_KEY_BASE` from the CI run that
+    // failed: it contains `418` at index 65 (`f1b3` + `1841` + `857`).
+    const secret =
+      "07a0d10002b48d1c56e5d2cbaf5471bd0a6ffa59c3f14faba9565d65c61f1b31841857622bd815a16a2fd54572480fd070b2ee0b08d39865fe4c1f223fccfb70";
+    expect(secret).toContain("418"); // the flake, reproduced
+    expect(REDACT_SECRETS(`SECRET_KEY_BASE: "${secret}"`)).not.toContain("418");
+
+    // A status in emitted SOURCE survives redaction untouched.
+    expect(REDACT_SECRETS("conn |> put_status(418)")).toContain("418");
+    expect(REDACT_SECRETS("HttpStatusCode.FromValue(418)")).toContain("418");
   });
 });

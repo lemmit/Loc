@@ -337,7 +337,8 @@ export function buildRoutesFile(
     lines.push(`import { moneySchema } from "../lib/schemas";`);
   }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import { ProblemDetails, newApp } from "./problem-details";`);
+  lines.push(`import { ProblemDetails, frameworkProblemBody, newApp } from "./problem-details";`);
+  lines.push(`import { HTTPException } from "hono/http-exception";`);
   // Domain metrics (M-T7.1): per-operation + per-fault counters, recorded at
   // the same seams as the operation_invoked / fault log lines below.
   lines.push(`import { recordDomainFault, recordDomainOperation } from "../obs/metrics";`);
@@ -1230,6 +1231,18 @@ export function buildRoutesFile(
   // the inner message for the operator; the wire gets the same "internal" every
   // other 500 arm sends, on every backend.
   lines.push(`      return problem(500, "Internal Server Error", "internal");`);
+  lines.push(`    }`);
+  // FRAMEWORK fault, not a domain one — hono raises `HTTPException` for the
+  // faults it detects itself (a malformed JSON body is the common one, at
+  // 400).  Without this arm it falls past every domain check into the generic
+  // 500 below, reporting a CLIENT fault as a server fault: java answers 400
+  // for the same request.  Placed LAST among the typed arms so no domain
+  // class it might subclass loses its own mapping.
+  lines.push(`    if (err instanceof HTTPException) {`);
+  lines.push(`      ${renderHonoLogCall("clientError", "error: err.message, status: err.status")}`);
+  lines.push(
+    `      return c.body(frameworkProblemBody(err.status, err.message, c.req.path), err.status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+  );
   lines.push(`    }`);
   lines.push(
     `    ${renderHonoLogCall("internalError", "error: err instanceof Error ? err.message : String(err), status: 500")}`,

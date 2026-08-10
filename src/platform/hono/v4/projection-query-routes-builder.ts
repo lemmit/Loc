@@ -1,3 +1,4 @@
+import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   DRIZZLE_INTRINSIC_SQL,
@@ -133,7 +134,8 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import { newApp } from "./problem-details";`);
+  lines.push(`import { frameworkProblemBody, newApp } from "./problem-details";`);
+  lines.push(`import { HTTPException } from "hono/http-exception";`);
   lines.push(
     `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
@@ -243,6 +245,13 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push(
     // RS-28 — sanitized; the inner exception reaches the log, not the wire.
     `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
+  );
+  lines.push(
+    // FRAMEWORK fault, not a domain one — hono raises `HTTPException` for the
+    // faults it detects itself (a malformed JSON body is the common one, at
+    // 400).  Without this arm it falls past every domain check into the
+    // generic 500 below, reporting a CLIENT fault as a server fault.
+    `    if (err instanceof HTTPException) { ${renderHonoLogCall("clientError", "error: err.message, status: err.status")} return c.body(frameworkProblemBody(err.status, err.message, c.req.path), err.status, { "content-type": "application/problem+json", "x-request-id": trace_id }); }`,
   );
   lines.push(`    console.error(err);`);
   lines.push(`    return problem(500, "Internal Server Error", "internal");`);

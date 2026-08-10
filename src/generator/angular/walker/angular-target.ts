@@ -461,6 +461,17 @@ export const angularTarget: WalkerTarget = {
     return `{{ ${jsExpr} }}`;
   },
 
+  /** Angular's template grammar has NO template literals, so a holed message is
+   *  built with `+` over single-quoted literals — exactly how the packs already
+   *  spelled `'Filter by ' + String(...)` before it became chrome. */
+  renderStringConcat(parts): string {
+    return parts
+      .map((p) =>
+        "expr" in p ? p.expr : `'${p.text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`,
+      )
+      .join(" + ");
+  },
+
   /** Angular property binding — `[name]="expr"`, leading space included.
    *  The expression is quoted, so pick the quote the rendered JS doesn't
    *  use (JS string literals render double-quoted via JSON.stringify, so

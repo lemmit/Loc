@@ -60,6 +60,11 @@ describe.each(["vuetify", "shadcnVue"])("vue dynamic sub-form rows — %s", (des
     // Add button pushes the default row (single-quoted attr — the JSON has "").
     expect(vue).toContain(`@click='form.values.items.push({ sku: "", qty: 0 })'`);
     expect(vue).toContain('@click="form.values.items.splice(index, 1)"');
-    expect(vue).toContain("Add Line Item");
+    // The add control names the ELEMENT.  Under pack-declared chrome
+    // (D-PACK-CHROME) that label is one ICU message whose hole carries the
+    // name — `t(<key>, "Add {item}", { item: "Line Item" })` — so accept
+    // either spelling: both satisfy what this assertion is actually for, and
+    // pinning one would re-fail the moment a pack opts in or out of i18n.
+    expect(vue).toMatch(/Add Line Item|item: "Line Item"/);
   });
 });

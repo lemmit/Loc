@@ -33,9 +33,11 @@ import type {
   EventIR,
   FieldIR,
   PayloadIR,
+  ProjectionIR,
   TypeIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
+import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
@@ -184,6 +186,20 @@ export function dartRecordForEvent(ev: EventIR): DartRecord {
   return {
     className: upperFirst(ev.name),
     fields: ev.fields.map((f: FieldIR) => toDartField(f)),
+  };
+}
+
+/** The Dart wire model for a query-time PROJECTION's row (M-T1.3 Phase 1).
+ *
+ *  `<Proj>Row`, off the SAME `wireShape` the backend's row DTO and every other
+ *  frontend's row type are built from — which is the whole reason a projection
+ *  read needs no wire negotiation per frontend.  Named `…Row` rather than after
+ *  the projection so it never collides with an aggregate of the same name, and
+ *  matching what the JS clients call the object inside their `Response`. */
+export function dartRecordForProjection(proj: ProjectionIR): DartRecord {
+  return {
+    className: `${upperFirst(proj.name)}Row`,
+    fields: (proj.wireShape ?? []).map(toDartField),
   };
 }
 
@@ -348,6 +364,12 @@ export function renderDartModels(
     for (const agg of ctx.aggregates) {
       addRecord(dartRecordForAggregate(agg));
       for (const part of agg.parts) addRecord(dartRecordForPart(part));
+    }
+    // Readable projections only — a keyed / folded one has no frontend route to
+    // decode, so emitting its row would be a class no provider can ever fill.
+    // The predicate is the SHARED one, never a Flutter-local re-derivation.
+    for (const proj of ctx.projections ?? []) {
+      if (isFrontendReadableProjection(proj)) addRecord(dartRecordForProjection(proj));
     }
   }
   if (blocks.length === 0) return "";

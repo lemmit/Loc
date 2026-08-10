@@ -78,7 +78,7 @@ describe(".NET validation-error extension — DomainExceptionFilter emission", (
     // Each error is a Dictionary so the optional `code` key is OMITTED for a
     // message-less rule (byte-identical body) and PRESENT for a messaged rule
     // whose `.WithErrorCode("msg.<hash>")` surfaces the content-hash wire code.
-    expect(filter).toMatch(/\["pointer"\] = PointerOf\(e\.PropertyName\)/);
+    expect(filter).toMatch(/\["pointer"\] = ValidationProblem\.PointerOf\(e\.PropertyName\)/);
     expect(filter).toMatch(/\["message"\] = e\.ErrorMessage/);
     expect(filter).toMatch(/e\.ErrorCode\.StartsWith\("msg\.", StringComparison\.Ordinal\)/);
     expect(filter).toMatch(/err\["code"\] = e\.ErrorCode/);
@@ -95,8 +95,12 @@ describe(".NET validation-error extension — DomainExceptionFilter emission", (
   it("PointerOf helper converts FluentValidation paths to RFC 6901 JSON pointers", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
-    const filter = files.get("Api/DomainExceptionFilter.cs")!;
-    expect(filter).toMatch(/private static string PointerOf\(string propertyName\)/);
+    // The helper moved to Api/ValidationProblem.cs, which is emitted
+    // unconditionally: MVC's invalid-model-state factory needs the same
+    // pointer conversion, and that path exists whether or not the model has
+    // any FluentValidation rule.
+    const filter = files.get("Api/ValidationProblem.cs")!;
+    expect(filter).toMatch(/public static string PointerOf\(string propertyName\)/);
     // Empty input → empty pointer (the whole document, per RFC 6901).
     expect(filter).toMatch(/if \(string\.IsNullOrEmpty\(propertyName\)\) return "";/);
     // Walk segments split on `.` — the FluentValidation path notation.

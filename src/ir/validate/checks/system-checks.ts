@@ -409,7 +409,22 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
 // NOTE for the sibling ports: this one-line Set is edited by every frontend's
 // port PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
 // already present plus yours — never by taking one side wholesale.
-const PROJECTION_READ_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
+//
+// With the last frontend ported the Set names every shipping framework, so the
+// gate no longer fires for anything that exists — it is the seam a NEW frontend
+// gates on until it ports, not dead code.  EXPORTED so its own test can prove
+// it still bites: with nothing left to gate, "the check works" and "the check
+// is unreachable" are indistinguishable from the outside, and the only honest
+// way to tell them apart is to remove a framework and watch the diagnostic
+// come back (`projection-select-unresolved.test.ts`).
+export const PROJECTION_READ_FRAMEWORKS = new Set([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "flutter",
+]);
 
 /** `loom.ui-projection-read-unsupported`, the FRAMEWORK half.  The FLAVOUR half
  *  (a keyed / folded projection, unreadable on every target) is F3 in

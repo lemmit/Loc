@@ -10,7 +10,7 @@ defmodule {{webModule}}.CoreComponents do
   in a richer component module without touching the emitter.
   """
   use Phoenix.Component
-  alias Phoenix.LiveView.JS
+{{{chromeImport webModule}}}  alias Phoenix.LiveView.JS
 
   @doc "Renders all currently-set flash messages."
   attr :flash, :map, default: %{}
@@ -282,7 +282,7 @@ defmodule {{webModule}}.CoreComponents do
               <span :if={!col[:sort_field]}>{col[:label]}</span>
             </th>
             <th :if={@action != []} class="px-3 py-2 text-right font-semibold text-zinc-700">
-              <span class="sr-only">Actions</span>
+              <span class="sr-only">{{{chrome "rowActions"}}}</span>
             </th>
           </tr>
         </thead>
@@ -320,7 +320,7 @@ defmodule {{webModule}}.CoreComponents do
 
   def pager(assigns) do
     ~H"""
-    <nav class="flex items-center justify-between gap-4 px-3 py-2 text-sm" aria-label="Pagination">
+    <nav class="flex items-center justify-between gap-4 px-3 py-2 text-sm" {{{chromeAttr "aria-label" "paginationLandmark"}}}>
       <button
         type="button"
         phx-click="loom-page"
@@ -363,7 +363,7 @@ defmodule {{webModule}}.CoreComponents do
   def empty(assigns) do
     ~H"""
     <div class={["text-center text-sm text-zinc-500 py-8", @class]}>
-      <%= if @inner_block == [] do %>No items.<% else %>{render_slot(@inner_block)}<% end %>
+      <%= if @inner_block == [] do %>{{{chrome "emptyList"}}}<% else %>{render_slot(@inner_block)}<% end %>
     </div>
     """
   end
@@ -409,7 +409,7 @@ defmodule {{webModule}}.CoreComponents do
                   type="button"
                   phx-click={hide_modal(@on_cancel, @id)}
                   class="rounded-md p-1 text-zinc-400 hover:text-zinc-600"
-                  aria-label="close"
+                  {{{chromeAttr "aria-label" "closeFlash"}}}
                 >
                   &times;
                 </button>

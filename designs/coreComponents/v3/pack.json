@@ -13,5 +13,12 @@
     "assets-js": "assets-js.heex.hbs",
     "tailwind-config": "tailwind-config.heex.hbs",
     "package-json": "package-json.heex.hbs"
+  },
+  "chrome": {
+    "closeFlash": "close",
+    "emptyList": "No items.",
+    "homeLink": "Home",
+    "paginationLandmark": "Pagination",
+    "rowActions": "Actions"
   }
 }

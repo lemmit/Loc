@@ -1,5 +1,8 @@
 // Auto-generated.
 using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
 using CatalogApi.Api;
@@ -137,6 +140,38 @@ builder.Services.AddControllers(opts =>
         new CatalogApi.Serialization.CanonicalInstantJsonConverter());
     opts.JsonSerializerOptions.Converters.Add(
         new CatalogApi.Serialization.CanonicalInstantOffsetJsonConverter());
+});
+
+// Model binding + DataAnnotations run BEFORE any controller action, so a
+// request they reject never reaches DomainExceptionFilter and MVC answers it
+// with its OWN ValidationProblemDetails — a different `type`, a different
+// title, `errors` as an object-of-arrays, `traceId` on the body, and 400
+// where the sibling backends answer 422.  Route it through the emitted
+// contract instead (Api/ValidationProblem.cs), so one validation shape reaches
+// the wire no matter which layer rejected the request.
+builder.Services.Configure<ApiBehaviorOptions>(opts =>
+{
+    opts.InvalidModelStateResponseFactory = CatalogApi.Api.ValidationProblem.FromModelState;
+});
+
+// The framework produces ProblemDetails of its own for the faults it answers
+// without reaching a controller at all — 415 being the common one.  Those
+// carry the rfc9110 `type` URI (not `about:blank`, RS-9), no `detail`, no
+// `instance`, and a `traceId` on the body that every backend here moved to
+// the x-request-id header.  Normalise them to the emitted envelope; the
+// customizer is a no-op on responses already built in that shape.
+builder.Services.AddProblemDetails(opts =>
+{
+    opts.CustomizeProblemDetails = ctx =>
+    {
+        var status = ctx.ProblemDetails.Status ?? ctx.HttpContext.Response.StatusCode;
+        ctx.ProblemDetails.Type = "about:blank";
+        ctx.ProblemDetails.Status = status;
+        ctx.ProblemDetails.Title ??= ReasonPhrases.GetReasonPhrase(status);
+        ctx.ProblemDetails.Detail ??= ctx.ProblemDetails.Title;
+        ctx.ProblemDetails.Instance ??= ctx.HttpContext.Request.Path;
+        ctx.ProblemDetails.Extensions.Remove("traceId");
+    };
 });
 
 // Minimal-API JSON options — the /health + /ready probes (and the /auth/me
@@ -337,6 +372,33 @@ app.UseMiddleware<CatalogApi.Middleware.RequestLoggingMiddleware>();
 // with the catalog middleware above (the framework line and the
 // catalog line are both useful; dashboards filter on the catalog).
 app.UseHttpLogging();
+// FRAMEWORK-originated client faults — an unmatched route (404), an
+// a method the route does not serve (405), a media type it cannot read
+// (415).  Routing
+// refuses these before any controller runs, so DomainExceptionFilter's RFC
+// 7807 responder never sees them and ASP.NET Core answers with an EMPTY
+// body: a bodiless second error contract on a wire that already committed to
+// application/problem+json.  UseStatusCodePages fills ONLY responses that
+// have no body of their own, so every domain answer above passes through
+// untouched.  Mounted before routing so it wraps the whole downstream
+// pipeline.
+// (The lambda's parameter is typed explicitly: UseStatusCodePages also has an
+// Action<IApplicationBuilder> overload, which an untyped lambda binds to.)
+app.UseStatusCodePages(async (StatusCodeContext statusCodeContext) =>
+{
+    var http = statusCodeContext.HttpContext;
+    var status = http.Response.StatusCode;
+    var title = ReasonPhrases.GetReasonPhrase(status);
+    lifecycleLog.LogWarning("{Event} error={Error} status={Status}", "client_error", title, status);
+    await http.Response.WriteAsJsonAsync(new ProblemDetails
+    {
+        Type = "about:blank",
+        Title = title,
+        Status = status,
+        Detail = title,
+        Instance = http.Request.Path,
+    }, (JsonSerializerOptions?)null, "application/problem+json");
+});
 app.UseCors();
 // Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
 app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");

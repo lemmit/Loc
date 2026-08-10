@@ -31,6 +31,7 @@ import {
   idLabelsFrom,
   pageMetaFieldName,
   pageMetaMember,
+  projectionFieldName,
   readFieldName,
 } from "./wire.js";
 
@@ -290,6 +291,14 @@ export const felizTarget: WalkerTarget = {
   // value QueryView matches on, and `renderApiHoisting` emits nothing (there is
   // no page-top hoist to make).
   buildHookUse: (detected) => {
+    // A query-time PROJECTION read (M-T1.3 Phase 1) resolves to its own Model
+    // field — `Remote<<Proj>Row option>`, filled by the init Cmd and rendered
+    // through `View.remoteOne`, exactly like a byId read's arm.  No import and
+    // no hoist: Elmish has neither (see `feliz/projection-read.ts`).
+    if (detected.kind === "projection") {
+      const field = projectionFieldName(detected.aggregateName);
+      return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
+    }
     // A `byId` read resolves to the `<Agg>ById` Model field (its `Remote<'T
     // option>` envelope); `all` (and any other read) to `All<Plural>`.  The
     // page-entry `Cmd` — not this call — issues the byId fetch, so the view
@@ -675,6 +684,14 @@ export const felizTarget: WalkerTarget = {
   // VALUE (`localizedNamedValue`, D-I18N-ATTR) is spelled with i18n off.
   // Same escaping as `escapeText`; both land in an F# `"…"` body.
   renderStringLiteral: (text: string) => `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
+
+  // A holed message as one F# string expression — `+` over `"…"` literals,
+  // paren-wrapped for the `prop.ariaLabel (…)` argument positions it lands in.
+  // Hole expressions arrive already string-typed (the seam concatenates, it does
+  // not coerce), which is what keeps `("Filter by " + loomText (…))` byte-
+  // identical to the sentence this pack spelled by hand.
+  renderStringConcat: (parts) =>
+    `(${parts.map((p) => ("expr" in p ? p.expr : fsString(p.text))).join(" + ")})`,
 
   // A call into the generated F# translation runtime (M-T1.11).  The JS
   // frontends' `t(key, default, values)` is not F#, so Feliz spells the same

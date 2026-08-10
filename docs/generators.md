@@ -365,6 +365,7 @@ for deployables marked `platform: dotnet`.
 │   └── Events/NoopDomainEventDispatcher.cs
 ├── Api/
 │   ├── DomainExceptionFilter.cs         # DomainException → 422, AggregateNotFoundException → 404
+│   ├── ValidationProblem.cs             # model-binding/DataAnnotations failures → the same 422 + errors[]
 │   ├── OrdersController.cs              # [HttpPost], [HttpGet], [HttpPost("{id}/<op>")], [HttpGet("<find>")]
 │   └── ProductsController.cs
 └── Tests/<Namespace>.Tests/             # xUnit project — emitted only when `test` blocks exist
@@ -418,6 +419,18 @@ shape records (`<Agg>Response`, `<Part>Response`, `<Vo>Response`,
 shape; converts wire-DTOs to commands, dispatches via `IMediator`,
 returns DTOs.  `DomainExceptionFilter` turns precondition failures
 into HTTP 422 (RS-15) and missing-aggregate into 404.
+
+**`Api/ValidationProblem.cs`** — the faults that never reach a controller.
+Model binding and DataAnnotations run before the action, so
+`DomainExceptionFilter` never sees them and MVC answered with its own
+`ValidationProblemDetails` (rfc9110 `type`, `errors` as an object-of-arrays,
+`traceId` inline, status 400 where the other backends send 422).  Wired as
+`ApiBehaviorOptions.InvalidModelStateResponseFactory`, this replaces it with
+the emitted envelope — 422 + `errors[]` for an invalid body, 400 for an
+unreadable one (RS-9's split).  `Program.cs` pairs it with
+`UseStatusCodePages` (404/405, which routing refuses with no body at all) and
+a `CustomizeProblemDetails` hook that normalises the ProblemDetails the
+framework builds itself (415).
 
 **`Program.cs`** — hosting entry:
 
