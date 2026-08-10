@@ -1178,10 +1178,15 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   // structure-derived rank), not through this generic spec table.
   Text: { tag: "p", takesChildren: true },
   Card: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  // `{role:"toolbar", needsName:true}` — "Actions" is the FALLBACK name; an
+  // author's `label:` overrides it (and translates), which needs
+  // `labelAsAriaLabel` or the label lands as a bogus `label=` attr on the div
+  // while the hardcoded default stays the accessible name.
   Toolbar: {
     tag: "div",
     staticAttrs: ["class"],
     takesChildren: true,
+    labelAsAriaLabel: true,
     extraAttrs: ['role="toolbar"', 'aria-label="Actions"'],
   },
   Group: { tag: "div", staticAttrs: ["class"], takesChildren: true },

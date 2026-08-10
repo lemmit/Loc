@@ -197,6 +197,33 @@ describe("Phoenix HEEx i18n runtime", () => {
     expect(live).not.toContain(`aria-label="Add order"`);
   });
 
+  // `Toolbar`'s contract is `{role:"toolbar", needsName:true}` with "Actions" as
+  // the FALLBACK name.  HEEx hardcoded that fallback as a static `extraAttrs`
+  // entry and had no `labelAsAriaLabel`, so an authored `label:` fell through
+  // the generic named-attr branch and landed as a bogus `label=` attribute on
+  // the `<div>` — the accessible name stayed "Actions" at every locale, and a
+  // translator translated a string the app never announced.
+  it("translates a Toolbar's accessible name — the author's label beats the default", async () => {
+    const src = SYSTEM(`Toolbar { label: "Order actions", Text { "x" } }`);
+    const live = await homeLive(src);
+    const key = await keyFor(src, "Order actions");
+    expect(live).toContain(`aria-label={pgettext("${key}", "Order actions")}`);
+    // The contract default is suppressed rather than emitted alongside — two
+    // `aria-label`s on one tag would let the hardcoded English outrank the
+    // authored name.
+    expect(live).not.toContain(`aria-label="Actions"`);
+    // …and the label never leaks as a literal attribute on the div.
+    expect(live).not.toContain(`label="Order actions"`);
+    expect(live).toContain(`role="toolbar"`);
+  });
+
+  it("keeps the Toolbar contract default when no label is authored", async () => {
+    // The other half of "defaults, not overrides": nothing derived the
+    // attribute, so the contract's fallback name still ships.
+    const live = await homeLive(SYSTEM(`Toolbar { Text { "Hello" } }`));
+    expect(live).toContain(`role="toolbar" aria-label="Actions"`);
+  });
+
   it("translates the Icon accessible name (iconLabel) and keeps role=img", async () => {
     const src = SYSTEM(`Icon { svg: "<svg/>", label: "Verified" }`);
     const live = await homeLive(src);
@@ -320,6 +347,26 @@ describe("Phoenix HEEx i18n — ICU interpolation", () => {
     expect(fileEndingWith(files, "lib/app/cldr.ex")).toBeUndefined();
     expect(fileEndingWith(files, "lib/app_web/i18n.ex")).toBeUndefined();
     expect(fileEndingWith(files, "lib/app_web.ex")).not.toContain("import AppWeb.I18n");
+  });
+
+  it("translates an INTERPOLATED Toolbar name — the last slot that fell through", async () => {
+    // `toolbarAria` was the ONE user-visible slot where interpolation kept the
+    // raw path: the walker never reached `localizedHeexAttr`, so it emitted
+    // `label={"Order " <> @code}` — the exact `<>` concat shape this slice set
+    // out to eliminate, and the very shape `loom.user-visible-concat` bans in
+    // `.ddd` source.  Worse than merely untranslated: the extraction pass DID
+    // mark the message `icu`, so the app shipped (and compiled) the whole CLDR
+    // engine to format a hole it then rendered by concatenation.
+    const src = SYSTEM('Toolbar { label: `Order {code}`, Text { "x" } }').replace(
+      'page Home {\n      route: "/"',
+      'page Home(code: string) {\n      route: "/:code"',
+    );
+    const live = await homeLive(src);
+    const key = await keyFor(src, "Order {code}");
+    expect(live).toContain(
+      `aria-label={loom_icu(pgettext("${key}", "Order \\x7Bcode\\x7D"), [code: @code])}`,
+    );
+    expect(live).not.toContain('"Order " <> @code');
   });
 
   it("does not let a hole-carrying CHROME message flip the ICU gate on", async () => {
