@@ -688,7 +688,11 @@ on a `date` style unless `ex_cldr_dates_times` is configured. An
 unformattable message degrades to raw hole substitution rather than
 crashing the render: the value appears unformatted, which is what the
 page showed before it was translatable. Same trade, same reason, as the
-Flutter runtime's `_substitute` fallback.
+Flutter runtime's `_substitute` fallback — though Flutter no longer
+*needs* it for skeletons: its runtime pre-formats the `, number` /
+`, date` / `, time` holes through `intl`'s `NumberFormat`/`DateFormat`
+before `MessageFormat` parses the message, and keeps `_substitute` only
+for a message the parser genuinely rejects.
 
 **Affects.** `i18n.md`; `generator/elixir/i18n.ts`,
 `generator/elixir/heex-walker-core.ts`,

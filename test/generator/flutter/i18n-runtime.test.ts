@@ -88,7 +88,7 @@ describe("Flutter i18n runtime", () => {
     );
     // ICU through package:intl's MessageFormat (already a pubspec dependency).
     expect(i18n).toContain("import 'package:intl/message_format.dart';");
-    expect(i18n).toContain("MessageFormat(message, locale: locale).format(values)");
+    expect(i18n).toContain("MessageFormat(icu.message, locale: locale).format(icu.values)");
     // The `_en` catalog is flat + key-sorted, so a reordered page can't churn
     // the file.  (Scoped to that block — `_catalogs` below it is a sibling map.)
     const enBlock = i18n!.split("const Map<String, String> _en")[1]!.split("};")[0]!;
@@ -110,10 +110,10 @@ describe("Flutter i18n runtime", () => {
   });
 
   it("carries an ICU format skeleton verbatim into the message", async () => {
-    // `{total, number, ::currency/USD}` rides into the catalog + the t() default.
-    // Dart's MessageFormat rejects the skeleton arg-type, so the runtime's
-    // documented fallback substitutes the raw value — which is exactly what
-    // pre-i18n Flutter rendered for a formatted hole.
+    // `{total, number, ::currency/USD}` rides into the catalog + the t() default
+    // UNCHANGED — the message a translator sees is the shared ICU one, keyed
+    // identically on every frontend.  Formatting happens at runtime, not by
+    // rewriting the catalog.
     const src = SYSTEM("Heading { `Total: {total, number, ::currency/USD}` }").replace(
       'page Home {\n      route: "/"',
       'page Home(total: money) {\n      route: "/:total"',
@@ -125,6 +125,85 @@ describe("Flutter i18n runtime", () => {
     expect(fileEndingWith(files, "lib/i18n.dart")).toContain(
       "String _substitute(String message, Map<String, Object> values) {",
     );
+  });
+
+  // --- ICU number/date FORMATTING -------------------------------------------
+  // `package:intl`'s `MessageFormat` covers {name} + the brace-bodied
+  // plural/select/gender forms but NOT the `, number` / `, date` / `, time`
+  // arg-types: it reads `{total, number, ::currency/USD}` as a placeholder NAMED
+  // "total, number, ::currency/USD", finds no such value, and renders the
+  // literal text `Undefined parameter - …` into the widget (it does not throw,
+  // so the `_substitute` fallback never fired).  `_resolveFormats` formats those
+  // holes through `NumberFormat`/`DateFormat` FIRST and hands MessageFormat the
+  // result as a plain value — the four JS frontends' and Feliz's behaviour.
+
+  it("routes t() through the format pre-pass before MessageFormat", async () => {
+    const i18n = fileEndingWith(
+      await generateSystemFiles(SYSTEM(`Heading { "Storefront" }`)),
+      "lib/i18n.dart",
+    )!;
+    // The pre-pass is not optional: MessageFormat must never see the raw message.
+    expect(i18n).toContain("final _Icu icu = _resolveFormats(message, values);");
+    expect(i18n).toContain("MessageFormat(icu.message, locale: locale).format(icu.values)");
+    expect(i18n).not.toContain("MessageFormat(message, locale: locale).format(values)");
+    // …and formatting needs the formatters, so the import comes along.
+    expect(i18n).toContain("import 'package:intl/intl.dart';");
+    // The fallback stays for a message MessageFormat genuinely rejects —
+    // degrading beats crashing a build().
+    expect(i18n).toContain("return _substitute(message, values);");
+  });
+
+  it("covers every ICU arg-type the validator admits", async () => {
+    // `checkTemplateHoles` (src/language/validators/template.ts) accepts exactly
+    // number / date / time / plural / selectordinal / select.  plural + select
+    // are MessageFormat-native; the other three MUST be in the pre-pass regex,
+    // or a hole the validator waved through renders "Undefined parameter - …".
+    const i18n = fileEndingWith(
+      await generateSystemFiles(SYSTEM(`Heading { "Storefront" }`)),
+      "lib/i18n.dart",
+    )!;
+    const argTypes = /RegExp\(r'\\\{.*?\((number(?:\|[a-z]+)*)\).*?'\);/.exec(i18n)?.[1];
+    expect(argTypes?.split("|").sort()).toEqual(["date", "number", "time"]);
+  });
+
+  it("maps the number styles and skeleton stems onto intl formatters", async () => {
+    const i18n = fileEndingWith(
+      await generateSystemFiles(SYSTEM(`Heading { "Storefront" }`)),
+      "lib/i18n.dart",
+    )!;
+    // `::currency/USD` → a currency formatter for THAT currency code.
+    expect(i18n).toContain("NumberFormat.simpleCurrency(locale: locale, name: stem.substring(9));");
+    expect(i18n).toContain("format = NumberFormat.percentPattern(locale);");
+    expect(i18n).toContain("format = NumberFormat.compact(locale: locale);");
+    // An unrecognised stem still renders a locale-formatted number rather than
+    // failing the message.
+    expect(i18n).toContain("format ?? NumberFormat.decimalPattern(locale), minFraction");
+  });
+
+  it("maps the four classic date widths and falls back on uninitialized locale data", async () => {
+    const i18n = fileEndingWith(
+      await generateSystemFiles(SYSTEM(`Heading { "Storefront" }`)),
+      "lib/i18n.dart",
+    )!;
+    for (const width of ["DateFormat.yMd", "DateFormat.yMMMd", "DateFormat.yMMMMd"]) {
+      expect(i18n).toContain(`_localizedDate(${width})`);
+    }
+    // `intl` loads date symbols lazily, so `DateFormat.yMd('en')` THROWS until
+    // `initializeDateFormatting` runs — a `, date` hole must fall back to the
+    // SDK default rather than taking the whole message down.
+    expect(i18n).toContain("DateFormat _localizedDate(DateFormat Function(String?) build) {");
+    expect(i18n).toContain("    return build(null);");
+  });
+
+  it("degrades one unformattable hole, not the whole message", async () => {
+    const i18n = fileEndingWith(
+      await generateSystemFiles(SYSTEM(`Heading { "Storefront" }`)),
+      "lib/i18n.dart",
+    )!;
+    // A value of the wrong runtime type rewrites to a BARE `{name}` — the raw
+    // value MessageFormat can substitute — never the skeleton arg it cannot.
+    expect(i18n).toContain("if (text == null) return '{$name}';");
+    expect(i18n).toContain("String? _formatValue(String type, String style, Object value) {");
   });
 
   it("threads the prefix into a component body (component.<Name> keys)", async () => {
