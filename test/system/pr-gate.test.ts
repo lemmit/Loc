@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   currentGateState,
   evaluate,
+  latestPerName,
   SELF_NAMES,
   sweepShouldPost,
   verdict,
@@ -29,6 +30,7 @@ const repoRoot = path.resolve(here, "../..");
 const workflowsDir = path.join(repoRoot, ".github/workflows");
 
 interface CheckRun {
+  id?: number;
   name: string;
   status: string;
   conclusion: string | null;
@@ -78,6 +80,89 @@ describe("evaluate — one snapshot's classification", () => {
   it("reports queued and in_progress runs as pending", () => {
     const { pending } = evalRuns([run("a", "queued"), run("b", "in_progress"), green("c")]);
     expect(pending).toEqual(["a", "b"]);
+  });
+});
+
+// The stale-suite bug (observed on #2467 and #2477, 2026-08-10).  Both PRs sat
+// permanently red with EVERY component check green, because a SHA can carry
+// more than one check suite and the API's `filter=latest` only dedupes WITHIN
+// one.  The trigger is the flow CLAUDE.md prescribes: open a draft, then mark
+// it ready.  The ready-flip fires a second event on the SAME head SHA, the new
+// suite's `cancel-in-progress` kills the draft suite mid-flight, and the gate's
+// fail-closed "cancelled counts as FAILED" rule then reads the corpse.
+//
+// It is unrecoverable by design-of-the-bug: the cancelled run never changes, so
+// every re-evaluation and every sweep re-derives the same red.  Only a
+// force-push to a fresh SHA cleared it, which is why it has to be fixed here
+// rather than worked around per PR.
+describe("latestPerName — a SHA can carry more than one check suite", () => {
+  it("keeps the newest run per name, dropping a superseded suite's corpse", () => {
+    const collapsed = latestPerName([
+      { id: 1, name: "build", status: "completed", conclusion: "cancelled" },
+      { id: 2, name: "build", status: "completed", conclusion: "success" },
+    ]);
+    expect(collapsed).toEqual([
+      { id: 2, name: "build", status: "completed", conclusion: "success" },
+    ]);
+  });
+
+  it("is order-independent — the corpse loses whichever way the API lists it", () => {
+    // The API does not promise an order, so the fix cannot rely on one.
+    const newest = { id: 2, name: "build", status: "completed", conclusion: "success" };
+    const corpse = { id: 1, name: "build", status: "completed", conclusion: "cancelled" };
+    expect(latestPerName([newest, corpse])).toEqual([newest]);
+    expect(latestPerName([corpse, newest])).toEqual([newest]);
+  });
+
+  it("still lets a genuinely failed NEWEST run condemn the SHA", () => {
+    // The point is not "ignore cancellations" — it is "read the live suite".
+    // A re-run that fails after an earlier success must still fail closed.
+    const { failed } = evalRuns([
+      { id: 1, name: "build", status: "completed", conclusion: "success" },
+      { id: 2, name: "build", status: "completed", conclusion: "failure" },
+    ]);
+    expect(failed).toEqual(["build"]);
+  });
+
+  it("does not double-count a name across suites in the total", () => {
+    const { total } = evalRuns([
+      { id: 1, name: "build", status: "completed", conclusion: "cancelled" },
+      { id: 2, name: "build", status: "completed", conclusion: "success" },
+    ]);
+    expect(total).toBe(1);
+  });
+
+  it("REGRESSION: the draft-then-ready SHA is green, not permanently red", () => {
+    // The exact shape of #2477: a draft suite cancelled wholesale by the
+    // ready-flip, and a live suite in which everything passed.  Before the fix
+    // this returned `failure` naming all three, and no later event could undo
+    // it.  This is the assertion that fails if the dedupe is reverted.
+    const draftSuite: CheckRun[] = [
+      { id: 10, name: "tests passed", status: "completed", conclusion: "cancelled" },
+      { id: 11, name: "pages-passed", status: "completed", conclusion: "cancelled" },
+      { id: 12, name: "flutter-build", status: "completed", conclusion: "cancelled" },
+    ];
+    const liveSuite: CheckRun[] = [
+      { id: 20, name: "tests passed", status: "completed", conclusion: "success" },
+      { id: 21, name: "pages-passed", status: "completed", conclusion: "success" },
+      { id: 22, name: "flutter-build", status: "completed", conclusion: "success" },
+    ];
+    expect(verdict(evalRuns([...draftSuite, ...liveSuite]))).toEqual({
+      state: "success",
+      summary: "all 3 triggered check(s) passed",
+    });
+  });
+
+  it("reads the gate's OWN state from the newest posting too", () => {
+    // `pr-gate` posts a fresh check run per evaluation, so a busy SHA carries
+    // many.  A bare `find` answered from whichever the API listed first, which
+    // made the sweep's has-this-changed comparison a coin flip.
+    expect(
+      currentGateState([
+        { id: 1, name: "pr-gate", status: "completed", conclusion: "failure" },
+        { id: 2, name: "pr-gate", status: "completed", conclusion: "success" },
+      ]),
+    ).toBe("success");
   });
 });
 
