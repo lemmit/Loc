@@ -73,12 +73,14 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3484",
     what: "per-operation audit-record emission missing on some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.auth-ui-unsupported-framework",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:446",
     what: "`auth: ui` only on react/vue/svelte/angular; feliz + flutter open",
+    mission: "M-T1.20",
   },
   {
     code: "loom.chart-unsupported-target",
@@ -92,6 +94,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1998",
     what: "`filter` capability not applied by some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.context-test-unsupported",
@@ -105,6 +108,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:2274",
     what: "features the .NET Dapper persistence adapter does not emit",
+    mission: "M-T6.35",
   },
   {
     code: "loom.datagrid-unsupported-target",
@@ -118,48 +122,56 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1684",
     what: "principal stamp without auth / stamp on event-sourced — .NET arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.elixir-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1689",
     what: "principal stamp without auth / stamp on event-sourced — Elixir arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.java-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1683",
     what: "principal stamp without auth / stamp on event-sourced — Java arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.node-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1685",
     what: "principal stamp without auth / stamp on event-sourced — node arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.python-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1686",
     what: "principal stamp without auth / stamp on event-sourced — Python arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.event-sourced-workflow-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3302",
     what: "event-sourced workflow storage unimplemented on all backends",
+    mission: "M-T6.34",
   },
   {
     code: "loom.event-sourcing-backend-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3263",
     what: "`persistedAs: eventLog` storage emission is Hono-only",
+    mission: "M-T6.34",
   },
   {
     code: "loom.feliz-async-effect-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/store-checks.ts:357",
     what: "`match await` async effect unrenderable on the Feliz frontend",
+    mission: "M-T1.20",
   },
   {
     code: "loom.field-mask-unsupported",
@@ -173,24 +185,28 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:2201",
     what: "`ignoring` capability-filter bypass unimplemented on some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.find-predicate-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:2729",
     what: "a find predicate the active persistence adapter cannot lower",
+    mission: "M-T6.35",
   },
   {
     code: "loom.flutter-primitive-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:562",
     what: "walker primitives with no Flutter renderer",
+    mission: "M-T1.20",
   },
   {
     code: "loom.frontend-collection-op-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/ui-checks.ts:459",
     what: "collection ops in a page expression the frontend walker can't render",
+    mission: "M-T1.20",
   },
   {
     code: "loom.generic-carrier-unsupported",
@@ -204,12 +220,14 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1839",
     what: "projection field shapes the Java emitter does not handle",
+    mission: "M-T6.36",
   },
   {
     code: "loom.java-workflow-instance-field-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1822",
     what: "workflow instance field shapes the Java emitter does not handle",
+    mission: "M-T6.36",
   },
   {
     code: "loom.mikroorm-unsupported",
@@ -237,6 +255,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1151",
     what: "a persistedAs/shape combination the deployable's adapter can't store",
+    mission: "M-T6.35",
   },
   {
     code: "loom.polymorphic-id-ref-unsupported",
@@ -285,6 +304,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3343",
     what: "provenance runtime (trace capture + history) missing on some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.remote-api-op-unsupported",
@@ -298,6 +318,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1282",
     what: "a `shape(...)` the hosting backend cannot persist",
+    mission: "M-T6.35",
   },
   {
     code: "loom.tph-backend-unsupported",
@@ -318,6 +339,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:498",
     what: "`on <channel>.<Event>` live-event handlers missing on some targets",
+    mission: "M-T1.20",
   },
   {
     code: "loom.union-unsupported",
@@ -331,6 +353,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1528",
     what: "`shape: document` partially emitted on Elixir",
+    mission: "M-T6.35",
   },
   {
     code: "loom.when-unsupported",

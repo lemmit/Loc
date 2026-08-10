@@ -252,3 +252,9 @@ Sources: [flutter-parity-and-native-gates](../old/proposals/flutter-parity-and-n
 
 ## M-T1.19 — `ProvenanceInfo` disclosure — non-React frontends — `done` · **M** · P3
 Sources: [provenance](../../docs/provenance.md) "Scaffolded UI", [provenanced-wire-pair](../old/proposals/provenanced-wire-pair.md) §5.
+
+## M-T1.20 — Frontend surface gaps: the five rejections outside the pack matrix — `open` · **M** · P2
+Five frontend features are accepted in `.ddd` and refused per-target at generate time, none of them owned until now: `loom.auth-ui-unsupported-framework` (`auth: ui` on react/vue/svelte/angular only — **feliz and flutter open**), `loom.feliz-async-effect-unsupported` (`match await` unrenderable on Feliz), `loom.flutter-primitive-unsupported` (walker primitives with no Flutter renderer), `loom.frontend-collection-op-unsupported` (collection ops in a page expression the frontend walker cannot render), `loom.ui-realtime-unsupported` (`on <channel>.<Event>` live-event handlers missing on some targets).
+
+The through-line: **the two self-hosting frontends carry most of it.** Feliz and Flutter have no `.hbs` pack pipeline and build through their own toolchains, so they miss features the four static-bundle frontends inherit from the pack layer — and the per-pack build matrices that catch drift on react/vue/svelte/angular structurally cannot see them. Sequence Flutter primitives first (it has the widest gap and a frozen renderer set), then the Feliz async seam.
+Sources: M-T9.27 register rows (`src/diagnostics/unsupported-register.ts`). Relates to M-T1.3 (Chart, already missioned on the same axis) and M-T9.14 (Flutter runtime gates).
