@@ -1747,12 +1747,13 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
         diags.push({
           severity: "error",
           code: "loom.lifecycle-body-dropped",
-          message:
-            `aggregate '${agg.name}': the \`${label}\` body's \`${s.kind}\` is not emitted on a ` +
-            `state-based aggregate, so ${reason}. The body is lowered into the IR but no backend ` +
-            `renders it (an event-sourced \`create\` is the exception — that path does run). ` +
-            `Move the logic to a named \`operation\`, which emits its guards and statements on ` +
-            `every backend, or drop the clause.`,
+          message: diagMessage("loom.lifecycle-body-dropped", {
+            agg: agg.name,
+            label,
+            kind: s.kind,
+            reason,
+            plural: plural(snake(agg.name)),
+          }),
           source: `${ctx.name}/aggregate ${agg.name}.${label}`,
         });
       }

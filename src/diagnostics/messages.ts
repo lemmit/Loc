@@ -168,6 +168,17 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.criterion-alias-collision": (p: { name: unknown; alias: unknown }) =>
     `criterion '${p.name}' binds the candidate alias '${p.alias}', but a parameter of the same name already exists — rename one so a bare '${p.alias}' is unambiguous.`,
+  // The canonical `create` / `destroy` body no backend renders.  `reason` is
+  // computed at the call site (it varies by statement kind AND by action), so
+  // the catalog owns the frame and the site owns the clause.
+  "loom.lifecycle-body-dropped": (p: {
+    agg: unknown;
+    label: unknown;
+    kind: unknown;
+    reason: unknown;
+    plural: unknown;
+  }) =>
+    `aggregate '${p.agg}': the \`${p.label}\` body's \`${p.kind}\` is not emitted on a state-based aggregate, so ${p.reason}. The body is lowered into the IR but no backend renders it (an event-sourced \`create\` is the exception — that path does run). Move the logic to a named \`operation\`, which emits its guards and statements on every backend, or drop the clause.`,
   "loom.criterion-unsupported-target": (p: { name: unknown }) =>
     `criterion '${p.name}' has an unsupported candidate type. v1 supports 'of <Aggregate>' (a predicate over that aggregate) or 'of bool' (a pure ambient predicate); predicates over primitives / value objects / enums are reserved for the forthcoming 'from <Criterion>(args)' parameter-binding surface.`,
   "loom.criterion-impure#member-call": (p: { name: unknown; member: unknown }) =>
