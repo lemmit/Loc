@@ -155,6 +155,33 @@ describe("java", () => {
     expect(svc).toContain("r[2] == null ? BigDecimal.ZERO : new BigDecimal(r[2].toString())");
   });
 
+  it("binds a SINGLE-select aggregation as a bare scalar — no Object[] cast", async () => {
+    // Regression (`OrderVolume` in test/fixtures/corpus/projection-aggregation.ddd):
+    // JPA returns an `Object[]` row only for a MULTI-column selection.  With one
+    // `select`, `getSingleResult()` hands back the bare scalar (a `Long` for a
+    // count), so the unconditional `(Object[])` cast was a ClassCastException →
+    // 500 on the smallest useful KPI there is.  Nothing caught it because the
+    // whole corpus had no single-select query projection until that fixture
+    // gained a runtime caller — and the cast is only wrong at RUNTIME, so every
+    // compile tier stayed green.  The coercion is the SAME `jpqlCoerce` the
+    // multi-column arm applies to that column; only the read expression moves.
+    const single = system("java")
+      .replace("        revenue: money\n        avgLines: decimal\n", "")
+      .replace(
+        "select orders = count(), revenue = sum(o.total), avgLines = avg(o.lineCount)",
+        "select orders = count()",
+      );
+    const files = await generateSystemFiles(single);
+    let svc = "";
+    for (const [path, content] of files)
+      if (path.endsWith("OrdersQueryProjections.java")) svc = content;
+    expect(svc).toContain(
+      'Object r = entityManager.createQuery("select count(e) from Order e where',
+    );
+    expect(svc).not.toContain("(Object[])");
+    expect(svc).toContain("return new SalesTotalsRow(((Number) r).intValue());");
+  });
+
   it("emits the `requires` gate on a gated singleton aggregation — 403 BEFORE the query", async () => {
     // Regression: the singleton arm once `continue`d past the shared gate
     // block, serving a `requires`-gated aggregation UNGATED on Java alone —

@@ -218,22 +218,35 @@ export function renderJavaQueryProjections(
       if (grouped.keys.some((k) => groupKeyOf(k.expr)?.transform !== undefined)) {
         needsGroupKeyInstant = true;
       }
+      // JPA hands back an `Object[]` per row only for a MULTI-column selection;
+      // a SINGLE-column query yields the bare scalar.  A grouped projection is
+      // single-column exactly when it selects no grouping key and one aggregate
+      // (`group by o.status; select n = count()` — legal: the validator requires
+      // an aggregate select, never a key select), so the column reader has to
+      // follow the arity or `r[0]` ClassCastExceptions at runtime.  Same rule as
+      // the singleton arm below.
+      const groupedCols = grouped.keys.length + grouped.aggregates.length;
+      const groupedCol = (i: number) => (groupedCols === 1 ? "r" : `r[${i}]`);
       const args = [
         ...grouped.keys.map((k, i) =>
-          groupKeyCoerce(k.type, `r[${i}]`, imports, groupKeyOf(k.expr)?.transform !== undefined),
+          groupKeyCoerce(
+            k.type,
+            groupedCol(i),
+            imports,
+            groupKeyOf(k.expr)?.transform !== undefined,
+          ),
         ),
         ...grouped.aggregates.map((a, i) => {
           if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
-          return jpqlCoerce(a, `r[${grouped.keys.length + i}]`);
+          return jpqlCoerce(a, groupedCol(grouped.keys.length + i));
         }),
       ];
-      // ≥2 select columns always (≥1 key + ≥1 aggregate, validator-guaranteed),
-      // so each result row is an Object[]; the raw `Query` list needs the one
-      // @SuppressWarnings the untyped JPA API forces.
+      // The raw `Query` list needs the one @SuppressWarnings the untyped JPA API
+      // forces, whichever row element type it carries.
       methods.push(
         `    public List<${rowName}> ${findName}() {`,
         `        @SuppressWarnings("unchecked")`,
-        `        List<Object[]> rows = entityManager.createQuery(${JSON.stringify(jpql)}).getResultList();`,
+        `        List<${groupedCols === 1 ? "Object" : "Object[]"}> rows = entityManager.createQuery(${JSON.stringify(jpql)}).getResultList();`,
         `        return rows.stream()`,
         `            .map(r -> new ${rowName}(${args.join(", ")}))`,
         `            .toList();`,
@@ -262,13 +275,22 @@ export function renderJavaQueryProjections(
         : "";
       if (filter) collectJavaExprImports(filter, imports);
       const jpql = `select ${cols} from ${source} e${where}`;
+      // `getSingleResult()` returns an `Object[]` only for a MULTI-column
+      // selection; a SINGLE `select` (`select total = count()`) hands back the
+      // bare scalar, so the `(Object[])` cast would ClassCastException → 500 on
+      // the smallest useful KPI there is.  Bind the scalar directly and coerce
+      // it through the SAME `jpqlCoerce` the multi-column arm uses for that
+      // column — only the READ expression changes with the arity.
+      const single = aggregates.length === 1;
       const args = aggregates.map((a, i) => {
         if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
-        return jpqlCoerce(a, `r[${i}]`);
+        return jpqlCoerce(a, single ? "r" : `r[${i}]`);
       });
       methods.push(
         `    public ${rowName} ${findName}() {`,
-        `        Object[] r = (Object[]) entityManager.createQuery(${JSON.stringify(jpql)}).getSingleResult();`,
+        single
+          ? `        Object r = entityManager.createQuery(${JSON.stringify(jpql)}).getSingleResult();`
+          : `        Object[] r = (Object[]) entityManager.createQuery(${JSON.stringify(jpql)}).getSingleResult();`,
         `        return new ${rowName}(${args.join(", ")});`,
         `    }`,
         ``,
