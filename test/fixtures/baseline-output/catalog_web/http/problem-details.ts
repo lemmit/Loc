@@ -1,4 +1,5 @@
 // Auto-generated.  Do not edit by hand.
+import { STATUS_CODES } from "node:http";
 import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
@@ -77,4 +78,20 @@ export function defaultHook(result: { success: boolean; error?: { issues: Readon
  *  hook is always installed without per-router boilerplate. */
 export function newApp(): OpenAPIHono {
   return new OpenAPIHono({ defaultHook });
+}
+
+/** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
+ *  describes: an unmatched route, a body hono itself refused to parse, an
+ *  aborted request.  Before this, such a fault left the wire two ways: never
+ *  reaching a router (hono's default `text/plain` 404), or reaching one and
+ *  falling past every domain arm into the generic 500 — reporting a CLIENT
+ *  fault as a server fault.  Both are a second error contract on a wire that
+ *  already committed to `application/problem+json`.  Shared by http/index.ts's
+ *  root handlers and every router's `HTTPException` arm so they can't drift. */
+export function frameworkProblemBody(status: number, detail: string, instance: string): string {
+  // Reason phrase from node's own table rather than a hand-kept map — the
+  // framework can raise any status, and a partial table would silently title
+  // the ones it missed.
+  const title = STATUS_CODES[status] ?? "Error";
+  return JSON.stringify({ type: "about:blank", title, status, detail, instance });
 }

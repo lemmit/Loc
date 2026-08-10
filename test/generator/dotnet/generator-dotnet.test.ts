@@ -794,19 +794,38 @@ describe(".NET generator", () => {
       );
     });
 
-    it("does NOT touch ValidationProblemDetails (RFC 7807 stays the contract)", async () => {
-      // The framework's default 400 envelope for model-binding /
-      // data-annotation failures is the published API contract for
-      // request-validation errors.  Forking it would break every
-      // OpenAPI-generated client.  Pin the absence of any override.
+    it("replaces MVC's ValidationProblemDetails with the emitted 7807 envelope", async () => {
+      // This test used to pin the OPPOSITE — "the framework's default 400
+      // envelope IS the published contract for request-validation errors".
+      // Measured against the emitted spec, that premise was false: every
+      // generated .NET route declares 400 AND 422 as
+      // `application/problem+json` → `#/components/schemas/ProblemDetails`,
+      // while MVC's default body carried the rfc9110 `type` URI (not
+      // `about:blank`, RS-9), `title` "One or more validation errors
+      // occurred.", `errors` as an object-of-arrays rather than the
+      // contract's `[{pointer, message}]`, and a `traceId` inline.  The
+      // backend was contradicting its own spec, and diverging from the four
+      // siblings that answer 422 + `errors[]`, for any request missing a
+      // required field.  So the override IS the contract now.
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const program = files.get("Program.cs")!;
-      expect(program).not.toMatch(/InvalidModelStateResponseFactory/);
-      expect(program).not.toMatch(/ConfigureApiBehaviorOptions/);
-      // No custom ValidationFilter file emitted alongside the
-      // domain filter.
-      expect(files.has("Api/ValidationFilter.cs")).toBe(false);
+      expect(program).toMatch(
+        /InvalidModelStateResponseFactory = .*ValidationProblem\.FromModelState/,
+      );
+      const validation = files.get("Api/ValidationProblem.cs")!;
+      expect(validation).toMatch(/Title = "Validation failed"/);
+      expect(validation).toMatch(/Status = 422/);
+      expect(validation).toMatch(/Type = "about:blank"/);
+      expect(validation).toMatch(/\["pointer"\] = PointerOf\(entry\.Key\)/);
+      // An unreadable body is malformed, not invalid — 400, no `errors[]`
+      // (RS-9's split, matching hono / Spring).
+      expect(validation).toMatch(/Status = 400/);
+      expect(validation).toMatch(/Detail = "Malformed request body\."/);
+      // The framework's own ProblemDetails (415 and friends) is normalised
+      // rather than forked — same `about:blank` type, no body-borne traceId.
+      expect(program).toMatch(/CustomizeProblemDetails/);
+      expect(program).toMatch(/Extensions\.Remove\("traceId"\)/);
     });
 
     // (Removed: the aggregate-op `try { await _user.HandleAsync } catch …
@@ -1793,14 +1812,17 @@ describe(".NET generator", () => {
       expect(filter).toMatch(/Title = "Validation failed"/);
       expect(filter).toMatch(/Status = 422/);
       expect(filter).toMatch(/problem\.Extensions\["errors"\] = fv\.Errors/);
-      expect(filter).toMatch(/\["pointer"\] = PointerOf\(e\.PropertyName\)/);
+      expect(filter).toMatch(/\["pointer"\] = ValidationProblem\.PointerOf\(e\.PropertyName\)/);
       expect(filter).toMatch(/\["message"\] = e\.ErrorMessage/);
       expect(filter).toMatch(/StatusCode = 422/);
       expect(filter).toMatch(/ContentTypes = \{ "application\/problem\+json" \}/);
-      // The PointerOf helper encodes RFC 6901 JSON pointers — see the
-      // validation-error-extension.test.ts file for the dedicated
-      // assertions on its emitted source.
-      expect(filter).toMatch(/private static string PointerOf\(string propertyName\)/);
+      // The PointerOf helper encodes RFC 6901 JSON pointers.  It lives in
+      // Api/ValidationProblem.cs (shared with MVC's invalid-model-state
+      // factory, which needs the same conversion); see
+      // validation-error-extension.test.ts for the assertions on its source.
+      expect(files.get("Api/ValidationProblem.cs")).toMatch(
+        /public static string PointerOf\(string propertyName\)/,
+      );
     });
 
     it("skips the FluentValidation gate entirely when no aggregate has wire-translatable invariants", async () => {
