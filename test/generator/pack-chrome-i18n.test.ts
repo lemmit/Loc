@@ -1060,6 +1060,51 @@ describe("renderStringConcat — the i18n-off spelling, per target", () => {
 });
 
 describe("pack-chrome i18n — per-column control ARIA", () => {
+  /** A grid with row selection on — the checkbox column's two names.
+   *
+   *  Its own system rather than the shared `SYSTEM`, because `selection:` must
+   *  name a declared `string[]` state field: anything else is a validation
+   *  ERROR (`loom.datagrid-selection-not-state`), which is precisely what makes
+   *  the call-node predicate exact. */
+  const SELECTION_SYS = (platform: string, design: string) => `
+    system Shop {
+      subdomain Sales {
+        context Sales {
+          aggregate Order with crudish { status: string }
+          repository Orders for Order { }
+        }
+      }
+      api SalesApi from Sales
+      ui Web {
+        api Sales: SalesApi
+        page Home {
+          route: "/"
+          state { picked: string[] = [] }
+          body: Stack {
+            QueryView { of: Sales.Order.all, data: rows => DataGrid {
+              Column { "Status", o => o.status },
+              rows: rows,
+              selection: picked,
+              testid: "orders-data-grid"
+            } }
+          }
+        }
+      }
+      storage primary { type: postgres }
+      resource salesState { for: Sales, kind: state, use: primary }
+      deployable api {
+        platform: node
+        contexts: [Sales]
+        dataSources: [salesState]
+        serves: SalesApi
+        port: 3000
+      }
+      deployable web { platform: ${platform} targets: api ui: Web { Sales: api }${
+        design === "" ? "" : ` design: ${design}`
+      } port: 3100 }
+    }
+  `;
+
   /** A grid whose single column opts into sorting and/or filtering. */
   const ARIA_GRID = (sortable: boolean, filterable: boolean) => `Stack {
     QueryView { of: Sales.Order.all, data: rows => DataGrid {
@@ -1118,6 +1163,71 @@ describe("pack-chrome i18n — per-column control ARIA", () => {
     expect(app).not.toContain(`("Filter by " + loomText`);
   });
 
+  it.each([
+    ["react", "mantine", "home.tsx", `aria-label={t("chrome.selectAllRows", "Select all rows")}`],
+    [
+      "vue",
+      "vuetify",
+      "src/components/OrdersDataGrid.vue",
+      `:aria-label='t("chrome.selectAllRows", "Select all rows")'`,
+    ],
+    [
+      "svelte",
+      "flowbite",
+      "src/lib/components/OrdersDataGrid.svelte",
+      `aria-label={t("chrome.selectAllRows", "Select all rows")}`,
+    ],
+    [
+      "angular",
+      "angularMaterial",
+      "src/app/components/orders-data-grid.component.ts",
+      `[attr.aria-label]='t("chrome.selectAllRows", "Select all rows")'`,
+    ],
+  ])("%s/%s names its selection checkboxes", async (platform, design, file, binding) => {
+    // A checkbox has NO visible label, so this string is its entire accessible
+    // name — the one grid control that is unusable, not merely English, when a
+    // locale can't reach it.
+    const files = await generateSystemFiles(SELECTION_SYS(platform, design));
+    const child = gridChildOf(files, file);
+    expect(child).toContain(binding);
+    expect(child).not.toContain(`aria-label="Select all rows"`);
+    expect(child).not.toContain(`aria-label="Select row"`);
+    const catalog = catalogOf(files);
+    expect(catalog["chrome.selectAllRows"]).toBe("Select all rows");
+    expect(catalog["chrome.selectRow"]).toBe("Select row");
+  });
+
+  it("React stops shadowing the translator with the TanStack table", async () => {
+    // The select column's header lambda destructured `{ table: t }` — the exact
+    // name of the imported translator.  A `t("chrome.selectAllRows", …)` inside
+    // it would have called the TABLE object and thrown at runtime; no type
+    // checker sees it, because TanStack's `table` is happily `any`-ish here.
+    // Renaming the shadow is why this binding is reachable at all.
+    const files = await generateSystemFiles(SELECTION_SYS("react", "mantine"));
+    const page = pageOf(files, "home.tsx");
+    expect(page).toContain("header: ({ table: tbl }) => (");
+    expect(page).not.toContain("header: ({ table: t }) => (");
+    expect(page).toContain("checked={tbl.getIsAllPageRowsSelected()}");
+  });
+
+  it("Feliz names them as F# values", async () => {
+    const app = gridChildOf(await generateSystemFiles(SELECTION_SYS("feliz", "")), "App.fs");
+    expect(app).toContain(`prop.ariaLabel (I18n.t "chrome.selectAllRows" "Select all rows")`);
+    expect(app).toContain(`prop.ariaLabel (I18n.t "chrome.selectRow" "Select row")`);
+    expect(app).not.toContain(`prop.ariaLabel "Select all rows"`);
+  });
+
+  it("a grid with no selection carries neither key", async () => {
+    // `selection:` naming a non-state field is a validation ERROR, so the arg's
+    // presence on the call node settles whether the column renders — which is
+    // what lets these be contributed exactly rather than merged.
+    const catalog = catalogOf(
+      await generateSystemFiles(SYSTEM("react", "mantine", ARIA_GRID(true, true))),
+    );
+    expect(catalog["chrome.selectAllRows"]).toBeUndefined();
+    expect(catalog["chrome.selectRow"]).toBeUndefined();
+  });
+
   it("each key is contributed by its OWN predicate, not by the grid as a whole", async () => {
     // `sortable:` and `filterable:` are independent, so one gate would be wrong
     // in both directions.  A sort-only grid renders a sort button and no filter
@@ -1132,14 +1242,18 @@ describe("pack-chrome i18n — per-column control ARIA", () => {
       await generateSystemFiles(SYSTEM("react", "mantine", ARIA_GRID(false, true))),
     );
     expect(filterOnly["chrome.filterBy"]).toBe("Filter by {column}");
-    expect(filterOnly["chrome.sortBy"]).toBeUndefined();
 
     const neither = catalogOf(
       await generateSystemFiles(SYSTEM("react", "mantine", ARIA_GRID(false, false))),
     );
-    expect(neither["chrome.sortBy"]).toBeUndefined();
     expect(neither["chrome.filterBy"]).toBeUndefined();
     // …but the pager is unconditional, so its keys are still there.
     expect(neither["chrome.previous"]).toBe("Previous");
+    // `chrome.sortBy` is deliberately NOT asserted absent here.  The GRID
+    // contributes it exactly (the sort-only case above proves that), but
+    // `Table`'s sortable header needs it too and cannot be gated on the call
+    // node — so it also rides `TABLE_CONTROLS_CHROME`, merged into every
+    // i18n-enabled app.  `filterBy` has no such second home, which is why it
+    // stays the honest witness that the two predicates are independent.
   });
 });

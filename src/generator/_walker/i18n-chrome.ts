@@ -28,7 +28,11 @@
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
 import type { MessageEntry } from "./i18n-extract.js";
-import { gridHasFilterableColumn, gridHasSortableColumn } from "./primitives/data-grid-shape.js";
+import {
+  gridHasFilterableColumn,
+  gridHasSelection,
+  gridHasSortableColumn,
+} from "./primitives/data-grid-shape.js";
 
 /** Stable key for a pack-chrome string: `chrome.<name>`. */
 export function chromeKey(name: string): string {
@@ -63,6 +67,15 @@ export const CHROME_MESSAGES: Record<string, string> = {
   // ATTRIBUTE position; see `localizedChromeIcuAria`.
   [chromeKey("sortBy")]: "Sort by {column}",
   [chromeKey("filterBy")]: "Filter by {column}",
+  // The row-selection checkboxes' accessible names.  A checkbox has no visible
+  // label — its whole accessible name IS this string — so an untranslated one
+  // leaves a screen-reader user with an unlabelled control at every locale but
+  // English.  Two keys because they name different things (the header toggles
+  // the whole page, the cell one row), and no `{row}` hole: the checkbox is
+  // per-row already, and naming the row would need a display field the grid
+  // does not have.
+  [chromeKey("selectAllRows")]: "Select all rows",
+  [chromeKey("selectRow")]: "Select row",
   // The empty-state text of a `<select>` picker.  One key rather than one per
   // call site: it is the same sentence to a translator, and every pack that
   // spells it spells it identically (unlike the nav-toggle pair, which packs
@@ -123,6 +136,10 @@ export const CHROME_BY_PRIMITIVE: Record<string, ChromeContribution> = {
     // present in precisely the grids that render the control.  `sortable:` and
     // `filterable:` are independent, hence two gates rather than one.
     ...(gridHasSortableColumn(call) ? [entry("sortBy")] : []),
+    // Exact for the same reason the two above are: `selection:` naming a
+    // non-state field is a validation ERROR, so its presence on the call node
+    // settles whether the checkbox column renders.
+    ...(gridHasSelection(call) ? [entry("selectAllRows"), entry("selectRow")] : []),
     ...(gridHasFilterableColumn(call) ? [entry("filter"), entry("filterBy")] : []),
   ],
   // A `SelectField` ALWAYS renders the picker, so this is exact — the primitive
@@ -209,7 +226,8 @@ export const FORM_CHROME: Record<string, string> = {
   [chromeKey("cancel")]: "Cancel",
 };
 
-/** Chrome a paged `Table` renders — "Prev" / "Next" / the position counter.
+/** Chrome a `Table`'s CONTROLS render — the pager's "Prev" / "Next" / position
+ *  counter, plus the sortable header's accessible name.
  *
  *  Merged-when-already-enabled rather than contributed off the `Table` call
  *  node, for the same reason `FORM_CHROME` is: the pager is CONDITIONAL, and
@@ -221,10 +239,18 @@ export const FORM_CHROME: Record<string, string> = {
  *  over-claim (catalog keys no pager emits) or under-claim (a binding no locale
  *  can reach); the gate below sidesteps the question, because emitter and merge
  *  site then answer the identical one — is this UI i18n-enabled. */
-export const TABLE_PAGER_CHROME: Record<string, string> = {
+export const TABLE_CONTROLS_CHROME: Record<string, string> = {
   [chromeKey("prev")]: "Prev",
   [chromeKey("next")]: "Next",
   [chromeKey("pageOf")]: "Page {page} of {pages}",
+  // Only FLUTTER's sortable header carries a name of its own: a Dart widget has
+  // no implicit accessible name, so it wraps the header in `Semantics(label:
+  // 'Sort by …')`, where the four JSX targets and Feliz render a real `<button>`
+  // whose CONTENT names it.  Merged rather than contributed for the same reason
+  // as the pager — the sortable header rides `serverControls` too.  (The GRID's
+  // sort button contributes `sortBy` exactly, off its own call node; this is the
+  // TABLE's separate, unmergeable half.)
+  [chromeKey("sortBy")]: "Sort by {column}",
 };
 
 /** Every chrome table merged into a catalog ONLY when the UI is already
@@ -235,5 +261,5 @@ export const TABLE_PAGER_CHROME: Record<string, string> = {
  *  (`system/i18n-catalog.ts` for `.loom/messages.en.json`, and
  *  `_frontend/i18n-runtime.ts` for each app's `locales/en.json`). */
 export function chromeMergedWhenEnabled(): Record<string, string> {
-  return { ...APP_SHELL_CHROME, ...FORM_CHROME, ...TABLE_PAGER_CHROME };
+  return { ...APP_SHELL_CHROME, ...FORM_CHROME, ...TABLE_CONTROLS_CHROME };
 }

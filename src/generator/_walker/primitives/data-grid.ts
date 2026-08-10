@@ -41,6 +41,7 @@ import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
 
 import {
+  localizedChromeAriaAttr,
   localizedChromeAttr,
   localizedChromeIcuAria,
   localizedChromeIcuExpr,
@@ -138,6 +139,13 @@ export function emitDataGrid(
       sortByAria: localizedChromeIcuAria(ctx, "sortBy", [
         { name: "column", expr: GRID_COLUMN_HEADER },
       ]),
+      // The selection checkboxes' names.  A checkbox carries no visible label,
+      // so this string IS its accessible name — the one control on the grid
+      // that is completely unusable to a screen reader when untranslated.
+      selectAllRowsAria: localizedChromeAriaAttr(ctx, "selectAllRows"),
+      selectRowAria: localizedChromeAriaAttr(ctx, "selectRow"),
+      selectAllRowsAriaValue: localizedChromeValue(ctx, "selectAllRows"),
+      selectRowAriaValue: localizedChromeValue(ctx, "selectRow"),
       // The grid body markup comes from the active design pack, so each pack
       // keeps its own table chrome while the reactive wiring around it belongs
       // to the target.  Rendered through a callback rather than eagerly: a

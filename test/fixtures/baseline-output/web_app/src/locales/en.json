@@ -13,6 +13,7 @@
   "chrome.selectPlaceholder": "Select…",
   "chrome.skipToContent": "Skip to content",
   "chrome.somethingWentWrong": "Something went wrong",
+  "chrome.sortBy": "Sort by {column}",
   "chrome.toggleNavigation": "Toggle navigation",
   "pack.mantine.addItem.n0qjz5": "Add {item}",
   "pack.mantine.arrayUnsupported.m0hiqj": "(arrays not yet supported in forms)",

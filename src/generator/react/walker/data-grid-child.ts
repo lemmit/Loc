@@ -108,18 +108,18 @@ function renderGridComponent(spec: DataGridSpec, body: string): string {
   const selectCol = selection
     ? `        {
           id: "loom-select",
-          header: ({ table: t }) => (
+          header: ({ table: tbl }) => (
             <input
               type="checkbox"
-              aria-label="Select all rows"
-              checked={t.getIsAllPageRowsSelected()}
-              onChange={t.getToggleAllPageRowsSelectedHandler()}
+              ${spec.selectAllRowsAria}
+              checked={tbl.getIsAllPageRowsSelected()}
+              onChange={tbl.getToggleAllPageRowsSelectedHandler()}
             />
           ),
           cell: ({ row }) => (
             <input
               type="checkbox"
-              aria-label="Select row"
+              ${spec.selectRowAria}
               checked={row.getIsSelected()}
               disabled={!row.getCanSelect()}
               onChange={row.getToggleSelectedHandler()}

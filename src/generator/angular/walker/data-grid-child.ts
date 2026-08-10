@@ -78,8 +78,8 @@ function renderComponent(spec: DataGridSpec, className: string, selector: string
   // and Svelte's — a TanStack `cell` function returns framework-specific render
   // output, and the walker produces markup.
   const body = spec.renderBody({
-    headerBody: headerBody(selection, spec.sortByAria),
-    cellBody: cellBody(columns, selection),
+    headerBody: headerBody(selection, spec.sortByAria, spec.selectAllRowsAria),
+    cellBody: cellBody(columns, selection, spec.selectRowAria),
   });
 
   const coreSymbols = [
@@ -319,7 +319,7 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
 }
 
 /** The full header-cell content, as Angular control flow (`@if`/`@else if`). */
-function headerBody(selection: boolean, sortByAria: string): string {
+function headerBody(selection: boolean, sortByAria: string, selectAllRowsAria: string): string {
   const label = `{{ String(h.column.columnDef.header ?? h.id) }}`;
   const indicator = `{{ h.column.getIsSorted() === 'asc' ? ' ↑' : h.column.getIsSorted() === 'desc' ? ' ↓' : '' }}`;
   const style =
@@ -330,7 +330,7 @@ function headerBody(selection: boolean, sortByAria: string): string {
           `@if (h.column.id === 'loom-select') {`,
           `  <input`,
           `    type="checkbox"`,
-          `    aria-label="Select all rows"`,
+          `    ${selectAllRowsAria}`,
           `    [checked]="table.getIsAllPageRowsSelected()"`,
           `    (change)="table.toggleAllPageRowsSelected()"`,
           `  />`,
@@ -352,7 +352,11 @@ function headerBody(selection: boolean, sortByAria: string): string {
 }
 
 /** The full body-cell content, as Angular control flow. */
-function cellBody(columns: readonly DataGridColumn[], selection: boolean): string {
+function cellBody(
+  columns: readonly DataGridColumn[],
+  selection: boolean,
+  selectRowAria: string,
+): string {
   const branches: string[] = [];
   if (selection) {
     branches.push(
@@ -360,7 +364,7 @@ function cellBody(columns: readonly DataGridColumn[], selection: boolean): strin
         `@if (c.column.id === 'loom-select') {`,
         `  <input`,
         `    type="checkbox"`,
-        `    aria-label="Select row"`,
+        `    ${selectRowAria}`,
         `    [checked]="c.row.getIsSelected()"`,
         `    [disabled]="!c.row.getCanSelect()"`,
         `    (change)="c.row.toggleSelected()"`,

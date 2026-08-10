@@ -609,10 +609,30 @@ export function localizedChromeIcuAria(
   name: string,
   values: ReadonlyArray<{ name: string; expr: string }>,
 ): string {
-  const attrName = `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
   return ctx.target
-    .renderAttrBinding(attrName, localizedChromeIcuExpr(ctx, name, values))
+    .renderAttrBinding(ariaLabelAttrName(ctx), localizedChromeIcuExpr(ctx, name, values))
     .trimStart();
+}
+
+/** The HOLE-FREE sibling of {@link localizedChromeIcuAria}: a plain chrome
+ *  string as an ` aria-label` attribute, for markup that lands in a hoisted
+ *  CHILD file (a grid's row-selection checkboxes).
+ *
+ *  Not {@link localizedChromeAria}, which is the PAGE-side helper — it registers
+ *  the `t` import and returns a leading-space fragment.  Not
+ *  {@link localizedChromeIcuAria} with an empty `values` either: that would route
+ *  through `renderStringConcat` and spell the i18n-off form as a one-piece
+ *  template literal (`` `Select row` ``) where the pre-i18n markup had a plain
+ *  quoted attribute.  A message with no holes is not a concatenation, so it
+ *  takes the ordinary attribute path and stays byte-identical. */
+export function localizedChromeAriaAttr(ctx: WalkContext, name: string): string {
+  return localizedChromeAttr(ctx, ariaLabelAttrName(ctx), name);
+}
+
+/** `aria-label`, or the target's binding-safe spelling of it (`attr.aria-label`
+ *  on Angular, whose `[aria-label]` would bind a non-existent DOM property). */
+function ariaLabelAttrName(ctx: WalkContext): string {
+  return `${ctx.target.ariaAttrPrefix ?? ""}aria-label`;
 }
 
 /** An ICU-holed chrome string as a target-native EXPRESSION, always defined —
