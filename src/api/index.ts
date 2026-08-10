@@ -23,6 +23,7 @@ import type {
   PrimitiveCatalog,
   ValidateReport,
 } from "../diagnostics/contract.js";
+import { diagMessage } from "../diagnostics/messages.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { wireFieldsForAggregate } from "../ir/enrich/wire-projection.js";
 import { lowerModel, mergeLoomModels } from "../ir/lower/lower.js";
@@ -124,9 +125,9 @@ function irDiagnosticsFor(model: Model, path: string): LoomDiagnostic[] {
     return [
       {
         severity: "error",
-        message: `IR phase failed before generation: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        message: diagMessage("loom.ir-internal#generation", {
+          err: err instanceof Error ? err.message : String(err),
+        }),
         source: path,
         code: "loom.ir-internal",
       },

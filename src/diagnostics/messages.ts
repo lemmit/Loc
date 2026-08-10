@@ -2308,6 +2308,70 @@ export const DIAGNOSTIC_MESSAGES = {
     prior: unknown;
   }) =>
     `api '${p.name}' sets urlStyle '${p.style}' on subdomain '${p.sub}', which another api already surfaces as '${p.prior}'.  The first-declared style ('${p.prior}') wins; route slugs use it.`,
+  // ----------------------------------------------------------------------
+  // src/macros/expander.ts
+  // ----------------------------------------------------------------------
+  "loom.unknown-capability": (p: { cap: unknown }) =>
+    `Unknown capability '${p.cap}' in 'implements'.`,
+  "loom.version-field-collision": (p: { name: unknown; name2: unknown }) =>
+    `field 'version' on aggregate '${p.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
+    `Rename this field (e.g. '${p.name2}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+  "loom.unknown-macro#top-level": (p: { name: unknown; listMacroNames: unknown }) =>
+    `Unknown macro or capability '${p.name}'.  Available macros: ${p.listMacroNames}.`,
+  "loom.unknown-macro#nested": (p: {
+    name: unknown;
+    childName: unknown;
+    listMacroNames: unknown;
+  }) =>
+    `Macro '${p.name}' invoked unknown macro '${p.childName}'.  ` +
+    `Available: ${p.listMacroNames}.`,
+  "loom.macro-target-mismatch": (p: { name: unknown; target: unknown; hostKind: unknown }) =>
+    `Macro '${p.name}' targets '${p.target}' but was invoked on a '${p.hostKind}'.`,
+  "loom.macro-threw#nested": (p: { childName: unknown; name: unknown; message: unknown }) =>
+    `Macro '${p.childName}' (invoked from '${p.name}') threw: ${p.message}`,
+  "loom.macro-threw#direct": (p: { name: unknown; message: unknown }) =>
+    `Macro '${p.name}' threw during expansion: ${p.message}`,
+  "loom.capability-host-invalid": (p: { name: unknown; hostKind: unknown }) =>
+    `Capability '${p.name}' can only be applied to an aggregate or context (got '${p.hostKind}').  ` +
+    "A capability is a pure mixin over domain state, not a UI or API concern.",
+  "loom.macro-non-ast-result": (p: { v1: unknown }) =>
+    `Macro returned a non-AST value (${p.v1}); expected an AST member or capability node.`,
+  "loom.macro-escapes-host":
+    "Macro emitted a node targeting a destination outside the host's subtree.  " +
+    "Macros may only modify their host or its descendants (e.g. a context-level macro " +
+    "may invoke an aggregate-level macro against an aggregate inside the context).",
+  "loom.macro-arg-duplicate": (p: { name: unknown; macroName: unknown }) =>
+    `Duplicate argument '${p.name}' in call to macro '${p.macroName}'.`,
+  "loom.macro-arg-unknown": (p: { name: unknown; macroName: unknown; spec: unknown }) =>
+    `Unknown argument '${p.name}' for macro '${p.macroName}'.  ` +
+    `Declared parameters: ${p.spec}.`,
+  "loom.macro-arg-missing": (p: { name: unknown; name2: unknown; kind: unknown }) =>
+    `Macro '${p.name}' requires argument '${p.name2}' (kind=${p.kind}).`,
+  "loom.macro-arg-unresolved-ref": (p: {
+    argName: unknown;
+    macroName: unknown;
+    of: unknown;
+    refText: unknown;
+  }) =>
+    `Argument '${p.argName}' to macro '${p.macroName}' references unknown ${p.of} '${p.refText}'.`,
+  "loom.macro-arg-kind-mismatch": (p: { argName: unknown; macroName: unknown; kind: unknown }) =>
+    `Argument '${p.argName}' to macro '${p.macroName}' expected kind '${p.kind}'.`,
+
+  // ----------------------------------------------------------------------
+  // src/api/evolve.ts
+  // ----------------------------------------------------------------------
+  "loom.ir-internal#snapshot-lowering": "Lowering failed before snapshot capture.",
+  "loom.ir-internal#evolve-lowering": "Lowering the current source failed.",
+  "loom.ir-internal#migration-derivation": (p: { message: unknown }) =>
+    `Migration derivation failed: ${p.message}`,
+  "loom.no-system":
+    "Source has no `system` block — schema migrations and the wire contract are derived per system, so there is nothing to evolve yet.",
+
+  // ----------------------------------------------------------------------
+  // src/api/index.ts
+  // ----------------------------------------------------------------------
+  "loom.ir-internal#generation": (p: { err: unknown }) =>
+    `IR phase failed before generation: ${p.err}`,
 } satisfies Record<string, MessageEntry>;
 
 type Catalog = typeof DIAGNOSTIC_MESSAGES;
