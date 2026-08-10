@@ -892,17 +892,34 @@ that one stays CI's to answer. Everything else, including all three Angular
 design packs, builds locally in a couple of minutes and is far cheaper than a CI
 round-trip.
 
-### Flutter: the pub.dev TLS wrinkle, and how to analyze anyway
+### Flutter: analyzing a generated app locally
 
-Flutter runs in `ghcr.io/cirruslabs/flutter:stable`, but `flutter pub get` fails
-with `Got TLS error trying to find package … at https://pub.dev`. It is the SAME
-fingerprint wrinkle documented above for Erlang/hex: the egress proxy allowlists
-by TLS fingerprint, so system OpenSSL passes and the language's own TLS stack
-does not. The proof is one command — inside the container, `curl https://pub.dev/api/packages/vector_math`
-returns **200** while Dart's fetch of the same package is refused.
+**Try the plain path first — it now works** (re-verified 2026-08-10 against a
+freshly generated app): in `ghcr.io/cirruslabs/flutter:stable`, an ordinary
+`flutter pub get` resolves and `flutter analyze` reports `No issues found!` on a
+FULL generated app, deps and all.
 
-So seed the pub cache with `curl` and resolve **offline**. Flutter pins its
-runtime deps to exact versions in the SDK's own pubspec, so fetch those:
+```bash
+docker run --rm --network host -v <deployable>:/src -w /src \
+  -v /root/.ccr:/root/.ccr:ro -e CURL_CA_BUNDLE=/root/.ccr/ca-bundle.crt \
+  -e HTTPS_PROXY="$HTTPS_PROXY" -e HTTP_PROXY="$HTTP_PROXY" \
+  ghcr.io/cirruslabs/flutter:stable bash -c 'flutter pub get && flutter analyze'
+```
+
+So `generated-flutter-build` is no longer the only thing that can answer for
+Flutter — analyze locally before pushing, as with every other backend.
+
+#### Fallback: the pub.dev TLS wrinkle
+
+Some proxies DO refuse Dart's own TLS stack — `flutter pub get` then fails with
+`Got TLS error trying to find package … at https://pub.dev`. That is the SAME
+fingerprint wrinkle documented above for Erlang/hex: system OpenSSL passes and
+the language's own TLS stack does not. The proof is one command — inside the
+container, `curl https://pub.dev/api/packages/vector_math` returns **200** while
+Dart's fetch of the same package is refused.
+
+If you hit it, seed the pub cache with `curl` and resolve **offline**. Flutter
+pins its runtime deps to exact versions in the SDK's own pubspec, so fetch those:
 
 ```bash
 # inside the container, with -v /root/.ccr:/root/.ccr:ro -e CURL_CA_BUNDLE=/root/.ccr/ca-bundle.crt
@@ -917,11 +934,12 @@ flutter pub get --offline && flutter analyze
 
 That is enough to `flutter analyze` any generated file whose imports are
 SDK-only — which covers the hand-written runtime widgets (`lib/modal.dart`).
-Analyzing a full generated app additionally needs its pub deps
-(`flutter_riverpod`, `http`, `intl` + transitives) at constraint-satisfying
-versions, which is a version-solve the seeding trick doesn't do; a proper
-pub.dev mirror (the `scripts/hex-mirror.py` equivalent) is the durable fix, and
-`generated-flutter-build` remains the authority until it exists.
+It does NOT cover a full generated app, whose pub deps (`flutter_riverpod`,
+`http`, `intl` + transitives) need a constraint-satisfying version solve the
+seeding trick doesn't do. On a proxy that blocks Dart's TLS, a pub.dev mirror
+(the `scripts/hex-mirror.py` equivalent) is the durable fix and
+`generated-flutter-build` stays the authority — but check the plain path above
+first, since it resolves the full dependency set when the proxy allows it.
 
 > `vitest --reporter=basic` no longer exists in vitest 4 — it fails at startup
 > with "Failed to load custom Reporter from basic". Use the default reporter.

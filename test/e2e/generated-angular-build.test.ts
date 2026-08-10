@@ -525,11 +525,32 @@ describe.skipIf(!ENABLED)("generated Angular project compiles + bundles (ng buil
       });
       // `ng build` runs the Angular compiler (strict template typecheck) +
       // esbuild bundle in one step.
-      execSync(`npx ng build`, {
-        cwd: projectDir,
-        stdio: "inherit",
-        timeout: 240_000,
-      });
+      //
+      // `stdio: "inherit"` is the convention across the e2e harnesses (in CI each
+      // matrix cell is its own job, so the child's output IS the job log). The
+      // cost lands locally, where this file loops over ALL 21 cells: execSync
+      // throws a bare `Command failed: npx ng build`, and the reason is somewhere
+      // up in interleaved output. Re-throw with the one piece of context that is
+      // always relevant here and never in that output at the point of failure —
+      // the Node version — because the Angular CLI enforces a hard floor and
+      // failing it fails every cell at once, which reads exactly like a broken
+      // diff. Deliberately does NOT hardcode the floor: the CLI prints its own
+      // requirement, which cannot go stale.
+      try {
+        execSync(`npx ng build`, {
+          cwd: projectDir,
+          stdio: "inherit",
+          timeout: 240_000,
+        });
+      } catch (e) {
+        throw new Error(
+          `npx ng build failed in ${projectDir} (running node ${process.version}).\n` +
+            `See the build output above for the compiler's own message. If it names a ` +
+            `minimum Node version, that is an environment limit, not a code defect — ` +
+            `every cell in this matrix fails together when the floor is unmet.\n` +
+            `Original: ${(e as Error).message}`,
+        );
+      }
     } finally {
       fs.rmSync(outDir, { recursive: true, force: true });
     }
