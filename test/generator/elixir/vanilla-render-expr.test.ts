@@ -1,6 +1,7 @@
 // Vanilla foundation render-expr leaves (vanilla-foundation-tdd-plan.md, Slice 0;
 // vanilla-foundation-research.md §3). `platform: elixir` only emits the vanilla
-// foundation (plain Ecto, no Ash): enum values render as stored strings, and a
+// foundation (plain Ecto, no Ash): enum values render as stored strings (PINNED
+// inside an Ecto query, so `Ecto.Enum` casts them), and a
 // filter-bound param is a bare Ecto pin `^name`.
 
 import { describe, expect, it } from "vitest";
@@ -25,11 +26,18 @@ const filter: ExprIR = {
 };
 
 describe("render-expr vanilla leaves", () => {
-  it("enum → declared string in a filter (query) context, atom in-memory; filter param → bare ^pin", () => {
-    // Query context (filterArgs): dumped DECLARED string, matching the text column.
-    expect(renderExpr(enumVal, ctx)).toBe('"Confirmed"');
+  it("enum → PINNED declared string in a filter (query) context, atom in-memory; filter param → bare ^pin", () => {
+    // Query context (filterArgs): the declared string, INTERPOLATED.  A bare
+    // literal in an Ecto query expression is only DUMPED, and `Ecto.Enum`'s dump
+    // map is keyed by the declared atom, so an inline `"Confirmed"` raises
+    // `Ecto.QueryError: value "Confirmed" cannot be dumped to type
+    // #Ecto.Enum<…>` when the query is planned (a runtime 500 on the first read
+    // — it compiles fine).  A pinned value is CAST first (string → atom) and
+    // then dumped back to the stored string, which is what the error message
+    // itself prescribes ("must be interpolated (using ^)").
+    expect(renderExpr(enumVal, ctx)).toBe('^"Confirmed"');
     expect(renderExpr(filterParam, ctx)).toBe("^min_total");
-    expect(renderExpr(filter, ctx)).toBe('record.status == "Confirmed"');
+    expect(renderExpr(filter, ctx)).toBe('record.status == ^"Confirmed"');
     // In-memory context (no filterArgs): the loaded Ecto.Enum field is the
     // declared-case atom, so the comparison literal is `:Confirmed` (unquoted —
     // value names are identifiers; `:"Confirmed"` would warn under -Werror).
@@ -40,6 +48,16 @@ describe("render-expr vanilla leaves", () => {
     };
     expect(renderExpr(enumVal, memCtx)).toBe(":Confirmed");
     expect(renderExpr(filter, memCtx)).toBe("record.status == :Confirmed");
+    // Document shape (`docStruct`): the predicate runs IN MEMORY over the
+    // rehydrated `%<Agg>.Data{}` embed, whose enum fields are plain `:string`s —
+    // a `^` pin would not even be valid Elixir there, so it stays bare.
+    const docCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+      docStruct: true,
+    };
+    expect(renderExpr(enumVal, docCtx)).toBe('"Confirmed"');
   });
 
   it("this-prop access renders record.<field>", () => {

@@ -214,9 +214,29 @@ function renderMiddleware(
   // segment — a pure string derivation, no extra read.  Build both onto the
   // principal: compute `orgPath` once into a const, then derive `rootOrg`.
   const orgPathExpr = orgPathReadsRegistry ? `await resolveOrgPath(${claimExpr})` : claimExpr;
+  // A declared NON-OPTIONAL array claim absent from the token is the EMPTY SET,
+  // not `undefined`.  The verifier projects claims with a bare cast
+  // (`permissions: claim(payload, "permissions") as string[]`), so a token that
+  // simply omits the claim — routine: an IdP emits `permissions` only for users
+  // who have any — produced a principal whose declared `string[]` field was
+  // undefined.  Everything that consumes it calls a method on it (`mask unless
+  // currentUser.permissions.contains(…)` → `.includes(…)`, the same for a
+  // `requires` gate or a policy), so the read answered **500** instead of
+  // redacting: the fail-OPEN-shaped crash of the one feature whose failure is a
+  // data leak.  Normalising here covers every verifier — the OIDC one, the dev
+  // stub, and any hand-written registration — because it is the single place
+  // the request principal is built.  Found by field-mask's first runtime
+  // caller.
+  const arrayClaimDefaults = user.fields
+    .filter((f) => !f.optional && f.type.kind === "array")
+    .map((f) => `${f.name}: claims.${f.name} ?? []`);
+  const claimsSpread =
+    arrayClaimDefaults.length > 0 ? `...claims, ${arrayClaimDefaults.join(", ")}` : "...claims";
   const buildUser = orgPathClaim
-    ? `const orgPath = ${orgPathExpr};\n  const user: User = { ...claims, orgPath, rootOrg: rootOrgOf(orgPath) };`
-    : `const user: User = claims;`;
+    ? `const orgPath = ${orgPathExpr};\n  const user: User = { ${claimsSpread}, orgPath, rootOrg: rootOrgOf(orgPath) };`
+    : arrayClaimDefaults.length > 0
+      ? `const user: User = { ${claimsSpread} };`
+      : `const user: User = claims;`;
   // The registry-lookup seam (P2.2).  The auth layer can't reach the db (it is
   // constructed at boot and injected into repositories), so — like the verifier
   // — the resolver is REGISTERED at boot (index.ts) with a closure that reads

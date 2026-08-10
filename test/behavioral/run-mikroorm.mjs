@@ -105,6 +105,18 @@ const MIKRO_SKIP = {
     "mikroorm emits no http/channels.ts (broker driver/producer tee/consumer loop) — M-T6.23",
   outbox:
     "mikroorm emits no transactional outbox + relay, so `retention: work` is at-most-once — M-T6.23",
+  // Same class, found by the first runtime callers for these two fixtures
+  // (#2468): the adapter emits no QUERY-time projection reads, and — unlike
+  // the silent gaps above — `loom.mikroorm-unsupported` already says so as a
+  // hard validation ERROR, so forcing the case here does not even generate
+  // ("context 'Orders' declares the query-time projection 'SalesTotals', which
+  // the MikroORM adapter does not emit"). The gate is honest; what was missing
+  // was a runtime caller to walk into it. Delete both entries when the adapter
+  // grows the read routes.
+  "projection-aggregation":
+    "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
+  "projection-groupby":
+    "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`

@@ -148,8 +148,9 @@ function renderQueryProjectionModule(
     (query.selects?.length ?? 0) === 0;
 
   // In-memory projection context (enum → declared atom); the `where` below uses
-  // a `filterArgs` clone (enum → dumped declared string — Ecto won't cast an
-  // inline atom through `Ecto.Enum`).
+  // a `filterArgs` clone (params → `^pin`, enum → the declared string PINNED,
+  // so Ecto casts it through `Ecto.Enum` instead of trying to dump a bare
+  // literal — see `render-expr.ts`'s `enum-value` arm).
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule,

@@ -162,6 +162,24 @@ const BEHAVIOURAL_SKIP = {
     // document-repo impl, so the interface/impl method sets agree; repository.ts.)
   },
   java: {},
+  // The DAPPER adapter of the .NET backend (`run-dapper.mjs` forces this exact
+  // clause, and looks the skip set up by it).
+  "dotnet { persistence: dapper }": {
+    // A SILENT gap, unlike mikroorm's: `src/generator/dotnet/query-projection-emit.ts`
+    // contains no `dapper` branch at all — it hard-codes `using
+    // Microsoft.EntityFrameworkCore;` and `private readonly AppDbContext _db;`,
+    // neither of which exists on the Dapper adapter, so the generated project
+    // does not COMPILE (CS0234 / CS0246) and nothing warned at generate time.
+    // Found by these two fixtures' first runtime callers (#2468).  The proper
+    // fix is either a Dapper query-projection emitter or — at minimum — an
+    // honest `loom.dapper-unsupported` gate like the MikroORM one, so the
+    // failure is a diagnostic instead of a broken build.  Delete these when
+    // either lands.
+    "projection-aggregation":
+      "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
+    "projection-groupby":
+      "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
+  },
   elixir: {
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
     // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
