@@ -29,7 +29,9 @@
 // the verdict.
 //
 // Fail-closed invariants, unchanged from v1: an unknown/future conclusion or
-// a cancelled run counts as FAILED; zero other checks reporting blocks (the
+// a cancelled run counts as FAILED — but only ever the NEWEST run of a given
+// check name (`latestPerName`), so a superseded suite's cancelled corpse never
+// condemns a SHA whose live suite is green; zero other checks reporting blocks (the
 // unfiltered test.yml guarantees at least one always comes); pending is never
 // green. The decision core (`evaluate`, `verdict`) is pure and pinned by
 // test/system/pr-gate.test.ts.
@@ -44,6 +46,40 @@ export const SELF_NAMES = new Set(["pr-gate", "pr-gate-eval"]);
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
 /**
+ * Collapse a check-run list to ONE run per NAME, keeping the newest.
+ *
+ * The API's `filter=latest` is per NAME **per CHECK SUITE**, not per name — a
+ * distinction that is invisible until a SHA carries two suites, and then it is
+ * a permanent red.  A PR opened as a draft and later marked ready (the flow
+ * CLAUDE.md prescribes) fires a second event on the SAME head SHA; the second
+ * suite's `concurrency: cancel-in-progress` CANCELS the first, and the gate's
+ * fail-closed rule ("a cancelled run counts as FAILED") then condemns the PR
+ * on the corpse of a superseded suite.  Nothing clears it: re-evaluation
+ * re-reads the same cancelled run and the sweep re-derives the same verdict,
+ * so the PR is unmergeable until it is force-pushed to a fresh SHA.
+ *
+ * Ordering is by check-run `id`, which GitHub assigns monotonically at
+ * creation: the newer suite's jobs are created later, so they win — and a
+ * re-run also wins over the attempt it replaces, the same answer
+ * `filter=latest` already gives within a suite.  Runs with no `id` (only the
+ * hand-built snapshots in the tests) fall back to "last one in the list wins",
+ * so array order stays meaningful rather than silently preferring the head.
+ *
+ * @template {{name: string, id?: number}} T
+ * @param {ReadonlyArray<T>} runs
+ * @returns {T[]}
+ */
+export function latestPerName(runs) {
+  /** @type {Map<string, T>} */
+  const byName = new Map();
+  for (const r of runs) {
+    const prev = byName.get(r.name);
+    if (!prev || (r.id ?? 0) >= (prev.id ?? 0)) byName.set(r.name, r);
+  }
+  return [...byName.values()];
+}
+
+/**
  * Classify one snapshot of the head SHA's check runs.
  *
  * @param {ReadonlyArray<{name: string, status: string, conclusion: string | null}>} runs
@@ -51,7 +87,7 @@ const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
  * @returns {{total: number, pending: string[], failed: string[]}}
  */
 export function evaluate(runs, selfNames) {
-  const others = runs.filter((r) => !selfNames.has(r.name));
+  const others = latestPerName(runs).filter((r) => !selfNames.has(r.name));
   const pending = others.filter((r) => r.status !== "completed").map((r) => r.name);
   const failed = others
     .filter((r) => r.status === "completed" && !PASSING_CONCLUSIONS.has(r.conclusion ?? ""))
@@ -94,8 +130,10 @@ const API_HEADERS = (token) => ({
   "x-github-api-version": "2022-11-28",
 });
 
-/** Fetch every check run on `sha` (paginated; `filter=latest` keeps only the
- *  newest attempt per check name, which is the run branch protection shows). */
+/** Fetch every check run on `sha` (paginated).  `filter=latest` narrows to the
+ *  newest attempt per name WITHIN EACH CHECK SUITE — a SHA carrying two suites
+ *  still yields two runs per name, so `latestPerName` does the cross-suite
+ *  collapse the verdict actually needs.  `id` is carried for that ordering. */
 async function fetchCheckRuns(repo, sha, token) {
   const runs = [];
   for (let page = 1; ; page += 1) {
@@ -109,7 +147,12 @@ async function fetchCheckRuns(repo, sha, token) {
     runs.push(...body.check_runs);
     if (runs.length >= body.total_count || body.check_runs.length === 0) break;
   }
-  return runs.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion }));
+  return runs.map((r) => ({
+    id: r.id,
+    name: r.name,
+    status: r.status,
+    conclusion: r.conclusion,
+  }));
 }
 
 /** Publish the verdict as a check run named `pr-gate` on the head SHA — the
@@ -138,14 +181,17 @@ async function postCheck(repo, sha, token, v) {
 /**
  * The state of the currently-published `pr-gate` check in a snapshot, so the
  * sweep can tell whether a fresh verdict would CHANGE anything.  Uses the same
- * fetched list the verdict uses (`filter=latest` keeps the newest run per
- * name).
+ * fetched list the verdict uses, collapsed by `latestPerName` — the gate posts
+ * a new check run per evaluation, so this SHA has many `pr-gate` runs.
  *
  * @param {ReadonlyArray<{name: string, status: string, conclusion: string | null}>} runs
  * @returns {"success" | "failure" | "pending" | "absent"}
  */
 export function currentGateState(runs) {
-  const gate = runs.find((r) => r.name === "pr-gate");
+  // Deduped for the same reason `evaluate` is: the gate posts a NEW check run
+  // per evaluation, so a SHA accumulates many `pr-gate` runs and a bare `find`
+  // would answer from whichever the API happened to list first.
+  const gate = latestPerName(runs).find((r) => r.name === "pr-gate");
   if (!gate) return "absent";
   if (gate.status !== "completed") return "pending";
   return gate.conclusion === "success" ? "success" : "failure";
