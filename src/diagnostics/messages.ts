@@ -2061,6 +2061,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `An e2e body drives the deployable over HTTP, so it resolves no domain names — ` +
     `an enum value belongs there as its wire string (e.g. "${p.name}"). ` +
     `Emitting it verbatim would ship an undefined identifier in the generated test.`,
+  "loom.e2e-unresolved-call": (p: { testName: unknown; name: unknown }) =>
+    `e2e test '${p.testName}': '${p.name}(…)' resolves to no function. ` +
+    `An e2e body drives the deployable over HTTP and resolves no domain names; ` +
+    `the conversions it may call (money(…), decimal(…), string(…), int(…)) are ` +
+    `built in. Emitting it verbatim would ship an undefined identifier in the ` +
+    `generated test.`,
   "loom.e2e-unknown-workflow": (p: { magicId: unknown; method: unknown; known: unknown }) =>
     `e2e: unknown workflow '${p.magicId}.workflows.${p.method}' on this deployable. ` +
     `Available workflows: ${p.known}.`,

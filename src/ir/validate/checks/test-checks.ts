@@ -223,12 +223,7 @@ function checkUnresolvedRef(
     diags.push({
       severity: "error",
       code: "loom.e2e-unresolved-call",
-      message:
-        `e2e test '${testName}': '${e.name}(…)' resolves to no function. ` +
-        `An e2e body drives the deployable over HTTP and resolves no domain names; ` +
-        `the conversions it may call (money(…), decimal(…), string(…), int(…)) are ` +
-        `built in. Emitting it verbatim would ship an undefined identifier in the ` +
-        `generated test.`,
+      message: diagMessage("loom.e2e-unresolved-call", { testName, name: e.name }),
       source,
     });
     return;
