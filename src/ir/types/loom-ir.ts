@@ -1163,7 +1163,7 @@ export interface PolicyReadLevelIR {
  *  tenant floor (and the default write scope when no rule names an aggregate);
  *  `deep` widens to the caller's org + all descendants (a `dataKey`
  *  materialized-path prefix).  `global` parses but is rejected in P3.1
- *  (`loom.policy-write-global-unsupported`). */
+ *  (`loom.policy-write-global-invalid`). */
 export interface PolicyWriteLevelIR {
   /** The tenant-owned aggregate this write level applies to (by name, in this
    *  context).  Resolution + tenant-owned-ness is validated in phase ⑦. */
@@ -2657,7 +2657,7 @@ export interface RefetchTargetIR {
  *  event as it arrives on the realtime wire.  A handler body admits two
  *  actions: `toast(<expr>)` (a message notification) and
  *  `refetch(<Aggregate>[, …])` (invalidate that aggregate's query cache);
- *  the validator (`loom.ui-handler-unsupported`) rejects anything else.
+ *  the validator (`loom.ui-handler-statement-unknown`) rejects anything else.
  *  Each lowers with `bind` in scope as the event payload. */
 export interface UiNotificationIR {
   /** The channel-param handle the handler subscribes through. */

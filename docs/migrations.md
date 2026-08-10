@@ -186,7 +186,7 @@ like every DDL step. Two steps exist, both deliberately minimal:
 expression is validated against a SQL-renderable subset (literals, enum
 values, sibling *scalar* fields as column refs, arithmetic/comparison/boolean
 operators, `?:`, `now()`; codes `loom.migration-expr-unsupported`,
-`loom.backfill-type-mismatch`, `loom.backfill-target-unsupported`) and fires
+`loom.backfill-type-mismatch`, `loom.backfill-target-invalid`) and fires
 whenever the diff adds that column or flips it NOT NULL:
 
 ```ddd

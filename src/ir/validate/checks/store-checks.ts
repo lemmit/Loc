@@ -13,7 +13,7 @@
 //        `persist: memory|local|session|url` ladder now ships on every
 //        frontend; a bad value is caught at the AST tier as
 //        loom.store-lifetime-invalid, validators/ui.ts.)
-//   loom.store-cross-store-on-liveview-unsupported — a store action that calls
+//   loom.store-cross-store-on-liveview-invalid — a store action that calls
 //        a DIFFERENT store's action, on a `phoenixLiveView` deployable.  The
 //        LiveView projection seeds each used store as its OWN per-page assign
 //        (`assign(:cart, %Cart{})`), so a pure store fn has no handle to a
@@ -80,7 +80,7 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         // gate is retired.  A malformed `persist:` value is rejected earlier at
         // the AST tier (`loom.store-lifetime-invalid`, validators/ui.ts).
 
-        // loom.store-url-field-unsupported — a `persist: url` store reflects its
+        // loom.store-url-field-invalid — a `persist: url` store reflects its
         // fields into query params, which carry only scalars.  Arrays and nested
         // entity/value-object fields have no faithful, round-trippable query
         // encoding in v1, so reject them loudly rather than silently drop them
@@ -91,8 +91,8 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
             if (k === "array" || k === "entity" || k === "valueobject") {
               diags.push({
                 severity: "error",
-                code: "loom.store-url-field-unsupported",
-                message: diagMessage("loom.store-url-field-unsupported", {
+                code: "loom.store-url-field-invalid",
+                message: diagMessage("loom.store-url-field-invalid", {
                   where,
                   name: f.name,
                   k,
@@ -210,7 +210,7 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
       }
     }
 
-    // loom.store-cross-store-on-liveview-unsupported — a ui mounted by a
+    // loom.store-cross-store-on-liveview-invalid — a ui mounted by a
     // `phoenixLiveView` deployable whose store has an action that calls a
     // DIFFERENT store's action.  The HEEx projection seeds each used store as
     // its own per-page assign (`assign(:cart, %Cart{})`) and renders a store
@@ -227,7 +227,7 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         const isLiveView =
           dep.uiFramework === "phoenixLiveView" || ui?.framework === "phoenixLiveView";
         if (!isLiveView) continue;
-        // loom.store-lifetime-liveview-unsupported — the persistence tiers of
+        // loom.store-lifetime-liveview-invalid — the persistence tiers of
         // the lifetime ladder don't map onto a server-rendered LiveView store:
         // `local`/`session` are browser storage (no server-side equivalent),
         // and `url` needs page-level `handle_params`/`push_patch` wiring the
@@ -239,8 +239,8 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
             const where = `store '${store.name}'`;
             diags.push({
               severity: "error",
-              code: "loom.store-lifetime-liveview-unsupported",
-              message: diagMessage("loom.store-lifetime-liveview-unsupported", {
+              code: "loom.store-lifetime-liveview-invalid",
+              message: diagMessage("loom.store-lifetime-liveview-invalid", {
                 where,
                 lifetime: lifetimeKeyword(store.lifetime),
               }),
@@ -258,8 +258,8 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
                 const where = `store '${store.name}' action '${action.name}'`;
                 diags.push({
                   severity: "error",
-                  code: "loom.store-cross-store-on-liveview-unsupported",
-                  message: diagMessage("loom.store-cross-store-on-liveview-unsupported", {
+                  code: "loom.store-cross-store-on-liveview-invalid",
+                  message: diagMessage("loom.store-cross-store-on-liveview-invalid", {
                     where,
                     store: s.store,
                     name: s.name,

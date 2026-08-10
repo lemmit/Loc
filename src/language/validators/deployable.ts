@@ -216,10 +216,10 @@ export function checkDeployable(
     // `auth: ui` is the frontend guard; a backend enforces auth via
     // `auth: required` instead.
     if (d.auth === "ui") {
-      accept("error", diagMessage("loom.auth-ui-on-backend", { name: d.name }), {
+      accept("error", diagMessage("loom.auth-ui-misplaced", { name: d.name }), {
         node: d,
         property: "auth",
-        code: "loom.auth-ui-on-backend",
+        code: "loom.auth-ui-misplaced",
       });
     }
   }

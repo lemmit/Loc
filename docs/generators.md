@@ -530,7 +530,7 @@ read renders `@cart.count` (template) / `socket.assigns.cart.count` (handler),
 and a `Cart.clear()` call renders `|> update(:cart, &Cart.clear/1)` (0 args) or
 `|> update(:cart, fn c -> Cart.add(c, sku) end)` (with args). Because each store
 is its own per-page assign, a store action calling a **different** store's
-action is gated (`loom.store-cross-store-on-liveview-unsupported`) — same-store
+action is gated (`loom.store-cross-store-on-liveview-invalid`) — same-store
 action→action composition is fine (a pure in-module call).
 
 Vue/Svelte/Angular store-module emit is a fan-out follow-up and throws loudly

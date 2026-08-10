@@ -154,7 +154,7 @@ describe("group-by shape gates", () => {
           on(e: OrderPlaced) { orderId := e.orderId  n := 1 }
           group by o.status }`),
       ),
-    ).toContain("loom.projection-groupby-source-unsupported");
+    ).toContain("loom.projection-groupby-source-invalid");
   });
 
   it("rejects group by over a keyed projection", async () => {
@@ -165,7 +165,7 @@ describe("group-by shape gates", () => {
           group by o.customerId
           select customerId = o.customerId, orders = count() }`),
       ),
-    ).toContain("loom.projection-groupby-keyed-unsupported");
+    ).toContain("loom.projection-groupby-keyed-invalid");
   });
 
   it("rejects group by alongside a join", async () => {
@@ -177,7 +177,7 @@ describe("group-by shape gates", () => {
           group by o.status
           select status = o.status, customerName = c.name, orders = count() }`),
       ),
-    ).toContain("loom.projection-groupby-join-unsupported");
+    ).toContain("loom.projection-groupby-join-invalid");
   });
 
   it("rejects group by with no aggregate select — that is just DISTINCT", async () => {

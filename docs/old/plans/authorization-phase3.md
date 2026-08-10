@@ -57,7 +57,7 @@ policy {
 - `write deep` — the caller's org + all descendants (the `dataKey`
   descendant-or-self materialized-path prefix, anchored at `orgPath`).
 - `write global` — **NOT offered in P3.1.** Root-subtree-wide mutation is a
-  footgun; rejected with `loom.policy-write-global-unsupported`. (A caller can
+  footgun; rejected with `loom.policy-write-global-invalid`. (A caller can
   still *read* `global`; they just can't blanket-write the whole root subtree.)
 
 ## Semantics

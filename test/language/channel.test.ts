@@ -76,7 +76,7 @@ describe("channel + channelSource — parse / validation", () => {
 
   // M-T4.4 pinned decision: the broker line-up is redis/rabbitmq/kafka —
   // `nats` parses as a storage type but is not a channel transport.
-  it("rejects nats as a channel transport (loom.channelsource-unsupported-transport)", async () => {
+  it("rejects nats as a channel transport (loom.channelsource-transport-invalid)", async () => {
     const src = `
       system S {
         subdomain M { context C {

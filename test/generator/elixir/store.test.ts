@@ -427,17 +427,17 @@ system Demo {
       page P { route: "/p" body: Heading { Cart.count, level: 1 } }`),
     );
     expect(codes).not.toContain("loom.store-on-liveview-unsupported");
-    expect(codes).not.toContain("loom.store-cross-store-on-liveview-unsupported");
+    expect(codes).not.toContain("loom.store-cross-store-on-liveview-invalid");
   });
 
-  it("(b) a store action calling a DIFFERENT store's action on LiveView fires loom.store-cross-store-on-liveview-unsupported", async () => {
+  it("(b) a store action calling a DIFFERENT store's action on LiveView fires loom.store-cross-store-on-liveview-invalid", async () => {
     const codes = await irCodes(
       wrapElixir(`
       store B { state { y: int = 0 } action g() { D.h() } }
       store D { state { z: int = 0 } action h() { z := 1 } }
       page P { route: "/p" body: Heading { B.y, level: 1 } }`),
     );
-    expect(codes).toContain("loom.store-cross-store-on-liveview-unsupported");
+    expect(codes).toContain("loom.store-cross-store-on-liveview-invalid");
   });
 
   it("(c) same-store action→action composition on LiveView is CLEAN", async () => {
@@ -446,7 +446,7 @@ system Demo {
       store B { state { y: int = 0 } action g() { reset() } action reset() { y := 0 } }
       page P { route: "/p" body: Heading { B.y, level: 1 } }`),
     );
-    expect(codes).not.toContain("loom.store-cross-store-on-liveview-unsupported");
+    expect(codes).not.toContain("loom.store-cross-store-on-liveview-invalid");
   });
 
   it("(d) the SAME cross-store ddd on a react (SPA) mount is CLEAN — the gate is phoenixLiveView-scoped", async () => {
@@ -456,7 +456,7 @@ system Demo {
       store D { state { z: int = 0 } action h() { z := 1 } }
       page P { route: "/p" body: Heading { B.y, level: 1 } }`),
     );
-    expect(codes).not.toContain("loom.store-cross-store-on-liveview-unsupported");
+    expect(codes).not.toContain("loom.store-cross-store-on-liveview-invalid");
   });
 });
 

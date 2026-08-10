@@ -94,7 +94,7 @@ elixir/Phoenix):
 | `broadcast` | `log` | `kafka` | `apache/kafka` |
 
 `nats` remains a parseable storage type but is **not** a channel transport —
-binding it is rejected by `loom.channelsource-unsupported-transport`
+binding it is rejected by `loom.channelsource-transport-invalid`
 (pinned decision; same code gates e.g. `postgres`).
 
 Per-backend drivers — plain official clients, free/OSS only (no MassTransit,

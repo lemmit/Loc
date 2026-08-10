@@ -5,9 +5,9 @@
 //
 // Gates:
 //   loom.projection-workflow-source-not-observable        — no id-shaped correlation field
-//   loom.projection-workflow-source-eventsourced-unsupported — event-sourced source (deferred)
-//   loom.projection-workflow-source-join-unsupported      — a `join` over a workflow source
-//   loom.projection-workflow-source-ignoring-unsupported  — an `ignoring` over a workflow source
+//   loom.projection-workflow-source-eventsourced-invalid — event-sourced source (deferred)
+//   loom.projection-workflow-source-join-invalid      — a `join` over a workflow source
+//   loom.projection-workflow-source-ignoring-no-effect  — an `ignoring` over a workflow source
 //   loom.projection-workflow-source-unsupported-backend   — a backend that hasn't ported the emit
 
 import { describe, expect, it } from "vitest";
@@ -66,28 +66,28 @@ describe("query-time projection `from <Workflow>` validation", () => {
     ).toEqual(["loom.projection-workflow-source-not-observable"]);
   });
 
-  it("loom.projection-workflow-source-eventsourced-unsupported — an event-sourced source", async () => {
+  it("loom.projection-workflow-source-eventsourced-invalid — an event-sourced source", async () => {
     expect(
       await codes(
         `projection P { orderId: Order id  from FulfilES as f where f.paid > 0 select orderId = f.orderId }`,
       ),
-    ).toEqual(["loom.projection-workflow-source-eventsourced-unsupported"]);
+    ).toEqual(["loom.projection-workflow-source-eventsourced-invalid"]);
   });
 
-  it("loom.projection-workflow-source-join-unsupported — a join over a workflow source", async () => {
+  it("loom.projection-workflow-source-join-invalid — a join over a workflow source", async () => {
     expect(
       await codes(
         `projection P { orderId: Order id  total: int  from Fulfil as f join Order as o on f.orderId select orderId = f.orderId, total = o.total }`,
       ),
-    ).toContain("loom.projection-workflow-source-join-unsupported");
+    ).toContain("loom.projection-workflow-source-join-invalid");
   });
 
-  it("loom.projection-workflow-source-ignoring-unsupported — an ignoring over a workflow source", async () => {
+  it("loom.projection-workflow-source-ignoring-no-effect — an ignoring over a workflow source", async () => {
     expect(
       await codes(
         `projection P { orderId: Order id  from Fulfil as f ignoring * select orderId = f.orderId }`,
       ),
-    ).toContain("loom.projection-workflow-source-ignoring-unsupported");
+    ).toContain("loom.projection-workflow-source-ignoring-no-effect");
   });
 
   it("accepts a workflow-sourced projection on every shipping backend", async () => {

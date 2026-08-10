@@ -119,7 +119,7 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.channel-key-missing-field": (p: { name: unknown; key: unknown; evName: unknown }) =>
     `channel '${p.name}' key '${p.key}' is not a field of carried event '${p.evName}'.`,
-  "loom.channelsource-unsupported-transport": (p: {
+  "loom.channelsource-transport-invalid": (p: {
     name: unknown;
     chName: unknown;
     refName: unknown;
@@ -214,7 +214,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `Deployable '${p.name}' (platform '${p.platform}') cannot host ui '${p.uiName}' framework '${p.uiFramework}'. This platform hosts: ${p.menu}. A runtime-coupled framework (e.g. 'phoenixLiveView'/LiveView) can only run on its own runtime; a static-bundle framework (e.g. 'react') runs on any static-asset host.`,
   "loom.auth-ui-target-open": (p: { name: unknown; targetName: unknown }) =>
     `Frontend deployable '${p.name}' declares 'auth: ui' but its target '${p.targetName}' is not 'auth: required'; the guard has no session endpoint to probe.`,
-  "loom.auth-ui-on-backend": (p: { name: unknown }) =>
+  "loom.auth-ui-misplaced": (p: { name: unknown }) =>
     `Deployable '${p.name}' declares 'auth: ui', which is only valid on a frontend deployable; backends use 'auth: required'.`,
   "loom.platform-knob-out-of-menu": (p: {
     name: unknown;
@@ -427,7 +427,7 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.seed-id-needs-raw":
     "An explicit `id` requires `seed raw { … }` — the domain create path mints ids. " +
     "Cross-references use explicit ids on the raw path (D-SEED-XREF).",
-  "loom.seed-raw-unsupported-column": (p: { name: unknown }) =>
+  "loom.seed-raw-column-invalid": (p: { name: unknown }) =>
     `Raw seed column '${p.name}' is a value object / nested record — raw rows ` +
     "support scalar / enum / id columns only; use the domain path for value objects.",
 
@@ -692,7 +692,7 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   // src/language/validators/template.ts
   // ----------------------------------------------------------------------
-  "loom.interp-format-unsupported": (p: { format: unknown }) =>
+  "loom.interp-format-unknown": (p: { format: unknown }) =>
     `Unsupported template format '${p.format}'. Supported ICU formats are ` +
     `\`number\` (incl. \`::currency/USD\`, \`::percent\`), \`date\`/\`time\`, ` +
     `\`plural\`/\`selectordinal\`, and \`select\`.`,
@@ -836,7 +836,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `'refetch(…)' arguments in ${p.where} must each name an aggregate (e.g. 'refetch(Order)').`,
   "loom.ui-handler-refetch-target#unknown-refetch-target": (p: { name: unknown; where: unknown }) =>
     `Unknown refetch target '${p.name}' in ${p.where} — it must name an aggregate declared in this system.`,
-  "loom.ui-handler-unsupported": (p: { where: unknown }) =>
+  "loom.ui-handler-statement-unknown": (p: { where: unknown }) =>
     `Unsupported statement in ${p.where}.  A handler body supports 'toast(<message expression>)' (one argument) and 'refetch(<Aggregate>[, …])'.`,
 
   // ----------------------------------------------------------------------
@@ -955,7 +955,7 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/migration-checks.ts
   // ----------------------------------------------------------------------
-  "loom.backfill-target-unsupported#backfill-a-aggregate-stores": (p: {
+  "loom.backfill-target-invalid#backfill-a-aggregate-stores": (p: {
     aggregate: unknown;
     field: unknown;
     persistedAs: unknown;
@@ -963,7 +963,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `backfill '${p.aggregate}.${p.field}': a ${
       p.persistedAs
     } aggregate stores no scalar columns to backfill — use a raw sql step over its payload instead.`,
-  "loom.backfill-target-unsupported#backfill-the-field-is-not": (p: {
+  "loom.backfill-target-invalid#backfill-the-field-is-not": (p: {
     aggregate: unknown;
     field: unknown;
   }) =>
@@ -984,19 +984,16 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.projection-workflow-source-not-observable": (p: { name: unknown; wfName: unknown }) =>
     `projection '${p.name}': workflow '${p.wfName}' has no observable instance state ` +
     "(it needs a single id-shaped correlation/state field), so it can't be a projection source.",
-  "loom.projection-workflow-source-eventsourced-unsupported": (p: {
-    name: unknown;
-    wfName: unknown;
-  }) =>
+  "loom.projection-workflow-source-eventsourced-invalid": (p: { name: unknown; wfName: unknown }) =>
     `projection '${p.name}': workflow '${p.wfName}' is event-sourced, whose instances are a ` +
     "per-request fold of its event stream (no state table). A projection over an event-sourced " +
     "workflow source is not emitted yet — source it from a state-backed (non-event-sourced) " +
     "workflow, or fold the events into a keyed 'projection' instead.",
-  "loom.projection-workflow-source-join-unsupported": (p: { name: unknown }) =>
+  "loom.projection-workflow-source-join-invalid": (p: { name: unknown }) =>
     `projection '${p.name}': a 'join' follow over a workflow source is not supported ` +
     "(by-id joins resolve an aggregate's identity, not a workflow instance). Read the " +
     "workflow's instance fields directly in 'select', or source the projection from an aggregate.",
-  "loom.projection-workflow-source-ignoring-unsupported": (p: { name: unknown }) =>
+  "loom.projection-workflow-source-ignoring-no-effect": (p: { name: unknown }) =>
     `projection '${p.name}': an 'ignoring' capability-filter bypass over a workflow source ` +
     "has no effect — a workflow instance read carries no capability query-filters. Remove the " +
     "'ignoring' clause.",
@@ -1006,15 +1003,15 @@ export const DIAGNOSTIC_MESSAGES = {
     `projection '${p.name}': source projection '${p.srcName}' is query-time (a live read with ` +
     "no persisted read-model table), so there is nothing to read `from`. Source it from a folded " +
     "('on(e) { … }') projection, or from the underlying aggregate directly.",
-  "loom.projection-source-join-unsupported": (p: { name: unknown }) =>
+  "loom.projection-source-join-invalid": (p: { name: unknown }) =>
     `projection '${p.name}': a 'join' follow over a projection source is not supported ` +
     "(by-id joins resolve an aggregate's identity, not a read-model row). Read the source row's " +
     "fields directly in 'select', or source the projection from an aggregate.",
-  "loom.projection-source-ignoring-unsupported": (p: { name: unknown }) =>
+  "loom.projection-source-ignoring-no-effect": (p: { name: unknown }) =>
     `projection '${p.name}': an 'ignoring' capability-filter bypass over a projection source ` +
     "has no effect — a read-model row read carries no capability query-filters. Remove the " +
     "'ignoring' clause.",
-  "loom.projection-query-and-fold-unsupported": (p: { name: unknown; source: unknown }) =>
+  "loom.projection-query-and-fold-invalid": (p: { name: unknown; source: unknown }) =>
     `projection '${p.name}' declares both a 'from ${p.source}' query source ` +
     `and 'on(e)' event folds. A query source and event folds together ` +
     `(seed-then-update) is a reserved combination — use EITHER a query-time ` +
@@ -1065,15 +1062,15 @@ export const DIAGNOSTIC_MESSAGES = {
     `projection '${p.name}': 'select ${p.field} = …' references '${p.unresolved}', which ` +
     `resolves to nothing — not a field of the '${p.source}' source, not a 'join' alias, ` +
     `not a parameter${p.hint}. It would be emitted as an undeclared identifier.`,
-  "loom.projection-groupby-source-unsupported": (p: { name: unknown; why: unknown }) =>
+  "loom.projection-groupby-source-invalid": (p: { name: unknown; why: unknown }) =>
     `projection '${p.name}' declares 'group by', but ${p.why}. A grouped ` +
     `projection reads (and groups) an AGGREGATE source's table in SQL — ` +
     `add 'from <Aggregate>'.`,
-  "loom.projection-groupby-keyed-unsupported": (p: { name: unknown; correlationField: unknown }) =>
+  "loom.projection-groupby-keyed-invalid": (p: { name: unknown; correlationField: unknown }) =>
     `projection '${p.name}' declares both 'keyed by ${p.correlationField}' and ` +
     `'group by'. A grouped projection's rows ARE the groups (one per distinct ` +
     `key combination), not id-keyed entities — drop the 'keyed by'.`,
-  "loom.projection-groupby-join-unsupported": (p: { name: unknown }) =>
+  "loom.projection-groupby-join-invalid": (p: { name: unknown }) =>
     `projection '${p.name}': 'join' and 'group by' don't compose — a join is a ` +
     `by-id bulk load AFTER the query, so its columns can't participate in the SQL ` +
     `GROUP BY. Group by source columns only, or drop the 'group by'.`,
@@ -1195,7 +1192,7 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/store-checks.ts
   // ----------------------------------------------------------------------
-  "loom.store-url-field-unsupported": (p: { where: unknown; name: unknown; k: unknown }) =>
+  "loom.store-url-field-invalid": (p: { where: unknown; name: unknown; k: unknown }) =>
     `${p.where}: field '${p.name}' (${p.k}) cannot be URL-synced — ` +
     `\`persist: url\` fields must be scalar (string/number/bool/enum/id). ` +
     `Use \`persist: local\` for structural state.`,
@@ -1215,12 +1212,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `${p.surfaceWhere} action '${p.name}': cannot write store state inline ` +
     `(\`${p.storeSeg}.${p.fieldSeg} := …\`).  Store state changes only inside a store ` +
     `action — add an \`action\` to \`store ${p.storeSeg}\` and call it (\`${p.storeSeg}.<action>()\`).`,
-  "loom.store-lifetime-liveview-unsupported": (p: { where: unknown; lifetime: unknown }) =>
+  "loom.store-lifetime-liveview-invalid": (p: { where: unknown; lifetime: unknown }) =>
     `${p.where}: \`persist: ${p.lifetime}\` is not supported on the ` +
     `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
     `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
     `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
-  "loom.store-cross-store-on-liveview-unsupported": (p: {
+  "loom.store-cross-store-on-liveview-invalid": (p: {
     where: unknown;
     store: unknown;
     name: unknown;
@@ -1962,7 +1959,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `policy in context '${p.name}': \`${p.source}\` uses the 'deep' write level, which ` +
     `needs a tenant hierarchy — mark the registry \`implements tenantRegistry\` (the ` +
     `materialized-path tree).  Under flat tenancy only 'local' is defined.`,
-  "loom.policy-write-global-unsupported": (p: { name: unknown; source: unknown }) =>
+  "loom.policy-write-global-invalid": (p: { name: unknown; source: unknown }) =>
     `policy in context '${p.name}': \`${p.source}\` uses \`write global\`, which is not ` +
     `offered — root-subtree-wide mutation is a footgun.  Use \`write deep\` (the caller's own ` +
     `subtree) or \`write local\` (the floor).  A caller can still \`allow global\` for READS.`,

@@ -41,7 +41,7 @@ Validators (all IR-level, `validate/checks/system-checks.ts` unless noted):
 | Code | Rule |
 |---|---|
 | `loom.channelsource-incompatible` | `delivery`×`retention` vs bound `storage.type` per the matrix in §2 (suggestion-with-alternatives, mirroring the dataSource matrix error). AST-level, `validators/channel.ts`. |
-| `loom.channelsource-unsupported-transport` | bound storage type has no channel driver — **`nats` lands here permanently** (pinned decision), as does e.g. `postgres`. Suggests the supported types for the channel's knobs. |
+| `loom.channelsource-transport-invalid` | bound storage type has no channel driver — **`nats` lands here permanently** (pinned decision), as does e.g. `postgres`. Suggests the supported types for the channel's knobs. |
 | `loom.deployable-channel-unrelated` | a deployable wires a channelSource but neither hosts the channel's owning context nor consumes any carried event (reactor/projection) — dead wiring, warn. |
 | `loom.channelsource-unbound` | a channelSource no deployable wires — declared but inert, warn (today's silent state becomes an honest diagnostic). |
 | `loom.channel-consumer-unwired` | a deployable's reactor rides channel `C` via `on(...) via`, some deployable binds `C` to a broker, but this consumer deployable doesn't list the binding — the event would silently never arrive cross-process. Error. |
@@ -57,7 +57,7 @@ Validators (all IR-level, `validate/checks/system-checks.ts` unless noted):
 | `queue` | `ephemeral` | `redis` (streams), `rabbitmq` | 3 |
 | `queue` | `work` | `rabbitmq`, `kafka` | 3/4 |
 
-Consequences of dropping NATS, recorded: every row keeps ≥1 transport; the ancestor-room/wildcard routing that M-T1.10's relay will need is served by Redis `PSUBSCRIBE` patterns and RabbitMQ topic wildcards (`#`/`*`) — **never Kafka**, which stays the log. `nats` remains in the `StorageType` enum (usable for other roles; removing it is a breaking grammar change with no payoff) but is a permanent `loom.channelsource-unsupported-transport`.
+Consequences of dropping NATS, recorded: every row keeps ≥1 transport; the ancestor-room/wildcard routing that M-T1.10's relay will need is served by Redis `PSUBSCRIBE` patterns and RabbitMQ topic wildcards (`#`/`*`) — **never Kafka**, which stays the log. `nats` remains in the `StorageType` enum (usable for other roles; removing it is a breaking grammar change with no payoff) but is a permanent `loom.channelsource-transport-invalid`.
 
 ## 3. Wire envelope — CloudEvents 1.0 JSON
 
@@ -190,6 +190,6 @@ Sequencing gates honored: slice 3 (`queue`) lands **after or with** the M-T4.3 r
 
 1. **CloudEvents 1.0** as the envelope (vs a bespoke minimal JSON) — buys interop/AsyncAPI alignment at the cost of a few fixed fields. *Recommended: yes.*
 2. **Delivery uniformity rule** (§4): broker-bound channels route co-located consumers through the broker too (no hybrid local shortcut). *Recommended: yes — correctness over latency; the unbound default still covers the monolith.*
-3. **`nats` stays in the enum**, permanently gated by `loom.channelsource-unsupported-transport`. *Recommended: yes.*
+3. **`nats` stays in the enum**, permanently gated by `loom.channelsource-transport-invalid`. *Recommended: yes.*
 4. **v1 .NET drivers without MassTransit** (thin official clients, mirroring the no-framework stance of the vanilla Phoenix move). Upgraded from recommendation to **requirement** by §6a: MassTransit v9 is commercially licensed. Flippable later behind the same `ChannelTransport` seam only if a free successor emerges.
 5. The **realtime tee migrates onto `ChannelTransport`** in slice 2 (mechanical refactor, byte-diff on generated output reviewed with M-T1.10's owner) — this is the moment the two missions physically meet; doing it early is the whole point.

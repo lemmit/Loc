@@ -275,7 +275,7 @@ system Demo {
     if (errors.length) throw new Error(errors.join("\n"));
     const liveCodes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
     expect(liveCodes).not.toContain("loom.store-on-liveview-unsupported");
-    expect(liveCodes).not.toContain("loom.store-cross-store-on-liveview-unsupported");
+    expect(liveCodes).not.toContain("loom.store-cross-store-on-liveview-invalid");
 
     // The SAME ui on each SPA deployable is clean too.
     for (const fw of ["react", "vue", "svelte", "angular"]) {
@@ -290,7 +290,7 @@ system Demo {
     }
   });
 
-  it("loom.store-cross-store-on-liveview-unsupported fires for a cross-store action call on LiveView; same-store is clean", async () => {
+  it("loom.store-cross-store-on-liveview-invalid fires for a cross-store action call on LiveView; same-store is clean", async () => {
     // On phoenixLiveView each store is its own per-page assign, so a store
     // action calling a DIFFERENT store's action has no handle to the sibling
     // struct — gated.  (A → A self-call is acyclic-rejected separately; B → C
@@ -324,14 +324,14 @@ system Demo {
       store B { state { y: int = 0 } action g() { D.h() } }
       store D { state { z: int = 0 } action h() { z := 1 } }
       page P { route: "/p" body: Heading { B.y, level: 1 } }`),
-    ).toContain("loom.store-cross-store-on-liveview-unsupported");
+    ).toContain("loom.store-cross-store-on-liveview-invalid");
 
     // Same-store action→action composition is fine.
     expect(
       await codesOf(`
       store B { state { y: int = 0 } action g() { reset() } action reset() { y := 0 } }
       page P { route: "/p" body: Heading { B.y, level: 1 } }`),
-    ).not.toContain("loom.store-cross-store-on-liveview-unsupported");
+    ).not.toContain("loom.store-cross-store-on-liveview-invalid");
   });
 
   it("a store on a Feliz-hosted ui is clean — stores fold into the Elmish Model (M-T6.15)", async () => {
@@ -490,10 +490,10 @@ system Demo {
       diags,
     );
     expect(diags.map((d) => d.code)).not.toContain("loom.store-lifetime-unsupported");
-    expect(diags.map((d) => d.code)).not.toContain("loom.store-lifetime-liveview-unsupported");
+    expect(diags.map((d) => d.code)).not.toContain("loom.store-lifetime-liveview-invalid");
   });
 
-  it("loom.store-lifetime-liveview-unsupported fires for a non-memory store mounted by a LiveView deployable", () => {
+  it("loom.store-lifetime-liveview-invalid fires for a non-memory store mounted by a LiveView deployable", () => {
     const store: StoreIR = { name: "Cart", lifetime: "url", state: [], actions: [] };
     const diags: import("../../src/ir/validate/checks/diagnostic.js").LoomDiagnostic[] = [];
     validateStores(
@@ -515,10 +515,10 @@ system Demo {
       } as never,
       diags,
     );
-    expect(diags.map((d) => d.code)).toContain("loom.store-lifetime-liveview-unsupported");
+    expect(diags.map((d) => d.code)).toContain("loom.store-lifetime-liveview-invalid");
   });
 
-  it("loom.store-url-field-unsupported fires for an array/entity field in a `persist: url` store", () => {
+  it("loom.store-url-field-invalid fires for an array/entity field in a `persist: url` store", () => {
     const store: StoreIR = {
       name: "Filters",
       lifetime: "url",
@@ -536,7 +536,7 @@ system Demo {
       } as never,
       diags,
     );
-    expect(diags.map((d) => d.code)).toContain("loom.store-url-field-unsupported");
+    expect(diags.map((d) => d.code)).toContain("loom.store-url-field-invalid");
   });
 });
 
