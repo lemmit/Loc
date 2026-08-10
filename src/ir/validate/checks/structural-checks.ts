@@ -1792,23 +1792,33 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
         if (s.kind === "requires") {
           const illegal = lifecycleGuardIllegalRefs(s.expr, label);
           if (illegal.length > 0) {
-            diags.push({
-              severity: "error",
-              code: "loom.lifecycle-guard-unreadable",
-              message:
-                `aggregate '${agg.name}': the \`${label}\` guard reads ` +
-                `${illegal.map((n) => `\`${n}\``).join(", ")}, which the gate cannot see. A ` +
-                `\`${label}\` guard may read ` +
-                (label === "create"
-                  ? "`currentUser` only — there is no instance until the factory runs, and the " +
-                    "emitted `POST` takes the field-derived create input, not the declared " +
-                    "parameter list, so a parameter has no wire slot either"
-                  : "`currentUser` and `this` (the route already loads the row) — but not a " +
-                    "parameter, because a DELETE carries no body") +
-                '. `requires` answers "may this caller"; a value check belongs in a ' +
-                "`precondition` on a named `operation`.",
-              source: `${ctx.name}/aggregate ${agg.name}.${label}`,
-            });
+            // Two literal `diagMessage` keys, and two pushes rather than one
+            // with a conditional message: the catalog gate resolves the key
+            // STATICALLY, so both an interpolated key and a ternary around the
+            // call read to it as "no catalog use at all".
+            const refs = illegal.map((n) => `\`${n}\``).join(", ");
+            const source = `${ctx.name}/aggregate ${agg.name}.${label}`;
+            if (label === "create") {
+              diags.push({
+                severity: "error",
+                code: "loom.lifecycle-guard-unreadable",
+                message: diagMessage("loom.lifecycle-guard-unreadable#create", {
+                  agg: agg.name,
+                  refs,
+                }),
+                source,
+              });
+            } else {
+              diags.push({
+                severity: "error",
+                code: "loom.lifecycle-guard-unreadable",
+                message: diagMessage("loom.lifecycle-guard-unreadable#destroy", {
+                  agg: agg.name,
+                  refs,
+                }),
+                source,
+              });
+            }
           }
         }
         if (assignEffectReproduced(s, agg)) continue;
