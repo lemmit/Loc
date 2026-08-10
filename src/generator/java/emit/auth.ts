@@ -6,6 +6,10 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import {
+  guidClaimAccessorName,
+  guidFromStringTenancyClaim,
+} from "../../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderJavaType } from "../render-expr.js";
@@ -116,6 +120,35 @@ export function renderAuthFiles(
         `    }`,
       ]
     : [];
+  // The fail-closed claim→UUID coercion the registry self-scope binds through
+  // (M-T3.7(c)).  Emitted only under a `guid`-id registry keyed by a `string`
+  // claim — the one binding whose principal side can fail to parse.  Both read
+  // paths call it: the @Query SpEL (`@currentUserAccessor.user()?.<name>()`)
+  // and the Criteria `tenantScope` factory (`currentUser.<name>()`), so a
+  // malformed claim is `= NULL` — no rows — on either, instead of an
+  // IllegalArgumentException out of query preparation (a 500 for an ordinary
+  // bad token).  Living on `User` rather than the accessor bean is what lets
+  // the Criteria path, which holds a `User` and no bean, share it.
+  const guidClaim = guidFromStringTenancyClaim(sys);
+  const guidClaimAccessor = guidClaim
+    ? [
+        ``,
+        `    /** The tenancy claim parsed as a UUID, or null when it is absent or`,
+        `     *  not a well-formed UUID.  Null binds "= NULL" in the registry`,
+        `     *  self-scope, which matches no row — a malformed tenant claim reads`,
+        `     *  empty, exactly like a foreign-but-well-formed one. */`,
+        `    public java.util.UUID ${guidClaimAccessorName(guidClaim)}() {`,
+        `        if (${guidClaim}() == null) {`,
+        `            return null;`,
+        `        }`,
+        `        try {`,
+        `            return java.util.UUID.fromString(${guidClaim}());`,
+        `        } catch (IllegalArgumentException e) {`,
+        `            return null;`,
+        `        }`,
+        `    }`,
+      ]
+    : [];
   out.set(
     "User.java",
     lines(
@@ -128,6 +161,7 @@ export function renderAuthFiles(
       `public record User(${components}) {`,
       ...orgPathAccessor,
       ...rootOrgAccessor,
+      ...guidClaimAccessor,
       `}`,
       ``,
     ),

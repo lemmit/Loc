@@ -253,6 +253,34 @@ export async function assertCrossTenantIsolation(base: string): Promise<void> {
     await (await fetch(`${base}/api/organizations`, { headers: claims(orgAId) })).json(),
   );
   expect(orgList.map((o) => o.id)).toEqual([orgAId]);
+
+  // --- a MALFORMED tenant claim is an ordinary empty read, not a 500 (M-T3.7(c)) ---
+  // The registry's id is a `guid` and the claim a `string`, so the self-scope
+  // is the one comparison whose principal side can fail to PARSE.  An
+  // authenticated token carrying `tenantId: "not-a-guid"` must land where a
+  // foreign-but-well-formed claim lands — empty list, 404 by id — not on the
+  // backend's uuid parser (`IllegalArgumentException` / `Ecto.Query.CastError` /
+  // pg `invalid input syntax for type uuid` → 500 + stack trace).
+  //
+  // Every OTHER claim this harness sends is a real org id, which is exactly why
+  // this stayed invisible: the shape was in the fixture, only the malformed
+  // VALUE was missing.  Assert the STATUS, not just the emptiness — the read
+  // already failed closed, so a 500 body would parse to zero rows and look
+  // identical.
+  const malformed = claims("not-a-guid");
+  const badList = await fetch(`${base}/api/organizations`, { headers: malformed });
+  expect(badList.status, await badList.clone().text()).toBe(200);
+  expect(rows<{ id: string }>(await badList.json())).toEqual([]);
+
+  const badGet = await fetch(`${base}/api/organizations/${orgAId}`, { headers: malformed });
+  expect(badGet.status, await badGet.clone().text()).toBe(404);
+
+  // The tenant floor (a `string` column vs the same `string` claim) never had a
+  // parse to fail, so it must stay unchanged: still 200, still scoped to
+  // nothing this principal owns.
+  const badInvoices = await fetch(`${base}/api/invoices`, { headers: malformed });
+  expect(badInvoices.status, await badInvoices.clone().text()).toBe(200);
+  expect(rows<{ id: string }>(await badInvoices.json()).map((r) => r.id)).not.toContain(id);
 }
 
 // ---------------------------------------------------------------------------

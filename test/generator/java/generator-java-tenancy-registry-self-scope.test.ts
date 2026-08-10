@@ -7,9 +7,12 @@
 // key is an `@EmbeddedId` record (`OrganizationId(UUID value)`), so the
 // comparison navigates into its component (`e.id.value`) and the SpEL side
 // binds the claim AS the id's value type: a `string` claim against a guid id
-// converts via `T(java.util.UUID).fromString(...)`, null-guarded so a missing
-// principal binds `= NULL` (fail-closed, no rows); a same-typed guid claim
-// binds directly through the plain `?.` accessor.
+// converts through the principal's emitted `<claim>AsUuid()` accessor, which
+// is null for an absent OR MALFORMED claim (M-T3.7(c)) — converting inline in
+// SpEL (`T(java.util.UUID).fromString`) could only null-guard, so a token
+// carrying `tenantId: "not-a-guid"` threw IllegalArgumentException out of
+// query preparation (a 500 for an ordinary bad token).  A same-typed guid
+// claim binds directly through the plain `?.` accessor.
 // ---------------------------------------------------------------------------
 
 import { readFileSync } from "node:fs";
@@ -21,8 +24,7 @@ const SRC = readFileSync("test/fixtures/corpus/tenancy-owned.ddd", "utf8").repla
   "java",
 );
 const ROOT = "d/src/main/java/com/loom/d";
-const SPEL_CONVERTED =
-  ":#{@currentUserAccessor.user() == null || @currentUserAccessor.user().tenantId() == null ? null : T(java.util.UUID).fromString(@currentUserAccessor.user().tenantId())}";
+const SPEL_CONVERTED = ":#{@currentUserAccessor.user()?.tenantIdAsUuid()}";
 
 async function orgRepo(src: string = SRC): Promise<string> {
   const files = await generateSystemFiles(src);
@@ -46,6 +48,37 @@ describe("java generator — derived registry self-scope filter", () => {
     const repo = await orgRepo(SRC.replace("tenantId: string", "tenantId: guid"));
     expect(repo).toContain("e.id.value = :#{@currentUserAccessor.user()?.tenantId()}");
     expect(repo).not.toContain("fromString");
+  });
+
+  it("parses the claim to null instead of throwing — a malformed one reads empty (M-T3.7(c))", async () => {
+    const files = await generateSystemFiles(SRC);
+    // No read path may convert the claim inline: `UUID.fromString` in SpEL can
+    // only null-guard, so a malformed claim escapes as IllegalArgumentException.
+    // Reverting the fix puts `fromString` back into the @Query and reds this.
+    expect(await orgRepo()).not.toContain("fromString");
+    // The coercion lives on the principal (so the Criteria path, which holds a
+    // `User` and no bean, shares it) and swallows the malformed case.
+    const user = files.get(`${ROOT}/auth/User.java`)!;
+    expect(user).toContain("public java.util.UUID tenantIdAsUuid() {");
+    expect(user).toContain("return java.util.UUID.fromString(tenantId());");
+    expect(user).toContain("} catch (IllegalArgumentException e) {");
+  });
+
+  it("routes the reified-retrieval (Criteria) self-scope through the same accessor", async () => {
+    // A `criterion` on the registry emits a `tenantScope(User)` Specification
+    // that bypasses the @Query reads.  It must navigate the @EmbeddedId to its
+    // `value` component AND bind the parsed claim — comparing the embeddable
+    // to a raw String threw for EVERY claim, well-formed or not.
+    const withCriterion = SRC.replace(
+      "      aggregate Organization with crudish {\n        name: string\n      }",
+      '      aggregate Organization with crudish {\n        name: string\n      }\n      criterion NamedAcme of Organization = this.name == "Acme"',
+    );
+    expect(withCriterion).not.toBe(SRC); // the fixture still has the shape we patched
+    const files = await generateSystemFiles(withCriterion);
+    const criteria = files.get(`${ROOT}/domain/criteria/OrganizationCriteria.java`)!;
+    expect(criteria).toContain(
+      'cb.equal(root.get("id").<UUID>get("value"), (currentUser == null ? null : currentUser.tenantIdAsUuid()))',
+    );
   });
 
   it("keeps the registry entity free of @SQLRestriction and claim reads", async () => {

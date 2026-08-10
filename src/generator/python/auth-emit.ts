@@ -174,6 +174,31 @@ function renderUserModule(
         '        return self.org_path.split(".", 1)[0]',
       ]
     : [];
+  // `User.guid_claim(name)` — the parse-to-None coercion the registry
+  // self-scope reads through when the tenancy claim is declared `string` and
+  // the registry's id is a `guid` (M-T3.7(c); the SQLAlchemy analogue of .NET's
+  // `Guid.TryParse(...) ? new <Agg>Id(g) : null`).  Comparing a `Uuid` column
+  // to raw token text runs `uuid.UUID(value)` in SQLAlchemy's bind processor,
+  // so a malformed claim raised `ValueError` and answered an ordinary bad token
+  // with a 500; returning None instead renders `IS NULL`, which no row with a
+  // NOT NULL primary key matches — the same EMPTY read a foreign claim gives.
+  // Emitted unconditionally (a method on the dataclass, not a module function)
+  // so no repository gains an import for it; the claim name is generated from
+  // the same IR that names the field, so the lookup cannot drift.
+  const guidClaimMethod = [
+    "",
+    "    def guid_claim(self, name: str) -> str | None:",
+    '        """The named claim parsed as a canonical UUID string, or None when it',
+    "        is absent or malformed — a bad tenant claim scopes a read to nothing",
+    '        instead of raising (multi-tenancy; M-T3.7(c))."""',
+    "        raw: object = getattr(self, name, None)",
+    "        if raw is None:",
+    "            return None",
+    "        try:",
+    "            return str(uuid.UUID(str(raw)))",
+    "        except ValueError:",
+    "            return None",
+  ];
   // Id-typed claims (`Customer id?`) reference the branded NewTypes.
   const idNames = [
     ...new Set(
@@ -199,6 +224,7 @@ function renderUserModule(
     "read raises, never leaks cross-tenant rows.",
     '"""',
     "",
+    "import uuid",
     "from contextvars import ContextVar",
     "from dataclasses import dataclass",
     "",
@@ -210,6 +236,7 @@ function renderUserModule(
     ...fields,
     ...orgPathProp,
     ...rootOrgProp,
+    ...guidClaimMethod,
     "",
     "",
     "# Ambient principal carrier — set by AuthMiddleware on every authenticated",

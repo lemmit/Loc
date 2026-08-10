@@ -9,7 +9,12 @@ import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { AggregateIR, LoomModel } from "../../src/ir/types/loom-ir.js";
-import { TENANCY_SELF_SCOPE_ORIGIN, tenancyClaimBinding } from "../../src/ir/util/tenant-stance.js";
+import {
+  guidFromStringSelfScope,
+  guidFromStringTenancyClaim,
+  TENANCY_SELF_SCOPE_ORIGIN,
+  tenancyClaimBinding,
+} from "../../src/ir/util/tenant-stance.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 import { parseString } from "../_helpers/parse.js";
@@ -159,6 +164,55 @@ describe("tenancyClaimBinding", () => {
     expect(tenancyClaimBinding("guid", { kind: "primitive", name: "int" })).toBe("mismatch");
     expect(tenancyClaimBinding("string", { kind: "primitive", name: "guid" })).toBe("mismatch");
     expect(tenancyClaimBinding("int", undefined)).toBe("mismatch");
+  });
+});
+
+// The `"guid-from-string"` binding is the one shape whose principal side can
+// FAIL TO PARSE, so every backend gates its parse-to-null rendering on these
+// two predicates (M-T3.7(c)).  A false negative here silently restores the
+// bare bind — i.e. the 500 — on all four ported backends at once.
+describe("guidFromStringSelfScope", () => {
+  it("matches the derived self-scope under a guid registry id + string claim", async () => {
+    const { model } = await parseString(TENANCY_SRC, { validate: false });
+    const reg = findAgg(enrichLoomModel(lowerModel(model)), "Organization");
+    const pred = (reg.contextFilters ?? [])[
+      (reg.contextFilterOrigins ?? []).indexOf(TENANCY_SELF_SCOPE_ORIGIN)
+    ]!;
+    expect(guidFromStringSelfScope(pred)).toEqual({ claim: "tenantId", idOnLeft: true });
+  });
+
+  it("does NOT match a same-typed claim — that side cannot fail to parse", async () => {
+    const { model } = await parseString(TENANCY_SRC.replace("tenantId: string", "tenantId: guid"), {
+      validate: false,
+    });
+    const reg = findAgg(enrichLoomModel(lowerModel(model)), "Organization");
+    const pred = (reg.contextFilters ?? [])[
+      (reg.contextFilterOrigins ?? []).indexOf(TENANCY_SELF_SCOPE_ORIGIN)
+    ]!;
+    expect(guidFromStringSelfScope(pred)).toBeUndefined();
+  });
+
+  it("does NOT match the flat tenant floor (a string column, not the guid id)", async () => {
+    const { model } = await parseString(TENANCY_SRC, { validate: false });
+    const invoice = findAgg(enrichLoomModel(lowerModel(model)), "Invoice");
+    for (const p of invoice.contextFilters ?? []) {
+      expect(guidFromStringSelfScope(p)).toBeUndefined();
+    }
+  });
+});
+
+describe("guidFromStringTenancyClaim", () => {
+  it("names the claim needing the coercion accessor, and only under that binding", async () => {
+    const guidId = await parseString(TENANCY_SRC, { validate: false });
+    const sys = enrichLoomModel(lowerModel(guidId.model)).systems[0]!;
+    expect(guidFromStringTenancyClaim(sys)).toBe("tenantId");
+
+    const sameTyped = await parseString(TENANCY_SRC.replace("tenantId: string", "tenantId: guid"), {
+      validate: false,
+    });
+    expect(
+      guidFromStringTenancyClaim(enrichLoomModel(lowerModel(sameTyped.model)).systems[0]!),
+    ).toBeUndefined();
   });
 });
 

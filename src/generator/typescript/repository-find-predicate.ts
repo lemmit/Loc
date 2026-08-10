@@ -24,6 +24,7 @@ import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
+  guidFromStringSelfScope,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -103,6 +104,16 @@ const MAKE_INTERVAL_ARG: Record<DurationUnit, string> = {
   minutes: "mins",
 };
 
+/** Emitted source for "is this claim a well-formed UUID?" — the JS side of the
+ *  malformed-tenant-claim guard (M-T3.7(c)).  Postgres accepts the canonical
+ *  8-4-4-4-12 hex form for a `uuid` column, so that is exactly what this
+ *  admits; anything else would make the driver's bind fail, and we route it to
+ *  the always-false term instead.  Case-insensitive because Postgres normalises
+ *  the input, so an upper-case claim is a VALID one.  Shared with the MikroORM
+ *  persistence adapter, which ANDs the same filters into its own reads. */
+export const GUID_CLAIM_RE_LITERAL =
+  "/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i";
+
 export interface DrizzleLowering {
   /** The TypeScript source for the whole expression. */
   expr: string;
@@ -170,6 +181,27 @@ export function lowerToDrizzle(
           const _exhaustive: never = e.filter;
           throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
         }
+      }
+    }
+    // Registry self-scope against a `string` tenancy claim (M-T3.7(c)).  The
+    // claim is raw token text bound straight into a `uuid` column, so a
+    // malformed one ("not-a-guid") makes Postgres reject the whole statement
+    // (`invalid input syntax for type uuid`) → 500 on an ordinary bad token.
+    // Branch in JS instead: a well-formed claim compares as before, anything
+    // else falls back to the always-false term the `deny` arm uses, so the read
+    // is the same EMPTY result a foreign-but-well-formed claim already gives.
+    // Self-contained (a literal regex + standard Drizzle ops), so no repository
+    // gains an import — the `deny` arm's reasoning.
+    {
+      const selfScope = guidFromStringSelfScope(e);
+      if (selfScope) {
+        for (const op of ["eq", "and", "isNull", "isNotNull"]) ops.add(op);
+        const idCol = `schema.${tableName}.id`;
+        const claim = `${principal}.${selfScope.claim}`;
+        return (
+          `(${GUID_CLAIM_RE_LITERAL}.test(${claim}) ? eq(${idCol}, ${claim}) ` +
+          `: and(isNull(${idCol}), isNotNull(${idCol})))`
+        );
       }
     }
     if (e.kind === "binary") {
