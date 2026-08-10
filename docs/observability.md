@@ -63,7 +63,7 @@ migration.
 | Level | Meaning | Examples |
 |---|---|---|
 | `error` | System fault — needs operator action | `internal_error`, `extern_handler_threw`, `migration_failed` |
-| `warn` | Client/domain fault, recoverable | `domain_error`, `forbidden`, `not_found`, `db_disconnected` |
+| `warn` | Client/domain fault, recoverable | `domain_error`, `forbidden`, `not_found`, `client_error`, `db_disconnected` |
 | `info` | Business narrative — what the app did | `request_start`, `request_end`, `server_listening`, `aggregate_created`, `workflow_started` |
 | `debug` | Mechanism — live-prod diagnosis | `aggregate_loaded`, `repository_save`, `find_executed`, `health_ok` |
 | `trace` | Fine detail — generate-time opt-in (`--trace`) | `tx_begin`, `wire_in`, `invariant_evaluated` |
@@ -90,6 +90,13 @@ The full list lives in `src/generator/_obs/log-events.ts`. Highlights:
 
 **Domain faults** (warn — recoverable):
 `domain_error`, `forbidden`, `not_found`.
+
+**Framework faults** (warn — the request never reached the domain):
+`client_error`. Emitted where the FRAMEWORK refuses a request before any
+handler runs — an unmatched route, a verb the path does not serve, a body it
+could not read. Kept distinct from `domain_error` because no aggregate was
+resolved, so a dashboard can separate "the client called something that isn't
+there" from "the client called something that refused".
 
 **System faults** (error):
 `internal_error`, `extern_handler_threw`, `migration_failed`,
