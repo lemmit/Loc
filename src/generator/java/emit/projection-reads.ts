@@ -7,6 +7,7 @@ import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId } from "../render-expr.js";
+import { javaNotFoundThrow } from "./common.js";
 import { projectionCorrIdClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 
@@ -135,7 +136,13 @@ function renderProjectionsController(
       `    public ResponseEntity<${T}> get${upperFirst(proj.name)}(@PathVariable ${paramJava} key) {`,
       `        return ${repo}.findById(new ${idClass}(key))`,
       `            .map(x -> ResponseEntity.ok(new ${T}(${projRow("x")})))`,
-      `            .orElse(ResponseEntity.notFound().build());`,
+      // M-T6.31 — was `.orElse(ResponseEntity.notFound().build())`: Spring's own
+      // bare 404, an EMPTY body with no content-type, which never reaches
+      // `ApiExceptionAdvice.onNotFound` and so answered a different shape from
+      // every other 404 the same app produces.  Throwing the shared carrier
+      // routes it through the one advice arm, whose `problem(404, "Not Found",
+      // e.getMessage(), request)` IS the cross-backend envelope.
+      `            .orElseThrow(() -> ${javaNotFoundThrow(upperFirst(proj.name), "key")});`,
       `    }`,
       ``,
     );
@@ -161,6 +168,9 @@ function renderProjectionsController(
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
+    // The 404 carrier the show route raises (M-T6.31) — unconditional, since
+    // every projection emits a show route.
+    `import ${pctx.basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${pctx.pkg}.*;`,
     `import ${pctx.rowRepoPkg}.*;`,
     `import ${pctx.basePkg}.domain.ids.*;`,

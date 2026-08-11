@@ -22,6 +22,10 @@ import {
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import {
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../../ir/util/aggregate-flags.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   type ReadPort,
@@ -254,11 +258,39 @@ export function buildWorkflowsFile(
   // (with the reason-phrase titles the literals used) ⇒ byte-identical.
   const wfDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
   const wfForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
-  const wfProblemUnion = [
-    ...new Set<number>([400, wfForbiddenStatus, 404, 422, wfDomainStatus, 500]),
-  ]
-    .sort((a, b) => a - b)
-    .join(" | ");
+  // ── the CONFLICT rungs (M-T6.28) ──────────────────────────────────────
+  // A workflow step loads an aggregate, invokes an operation and `save`s it, so
+  // this router raises exactly the conflicts the aggregate router does — and
+  // could not express any of them: the `problem` signature was typed
+  // `400 | 403 | 404 | 422 | 500`, and the file imported neither
+  // `ConcurrencyError` nor `DisallowedError`.  A saga step that lost an
+  // optimistic-lock race, or tripped a `unique (…)` index, therefore answered
+  // `500 / "internal"` on `POST /api/workflows/<wf>` while the same conflict on
+  // `/api/<agg>/…` answered 409.
+  //
+  // Presence-gated exactly as the aggregate router gates them, so a project with
+  // neither a versioned/event-sourced aggregate nor a `unique` key emits a
+  // byte-identical file.
+  const wfNeedsConcurrency = aggregatesNeedConcurrency(ctx.aggregates);
+  const wfHasUniqueKeys = aggregatesHaveUniqueKeys(ctx.aggregates);
+  const wfDisallowedStatus = resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses);
+  const wfUniquenessStatus = resolveErrorStatus("UniquenessConflict", ctx.structuralErrorStatuses);
+  const wfConcurrencyStatus = resolveErrorStatus(
+    "ConcurrencyConflict",
+    ctx.structuralErrorStatuses,
+  );
+  const wfStatuses = new Set<number>([
+    400,
+    wfForbiddenStatus,
+    404,
+    422,
+    wfDomainStatus,
+    500,
+    wfDisallowedStatus,
+  ]);
+  if (wfHasUniqueKeys) wfStatuses.add(wfUniquenessStatus);
+  if (wfNeedsConcurrency) wfStatuses.add(wfConcurrencyStatus);
+  const wfProblemUnion = [...wfStatuses].sort((a, b) => a - b).join(" | ");
   // RFC 7807 responder — application/problem+json + x-request-id header.
   body.push(
     `    const problem = (status: ${wfProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
@@ -267,11 +299,32 @@ export function buildWorkflowsFile(
     `    if (err instanceof ForbiddenError) return problem(${wfForbiddenStatus}, ${JSON.stringify(problemTitle(wfForbiddenStatus))}, err.message);`,
   );
   body.push(
+    // The state-gate rung, ordered before `DomainError` as in the aggregate
+    // router.  Reachability note: the emitted `when` gate is a ROUTE-layer check
+    // (`routes-builder.ts` `whenGateLine`), so an operation invoked from a
+    // workflow step does not evaluate it — this arm answers a `DisallowedError`
+    // raised from user-authored code.  That bypass is a separate defect,
+    // recorded on M-T6.28.
+    `    if (err instanceof DisallowedError) return problem(${wfDisallowedStatus}, "Disallowed", err.message);`,
+  );
+  body.push(
     `    if (err instanceof DomainError) return problem(${wfDomainStatus}, ${JSON.stringify(problemTitle(wfDomainStatus))}, err.message);`,
   );
   body.push(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
+  if (wfHasUniqueKeys) {
+    body.push(
+      // PG unique_violation — SQLSTATE read off `err` AND `err.cause` (drizzle
+      // v5 wraps the driver error), same as the aggregate router.
+      `    if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23505")) return problem(${wfUniquenessStatus}, "Conflict", "A record with these values already exists.");`,
+    );
+  }
+  if (wfNeedsConcurrency) {
+    body.push(
+      `    if (err instanceof ConcurrencyError) return problem(${wfConcurrencyStatus}, "Conflict", err.message);`,
+    );
+  }
   body.push(
     // RS-28 — sanitized; the inner exception reaches the log, not the wire.
     `    if (err instanceof ExternHandlerError) { console.error(err); return problem(500, "Internal Server Error", "internal"); }`,
@@ -322,8 +375,10 @@ export function buildWorkflowsFile(
   const errorClasses = [
     "DomainError",
     "AggregateNotFoundError",
+    "DisallowedError",
     "ForbiddenError",
     "ExternHandlerError",
+    "ConcurrencyError",
   ].filter(hasRef);
   const usesEvents = /\bEvents\.\w/.test(bodyStr);
   const usesIds = /\bIds\.\w/.test(bodyStr);

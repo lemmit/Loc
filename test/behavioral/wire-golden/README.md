@@ -5,15 +5,25 @@ One file per shared behavioral system (`../systems/*.ddd`). Each is the
 emitted `test e2e` suite is replayed against it: an ordered list of
 `{seq, method, templated path, status, normalized body}`.
 
-The last three entries of every file are not from the e2e suite. They are the
-**framework-fault probes** (RS-9), issued through the same dispatch after the
-tier finishes: a wrong verb, an unknown path, and a body the server cannot
-parse. An emitted suite only ever requests what the API *serves*, so before
-these existed the golden ran five legs green while those three requests
-answered five different shapes across three statuses — the gap
-`framework-error-contract-parity.test.ts` had to cover statically because
-nothing booted ever reached it. Appended *after* the tier so they never shift
-the ordinals the rest of the file aligns on.
+The tail entries of every file are not from the e2e suite. They are **probes**,
+issued through the same dispatch after the tier finishes, because an emitted
+suite only ever requests what the API *serves* — so a whole class of response
+was invisible to every golden. Appended *after* the tier so they never shift the
+ordinals the rest of the file aligns on:
+
+- the **framework-fault probes** (RS-9) — a wrong verb, an unknown path, and a
+  body the server cannot parse. Before these existed the golden ran five legs
+  green while those three requests answered five different shapes across three
+  statuses — the gap `framework-error-contract-parity.test.ts` had to cover
+  statically because nothing booted ever reached it.
+- the **absent-read probes** (M-T6.31) — for each projection-show
+  (`/api/projections/<p>/{key}`) and workflow-instance-show
+  (`/api/workflows/<wf>/instances/{id}`) URL the tier hit, the same route
+  re-requested with a key of the same shape that cannot exist. The `test e2e`
+  DSL has no verb for "read a key that isn't there", so those two routes shipped
+  three different 404 envelopes across the five backends with every golden
+  green. Only projection/instance-bearing cases grow an entry; a case that reads
+  neither route is skipped rather than guessed at.
 
 Every backend runner (`../run.mjs`, `run-python`, `run-dotnet`, `run-java`,
 `run-elixir`, plus the `run-dapper` / `run-mikroorm` persistence-adapter legs)
