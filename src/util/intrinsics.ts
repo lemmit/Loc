@@ -72,6 +72,20 @@ export interface IntrinsicSignature {
 //     comparison.  A string-receiver `contains` is an intrinsic, NOT the
 //     collection op — lowering keys the `isCollectionOp` flag off the
 //     receiver type, so the two never collide.
+//     `startsWith` is the one of the three that is also QUERYABLE — the
+//     prefix-match filter operator of
+//     `docs/old/proposals/tenancy-authorization-final-surface.md` decision 2
+//     (the tenancy subtree ladder's `dataKey` reachability predicate is a
+//     prefix match, and nothing else in the language expresses one).  Every
+//     SQL path renders it as position-anchored search rather than `LIKE
+//     <arg> || '%'`: the argument is a VALUE, so a `%` or `_` inside it must
+//     match literally, and an anchored `strpos`/`locate` needs no
+//     escape-character discipline to guarantee that.  Postgres `strpos(col,
+//     '')` is 1 and every host language's `startsWith("")` is true, so the
+//     empty prefix agrees in memory and in SQL; a NULL column matches
+//     nothing on either side.  `endsWith`/`contains` stay non-queryable —
+//     neither is anchored, so neither can ride a prefix index, and no
+//     shipped feature needs them in a `where`.
 //   - `replace(find, repl)` — replaces ALL occurrences; `find` is a literal
 //     string, never a pattern (use `matches` for regex).
 //   - `split(sep)` — literal separator; keeps empty segments (including a
@@ -140,7 +154,7 @@ export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
     name: "startsWith",
     params: ["string"],
     returns: "bool",
-    queryable: false,
+    queryable: true,
     signature: "(s: string): bool",
   },
   {
@@ -283,6 +297,23 @@ const BY_KEY = new Map(INTRINSIC_SIGNATURES.map((s) => [intrinsicKey(s.receiver,
  *  unknown-member diagnostics). */
 export function intrinsicFor(receiver: string, name: string): IntrinsicSignature | undefined {
   return BY_KEY.get(`${receiver}.${name}`);
+}
+
+/** True when `receiver.name(...)` is a `queryable` intrinsic that returns
+ *  `bool` — i.e. one whose SQL snippet is a COMPLETE predicate rather than a
+ *  scalar to compose into a comparison (`startsWith` today).
+ *
+ *  Every backend's query-filter lowerer needs this distinction: a scalar
+ *  intrinsic only ever appears as a comparison OPERAND, so those lowerers
+ *  reach their intrinsic arm from the value/column-position renderer, and a
+ *  bool-returning one standing alone in a PREDICATE position would otherwise
+ *  fall through to "not lowerable" (drizzle) or an `unsupported` throw (the
+ *  JPQL / `@SQLRestriction` / Dapper string renderers).  Keyed off the
+ *  catalogue rather than a per-backend name list so a future bool-returning
+ *  queryable row lights up every backend at once. */
+export function isQueryableBoolIntrinsic(receiver: string, name: string): boolean {
+  const sig = intrinsicFor(receiver, name);
+  return sig?.queryable === true && intrinsicReturnType(sig, receiver) === "bool";
 }
 
 /** Resolve an intrinsic's return type to a concrete primitive name —

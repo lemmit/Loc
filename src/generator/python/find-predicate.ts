@@ -56,6 +56,12 @@ export const SQLALCHEMY_INTRINSIC_SQL: Record<string, (recv: string, args: strin
   "string.trim": (recv) => `func.trim(${recv})`,
   "string.toUpper": (recv) => `func.upper(${recv})`,
   "string.toLower": (recv) => `func.lower(${recv})`,
+  // Prefix match (tenancy-authorization-final-surface decision 2).  `func.strpos`
+  // rather than SQLAlchemy's `.startswith(…)`: the ColumnOperators helper emits
+  // `LIKE`, whose autoescape mode differs by argument shape, and an anchored
+  // position test is escaping-free by construction — see
+  // `src/util/intrinsics.ts`.
+  "string.startsWith": (recv, args) => `(func.strpos(${recv}, ${args[0]}) == 1)`,
   // ---- numerics (A3 math batch) -------------------------------------------
   // Postgres round(numeric, n) is already half-away-from-zero (the catalogue
   // contract), so the SQL side needs no mode forcing; min/max are the

@@ -1210,12 +1210,17 @@ export function renderCsproj(
          the parameterless ToUpper()/ToLower() (the only forms EF Core
          translates — the Invariant forms throw at query compile); they
          execute as SQL upper()/lower(), so no culture ever applies.
+         CA1310: same bargain for the queryable \`startsWith\` prefix operator —
+         only the one-argument StartsWith(string) overload is EF-translatable
+         (the StringComparison overloads throw at query compile), and it runs
+         as an anchored SQL prefix test where the collation decides, so the
+         catalogue's ordinal contract holds.
          MSG0005: Mediator 3's source generator warns on any IMessage with no
          registered handler.  Loom emits domain-event notifications that have
          no in-process subscriber by design (they exist for the outbox / event
          log / external consumers), so this fires on every such event — it's a
          false positive for this codegen model, not a missing handler. -->
-    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1311;MSG0005</NoWarn>
+    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1310;CA1311;MSG0005</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- Test files live in the sibling Tests/${ns}.Tests project -->
