@@ -150,7 +150,7 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
 //     now);
 //   - an `enum-value` ref (`Status.Draft` → its stored text).
 // Value-object / nested-record columns on a raw row are already rejected by
-// the AST seed validator (`loom.seed-raw-unsupported-column`); this catches
+// the AST seed validator (`loom.seed-raw-column-invalid`); this catches
 // the remaining non-literal expressions that AST validator lets through.
 // ---------------------------------------------------------------------------
 

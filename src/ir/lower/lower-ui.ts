@@ -256,11 +256,11 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
     } else if (m.$type === "UiNotification") {
       // The bind types as the carried event (entity-kind, like a
       // workflow's `create(e: Event)` param); each body statement is a
-      // `toast(<expr>)` call (validator `loom.ui-handler-unsupported`
+      // `toast(<expr>)` call (validator `loom.ui-handler-statement-unknown`
       // rejects everything else), so only the message expr lowers.
       // Handler body admits `toast(<expr>)` (a message) and
       // `refetch(<Aggregate>[, …])` (cache invalidation); the validator
-      // (`loom.ui-handler-unsupported`) rejects everything else, so the
+      // (`loom.ui-handler-statement-unknown`) rejects everything else, so the
       // head bareword is one of those two.  `refetch` args are aggregate
       // NameRefs — carry the resolved query-key tag so backends never
       // re-derive it (mirrors the mutation-success `["<tag>"]` key).

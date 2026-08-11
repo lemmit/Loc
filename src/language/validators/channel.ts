@@ -5,7 +5,7 @@
 //   - `loom.channel-key-missing-field` — a channel's `key:` must name a field
 //     that exists on *every* carried event; otherwise the broker can't form a
 //     stable partition/ordering key.
-//   - `loom.channelsource-unsupported-transport` — the bound storage type is
+//   - `loom.channelsource-transport-invalid` — the bound storage type is
 //     not a channel transport at all (no broker driver exists or is planned).
 //     `nats` lands here permanently (M-T4.4 pinned decision: the broker
 //     line-up is redis/rabbitmq/kafka), as do non-messaging types.
@@ -70,7 +70,7 @@ export function checkChannels(model: Model, accept: ValidationAcceptor): void {
     if (!CHANNEL_TRANSPORT_TYPES.has(storageType)) {
       accept(
         "error",
-        diagMessage("loom.channelsource-unsupported-transport", {
+        diagMessage("loom.channelsource-transport-invalid", {
           name: cs.name,
           chName: ch.name,
           refName: cs.use?.ref?.name,
@@ -78,7 +78,7 @@ export function checkChannels(model: Model, accept: ValidationAcceptor): void {
           ok: ok ? ` for ${delivery}/${retention}` : "",
           ok2: [...(ok ?? CHANNEL_TRANSPORT_TYPES)].join(", "),
         }),
-        { node: cs, property: "use", code: "loom.channelsource-unsupported-transport" },
+        { node: cs, property: "use", code: "loom.channelsource-transport-invalid" },
       );
     } else if (ok && !ok.has(storageType)) {
       accept(

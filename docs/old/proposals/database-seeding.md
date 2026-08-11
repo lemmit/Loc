@@ -401,7 +401,7 @@ is the deferred follow-up (§10).
 |---|---|
 | `seed` row for an aggregate outside the enclosing context | Error: cross-context seed (same scoping as a workflow body). `loom.seed-foreign-aggregate` |
 | Record field set fails the aggregate `create` param type-check (domain path) | Error, reusing the call-arg type checker. `loom.seed-shape-mismatch` |
-| `id` / value-object / containment column on a `raw` row that v1 can't insert | Error: "raw seed supports scalar / enum / id columns only." `loom.seed-raw-unsupported-column` |
+| `id` / value-object / containment column on a `raw` row that v1 can't insert | Error: "raw seed supports scalar / enum / id columns only." `loom.seed-raw-column-invalid` |
 | `seed` in a context whose module has no `migrationsOwner` (frontend-only) | Error: "nothing to seed — no database-owning deployable hosts this context." `loom.seed-no-db` |
 
 ---
@@ -496,7 +496,7 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    Table/column naming mirrors the migration builder
    (`plural(snake(agg))` / `snake(field)`). v1 = scalar / enum / id
    columns; value-object + containment columns stay on the domain path
-   (`loom.seed-raw-unsupported-column`). An explicit `id` on the domain
+   (`loom.seed-raw-column-invalid`). An explicit `id` on the domain
    path is rejected (`loom.seed-id-needs-raw`). Author orders parents
    before children — no topological reorder.
 5. Imperative (workflow-body) form — reuses statement lowering.

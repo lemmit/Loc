@@ -1,37 +1,43 @@
 // ---------------------------------------------------------------------------
 // The `*-unsupported` register (M-T9.27).
 //
-// 69 diagnostic codes in `src/` carry an `-unsupported` / `-backend` suffix.
-// They LOOK like one family — "this target can't do this yet" — and that
-// reading is what makes them ossify: a permanent-shaped artifact (a stable
-// `loom.*` identity, documented beside real rules, matched in tests like real
-// rules) standing in for a temporary condition.
-//
-// They are not one family.  Classifying them against their emission sites
-// splits them four ways, and only ONE of the four is work:
+// Every diagnostic code in `src/` carrying an `-unsupported` / `-backend`
+// suffix is WORK — either now (`gap`) or later (`scope`).  That invariant is
+// the point of this file, and slice 2 is what made it true.
 //
 //   gap    — a target hasn't implemented it yet.  A TODO.  DRAINS TO ZERO.
 //   scope  — a declared v1 limit with a named successor.  Owned by a mission;
-//            becomes a `gap` when that mission starts, or a `never` if the
-//            limit is re-justified.
-//   never  — semantically impossible or deliberately refused.  Never drains.
-//            Should not be spelled `-unsupported` at all (§Rename, M-T9.27).
-//   rule   — not a gap in any sense: a closed vocabulary or a misuse error the
-//            suffix regex swept in.  A plain language rule wearing the wrong
-//            name.
+//            becomes a `gap` when that mission starts, or is renamed out (as
+//            below) if the limit is re-justified as permanent.
 //
-// WHY THIS FILE EXISTS.  Under the no-permanent-skips policy every `gap` is a
-// commitment, so the gap list is a sprint backlog.  It could not be planned
-// before this file: the codes were inline string literals across ~50 files, 53
-// of the 69 were mentioned nowhere in `docs/new-plan/`, and the suffix itself
-// misclassifies 27 of them.  You cannot drain a list you cannot enumerate, and
-// you cannot enumerate this one by grep — which is exactly why `kind` is an
-// explicit reviewed field here and not a naming convention.
+// HOW IT GOT THIS WAY.  The suffix originally spanned 69 codes and LOOKED like
+// one family — "this target can't do this yet" — which is what made them
+// ossify: a permanent-shaped artifact (a stable `loom.*` identity, documented
+// beside real rules, matched in tests like real rules) standing in for a
+// temporary condition.  Classifying all 69 against their emission sites split
+// them FOUR ways, and 27 turned out not to be work at all:
+//
+//   * 13 were semantically impossible or deliberately refused
+//     (`projection-groupby-join`: a join is a by-id load AFTER the query, so it
+//     cannot compose with `group by`; `policy-write-global`, a documented
+//     deliberate never).  Those never drain.
+//   * 6 were not gaps in any sense — a closed vocabulary or a misuse error the
+//     suffix regex swept in (`auth-ui-on-backend` was a misuse error;
+//     `ui-handler-unsupported` a closed statement vocabulary).
+//
+// Slice 2 RENAMED all 19 out of the suffix — `-invalid` (impossible/refused),
+// `-no-effect` (parses, does nothing), `-unknown` (not in a closed vocabulary)
+// — so they no longer read as parity debt and no longer land in this register.
+// That is why the two kinds below are the only two left: a third of the
+// apparent debt was permanent by design, and leaving it here would have stalled
+// any drain sprint at 19 rows nothing could close.
+//
+// The lasting lesson: NO NAMING CONVENTION separates these.  The classification
+// is a reviewed field, not something derivable from the code name — which is
+// why `kind` is written down per row.
 //
 // `verified` marks rows whose classification a human has confirmed against the
-// emission site.  Rows land `false` and are promoted on review — an unverified
-// `never` is the dangerous cell (it silently excuses work), so those are the
-// ones to review first.
+// emission site.  Rows land `false` and are promoted on review.
 //
 // GATED BY `test/system/unsupported-register.test.ts`: every suffixed code in
 // `src/` must appear here and every row must still be emitted, so a new gap
@@ -39,8 +45,10 @@
 // closes, DELETE ITS ROW in the same PR.
 // ---------------------------------------------------------------------------
 
-/** How a `*-unsupported` code relates to work.  See the header. */
-export type UnsupportedKind = "gap" | "scope" | "never" | "rule";
+/** How a `*-unsupported` code relates to work — now or later.  See the header.
+ *  A code that is NEITHER (impossible, refused, or a plain rule) does not
+ *  belong in the suffix at all; rename it, per slice 2. */
+export type UnsupportedKind = "gap" | "scope";
 
 export interface UnsupportedEntry {
   /** The `loom.*` diagnostic code. */
@@ -65,12 +73,14 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3484",
     what: "per-operation audit-record emission missing on some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.auth-ui-unsupported-framework",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:446",
     what: "`auth: ui` only on react/vue/svelte/angular; feliz + flutter open",
+    mission: "M-T1.20",
   },
   {
     code: "loom.chart-unsupported-target",
@@ -84,6 +94,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1998",
     what: "`filter` capability not applied by some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.context-test-unsupported",
@@ -97,6 +108,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:2274",
     what: "features the .NET Dapper persistence adapter does not emit",
+    mission: "M-T6.35",
   },
   {
     code: "loom.datagrid-unsupported-target",
@@ -110,48 +122,56 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1684",
     what: "principal stamp without auth / stamp on event-sourced — .NET arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.elixir-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1689",
     what: "principal stamp without auth / stamp on event-sourced — Elixir arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.java-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1683",
     what: "principal stamp without auth / stamp on event-sourced — Java arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.node-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1685",
     what: "principal stamp without auth / stamp on event-sourced — node arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.python-stamp-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1686",
     what: "principal stamp without auth / stamp on event-sourced — Python arm",
+    mission: "M-T6.33",
   },
   {
     code: "loom.event-sourced-workflow-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3302",
     what: "event-sourced workflow storage unimplemented on all backends",
+    mission: "M-T6.34",
   },
   {
     code: "loom.event-sourcing-backend-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3263",
     what: "`persistedAs: eventLog` storage emission is Hono-only",
+    mission: "M-T6.34",
   },
   {
     code: "loom.feliz-async-effect-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/store-checks.ts:357",
     what: "`match await` async effect unrenderable on the Feliz frontend",
+    mission: "M-T1.20",
   },
   {
     code: "loom.field-mask-unsupported",
@@ -165,24 +185,28 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:2201",
     what: "`ignoring` capability-filter bypass unimplemented on some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.find-predicate-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:2729",
     what: "a find predicate the active persistence adapter cannot lower",
+    mission: "M-T6.35",
   },
   {
     code: "loom.flutter-primitive-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:562",
     what: "walker primitives with no Flutter renderer",
+    mission: "M-T1.20",
   },
   {
     code: "loom.frontend-collection-op-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/ui-checks.ts:459",
     what: "collection ops in a page expression the frontend walker can't render",
+    mission: "M-T1.20",
   },
   {
     code: "loom.generic-carrier-unsupported",
@@ -196,12 +220,14 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1839",
     what: "projection field shapes the Java emitter does not handle",
+    mission: "M-T6.36",
   },
   {
     code: "loom.java-workflow-instance-field-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1822",
     what: "workflow instance field shapes the Java emitter does not handle",
+    mission: "M-T6.36",
   },
   {
     code: "loom.mikroorm-unsupported",
@@ -229,6 +255,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1151",
     what: "a persistedAs/shape combination the deployable's adapter can't store",
+    mission: "M-T6.35",
   },
   {
     code: "loom.polymorphic-id-ref-unsupported",
@@ -277,6 +304,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3343",
     what: "provenance runtime (trace capture + history) missing on some backends",
+    mission: "M-T6.32",
   },
   {
     code: "loom.remote-api-op-unsupported",
@@ -290,6 +318,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1282",
     what: "a `shape(...)` the hosting backend cannot persist",
+    mission: "M-T6.35",
   },
   {
     code: "loom.tph-backend-unsupported",
@@ -310,6 +339,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:498",
     what: "`on <channel>.<Event>` live-event handlers missing on some targets",
+    mission: "M-T1.20",
   },
   {
     code: "loom.union-unsupported",
@@ -323,6 +353,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:1528",
     what: "`shape: document` partially emitted on Elixir",
+    mission: "M-T6.35",
   },
   {
     code: "loom.when-unsupported",
@@ -396,152 +427,6 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "scope",
     site: "src/ir/validate/checks/workflow-checks.ts:600",
     what: "workflow load of a nullable result — v1 is single non-nullable",
-    verified: true,
-  },
-
-  // -------------------------------------------------------------------------
-  // never — semantically impossible or deliberately refused.  These do NOT
-  // drain, and spelling them `-unsupported` is what makes the debt number lie.
-  // M-T9.27 §Rename retires the suffix on these.
-  // -------------------------------------------------------------------------
-  {
-    code: "loom.backfill-target-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/migration-checks.ts:42",
-    what: "a document/eventLog aggregate has no SQL column to backfill",
-    verified: true,
-  },
-  {
-    code: "loom.policy-write-global-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/tenancy-checks.ts:268",
-    what: "root-subtree-wide mutation is a deliberate never (surface-redundancy-cuts §4)",
-    verified: true,
-  },
-  {
-    code: "loom.projection-groupby-join-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:449",
-    what: "`join` is a post-query by-id load, so it cannot compose with `group by`",
-    verified: true,
-  },
-  {
-    code: "loom.projection-groupby-keyed-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:438",
-    what: "`keyed by` and `group by` define conflicting row identities",
-    verified: true,
-  },
-  {
-    code: "loom.projection-groupby-source-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:421",
-    what: "a grouped projection must read an aggregate source",
-    verified: true,
-  },
-  {
-    code: "loom.projection-query-and-fold-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:245",
-    what: "a query source and `on(e)` event folds are mutually exclusive",
-    verified: true,
-  },
-  {
-    code: "loom.projection-source-ignoring-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:209",
-    what: "`ignoring` over a projection source has no effect (read-model rows)",
-    verified: true,
-  },
-  {
-    code: "loom.projection-source-join-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:198",
-    what: "by-id joins resolve aggregates, not projection rows",
-    verified: true,
-  },
-  {
-    code: "loom.projection-workflow-source-eventsourced-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:116",
-    what: "an event-sourced workflow has no instance table to read",
-    verified: true,
-  },
-  {
-    code: "loom.projection-workflow-source-ignoring-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:139",
-    what: "`ignoring` over a workflow source has no effect",
-    verified: true,
-  },
-  {
-    code: "loom.projection-workflow-source-join-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/projection-checks.ts:128",
-    what: "by-id joins resolve aggregates, not workflow instance rows",
-    verified: true,
-  },
-  {
-    code: "loom.store-cross-store-on-liveview-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/store-checks.ts:256",
-    what: "a LiveView process cannot reach another store's action",
-    verified: true,
-  },
-  {
-    code: "loom.store-lifetime-liveview-unsupported",
-    kind: "never",
-    site: "src/ir/validate/checks/store-checks.ts:236",
-    what: "`persist:` lifetimes have no LiveView equivalent (server-held state)",
-    verified: true,
-  },
-
-  // -------------------------------------------------------------------------
-  // rule — not a gap in any sense.  A closed vocabulary or a misuse error the
-  // `-unsupported` suffix swept in.  These are the proof that the suffix is not
-  // a classifier: no amount of grepping separates them from the `gap` rows.
-  // M-T9.27 §Rename moves them out of the suffix.
-  // -------------------------------------------------------------------------
-  {
-    code: "loom.auth-ui-on-backend",
-    kind: "rule",
-    site: "src/language/validators/deployable.ts:215",
-    what: "`auth: ui` on a backend deployable — misuse; backends use `auth: required`",
-    verified: true,
-  },
-  {
-    code: "loom.channelsource-unsupported-transport",
-    kind: "rule",
-    site: "src/language/validators/channel.ts:69",
-    what: "the bound storage type is not a channel transport — type compatibility",
-    verified: true,
-  },
-  {
-    code: "loom.interp-format-unsupported",
-    kind: "rule",
-    site: "src/language/validators/template.ts:71",
-    what: "ICU format outside the closed set (plural/selectordinal/select)",
-    verified: true,
-  },
-  {
-    code: "loom.seed-raw-unsupported-column",
-    kind: "rule",
-    site: "src/language/validators/seed.ts:74",
-    what: "raw seed rows take scalar/enum/id columns only — use the domain path",
-    verified: true,
-  },
-  {
-    code: "loom.store-url-field-unsupported",
-    kind: "rule",
-    site: "src/ir/validate/checks/store-checks.ts:93",
-    what: "`persist: url` fields must be scalar",
-    verified: true,
-  },
-  {
-    code: "loom.ui-handler-unsupported",
-    kind: "rule",
-    site: "src/language/validators/ui.ts:400",
-    what: "handler bodies take `toast(…)` / `refetch(…)` only — closed vocabulary",
     verified: true,
   },
 ];

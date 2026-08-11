@@ -78,7 +78,7 @@ describe("migration data steps — IR validation (M-T2.3)", () => {
     }`);
     expect(found).not.toContain("loom.migration-expr-unsupported");
     expect(found).not.toContain("loom.backfill-type-mismatch");
-    expect(found).not.toContain("loom.backfill-target-unsupported");
+    expect(found).not.toContain("loom.backfill-target-invalid");
     expect(found).not.toContain("loom.migration-data-steps-unsupported");
   });
 
@@ -102,13 +102,13 @@ describe("migration data steps — IR validation (M-T2.3)", () => {
 
   it("rejects a value-object target (no single scalar column)", async () => {
     expect(await irCodes(`migration "x" { Order.price = 1 }`)).toContain(
-      "loom.backfill-target-unsupported",
+      "loom.backfill-target-invalid",
     );
   });
 
   it("rejects a backfill on a shape: document aggregate", async () => {
     expect(await irCodes(`migration "x" { Doc.body = "b" }`)).toContain(
-      "loom.backfill-target-unsupported",
+      "loom.backfill-target-invalid",
     );
   });
 

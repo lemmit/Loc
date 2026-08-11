@@ -21,7 +21,7 @@
 //
 // This module is React-only.  The other frontends (Vue/Svelte/Angular) wire
 // their own store-module emitters with the same lifetime ladder; LiveView is
-// memory-only (gated by `loom.store-lifetime-liveview-unsupported`).
+// memory-only (gated by `loom.store-lifetime-liveview-invalid`).
 //
 // The `lifetime` ladder (frontend-state-management.md §3.1): `memory` (default)
 // is the plain `create(...)` below; `persistLocal`/`persistSession` wrap it in
@@ -200,7 +200,7 @@ function decodeFieldFromParam(field: StateFieldIR): string {
   // an off-set value is harmless client filter state, re-validated server-side).
   if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${storeFieldInit(t)}`;
   // Arrays / entities / anything structural are not URL-encodable in v1 — the
-  // validator (loom.store-url-field-unsupported) blocks them, so this is a
+  // validator (loom.store-url-field-invalid) blocks them, so this is a
   // defensive default only.
   return storeFieldInit(t);
 }

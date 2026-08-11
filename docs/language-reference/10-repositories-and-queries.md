@@ -409,9 +409,9 @@ The other backends emit the same query through their own persistence layer — `
 
 The shape discipline (each its own diagnostic):
 
-- **Aggregate `from` source required** — grouping reads (and groups) a source table; workflow/projection sources and folded projections are rejected (`loom.projection-groupby-source-unsupported`).
+- **Aggregate `from` source required** — grouping reads (and groups) a source table; workflow/projection sources and folded projections are rejected (`loom.projection-groupby-source-invalid`).
 - **At least one aggregate `select`** — a `group by` with only per-row selects is just DISTINCT (`loom.projection-groupby-no-aggregate`).
 - **Per-row selects must be grouping columns** — anything else has no single value per group, the same rule SQL enforces (`loom.projection-groupby-select-not-grouped`).
 - **Grouping columns are source columns** — `o.status`, optionally bucketed by a supported grouping transform (`o.placedAt.startOfDay()`, the midnight-UTC daily bucket — `date_trunc('day', …)` in SQL, still a `datetime`).  Any other computed key (`o.total + 1`) is rejected (`loom.projection-groupby-key-not-columnar`).  A key `select` must repeat the grouping expression EXACTLY, transform included — `select day = o.placedAt` against `group by o.placedAt.startOfDay()` is per-row, not per-group.
 - **Aggregation arguments are bare source columns too** — `sum(o.total)`, never a computed expression (`sum(o.total + o.tax)`) or a bare unqualified name (`sum(total)`): SQL aggregates a column, not a per-row computation (`loom.projection-aggregate-arg-not-columnar`; applies to the singleton whole-table aggregation as well).
-- **No `join`, no `keyed by`** — a join is an app-level by-id load after the query (`loom.projection-groupby-join-unsupported`), and a grouped projection's rows are the groups, not id-keyed entities (`loom.projection-groupby-keyed-unsupported`).
+- **No `join`, no `keyed by`** — a join is an app-level by-id load after the query (`loom.projection-groupby-join-invalid`), and a grouped projection's rows are the groups, not id-keyed entities (`loom.projection-groupby-keyed-invalid`).

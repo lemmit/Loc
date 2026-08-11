@@ -10,7 +10,7 @@
 // Pinned decision (M-T4.4 design §2, 2026-07-18): the broker line-up is
 // redis → rabbitmq → kafka; **NATS is not a channel transport** (it stays a
 // parseable storage type for other roles and is rejected by
-// `loom.channelsource-unsupported-transport`).
+// `loom.channelsource-transport-invalid`).
 
 /** Storage types that are (or are slated to become) channel transports.
  *  `inMemory` is the degenerate in-process transport — compatible only with

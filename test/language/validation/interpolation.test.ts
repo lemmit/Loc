@@ -80,7 +80,7 @@ describe("validation — A6 string interpolation", () => {
 // its expression.  NUMBER/CURRENCY/PERCENT + PLURAL/SELECTORDINAL require a
 // numeric value; DATE/TIME lift the datetime rejection above (a datetime hole is
 // exactly what they format); SELECT wants a string/enum; a genuinely unknown ICU
-// argType → loom.interp-format-unsupported.
+// argType → loom.interp-format-unknown.
 describe("validation — A6 interpolation format suffix", () => {
   it("accepts a `, number` suffix on a numeric hole (int, money)", async () => {
     const { errors } = await parseString(
@@ -137,10 +137,10 @@ describe("validation — A6 interpolation format suffix", () => {
     expect(diagnostics.some((d) => d.code === "loom.interp-hole-type")).toBe(true);
   });
 
-  it("rejects a genuinely unknown ICU format — loom.interp-format-unsupported", async () => {
+  it("rejects a genuinely unknown ICU format — loom.interp-format-unknown", async () => {
     const { diagnostics } = await parseString(
       wrap(`derived x: string = \`x {quantity, spellout}\``),
     );
-    expect(diagnostics.some((d) => d.code === "loom.interp-format-unsupported")).toBe(true);
+    expect(diagnostics.some((d) => d.code === "loom.interp-format-unknown")).toBe(true);
   });
 });

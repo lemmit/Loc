@@ -7,8 +7,8 @@
 //   loom.projection-source-not-materialized   — the source projection is itself
 //                                                query-time (no read-model table)
 //   loom.projection-source-self               — a projection sourcing itself
-//   loom.projection-source-join-unsupported   — a `join` over a projection source
-//   loom.projection-source-ignoring-unsupported — an `ignoring` over a projection source
+//   loom.projection-source-join-invalid   — a `join` over a projection source
+//   loom.projection-source-ignoring-no-effect — an `ignoring` over a projection source
 //   loom.projection-source-unsupported-backend  — a backend that hasn't ported the emit
 
 import { describe, expect, it } from "vitest";
@@ -79,7 +79,7 @@ describe("query-time projection `from <Projection>` validation", () => {
       await codes(
         `projection Joined { orderId: Order id  total: int  from OrderTotals as t where t.total > 100 join Order as o on t.orderId select orderId = t.orderId, total = t.total }`,
       ),
-    ).toContain("loom.projection-source-join-unsupported");
+    ).toContain("loom.projection-source-join-invalid");
   });
 
   it("rejects an `ignoring` over a projection source", async () => {
@@ -87,6 +87,6 @@ describe("query-time projection `from <Projection>` validation", () => {
       await codes(
         `projection Bypassing { orderId: Order id  total: int  from OrderTotals as t where t.total > 100 ignoring * select orderId = t.orderId, total = t.total }`,
       ),
-    ).toContain("loom.projection-source-ignoring-unsupported");
+    ).toContain("loom.projection-source-ignoring-no-effect");
   });
 });

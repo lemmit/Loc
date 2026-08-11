@@ -72,10 +72,10 @@ function checkSeed(seed: Seed, accept: ValidationAcceptor): void {
         // Rule 4 — raw rows are direct column inserts: scalar / enum / id
         // literals only.  Value-object / containment columns route through
         // the domain path.
-        accept("error", diagMessage("loom.seed-raw-unsupported-column", { name: f.name }), {
+        accept("error", diagMessage("loom.seed-raw-column-invalid", { name: f.name }), {
           node: f,
           property: "value",
-          code: "loom.seed-raw-unsupported-column",
+          code: "loom.seed-raw-column-invalid",
         });
       }
     }

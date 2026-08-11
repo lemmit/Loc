@@ -187,7 +187,7 @@ describe("projection comprehension — validation gates", () => {
         select orderId = o.id
       }
     `);
-    expect(codes).toContain("loom.projection-query-and-fold-unsupported");
+    expect(codes).toContain("loom.projection-query-and-fold-invalid");
     // the specific reserved-combo gate fires INSTEAD of the generic honest gate
     expect(codes).not.toContain("loom.projection-query-time-unsupported");
   });
@@ -200,7 +200,7 @@ describe("projection comprehension — validation gates", () => {
       }
     `);
     expect(codes).not.toContain("loom.projection-query-time-unsupported");
-    expect(codes).not.toContain("loom.projection-query-and-fold-unsupported");
+    expect(codes).not.toContain("loom.projection-query-and-fold-invalid");
   });
 });
 

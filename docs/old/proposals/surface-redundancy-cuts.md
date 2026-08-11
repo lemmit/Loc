@@ -65,12 +65,12 @@ as a hard parse error.
 ### 4. `write global` policy level — a parseable always-error
 
 `allow write global on X` parses, then *unconditionally* fails validation
-(`loom.policy-write-global-unsupported`, `ddd.langium:1089`) — root-subtree-
+(`loom.policy-write-global-invalid`, `ddd.langium:1089`) — root-subtree-
 wide mutation is a deliberate never, not a roadmap gap. A grammatically
 reachable state whose only destiny is an error.
 
 **Cut — but keep the good message.** Do **not** downgrade to a raw parse
-error: today's `loom.policy-write-global-unsupported` *explains why* global
+error: today's `loom.policy-write-global-invalid` *explains why* global
 writes are a deliberate never; a bare "expected `local` | `deep`" is a UX
 regression (against the signposting principle — fail loudly *with a reason*).
 Also, `level` is shared read/write in one rule (`PolicyReadRule`), so
