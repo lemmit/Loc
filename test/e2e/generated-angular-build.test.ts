@@ -132,10 +132,41 @@ const SHOWCASE: Case = {
       }
       ui WebApp {
         api Sales: SalesApi
+        // User (non-extern) components — emitted as standalone @Component
+        // classes under src/app/components/ (angular/components-emit.ts).
+        // THREE shapes, because they typecheck differently under
+        // strictTemplates: scalar @Input()s read bare in the template; an
+        // aggregate-typed input carrying the wire DTO (its ../../api/<agg>
+        // import resolves only at component depth); and a STATEFUL component
+        // whose signal / computed / action-method members come from the page
+        // shell's own machinery.  ng build is the only gate that type-checks
+        // a generated Angular TEMPLATE, so all three live here.
+        component TierBadge(label: string, level: int) {
+          body: Stack {
+            Text { label },
+            Text { level > 2 ? "high" : "low" },
+            Text { string(level * 2) }
+          }
+        }
+        component OrderLine(order: Order) {
+          body: Stack { Text { order.customerId }, Text { string(order.priority) } }
+        }
+        component Ticker(caption: string) {
+          state { n: int = 0 }
+          derived doubled: int = n * 2
+          action bump() { n := n + 1 }
+          body: Stack {
+            Text { caption },
+            Text { string(doubled) },
+            Button { "more", onClick: bump }
+          }
+        }
         page OrderList {
           route: "/"
           body: Stack {
             Heading { "Orders" },
+            TierBadge { label: "gold", level: 3 },
+            Ticker { caption: "hits" },
             QueryView {
               of: Sales.Order.all,
               loaded: rows => Table { of: rows, columns: [o => o.customerId, o => o.status] }
@@ -166,6 +197,7 @@ const SHOWCASE: Case = {
             data: o => Stack {
               Heading { "Order" },
               Text { o.customerId },
+              OrderLine { order: o },
               Action { o.confirm }
             }
           }
@@ -194,9 +226,10 @@ const SHOWCASE: Case = {
  *  client-side `store Cart { state {…} action … }` injectable signal service,
  *  a page that READS store state by dotted name (`Cart.lines`, `Cart.count`)
  *  in markup (`For { each: Cart.lines }`, a Heading) and CALLS a store action
- *  from a page action (`discard() { Cart.clear() }`).  Page-only (Angular emits
- *  no standalone user-component files), so the store-from-component path of the
- *  React `store-showcase.ddd` is covered here purely through pages.  Asserts
+ *  from a page action (`discard() { Cart.clear() }`).  Page-only by choice — the
+ *  showcase case above is where walked user components are compiled — so the
+ *  store-from-component path of the React `store-showcase.ddd` is covered here
+ *  purely through pages.  Asserts
  *  the `@Injectable` signal store at `src/app/stores/cart.store.ts` and the
  *  per-page `inject(CartStore)` + `this.cart.lines()` read / `this.cart.clear()`
  *  call all `ng build` cleanly. */

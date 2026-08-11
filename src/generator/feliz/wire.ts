@@ -1931,7 +1931,7 @@ export function renderAsyncOutcomeTypes(effects: readonly FelizAsyncEffect[]): s
 /** F# type spelling of a wire field's declared type, honouring the wire
  *  contract: an enum value arrives as its string name, so it decodes to a
  *  plain `string` (a proper DU decoder is a follow-up). */
-function wireFieldType(t: TypeIR): string {
+export function wireFieldType(t: TypeIR): string {
   // A `File` wire field is the fixed `FileRef` record (`renderFileRefType`),
   // not a scalar — decoded via `fileRefDecoder`.
   if (t.kind === "primitive" && t.name === "File") return "FileRef";
