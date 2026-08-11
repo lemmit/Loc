@@ -1,0 +1,70 @@
+// A VALUE-OBJECT-typed field default — `total: Money = Money { … }`.
+//
+// Why this fixture exists: a field default is rendered by each backend's DOMAIN
+// expression renderer, and on the backends with a distinct WIRE DTO it lands in
+// a slot typed as the wire model.  The result is a domain class sitting in a
+// wire-typed field:
+//
+//   python  total: MoneyModel = Money(0, "USD")
+//           → Incompatible types in assignment (expression has type
+//             "app.domain.value_objects.Money", variable has type
+//             "app.http.wire_models.Money")            [mypy --strict]
+//   .NET    new Money(...) into a MoneyRequest slot
+//           → CS0246: the domain type is not in scope in the request file
+//   hono    MoneySchema.default(new Money(0, "USD"))
+//           → COMPILES, by structural typing alone
+//
+// That last line is why this is a COMPILE-tier fixture rather than a unit
+// assertion, and why the corpus row lists every backend.  TypeScript's
+// structural typing makes it the WEAKEST oracle for wire/domain confusion: a
+// class with matching public fields is assignable to the wire object type, so
+// `build-generated-ts` stays green while two other backends cannot compile the
+// same source.  Java (which coalesces on the domain side, in the factory) and
+// Elixir (which has no separate wire DTO) are expected to be unaffected — this
+// fixture is what turns "expected" into "measured".
+//
+// The SCALAR and ENUM defaults are here deliberately alongside the VO one: they
+// are the forms that already worked, so a regression in them is visible in the
+// same compile, and the contrast is the point — the wire boundary treats a
+// non-scalar default differently from a scalar one, and nothing said so.
+system VoFieldDefault {
+  subdomain Billing {
+    context Invoicing {
+      enum Tier { free  paid }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      aggregate Invoice with crudish {
+        reference: string
+        // The subject of the fixture: a VO-typed default.
+        total: Money = Money { amount: 0, currency: "USD" }
+        // A nested-VO slot whose inner value is an integer literal — crosses
+        // the wire default with the decimal-slot promotion, so a backend that
+        // fixes one and not the other is caught here rather than downstream.
+        credit: Money = Money { amount: 0, currency: "EUR" }
+        // The forms that already worked, kept as the contrast.
+        tier: Tier = Tier.free
+        note: string = "none"
+        seats: int = 1
+      }
+
+      repository Invoices for Invoice { }
+    }
+  }
+
+  api BillingApi from Billing
+  storage primary { type: postgres }
+  resource invoicingState { for: Invoicing, kind: state, use: primary }
+
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Invoicing]
+    dataSources: [invoicingState]
+    serves: BillingApi
+    port: 4000
+  }
+}

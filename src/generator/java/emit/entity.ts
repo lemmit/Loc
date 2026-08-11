@@ -250,7 +250,17 @@ export function renderJavaEntity(
   const hasExtern = operations.some((o) => o.extern);
 
   const javaImports = new Set<string>(["java.util.List"]);
-  for (const f of entity.fields) collectJavaTypeImports(f.type, javaImports);
+  for (const f of entity.fields) {
+    collectJavaTypeImports(f.type, javaImports);
+    // A field DEFAULT is rendered into the `create` factory
+    // (`total != null ? total : new Money(new BigDecimal("0"), "USD")`), so it
+    // pulls imports exactly like a derived expression or an invariant does.
+    // It was the one expression on the entity that nothing scanned — invisible
+    // while the only defaults reaching here were scalars whose rendering needs
+    // no import, and a `cannot find symbol` on `BigDecimal` the moment a
+    // value-object or decimal default did.
+    if (f.default) collectJavaExprImports(f.default, javaImports);
+  }
   for (const d of entity.derived) {
     collectJavaExprImports(d.expr, javaImports);
     collectJavaTypeImports(d.type, javaImports);
