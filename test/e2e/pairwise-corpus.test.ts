@@ -34,6 +34,11 @@ const ENABLED = process.env.LOOM_PAIRWISE === "1";
  *  is generated, so this is how a human reads what was actually tested. */
 const DUMP_DIR = process.env.LOOM_PAIRWISE_DUMP;
 
+/** `LOOM_PAIRWISE_REPORT=<file>` writes the full per-crossing verdict census.
+ *  The findings register quotes these numbers, and a register whose counts are
+ *  hand-tallied goes stale the first time the matrix changes. */
+const REPORT = process.env.LOOM_PAIRWISE_REPORT;
+
 interface Row {
   readonly platform: string;
   readonly kase: PairwiseCase;
@@ -77,6 +82,31 @@ describe.skipIf(!ENABLED)(
         }
       }
 
+      if (REPORT) {
+        const tally = new Map<string, number>();
+        for (const r of rows) tally.set(r.verdict, (tally.get(r.verdict) ?? 0) + 1);
+        const codeTally = new Map<string, number>();
+        for (const r of rows) {
+          for (const c of r.codes) codeTally.set(c, (codeTally.get(c) ?? 0) + 1);
+        }
+        fs.writeFileSync(
+          REPORT,
+          [
+            `crossings: ${rows.length}`,
+            ...[...tally].sort().map(([v, n]) => `  ${v}: ${n}`),
+            "rejection codes:",
+            ...[...codeTally].sort().map(([c, n]) => `  ${c}: ${n}`),
+            "",
+            ...rows
+              .filter((r) => r.verdict !== "ok")
+              .map(
+                (r) =>
+                  `${r.verdict.padEnd(9)} ${r.platform}/${r.kase.persistence} ${caseId(r.kase)} ${r.codes.join(",")} :: ${r.detail.split("\n")[0]}`,
+              ),
+          ].join("\n"),
+        );
+      }
+
       // ---- (1) NEW crashes fail. -------------------------------------------
       const unwaived = rows.filter((r) => r.verdict === "crashed" && !r.waiver);
       expect(
@@ -106,12 +136,27 @@ describe.skipIf(!ENABLED)(
       // otherwise leave (1) and (2) trivially satisfiable.  Assert a floor of
       // successfully generated crossings so the sweep cannot pass vacuously.
       const ok = rows.filter((r) => r.verdict === "ok").length;
+      const rejected = rows.filter((r) => r.verdict === "rejected").length;
       expect(rows.length, "crossings attempted").toBeGreaterThan(500);
+      // A COLLAPSE floor, not a target: a composer bug (or a rename) that made
+      // every case fail to parse would otherwise leave assertions (1) and (2)
+      // trivially satisfiable.  The floor sits well under the current 543 so
+      // that legitimately growing the rejection count — a backend adding an
+      // honest `loom.*` refusal — does not fail the gate.
       expect(
         ok,
         "crossings that generated cleanly — a collapse here means the " +
           "composer broke, not that the language did",
-      ).toBeGreaterThan(rows.length * 0.8);
+      ).toBeGreaterThan(400);
+      // …and the mirror: rejections must still be REACHED.  If phase ⑦ stopped
+      // running (the hole this harness shipped with once — see harness.ts), the
+      // honest refusals would silently become `ok` and the sweep would go quiet
+      // exactly where it is most load-bearing.
+      expect(
+        rejected,
+        "crossings refused by a named loom.* diagnostic — zero here means the " +
+          "validator phases are not being run at all",
+      ).toBeGreaterThan(50);
     }, 900_000);
   },
 );

@@ -1614,3 +1614,96 @@ describe("mikroorm — workflow (saga) correlation store is persistence-neutral"
     expect(httpIndex).toContain("events: DomainEventDispatcher = createInProcessDispatcher(db),");
   });
 });
+
+// ---------------------------------------------------------------------------
+// `mask unless` — every repository variant that EMITS `toWireMasked` must also
+// IMPORT the `User` its signature names (M-T9.29 finding F3).
+//
+// `toWireMaskedMethod` renders `toWireMasked(root: T, currentUser: User | null)`,
+// and all four MikroORM variants emit it for a masked aggregate.  None imported
+// `User`, so `mask unless` × `persistence: mikroorm` failed `tsc` with TS2304
+// "Cannot find name 'User'" on every saving shape.  The drizzle relational
+// builder has always spelled the rule (`typescript/repository-builder.ts` —
+// `findUsesCurrentUser(...) || aggHasFieldMask(agg)`); MikroORM was cloned
+// before the mask half existed and never picked it up.
+//
+// The crossing is why the pairwise corpus exists: `mask unless` has a fixture,
+// `persistence: mikroorm` has a matrix, and neither one alone reaches the cell
+// where they meet.  One case PER VARIANT because the bug was per-variant —
+// asserting only the relational shape would have missed three of the four.
+// ---------------------------------------------------------------------------
+describe("mikroorm — a `mask unless` repository imports the User its signature names", () => {
+  const masked = (header: string) => `system M {
+  user { id: guid  role: string  permissions: string[] }
+  api A from S
+  subdomain S {
+    permissions { unmask }
+    context O {
+      aggregate Doc ${header} {
+        title: string
+        ssn: string mask unless currentUser.permissions.contains(permissions.unmask)
+        contains notes: Note[]
+        entity Note { body: string }
+      }
+      repository Docs for Doc { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api {
+    platform: node { persistence: mikroorm }
+    contexts: [O]
+    dataSources: [s]
+    serves: A
+    port: 8080
+    auth: required
+  }
+}`;
+
+  // The event-sourced variant cannot carry `crudish` (its commands emit), so it
+  // spells its own create/apply pair.
+  const MASKED_ES = `system M {
+  user { id: guid  role: string  permissions: string[] }
+  api A from S
+  subdomain S {
+    permissions { unmask }
+    context O {
+      event Opened { doc: Doc id, title: string }
+      aggregate Doc persistedAs: eventLog {
+        title: string
+        ssn: string mask unless currentUser.permissions.contains(permissions.unmask)
+        create open(title: string) { emit Opened { doc: id, title: title } }
+        apply(e: Opened) { title := e.title  ssn := "" }
+      }
+      repository Docs for Doc { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: eventLog, use: pg }
+  deployable api {
+    platform: node { persistence: mikroorm }
+    contexts: [O]
+    dataSources: [s]
+    serves: A
+    port: 8080
+    auth: required
+  }
+}`;
+
+  const CASES: [string, string][] = [
+    ["relational", masked("with crudish")],
+    ["shape: document", masked("shape: document, with crudish")],
+    ["shape: embedded", masked("shape: embedded, with crudish")],
+    ["persistedAs: eventLog", MASKED_ES],
+  ];
+
+  it.each(CASES)("%s", async (_label, src) => {
+    const { files, errors } = await emit(src);
+    expect(errors).toEqual([]);
+    const repo = files.get("api/db/repositories/doc-repository.ts")!;
+    // The method whose signature names `User` — if this stops being emitted the
+    // assertion below would pass vacuously, so pin it first.
+    expect(repo).toContain("toWireMasked(root: Doc, currentUser: User | null)");
+    expect(repo).toContain('import type { User } from "../../auth/user-types";');
+  });
+});

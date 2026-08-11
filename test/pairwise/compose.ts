@@ -86,7 +86,7 @@ function withClause(cap: Capability, shape: Shape, authz: Authz): string {
 function members(shape: Shape, authz: Authz): string[] {
   const out: string[] = ["    label: string", "    amount: int = 0"];
   if (authz === "mask") {
-    out.push("    secret: string mask unless currentUser.permissions.contains(permissions.unmask)");
+    out.push("    ssn: string mask unless currentUser.permissions.contains(permissions.unmask)");
   }
   if (shape === "eventLog") {
     out.push(
@@ -197,7 +197,13 @@ export function composeSource(c: Pick<PairwiseCase, "capability" | "shape" | "au
     `    dataSources: [mainState${tenancy ? ", registryState" : ""}]`,
     "    serves: MainApi",
     "    port: 4000",
-    ...(authz === "none" ? [] : ["    auth: required"]),
+    // `auth: required` whenever ANY principal-referencing machinery is on —
+    // an authz surface, or a tenancy filter/stamp.  Not a convenience: a
+    // `tenancy by` deployable without auth is refused by name
+    // (`loom.context-filter-unsupported`, `loom.<backend>-stamp-unsupported`),
+    // so omitting it would spend 40 crossings re-proving one validator instead
+    // of reaching the capability×shape interactions the matrix exists for.
+    ...(authz === "none" && !tenancy ? [] : ["    auth: required"]),
     "  }",
   );
   L.push("}", "");

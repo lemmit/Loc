@@ -65,18 +65,12 @@ export const GENERATION_WAIVERS: readonly Waiver[] = [
     reason:
       "F1 — document shape × policy allow ladder: 'authz-filter' hits the generic ExprIR dispatcher and throws (renderExprWith invariant)",
   },
-  {
-    // F2 — dapper × `policy { allow … }`: the Dapper SQL translator refuses
-    // the capability filter by THROWING out of phase ⑧ with a user-facing
-    // message.  Sibling of #2492 (`policy { deny }` × dapper), fixed as
-    // M-T6.29 — that fix covered the deny sentinel, not the allow ladder, so
-    // the class is still live one rung over.
-    platform: "dotnet",
-    persistence: "dapper",
-    capability: "*",
-    shape: "relational|embedded",
-    authz: "policyAllow",
-    reason:
-      "F2 — dapper × policy allow ladder: codegen throws 'outside the Dapper SQL subset' instead of raising a loom.* diagnostic",
-  },
+  // NOTE — there is deliberately no entry for `dapper × policy allow`.  An
+  // early build of this harness recorded one, because it ran phases ①–④ only:
+  // without phase ⑦ the crossing reached codegen and threw.  With
+  // `validateLoomModel` wired in, it is refused by name
+  // (`loom.dapper-unsupported`), which is the contract being honoured, not a
+  // bug.  The stale-waiver ratchet is what surfaced the mistake — the entry
+  // stopped matching and the gate said so.  Left here as the worked example of
+  // why the register ratchets in both directions.
 ];

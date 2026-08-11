@@ -19,6 +19,9 @@
 //               (`policy { deny }` × dapper) is exactly this shape.
 // ---------------------------------------------------------------------------
 
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { lowerModel } from "../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { generateSystems } from "../../src/system/index.js";
 import { parseString } from "../_helpers/parse.js";
 import type { PairwiseCase } from "./axes.js";
@@ -77,6 +80,34 @@ export async function runPipeline(c: PairwiseCase, platform: string): Promise<Pi
       verdict: codes.length > 0 ? "rejected" : "crashed",
       codes,
       detail: errors[0] ?? "",
+    };
+  }
+
+  // ---- phase ⑦, the IR validator ----------------------------------------
+  //
+  // This is NOT part of the Langium document validation: `parseString` runs
+  // phases ①–④ only, and `validateLoomModel` is invoked separately by the CLI
+  // (`src/cli/main.ts`) and the api toolkit (`src/api/index.ts`).  Skipping it
+  // here was a real hole in this harness — `tenancy by` on a deployable with no
+  // `auth:` is refused by a named IR diagnostic, and without this block the
+  // sweep called such a crossing `ok` and then handed uncompilable code to the
+  // compile leg.  A discovery harness that runs FEWER phases than the CLI
+  // reports bugs the product does not have, and misses the ones it does.
+  let irErrors: { message: string; code?: string }[];
+  try {
+    const loom = enrichLoomModel(lowerModel(model));
+    irErrors = validateLoomModel(loom).filter((d) => d.severity === "error");
+  } catch (e) {
+    return { verdict: "crashed", codes: [], detail: `lower/enrich/validate threw: ${describe(e)}` };
+  }
+  if (irErrors.length > 0) {
+    const codes = [
+      ...new Set(irErrors.map((d) => d.code).filter((c): c is string => !!c?.startsWith("loom."))),
+    ].sort();
+    return {
+      verdict: codes.length > 0 ? "rejected" : "crashed",
+      codes,
+      detail: irErrors[0]?.message ?? "",
     };
   }
 
