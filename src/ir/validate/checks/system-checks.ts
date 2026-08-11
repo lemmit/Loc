@@ -1873,12 +1873,13 @@ export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
         if (usesPrincipal && !authed) {
           diags.push({
             severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform ${family}) hosts aggregate '${ctxName}.${agg.name}' ` +
-              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
-              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
-              `${principalNoun} to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
-              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            message: diagMessage("loom.stamp-principal-without-auth", {
+              dep: dep.name,
+              family,
+              ctxName,
+              name: agg.name,
+              principalNoun,
+            }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.stamp-principal-without-auth",
           });
@@ -1886,11 +1887,12 @@ export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
         if (enriched.persistedAs === "eventLog") {
           diags.push({
             severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform ${family}) hosts event-sourced aggregate ` +
-              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
-              `event-sourced aggregate's state is folded from its event stream. ` +
-              `Record the timestamp in an event instead, or drop persistedAs: eventLog.`,
+            message: diagMessage("loom.stamp-on-event-sourced-invalid", {
+              dep: dep.name,
+              family,
+              ctxName,
+              name: agg.name,
+            }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.stamp-on-event-sourced-invalid",
           });
