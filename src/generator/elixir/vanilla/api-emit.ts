@@ -37,6 +37,7 @@ import {
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
+import { lifecycleGates } from "../../../ir/util/op-gates.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
@@ -406,11 +407,35 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
   // The create action has no read-filter `cuBind`, so bind `current_user` there
   // when a principal stamp OR a `currentUser.*` field default needs it.  The
   // params coalesce runs after the bind (it may read `current_user`).
+  // The canonical create's authorization gate lives in the CONTEXT on this
+  // backend (the LiveView calls the context directly, around any controller
+  // gate — see the header note in context-emit.ts), so the controller's job is
+  // to THREAD the principal and answer the typed denial.  `create_<agg>/2`
+  // takes it whether or not a stamp does, so the arg is unconditional once the
+  // create is gated.
+  const createGated = lifecycleGates(agg.canonicalCreate).length > 0;
+  const destroyGated = lifecycleGates(agg.canonicalDestroy).length > 0;
   const createCuBind =
-    stampPrincipal || defaultUsesPrincipal
+    stampPrincipal || defaultUsesPrincipal || createGated
       ? `    current_user = Map.get(conn.assigns, :current_user)\n${createParamDefaults}`
       : createParamDefaults;
-  const createActor = stampPrincipal ? ", current_user" : "";
+  const createActor = stampPrincipal || createGated ? ", current_user" : "";
+  // `delete_<agg>/2` takes the principal once the destroy is gated.  `cuBind`
+  // already binds `current_user` for a principal-filtered read; bind it here
+  // when only the gate needs it (a double bind is a compile error).
+  const destroyActor = destroyGated ? ", current_user" : "";
+  const destroyCuBind =
+    destroyGated && !principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+  // The `{:error, {:forbidden, detail}}` arm the gated create / destroy needs —
+  // the same 403 ProblemDetails clause the operation paths answer with, built
+  // from the shared denial ladder so a `httpStatus Forbidden -> …` override
+  // moves all of them together.
+  const forbiddenArm = (indent: string): string =>
+    `\n\n${indent}{:error, {:forbidden, detail}} ->\n${indent}  ${denialResponse(
+      "forbidden",
+      "detail",
+      denialOverrides(ctx),
+    )}`;
   // The update action already binds `current_user` when the aggregate has a
   // principal READ filter; bind it here too when only a principal stamp needs
   // it (avoid a double bind when both apply).
@@ -569,7 +594,14 @@ ${auditRecordCall({
             record
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            ${appModule}.Repo.rollback(changeset)
+            ${appModule}.Repo.rollback(changeset)${
+              createGated
+                ? `
+
+          {:error, {:forbidden, detail}} ->
+            ${appModule}.Repo.rollback({:forbidden, detail})`
+                : ""
+            }
         end
       end)
 
@@ -586,7 +618,7 @@ ${auditRecordCall({
         |> json(%{"id" => record.id})
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${createGated ? forbiddenArm("      ") : ""}
     end
   end`
       : `  def create(conn, params) do
@@ -603,7 +635,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
         |> json(%{"id" => record.id})
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${createGated ? forbiddenArm("      ") : ""}
     end
   end`;
 
@@ -641,7 +673,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
     ? ""
     : auditDestroy
       ? `  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
+${cuBind}${destroyCuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _} <-
            ${appModule}.Repo.transaction(fn ->
 ${auditRecordCall({
@@ -655,9 +687,14 @@ ${auditRecordCall({
   indent: "             ",
 })}
 
-             case ${ctxModule}.delete_${aggSnake}(record) do
+             case ${ctxModule}.delete_${aggSnake}(record${destroyActor}) do
                {:ok, deleted} -> deleted
-               {:error, %Ecto.Changeset{} = changeset} -> ${appModule}.Repo.rollback(changeset)
+               {:error, %Ecto.Changeset{} = changeset} -> ${appModule}.Repo.rollback(changeset)${
+                 destroyGated
+                   ? `
+               {:error, {:forbidden, detail}} -> ${appModule}.Repo.rollback({:forbidden, detail})`
+                   : ""
+               }
              end
            end) do
       send_resp(conn, 204, "")
@@ -666,19 +703,19 @@ ${auditRecordCall({
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${destroyGated ? forbiddenArm("      ") : ""}
     end${fkRestrictRescue}
   end`
       : `  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
-         {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
+${cuBind}${destroyCuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
+         {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record${destroyActor}) do
       send_resp(conn, 204, "")
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${destroyGated ? forbiddenArm("      ") : ""}
     end${fkRestrictRescue}
   end`;
 

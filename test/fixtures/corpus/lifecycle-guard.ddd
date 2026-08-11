@@ -1,0 +1,98 @@
+// The canonical `create` / `destroy` AUTHORIZATION GATE — `requires` inside a
+// lifecycle action, on a state-based (not event-sourced) aggregate.
+//
+// Why this fixture exists: the guard used to be lowered into the IR and then
+// read by NO backend.  `canonicalCreate` was consumed as a marker (its
+// existence gates whether `POST /<aggs>` and the `static create` factory are
+// emitted); `.statements` reached no emitter at all.  A `requires` in a create
+// therefore parsed clean, emitted nothing, and left the route OPEN — the worst
+// possible failure mode for an authorization clause, because the source says
+// the opposite of what runs.
+//
+// The two halves are deliberately DIFFERENT, because they render in different
+// places and only a fixture carrying both proves each:
+//
+//   * `create` — the guard runs BEFORE the factory, so it has no `this` to
+//     read.  It sees the request principal only.  → 403.
+//   * `destroy` — the guard runs AFTER the row loads, so it MAY read `this`
+//     (here: `quantity == 0`, a state condition on deletion).  The caller
+//     already loads the aggregate for reachability, so the same load feeds the
+//     guard.  404 (unreachable) wins over 403 (unauthorized).
+//
+// `Shipment`'s destroy guard mixes a principal term with a row term on purpose:
+// a backend that renders the gate against the wrong receiver compiles fine and
+// answers the wrong status, so the row half is what makes the placement
+// observable.
+//
+// `Crate` carries the OTHER destroy shape — a PRINCIPAL-ONLY destroy guard,
+// which reads no field of the loaded row.  It is not a redundant copy: the
+// Phoenix gate binds the loaded record to evaluate the guard, and an unused
+// binding is a `mix compile --warnings-as-errors` failure, so a fixture whose
+// every destroy guard happens to read `this` cannot observe that class (C1 of
+// the M-T3.16 plan).  Its create is deliberately UNGUARDED — the control that
+// keeps an "every create is gated" emitter from passing.
+//
+// COMPILE-tier: the emitted gate is ordinary target code, and the receiver
+// binding (`__loaded` / the C# local / the Java entity / the Elixir struct) is
+// exactly the kind of thing only a real compiler checks.
+system LifecycleGuard {
+  user { id: string  permissions: string[] }
+
+  subdomain Ops {
+    permissions { manage }
+
+    context Warehouse {
+      aggregate Shipment {
+        reference: string
+        quantity: int = 0
+
+        // Principal-only guard: no `this` exists yet.
+        create(reference: string) {
+          requires currentUser.permissions.contains(permissions.manage)
+        }
+
+        // Principal AND row: the loaded aggregate is the receiver.
+        destroy {
+          requires currentUser.permissions.contains(permissions.manage) && quantity == 0
+        }
+
+        operation restock(by: int) {
+          precondition by > 0
+          quantity := quantity + by
+        }
+      }
+
+      repository Shipments for Shipment { }
+
+      aggregate Crate {
+        label: string
+
+        // No create guard — the ungated control.
+        create(label: string) { }
+
+        // Principal-ONLY destroy guard: the gate never reads the loaded row.
+        destroy {
+          requires currentUser.permissions.contains(permissions.manage)
+        }
+      }
+
+      repository Crates for Crate { }
+    }
+  }
+
+  api WarehouseApi from Ops
+  storage primary { type: postgres }
+  resource warehouseState { for: Warehouse, kind: state, use: primary }
+
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Warehouse]
+    dataSources: [warehouseState]
+    serves: WarehouseApi
+    port: 4000
+    // The gate reads the request principal, so the deployable must carry auth
+    // — without it no backend emits a `User` at all and the guard has nothing
+    // to evaluate against.
+    auth: required
+  }
+}

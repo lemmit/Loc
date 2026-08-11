@@ -176,6 +176,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `aggregate '${p.agg}': the \`create\` guard reads ${p.refs}, which the gate cannot see. A \`create\` guard may read \`currentUser\` only — there is no instance until the factory runs, and the emitted POST takes the field-derived create input, not the declared parameter list, so a parameter has no wire slot either. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
   "loom.lifecycle-guard-unreadable#destroy": (p: { agg: unknown; refs: unknown }) =>
     `aggregate '${p.agg}': the \`destroy\` guard reads ${p.refs}, which the gate cannot see. A \`destroy\` guard may read \`currentUser\` and \`this\` (the route already loads the row), but not a parameter — a DELETE carries no body. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
+  // An EVENT-SOURCED lifecycle guard.  Not a "not yet" gap: the ES create body
+  // renders into the domain `_init`, which has no principal in scope, so the
+  // guard cannot be evaluated there at all.
+  "loom.lifecycle-guard-event-sourced": (p: { agg: unknown }) =>
+    `aggregate '${p.agg}': a \`requires\` in an event-sourced \`create\` cannot be enforced. The create body renders into the domain \`_init\`, which has no principal in scope — \`currentUser\` is a free identifier there, so the guard does not compile rather than deny. Gate the caller instead: put the \`requires\` on the named \`operation\` (or \`workflow\`) that issues the create, where the request principal is bound.`,
   // The canonical `create` / `destroy` body no backend renders.  `reason` is
   // computed at the call site (it varies by statement kind AND by action), so
   // the catalog owns the frame and the site owns the clause.
