@@ -39,7 +39,7 @@ const srcRoot = path.join(repoRoot, "src");
 const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts");
 
 /** Pinned `gap` count.  LOWER when you drain; raising it is reviewed. */
-const MAX_OPEN_GAPS = 42;
+const MAX_OPEN_GAPS = 37;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
