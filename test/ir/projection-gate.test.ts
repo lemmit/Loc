@@ -39,7 +39,7 @@ describe("query-time projection requires gate validation", () => {
   it("accepts a currentUser gate", async () => {
     expect(
       await diags(
-        `projection AdminOrders { status: string  from Order as o requires currentUser.role == "admin" select status = o.status }`,
+        `projection AdminOrders requires currentUser.role == "admin" { status: string  from Order as o select status = o.status }`,
       ),
     ).toEqual([]);
   });
@@ -47,14 +47,14 @@ describe("query-time projection requires gate validation", () => {
   it("accepts `requires true`", async () => {
     expect(
       await diags(
-        `projection PublicOrders { status: string  from Order as o requires true select status = o.status }`,
+        `projection PublicOrders requires true { status: string  from Order as o select status = o.status }`,
       ),
     ).toEqual([]);
   });
 
   it("loom.projection-gate-not-current-user — a gate referencing the source row", async () => {
     const errs = await diags(
-      `projection P { status: string  from Order as o requires o.status == "open" select status = o.status }`,
+      `projection P requires o.status == "open" { status: string  from Order as o select status = o.status }`,
     );
     expect(errs.map((e) => e.code)).toEqual(["loom.projection-gate-not-current-user"]);
     expect(errs[0]!.message).toContain("P");
@@ -63,7 +63,7 @@ describe("query-time projection requires gate validation", () => {
 
   it("loom.projection-gate-without-source — a gate on a folded projection (no `from`)", async () => {
     const errs = await diags(
-      `projection Book keyed by order { order: Order id  on(e: Placed) { order := e.order }  requires currentUser.role == "admin" }`,
+      `projection Book keyed by order requires currentUser.role == "admin" { order: Order id  on(e: Placed) { order := e.order } }`,
     );
     expect(errs.map((e) => e.code)).toEqual(["loom.projection-gate-without-source"]);
     expect(errs[0]!.message).toContain("Book");

@@ -13,9 +13,9 @@ const SRC = `
     subdomain D { context C {
       aggregate Order { status: string }
       repository Orders for Order { }
-      projection AdminOrders {
+      projection AdminOrders requires currentUser.role == "admin" {
         status: string
-        from Order as o requires currentUser.role == "admin"
+        from Order as o
         select status = o.status
       }
       projection LiveOrders {

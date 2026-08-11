@@ -1513,7 +1513,15 @@ IsolationLevel returns string:
 // field by the validator (`loom.projection-key-*`).
 Projection:
     'projection' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')?
-    ('keyed' 'by' key=LooseName)? '{'
+    ('keyed' 'by' key=LooseName)?
+    // The authorization gate rides the DECLARATION HEADER, like every other
+    // gate in the language (`operation … requires`, `create … requires`,
+    // `handle … requires`, `find … requires`) — not inside the body among the
+    // query clauses.  It used to sit in `ProjectionQueryClauses`, which made it
+    // unspellable on a FOLDED projection (no `from`, so no query-clause tail to
+    // hold it) — `loom.projection-gate-without-source` reads like a semantic
+    // law but was really an artifact of which production the keyword landed in.
+    ('requires' gate=Expression)? '{'
         members+=ProjectionMember*
         ProjectionQueryClauses
     '}';
@@ -1559,7 +1567,6 @@ type ProjectionSource = Aggregate | Workflow | Projection;
 
 fragment ProjectionQueryClauses:
     ('from' source=[ProjectionSource:ID] ('as' sourceAlias=ID)?)?
-    ('requires' gate=Expression)?
     ('where' filter=Expression)?
     IgnoringClause?
     (joins+=ProjectionJoin)*

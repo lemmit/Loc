@@ -351,6 +351,14 @@ export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagno
   for (const proj of ctx.projections) {
     const gate = proj.query?.requires;
     if (!gate) continue;
+    // The gate now rides the DECLARATION HEADER (after `keyed by`), so a folded
+    // projection can SPELL one — the old grammar position made it unspellable,
+    // which is why this check historically read as "a gate guards a query-time
+    // read".  That framing was an artifact.  It is still rejected, but for the
+    // honest reason: no backend emits the gate on a folded projection's
+    // read-model routes, so accepting it would ship an inert gate — the exact
+    // silent-no-op class M-T3.15 exists to close.  Lift this once those routes
+    // enforce it.
     if (!proj.query?.source) {
       diags.push({
         severity: "error",

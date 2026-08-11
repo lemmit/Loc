@@ -1192,8 +1192,12 @@ export const DIAGNOSTIC_MESSAGES = {
     "is not available here. Use `where` to scope which rows return; use `requires` to " +
     "allow / deny the caller.",
   "loom.projection-gate-without-source": (p: { name: unknown }) =>
-    `projection '${p.name}': a \`requires\` gate guards a query-time read, but this ` +
-    "projection declares no `from` source. Add a `from <Aggregate>` clause, or drop the gate.",
+    `projection '${p.name}': a \`requires\` gate is not ENFORCED on a folded ` +
+    "(materialized) projection yet — its read-model routes are emitted without it, so the " +
+    "gate would be silently inert. This projection declares no `from` source, which is what " +
+    "makes it folded. Read it through a query-time projection that carries the gate " +
+    "(`projection <Name> requires <expr> { … from " +
+    `${p.name} … select … }\`), or drop the gate.`,
   "loom.projection-gate-not-current-user": (p: { name: unknown; offending: unknown }) =>
     `projection '${p.name}': a \`requires\` gate runs before the query (no row exists ` +
     `yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` is not ` +
