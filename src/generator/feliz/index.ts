@@ -391,6 +391,11 @@ function externModuleFromPath(path: string): string {
     .join(".");
 }
 
+/** The `open` line for Feliz.Router.  Named because it is BOTH emitted into
+ *  App.fs and matched against the emitted App.fs to decide the `.fsproj`
+ *  package reference — one constant, so the two can never drift apart. */
+const ROUTER_OPEN = "open Feliz.Router";
+
 // --- Multi-page routing helpers (Feliz.Router) ----------------------------
 
 /** F# `Page` union case for a page.  Uses the aggregate-qualified emit name
@@ -1165,15 +1170,29 @@ function renderAppFs(
   }
   const externOpens = [...externModules].sort().map((m) => `open ${m}`);
 
+  // A page body that NAVIGATES reaches `Router.navigatePath` through the
+  // `renderNavigate` / `renderNavigateExpr` seams — and a SINGLE-page ui with no
+  // forms (`Button { "New", to: "/new" }`) satisfies neither `routed` nor
+  // `hasForms`, so the open was missing and `dotnet fable` failed outright with
+  // "The value, namespace, type or module 'Router' is not defined".
+  //
+  // Asked of the RENDERED views rather than re-derived from the model: two seams
+  // decide to emit `Router.`, so a model-level predicate would be a second copy
+  // of that decision, free to drift from it.  The views are the only place that
+  // already knows.  Purely additive — it can turn the open ON where it was
+  // missing, never off, so every app that compiled before is byte-identical.
+  const viewsNavigate = views.some((v) => v.includes("Router."));
+
   return lines(
     "module App",
     "",
     "open Feliz",
     // Hand-written extern component / function modules (extern-*-escape-hatch.md).
     ...externOpens,
-    // Feliz.Router provides `React.router` (routed) AND `Cmd.navigate` (any form
-    // navigates on success), so a single-page ui with a form still needs it.
-    (routed || hasForms) && "open Feliz.Router",
+    // Feliz.Router provides `React.router` (routed), `Cmd.navigate` (any form
+    // navigates on success), and `Router.navigatePath` (a `to:` navigation
+    // anywhere in a page body).
+    (routed || hasForms || viewsNavigate) && ROUTER_OPEN,
     "open Elmish",
     "open Elmish.React",
     // Thoth is needed for decoders (reads + async effects), encoders (forms),
@@ -1533,9 +1552,14 @@ export function generateFelizForContexts(
     );
   }
   // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
-  // when there's any Http (reads or mutations/forms), Feliz.Router when routed
-  // (>1 page OR a lone `:id` detail page) OR any form exists (forms navigate via
-  // `Cmd.navigate` on success).
+  // when there's any Http (reads or mutations/forms).
+  //
+  // Feliz.Router is no longer a SECOND predicate over the model — it is read off
+  // the emitted App.fs below (`open Feliz.Router`).  Two independent conditions
+  // for one invariant is what let them disagree: the open gained a
+  // navigating-body case while this side still asked "routed or any form", and
+  // the mismatch is a package reference missing for code that uses it.  Deriving
+  // it from the source makes them agree by construction.
   // Auth gate (D-AUTH-OIDC, `auth: ui`): this feliz deployable opts in AND its
   // target backend enforces auth AND the system declares a `user { }` claim
   // shape — mirrors the React frontend's `authUi` gate.
@@ -1556,10 +1580,11 @@ export function generateFelizForContexts(
     authUi ||
     hasEffects ||
     hasFileUploads;
-  const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
   const backendRealtime = backendServesRealtime(target?.platform);
-  out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user, backendRealtime));
-  out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi, hasFileUploads));
+  const appFs = renderAppFs(ui, contexts, authUi, sys.user, backendRealtime);
+  out.set("src/App.fs", appFs);
+  // The emitted source is the authority for its own package refs — see above.
+  out.set("App.fsproj", fsproj(hasHttp, appFs.includes(ROUTER_OPEN), authUi, hasFileUploads));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);
   out.set(
