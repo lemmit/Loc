@@ -1,0 +1,60 @@
+name: Quality delta (weekly)
+
+# M-T9.31 lane 1 — the mechanical half of docs/audits/quality-audit-2026-08.md,
+# appended weekly so its §3 ratio becomes a SERIES instead of a snapshot.
+#
+# The audit's most important table ("how the bugs are actually found") took an
+# afternoon of reading 235 commit bodies by hand. That is a number nobody will
+# reconstruct on a schedule, so the trend it describes — discovery-by-audit
+# giving way to discovery-by-gate — cannot currently be watched moving. R11
+# pins the success metric explicitly: the per-PR-gate discovery share (~16% at
+# baseline) should overtake the episodic-audit share (~58%).
+#
+# Every run appends ONE comment to ONE long-lived issue labelled
+# `quality-delta`, deduped by label exactly the way ci-red-alarm.yml dedupes on
+# `ci-red` (labels are reliably indexed; body text is not). The issue is meant
+# to stay OPEN and accumulate — the series is the artefact, not any one comment.
+#
+# Read-only against everything except that issue. R12 findings (duplicate open
+# PRs on one head branch, drafts on a long-unmoved head) are FLAGGED for a
+# human; nothing here closes anyone's PR.
+#
+# The whole report also runs locally with no token and no side effects:
+#   node scripts/quality-delta.mjs --dry-run
+
+on:
+  schedule:
+    # Mondays 07:00 UTC — after the weekend's nightly gates have reported, so
+    # the window closes on a settled main.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: quality-delta
+  cancel-in-progress: false
+
+jobs:
+  delta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The trailing-window merge stats come from `git log`, so the shallow
+          # default clone (depth 1) would report zero merges every week — the
+          # silent-empty-input failure this report is otherwise built to avoid.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Compute the delta and append it to the tracking issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/quality-delta.mjs

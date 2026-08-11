@@ -111,6 +111,7 @@ on:
       - 'Tenancy isolation (runtime e2e)'
       - 'Tests + coverage'
       - 'Lint GitHub Actions workflows'
+      - 'Quality delta (weekly)'
 
 permissions:
   checks: write
