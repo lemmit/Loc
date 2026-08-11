@@ -612,7 +612,7 @@ load-bearing.
   (`lower-expr.ts:2097`); the new part is whole-table (keyless) aggregation.
 - **Exotic combos are deferred behind gates, not left undefined:**
   - `from` **and** `on(e)` together (query source *and* folds — a
-    seed-then-update pattern) → `loom.projection-query-and-fold-unsupported`.
+    seed-then-update pattern) → `loom.projection-query-and-fold-invalid`.
   - keyed **and** aggregating `select` (group-by — one row per group) →
     `loom.projection-groupby-unsupported`. Singleton (whole-table) is the clean
     v1 case.
@@ -896,7 +896,7 @@ No flag day; each slice independent:
    (any `on`) / singleton (no `keyed by`) and **normalising to a validated IR**
    (a discriminated shape, not a nullable bag). Relocate the `X id` follow /
    batch-load (`collectIdFollows`, `auxiliaries`) from the view lowerer. Gate
-   the deferred combos (`loom.projection-query-and-fold-unsupported`,
+   the deferred combos (`loom.projection-query-and-fold-invalid`,
    `-groupby-unsupported`). Add the `print-structural.ts` arms for the new body
    (printer-completeness). This is where `view`'s full form + the hybrid land;
    ship before the view deprecation. Sequence after the read-rewire PRs

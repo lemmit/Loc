@@ -6,7 +6,7 @@
 //
 // The channel segment resolves within the named context; the event
 // resolves within the param's channel `carries:` list; v1 handler
-// bodies admit only `toast(<expr>)` (loom.ui-handler-unsupported).
+// bodies admit only `toast(<expr>)` (loom.ui-handler-statement-unknown).
 
 import { describe, expect, it } from "vitest";
 import { parseString } from "../_helpers/index.js";
@@ -91,7 +91,7 @@ describe("ui channel subscription — validation", () => {
         on Orders.OrderPlaced(e) { navigate("/orders") }
       `),
     );
-    // The unsupported-statement diagnostic keeps its `loom.ui-handler-unsupported`
+    // The unsupported-statement diagnostic keeps its `loom.ui-handler-statement-unknown`
     // code and now lists both supported actions.
     expect(errors.some((e) => /supports 'toast\(.*\) and 'refetch\(/.test(e))).toBe(true);
   });

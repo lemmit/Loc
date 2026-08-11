@@ -1345,7 +1345,7 @@ system D {
 });
 
 // ---------------------------------------------------------------------------
-// M-T6.26 — the two `authz-filter` sentinels under `persistence: dapper`.
+// M-T6.29 — the two `authz-filter` sentinels under `persistence: dapper`.
 // `deny` RENDERS (`1 = 0`, principal-free); the hierarchical `deep`/`global`
 // scope sentinel is an HONEST boundary.  Before this both fell through
 // `whereToSql`'s `default:` and CRASHED codegen — and the corpus map already

@@ -124,4 +124,56 @@ describe("`*-unsupported` register (M-T9.27)", () => {
     );
     expect(bad, "Every row needs a `file:line` emission site for the reviewer.").toEqual([]);
   });
+
+  // --- ownership (slice 3) -------------------------------------------------
+  // A gap with no owner is work nobody has agreed to do — the state 53 of the
+  // original 69 were in, and the reason the list could not be sprint-planned.
+
+  it("gives every gap an owning mission", () => {
+    const unowned = openGaps()
+      .filter((e) => !e.mission)
+      .map((e) => e.code);
+    expect(
+      unowned,
+      "Gap(s) with no `mission`. Every gap is a commitment under the no-permanent-skips " +
+        "policy — assign it to a mission in docs/new-plan/, minting one if none fits.",
+    ).toEqual([]);
+  });
+
+  it("resolves every cited mission to exactly one heading in docs/new-plan/", () => {
+    // A `mission` pointing at a missing OR duplicated id is worse than none: the
+    // first is a dangling reference, the second sends two readers to different
+    // work.  T6 carried three duplicate ids when this check was written (two
+    // separate renumbering attempts had each collided) — that is the failure
+    // this pins, and it is why the field is validated rather than trusted.
+    const planDir = path.join(repoRoot, "docs", "new-plan");
+    const headings = new Map<string, number>();
+    const scan = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) scan(p);
+        else if (e.name.endsWith(".md")) {
+          for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+            const m = line.match(/^##\s+(M-T\d+\.\d+)\b/);
+            if (m) headings.set(m[1], (headings.get(m[1]) ?? 0) + 1);
+          }
+        }
+      }
+    };
+    scan(planDir);
+
+    const cited = [...new Set(UNSUPPORTED_REGISTER.flatMap((e) => (e.mission ? [e.mission] : [])))];
+    const missing = cited.filter((m) => !headings.has(m));
+    const ambiguous = cited.filter((m) => (headings.get(m) ?? 0) > 1);
+
+    expect(
+      missing,
+      "Register cites mission id(s) with no `## <id>` heading in docs/new-plan/.",
+    ).toEqual([]);
+    expect(
+      ambiguous.map((m) => `${m} (${headings.get(m)} headings)`),
+      "Register cites mission id(s) that appear more than once — renumber the duplicates so " +
+        "the reference is unambiguous.",
+    ).toEqual([]);
+  });
 });

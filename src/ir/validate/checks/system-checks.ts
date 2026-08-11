@@ -2539,7 +2539,7 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // the EF AuditableInterceptor.  A principal stamp on a no-auth
         // deployable stays rejected by the category-A loom.dotnet-stamp-unsupported.
         //
-        // HIERARCHICAL TENANCY (M-T6.26).  The `deep`/`global` read level lowers
+        // HIERARCHICAL TENANCY (M-T6.29).  The `deep`/`global` read level lowers
         // to the materialized-path `authz-filter` sentinel, whose
         // `currentUser.<claim>` sub-expressions the Dapper principal-param
         // collector does not descend into — so it cannot bind the `@__cu_*`

@@ -53,7 +53,7 @@ const DAPPER_COMPILE_SKIP: Record<string, string> = {
 const DAPPER_UNSUPPORTED: Record<string, string> = {
   "tenancy-hierarchy":
     "hierarchical tenancy's capability filter is outside the Dapper SQL subset; the validator " +
-    "says so with loom.dapper-unsupported.  NOTE: that claim was FALSE until M-T6.26 — the " +
+    "says so with loom.dapper-unsupported.  NOTE: that claim was FALSE until M-T6.29 — the " +
     "deep-scope sentinel escaped `validateDapperSupport` exactly as the deny sentinel did, and " +
     "this fixture CRASHED codegen with the same 'outside the Dapper SQL subset' throw.  The " +
     "gate now exists, so the rationale is true; re-verified by generating the fixture.",

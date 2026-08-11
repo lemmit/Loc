@@ -13,7 +13,7 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 //
 //   - `loom.migration-expr-unsupported`   — backfill expression outside the
 //     SQL-renderable subset (`sqlRenderableExpr`, ir/util).
-//   - `loom.backfill-target-unsupported`  — the target field has no single
+//   - `loom.backfill-target-invalid`  — the target field has no single
 //     scalar column: value-object / collection / entity fields, and
 //     `shape: document` / `persistedAs: eventLog` aggregates (no row columns
 //     to backfill — use a raw `sql` step over the document payload instead).
@@ -40,8 +40,8 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
     if ((agg.savingShape ?? "relational") === "document" || agg.persistedAs === "eventLog") {
       diags.push({
         severity: "error",
-        code: "loom.backfill-target-unsupported",
-        message: diagMessage("loom.backfill-target-unsupported#backfill-a-aggregate-stores", {
+        code: "loom.backfill-target-invalid",
+        message: diagMessage("loom.backfill-target-invalid#backfill-a-aggregate-stores", {
           aggregate: intent.aggregate,
           field: intent.field,
           persistedAs: agg.persistedAs === "eventLog" ? "persistedAs: eventLog" : "shape: document",
@@ -57,8 +57,8 @@ export function validateMigrationDataSteps(loom: EnrichedLoomModel, diags: LoomD
     if (!isScalarColumnType(field.type)) {
       diags.push({
         severity: "error",
-        code: "loom.backfill-target-unsupported",
-        message: diagMessage("loom.backfill-target-unsupported#backfill-the-field-is-not", {
+        code: "loom.backfill-target-invalid",
+        message: diagMessage("loom.backfill-target-invalid#backfill-the-field-is-not", {
           aggregate: intent.aggregate,
           field: intent.field,
         }),

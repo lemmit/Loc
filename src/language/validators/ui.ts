@@ -360,7 +360,7 @@ export function checkStore(store: Store, accept: ValidationAcceptor): void {
  *     queries under `["<snake-plural>"]`).
  *
  *  Anything else (an assignment, `navigate(…)`, an unknown call) has
- *  nowhere to lower and is rejected with `loom.ui-handler-unsupported`.
+ *  nowhere to lower and is rejected with `loom.ui-handler-statement-unknown`.
  *  An unresolvable refetch target gets the distinct, more specific
  *  `loom.ui-handler-refetch-target` code. */
 export function checkUiNotification(n: UiNotification, ui: Ui, accept: ValidationAcceptor): void {
@@ -408,9 +408,9 @@ export function checkUiNotification(n: UiNotification, ui: Ui, accept: Validatio
       }
       continue;
     }
-    accept("error", diagMessage("loom.ui-handler-unsupported", { where }), {
+    accept("error", diagMessage("loom.ui-handler-statement-unknown", { where }), {
       node: stmt,
-      code: "loom.ui-handler-unsupported",
+      code: "loom.ui-handler-statement-unknown",
     });
   }
 }

@@ -32,7 +32,7 @@
 //     and the last statement's struct is the return value.
 //   - A same-store action calling another action → `state = <other>(state)` /
 //     `<other>(state)` (a pure in-module call).  Cross-store calls are gated
-//     on LiveView by `loom.store-cross-store-on-liveview-unsupported`.
+//     on LiveView by `loom.store-cross-store-on-liveview-invalid`.
 //
 // The page seam (assign(:cart, %Cart{}) in mount + the @cart.field reads +
 // the `update(socket, :cart, …)` calls) lives in liveview-emit / heex-walker;

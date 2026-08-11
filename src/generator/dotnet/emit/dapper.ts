@@ -688,7 +688,7 @@ function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
   }
 }
 
-/** The `authz-filter` sentinels as raw Postgres SQL (M-T9.9 / M-T6.26).  A
+/** The `authz-filter` sentinels as raw Postgres SQL (M-T9.9 / M-T6.29).  A
  *  discriminated node, so a missing arm is a `tsc` error here rather than a
  *  fall-through to `whereToSql`'s `default:` — which is exactly how the `deny`
  *  carve-out used to reach the generic dispatcher and CRASH codegen on this
@@ -1063,7 +1063,7 @@ export function renderDapperRepository(
   // (GetById / FindManyByIds).
   const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
 
-  // Command-load path (authorization Phase 3 P3.1 / M-T6.26): the write-scope
+  // Command-load path (authorization Phase 3 P3.1 / M-T6.29): the write-scope
   // existence pre-guard behind `GetByIdForWriteAsync`, the raw-SQL twin of the
   // EF `AnyAsync(x => x.Id == id && (<scope>))` in `emit/repository.ts`.  EF
   // gets the READ query-filter applied to that `Any` for free; Dapper has no

@@ -40,7 +40,7 @@ Status: every item below was corrected in the proposal docs this session
 | A6 | organization-context | concern | Claimed "purely additive" — false for the trust model (filter basis shifts from unforgeable to submitted). | Reframed honestly; reads stay principal-anchored by default. |
 | A7 | scaffolded-navigation | concern | Label-exact section merge silently produces a duplicate on `"orders"`/`"Order"`. | Warn on near-miss labels; key scaffold sections on the `area` ref, not the rendered string. |
 | A8 | surface-redundancy-cuts | concern | Cut of `UiBlockBinding` may remove a real capability (per-binding-site `framework:` override — only `UiBlockBinding` expresses divergent frameworks for a shared `ui`). | Gated the cut on a grep verifying no divergent per-binding framework. |
-| A9 | surface-redundancy-cuts | nit | Making `write global` a parse error trades a good explanatory message for a cryptic one. | Keep the `loom.policy-write-global-unsupported` validator error; treat as already-handled, not a cut. |
+| A9 | surface-redundancy-cuts | nit | Making `write global` a parse error trades a good explanatory message for a cryptic one. | Keep the `loom.policy-write-global-invalid` validator error; treat as already-handled, not a cut. |
 | A10 | with-implements-split | nit | Headline ergonomics assume `implements` in header position, but `ImplementsDecl` is a member — load-bearing, not soft. | Flagged as a required grammar-ambiguity resolution before implementing. |
 
 Cleanest of the session set: `with-implements-split` and the `ids guid` /

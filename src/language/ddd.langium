@@ -654,7 +654,7 @@ UiFunction:
 //
 // Renders the event itself (toast / feed / badge) when it arrives on
 // the subscribed channel's realtime wire.  Restricts the body to
-// `toast(<expr>)` calls (validator rule `loom.ui-handler-unsupported`).
+// `toast(<expr>)` calls (validator rule `loom.ui-handler-statement-unknown`).
 // A live READ needs no marker — an ordinary cached query auto-freshens.
 UiNotification:
     'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
@@ -1210,7 +1210,7 @@ PolicyDecl:
 // the ladder: bare = the read reachability ladder; `write` gates INSTANCE
 // mutations (update-style ops, destroy, applier dispatch) on the target row's
 // write scope.  `write global` PARSES but is an IR validator error
-// (`loom.policy-write-global-unsupported`) — root-subtree-wide mutation is a
+// (`loom.policy-write-global-invalid`) — root-subtree-wide mutation is a
 // footgun; only `write local` (the default floor) and `write deep` are
 // offered.  There is deliberately NO `read` verb synonym: `read` is far too
 // common a user identifier (`let read = …`) to promote to a keyword, so the

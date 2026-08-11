@@ -66,8 +66,8 @@ export function checkTemplateHoles(model: Model, accept: ValidationAcceptor): vo
         if (kind === "unsupported") {
           accept(
             "error",
-            diagMessage("loom.interp-format-unsupported", { format: hole.format?.trim() }),
-            { node, property: "holes", index: i, code: "loom.interp-format-unsupported" },
+            diagMessage("loom.interp-format-unknown", { format: hole.format?.trim() }),
+            { node, property: "holes", index: i, code: "loom.interp-format-unknown" },
           );
           continue;
         }

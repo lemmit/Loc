@@ -58,7 +58,7 @@ Three rules:
 `channel <name>: <Ctx>.<Channel>` subscribes the UI to a context's
 `delivery: broadcast` channel, and `on <name>.<Event>(e) { … }` runs a
 handler as the event arrives.  A handler body admits two actions
-(anything else is `loom.ui-handler-unsupported`):
+(anything else is `loom.ui-handler-statement-unknown`):
 
 - `toast(<expr>)` — show the arriving event as a message notification.
 - `refetch(<Aggregate>[, …])` — invalidate that aggregate's query cache,

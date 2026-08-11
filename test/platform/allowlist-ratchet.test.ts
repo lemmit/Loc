@@ -96,7 +96,7 @@ const REGISTERED: Ratchet[] = [
   // SAME bug — query-time projection handlers are EF-LINQ over `AppDbContext`
   // (M-T6.25) — and the folded read controller already has the raw-Npgsql port
   // they need, so that pair is a port with a precedent, not an open design
-  // question.  Lowered 3 -> 2 by M-T6.26, which drained `policy-deny`: the
+  // question.  Lowered 3 -> 2 by M-T6.29, which drained `policy-deny`: the
   // `deny` authz sentinel now has its `whereToSql` arm (`1 = 0`, ANDed into
   // every read SELECT) and `dapper.ts` reads `writeScopeFilter` to emit the
   // `GetByIdForWriteAsync` the shared command layer has always dispatched to.

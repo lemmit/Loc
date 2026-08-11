@@ -208,7 +208,7 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
  *     `loom.policy-target-not-tenant-owned`, `loom.policy-duplicate-target`) —
  *     a write rule scopes a concrete tenant-owned aggregate, and a context may
  *     hold at most one write rule per aggregate.
- *   - `loom.policy-write-global-unsupported` — `write global` is rejected in
+ *   - `loom.policy-write-global-invalid` — `write global` is rejected in
  *     P3.1 (root-subtree-wide mutation is a footgun); only `write local` (the
  *     floor) and `write deep` are offered.
  *   - `loom.policy-level-requires-hierarchy` — `write deep` needs the
@@ -275,8 +275,8 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
         if (rule.level === "global") {
           diags.push({
             severity: "error",
-            code: "loom.policy-write-global-unsupported",
-            message: diagMessage("loom.policy-write-global-unsupported", {
+            code: "loom.policy-write-global-invalid",
+            message: diagMessage("loom.policy-write-global-invalid", {
               name: ctx.name,
               source: rule.source,
             }),

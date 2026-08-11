@@ -83,7 +83,7 @@ describe("policy deny — .NET (EF Core)", () => {
 });
 
 describe("policy deny — .NET (Dapper)", () => {
-  // M-T6.26.  The .NET backend's SECOND persistence adapter used to CRASH
+  // M-T6.29.  The .NET backend's SECOND persistence adapter used to CRASH
   // codegen here (`whereToSql` had no `authz-filter` arm, so the deny sentinel
   // fell to its `default:` and threw), and never read `writeScopeFilter` at all
   // — while the shared command layer already dispatched mutations to

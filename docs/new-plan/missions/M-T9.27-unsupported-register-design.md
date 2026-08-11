@@ -46,16 +46,16 @@ emission site. `-unsupported` conflates four unrelated things:
 
 Examples of each, so the distinction is concrete:
 
-- **never** — `loom.projection-groupby-join-unsupported`: *"'join' and 'group by'
+- **never** — `loom.projection-groupby-join-invalid`: *"'join' and 'group by'
   don't compose — a join is a by-id bulk load AFTER the query."* That is a
   statement about relational semantics, not about any backend.
-  `loom.policy-write-global-unsupported` is a documented deliberate never
+  `loom.policy-write-global-invalid` is a documented deliberate never
   (`surface-redundancy-cuts.md` §4). Neither will ever drain, and both inflate
   the debt number.
-- **rule** — `loom.auth-ui-on-backend`: *"'auth: ui' is only valid on a frontend
+- **rule** — `loom.auth-ui-misplaced`: *"'auth: ui' is only valid on a frontend
   deployable; backends use 'auth: required'."* A misuse error the suffix regex
-  swept in. `loom.ui-handler-unsupported` (handler bodies take `toast`/`refetch`
-  only) and `loom.interp-format-unsupported` (the closed ICU set) are the same —
+  swept in. `loom.ui-handler-statement-unknown` (handler bodies take `toast`/`refetch`
+  only) and `loom.interp-format-unknown` (the closed ICU set) are the same —
   closed vocabularies, permanently.
 - **scope** — `loom.criterion-unsupported-target` names its own successor
   (*"reserved for the forthcoming `from <Criterion>(args)` surface"*), so it is
@@ -118,15 +118,55 @@ a plausible sprint-and-a-half, not a quarter — which is only knowable *because
 the enumeration exists. Units 1, 6, and 9 have no owning mission at all; those
 need one before they can be claimed.
 
-## Open slices
+## Slice 2 — rename the 19 non-gaps out of the suffix (LANDED)
 
-**Slice 2 — rename the 19 non-gaps out of the suffix.** The 13 `never` + 6
-`rule` rows should not read as parity debt. `loom.projection-groupby-join-unsupported`
-→ `loom.projection-groupby-join-invalid`; `loom.auth-ui-on-backend` is already
-correctly named and just needs its `-backend` suffix to stop matching the gap
-regex. Mechanical, one PR, and it makes the remaining suffix mean exactly one
-thing. **Do this before the drain sprint** — otherwise a third of the sprint
-board is undrainable by construction.
+The 13 `never` + 6 `rule` codes no longer read as parity debt. **The remaining
+suffix now means exactly one thing: work, now (`gap`) or later (`scope`).**
+`UnsupportedKind` is narrowed to those two, so a future `kind: "never"` row is a
+*compile* error, not a review catch.
+
+Three suffixes, each carrying a distinct meaning:
+
+| suffix | means | count |
+|---|---|---:|
+| `-invalid` | semantically impossible or deliberately refused | 15 |
+| `-no-effect` | parses, does nothing | 2 |
+| `-unknown` | not a member of a closed vocabulary | 2 |
+
+| was | now |
+|---|---|
+| `loom.backfill-target-unsupported` | `loom.backfill-target-invalid` |
+| `loom.policy-write-global-unsupported` | `loom.policy-write-global-invalid` |
+| `loom.projection-groupby-join-unsupported` | `loom.projection-groupby-join-invalid` |
+| `loom.projection-groupby-keyed-unsupported` | `loom.projection-groupby-keyed-invalid` |
+| `loom.projection-groupby-source-unsupported` | `loom.projection-groupby-source-invalid` |
+| `loom.projection-query-and-fold-unsupported` | `loom.projection-query-and-fold-invalid` |
+| `loom.projection-source-join-unsupported` | `loom.projection-source-join-invalid` |
+| `loom.projection-source-ignoring-unsupported` | `loom.projection-source-ignoring-no-effect` |
+| `loom.projection-workflow-source-eventsourced-unsupported` | `loom.projection-workflow-source-eventsourced-invalid` |
+| `loom.projection-workflow-source-ignoring-unsupported` | `loom.projection-workflow-source-ignoring-no-effect` |
+| `loom.projection-workflow-source-join-unsupported` | `loom.projection-workflow-source-join-invalid` |
+| `loom.store-cross-store-on-liveview-unsupported` | `loom.store-cross-store-on-liveview-invalid` |
+| `loom.store-lifetime-liveview-unsupported` | `loom.store-lifetime-liveview-invalid` |
+| `loom.auth-ui-on-backend` | `loom.auth-ui-misplaced` |
+| `loom.channelsource-unsupported-transport` | `loom.channelsource-transport-invalid` |
+| `loom.seed-raw-unsupported-column` | `loom.seed-raw-column-invalid` |
+| `loom.store-url-field-unsupported` | `loom.store-url-field-invalid` |
+| `loom.interp-format-unsupported` | `loom.interp-format-unknown` |
+| `loom.ui-handler-unsupported` | `loom.ui-handler-statement-unknown` |
+
+No behaviour change: same checks, same messages, same emission sites — only the
+stable ids move, along with their `src/diagnostics/messages.ts` catalog keys
+(18 of the 19 had entries). The renamed rows leave the register entirely; it
+now holds 50 rows (42 `gap` + 8 `scope`).
+
+**Gotcha for whoever does a rename like this next:** a repo-wide
+search-and-replace rewrote *both sides of the arrow* in this very section,
+turning the mapping into `X-invalid → X-invalid`. Prose that documents a rename
+is data the rename script will happily eat. Check the doc that describes the
+change, not just the code.
+
+## Open slices
 
 **Slice 3 — mission every orphaned gap.** Units 1, 6, 9 have no owner. Mint the
 missions (or fold them into an existing track) so every `gap` row has a

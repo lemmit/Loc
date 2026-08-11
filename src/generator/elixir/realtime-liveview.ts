@@ -18,7 +18,7 @@
 // the existing tests pin are untouched).
 //
 // The toast message expression is the validator-bounded v1 subset
-// (`loom.ui-handler-unsupported` admits only `toast(<expr>)`): literals, the
+// (`loom.ui-handler-statement-unknown` admits only `toast(<expr>)`): literals, the
 // event binding, single-level member access off it, and operators.  Anything
 // deeper fails loud here rather than emitting broken Elixir — the Elixir twin
 // of `renderMessageExpr` in `src/generator/_frontend/realtime.ts`.
