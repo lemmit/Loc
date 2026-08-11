@@ -330,6 +330,20 @@ export const svelteTarget: WalkerTarget = {
    *  markup, so a conditional CHILD must be a control-flow block.
    *  Indentation mirrors the TSX ternary's depth shape so nested
    *  output stays readable. */
+  /** Render-NOTHING in child position: an empty-string EXPRESSION TAG, not the
+   *  walker's default `null` and not the empty string either.
+   *
+   *  A `{#if}` branch is markup, so a bare `null` token inside it is literal TEXT
+   *  (the same insight as the `elseS === "null"` guard below, applied where a PACK
+   *  TEMPLATE — which only interpolates — receives the slot: a slotless
+   *  `QueryView` used to render the word "null").  Emitting NOTHING is not the
+   *  answer either: Svelte then warns `Empty block` on every branch, and a
+   *  generator that ships warnings trains everyone to ignore the gate.  `{""}`
+   *  gives the block a child that provably renders nothing, on every Svelte
+   *  version (a nullish `{null}` is version-sensitive).  See
+   *  `WalkerTarget.emptyChild`. */
+  emptyChild: '{""}',
+
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const inner = "  ".repeat(depth + 1);
     const close = "  ".repeat(depth);
