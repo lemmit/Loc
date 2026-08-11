@@ -36,6 +36,7 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { addImport } from "../render-primitive.js";
 import { lambdaArg, namedArgValue, stringNamed } from "../shared/args.js";
+import type { ChartDataSpec } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, testidAttr } from "../walker-core.js";
 // Shared ctx-free accessor-shape helper — `Chart`'s `x:`/`y:` lambdas unwrap to
@@ -51,6 +52,39 @@ import { simpleAccessorField } from "./data-grid-shape.js";
  *  teaching this filter about each one. */
 const LINE_ONLY_COMPONENTS: ReadonlySet<string> = new Set(["LineChart", "Line"]);
 const BAR_ONLY_COMPONENTS: ReadonlySet<string> = new Set(["BarChart", "Bar"]);
+
+/** The default (JavaScript) plotted-data expression — what every JSX target
+ *  emitted inline before this became a seam, verbatim.
+ *
+ *  The series is coerced to a NUMBER on the way in, and this is load-bearing
+ *  rather than defensive: a `money` (or `decimal`) projection field parses
+ *  client-side into a `Decimal` (`moneySchema` in lib/schemas), and no chart
+ *  library can plot an object.  `revenue = sum(o.total)` is the single most
+ *  likely series there is, and left alone it fails DIFFERENTLY per pack —
+ *  `@mui/x-charts` v7 rejects it at compile time (`Decimal` is not assignable
+ *  to `DatasetElementType`), while recharts and `@mantine/charts` accept it and
+ *  then plot NOTHING at runtime.  Coercing here fixes every pack at once, and
+ *  keeps `dataKey`/`series` a plain string on libraries that require one.
+ *
+ *  `Number()` is right for every series type a chart can carry: `Decimal`
+ *  stringifies through `valueOf`, and an `int`/`decimal` field is already a
+ *  number, so this is the identity on them.
+ *
+ *  The row is PROJECTED to just the two plotted columns rather than spread
+ *  (`...r`).  Spreading carries every OTHER field along, and a sibling money
+ *  column is still a `Decimal` — enough on its own to fail `@mui/x-charts`'s
+ *  `dataset` element type even when the plotted series is clean (the second
+ *  chart on a page hit exactly that).  Projecting also keeps the emitted data
+ *  to what the chart actually reads. */
+function jsChartData({ queryExpr, dataKey, seriesField }: ChartDataSpec): string {
+  const seriesCoerced = `${seriesField}: Number(r.${seriesField})`;
+  // A chart keyed and seriesed on the SAME field would repeat the key in the
+  // object literal — a duplicate-key lint failure in the generated project —
+  // so the coerced one stands alone.
+  const rowLiteral =
+    dataKey === seriesField ? seriesCoerced : `${dataKey}: r.${dataKey}, ${seriesCoerced}`;
+  return `(${queryExpr}.data ?? []).map((r) => ({ ${rowLiteral} }))`;
+}
 
 export function emitChart(
   call: ExprIR & { kind: "call" },
@@ -77,33 +111,21 @@ export function emitChart(
   const dataKey = simpleAccessorField(lambdaArg(call, "x")) ?? "";
   const seriesField = simpleAccessorField(lambdaArg(call, "y")) ?? "";
 
-  // The series is coerced to a NUMBER on the way in, and this is load-bearing
-  // rather than defensive: a `money` (or `decimal`) projection field parses
-  // client-side into a `Decimal` (`moneySchema` in lib/schemas), and no chart
-  // library can plot an object.  `revenue = sum(o.total)` is the single most
-  // likely series there is, and left alone it fails DIFFERENTLY per pack —
-  // `@mui/x-charts` v7 rejects it at compile time (`Decimal` is not assignable
-  // to `DatasetElementType`), while recharts and `@mantine/charts` accept it
-  // and then plot NOTHING at runtime.  Coercing here fixes every pack at once,
-  // and keeps `dataKey`/`series` a plain string on libraries that require one.
+  // The plotted data is a SEAM with the JavaScript form as its default.
   //
-  // `Number()` is right for every series type a chart can carry: `Decimal`
-  // stringifies through `valueOf`, and an `int`/`decimal` field is already a
-  // number, so this is the identity on them.
-  //
-  // The row is PROJECTED to just the two plotted columns rather than spread
-  // (`...r`).  Spreading carries every OTHER field along, and a sibling money
-  // column is still a `Decimal` — enough on its own to fail `@mui/x-charts`'s
-  // `dataset` element type even when the plotted series is clean (the second
-  // chart on a page hit exactly that).  Projecting also keeps the emitted data
-  // to what the chart actually reads.
-  const seriesCoerced = `${seriesField}: Number(r.${seriesField})`;
-  // A chart keyed and seriesed on the SAME field would repeat the key in the
-  // object literal — a duplicate-key lint failure in the generated project —
-  // so the coerced one stands alone.
-  const rowLiteral =
-    dataKey === seriesField ? seriesCoerced : `${dataKey}: r.${dataKey}, ${seriesCoerced}`;
-  const dataExpr = `(${queryExpr}.data ?? []).map((r) => ({ ${rowLiteral} }))`;
+  // Everything below `jsChartData` is literal JS — a `?? []` guard, `.map`, an
+  // object literal, `Number(...)`.  That is fine for the eight tsx packs, which
+  // share a language and a chart library that keys on plain objects, but it is
+  // not source the F# and Dart targets can host, so `Chart` was structurally
+  // unreachable for them no matter what their pack rendered.  Same split, and
+  // the same fix, as `renderClientPaging` (M-T1.1): the shaping moves behind a
+  // target seam, the JS spelling stays the default, and every existing caller
+  // stays byte-identical.
+  const dataExpr = (ctx.target.renderChartData ?? jsChartData)({
+    queryExpr,
+    dataKey,
+    seriesField,
+  });
 
   // A chart is an image of data (a11y contract `role="img"` + `needsName`), so
   // the wrapper carries a derived accessible name — the projection + series,

@@ -15,6 +15,7 @@
 
 import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import { fsString } from "./fs-expr.js";
 
 type Ctx = Record<string, string | number | boolean | undefined>;
 
@@ -550,6 +551,38 @@ function primitiveEnumBadge(c: Ctx): string {
   return `Html.span [ prop.className "badge badge-outline"; prop.text (string (${value})) ]`;
 }
 /** Stat(label, value) — a daisyUI stat card.  `label`/`value` are raw text. */
+/** Chart(kind:, of:, x:, y:) — a line/bar chart as INLINE SVG, computed by the
+ *  `View.chart` helper from the rows already in the Model (M-T1.3 Phase 4).
+ *
+ *  No charting library, and no dependency added to the emitted `.fsproj` — the
+ *  same conclusion the HEEx leg reached, and for the same reason: the rows are
+ *  already decoded on this side, so plotting them is arithmetic.  Feliz has no
+ *  `.hbs` pack matrix either, so unlike the tsx leg there is no per-pack
+ *  library to pick.
+ *
+ *  `dataExpr` is the `Remote<'T list>` Model field itself (the Feliz
+ *  `renderChartData` seam hands the read straight through) — `View.chart`
+ *  matches on it, so a chart renders empty while loading rather than needing
+ *  the caller to unwrap. */
+function primitiveChart(c: Ctx): string {
+  const isBar = c.isLine ? "false" : "true";
+  // The name is DERIVED ("Bar chart of SalesByStatus: revenue by status"), not
+  // an authored slot, so it carries no i18n key — same as the tsx leg, which
+  // splices it raw.  `JSON.stringify` is an exact F# string literal for it.
+  const label = fsString(String(c.ariaLabel ?? ""));
+  const rows = String(c.dataExpr ?? "");
+  // The accessors are lambdas over the ROW record, whose fields are the wire
+  // names verbatim (`wireShape`), so the walker's `dataKey`/`seriesField`
+  // strings are already the F# field names.
+  const xOf = `(fun r -> string r.${String(c.dataKey ?? "")})`;
+  // `float` is the one coercion every series type a chart can carry needs and
+  // survives: `money`/`decimal` land as F# `decimal`, `int` as `int`, and F#'s
+  // `float` conversion is defined on both — the F# spelling of the tsx leg's
+  // `Number(...)`.
+  const yOf = `(fun r -> float r.${String(c.seriesField ?? "")})`;
+  return `(View.chart ${isBar} ${label} ${rows} ${xOf} ${yOf})`;
+}
+
 function primitiveStat(c: Ctx): string {
   const title = `Html.div [ prop.className "stat-title"; prop.children [ ${asChild(String(c.label ?? ""))} ] ]`;
   const val = `Html.div [ prop.className "stat-value tabular-nums"; prop.children [ ${asChild(String(c.value ?? ""))} ] ]`;
@@ -889,6 +922,7 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-date-display": primitiveDateDisplay,
   "primitive-enum-badge": primitiveEnumBadge,
   "primitive-stat": primitiveStat,
+  "primitive-chart": primitiveChart,
   "primitive-loader": primitiveLoader,
   "primitive-image": primitiveImage,
   "primitive-avatar": primitiveAvatar,

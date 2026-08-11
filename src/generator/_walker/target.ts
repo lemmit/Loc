@@ -229,6 +229,20 @@ export interface PagerChrome {
  *  them no matter what `renderPager` did.  The arithmetic is now a seam with
  *  the JS form as its default, so the JSX targets stay byte-identical and a
  *  non-JS target can express the same window in its own language. */
+/** What a target needs to build the plotted-data expression under a `Chart`
+ *  (M-T1.3 Phase 4 — the `renderChartData` seam).  The `of:` read is already
+ *  rendered; what differs per target is only how rows are reached and how the
+ *  series is coerced to a number. */
+export interface ChartDataSpec {
+  /** The already-rendered `of:` projection read — a JSX query-hook variable, a
+   *  Feliz `Remote<'T list>` Model field, a Flutter provider read. */
+  queryExpr: string;
+  /** Row field the category axis keys on (`x: r => r.status` → `"status"`). */
+  dataKey: string;
+  /** Row field the series plots (`y: r => r.revenue` → `"revenue"`). */
+  seriesField: string;
+}
+
 export interface ClientPagingSpec {
   /** The rows expression AFTER any filter/sort, BEFORE windowing.  Its element
    *  count is the pager's pre-slice total (neither transform changes count). */
@@ -1182,6 +1196,19 @@ export interface WalkerTarget {
    *  alone cannot make client paging work there, because the arithmetic around
    *  it would still be JavaScript. */
   renderClientPaging?(spec: ClientPagingSpec): ClientPagingResult;
+
+  /** Build the PLOTTED DATA expression a `Chart` hands its pack template.
+   *  Omitted → the shared JS default: the projection read's rows, `.map`ped to
+   *  an object literal of just the two plotted columns with the series coerced
+   *  through `Number(...)`.
+   *
+   *  Same reason `renderClientPaging` is a seam: that default is literal
+   *  JavaScript, which the F# and Dart targets cannot host, so `Chart` was
+   *  unreachable for them however their pack rendered.  A non-JS target returns
+   *  whatever its own `primitive-chart` renderer consumes — Feliz hands the
+   *  `Remote<'T list>` Model field straight through and lets `View.chart` match
+   *  on it; Flutter hands the Riverpod `AsyncValue`'s rows. */
+  renderChartData?(spec: ChartDataSpec): string;
 
   /** OPTIONAL — set `false` when this target cannot drive a SERVER-paged
    *  `Table`, even though it implements the control seams.  Server mode needs
