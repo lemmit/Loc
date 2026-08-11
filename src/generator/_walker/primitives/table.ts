@@ -378,6 +378,16 @@ function emitColumn(
         field,
         sortKey: sortRefs.sortKeyRef,
         sortDir: sortRefs.sortDirRef,
+        // The header's accessible name (M-T1.11), for the one target that needs
+        // an explicit one.  The hole is the header TEXT — static, so it rides
+        // in as a target string LITERAL rather than as a runtime expression.
+        // `undefined` with i18n off, leaving the target its own sentence.
+        sortByLabel: localizedChromeIcuValue(ctx, "sortBy", [
+          {
+            name: "column",
+            expr: ctx.target.renderStringLiteral?.(headerStr) ?? JSON.stringify(headerStr),
+          },
+        ]),
       });
       headerMarkup = true;
     }

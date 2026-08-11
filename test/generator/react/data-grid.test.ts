@@ -224,7 +224,13 @@ describe("DataGrid — row selection", () => {
     // BEHAVIOUR (not appearance) is load-bearing, and keeping it out of the
     // pack means selection ports to every pack and framework unchanged.
     expect(page).toContain('type="checkbox"');
-    expect(page).toContain("t.getToggleAllPageRowsSelectedHandler()");
+    // `tbl`, not `t`: the header lambda used to destructure `{ table: t }`,
+    // shadowing the imported translator of the same name — so once the
+    // checkbox's aria-label became a `t("chrome.selectAllRows", …)` binding
+    // (M-T1.11) that call resolved to the TanStack TABLE and threw at runtime.
+    // Nothing type-checks it, because `table` is effectively untyped here.
+    expect(page).toContain("tbl.getToggleAllPageRowsSelectedHandler()");
+    expect(page).not.toContain("({ table: t })");
     expect(page).toContain("row.getToggleSelectedHandler()");
     // The select column is never sortable or filterable.
     expect(page).toContain("enableSorting: false");

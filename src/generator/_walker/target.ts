@@ -98,6 +98,16 @@ export interface SortableHeaderSpec {
   sortKey: StateRef;
   /** Page-state field holding the active direction (`"asc"` / `"desc"`). */
   sortDir: StateRef;
+  /** The header's accessible NAME as a target-native expression, or `undefined`
+   *  with i18n off (M-T1.11) — the same `undefined`-means-keep-your-own-sentence
+   *  contract {@link PagerChrome.pageOfValue} uses.
+   *
+   *  Only FLUTTER reads it: a Dart widget has no implicit accessible name, so it
+   *  wraps the header in `Semantics(label: 'Sort by <header>')`, where the four
+   *  JSX targets and Feliz render a real `<button>` whose CONTENT names it.  The
+   *  hole is the header TEXT, which is static here — known at emit time, unlike
+   *  the grid's, which is read off the TanStack column at runtime. */
+  sortByLabel?: string;
 }
 
 /** What a target needs to sort a `Table`'s rows client-side (M-T1.1 — the
@@ -303,6 +313,20 @@ export interface DataGridSpec {
   selection?: string;
   /** `data-testid` attribute string for the grid root, or `""`. */
   testidAttr: string;
+  /** The row-selection checkboxes' accessible names (M-T1.11) — complete
+   *  `aria-label` attribute fragments, no leading space, already resolved
+   *  against this walk's i18n decision.  Empty strings when the grid renders no
+   *  selection column, which is also when no target reads them.
+   *
+   *  On the SPEC rather than the pack render context because every target emits
+   *  this column itself: React in its column defs, the others in the header /
+   *  cell fragments they splice into the pack's table. */
+  selectAllRowsAria: string;
+  selectRowAria: string;
+  /** The same two as target-native VALUES, for the procedural pack that builds
+   *  props instead of markup (Feliz's `prop.ariaLabel`). */
+  selectAllRowsAriaValue: string;
+  selectRowAriaValue: string;
   /** The sortable header button's accessible name (M-T1.11) — a complete
    *  `aria-label` attribute fragment, no leading space, already resolved
    *  against this walk's i18n decision (`localizedChromeIcuAria`).

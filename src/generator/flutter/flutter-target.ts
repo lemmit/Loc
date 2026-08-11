@@ -244,7 +244,7 @@ export const flutterTarget: WalkerTarget = {
       `: const SizedBox.shrink()`;
     return (
       `InkWell(onTap: ${onTap}, child: Semantics(button: true, ` +
-      `label: ${dartString(`Sort by ${header}`)}, child: Row(mainAxisSize: MainAxisSize.min, ` +
+      `label: ${spec.sortByLabel ?? dartString(`Sort by ${header}`)}, child: Row(mainAxisSize: MainAxisSize.min, ` +
       `children: <Widget>[Text(${dartString(header)}), ${arrow}])))`
     );
   },

@@ -68,8 +68,8 @@ function renderSfc(spec: DataGridSpec): string {
   // is likewise a walker-emitted `<button>` with inline reset styles
   // (`vueTarget.renderSortableHeader`), not pack markup.
   const body = spec.renderBody({
-    headerBody: headerBody(selection, spec.sortByAria),
-    cellBody: cellBody(columns, selection),
+    headerBody: headerBody(selection, spec.sortByAria, spec.selectAllRowsAria),
+    cellBody: cellBody(columns, selection, spec.selectRowAria),
   });
 
   const needsDecimalSort = columns.some((c) => c.numericSort);
@@ -295,7 +295,7 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
 
 /** The full `<th>` content: the select-all checkbox (when selection is on), a
  *  sortable header button, or the plain header. */
-function headerBody(selection: boolean, sortByAria: string): string {
+function headerBody(selection: boolean, sortByAria: string, selectAllRowsAria: string): string {
   const style =
     "background: none; border: none; padding: 0; font: inherit; cursor: pointer; user-select: none;";
   const indicator =
@@ -307,7 +307,7 @@ function headerBody(selection: boolean, sortByAria: string): string {
           `<input`,
           `  v-if="h.column.id === 'loom-select'"`,
           `  type="checkbox"`,
-          `  aria-label="Select all rows"`,
+          `  ${selectAllRowsAria}`,
           `  :checked="table.getIsAllPageRowsSelected()"`,
           `  @change="table.toggleAllPageRowsSelected()"`,
           `/>`,
@@ -332,7 +332,11 @@ function headerBody(selection: boolean, sortByAria: string): string {
  *
  *  Selecting by `c.column.id` rather than by index keeps the branch correct
  *  under column reordering and hiding, both of which TanStack does at runtime. */
-function cellBody(columns: readonly DataGridColumn[], selection: boolean): string {
+function cellBody(
+  columns: readonly DataGridColumn[],
+  selection: boolean,
+  selectRowAria: string,
+): string {
   const branches: string[] = [];
   if (selection) {
     branches.push(
@@ -340,7 +344,7 @@ function cellBody(columns: readonly DataGridColumn[], selection: boolean): strin
         `<input`,
         `  v-if="c.column.id === 'loom-select'"`,
         `  type="checkbox"`,
-        `  aria-label="Select row"`,
+        `  ${selectRowAria}`,
         `  :checked="c.row.getIsSelected()"`,
         `  :disabled="!c.row.getCanSelect()"`,
         `  @change="c.row.toggleSelected()"`,
