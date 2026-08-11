@@ -237,7 +237,7 @@ over-requires. It has no caller in generated code (every write path goes
 through `base_changeset`); threading defaults onto crudish create params would
 ripple through every param-driven surface on all five backends.
 
-## M-T6.29 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `open` · **S–M** · P2 ⭐ security-adjacent
+## M-T6.29 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `done` · **S–M** · P2 ⭐ security-adjacent
 
 Found by `test/fixtures/corpus/policy-deny.ddd` the moment it joined the corpus (the fixture's own PR): the dotnet compile tier runs BOTH persistence adapters, and `deny` had never been through either.
 
@@ -250,6 +250,45 @@ Two halves, both in `src/generator/dotnet/emit/dapper.ts`:
 
 Sibling of M-T6.23 (the same class on the node/mikroorm adapter) and M-T6.25 (the other dapper compile-tier gap). Adapter-axis gaps like this are invisible to the "five backends" framing — the persistence adapter is a second axis.
 Sources: `test/e2e/corpus-dotnet-dapper-build.test.ts` (`DAPPER_COMPILE_SKIP.policy-deny`), `src/generator/dotnet/emit/dapper.ts`, [authorization-phase4-deny](../old/plans/authorization-phase4-deny.md).
+
+**Done (PR #2492).** Both halves landed on `src/generator/dotnet/emit/dapper.ts`, not one:
+`whereToSql` gained an `authz-filter` arm (`authzFilterToSql`, discriminated so a future
+`AuthzFilterKind` is a `tsc` error rather than a fall-through), and the relational Dapper
+repository now reads `writeScopeFilter` and emits `GetByIdForWriteAsync` — a
+`SELECT EXISTS` write-scope pre-guard with the READ `filterSql` spliced in (EF gets that
+from `HasQueryFilter` free; without it the Dapper write scope would be *wider* than the
+read scope). `DAPPER_COMPILE_SKIP.policy-deny` deleted, ratchet `max` 3 → 2.
+
+*Evidence.* (1) Compile: `dotnet build /warnaserror` clean on the generated `policy-deny`
+project under `persistence: dapper` (`mcr.microsoft.com/dotnet/sdk:10.0`). (2) Emitters:
+`test/generator/policy-deny.test.ts` gained a Dapper leg pinning `1 = 0` at **every** read
+site (GetById / FindManyByIds / findAll page + its COUNT / the author's own named find)
+plus the write guard, and pinning the control aggregate untouched. (3) **Runtime, booted**
+(the compile tier cannot see whether the value binds — §81): against a real Postgres, a
+`deny`-read row present in the table (`select count(*) from secrets` → 1) answers `GET/{id}`
+404, `findAll` `total=0` and the named find `[]`, while the control returns its row; a
+`deny write` aggregate reads 200 but `update`/`destroy` 404 with the balance unchanged at
+100, while the control's update returns 204 and moves to 999. (4) **Mutation-proved**, three
+ways: dropping only the write method → `CS0535: 'AccountRepository' does not implement
+'IAccountRepository.GetByIdForWriteAsync'`; dropping the read arm → the original codegen
+throw returns; flipping the fragment to `1 = 1` → the generator test fails **and** all four
+booted assertions invert (404→200, total 0→1, 404→204, balance 100→999).
+
+**Bonus — a stale `DAPPER_UNSUPPORTED` claim, verified false.** That map asserted
+`tenancy-hierarchy` was rejected by `loom.dapper-unsupported`. It was not: the deep-scope
+sentinel escaped `validateDapperSupport` exactly as the deny sentinel did, and the fixture
+crashed with the *same* "outside the Dapper SQL subset" throw. `validateDapperSupport` now
+gates it for real, under a dedicated `loom.dapper-unsupported#deep-scope` catalog message —
+the generic tail claims every surviving Dapper reject has no relational mapping on *any*
+adapter, which is untrue here (efcore renders it fine; what Dapper lacks is the
+principal-param binding for the sentinel's `currentUser.<claim>` sub-expressions).
+Pinned by `test/adapters/dotnet-dapper.test.ts`.
+
+**Known residue (pre-existing, not introduced here).** `GetByIdForWriteAsync` is emitted by
+the RELATIONAL repository emitter only — on **both** adapters. A `shape: document` or
+`persistedAs: eventLog` aggregate carrying a `writeScopeFilter` would have the interface
+declare a method neither `repository.ts` nor `dapper.ts` implements. No fixture reaches it;
+worth a mission if one ever does.
 
 ## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
 

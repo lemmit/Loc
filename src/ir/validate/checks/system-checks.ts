@@ -68,6 +68,7 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
+import { isDeepScopeFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
@@ -2537,6 +2538,34 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // → the principal id, `currentUser.<claim>` → the claim), exactly as
         // the EF AuditableInterceptor.  A principal stamp on a no-auth
         // deployable stays rejected by the category-A loom.dotnet-stamp-unsupported.
+        //
+        // HIERARCHICAL TENANCY (M-T6.29).  The `deep`/`global` read level lowers
+        // to the materialized-path `authz-filter` sentinel, whose
+        // `currentUser.<claim>` sub-expressions the Dapper principal-param
+        // collector does not descend into — so it cannot bind the `@__cu_*`
+        // params the fragment would need.  This USED to escape the gate entirely
+        // and crash codegen (`capability filter … is outside the Dapper SQL
+        // subset`) — the corpus map claimed the validator rejected it, and it did
+        // not.  Now it is what that map always said: an honest boundary.  The
+        // `deny` sentinel is principal-free and DOES render (`1 = 0`), so it is
+        // deliberately not gated here.
+        for (const f of [...(a.contextFilters ?? []), a.writeScopeFilter].filter(
+          (x): x is ExprIR => x != null,
+        )) {
+          if (isDeepScopeFilter(f)) {
+            diags.push({
+              severity: "error",
+              message: diagMessage("loom.dapper-unsupported#deep-scope", {
+                name: dep.name,
+                subject: where,
+                reason: "carries a hierarchical (deep/global) tenancy scope filter",
+              }),
+              source: `${sys.name}/${dep.name}`,
+              code: "loom.dapper-unsupported",
+            });
+            break;
+          }
+        }
         // Capability filters are supported too (spliced into every SELECT's
         // WHERE); a principal-referencing one lowers `currentUser.<claim>` to a
         // `@__cu_<claim>` Dapper param bound from the same ambient principal.

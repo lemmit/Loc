@@ -45,17 +45,6 @@ const DAPPER_COMPILE_SKIP: Record<string, string> = {
     "query-time projection handlers are EF-LINQ over AppDbContext (CS0234: no Microsoft.EntityFrameworkCore under dapper) — needs the raw-Npgsql port the FOLDED read controller already got",
   "projection-groupby":
     "same as projection-aggregation — the grouped QP handler is EF-LINQ over AppDbContext",
-  "policy-deny":
-    "the `deny` authz-filter sentinel has no arm in the Dapper emitter: `whereToSql` " +
-    "falls through to its default and CODEGEN THROWS (\"capability filter on 'Secret' is " +
-    'outside the Dapper SQL subset"), and `writeScopeFilter` — which the EF repository ' +
-    "emitter and the shared command layer both honour (GetByIdForWriteAsync) — is not read " +
-    "by dapper.ts at all.  A crash, not a documented boundary: unlike tenancy-hierarchy " +
-    "this escapes `loom.dapper-unsupported`, so it belongs in the GAP map, not the " +
-    "UNSUPPORTED one.  The read half is a 3-line `1 = 0` arm, but landing that alone would " +
-    "make this fixture green while `deny write on` stayed unenforceable — a hollow cell.  " +
-    "Fix both halves (or gate the pair honestly in validateDapperSupport) and delete this.  " +
-    "Tracked: M-T6.26 (docs/new-plan/T6-backend-parity.md).",
 };
 
 // Features the IR validator HONESTLY rejects under dapper — not a gap, a
@@ -63,7 +52,11 @@ const DAPPER_COMPILE_SKIP: Record<string, string> = {
 // reach the compiler, so they are excluded rather than skipped.
 const DAPPER_UNSUPPORTED: Record<string, string> = {
   "tenancy-hierarchy":
-    "hierarchical tenancy's capability filter is outside the Dapper SQL subset; the validator says so with loom.dapper-unsupported",
+    "hierarchical tenancy's capability filter is outside the Dapper SQL subset; the validator " +
+    "says so with loom.dapper-unsupported.  NOTE: that claim was FALSE until M-T6.29 — the " +
+    "deep-scope sentinel escaped `validateDapperSupport` exactly as the deny sentinel did, and " +
+    "this fixture CRASHED codegen with the same 'outside the Dapper SQL subset' throw.  The " +
+    "gate now exists, so the rationale is true; re-verified by generating the fixture.",
 };
 
 const dapperFeatures = CORPUS.filter((f) => f.backends.includes("dotnet"))

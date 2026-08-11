@@ -665,6 +665,8 @@ function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
       // the `text` column the enum is stored as.
       if (e.refKind === "enum-value") return `'${e.name.replace(/'/g, "''")}'`;
       throw new Error(`dapper: unsupported ref '${e.refKind}' in find`);
+    case "authz-filter":
+      return authzFilterToSql(e);
     case "literal":
       switch (e.lit) {
         case "string":
@@ -683,6 +685,39 @@ function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
       }
     default:
       throw new Error(`dapper: unsupported expression '${e.kind}' in find`);
+  }
+}
+
+/** The `authz-filter` sentinels as raw Postgres SQL (M-T9.9 / M-T6.29).  A
+ *  discriminated node, so a missing arm is a `tsc` error here rather than a
+ *  fall-through to `whereToSql`'s `default:` — which is exactly how the `deny`
+ *  carve-out used to reach the generic dispatcher and CRASH codegen on this
+ *  adapter (the whole point of giving the sentinel its own `ExprIR.kind`). */
+function authzFilterToSql(e: Extract<ExprIR, { kind: "authz-filter" }>): string {
+  switch (e.filter.kind) {
+    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // term, ANDed into every read SELECT (and into the write-scope existence
+    // pre-guard).  `1 = 0` rather than `FALSE` to match the JPQL/Java rendering
+    // and stay a valid standalone predicate in every SQL position.
+    case "deny":
+      return "1 = 0";
+    // `deep`/`global` read level (hierarchical tenancy) — the materialized-path
+    // descendant-or-self sentinel.  It is SQL-expressible in principle, but its
+    // `currentUser.<claim>` sub-expressions would have to reach
+    // `collectFilterPrincipalRefs` (which does not descend into this node) to
+    // bind the `@__cu_*` params.  Until that lands it is a DOCUMENTED capability
+    // boundary, not a crash: `validateDapperSupport` rejects a hierarchical
+    // scope filter under `persistence: dapper` with `loom.dapper-unsupported`
+    // before codegen runs, so this throw is unreachable defence-in-depth.
+    case "scope":
+      throw new Error(
+        `dapper: hierarchical tenancy scope filter on '${e.aggregate}' is outside the ` +
+          `Dapper SQL subset; use 'persistence: efcore'.`,
+      );
+    default: {
+      const _exhaustive: never = e.filter;
+      throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+    }
   }
 }
 
@@ -1027,6 +1062,50 @@ export function renderDapperRepository(
   // Comma-prefixed suffix appended inside a `new { … }` that already has fields
   // (GetById / FindManyByIds).
   const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
+
+  // Command-load path (authorization Phase 3 P3.1 / M-T6.29): the write-scope
+  // existence pre-guard behind `GetByIdForWriteAsync`, the raw-SQL twin of the
+  // EF `AnyAsync(x => x.Id == id && (<scope>))` in `emit/repository.ts`.  EF
+  // gets the READ query-filter applied to that `Any` for free; Dapper has no
+  // HasQueryFilter, so the read `filterSql` is spliced in explicitly here —
+  // without it the write guard would be WIDER than the read scope on this
+  // adapter, which is the whole invariant the seam exists to hold.  A row the
+  // caller may READ but not WRITE reads as missing → 404 (no existence leak).
+  // Principal claims bind from the ambient accessor (re-read per call), and the
+  // param set is the UNION of the read filter's and the write scope's claims —
+  // a scope claim the read filter never mentions must still be bound.
+  const writeScopeSql = agg.writeScopeFilter
+    ? (() => {
+        try {
+          return whereToSql(agg.writeScopeFilter, sqlCtx);
+        } catch {
+          throw new Error(
+            `dapper: write-scope filter on '${agg.name}' is outside the Dapper SQL subset; ` +
+              `use 'persistence: efcore' or simplify the policy.`,
+          );
+        }
+      })()
+    : null;
+  const writePrincFields = principalFields(
+    dedupPrincipalRefs([
+      ...filterPrincipalRefs,
+      ...collectFilterPrincipalRefs(agg.writeScopeFilter ? [agg.writeScopeFilter] : []),
+    ]),
+    AMBIENT_CURRENT_USER,
+  );
+  const writePrincSuffix = writePrincFields.length > 0 ? `, ${writePrincFields.join(", ")}` : "";
+  const writeScopeMethod: string[] = writeScopeSql
+    ? [
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
+        `        var __inScope = await conn.ExecuteScalarAsync<bool>(new CommandDefinition("SELECT EXISTS (SELECT 1 FROM ${table} WHERE id = @id AND (${writeScopeSql})${andFilter(true)})", new { id = id.Value${writePrincSuffix} }, cancellationToken: cancellationToken));`,
+        "        if (!__inScope) return null;",
+        "        return await GetByIdAsync(id, cancellationToken);",
+        "    }",
+        "",
+      ]
+    : [];
 
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
 
@@ -1502,6 +1581,7 @@ export function renderDapperRepository(
           : ["        return r is null ? null : Map(r);"]),
       "    }",
       "",
+      ...writeScopeMethod,
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
