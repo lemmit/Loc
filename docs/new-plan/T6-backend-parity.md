@@ -237,7 +237,7 @@ over-requires. It has no caller in generated code (every write path goes
 through `base_changeset`); threading defaults onto crudish create params would
 ripple through every param-driven surface on all five backends.
 
-## M-T6.26 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `open` · **S–M** · P2 ⭐ security-adjacent
+## M-T6.29 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `done` · **S–M** · P2 ⭐ security-adjacent
 
 Found by `test/fixtures/corpus/policy-deny.ddd` the moment it joined the corpus (the fixture's own PR): the dotnet compile tier runs BOTH persistence adapters, and `deny` had never been through either.
 
@@ -250,6 +250,45 @@ Two halves, both in `src/generator/dotnet/emit/dapper.ts`:
 
 Sibling of M-T6.23 (the same class on the node/mikroorm adapter) and M-T6.25 (the other dapper compile-tier gap). Adapter-axis gaps like this are invisible to the "five backends" framing — the persistence adapter is a second axis.
 Sources: `test/e2e/corpus-dotnet-dapper-build.test.ts` (`DAPPER_COMPILE_SKIP.policy-deny`), `src/generator/dotnet/emit/dapper.ts`, [authorization-phase4-deny](../old/plans/authorization-phase4-deny.md).
+
+**Done (PR #2492).** Both halves landed on `src/generator/dotnet/emit/dapper.ts`, not one:
+`whereToSql` gained an `authz-filter` arm (`authzFilterToSql`, discriminated so a future
+`AuthzFilterKind` is a `tsc` error rather than a fall-through), and the relational Dapper
+repository now reads `writeScopeFilter` and emits `GetByIdForWriteAsync` — a
+`SELECT EXISTS` write-scope pre-guard with the READ `filterSql` spliced in (EF gets that
+from `HasQueryFilter` free; without it the Dapper write scope would be *wider* than the
+read scope). `DAPPER_COMPILE_SKIP.policy-deny` deleted, ratchet `max` 3 → 2.
+
+*Evidence.* (1) Compile: `dotnet build /warnaserror` clean on the generated `policy-deny`
+project under `persistence: dapper` (`mcr.microsoft.com/dotnet/sdk:10.0`). (2) Emitters:
+`test/generator/policy-deny.test.ts` gained a Dapper leg pinning `1 = 0` at **every** read
+site (GetById / FindManyByIds / findAll page + its COUNT / the author's own named find)
+plus the write guard, and pinning the control aggregate untouched. (3) **Runtime, booted**
+(the compile tier cannot see whether the value binds — §81): against a real Postgres, a
+`deny`-read row present in the table (`select count(*) from secrets` → 1) answers `GET/{id}`
+404, `findAll` `total=0` and the named find `[]`, while the control returns its row; a
+`deny write` aggregate reads 200 but `update`/`destroy` 404 with the balance unchanged at
+100, while the control's update returns 204 and moves to 999. (4) **Mutation-proved**, three
+ways: dropping only the write method → `CS0535: 'AccountRepository' does not implement
+'IAccountRepository.GetByIdForWriteAsync'`; dropping the read arm → the original codegen
+throw returns; flipping the fragment to `1 = 1` → the generator test fails **and** all four
+booted assertions invert (404→200, total 0→1, 404→204, balance 100→999).
+
+**Bonus — a stale `DAPPER_UNSUPPORTED` claim, verified false.** That map asserted
+`tenancy-hierarchy` was rejected by `loom.dapper-unsupported`. It was not: the deep-scope
+sentinel escaped `validateDapperSupport` exactly as the deny sentinel did, and the fixture
+crashed with the *same* "outside the Dapper SQL subset" throw. `validateDapperSupport` now
+gates it for real, under a dedicated `loom.dapper-unsupported#deep-scope` catalog message —
+the generic tail claims every surviving Dapper reject has no relational mapping on *any*
+adapter, which is untrue here (efcore renders it fine; what Dapper lacks is the
+principal-param binding for the sentinel's `currentUser.<claim>` sub-expressions).
+Pinned by `test/adapters/dotnet-dapper.test.ts`.
+
+**Known residue (pre-existing, not introduced here).** `GetByIdForWriteAsync` is emitted by
+the RELATIONAL repository emitter only — on **both** adapters. A `shape: document` or
+`persistedAs: eventLog` aggregate carrying a `writeScopeFilter` would have the interface
+declare a method neither `repository.ts` nor `dapper.ts` implements. No fixture reaches it;
+worth a mission if one ever does.
 
 ## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
 
@@ -327,7 +366,7 @@ Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
 explicitly, with a comment pointing here — deliberately NOT worked around in the
 compiler.
 
-## M-T6.25 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
+## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
 Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
 
 The four non-elixir backends install an **app-global** unhandled-exception handler — `app.onError` (hono), `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so *any* unmodelled fault, on any route, in any system, answers the RFC 7807 envelope.
@@ -348,7 +387,7 @@ That is a **different SHAPE, not a different detail**: `{"errors":{"detail":"Int
 
 Sources: found while landing M-T6.24 / RS-26. Relates to RS-22 (the 7807 envelope's exact membership) and M-T9.11 (which is blind here).
 
-## M-T6.26 — The absent-read 404 is three different envelopes — `open` · **M** · P1 ⭐ the RS-28 companion, and the half a string fix can't reach
+## M-T6.31 — The absent-read 404 is three different envelopes — `open` · **M** · P1 ⭐ the RS-28 companion, and the half a string fix can't reach
 Found 2026-08-02 by the M-T9.25 casing/absence census sweep, and it is the **structural** half of what RS-28 fixed as a string.
 
 RS-28 made every backend's 404 `detail` name its resource. That is necessary and not sufficient, because two backends don't emit the envelope RS-28 assumes on their READ paths at all:
@@ -412,3 +451,25 @@ Node does not install an app-global handler. `api/http/index.ts` mounts five sub
 **Verification.** A per-FILE assertion — the `denial-ladder-override-parity` / `problem-arm-census` shape — that every emitted `http/*.ts` router either declares the full ladder or is provably covered by the root one. Joined-output `toContain` cannot see this: a sibling router always satisfies it, which is the trap already documented in both those suites.
 
 Sources: M-T9.25 census sweep 3 (409/500). Twin of M-T6.25; relates to M-T6.26 (the same "read paths answer a different shape from write paths" defect on dotnet/java).
+
+## M-T6.32 — Capability emission: the four capabilities that gate honestly and emit nothing — `open` · **M** · P1 ⭐ silent-governance class
+Four capability-shaped features are declared in `.ddd`, accepted by the validator, and then **not emitted** by some backends — each with an honest gate standing in for the emitter: `loom.context-filter-unsupported` (a `filter` capability the backend never applies), `loom.filter-bypass-unsupported` (`ignoring`, the deliberate bypass), `loom.audited-backend-unsupported` (per-operation audit records), `loom.provenanced-backend-unsupported` (the provenance runtime — trace capture + history). The gates are the right failure mode; the emitters are the open half. Grouped because they share a shape — a capability the macro/prelude layer splices in, which every backend must then honour — so the per-backend work rhymes even though the four features don't.
+**First step is a re-verify:** the register rows are classified `gap` but unverified. Confirm against each emission site that the backend genuinely cannot emit (a gap) rather than that the combination is meaningless (which would make it a rename, per M-T9.27 slice 2).
+Sources: M-T9.27 register rows (`src/diagnostics/unsupported-register.ts`). Relates to M-T3.2 (`mask unless`, the same silent-governance class, already missioned).
+
+## M-T6.33 — Lifecycle stamps: one rule wearing five names — `open` · **S–M** · P2 ⚠ verify-first
+`loom.{node,dotnet,java,python,elixir}-stamp-unsupported` are **five codes for one rule** — the check is already a single shared body over a per-backend table (`STAMP_BACKENDS`, `src/ir/validate/checks/system-checks.ts`), whose own comment says the two rejected shapes are *"backend-independent facts about the model"*. Only the code identity is forked, kept for the tests that match on it.
+Two jobs, in order: (1) **re-verify the classification** — a principal stamp with no auth has no principal to read, and a stamp on an event-sourced aggregate contradicts folding state from events; both may be permanent refusals rather than gaps, in which case this is a rename (M-T9.27 slice 2), not emitter work. (2) Whatever the verdict, **collapse five codes to one** (`loom.stamp-unsupported`, backend in the message and a structured field) — the target name never belongs in the identity, since it becomes a lie the day that backend supports it. See [M-T5.21](./missions/M-T5.21-callable-unification-design.md) §Symptom 1.
+Sources: M-T9.27 register rows; `system-checks.ts` `STAMP_BACKENDS`.
+
+## M-T6.34 — Event-sourced storage exists on one backend of five — `open` · **L** · P2
+`persistedAs: eventLog` emits storage on Hono only (`loom.event-sourcing-backend-unsupported`), and **event-sourced workflow storage — a per-correlation event stream folded into workflow state — exists nowhere** (`loom.event-sourced-workflow-unsupported`, rejected on all five). The aggregate half is a four-backend port of a shipped design; the workflow half is unbuilt everywhere and should be scoped before it is started. Sized L because the two halves are not the same work and the second may want its own mission once scoped.
+Sources: M-T9.27 register rows.
+
+## M-T6.35 — Persistence-adapter capability gaps — `open` · **M** · P2
+The non-default persistence adapters reject shapes their EF/Ecto siblings accept: `loom.dapper-unsupported` (features Dapper does not emit), `loom.find-predicate-unsupported` (a find predicate the active adapter cannot lower), `loom.persistence-mode-unsupported` (a `persistedAs`/`shape` pair the adapter cannot store), `loom.saving-shape-unsupported` (a `shape(...)` the hosting backend cannot persist), `loom.vanilla-document-unsupported` (`shape: document` only partly emitted on Elixir). The adapter axis is where "all targets support the whole surface" costs the most, because each adapter multiplies the matrix again — worth confirming per row whether the adapter *cannot* express the shape (a permanent limit, so a rename) or merely *does not yet* (a gap).
+Sources: M-T9.27 register rows. Relates to M-T6.23 (mikroorm) and M-T6.25 (dapper query-time projections) — the same axis, already missioned.
+
+## M-T6.36 — Java emitter shape gaps — `open` · **S** · P3
+Two narrow Java-only rejections: `loom.java-projection-field-unsupported` (projection field shapes the emitter does not handle) and `loom.java-workflow-instance-field-unsupported` (workflow instance field shapes). Both name Java in the code identity, which M-T5.21 §Symptom 1 argues against — fold the target into the message when the shapes land.
+Sources: M-T9.27 register rows.

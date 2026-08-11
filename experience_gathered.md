@@ -4778,3 +4778,70 @@ Two smaller ones from the same session, both found only by the real compiler:
   (`curl repo.hex.pm/tarballs/gettext-0.26.2.tar` + grep) took one minute and
   removed a guess that a compile would only have caught after a 2-minute docker
   round-trip.
+
+## 84. Three ways a green result lied this session — reverts, required checks, and a rename that ate its own docs (2026-08-10)
+
+Landing the M-T9.27 register (#2444) and its rename slice (#2488) produced three
+distinct false signals. None was in the diff; all three were in the *process*
+around it, which is why they are worth writing down.
+
+### `git checkout -- <path>` is the wrong revert for a mutation proof
+
+The mutation-proof recipe is: break the thing, watch the gate fail, put it back.
+"Put it back" was `git checkout -- <file>` — which restores **HEAD**, not the
+state before the mutation. Every uncommitted edit in that file goes with it.
+
+It fired three times in one session, and the middle one is the dangerous shape:
+
+1. Reverted the register file → silently discarded the section deletion and
+   header rewrite that were the actual work in progress.
+2. Reverted it again during a second proof → the *next* mutation then failed a
+   **different assertion** than the one under test (the "every gap has a
+   mission" invariant, not the "mission ids are unambiguous" one it was meant to
+   exercise). A red result for the wrong reason is indistinguishable from a
+   successful proof if you only read the exit code.
+3. Reverted a docs file → wiped a renumbering plus five newly written missions.
+
+**The asymmetry that makes this bite late:** while a new file is untracked,
+`git checkout -- <path>` errors out harmlessly (`did not match any file(s)
+known to git`) — the exact behaviour observed pre-merge. Once the file lands on
+`main`, the identical command becomes destructive. A habit formed in the first
+half of a task is silently unsafe in the second.
+
+**Rule:** copy the file aside (`cp x /tmp/x.good`), mutate, `cp` back. And read
+*which* assertion failed — a mutation proof is only a proof if the failure is
+the one you seeded.
+
+### A required check can be minted after your branch point
+
+`#2444` sat unmerged for four days. It was not a test failure: `pr-gate` — a
+required status check — had landed on `main` *after* the branch was cut, so the
+PR had no workflow producing it, and the merge was refused by a **repository
+rule**, not by a red check. All 45 real checks were green the whole time.
+
+Compounding it: `pr-gate` waits for the other checks and renders a verdict; on
+the first run it gave up after 82 minutes while the frontend matrices were still
+**queued** behind a runner backlog. Those went green ~2h later — after the
+verdict. So the gate reported failure for a stalled queue, not a defect.
+
+**Two consequences.** (1) "45 checks green" is not "mergeable" — the required
+set can have grown under you; check for a required context with *no run at all*,
+not just for red ones. (2) `pr-gate`'s verdict is a **snapshot**; re-run it after
+any check it judged while pending. This is the stale-base hazard from CLAUDE.md
+applied to CI configuration rather than to code — the base moved and took the
+*rules* with it, which is the version that is invisible in a diff.
+
+### A repo-wide rename eats the prose that documents the rename
+
+Slice 2 renamed 19 diagnostic codes via a search-and-replace across
+`src`/`test`/`docs`. It also rewrote **both sides of the arrow** in the design
+doc's own mapping table, turning `X-unsupported → X-invalid` into
+`X-invalid → X-invalid` — a table that documented nothing, in the one file whose
+job was to explain the change.
+
+Nothing catches this: it compiles, it lints, the tests pass, and the corruption
+is *semantically invisible* because both sides are valid current identifiers.
+
+**Rule:** after a mechanical rename, read the document that describes it. Prose
+about a rename is data the rename will match. (The same trap exists for
+migration notes, changelogs, and any before/after table.)

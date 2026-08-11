@@ -82,12 +82,12 @@ export function validateProjections(ctx: BoundedContextIR, diags: LoomDiagnostic
  *
  *   - `loom.projection-workflow-source-not-observable` — the workflow has no
  *     readable instance state (no id-shaped correlation field).
- *   - `loom.projection-workflow-source-eventsourced-unsupported` — an
+ *   - `loom.projection-workflow-source-eventsourced-invalid` — an
  *     event-sourced workflow source (its instances are a per-request fold, no
  *     state table); the emit path for it is deferred (honest gate).
- *   - `loom.projection-workflow-source-join-unsupported` — a `join` follow over
+ *   - `loom.projection-workflow-source-join-invalid` — a `join` follow over
  *     a workflow source (by-id follows are aggregate-rooted).
- *   - `loom.projection-workflow-source-ignoring-unsupported` — an `ignoring`
+ *   - `loom.projection-workflow-source-ignoring-no-effect` — an `ignoring`
  *     bypass over a workflow source (a workflow has no capability query-filters
  *     to bypass). */
 function validateWorkflowSource(
@@ -115,8 +115,8 @@ function validateWorkflowSource(
   if (wf.eventSourced) {
     diags.push({
       severity: "error",
-      code: "loom.projection-workflow-source-eventsourced-unsupported",
-      message: diagMessage("loom.projection-workflow-source-eventsourced-unsupported", {
+      code: "loom.projection-workflow-source-eventsourced-invalid",
+      message: diagMessage("loom.projection-workflow-source-eventsourced-invalid", {
         name: proj.name,
         wfName: wf.name,
       }),
@@ -126,16 +126,16 @@ function validateWorkflowSource(
   if (q.joins.length > 0) {
     diags.push({
       severity: "error",
-      code: "loom.projection-workflow-source-join-unsupported",
-      message: diagMessage("loom.projection-workflow-source-join-unsupported", { name: proj.name }),
+      code: "loom.projection-workflow-source-join-invalid",
+      message: diagMessage("loom.projection-workflow-source-join-invalid", { name: proj.name }),
       source: at,
     });
   }
   if (q.bypassAll || (q.bypassCaps?.length ?? 0) > 0) {
     diags.push({
       severity: "error",
-      code: "loom.projection-workflow-source-ignoring-unsupported",
-      message: diagMessage("loom.projection-workflow-source-ignoring-unsupported", {
+      code: "loom.projection-workflow-source-ignoring-no-effect",
+      message: diagMessage("loom.projection-workflow-source-ignoring-no-effect", {
         name: proj.name,
       }),
       source: at,
@@ -154,9 +154,9 @@ function validateWorkflowSource(
  *     aggregate directly.
  *   - `loom.projection-source-self` — a projection sourcing itself (`from` its
  *     own name) is a cycle.
- *   - `loom.projection-source-join-unsupported` — a `join` follow over a
+ *   - `loom.projection-source-join-invalid` — a `join` follow over a
  *     projection source (by-id follows are aggregate-rooted).
- *   - `loom.projection-source-ignoring-unsupported` — an `ignoring` bypass over
+ *   - `loom.projection-source-ignoring-no-effect` — an `ignoring` bypass over
  *     a projection source (a read-model row carries no capability query-filters). */
 function validateProjectionSource(
   ctx: BoundedContextIR,
@@ -192,16 +192,16 @@ function validateProjectionSource(
   if (q.joins.length > 0) {
     diags.push({
       severity: "error",
-      code: "loom.projection-source-join-unsupported",
-      message: diagMessage("loom.projection-source-join-unsupported", { name: proj.name }),
+      code: "loom.projection-source-join-invalid",
+      message: diagMessage("loom.projection-source-join-invalid", { name: proj.name }),
       source: at,
     });
   }
   if (q.bypassAll || (q.bypassCaps?.length ?? 0) > 0) {
     diags.push({
       severity: "error",
-      code: "loom.projection-source-ignoring-unsupported",
-      message: diagMessage("loom.projection-source-ignoring-unsupported", { name: proj.name }),
+      code: "loom.projection-source-ignoring-no-effect",
+      message: diagMessage("loom.projection-source-ignoring-no-effect", { name: proj.name }),
       source: at,
     });
   }
@@ -213,7 +213,7 @@ function validateProjectionSource(
  *  parsed, lowered, and validated — but HONESTLY REJECTED until a backend ports
  *  the emit (PR-C onward), rather than silently mis-emitted by the folded path.
  *
- *   - `loom.projection-query-and-fold-unsupported` — a `from` source AND
+ *   - `loom.projection-query-and-fold-invalid` — a `from` source AND
  *     `on(e)` folds together (a seed-then-update read model) is a RESERVED
  *     combo (proposal § "Exotic combos are deferred behind gates").
  *   - `loom.projection-query-time-unsupported` — the HONEST not-yet-emitted
@@ -233,8 +233,8 @@ function validateQueryComprehension(
   if (q.source && proj.handlers.length > 0) {
     diags.push({
       severity: "error",
-      code: "loom.projection-query-and-fold-unsupported",
-      message: diagMessage("loom.projection-query-and-fold-unsupported", {
+      code: "loom.projection-query-and-fold-invalid",
+      message: diagMessage("loom.projection-query-and-fold-invalid", {
         name: proj.name,
         source: q.source,
       }),
@@ -385,12 +385,12 @@ function validateQueryComprehension(
  *  disciplined shape `groupedAggregates` (projection-aggregate.ts) hands every
  *  backend, so an emitter never guesses:
  *
- *   - `loom.projection-groupby-source-unsupported` — grouping needs a plain
+ *   - `loom.projection-groupby-source-invalid` — grouping needs a plain
  *     AGGREGATE `from` source (the table the SQL groups over); no source,
  *     a workflow / projection source, or event folds are all rejected.
- *   - `loom.projection-groupby-keyed-unsupported` — a grouped projection's
+ *   - `loom.projection-groupby-keyed-invalid` — a grouped projection's
  *     rows are the groups, not id-keyed entities; `keyed by` doesn't apply.
- *   - `loom.projection-groupby-join-unsupported` — a `join` is an app-level
+ *   - `loom.projection-groupby-join-invalid` — a `join` is an app-level
  *     bulk load AFTER the query, so its columns can't participate in a SQL
  *     GROUP BY.
  *   - `loom.projection-groupby-no-aggregate` — a `group by` whose selects
@@ -412,22 +412,22 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
       : "it has no 'from' source";
     diags.push({
       severity: "error",
-      code: "loom.projection-groupby-source-unsupported",
-      message: diagMessage("loom.projection-groupby-source-unsupported", { name: proj.name, why }),
+      code: "loom.projection-groupby-source-invalid",
+      message: diagMessage("loom.projection-groupby-source-invalid", { name: proj.name, why }),
       source: at,
     });
     return;
   }
   if (proj.handlers.length > 0) {
-    // `from` + folds is already `loom.projection-query-and-fold-unsupported`;
+    // `from` + folds is already `loom.projection-query-and-fold-invalid`;
     // nothing more to say here.
     return;
   }
   if (proj.correlationField !== undefined) {
     diags.push({
       severity: "error",
-      code: "loom.projection-groupby-keyed-unsupported",
-      message: diagMessage("loom.projection-groupby-keyed-unsupported", {
+      code: "loom.projection-groupby-keyed-invalid",
+      message: diagMessage("loom.projection-groupby-keyed-invalid", {
         name: proj.name,
         correlationField: proj.correlationField,
       }),
@@ -437,8 +437,8 @@ function validateGroupBy(ctx: BoundedContextIR, proj: ProjectionIR, diags: LoomD
   if (q.joins.length > 0) {
     diags.push({
       severity: "error",
-      code: "loom.projection-groupby-join-unsupported",
-      message: diagMessage("loom.projection-groupby-join-unsupported", { name: proj.name }),
+      code: "loom.projection-groupby-join-invalid",
+      message: diagMessage("loom.projection-groupby-join-invalid", { name: proj.name }),
       source: at,
     });
   }

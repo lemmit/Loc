@@ -30,10 +30,10 @@
 > module-store singleton cannot call (its one limitation: in-app `pushState`
 > link navigations aren't observed — only back/forward + manual edits — fine
 > for store-driven filter state). **LiveView is memory-only** —
-> `local`/`session`/`url` are gated by `loom.store-lifetime-liveview-unsupported`
+> `local`/`session`/`url` are gated by `loom.store-lifetime-liveview-invalid`
 > (a server-side struct has no browser storage; URL state is the page's
 > `handle_params`, out of v1 store scope). Two other gates: `loom.store-lifetime-invalid`
-> (bad `persist:` value) and `loom.store-url-field-unsupported` (a `url` store's
+> (bad `persist:` value) and `loom.store-url-field-invalid` (a `url` store's
 > fields must be scalar). Remaining: LiveView `url` via `handle_params`/`push_patch`
 > (the §5 follow-up). Surface pinned to one keyword (the `url` tier was formerly
 > the separate `sync: url`; see §3.1). Named actions over store state

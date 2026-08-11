@@ -32,7 +32,7 @@
 > `RealtimeHandlers` component every design pack's App shell mounts;
 > the toast call is pack-shaped (`realtime-toast` micro-template ×8
 > packs).  v1 handler bodies are toast-only
-> (`loom.ui-handler-unsupported`).  Still unstarted: the
+> (`loom.ui-handler-statement-unknown`).  Still unstarted: the
 > .NET / Phoenix realtime wire, external brokers via `channelSource` (redis /
 > kafka / nats), the `delivery: queue`
 > competing-consumer semantics, the realtime topology (rooms + edge relay

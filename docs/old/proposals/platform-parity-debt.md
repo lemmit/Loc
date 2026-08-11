@@ -132,7 +132,7 @@ below).**
 2. **`store` persist/sync ladder** — the `store` primitive is v1 in-memory on all
    five targets; `persist:`/`sync:` parse but stay validator-gated
    (`loom.store-lifetime-unsupported`), and cross-store calls are gated on
-   LiveView only (`loom.store-cross-store-on-liveview-unsupported`).
+   LiveView only (`loom.store-cross-store-on-liveview-invalid`).
 
 ## Adapter sub-matrix
 

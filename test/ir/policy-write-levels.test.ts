@@ -54,7 +54,7 @@ const POLICY_CODES = new Set([
   "loom.policy-target-not-tenant-owned",
   "loom.policy-level-requires-hierarchy",
   "loom.policy-duplicate-target",
-  "loom.policy-write-global-unsupported",
+  "loom.policy-write-global-invalid",
   "loom.policy-write-wider-than-read",
 ]);
 
@@ -149,11 +149,11 @@ describe("policy write levels — validator gates", () => {
     expect(diags).toEqual([]);
   });
 
-  it("rejects `write global` — loom.policy-write-global-unsupported", async () => {
+  it("rejects `write global` — loom.policy-write-global-invalid", async () => {
     const diags = await policyDiags(
       system({ policy: "allow global on Invoice\nallow write global on Invoice" }),
     );
-    expect(diags.map((d) => d.code)).toContain("loom.policy-write-global-unsupported");
+    expect(diags.map((d) => d.code)).toContain("loom.policy-write-global-invalid");
   });
 
   it("rejects `write deep` without a matching `deep`/`global` read — loom.policy-write-wider-than-read", async () => {

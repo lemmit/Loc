@@ -212,6 +212,70 @@ function triggerList(): string[] {
   return [...block.matchAll(/-\s*'([^']+)'/g)].map((m) => m[1]);
 }
 
+// ---------------------------------------------------------------------------
+// The sweep's concurrency, pinned.
+//
+// The gate is event-driven, and `workflow_run` delivery is best-effort — the
+// 15-minute cron sweep is the safety net that un-parks a PR whose final event
+// GitHub dropped.  That net was itself broken by the concurrency block, in a
+// way nothing tested: a `schedule` payload carries neither `pull_request` nor
+// `workflow_run`, so the group key resolved to the literal `pr-gate-` and, with
+// `cancel-in-progress: true`, each cron tick cancelled the previous one.  Under
+// the runner starvation the sweep exists to survive, the sweep never ran.
+//
+// Both halves are pinned because both are load-bearing and the "obvious" fix to
+// the first (a unique key per run) silently breaks correctness: unique keys let
+// sweeps OVERLAP, and a slower sweep posting its older verdict last can re-park
+// a PR it already greened.
+// ---------------------------------------------------------------------------
+
+/** The `concurrency:` block of pr-gate.yml, comments stripped. */
+function concurrencyBlock(): { group: string; cancelInProgress: string } {
+  const src = readFileSync(path.join(workflowsDir, "pr-gate.yml"), "utf8");
+  const start = src.search(/^concurrency:\s*$/m);
+  expect(start, "pr-gate.yml lost its top-level concurrency: key").toBeGreaterThan(-1);
+  const block = src.slice(start, src.indexOf("\njobs:"));
+  const group = block.match(/^\s*group:\s*(.+)$/m);
+  const cancel = block.match(/^\s*cancel-in-progress:\s*(.+)$/m);
+  expect(group, "concurrency block lost its group:").toBeTruthy();
+  expect(cancel, "concurrency block lost its cancel-in-progress:").toBeTruthy();
+  return {
+    group: (group as RegExpMatchArray)[1].trim(),
+    cancelInProgress: (cancel as RegExpMatchArray)[1].trim(),
+  };
+}
+
+describe("pr-gate.yml concurrency does not cancel its own safety net", () => {
+  it("the group key has a non-empty fallback for SHA-less events", () => {
+    const { group } = concurrencyBlock();
+    // Both SHA expressions are empty on `schedule` / `workflow_dispatch`.  With
+    // no third alternative the key collapses to a single shared literal and
+    // every sweep contends with every other sweep.
+    expect(group).toContain("github.event.pull_request.head.sha");
+    expect(group).toContain("github.event.workflow_run.head_sha");
+    expect(
+      /\|\|\s*'[^']+'\s*\}\}/.test(group),
+      `group key needs a literal fallback for SHA-less (schedule / dispatch) events, got: ${group}`,
+    ).toBe(true);
+  });
+
+  it("cancel-in-progress is conditional, never an unguarded true", () => {
+    const { cancelInProgress } = concurrencyBlock();
+    // An unconditional `true` cancels the sweep; a unique-per-run group would
+    // instead let sweeps overlap and race.  The only safe shape is: cancel for
+    // the SHA-keyed events, do not cancel for the sweep.
+    expect(
+      cancelInProgress,
+      "cancel-in-progress: true cancels the cron sweep — gate it on the SHA-keyed events",
+    ).not.toBe("true");
+    expect(cancelInProgress).toContain("github.event_name");
+    expect(cancelInProgress).toContain("pull_request");
+    expect(cancelInProgress).toContain("workflow_run");
+    // …and it must NOT name the sweep's own events, or it cancels them again.
+    expect(cancelInProgress).not.toContain("schedule");
+  });
+});
+
 describe("pr-gate.yml re-evaluates on every other workflow's completion", () => {
   const others = readdirSync(workflowsDir)
     .filter((f) => f.endsWith(".yml") && f !== "pr-gate.yml")

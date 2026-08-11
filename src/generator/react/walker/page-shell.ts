@@ -19,6 +19,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -517,14 +518,36 @@ export function renderCustomLayoutPage(
   // declared inside the page (fresh identity every render ⇒ remounted subtree)
   // and cannot run inside `QueryView`'s conditional slot at all.
   const moduleDecls = (hoistedModuleDecls ?? []).join("\n");
-  return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
+  // Everything below the import block, assembled FIRST so the decimal.js
+  // import can be decided by scanning it — see `decimalImportFor`.
+  const belowImports = `${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${store.decls}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${titleEffect}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+  return `// Auto-generated.  Do not edit by hand.
+${gate.import}${reactImport}${decimalImportFor(belowImports, decimalImport)}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${belowImports}`;
+}
+
+/** The page file's decimal.js import.
+ *
+ *  The narrow trigger (`fallback`) is a money-typed `state {}` field, whose
+ *  `useState<Decimal>(new Decimal("0"))` needs the binding.  That misses every
+ *  OTHER way a page body produces a `Decimal`: `jsExprLeaves.exprConvert`
+ *  emits `new Decimal(…)` for a cast to money, and the shared intrinsic table
+ *  emits `Decimal.min`/`Decimal.max`/`Decimal.ROUND_HALF_UP` — which is why
+ *  those three arms had to be declined before this existed.
+ *
+ *  Deciding it by scanning the RENDERED file body covers all three producers
+ *  at once and cannot drift as the tables change — the same detect-once shape
+ *  as the `usesMoney` / `usesCodeBlock` conditional-dep gates in
+ *  `react/index.ts`.  The narrow trigger is kept as the fallback so a money
+ *  state field that is declared but never READ still imports exactly as
+ *  before, keeping pre-existing pages byte-identical. */
+function decimalImportFor(source: string, fallback: string): string {
+  return usesDecimalBinding(source) ? `import Decimal from "decimal.js";\n` : fallback;
 }
 
 /** Render the page's currentUser binding + optional `requires` guard.

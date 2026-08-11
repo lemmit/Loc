@@ -36,6 +36,17 @@ export const jsExprLeaves: ExprLeaves = {
     if (lit === "string") return JSON.stringify(value);
     if (lit === "bool") return value;
     if (lit === "null") return "null";
+    // `money` is a decimal.js `Decimal` on this surface, NOT a number — the
+    // same representation the TS backend uses (`typescript/render-expr.ts`'s
+    // `renderLiteral`), and the one `exprConvert` below already assumes when it
+    // emits `new Decimal(…)` for a cast to money.  This leaf had diverged and
+    // emitted the bare numeric literal, so a money `state {}` field seeded with
+    // `money("12.50")` produced `ref(12.50)` / `$state<Decimal>(12.50)` — a
+    // type error on Vue and Svelte.  (React never reaches here: its state-init
+    // path renders the money literal itself, which is why the divergence hid.)
+    // Quoted, so the decimal string is parsed exactly rather than round-tripped
+    // through a float.
+    if (lit === "money") return `new Decimal(${JSON.stringify(value)})`;
     // int / decimal / now → emit as numeric literal verbatim.
     return String(value);
   },
