@@ -1,11 +1,11 @@
 {
-  "case": "stamps",
+  "case": "field-mask",
   "oracle": "node",
   "entries": [
     {
       "seq": 0,
       "method": "POST",
-      "path": "/api/orders",
+      "path": "/api/employees",
       "status": 201,
       "body": {
         "id": "<volatile:key>"
@@ -14,48 +14,54 @@
     {
       "seq": 1,
       "method": "GET",
-      "path": "/api/orders/{id}",
+      "path": "/api/employees/{id}",
       "status": 200,
       "body": {
-        "code": "S1",
-        "createdAt": "<timestamp>",
+        "grade": 2,
         "id": "<volatile:key>",
-        "updatedAt": "<timestamp>",
+        "name": "Ada",
+        "nationalId": null,
+        "reviews": [],
+        "salary": null,
         "version": 1
       }
     },
     {
       "seq": 2,
       "method": "POST",
-      "path": "/api/orders/{id}/update",
+      "path": "/api/employees/{id}/promote",
       "status": 204,
       "body": ""
     },
     {
       "seq": 3,
       "method": "GET",
-      "path": "/api/orders/{id}",
+      "path": "/api/employees/{id}",
       "status": 200,
       "body": {
-        "code": "S2",
-        "createdAt": "<timestamp>",
+        "grade": 5,
         "id": "<volatile:key>",
-        "updatedAt": "<timestamp>",
+        "name": "Ada",
+        "nationalId": null,
+        "reviews": [],
+        "salary": null,
         "version": 2
       }
     },
     {
       "seq": 4,
       "method": "GET",
-      "path": "/api/orders",
+      "path": "/api/employees",
       "status": 200,
       "body": {
         "items": [
           {
-            "code": "S2",
-            "createdAt": "<timestamp>",
+            "grade": 5,
             "id": "<volatile:key>",
-            "updatedAt": "<timestamp>",
+            "name": "Ada",
+            "nationalId": null,
+            "reviews": [],
+            "salary": null,
             "version": 2
           }
         ],
@@ -67,28 +73,65 @@
     },
     {
       "seq": 5,
-      "method": "DELETE",
-      "path": "/api/orders/{id}",
+      "method": "GET",
+      "path": "/api/employees/by_name?name=Ada",
+      "status": 200,
+      "body": {
+        "grade": 5,
+        "id": "<volatile:key>",
+        "name": "Ada",
+        "nationalId": null,
+        "reviews": [],
+        "salary": null,
+        "version": 2
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/employees/{id}/update",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 6,
+      "seq": 7,
       "method": "GET",
-      "path": "/api/orders/{id}",
+      "path": "/api/employees/{id}",
+      "status": 200,
+      "body": {
+        "grade": 5,
+        "id": "<volatile:key>",
+        "name": "Ada L",
+        "nationalId": null,
+        "reviews": [],
+        "salary": null,
+        "version": 3
+      }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/employees/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/employees/{id}",
       "status": 404,
       "body": {
-        "detail": "Order {id} not found",
-        "instance": "/api/orders/{id}",
+        "detail": "Employee {id} not found",
+        "instance": "/api/employees/{id}",
         "status": 404,
         "title": "Not Found",
         "type": "about:blank"
       }
     },
     {
-      "seq": 7,
+      "seq": 10,
       "method": "GET",
-      "path": "/api/orders",
+      "path": "/api/employees",
       "status": 200,
       "body": {
         "items": [],
@@ -99,20 +142,20 @@
       }
     },
     {
-      "seq": 8,
+      "seq": 11,
       "method": "PATCH",
-      "path": "/api/orders",
+      "path": "/api/employees",
       "status": 405,
       "body": {
-        "detail": "method PATCH is not supported for /api/orders",
-        "instance": "/api/orders",
+        "detail": "method PATCH is not supported for /api/employees",
+        "instance": "/api/employees",
         "status": 405,
         "title": "Method Not Allowed",
         "type": "about:blank"
       }
     },
     {
-      "seq": 9,
+      "seq": 12,
       "method": "GET",
       "path": "/__loom_no_such_path",
       "status": 404,
@@ -125,26 +168,26 @@
       }
     },
     {
-      "seq": 10,
+      "seq": 13,
       "method": "POST",
-      "path": "/api/orders",
+      "path": "/api/employees",
       "status": 400,
       "body": {
         "detail": "Malformed JSON in request body",
-        "instance": "/api/orders",
+        "instance": "/api/employees",
         "status": 400,
         "title": "Bad Request",
         "type": "about:blank"
       }
     },
     {
-      "seq": 11,
+      "seq": 14,
       "method": "PATCH",
-      "path": "/api/orders",
+      "path": "/api/employees",
       "status": 405,
       "body": {
-        "detail": "method PATCH is not supported for /api/orders",
-        "instance": "/api/orders",
+        "detail": "method PATCH is not supported for /api/employees",
+        "instance": "/api/employees",
         "status": 405,
         "title": "Method Not Allowed",
         "type": "about:blank"

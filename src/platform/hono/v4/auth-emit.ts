@@ -294,6 +294,22 @@ import type { User, UserClaims } from "./user-types";
 import { verifyUserOrThrow } from "./verifier";
 
 const BYPASS_PREFIXES = ${bypass} as const;
+
+/** Whether ANY route serves this path.  Installed by http/index.ts once every
+ *  router is mounted (it owns the router that can answer), so it is null until
+ *  then and the middleware simply authenticates as before.
+ *
+ *  The RFC puts ROUTING before authentication.  §15.5.4 names 404 as the code
+ *  for an origin server that wishes to hide a resource's existence — 404 is the
+ *  sanctioned concealment tool, not 401 — and §15.5.2 defines 401 as missing
+ *  credentials FOR THE TARGET RESOURCE, which invites a retry that can never
+ *  succeed when there is no such resource.  So a path nothing serves falls
+ *  through to the 404 handler rather than being challenged. */
+export type RouteProbe = (path: string) => boolean;
+let routeProbe: RouteProbe | null = null;
+export function registerRouteProbe(fn: RouteProbe): void {
+  routeProbe = fn;
+}
 ${resolverSeam}${rootOrgSeam}
 /** Hono middleware that decodes the request's JWT into a User, attaches it
  *  to the ambient RequestContext (the one source of truth, readable by
@@ -336,6 +352,11 @@ export const authMiddleware = createMiddleware<{
       await next();
       return;
     }
+  }
+  // Route before authenticate — see registerRouteProbe above.
+  if (routeProbe && !routeProbe(path)) {
+    await next();
+    return;
   }
   let claims: UserClaims;
   try {

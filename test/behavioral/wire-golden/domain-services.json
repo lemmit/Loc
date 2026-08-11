@@ -214,6 +214,19 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
+    },
+    {
+      "seq": 17,
+      "method": "PATCH",
+      "path": "/api/accounts",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/accounts",
+        "instance": "/api/accounts",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
     }
   ]
 }

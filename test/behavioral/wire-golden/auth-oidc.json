@@ -140,6 +140,19 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
+    },
+    {
+      "seq": 12,
+      "method": "PATCH",
+      "path": "/api/tickets",
+      "status": 401,
+      "body": {
+        "detail": "no valid credentials for PATCH /api/tickets",
+        "instance": "/api/tickets",
+        "status": 401,
+        "title": "Unauthorized",
+        "type": "about:blank"
+      }
     }
   ]
 }

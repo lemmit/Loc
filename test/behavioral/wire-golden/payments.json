@@ -238,6 +238,19 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
+    },
+    {
+      "seq": 21,
+      "method": "PATCH",
+      "path": "/api/credit_cards",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/credit_cards",
+        "instance": "/api/credit_cards",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
     }
   ]
 }

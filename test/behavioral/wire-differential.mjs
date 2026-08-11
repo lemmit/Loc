@@ -302,6 +302,19 @@ const __frameworkProbes = async (dispatch) => {
   }
   await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: { ...__authHeaders } });
   await dispatch({ method: "POST", url: origin + collection.pathname, headers: json, body: "{not json" });
+  // The AUTH arm, which no recording ever reached: an emitted suite always
+  // authenticates successfully, which is how all five backends came to answer
+  // 401 outside the RFC 7807 contract, two of them in text/plain, and none of
+  // them with the WWW-Authenticate header RFC 9110 makes mandatory.
+  //
+  // Deliberately the WRONG VERB again rather than a read.  Whether an anonymous
+  // caller is refused (401) or routed (405) is the fact worth pinning, and this
+  // shape answers it with a fixed problem document instead of a payload.  An
+  // anonymous GET of the collection was tried first and coupled the golden to
+  // END-OF-TIER DATA: it recorded the whole collection, so the seeding
+  // fixture rows and an operation-returns version counter became wire
+  // divergences that had nothing to do with authentication.
+  await dispatch({ method: "PATCH", url: origin + collection.pathname, headers: { "content-type": "application/json" }, body: "{}" });
 };
 
 // ── authorization ladder (M-T9.28 slice 1) ──────────────────────────────────

@@ -164,6 +164,19 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
+    },
+    {
+      "seq": 15,
+      "method": "PATCH",
+      "path": "/api/widgets",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/widgets",
+        "instance": "/api/widgets",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
     }
   ]
 }
