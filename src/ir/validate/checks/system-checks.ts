@@ -11,7 +11,6 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
-import { SHIPPED_COMBOS } from "../../../util/channels.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import {
@@ -2817,33 +2816,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         `'scheduler.ts' — the cadence would never fire`,
       );
     }
-    // (5) Broker-bound channels: `channelBindings` is computed as `[]` for a
-    // mikroorm deployable (`emit.ts`), so `http/channels.ts` — the driver,
-    // producer tee and consumer loop — is never emitted, while system compose
-    // still provisions the broker sidecar and injects its URL.  The result is a
-    // stack that boots with a live broker nothing publishes to or reads from.
-    // Re-derived here at the IR level rather than calling the generator's
-    // `brokerChannelBindings` (that would be a validate → generator backward
-    // edge); `SHIPPED_COMBOS` lives in `src/util/channels.ts` precisely so a
-    // validator can reason about broker wiring without importing downward.
-    const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
-    for (const csName of dep.channelSourceNames ?? []) {
-      const cs = sys.channelSources.find((c) => c.name === csName);
-      if (!cs) continue;
-      const type = storageType.get(cs.storageName);
-      if (type !== "redis" && type !== "rabbitmq" && type !== "kafka") continue;
-      const ch = sys.subdomains
-        .flatMap((s) => s.contexts)
-        .flatMap((c) => c.channels ?? [])
-        .find((c) => c.name === cs.channelName);
-      if (!ch) continue;
-      if (!SHIPPED_COMBOS[type].has(`${ch.delivery}/${ch.retention}`)) continue;
-      rejectFeature(
-        `it wires the channelSource '${cs.name}' to the ${type} broker '${cs.storageName}'`,
-        `'http/channels.ts' (the broker driver, producer tee and consumer loop) — ` +
-          `compose would still start the broker with nothing publishing to it`,
-      );
-    }
+    // (5) Broker-bound channels: CLOSED by M-T6.23 slice 2 — `channelBindings` is
+    // no longer emptied for a mikroorm deployable, so `http/channels.ts` (the
+    // driver, producer tee and consumer loop) and the boot-time transport /
+    // consumer wiring emit here exactly as on drizzle.  The module reads no
+    // `db`, and the outbox relay it publishes drained rows through landed in
+    // slice 1 — nothing left to gate.
   }
 }
 

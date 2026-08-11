@@ -23,6 +23,23 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const ENABLED = process.env.LOOM_CHANNELS_E2E === "1";
 
+// Persistence-adapter variant (M-T6.23 slice 2).  `LOOM_CHANNELS_PERSISTENCE`
+// forces a `persistence:` clause onto both node deployables, so the SAME
+// cross-process choreography runs on the second node persistence adapter — the
+// pattern `run-dapper.mjs` uses (run-dotnet with the clause forced) rather than
+// a duplicated harness.  `http/channels.ts` itself reads no `db`, but the boot
+// wiring composes the publish tee OVER the outbox dispatcher, and that half is
+// adapter-specific: on mikroorm this is the first runtime caller for
+// `channelPublishTee(transports, createOutboxDispatcher(em, …))` and for the
+// relay publishing drained `__loom_outbox` rows to a real broker.
+const PERSISTENCE = process.env.LOOM_CHANNELS_PERSISTENCE;
+const PLATFORM = PERSISTENCE ? `node { persistence: ${PERSISTENCE} }` : "node";
+const LEG = PERSISTENCE ?? "drizzle";
+// Ports/container names shift for a variant leg so it can run beside the
+// default one locally without squatting its ports.
+const PORT_SHIFT = PERSISTENCE ? 10 : 0;
+const NAME_SUFFIX = PERSISTENCE ? `-${PERSISTENCE}` : "";
+
 const FIXTURE = `
 system Acme {
   subdomain Sales {
@@ -61,15 +78,17 @@ system Acme {
   resource ordersState { for: Orders, kind: state, use: primary }
   resource shippingState { for: Shipping, kind: state, use: primary }
   channelSource lifecycleBus { for: Lifecycle, use: bus }
-  deployable salesApi { platform: node contexts: [Orders] dataSources: [ordersState] channels: [lifecycleBus] port: 3000 }
-  deployable shipApi  { platform: node contexts: [Shipping] dataSources: [shippingState] channels: [lifecycleBus] port: 3001 }
+  deployable salesApi { platform: ${PLATFORM} contexts: [Orders] dataSources: [ordersState] channels: [lifecycleBus] port: 3000 }
+  deployable shipApi  { platform: ${PLATFORM} contexts: [Shipping] dataSources: [shippingState] channels: [lifecycleBus] port: 3001 }
 }
 `;
 
-const SALES_PORT = 3181;
-const SHIP_PORT = 3182;
-const PG_PORT = 55433;
-const REDIS_PORT = 56390;
+const SALES_PORT = 3181 + PORT_SHIFT;
+const SHIP_PORT = 3182 + PORT_SHIFT;
+const PG_PORT = 55433 + PORT_SHIFT;
+const REDIS_PORT = 56390 + PORT_SHIFT;
+const PG_NAME = `loom-channels-pg${NAME_SUFFIX}`;
+const VALKEY_NAME = `loom-channels-valkey${NAME_SUFFIX}`;
 
 const sh = (cmd: string, cwd?: string): string =>
   execSync(cmd, { cwd, stdio: ["ignore", "pipe", "pipe"], timeout: 420_000 }).toString();
@@ -86,7 +105,7 @@ async function waitFor(probe: () => Promise<boolean>, ms: number, label: string)
 const ready = (port: number) => async (): Promise<boolean> =>
   (await fetch(`http://localhost:${port}/ready`)).ok;
 
-describe.skipIf(!ENABLED)("cross-deployable broker delivery (channels-e2e)", () => {
+describe.skipIf(!ENABLED)(`cross-deployable broker delivery (channels-e2e, ${LEG})`, () => {
   let dir: string;
   const apps: ChildProcess[] = [];
   const dockerNames: string[] = [];
@@ -94,7 +113,7 @@ describe.skipIf(!ENABLED)("cross-deployable broker delivery (channels-e2e)", () 
   let redisUrl: string;
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "loom-channels-e2e-"));
+    dir = mkdtempSync(join(tmpdir(), `loom-channels-e2e${NAME_SUFFIX}-`));
     writeFileSync(join(dir, "sys.ddd"), FIXTURE);
     sh(`node ${join(process.cwd(), "bin/cli.js")} generate system sys.ddd -o out`, dir);
 
@@ -105,9 +124,9 @@ describe.skipIf(!ENABLED)("cross-deployable broker delivery (channels-e2e)", () 
       pgUrl = (db) => `${pgOverride.replace(/\/[^/]*$/, "")}/${db}`;
     } else {
       sh(
-        `docker run -d --rm --name loom-channels-pg -e POSTGRES_PASSWORD=postgres -p ${PG_PORT}:5432 postgres:18-alpine`,
+        `docker run -d --rm --name ${PG_NAME} -e POSTGRES_PASSWORD=postgres -p ${PG_PORT}:5432 postgres:18-alpine`,
       );
-      dockerNames.push("loom-channels-pg");
+      dockerNames.push(PG_NAME);
       pgUrl = (db) => `postgres://postgres:postgres@localhost:${PG_PORT}/${db}`;
       // The postgres entrypoint restarts the server after initdb, so a bare
       // pg_isready can pass in the init window — make the CREATE DATABASE
@@ -115,7 +134,7 @@ describe.skipIf(!ENABLED)("cross-deployable broker delivery (channels-e2e)", () 
       await waitFor(
         async () => {
           sh(
-            `docker exec loom-channels-pg psql -U postgres -c "CREATE DATABASE sales_api;" -c "CREATE DATABASE ship_api;"`,
+            `docker exec ${PG_NAME} psql -U postgres -c "CREATE DATABASE sales_api;" -c "CREATE DATABASE ship_api;"`,
           );
           return true;
         },
@@ -126,10 +145,8 @@ describe.skipIf(!ENABLED)("cross-deployable broker delivery (channels-e2e)", () 
     if (redisOverride) {
       redisUrl = redisOverride;
     } else {
-      sh(
-        `docker run -d --rm --name loom-channels-valkey -p ${REDIS_PORT}:6379 valkey/valkey:8-alpine`,
-      );
-      dockerNames.push("loom-channels-valkey");
+      sh(`docker run -d --rm --name ${VALKEY_NAME} -p ${REDIS_PORT}:6379 valkey/valkey:8-alpine`);
+      dockerNames.push(VALKEY_NAME);
       redisUrl = `redis://localhost:${REDIS_PORT}`;
     }
 

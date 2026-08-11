@@ -64,6 +64,12 @@ on:
       - 'src/ir/**'
       - 'src/system/**'
       - 'src/util/**'
+      # The Hono backend + every PlatformSurface: `src/platform/hono/v4/emit.ts`
+      # owns the channel-transport wiring (bindings -> http/channels.ts -> the
+      # boot-time publish tee + consumer loop) and `composeService` provisions
+      # the broker sidecar, yet neither could trigger this gate before M-T6.23
+      # slice 2 — which changed exactly that file.
+      - 'src/platform/**'
       - 'src/generator/_channels/**'
       - 'src/generator/typescript/emit/channels.ts'
       - 'src/generator/python/channels-builder.ts'
@@ -106,6 +112,13 @@ jobs:
         include:
           - backend: node
             script: test:channels
+          # The SECOND node persistence adapter (M-T6.23 slice 2): same
+          # choreography with `persistence: mikroorm` forced onto both
+          # deployables, so the publish tee composed over the MikroORM outbox
+          # dispatcher (and the relay publishing drained rows to the broker) is
+          # proven at runtime, not just tsc-compiled.
+          - backend: node-mikroorm
+            script: test:channels-mikroorm
           - backend: python
             script: test:channels-python
           - backend: dotnet
