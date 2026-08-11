@@ -173,6 +173,40 @@ inline conditions so the next variant cannot forget it independently.
 
 ---
 
+### F4 — a field named `secret` after a modifier-less property is swallowed as that property's access modifier — **open**
+
+**Class:** grammar ambiguity / degenerate name (M-T9.22's tail; found incidentally while
+writing F3's regression test).
+
+`FieldAccess` (`src/language/ddd.langium:1744`) is `'immutable' | 'managed' | 'token' |
+'internal' | 'secret'`, and the comment three lines above states the intent plainly: these are
+admitted as property names "so pre-existing files that named a field `money` / `secret` / etc.
+keep parsing". They do not, in one position. Because a property is `name ':' type (access)?`
+and the grammar is newline-insensitive, a bare property followed by a property *named* one of
+those five is parsed as `<prev>: <type> <access>` — and the next `:` is then a syntax error
+pointing at the **wrong line**:
+
+```ddd
+aggregate Doc with crudish {
+  title: string
+  secret: string        // ← 7:15 error: Expecting token of type '}' but found ':'
+}
+```
+
+Reorder the two and it parses cleanly (`secret` first, `title` second), as does
+`amount: int = 0` followed by `secret: string` — a trailing `= default` terminates the
+property and disambiguates. So the failure depends on the *preceding* field, which is why it
+survives: any fixture that happens to put the field first, or after a defaulted field, never
+sees it. The composer originally named its masked field `secret` and parsed fine for exactly
+that reason (it follows `amount: int = 0`); it now uses `ssn`, so a harness failure is always
+attributable to a crossing rather than to a name trap.
+
+**Not fixed here:** a grammar change (`ddd.langium` + regenerate + printer round-trip), well
+outside a harness slice. Worth pairing with M-T9.22, whose subject is exactly this shape of
+bug.
+
+---
+
 ### F5 — a principal capability filter × `shape: document` × `persistence: mikroorm` does not compile — **open**
 
 **Class:** feature × feature × adapter (three-factor), same family as F3 and in the same file.
@@ -213,40 +247,6 @@ as an always-false constant and references no principal.
 the mikro document repository — several method bodies in an emitter with no test at this
 crossing. It belongs with F2 in one "document/embedded repositories are missing what the
 relational one has" follow-up.
-
----
-
-### F4 — a field named `secret` after a modifier-less property is swallowed as that property's access modifier — **open**
-
-**Class:** grammar ambiguity / degenerate name (M-T9.22's tail; found incidentally while
-writing F3's regression test).
-
-`FieldAccess` (`src/language/ddd.langium:1744`) is `'immutable' | 'managed' | 'token' |
-'internal' | 'secret'`, and the comment three lines above states the intent plainly: these are
-admitted as property names "so pre-existing files that named a field `money` / `secret` / etc.
-keep parsing". They do not, in one position. Because a property is `name ':' type (access)?`
-and the grammar is newline-insensitive, a bare property followed by a property *named* one of
-those five is parsed as `<prev>: <type> <access>` — and the next `:` is then a syntax error
-pointing at the **wrong line**:
-
-```ddd
-aggregate Doc with crudish {
-  title: string
-  secret: string        // ← 7:15 error: Expecting token of type '}' but found ':'
-}
-```
-
-Reorder the two and it parses cleanly (`secret` first, `title` second), as does
-`amount: int = 0` followed by `secret: string` — a trailing `= default` terminates the
-property and disambiguates. So the failure depends on the *preceding* field, which is why it
-survives: any fixture that happens to put the field first, or after a defaulted field, never
-sees it. The composer originally named its masked field `secret` and parsed fine for exactly
-that reason (it follows `amount: int = 0`); it now uses `ssn`, so a harness failure is always
-attributable to a crossing rather than to a name trap.
-
-**Not fixed here:** a grammar change (`ddd.langium` + regenerate + printer round-trip), well
-outside a harness slice. Worth pairing with M-T9.22, whose subject is exactly this shape of
-bug.
 
 ---
 
