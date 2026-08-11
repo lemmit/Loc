@@ -121,9 +121,31 @@ permissions:
 # One evaluation per SHA at a time; a burst of completions collapses to the
 # newest evaluation (cancelled `pr-gate-eval` runs are excluded from the
 # verdict by SELF_NAMES).
+#
+# The SWEEP needs different handling on BOTH lines, and getting either wrong
+# re-breaks the safety net:
+#
+#   * `group` — a `schedule` / `workflow_dispatch` payload has neither
+#     `pull_request` nor `workflow_run`, so both expressions resolved to empty
+#     and the key degenerated to the literal `pr-gate-`.  Every sweep shared one
+#     group, and with `cancel-in-progress: true` each cron tick killed the
+#     previous tick.  Under the runner starvation the sweep exists to survive,
+#     a queued sweep was reliably cancelled by the next one and the verdict
+#     never got posted — observed on #2443: checks all green at 22:07Z, sweeps
+#     at 21:20Z and 22:08Z both cancelled, gate parked at `in_progress`.
+#     A literal `sweep` key keeps sweeps in their own group, clear of the
+#     SHA-keyed evaluations.
+#
+#   * `cancel-in-progress` — must be FALSE for the sweep.  Making each sweep
+#     unique (e.g. falling back to `github.run_id`) would stop the cancelling
+#     but let sweeps OVERLAP, and two concurrent sweeps race: the slower one
+#     posts its older verdict last and can re-park a PR it already greened.
+#     With cancellation off, GitHub keeps the running sweep alive and holds at
+#     most one pending behind it (a newer pending replaces an older pending) —
+#     never lose the newest, never kill the in-flight one.
 concurrency:
-  group: pr-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
-  cancel-in-progress: true
+  group: pr-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || 'sweep' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_run' }}
 
 jobs:
   pr-gate-eval:
