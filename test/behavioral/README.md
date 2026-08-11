@@ -188,6 +188,29 @@ will generate old code and produce misleading failures.
 Both tiers gate: any `api` or `unit` failure, or a boot/infra error,
 fails the run.
 
+### Contract fuzzing (`run-schemathesis.mjs`)
+
+A sibling runner reusing this tier's boot, for a different question. The
+suites above ask *"does the backend do what the model said?"* with
+example-shaped input. This one asks *"does the backend honour the contract
+it published?"* with adversarial input — it serves the generated Hono app on
+a **real port** (`@hono/node-server` over the same PGlite boot, because
+Schemathesis is an out-of-process HTTP client and cannot reach `app.fetch`)
+and feeds it its own emitted `/openapi.json`:
+
+```bash
+uv tool install schemathesis          # once (or pipx)
+npm run test:schemathesis             # from the repo root; ~1 min
+LOOM_SCHEMATHESIS=1 node run-schemathesis.mjs storefront-system   # one case
+```
+
+Known findings are **ratcheting root-cause rules** in
+`schemathesis-waivers.json`, explained in
+[`docs/audits/schemathesis-findings-2026-08.md`](../../docs/audits/schemathesis-findings-2026-08.md):
+a finding no rule matches fails the run, and a rule that stops reproducing
+fails it too, so a fix deletes its rule in the same PR. Nightly in CI
+(`schemathesis.yml`), or on demand via the `run-schemathesis` label.
+
 ## Corpus
 
 `corpus.json` is a curated allowlist. **Constraint:** each system has
