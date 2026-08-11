@@ -105,7 +105,7 @@ const SPECS: Record<Backend, BackendSpec> = {
       region: { file: "http/crate.routes.ts", from: 'operationId: "destroyCrate"', to: "\n  );" },
       gate: 'if (!((currentUser.permissions).includes("ops.manage"))) throw new ForbiddenError("Forbidden: currentUser.permissions.contains(permissions.manage)");',
       after: ["await repo.getById(Ids.CrateId(id));"],
-      before: ["await repo.delete(Ids.CrateId(id));"],
+      before: ["tx.insert(schema.auditRecords)", "await repoTx.delete(Ids.CrateId(id));"],
     },
   },
   python: {
@@ -147,7 +147,7 @@ const SPECS: Record<Backend, BackendSpec> = {
         'if "ops.manage" not in current_user.permissions:\n' +
         '        raise ForbiddenError("Forbidden: currentUser.permissions.contains(permissions.manage)")',
       after: ["await repo.get_by_id(CrateId(id))"],
-      before: ["await repo.delete(CrateId(id))"],
+      before: ["await repo.record_audit(", "await repo.delete(CrateId(id))"],
     },
   },
   java: {
@@ -183,7 +183,7 @@ const SPECS: Record<Backend, BackendSpec> = {
       },
       gate: 'if (!(currentUser.permissions().contains("ops.manage"))) throw new ForbiddenException("Forbidden: currentUser.permissions.contains(permissions.manage)");',
       after: ["var aggregate = repository.getById(id);"],
-      before: ["repository.delete(aggregate);"],
+      before: ["auditRecords.save(new AuditRecord(", "repository.delete(aggregate);"],
     },
   },
   dotnet: {
@@ -232,7 +232,7 @@ const SPECS: Record<Backend, BackendSpec> = {
         "        {\n" +
         '            throw new ForbiddenException("Forbidden: currentUser.permissions.contains(permissions.manage)");',
       after: ["var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)"],
-      before: ["await _repo.DeleteAsync(aggregate, cancellationToken);"],
+      before: ["_audit.Stage(new AuditRecord", "await _repo.DeleteAsync(aggregate, cancellationToken);"],
     },
   },
   vanilla: {

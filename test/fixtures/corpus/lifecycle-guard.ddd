@@ -64,7 +64,12 @@ system LifecycleGuard {
 
       repository Shipments for Shipment { }
 
-      aggregate Crate {
+      // `audited` on top of the gate is deliberate: the audit path is where a
+      // denial can land on the WRONG side of the staged row (the .NET defect
+      // #2450's gate passed was exactly a gate below the write), and it is the
+      // one interaction the compile tiers can observe — an extra load, an extra
+      // local, a rollback arm the `case` has no clause for.
+      aggregate Crate audited {
         label: string
 
         // No create guard — the ungated control.
