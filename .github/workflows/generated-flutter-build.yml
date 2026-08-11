@@ -134,6 +134,14 @@ jobs:
                 repository Categories for Category { }
                 repository Products for Product {
                   find byName(term: string): Product[] where this.name == term
+                  // PARAMETERLESS find — the branch that shipped invalid Dart
+                  // (#2433).  A named find's provider is keyed by a RECORD of
+                  // its params, and with none that spelled the empty record as
+                  // `({})` instead of `()`, so `reads.dart` did not parse at
+                  // all.  Every other Flutter-reachable read in this fixture
+                  // takes an argument, which is exactly why the gate stayed
+                  // green through it.
+                  find inStock(): Product[] where this.inStock == true
                 }
                 // M-T1.3 Phase 1 — query-time PROJECTION reads, both shapes:
                 // a SINGLETON (one object, `FutureProvider<Row?>`) and a
@@ -201,6 +209,11 @@ jobs:
                     of: Shop.Product.byName("widget"),
                     loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No matches." },
                     data: hits => Stack { For { each: hits, h => Text { h.name } } }
+                  },
+                  QueryView {
+                    of: Shop.Product.inStock,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "None in stock." },
+                    data: avail => Stack { For { each: avail, a => Text { a.name } } }
                   },
                   Button { "Add product", to: "/products/new" }
                 }
