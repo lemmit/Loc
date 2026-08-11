@@ -625,6 +625,16 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
+  // The chart component (`Chart`, M-T1.3 Phase 4).  It cannot ride
+  // `result.imports` like a pack component: the loop above drops every RELATIVE
+  // specifier (React-pipeline leakage), and a Vue SFC is a DEFAULT export,
+  // which the walker's named-import map cannot express either.  So the page
+  // imports it off the same MARKER the template carries — the discipline the
+  // Flutter shell already uses for `LoomModalHost`, which keeps the emitted
+  // file and its import from ever dangling apart.
+  if (result.tsx.includes("<LoomChart")) {
+    script.push(`import LoomChart from "${adjustDepth("../components/LoomChart.vue", input)}";`);
+  }
   for (const line of storeWiring.imports) script.push(line);
   script.push("");
   if (needsRoute) {

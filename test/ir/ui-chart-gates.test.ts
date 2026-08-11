@@ -71,14 +71,27 @@ system S {
 `;
 
 describe("loom.chart-unsupported-target (per-pack gate)", () => {
-  it("rejects Chart on a vue frontend", async () => {
+  // Vue used to be the example of a rejected framework here.  It renders now
+  // (M-T1.3 Phase 4, through the SHARED `vue/primitive-chart.hbs` + the
+  // generated `LoomChart.vue`), so the gate is asserted on the frameworks that
+  // genuinely still lack a renderer.  Swapping the subject rather than deleting
+  // the case keeps the check biting: with every framework ported this reads as
+  // "the gate works" and "the gate is unreachable" identically from outside.
+  for (const framework of ["svelte", "angular"]) {
+    it(`rejects Chart on a ${framework} frontend`, async () => {
+      const diags = await diagsOf(sys({ framework }));
+      const hit = diags.find((d) => d.code === "loom.chart-unsupported-target");
+      expect(hit).toBeDefined();
+      expect(hit?.severity).toBe("error");
+      // The message must point at the alternative that actually works.
+      expect(hit?.message).toContain("Table");
+      expect(hit?.message).toContain("react");
+    });
+  }
+
+  it("accepts Chart on a vue frontend", async () => {
     const diags = await diagsOf(sys({ framework: "vue" }));
-    const hit = diags.find((d) => d.code === "loom.chart-unsupported-target");
-    expect(hit).toBeDefined();
-    expect(hit?.severity).toBe("error");
-    // The message must point at the alternative that actually works.
-    expect(hit?.message).toContain("Table");
-    expect(hit?.message).toContain("react");
+    expect(diags.find((d) => d.code === "loom.chart-unsupported-target")).toBeUndefined();
   });
 
   // The pack backfill is complete (M-T1.3 Phase 5): every tsx pack emits

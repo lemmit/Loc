@@ -81,6 +81,18 @@ function quoteAttrExpr(expr: string, prefer: '"' | "'" = '"'): string {
  *  generator-core slice on) the shared markup walker. */
 export const vueTarget: WalkerTarget = {
   framework: "vue",
+
+  // The chart component takes a FLAT point list, so the `x:`/`y:` accessors are
+  // applied here rather than passed along as key names — the same split
+  // Flutter's `LoomChartPoint` draws.  `Number(...)` is the coercion the shared
+  // JS default already applies for the same reason: a `money` field parses into
+  // a `Decimal`, which nothing can plot.
+  renderChartData({ queryExpr, dataKey, seriesField }) {
+    return (
+      `(${queryExpr}.data ?? []).map((r) => ` +
+      `({ label: String(r.${dataKey}), value: Number(r.${seriesField}) }))`
+    );
+  },
   // Expression-syntax leaves (JS) — shared by all JSX-family frontends.
   ...jsExprLeaves,
 

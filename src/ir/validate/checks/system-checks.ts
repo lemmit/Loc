@@ -386,7 +386,7 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
  *  NOTE for the sibling ports: this one-line Set is edited by every frontend's
  *  chart PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
  *  already present plus yours — never by taking one side wholesale. */
-const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter"]);
+const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter", "vue"]);
 
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
