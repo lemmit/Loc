@@ -762,7 +762,7 @@ export function renderApiExceptionAdvice(
     ``,
     `    @ExceptionHandler(HttpMessageNotReadableException.class)`,
     `    public ResponseEntity<ProblemDetail> onUnreadable(HttpMessageNotReadableException e, WebRequest request) {`,
-    `        return respond(problem(400, "Bad Request", "Malformed request body.", request), 400);`,
+    `        return respond(problem(400, "Bad Request", "Malformed JSON in request body", request), 400);`,
     `    }`,
     ``,
     `    @ExceptionHandler(Exception.class)`,
@@ -787,7 +787,22 @@ export function renderApiExceptionAdvice(
     // `getBody().getDetail()` is Spring's own human-readable explanation
     // ("Method 'PUT' is not supported."); it is null for a few, hence the
     // fall back to the reason phrase so `detail` is never absent.
-    `            var detail = er.getBody().getDetail() != null ? er.getBody().getDetail() : reason;`,
+    // RFC 7807 asks `detail` for an explanation specific to THIS occurrence.
+    // Spring's own is specific for most faults, but the two ROUTING misses get
+    // the wording the cross-backend wire golden pins — those are the entries
+    // every backend produces, so they are the ones that have to agree.
+    // `WebRequest` carries neither the URI nor the verb — those are
+    // `HttpServletRequest`, reached through the servlet-flavoured subtype the
+    // MVC stack always passes here.  Fully qualified so the advice's import
+    // block stays as it was.
+    `            var servletRequest =`,
+    `                ((org.springframework.web.context.request.ServletWebRequest) request).getRequest();`,
+    `            var path = servletRequest.getRequestURI();`,
+    `            var detail = switch (status) {`,
+    `                case 404 -> "no route for " + servletRequest.getMethod() + " " + path;`,
+    `                case 405 -> "method " + servletRequest.getMethod() + " is not supported for " + path;`,
+    `                default -> er.getBody().getDetail() != null ? er.getBody().getDetail() : reason;`,
+    `            };`,
     `            CatalogLog.event("client_error", "warn", "error", detail, "status", status);`,
     `            return respond(problem(status, reason, detail, request), status);`,
     `        }`,

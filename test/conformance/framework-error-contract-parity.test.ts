@@ -60,7 +60,13 @@ const SEAMS: Record<(typeof PLATFORMS)[number], { why: string; shape: RegExp; fi
   node: [
     // Hono's default for an unmatched route is `text/plain` "404 Not Found" —
     // no router's onError ever runs, because no router was reached.
-    { why: "root notFound handler", shape: /app\.notFound\(\(c\) =>/ },
+    { why: "root notFound handler", shape: /app\.notFound\(\(c\) => \{/ },
+    // A miss that is really a METHOD mismatch answers 405 + Allow, not 404 —
+    // the probe router is what separates the two, and skipping `ALL` is what
+    // keeps middleware (`app.use("*", …)`, registered under that method and
+    // matching every path) from reporting an Allow on every unknown URL.
+    { why: "method-mismatch probe", shape: /methodProbe\.add\(r\.method, r\.path, r\.method\)/ },
+    { why: "ALL exclusion in the probe", shape: /if \(r\.method !== "ALL"\)/ },
     // …and a fault hono raises INSIDE a router (a malformed JSON body arrives
     // as HTTPException 400) fell past every domain arm into the generic 500.
     // Scoped to the ROUTER file on purpose: http/index.ts carries the same
@@ -111,9 +117,29 @@ const SEAMS: Record<(typeof PLATFORMS)[number], { why: string; shape: RegExp; fi
     // the `json` format — `application/json`.  A controller is the only place
     // the content type can be set, hence the catch-all route.
     { why: "catch-all route", shape: /match :\*, "\/\*path", NotFoundController, :not_found/ },
+    // Same 405 split as node, through phoenix's own router lookup.  The
+    // `%{plug: __MODULE__}` arm is load-bearing: this controller IS the
+    // catch-all, registered for `:*`, so route_info matches it for every method
+    // on every path — counting those would answer 405 for a URL serving nothing.
+    //
+    // Both are scoped to the CONTROLLER file.  `Phoenix.Router.route_info(`
+    // already appears in `request_context.ex` and `telemetry.ex`, which call it
+    // to recover the route template for a log line — an unscoped search finds
+    // those and stays green with this probe deleted.  (Mutation caught it; the
+    // identical trap took the node arm in #2472.)
+    {
+      why: "method-mismatch probe",
+      shape: /Phoenix\.Router\.route_info\(/,
+      file: /not_found_controller\.ex$/,
+    },
+    {
+      why: "catch-all self-exclusion",
+      shape: /%\{plug: __MODULE__\} -> false/,
+      file: /not_found_controller\.ex$/,
+    },
     {
       why: "problem+json content type",
-      shape: /put_resp_content_type\("application\/problem\+json"\)\n {4}\|> send_resp\(404/,
+      shape: /put_resp_content_type\("application\/problem\+json"\)\n {4}\|> send_resp\(status/,
     },
     { why: "RFC 7807 ErrorJSON view", shape: /type: "about:blank",\n {6}title: title,/ },
   ],

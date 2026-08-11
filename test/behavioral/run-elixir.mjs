@@ -279,7 +279,11 @@ export async function run() {
     return { ok: true, response: { status: r.status, statusText: r.statusText, headers, body: await r.text() } };
   });
   const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: BEARER_ENV });
-  return { results: await runTests(cases), wire: __wire };
+  const results = await runTests(cases);
+  // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
+  // golden aligns on, and so a failing tier is diagnosed on its own requests.
+  await __frameworkProbes(dispatch);
+  return { results, wire: __wire };
 }
 `;
 }

@@ -1641,6 +1641,11 @@ def install_openapi(app: FastAPI) -> None:
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
+# The one wording every backend sends for a body it could not read.  Shared as
+# a constant because the cross-backend wire golden compares it byte-for-byte.
+MALFORMED_BODY = "Malformed JSON in request body"
+
+
 def problem(
     request: Request,
     status: int,
@@ -1710,8 +1715,8 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # tags it \`json_invalid\`), which is why python was the one backend
         # answering 422 with a nonsense \`/1\` byte-offset pointer.
         if any(str(e.get("type", "")) == "json_invalid" for e in err.errors()):
-            log("warn", "client_error", error="Malformed request body.", status=400)
-            return problem(request, 400, "Bad Request", "Malformed request body.")
+            log("warn", "client_error", error=MALFORMED_BODY, status=400)
+            return problem(request, 400, "Bad Request", MALFORMED_BODY)
         errors = []
         for e in err.errors():
             entry: dict[str, str] = {
@@ -1748,8 +1753,21 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # \`err.headers\` is forwarded because the framework puts semantics
         # there — a 405 carries \`Allow\`, a 401 carries \`WWW-Authenticate\`;
         # dropping them would trade one contract break for another.
+        # RFC 7807 asks \`detail\` for "an explanation specific to THIS
+        # occurrence".  Starlette's is the reason phrase, which just repeats
+        # \`title\` and tells a caller nothing — and the cross-backend wire
+        # golden showed it as the one member still diverging once the statuses
+        # converged.  The two framework misses get the occurrence-specific
+        # wording the oracle (node) sends; anything else keeps starlette's,
+        # which for a hand-raised HTTPException is genuinely specific.
         title = HTTPStatus(err.status_code).phrase
-        detail = err.detail if isinstance(err.detail, str) else title
+        path = request.url.path
+        if err.status_code == 404:
+            detail = f"no route for {request.method} {path}"
+        elif err.status_code == 405:
+            detail = f"method {request.method} is not supported for {path}"
+        else:
+            detail = err.detail if isinstance(err.detail, str) else title
         log("warn", "client_error", error=detail, status=err.status_code)
         return problem(
             request,

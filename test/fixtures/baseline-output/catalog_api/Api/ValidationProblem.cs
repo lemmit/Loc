@@ -32,7 +32,7 @@ public static class ValidationProblem
                 Type = "about:blank",
                 Title = "Bad Request",
                 Status = 400,
-                Detail = "Malformed request body.",
+                Detail = "Malformed JSON in request body",
                 Instance = context.HttpContext.Request.Path,
             })
             {

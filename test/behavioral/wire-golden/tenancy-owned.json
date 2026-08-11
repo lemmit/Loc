@@ -196,6 +196,45 @@
         "total": 0,
         "totalPages": 0
       }
+    },
+    {
+      "seq": 17,
+      "method": "PATCH",
+      "path": "/api/invoices",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/invoices",
+        "instance": "/api/invoices",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 18,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 19,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/invoices",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
     }
   ]
 }
