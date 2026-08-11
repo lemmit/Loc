@@ -14,12 +14,17 @@
 // One F# function per walked component, spliced into `App.fs` ahead of the page
 // views (F# is order-sensitive, and the views call these) — the same channel the
 // hoisted `DataGrid` child rides.  Feliz has no per-component FILE, so there is
-// nothing else to place it in:
+// nothing else to place it in.  The functions go in a NESTED module that is
+// immediately `open`ed, which is what keeps a component free to be named after
+// anything the rest of App.fs declares (see `renderFelizComponentModule`):
 //
-//     let TierBadge (props: {| label: string; level: int |}) =
-//         let label = props.label
-//         let level = props.level
-//         Html.div [ … ]
+//     module Components =
+//         let TierBadge (props: {| label: string; level: int |}) =
+//             let label = props.label
+//             let level = props.level
+//             Html.div [ … ]
+//
+//     open Components
 //
 // The single anonymous-record parameter is what keeps ONE call form for both
 // flavours: `felizTarget.renderUserComponent` already emits
@@ -121,13 +126,24 @@ function needsMvuScope(fs: string): boolean {
   return /\bmodel\b/.test(fs) || /\bdispatch\b/.test(fs);
 }
 
+/** One rendered component: its F# declaration plus the sibling components its
+ *  body CALLS — F# resolves top-to-bottom, so the callees have to be declared
+ *  first (see `orderByCallGraph`). */
+interface RenderedComponent {
+  name: string;
+  decl: string;
+  /** Sibling walked components this body calls. */
+  uses: ReadonlySet<string>;
+  component: ComponentIR;
+}
+
 /** Walk one component body and render its F# declaration, or `undefined` when
  *  the walked body needs MVU scope (see the header). */
 function renderOne(
   c: ComponentIR,
   componentParams: ReadonlyMap<string, readonly ParamIR[]>,
   ctx: FelizComponentCtx,
-): string | undefined {
+): { decl: string; uses: ReadonlySet<string> } | undefined {
   const result = walkBody(
     c.body!,
     felizTarget,
@@ -174,22 +190,81 @@ function renderOne(
   const binds = c.params
     .filter((p) => result.usedParams.has(p.name))
     .map((p) => `    let ${p.name} = props.${p.name}`);
-  return [
-    head,
-    ...binds,
-    body
+  return {
+    decl: [
+      head,
+      ...binds,
+      body
+        .split("\n")
+        .map((l) => (l.length > 0 ? `    ${l}` : l))
+        .join("\n"),
+    ].join("\n"),
+    // Only sibling WALKED components matter for ordering; an extern call resolves
+    // through an `open`ed module, and a primitive isn't a name at all.
+    uses: new Set([...result.usedUserComponents].filter((n) => componentParams.has(n))),
+  };
+}
+
+/** Order the declarations so every callee precedes its caller — F# resolves
+ *  names top-to-bottom, so a component calling a sibling declared LATER in the
+ *  `.ddd` would not compile.  Depth-first post-order over the call graph; a cycle
+ *  (pathological — `A` calling `B` calling `A`) keeps source order for its
+ *  members, which F# then rejects rather than the emitter silently reordering
+ *  into something that looks fine and isn't. */
+function orderByCallGraph(rendered: readonly RenderedComponent[]): RenderedComponent[] {
+  const byName = new Map(rendered.map((r) => [r.name, r] as const));
+  const out: RenderedComponent[] = [];
+  const done = new Set<string>();
+  const onPath = new Set<string>();
+  const visit = (r: RenderedComponent): void => {
+    if (done.has(r.name) || onPath.has(r.name)) return;
+    onPath.add(r.name);
+    for (const use of [...r.uses].sort()) {
+      const dep = byName.get(use);
+      if (dep) visit(dep);
+    }
+    onPath.delete(r.name);
+    done.add(r.name);
+    out.push(r);
+  };
+  for (const r of rendered) visit(r);
+  return out;
+}
+
+/** The nested module the component functions are declared in, `open`ed on the
+ *  next line so a call site can keep referencing the bare name.
+ *
+ *  WHY A MODULE AND NOT TOP-LEVEL `let`s.  `App.fs` is ONE F# module, and Fable
+ *  compiles each of its members to a JS binding of the same name — so a
+ *  top-level `let Product` beside the emitted wire record `type Product` is a
+ *  hard `error FABLE: Cannot have two module members with same name: Product`
+ *  (measured, not assumed).  Nothing stops a user from naming a component after
+ *  an aggregate, a projection row, a `<X>Form`, a hoisted `DataGrid` child, or
+ *  `Model`/`Msg`/`Api`/`View`.  Enumerating those names would be a second copy
+ *  of every naming decision the emitter makes, free to drift; a nested module
+ *  makes the collision IMPOSSIBLE instead — the members live in their own scope,
+ *  and the following `open` re-exposes them to the views.  A PascalCase value
+ *  brought into scope beside a same-named TYPE or MODULE is unambiguous in F#
+ *  (`Api.foo` still resolves the module, a type annotation still resolves the
+ *  type), which is what makes the `open` safe. */
+export function renderFelizComponentModule(decls: readonly string[]): string[] {
+  if (decls.length === 0) return [];
+  const indented = decls.map((d) =>
+    d
       .split("\n")
       .map((l) => (l.length > 0 ? `    ${l}` : l))
       .join("\n"),
-  ].join("\n");
+  );
+  return ["", "module Components =", indented.join("\n\n"), "", "open Components"];
 }
 
 /** Emit every walked (non-`extern`) user component of this ui.
  *
- *  Returns the F# declarations (spliced into `App.fs` ahead of the page views)
- *  plus the name→params map of what actually emitted — merged into the extern
- *  map and threaded through every page / component walk, so ONLY an emitted
- *  component resolves at a call site. */
+ *  Returns the F# declarations (wrapped by `renderFelizComponentModule` and
+ *  spliced into `App.fs` ahead of the page views) plus the name→params map of
+ *  what actually emitted — merged into the extern map and threaded through every
+ *  page / component walk, so ONLY an emitted component resolves at a call
+ *  site. */
 export function emitFelizUserComponents(
   components: readonly ComponentIR[],
   ctx: FelizComponentCtx,
@@ -198,21 +273,22 @@ export function emitFelizUserComponents(
   // Nested components make emittability TRANSITIVE (a body may only call a
   // function that is itself emitted), so iterate to a fixpoint: each round either
   // drops at least one candidate or is the last.
-  let rendered: { name: string; decl: string; component: ComponentIR }[] = [];
+  let rendered: RenderedComponent[] = [];
   for (;;) {
     const inScope = new Map<string, readonly ParamIR[]>(candidates.map((c) => [c.name, c.params]));
-    const round: typeof rendered = [];
+    const round: RenderedComponent[] = [];
     for (const c of candidates) {
-      const decl = renderOne(c, inScope, ctx);
-      if (decl === undefined) continue;
-      round.push({ name: c.name, decl, component: c });
+      const one = renderOne(c, inScope, ctx);
+      if (one === undefined) continue;
+      round.push({ name: c.name, decl: one.decl, uses: one.uses, component: c });
     }
     rendered = round;
     if (round.length === candidates.length) break;
     candidates = round.map((r) => r.component);
   }
+  const ordered = orderByCallGraph(rendered);
   return {
-    decls: rendered.map((r) => r.decl),
-    params: new Map(rendered.map((r) => [r.name, r.component.params] as const)),
+    decls: ordered.map((r) => r.decl),
+    params: new Map(ordered.map((r) => [r.name, r.component.params] as const)),
   };
 }

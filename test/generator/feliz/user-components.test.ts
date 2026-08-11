@@ -11,8 +11,11 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // `test/generator/_walker/render-degradation.test.ts`).
 //
 // Feliz has no per-component FILE, so each component becomes an F# function of
-// its props record, spliced into `App.fs` AHEAD of the page views (F# is
-// order-sensitive).  The props record is what keeps ONE call form for both
+// its props record, declared in a nested `Components` module (then `open`ed)
+// AHEAD of the page views — F# is order-sensitive, and the module is what makes a
+// name collision with an App.fs member (a wire record, `Model`, `Api`, a hoisted
+// grid child) impossible rather than enumerated: Fable rejects two members of the
+// same name in one module.  The props record is what keeps ONE call form for both
 // flavours — the extern seam's `Name {| … |}` call already matches it.
 //
 // The Feliz mirror of react's `walker-user-components.test.ts` and vue's
@@ -54,9 +57,11 @@ describe("user components — Feliz", () => {
       }
       page Home { route: "/" body: Stack { TierBadge(label: "gold", level: 3) } }`),
     );
-    expect(fs).toContain("let TierBadge (props: {| label: string; level: int |}) =");
-    expect(fs).toContain("let label = props.label");
-    expect(fs).toContain("let level = props.level");
+    expect(fs).toContain("module Components =");
+    expect(fs).toContain("open Components");
+    expect(fs).toContain("    let TierBadge (props: {| label: string; level: int |}) =");
+    expect(fs).toContain("        let label = props.label");
+    expect(fs).toContain("        let level = props.level");
     // The walked body landed inside the function (the `Text { label }` slot).
     expect(fs).toMatch(/let TierBadge[\s\S]*?Html\.text \(string \(label\)\)/);
     expect(fs).not.toContain("unknown layout component");
@@ -78,10 +83,13 @@ describe("user components — Feliz", () => {
       page Home { route: "/" body: Stack { TierBadge(label: "gold") } }`),
     );
     const decl = fs.indexOf("let TierBadge (props:");
-    const view = fs.search(/let \w*[Vv]iew \(model: Model\)/);
+    const open = fs.indexOf("open Components");
+    const view = fs.search(/^let \w*[Vv]iew \(model: Model\)/m);
     expect(decl).toBeGreaterThan(-1);
     expect(view).toBeGreaterThan(-1);
-    expect(decl).toBeLessThan(view);
+    // module member, then the `open` that re-exposes it, then the caller.
+    expect(decl).toBeLessThan(open);
+    expect(open).toBeLessThan(view);
   });
 
   it("binds only the params the body reads (an unread param stays props-only)", async () => {
@@ -153,6 +161,32 @@ describe("user components — Feliz", () => {
     expect(fs).not.toContain("let OrderLine (props:");
   });
 
+  it("a component named after a wire record is scoped by the module, not dropped", async () => {
+    // Measured, not assumed: with the decl at App.fs top level, `let Order`
+    // beside the emitted `type Order` is `error FABLE: Cannot have two module
+    // members with same name: Order`.  The nested module + `open` makes that
+    // impossible for EVERY App.fs member (records, `Model`, `Api`, a hoisted grid
+    // child) without enumerating any of them — and the call site is unchanged,
+    // because a PascalCase value in scope beside a same-named type is
+    // unambiguous in F#.
+    const fs = await appFs(
+      sys(`
+      component Order(order: Order) { body: Text { order.customerId } }
+      page Home {
+        route: "/"
+        body: QueryView { of: Sales.Order.all, data: rows => Stack {
+          For { each: rows, o => Order(order: o) }
+        } }
+      }`),
+    );
+    expect(fs).toContain("type Order =");
+    expect(fs).toContain("    let Order (props: {| order: Order |}) =");
+    expect(fs).toContain("Order {| order = o |}");
+    // The record type stays a TOP-LEVEL member; the component is a module one.
+    expect(fs).toMatch(/^type Order =/m);
+    expect(fs).not.toMatch(/^let Order \(props:/m);
+  });
+
   it("an extern component still binds by module (the other flavour is untouched)", async () => {
     const fs = await appFs(
       sys(`
@@ -177,9 +211,21 @@ describe("user components — Feliz", () => {
       component TierBadge(label: string) { body: Stack { Text { label }, Ribbon() } }
       page Home { route: "/" body: Stack { TierBadge(label: "gold") } }`),
     );
-    // Both declared, and the inner one BEFORE its caller (declaration order
-    // follows the ui's, which is the order F# needs here).
     expect(fs.indexOf("let Ribbon () =")).toBeLessThan(fs.indexOf("let TierBadge (props:"));
     expect(fs).toMatch(/let TierBadge[\s\S]*?Ribbon \(\)/);
+  });
+
+  it("the CALLEE is declared first even when the .ddd declares the caller first", async () => {
+    // F# resolves names top-to-bottom, so emitting in `.ddd` order would put
+    // `Ribbon` after the `TierBadge` that calls it — "The value or constructor
+    // 'Ribbon' is not defined".  Source order is not a compilability contract, so
+    // the emitter sorts by the call graph.
+    const fs = await appFs(
+      sys(`
+      component TierBadge(label: string) { body: Stack { Text { label }, Ribbon() } }
+      component Ribbon() { body: Text { "sale" } }
+      page Home { route: "/" body: Stack { TierBadge(label: "gold") } }`),
+    );
+    expect(fs.indexOf("let Ribbon () =")).toBeLessThan(fs.indexOf("let TierBadge (props:"));
   });
 });

@@ -171,6 +171,37 @@ describe("user components — Angular", () => {
     expect(home).not.toContain("import { Panel }");
   });
 
+  it("an arg-less api read inside a component hoists like a page's", async () => {
+    const files = await angularFiles(
+      sys(`
+      component OrderCount() {
+        body: QueryView { of: Sales.Order.all, data: rows => Text { string(rows.length) } }
+      }
+      page Home { route: "/" body: Stack { OrderCount() } }`),
+    );
+    const comp = files.get("src/app/components/OrderCount.ts")!;
+    expect(comp).toContain("readonly orderAll = useAllOrders();");
+    expect(comp).toContain('import { useAllOrders } from "../../api/order";');
+  });
+
+  it("a read whose ARG reads an @Input() defers (the field initializer beats the input)", async () => {
+    // The shell hoists a read as a class-FIELD initializer, which runs in the
+    // constructor — before Angular sets any input — so `useOrderById(this.oid)`
+    // would throw on `undefined` at construction.  Compiles, breaks at runtime:
+    // exactly the class this deferral exists to keep out.
+    const files = await angularFiles(
+      sys(`
+      component OrderCard(oid: string) {
+        body: QueryView { of: Sales.Order.byId(oid), single: true, data: o => Text { o.customerId } }
+      }
+      page Home { route: "/" body: Stack { OrderCard(oid: "x") } }`),
+    );
+    expect(files.has("src/app/components/OrderCard.ts")).toBe(false);
+    expect(files.get("src/app/pages/home.component.ts")).toContain(
+      "unknown layout component: OrderCard",
+    );
+  });
+
   it("an extern component still resolves through its own shim path", async () => {
     const files = await angularFiles(
       sys(`

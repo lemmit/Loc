@@ -45,6 +45,9 @@
 //     reference through the inputs object, losing `this` at the call.
 //   • a body that records onto the shared React-shaped form/mutation sinks
 //     (`pageNeedsDeferredFeatures`) — the same guard that stubs such a PAGE.
+//   • an api read whose ARG reads an `@Input()` — the shell hoists a read as a
+//     class-field initializer, which runs before Angular sets inputs (see
+//     `renderOne`).  An arg-less read and a reactive find are unaffected.
 
 import type {
   AggregateIR,
@@ -146,6 +149,20 @@ function renderOne(
     ctx.i18nEnabled ? `component.${c.name}` : undefined,
   );
   if (pageNeedsDeferredFeatures(result)) return undefined;
+  // An api read whose ARG reads an `@Input()` is deferred.  The shell hoists a
+  // read as a class FIELD initializer, which runs in the constructor — before
+  // Angular has set any input — so `useOrderById(this.order.id)` would throw on
+  // `undefined` at construction.  (A *reactive* find is exempt: its args are
+  // wrapped in a `() => (…)` the query re-reads, so the input is read lazily.)
+  // An arg-less read (`<handle>.<Agg>.all`) is likewise unaffected — the common
+  // case, and it stays supported.
+  const inputNames = c.params.map((p) => p.name);
+  const readsAnInput = [...result.usedApiHooks.values()].some(
+    (h) =>
+      !h.reactiveQuery &&
+      h.argsRendered.some((a) => inputNames.some((n) => new RegExp(`(?<![.\\w])${n}\\b`).test(a))),
+  );
+  if (readsAnInput) return undefined;
   const mode: AngularComponentMode = {
     className: c.name,
     selector: componentSelector(c.name),

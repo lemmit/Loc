@@ -49,7 +49,7 @@ import {
   renderFelizGate,
   uiHasPageGate,
 } from "./auth-gate.js";
-import { emitFelizUserComponents } from "./component-emit.js";
+import { emitFelizUserComponents, renderFelizComponentModule } from "./component-emit.js";
 import { FELIZ_GRID_PRELUDE } from "./data-grid-child.js";
 import { felizTarget } from "./feliz-target.js";
 import {
@@ -1333,8 +1333,10 @@ function renderAppFs(
     ...used.gridDecls.flatMap((d) => ["", d]),
     // Walked user components (`component-emit.ts`) — BEFORE the page views, for
     // the same reason the grid children are: F# is order-sensitive and the views
-    // call these.
-    ...walkedComponents.decls.flatMap((d) => ["", d]),
+    // call these.  Declared in a nested `Components` module (then `open`ed) so a
+    // component named after a wire record / `Model` / `Api` can't collide with an
+    // App.fs member — see `renderFelizComponentModule`.
+    ...renderFelizComponentModule(walkedComponents.decls),
     "",
     views.join("\n"),
     "",
