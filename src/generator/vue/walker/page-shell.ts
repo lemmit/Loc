@@ -70,6 +70,12 @@ function renderInitLiteral(e: ExprIR): string | undefined {
   if (e.kind === "literal") {
     if (e.lit === "string") return JSON.stringify(e.value);
     if (e.lit === "null") return "null";
+    // `money` is a decimal.js `Decimal`, not a number — a bare `ref(12.50)`
+    // types the ref as `Ref<number>`, so every `.toDecimalPlaces(…)` read off
+    // it fails `vue-tsc`.  Mirrors `jsExprLeaves.exprLiteral`; Vue needs its
+    // own arm because state inits render through this literal reader rather
+    // than through the shared leaf table (same as Angular's).
+    if (e.lit === "money") return `new Decimal(${JSON.stringify(e.value)})`;
     // int / decimal / bool already carry their JS-literal text.
     return e.value;
   }
