@@ -13,7 +13,7 @@ distribute one bucket per backend to `language-feature-developer` (backend
 generator trees are disjoint — `src/generator/<backend>/` never collide, so the
 fixes parallelise cleanly).
 
-Legend: 🔴 confirmed (reproduced) · 🟡 suspected (needs a boot to confirm) · ✅ fixed.
+Legend: 🔴 confirmed (reproduced) · 🟡 suspected (needs a boot to confirm) · ✅ fixed · ⛔ confirmed, fix missioned elsewhere (the case is honestly skipped on that backend meanwhile).
 
 ---
 
@@ -34,7 +34,7 @@ Booted locally against `systems/{sales,payments,ledger,shapes}.ddd` + the
 | stamps (auditable)            |  ✅  |  ✅  |   ✅   |  ✅    |✅ B7   |
 | paged / criterion-filter      |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | single-containment            |  ✅  |  ✅  |   ✅   |✅ B8   |✅ B9   |
-| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |✅ B10  |
+| seeding                       |  ✅  |  ✅  |   ✅   |  ✅    |⛔ B19  |
 | operation-returns (`T or Err`)|  ✅  |  ✅  |   ✅   |  ✅    |✅ B11  |
 | core-domain                   |  ✅  |  ✅  |   ✅   |  ✅    |  ✅    |
 | document (crudish)            |  ✅  |  ✅  |   ✅   |✅ B12  |  ✅    |
@@ -58,7 +58,9 @@ Elixir was booted locally via the `elixir:1.16-otp-26` docker image + node 22
 (the generated project pins Elixir `~> 1.16` and the CLI needs node ≥21 for
 `Object.groupBy`; host apt ships only Elixir 1.14, and the 1.16 binary download is
 org-policy-blocked). Every elixir gap the drain surfaced (B5/B6/B7/B9/B10/B11/B13) is
-now fixed; all corpus cases boot green on all five backends.
+now fixed; all corpus cases boot green on all five backends. **Amended 2026-08-11:**
+`seeding` is no longer green on elixir — not a regression but a gap that only became
+visible once anything read a seeded row back (**B19**, the first ⛔ in this register).
 
 ---
 
@@ -68,7 +70,7 @@ now fixed; all corpus cases boot green on all five backends.
 - **Repro:** `test/fixtures/corpus/seeding.ddd` on elixir → generate and `find -iname "*seed*"`: no file. Boot the leg and read a collection: the table is empty, where the other four legs hold the `default` dataset's rows.
 - **Impact:** every `seed` block is a no-op on `platform: elixir` — first-boot reference data simply does not exist, with no diagnostic. A SILENT gap of the class `CLAUDE.md` forbids (a feature the manifest claims on all five backends: `manifest.ts` `{ id: "seeding", backends: ALL }`). It stayed invisible because seed data is only observable through a COLLECTION read, and the one fixture that has seeds had none — the node behavioural leg didn't even run its own seeder (`R.unseededListRead`), so no leg could assert a seeded row.
 - **Found by:** #2517 (M-T9.13), giving `seeding`'s two list routes their first callers.
-- **Status:** OPEN. Registered honestly as `BEHAVIOURAL_SKIP.elixir.seeding` (`test/behavioral/cases.mjs`) with this cause, so the elixir leg does not fail on rows it cannot have; the case still runs on the other four and the emit-everywhere gate still requires it to generate. **The fix is its own slice:** an Ecto seeder module (domain rows through the context `create` path, raw rows as **schema-qualified** INSERTs, the ship-once `__loom_seed` marker, `LOOM_SEED` dataset gating — the java `SeedRunner` is the closest model) plus an invocation at boot next to the migrations. Delete the skip entry when it lands. Until then, the honest alternative would be a `loom.elixir-unsupported`-style gate on `seed` for that platform — deliberately NOT added here, because it would fail generation for every seeded elixir system and break the corpus compile matrix in the same PR that only meant to observe the gap.
+- **Status:** OPEN. Registered honestly as `BEHAVIOURAL_SKIP.elixir.seeding` (`test/behavioral/cases.mjs`) with this cause, so the elixir leg does not fail on rows it cannot have; the case still runs on the other four and the emit-everywhere gate still requires it to generate. **The fix is its own slice — mission [M-T6.37](../new-plan/T6-backend-parity.md#m-t637--elixir-emits-no-seeder-seed-datasets-are-silently-dropped--open--m--p1--silent-gap-in-a-feature-claimed-on-five-backends):** an Ecto seeder module (domain rows through the context `create` path, raw rows as **schema-qualified** INSERTs, the ship-once `__loom_seed` marker, `LOOM_SEED` dataset gating — the java `SeedRunner` is the closest model) plus an invocation at boot next to the migrations. Delete the skip entry when it lands. Until then, the honest alternative would be a `loom.elixir-unsupported`-style gate on `seed` for that platform — deliberately NOT added here, because it would fail generation for every seeded elixir system and break the corpus compile matrix in the same PR that only meant to observe the gap.
 
 ---
 

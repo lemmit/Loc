@@ -254,7 +254,7 @@ const BEHAVIOURAL_SKIP = {
     // start empty — while node/python/java/dotnet all seed at boot.  Invisible
     // until something read a seeded row back: the fixture compiled green on all
     // five backends and the case passed here because nothing asserted the rows.
-    // Delete this entry when the Elixir seeder lands (M-T9.13 follow-up).
+    // Delete this entry when the Elixir seeder lands — M-T6.37 owns it.
     seeding:
       "elixir emits no seed runner — `seed` datasets are silently dropped, so the seeded rows the fixture reads back never exist (B19)",
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
