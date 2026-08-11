@@ -422,7 +422,7 @@ export function renderHttpIndex(
       // answers 404 instead of challenging for credentials that could never
       // make it resolve.  Installed here because this is where the router that
       // can answer the question lives.
-      authRequired ? "  registerRouteProbe((p) => allowedFor(p).length > 0);" : null,
+      authRequired ? "  registerRouteProbe((m, p) => allowedFor(p).includes(m));" : null,
       "  app.notFound((c) => {",
       "    const allow = allowedFor(c.req.path).filter((m) => m !== c.req.method);",
       "    if (allow.length > 0) {",

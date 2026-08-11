@@ -143,12 +143,12 @@
     },
     {
       "seq": 12,
-      "method": "PATCH",
-      "path": "/api/tickets",
+      "method": "GET",
+      "path": "/api/tickets/{id}",
       "status": 401,
       "body": {
-        "detail": "no valid credentials for PATCH /api/tickets",
-        "instance": "/api/tickets",
+        "detail": "no valid credentials for GET /api/tickets/{id}",
+        "instance": "/api/tickets/{id}",
         "status": 401,
         "title": "Unauthorized",
         "type": "about:blank"

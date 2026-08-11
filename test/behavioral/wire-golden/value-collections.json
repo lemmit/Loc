@@ -155,14 +155,14 @@
     },
     {
       "seq": 10,
-      "method": "PATCH",
-      "path": "/api/invoices",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/invoices",
-        "instance": "/api/invoices",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Invoice {id} not found",
+        "instance": "/api/invoices/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

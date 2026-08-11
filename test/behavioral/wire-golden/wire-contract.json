@@ -240,14 +240,14 @@
     },
     {
       "seq": 18,
-      "method": "PATCH",
-      "path": "/api/listings",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/listings/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/listings",
-        "instance": "/api/listings",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Listing {id} not found",
+        "instance": "/api/listings/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

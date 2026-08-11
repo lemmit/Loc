@@ -182,14 +182,14 @@
     },
     {
       "seq": 14,
-      "method": "PATCH",
-      "path": "/api/employees",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/employees/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/employees",
-        "instance": "/api/employees",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Employee {id} not found",
+        "instance": "/api/employees/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

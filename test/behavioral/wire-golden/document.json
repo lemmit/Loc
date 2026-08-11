@@ -206,14 +206,14 @@
     },
     {
       "seq": 16,
-      "method": "PATCH",
-      "path": "/api/articles",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/articles/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/articles",
-        "instance": "/api/articles",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Article {id} not found",
+        "instance": "/api/articles/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

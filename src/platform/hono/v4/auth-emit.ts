@@ -304,8 +304,17 @@ const BYPASS_PREFIXES = ${bypass} as const;
  *  sanctioned concealment tool, not 401 — and §15.5.2 defines 401 as missing
  *  credentials FOR THE TARGET RESOURCE, which invites a retry that can never
  *  succeed when there is no such resource.  So a path nothing serves falls
- *  through to the 404 handler rather than being challenged. */
-export type RouteProbe = (path: string) => boolean;
+ *  through to the 404 handler rather than being challenged.
+ *
+ *  Keyed on (METHOD, path), because that is what a router resolves.  Keying on
+ *  the path alone answers 401 for a wrong VERB on a path that exists, which
+ *  contradicts the same ladder: a method mismatch is a ROUTING outcome, so it
+ *  belongs to the 405 handler, ahead of authentication.  Phoenix was already
+ *  right here and node was not — the cross-backend recording is what said so.
+ *  Disclosing the served methods to an anonymous caller is consistent with
+ *  answering 404 honestly for an unknown path: concealment has its own
+ *  sanctioned tool (§15.5.4) and this API does not use it. */
+export type RouteProbe = (method: string, path: string) => boolean;
 let routeProbe: RouteProbe | null = null;
 export function registerRouteProbe(fn: RouteProbe): void {
   routeProbe = fn;
@@ -354,7 +363,7 @@ export const authMiddleware = createMiddleware<{
     }
   }
   // Route before authenticate — see registerRouteProbe above.
-  if (routeProbe && !routeProbe(path)) {
+  if (routeProbe && !routeProbe(c.req.method, path)) {
     await next();
     return;
   }

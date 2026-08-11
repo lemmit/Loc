@@ -263,14 +263,14 @@
     },
     {
       "seq": 23,
-      "method": "PATCH",
-      "path": "/api/cars",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/cars/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/cars",
-        "instance": "/api/cars",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Car {id} not found",
+        "instance": "/api/cars/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

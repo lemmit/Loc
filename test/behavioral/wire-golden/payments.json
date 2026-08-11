@@ -241,14 +241,14 @@
     },
     {
       "seq": 21,
-      "method": "PATCH",
-      "path": "/api/credit_cards",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/credit_cards/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/credit_cards",
-        "instance": "/api/credit_cards",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "CreditCard {id} not found",
+        "instance": "/api/credit_cards/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

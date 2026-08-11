@@ -377,14 +377,14 @@
     },
     {
       "seq": 31,
-      "method": "PATCH",
-      "path": "/api/products",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/products/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/products",
-        "instance": "/api/products",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Product {id} not found",
+        "instance": "/api/products/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

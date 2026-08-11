@@ -211,14 +211,14 @@
     },
     {
       "seq": 15,
-      "method": "PATCH",
-      "path": "/api/items",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/items/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/items",
-        "instance": "/api/items",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Item {id} not found",
+        "instance": "/api/items/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

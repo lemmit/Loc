@@ -217,14 +217,14 @@
     },
     {
       "seq": 17,
-      "method": "PATCH",
-      "path": "/api/accounts",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/accounts/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/accounts",
-        "instance": "/api/accounts",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Account {id} not found",
+        "instance": "/api/accounts/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

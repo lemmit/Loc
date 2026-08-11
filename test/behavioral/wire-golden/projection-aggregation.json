@@ -259,14 +259,14 @@
     },
     {
       "seq": 21,
-      "method": "PATCH",
-      "path": "/api/orders",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/orders",
-        "instance": "/api/orders",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }

@@ -143,14 +143,14 @@
     },
     {
       "seq": 12,
-      "method": "PATCH",
-      "path": "/api/tickets",
-      "status": 405,
+      "method": "GET",
+      "path": "/api/tickets/{id}",
+      "status": 404,
       "body": {
-        "detail": "method PATCH is not supported for /api/tickets",
-        "instance": "/api/tickets",
-        "status": 405,
-        "title": "Method Not Allowed",
+        "detail": "Ticket {id} not found",
+        "instance": "/api/tickets/{id}",
+        "status": 404,
+        "title": "Not Found",
         "type": "about:blank"
       }
     }
