@@ -37,7 +37,10 @@ async function angularFiles(src: string): Promise<Map<string, string>> {
 const sys = (uiBody: string) => `
   system S {
     subdomain M { context Sales {
-      aggregate Order { customerId: string }
+      aggregate Order with crudish {
+        customerId: string
+        operation confirm() { }
+      }
       repository Orders for Order { }
     } }
     api SalesApi from M
@@ -200,6 +203,28 @@ describe("user components — Angular", () => {
     expect(files.get("src/app/pages/home.component.ts")).toContain(
       "unknown layout component: OrderCard",
     );
+  });
+
+  it("an `Action(<input>.<op>)` component hoists the mutation and reads the id at CLICK time", async () => {
+    // The canonical component shape (`component OrderActions(order: Order)`):
+    // the mutation is a class field (an injection context), and the id is read
+    // inside the click method — i.e. after Angular has set the input, which is
+    // why THIS shape is supported while an input-fed READ is not.
+    const files = await angularFiles(
+      sys(`
+      component OrderActions(order: Order) { body: Stack { Action { order.confirm } } }
+      page Home {
+        route: "/"
+        body: QueryView { of: Sales.Order.all, data: rows => Stack {
+          For { each: rows, o => OrderActions(order: o) }
+        } }
+      }`),
+    );
+    const comp = files.get("src/app/components/OrderActions.ts")!;
+    expect(comp).toContain("@Input() order!: OrderResponse;");
+    expect(comp).toContain("readonly confirmOrder = useConfirmOrder();");
+    expect(comp).toContain("const id = this.order?.id;");
+    expect(comp).toContain("await this.confirmOrder.mutateAsync({ id, input: {} });");
   });
 
   it("an extern component still resolves through its own shim path", async () => {

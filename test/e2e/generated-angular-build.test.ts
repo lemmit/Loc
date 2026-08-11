@@ -139,10 +139,11 @@ const SHOWCASE: Case = {
         // aggregate-typed input carrying the wire DTO (its ../../api/<agg>
         // import resolves only at component depth); and a STATEFUL component
         // whose signal / computed / action-method members come from the page
-        // shell's own machinery, and a component that ISSUES A READ (its
-        // TanStack query hoists as a class field, the same as a page's).  ng
-        // build is the only gate that type-checks a generated Angular TEMPLATE,
-        // so all four live here.
+        // shell's own machinery; a component that ISSUES A READ (its TanStack
+        // query hoists as a class field, the same as a page's); and the
+        // canonical Action host (an @Input()-typed record + the mutation the
+        // click method awaits).  ng build is the only gate that type-checks a
+        // generated Angular TEMPLATE, so all five live here.
         component TierBadge(label: string, level: int) {
           body: Stack {
             Text { label },
@@ -152,6 +153,9 @@ const SHOWCASE: Case = {
         }
         component OrderLine(order: Order) {
           body: Stack { Text { order.customerId }, Text { string(order.priority) } }
+        }
+        component OrderActions(order: Order) {
+          body: Stack { Action { order.confirm } }
         }
         component OrderCount() {
           body: QueryView {
@@ -210,6 +214,7 @@ const SHOWCASE: Case = {
               Heading { "Order" },
               Text { o.customerId },
               OrderLine { order: o },
+              OrderActions { order: o },
               Action { o.confirm }
             }
           }
