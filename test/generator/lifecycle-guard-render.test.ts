@@ -341,12 +341,7 @@ function assertGate(files: ReadonlyMap<string, string>, spec: GateSpec, label: s
 /** Every spelling of a denial, across the five backends — used NEGATIVELY, on
  *  the ungated control, so a gate-everything emitter cannot hide behind one
  *  backend's idiom. */
-const DENIAL_SPELLINGS = [
-  "ForbiddenError(",
-  "ForbiddenException(",
-  ":forbidden",
-  "403",
-] as const;
+const DENIAL_SPELLINGS = ["ForbiddenError(", "ForbiddenException(", ":forbidden", "403"] as const;
 
 describe("lifecycle `requires` — the emitted gate ENFORCES, per backend", () => {
   for (const [backend, spec] of Object.entries(SPECS) as [Backend, BackendSpec][]) {

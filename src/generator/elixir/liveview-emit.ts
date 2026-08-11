@@ -501,9 +501,7 @@ function buildActionHandlers(
     // actions load the record first, then invoke the op on it.
     const body = b.byId
       ? [
-          ...(destroyUsesUser
-            ? ["    current_user = Map.get(socket.assigns, :current_user)"]
-            : []),
+          ...(destroyUsesUser ? ["    current_user = Map.get(socket.assigns, :current_user)"] : []),
           `    ${ctxModule}.${b.eventName}!(id${destroyUsesUser ? ", current_user" : ""})`,
           `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
         ]

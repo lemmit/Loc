@@ -26,6 +26,8 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { stmtUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../../ir/util/op-gates.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
@@ -40,6 +42,7 @@ import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { aggregateHasResidualInvariants } from "./changeset-invariant-emit.js";
+import { denialTerm } from "./denial.js";
 import {
   isVanillaDocAgg,
   renderDocNamedOpFunction,
@@ -68,13 +71,6 @@ import {
   renderReturningStmt,
   wrapOpBodyWithGuards,
 } from "./operation-returns-emit.js";
-import { stmtUsesCurrentUser } from "../../../ir/types/loom-ir.js";
-import {
-  lifecycleGates,
-  lifecycleGatesReadRow,
-  lifecycleGatesUseCurrentUser,
-} from "../../../ir/util/op-gates.js";
-import { denialTerm } from "./denial.js";
 import { refCollFieldNames } from "./ref-collection-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
@@ -121,9 +117,7 @@ function lifecycleEnsureClauses(
 ): readonly string[] {
   return lifecycleGates(action).map((g) => {
     const pred = renderExpr(g.expr, rc);
-    const guarded = stmtUsesCurrentUser(g)
-      ? `not is_nil(current_user) and (${pred})`
-      : `(${pred})`;
+    const guarded = stmtUsesCurrentUser(g) ? `not is_nil(current_user) and (${pred})` : `(${pred})`;
     return `:ok <- ensure(${guarded}, ${denialTerm(g)})`;
   });
 }

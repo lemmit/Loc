@@ -694,7 +694,7 @@ ${auditRecordCall({
                    ? `
                {:error, {:forbidden, detail}} -> ${appModule}.Repo.rollback({:forbidden, detail})`
                    : ""
-               }
+}
              end
            end) do
       send_resp(conn, 204, "")
