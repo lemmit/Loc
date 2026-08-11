@@ -388,6 +388,12 @@ export function renderAuthFiles(
       `            throws java.io.IOException {`,
       `        var detail = "no valid credentials for " + request.getMethod() + " " + request.getRequestURI();`,
       `        response.setStatus(401);`,
+      // Encoding BEFORE content type: the servlet default is ISO-8859-1, and a
+      // `detail` is localisable (the i18n layer resolves messages per request
+      // locale), so a non-Latin-1 character would go out mangled.  Booting the
+      // generated app is what showed it — `charset=ISO-8859-1` on the wire —
+      // and the golden could not: it compares status and body, not headers.
+      `        response.setCharacterEncoding("UTF-8");`,
       `        response.setContentType("application/problem+json");`,
       `        response.setHeader("WWW-Authenticate", "Bearer realm=\\"api\\", error=\\"invalid_token\\"");`,
       `        response.getWriter().write(`,
