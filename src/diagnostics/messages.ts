@@ -1306,9 +1306,10 @@ export const DIAGNOSTIC_MESSAGES = {
     `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
   "loom.chart-unsupported-target": (p: { what: unknown; name: unknown; uiFramework: unknown }) =>
     `${p.what} uses 'Chart', which deployable '${p.name}' can't render ` +
-    `(frontend '${p.uiFramework}'). Chart ships on react (on every react design pack) and on ` +
-    `phoenixLiveView (server-rendered inline SVG). Host this ui on one of those, or bind the ` +
-    `grouped projection to 'Table' — it renders the same rows on every frontend.`,
+    `(frontend '${p.uiFramework}'). Chart ships on every shipping frontend — react, vue, ` +
+    `svelte, angular, feliz, flutter and phoenixLiveView — so this names a frontend the ` +
+    `chart renderer has not been written for yet. Bind the grouped projection to 'Table' ` +
+    `meanwhile: it renders the same rows on every frontend.`,
   "loom.ui-projection-read-unsupported#frontend-has-no-client": (p: {
     what: unknown;
     name: unknown;
