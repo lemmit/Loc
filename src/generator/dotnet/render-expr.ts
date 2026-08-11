@@ -86,6 +86,13 @@ export interface CsRenderContext {
    *  the read side already uses — one currentUser resolution for the whole
    *  backend.  Unset everywhere a `currentUser` local is actually in scope. */
   currentUserExpr?: string;
+  /** Text an operation-PARAMETER ref renders as, overriding the default bare
+   *  parameter name.  A hoisted `requires` gate (op-gates.ts) is evaluated by
+   *  the CALLER, where the operation's arguments are not locals — they live on
+   *  the command record (`command.<Name>`) or, at a workflow's inline op-call,
+   *  in the caller's own expressions.  Unset everywhere the parameters really
+   *  are in scope. */
+  paramExpr?: (name: string) => string | undefined;
   /** Read-port handle resolver for a `reading`-tier domain-service body
    *  (domain-services.md rev. 4, Slice 1).  A `repo-read` Call
    *  (`Accounts.byHolder(holder)`, lowered to `callKind: "repo-read"`) renders
@@ -601,7 +608,7 @@ function renderRef(e: RefExpr, ctx: CsRenderContext): string {
       // use matches the (also-escaped) binding (`let base` → `@base`).
       return escapeCsharpIdent(e.name);
     case "param":
-      return e.name;
+      return ctx.paramExpr?.(e.name) ?? e.name;
     case "this-prop":
     case "this-vo-prop":
     case "this-derived":

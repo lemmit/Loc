@@ -19,8 +19,9 @@ import type {
   OperationIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { aggregateUsesMoney } from "../../../ir/types/loom-ir.js";
 import { directParentName } from "../../../ir/util/containment-parent.js";
+import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -118,9 +119,10 @@ export function renderAggregate(
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
   // Lifecycle stamps no longer thread the principal into the domain (it's
-  // stamped persist-time in the drizzle save()), so only operation bodies
-  // pull in the User type now.
-  const usesUser = agg.operations.some(operationUsesCurrentUser);
+  // stamped persist-time in the drizzle save()), and the leading `requires`
+  // gates are hoisted to the calling handler (`src/ir/util/op-gates.ts`), so
+  // only what REMAINS of an operation body can pull the principal in here.
+  const usesUser = agg.operations.some(operationBodyUsesCurrentUser);
   const usesMoney = aggregateUsesMoney(agg);
   // The errors-module imports are conditional on what the body emits
   // (see render-stmt.ts and the invariant renderer below):
@@ -131,8 +133,12 @@ export function renderAggregate(
     agg.invariants.length > 0 ||
     agg.parts.some((p) => p.invariants.length > 0) ||
     agg.operations.some((op) => op.statements.some((s) => s.kind === "precondition"));
+  // Only NON-leading `requires` statements still render here — the leading run
+  // is hoisted to the calling handler, which owns the 403 (op-gates.ts).  An
+  // aggregate whose every gate hoisted drops the `ForbiddenError` import with
+  // the last statement that threw it.
   const usesForbidden = agg.operations.some((op) =>
-    op.statements.some((s) => s.kind === "requires"),
+    operationBody(op).some((s) => s.kind === "requires"),
   );
   const errorsImportList = [usesDomain && "DomainError", usesForbidden && "ForbiddenError"]
     .filter(Boolean)
@@ -483,10 +489,13 @@ function renderEntity(
   // file imports the User type from auth/.  Per-op signatures still
   // get the parameter conditionally so a non-auth op stays
   // un-burdened with a User param.
-  const _anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
+  const _anyOpUsesCurrentUser = e.operations.some(operationBodyUsesCurrentUser);
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
+    // The authorization gate is the CALLER's job — the handler evaluates it
+    // post-load, before this method is entered (op-gates.ts).
+    const opBody = operationBody(op);
     const baseParams = op.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
     const userParam = usesUser ? "currentUser: User" : "";
     const params = [baseParams, userParam].filter(Boolean).join(", ");
@@ -503,7 +512,7 @@ function renderEntity(
       const retType = op.returnType ? renderOperationReturnType(op.returnType, ctx) : "void";
       // Preconditions kept as their own method (parity with the prior shape).
       ops.push(`  ${checkName}(${params}): void {`);
-      const checkBody = renderTsStatements(op.statements, emitProvenance, {
+      const checkBody = renderTsStatements(opBody, emitProvenance, {
         emitTrace,
         aggregate: e.name,
         op: op.name,
@@ -550,7 +559,7 @@ function renderEntity(
     // per-chunk list lets us surface per-statement sub-regions to the caller
     // that owns the recorder + this file's final content (source-map
     // Milestone 3, Hono-only for now — see `OpFragment`).
-    const chunks = renderTsStatementChunks(op.statements, emitProvenance, {
+    const chunks = renderTsStatementChunks(opBody, emitProvenance, {
       emitTrace,
       aggregate: e.name,
       op: op.name,
@@ -562,11 +571,11 @@ function renderEntity(
       // slice 2) — only computed on this recording path (`opFragments`
       // present); the flag-off run above never re-renders the RHS
       // expressions through the marks-carrying entry.
-      const exprMarks = op.statements.map((s, i) => statementExprMarks(s, chunks[i]!));
+      const exprMarks = opBody.map((s, i) => statementExprMarks(s, chunks[i]!));
       opFragments.push({
         fragmentText: body,
         subRegions: statementSubRegions(
-          op.statements,
+          opBody,
           chunks,
           `${ctx.name}.${e.name}.${op.name}`,
           exprMarks,

@@ -3,13 +3,13 @@ import {
   type EnrichedBoundedContextIR,
   type EventSubscriptionIR,
   type ExprIR,
-  operationUsesCurrentUser,
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser, operationGates } from "../../ir/util/op-gates.js";
 
 /** The resolved body of one subscription (the `on` reactor or event-`create`
  *  starter): its statements, aggregate saves, and correlation routing expr. */
@@ -1649,7 +1649,8 @@ export function csWorkflowStmtTarget(
       return [`${indent}var ${st.name} = ${call};`];
     },
     opCall: (st, indent) => {
-      const argList = st.args.map(renderArg).join(", ");
+      const renderedArgs = st.args.map(renderArg);
+      const argList = renderedArgs.join(", ");
       const op = ctx.aggregates
         .find((a) => a.name === st.aggName)
         ?.operations.find((o) => o.name === st.op);
@@ -1662,11 +1663,27 @@ export function csWorkflowStmtTarget(
       // `User currentUser` parameter on the aggregate method — pass
       // the workflow handler's local `currentUser` through.
       const callArgs =
-        op && operationUsesCurrentUser(op)
+        op && operationBodyUsesCurrentUser(op)
           ? argList.length > 0
             ? `${argList}, currentUser`
             : "currentUser"
           : argList;
+      // The op's authorization gate is hoisted out of the entity (op-gates.ts),
+      // so EVERY caller owns it — this inline op-call included.  Emitting it
+      // here is what keeps the hoist enforcement-neutral instead of silently
+      // dropping the check on the non-HTTP path.
+      const gateLines = (op ? operationGates(op) : []).map((g) => {
+        const pred = renderCsExpr(g.expr, {
+          thisName: st.target,
+          paramExpr: (name) => {
+            const i = op!.params.findIndex((q) => q.name === name);
+            return i >= 0 ? renderedArgs[i] : undefined;
+          },
+        });
+        return `${indent}if (!(${pred})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: ${g.source}`,
+        )});`;
+      });
       const callLine = `${indent}${st.target}.${upperFirst(st.op)}(${callArgs});`;
       // Audited op invoked inline → stage an AuditRecord bracketing the call
       // with before/after wire snapshots, mirroring the per-operation command
@@ -1679,6 +1696,7 @@ export function csWorkflowStmtTarget(
         const before = `__wfAuditBefore${n}`;
         const after = `__wfAuditAfter${n}`;
         return [
+          ...gateLines,
           `${indent}var ${before} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames })});`,
           callLine,
           `${indent}var ${after} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames })});`,
@@ -1700,7 +1718,7 @@ export function csWorkflowStmtTarget(
           `${indent}});`,
         ];
       }
-      return [callLine];
+      return [...gateLines, callLine];
     },
     repoDelete: (st, indent) => {
       // `<Repo>.delete(o)` → `await _<repo>.DeleteAsync(<entity>, cancellationToken)`.
