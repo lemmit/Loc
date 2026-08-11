@@ -89,6 +89,17 @@ system ExpressionShowcase {
         s: string = "  Hello-World  "
         n: int = -7
         d: decimal = 3.14159
+        // `money` is a decimal.js `Decimal` on the JS frontends, a distinct
+        // representation from `decimal`'s plain number — so its intrinsics
+        // render through DIFFERENT snippets (`Decimal.min` vs `Math.min`) and
+        // need the binding in scope.  Without a money-typed state field here
+        // nothing in the repo exercised those arms, which is exactly why they
+        // shipped declined-then-verbatim.  Init uses the `money(...)`
+        // conversion form: a BARE decimal literal init (`m: money = 1.50`)
+        // still mis-renders as `useState<Decimal>(1.50)` — a separate,
+        // pre-existing bug, see this fixture's PR.
+        m: money = money("12.50")
+        cap: money = money("9.99")
       }
       body: Stack {
         Heading { "Scalar intrinsics" },
@@ -111,7 +122,17 @@ system ExpressionShowcase {
         Stat { "divTrunc", string(n.divTrunc(2)) },
         Stat { "round", string(d.round(2)) },
         Stat { "floor", string(d.floor()) },
-        Stat { "ceil", string(d.ceil()) }
+        Stat { "ceil", string(d.ceil()) },
+
+        // money intrinsics — the arms that name the `Decimal` binding.
+        // `min`/`max`/`round` are the three that were declined outright;
+        // `abs`/`floor`/`ceil` already rendered and are pinned against churn.
+        Stat { "money.min", string(m.min(cap)) },
+        Stat { "money.max", string(m.max(cap)) },
+        Stat { "money.round", string(m.round(2)) },
+        Stat { "money.abs", string(m.abs()) },
+        Stat { "money.floor", string(m.floor()) },
+        Stat { "money.ceil", string(m.ceil()) }
       }
     }
 
