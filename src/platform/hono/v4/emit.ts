@@ -1075,10 +1075,13 @@ export function generateTypeScriptForContexts(
         return sub?.migrationsOwner === system.deployable.name;
       })
     : [];
-  const hasTimers = ownedTimers.length > 0 && !usingMikro;
+  // Persistence-neutral since M-T6.23 slice 3: the scheduler's watermark table
+  // and advisory lock run on the EntityManager under `persistence: mikroorm`
+  // (`TimerStore` in scheduler-builder.ts).
+  const hasTimers = ownedTimers.length > 0;
   if (hasTimers) {
     const eventByName = new Map<string, EventIR>(merged.events.map((e) => [e.name, e]));
-    out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName));
+    out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName, usingMikro));
   }
 
   // Broker transport (channels.md; M-T4.4 slice 2).  A deployable that wires

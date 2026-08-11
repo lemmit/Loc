@@ -754,7 +754,17 @@ export function renderMikroEntities(
     blocks.push(
       lines(
         `export class ${cls} {`,
-        "  seq!: number;",
+        // OPTIONAL, unlike every other column: `seq` is a DB-generated
+        // `bigserial` (see the property below), so every append omits it — and
+        // MikroORM derives `RequiredEntityData` from the CLASS, not from the
+        // `autoincrement` flag.  Declared required, `em.insert(<Ctx>EventRow, {…})`
+        // fails `tsc` with "Property 'seq' is missing" on every event-sourced
+        // append.  Found by M-T6.23 slice 3's compile proof: no gate hid this
+        // one, the tsc TIERS did — the corpus tsc gates run drizzle only, and the
+        // mikro behavioural leg builds with esbuild (no typecheck), so an
+        // event-sourced aggregate or workflow on `persistence: mikroorm` has
+        // never actually been type-checked.
+        "  seq?: number;",
         "  streamType!: string;",
         "  streamId!: string;",
         "  version!: number;",

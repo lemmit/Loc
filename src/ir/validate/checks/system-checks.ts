@@ -2832,19 +2832,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // `with audit` → `stampInsert` in `em.upsert`) stays supported too.
       }
     }
-    // (4) Timers: `hasTimers` is `&& !usingMikro`, so `scheduler.ts` is never
-    // written — the cadence never fires and the timer's event is never emitted.
-    // Mirrors the emitter's ownership filter exactly (the subdomain's
-    // `migrationsOwner`), so a mikroorm deployable that merely HOSTS a timer's
-    // context without owning it is not blamed for another deployable's emission.
-    for (const ts of sys.timerSources ?? []) {
-      const owner = sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
-      if (owner?.migrationsOwner !== dep.name) continue;
-      rejectFeature(
-        `it owns the timerSource '${ts.name}' (firing '${ts.event}')`,
-        `'scheduler.ts' — the cadence would never fire`,
-      );
-    }
+    // (4) Timers: CLOSED by M-T6.23 slice 3 — `scheduler.ts` emits on this
+    // adapter (pg-boss for `cron:`, setInterval + a transaction-scoped advisory
+    // lock for `every:`), with the `loom_timer_runs` watermark and the lock query
+    // running through the EntityManager (`TimerStore` in scheduler-builder.ts).
+    // Nothing to gate.
     // (5) Broker-bound channels: CLOSED by M-T6.23 slice 2 — `channelBindings` is
     // no longer emptied for a mikroorm deployable, so `http/channels.ts` (the
     // driver, producer tee and consumer loop) and the boot-time transport /
