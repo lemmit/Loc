@@ -33,11 +33,14 @@ system AuditHistorySystem {
       aggregate Order audited with versioned {
         reference: string
         quantity: int
-        status: int
+        // `status` defaults on the FIELD, not in the create body: a create-body
+        // assignment is not rendered on a state-based aggregate, so writing it there
+        // made `status` a REQUIRED client field (this fixture's own e2e had to send
+        // `status: 0` to compensate).  `loom.lifecycle-body-dropped` now says so.
+        status: int = 0
         create(reference: string, quantity: int) {
           reference := reference
           quantity := quantity
-          status := 0
         }
         operation cancel(reason: int) {
           precondition reason >= 0
@@ -61,7 +64,11 @@ system AuditHistorySystem {
   }
 
   test e2e "entity history replays the commands that changed the row" against d {
-    let o = api.orders.create({ reference: "R1", quantity: 5, status: 0 })
+    // `status` is deliberately OMITTED: the field default now reaches the wire
+    // schema, so leaving it out exercises the very path the create-body drop
+    // used to break.  Sending `status: 0` here was the workaround for that bug
+    // — keeping it would have left the fix unproven at runtime.
+    let o = api.orders.create({ reference: "R1", quantity: 5 })
     api.orders.cancel(o, { reason: 7 })
     let trail = api.orders.history(o)
     expect(trail.count).toBe(2)
