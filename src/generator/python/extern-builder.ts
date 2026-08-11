@@ -1,5 +1,6 @@
 import type { AggregateIR, OperationIR } from "../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../ir/util/op-gates.js";
+
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
@@ -69,7 +70,7 @@ export function externHookCall(aggName: string, op: OperationIR): string {
   const args = [
     "self",
     ...op.params.map((p) => snake(p.name)),
-    ...(operationUsesCurrentUser(op) ? ["current_user"] : []),
+    ...(operationBodyUsesCurrentUser(op) ? ["current_user"] : []),
   ];
   return `${externHookModuleName(aggName)}.${snake(op.name)}(${args.join(", ")})`;
 }
@@ -82,7 +83,7 @@ export function buildPyExternHookModule(agg: AggregateIR): string | null {
   if (ops.length === 0) return null;
 
   const aggParam = snake(agg.name);
-  const usesUser = ops.some(operationUsesCurrentUser);
+  const usesUser = ops.some(operationBodyUsesCurrentUser);
 
   // TYPE_CHECKING imports the signature's names (the aggregate itself, plus any
   // id / value-object / enum param types).  `from __future__ import
@@ -99,7 +100,7 @@ export function buildPyExternHookModule(agg: AggregateIR): string | null {
     const params = [
       `${aggParam}: ${agg.name}`,
       ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`),
-      ...(operationUsesCurrentUser(op) ? ["current_user: User"] : []),
+      ...(operationBodyUsesCurrentUser(op) ? ["current_user: User"] : []),
     ].join(", ");
     const ret = op.returnType ? renderPyType(op.returnType) : "None";
     return lines(

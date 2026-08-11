@@ -145,6 +145,9 @@ export async function run() {
     const compile = async (ts) => (await esbuildTransform(ts, { loader: "ts", format: "cjs" })).code;
     const cases = await loadApiTests({ source: readFileSync(E2E_FILE, "utf8"), compile, dispatch, env: { E2E_DEV_CLAIMS: DEV_CLAIMS${bearerEnv} } });
     for (const r of await runTests(cases)) out.push({ tier: "api", ...r });
+    // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
+    // golden aligns on, and so a failing tier is diagnosed on its own requests.
+    await __frameworkProbes(dispatch);
   }
 
   const req = createRequire(import.meta.url);

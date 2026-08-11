@@ -49,9 +49,9 @@ import type {
   RouteIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
+import { operationBodyUsesCurrentUser } from "../../ir/util/op-gates.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
@@ -229,7 +229,7 @@ function lookupGatedOp(ctx: EnrichedBoundedContextIR, aggName: string, opName: s
   const op = ctx.aggregates
     .find((a) => a.name === aggName)
     ?.operations.find((o) => o.name === opName);
-  return !!op && operationUsesCurrentUser(op);
+  return !!op && operationBodyUsesCurrentUser(op);
 }
 
 /** Whether the handler body calls a currentUser-gated operation — the op's

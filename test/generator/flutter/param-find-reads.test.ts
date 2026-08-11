@@ -80,6 +80,21 @@ const SINGLE = sys(
   "hit => Text { hit.name }",
 );
 
+// The same shape with NO parameters — the branch that shipped invalid Dart.
+const NO_PARAMS = sys(
+  `
+        find inStock(): Product[] where this.name != ""`,
+  "Sales.Product.inStock",
+  "rows => Stack { For { each: rows, r => Text { r.name } } }",
+);
+
+const NO_PARAMS_SINGLE = sys(
+  `
+        find latest(): Product? where this.name != ""`,
+  "Sales.Product.latest",
+  "hit => Text { hit.name }",
+);
+
 describe("flutter emits a provider for a parameterized find", () => {
   it("list find — .family keyed by a record, bare-array decode, no dangling import", async () => {
     const files = generateSystems(await build(LIST)).files;
@@ -112,6 +127,43 @@ describe("flutter emits a provider for a parameterized find", () => {
     expect(reads).toContain(
       "return Product.fromJson(jsonDecode(res.body) as Map<String, dynamic>);",
     );
+  });
+
+  // A find with NO params is still a named find, so it took the `.family`
+  // branch — whose key type is a Dart RECORD of the params.  With none that
+  // spelled the empty record as `({})`; Dart writes it `()`, so `reads.dart`
+  // did not parse and every page watching the provider cascaded (#2433).
+  //
+  // A key with no fields is not a key at all, so the fix is a PLAIN
+  // `FutureProvider` — which is what the call site was already emitting
+  // (`renderApiHoisting` watches the bare `<var>Provider` when a read renders
+  // no args), so emitter and call site had silently disagreed all along.
+  it("parameterless list find — a plain FutureProvider, never an empty record key", async () => {
+    const files = generateSystems(await build(NO_PARAMS)).files;
+    const reads = expectEmitted(files, "web/lib/reads.dart");
+    const page = expectEmitted(files, "web/lib/pages/product_list_page.dart");
+
+    expect(reads).toContain("final productInStockProvider = FutureProvider<List<Product>>((ref)");
+    expect(reads).not.toContain("({})");
+    expect(reads).not.toContain("FutureProvider.family<List<Product>, ({})>");
+    // No params means no query string to build.
+    expect(reads).toContain("await http.get(apiUri('/products/in_stock'))");
+    // Still a find, so still a BARE array — not the paged `.all` envelope.
+    expect(reads).toContain("as List<dynamic>;");
+    expect(reads).not.toContain("body['items']");
+    // …and the bare watch the walker emits resolves to it.
+    expect(page).toContain("ref.watch(productInStockProvider)");
+    expect(page).not.toContain("productInStockProvider(");
+  });
+
+  it("parameterless single find — a plain nullable FutureProvider, 404 → null", async () => {
+    const reads = expectEmitted(
+      generateSystems(await build(NO_PARAMS_SINGLE)).files,
+      "web/lib/reads.dart",
+    );
+    expect(reads).toContain("final productLatestProvider = FutureProvider<Product?>((ref)");
+    expect(reads).not.toContain("({})");
+    expect(reads).toContain("if (res.statusCode == 404) return null;");
   });
 
   it("every provider the page watches is actually emitted", async () => {

@@ -117,20 +117,30 @@ describe("Python domain-test emitter (renderPyTestsFile)", () => {
     expect(src).toContain('        p.rename("")');
   });
 
-  it("coerces typed create inputs and threads a synthetic actor into a gated op", async () => {
+  it("coerces typed create inputs and calls a gated op with no synthetic actor", async () => {
     const files = await generateSystemFiles(TYPED);
     const src = findFile(files, /py_api\/tests\/test_order\.py$/);
 
     const create = line(src, /Order\.create\(/);
     expect(create).toContain('customer_id=CustomerId("c1")'); // `X id` brand
-    expect(create).toContain('total=Money(9.99, "USD")'); // VO positional ctor, declared order
+    // VO positional ctor, declared order — and the `money` slot carries a real
+    // `Decimal`, not a bare float.  This assertion used to read
+    // `Money(9.99, "USD")`, which pinned OUTPUT THAT DID NOT TYPE-CHECK: the
+    // emitted `Money.amount` is `Decimal` (python maps `money` → `Decimal`),
+    // so a float there is a `mypy --strict` error in the emitted test file.
+    // The Java sibling below already expected `new BigDecimal("9.99")` for the
+    // same fixture — the two backends' expectations disagreed about one slot,
+    // and this was the wrong one.  Fixed by lowering VO ctor args against the
+    // declared slot type (`DecLit → money`), which is why it changed here.
+    expect(create).toContain('total=Money(Decimal("9.99"), "USD")');
     expect(create).toContain('placed_at=datetime.fromisoformat("2024-01-01T00:00:00Z")'); // datetime
-    // A currentUser-gated op gets the synthetic full-access actor as the
-    // trailing arg (resolved via the let-binding type table — the receiver is
-    // untyped in test position).
-    expect(src).toContain("from app.auth.user import User");
-    expect(src).toContain('SimpleNamespace(id="00000000-0000-0000-0000-000000000000"');
-    expect(src).toContain("o.cancel(cast(User, SimpleNamespace(");
+    // The gate is hoisted to the route (op-gates.ts), so the method signature
+    // no longer takes a principal and the domain test stops fabricating one —
+    // passing the old actor would now be an excess argument under
+    // `mypy --strict`.
+    expect(src).toContain("o.cancel()");
+    expect(src).not.toContain("SimpleNamespace(id=");
+    expect(src).not.toContain("from app.auth.user import User");
   });
 });
 

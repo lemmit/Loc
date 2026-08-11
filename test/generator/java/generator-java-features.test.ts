@@ -78,10 +78,24 @@ describe("java generator — auth surface (S6)", () => {
     expect(filter).toContain("response.setStatus(401);");
   });
 
-  it("threads currentUser from the accessor into ops that require it", async () => {
-    const svc = (await files()).get(`${ROOT}/features/projects/ProjectService.java`)!;
+  it("evaluates the hoisted gate in the service — the entity takes no principal", async () => {
+    const f = await files();
+    const svc = f.get(`${ROOT}/features/projects/ProjectService.java`)!;
+    // The accessor binding stays — the GATE needs it — but it is consumed here
+    // (op-gates.ts) instead of being handed to the entity.
     expect(svc).toContain("var currentUser = currentUserAccessor.user();");
-    expect(svc).toContain("aggregate.rename(newName, currentUser);");
+    expect(svc).toContain("throw new ForbiddenException(");
+    expect(svc).toContain("aggregate.rename(newName);");
+    expect(svc).not.toContain("aggregate.rename(newName, currentUser);");
+    // Post-load and pre-call.
+    const load = svc.indexOf("var aggregate = repository.getById(id);");
+    const gate = svc.indexOf("throw new ForbiddenException(");
+    const call = svc.indexOf("aggregate.rename(newName);");
+    expect(load).toBeLessThan(gate);
+    expect(gate).toBeLessThan(call);
+    // Authorization is not an invariant — the aggregate is clean.
+    const entity = f.get(`${ROOT}/features/projects/Project.java`)!;
+    expect(entity).not.toContain("ForbiddenException");
   });
 });
 
@@ -145,8 +159,11 @@ describe("java generator — workflows (S6)", () => {
     );
     // factory-let orders the target's create-input list, nulls for absent.
     expect(svc).toContain("var proj = Project.create(name, visibility, true);");
-    // op-call threads currentUser into ops that use it.
-    expect(svc).toContain("proj.rename(name, currentUser);");
+    // The op's gate is hoisted, so this inline op-call evaluates it HERE
+    // rather than inheriting it from the entity — emitting it at every caller
+    // is what keeps the hoist enforcement-neutral on the non-HTTP path.
+    expect(svc).toContain("proj.rename(name);");
+    expect(svc).not.toContain("proj.rename(name, currentUser);");
     // at-exit save for the dirty let.
     expect(svc).toContain("projectsRepository.save(proj);");
   });

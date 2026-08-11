@@ -163,6 +163,22 @@ jobs:
                   where InStock
                   select products = count, stockValue = sum(p.price)
                 }
+                // M-T1.3 Phase 4 — a GROUPED projection: the LIST response
+                // shape, one row per group.  It is here because the two shapes
+                // compile to DIFFERENT F# (`Remote<Row list>` + `Decode.list` +
+                // `View.remoteList`, against the singleton's `option` +
+                // `Decode.map Some` + `remoteOne`), and the shape used to be
+                // hard-coded to the singleton — which emitted a call to a
+                // `View.remoteList` that was never defined.  Only a Fable
+                // compile over BOTH shapes catches that.
+                projection StockByStatus {
+                  status: Status
+                  items: int
+                  stockValue: money
+                  from Product as p
+                  group by p.status
+                  select status = p.status, items = count(), stockValue = sum(p.price)
+                }
               }
             }
 
@@ -283,6 +299,24 @@ jobs:
                       Text { t.products },
                       Money { t.stockValue }
                     }
+                  },
+                  // M-T1.3 Phase 4 — `Chart` on Feliz: inline SVG through the
+                  // `View.chart` helper, no charting library and no `.fsproj`
+                  // dependency.  Both kinds render from the same helper, so
+                  // compiling one compiles both branches; both are here anyway
+                  // because the CALL SITES differ (`isBar`, and the series
+                  // accessor's `float` coercion over int vs money).
+                  Chart {
+                    kind: "bar",
+                    of:   Shop.StockByStatus,
+                    x:    r => r.status,
+                    y:    r => r.stockValue
+                  },
+                  Chart {
+                    kind: "line",
+                    of:   Shop.StockByStatus,
+                    x:    r => r.status,
+                    y:    r => r.items
                   },
                   Button { "Back home", to: "/" }
                 }

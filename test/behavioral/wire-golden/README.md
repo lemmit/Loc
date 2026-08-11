@@ -5,6 +5,16 @@ One file per shared behavioral system (`../systems/*.ddd`). Each is the
 emitted `test e2e` suite is replayed against it: an ordered list of
 `{seq, method, templated path, status, normalized body}`.
 
+The last three entries of every file are not from the e2e suite. They are the
+**framework-fault probes** (RS-9), issued through the same dispatch after the
+tier finishes: a wrong verb, an unknown path, and a body the server cannot
+parse. An emitted suite only ever requests what the API *serves*, so before
+these existed the golden ran five legs green while those three requests
+answered five different shapes across three statuses — the gap
+`framework-error-contract-parity.test.ts` had to cover statically because
+nothing booted ever reached it. Appended *after* the tier so they never shift
+the ordinals the rest of the file aligns on.
+
 Every backend runner (`../run.mjs`, `run-python`, `run-dotnet`, `run-java`,
 `run-elixir`, plus the `run-dapper` / `run-mikroorm` persistence-adapter legs)
 records its own run at its single `fetch`/`app.fetch` chokepoint and diffs it

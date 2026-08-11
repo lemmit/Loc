@@ -126,11 +126,18 @@ function exprChildren(e: ExprIR): ExprIR[] {
   }
 }
 
-/** Every `QueryView(of: <expr>)` `of:` argument in a page body, in tree order. */
+/** Every READ-BEARING `of:` argument in a page body, in tree order.
+ *
+ *  `QueryView` is the general one; `Chart` (M-T1.3 Phase 4) carries the same
+ *  kind of `of:` — a projection read — without being wrapped in one.  Its read
+ *  has to be collected too, or a page whose only read is a chart imports
+ *  `reads.dart` and watches a provider that the emitter never wrote: two
+ *  `flutter analyze` errors (`uri_does_not_exist`, `undefined_identifier`), not
+ *  a silent degradation. */
 function queryViewOfArgs(body: ExprIR): ExprIR[] {
   const out: ExprIR[] = [];
   const walk = (e: ExprIR): void => {
-    if (e.kind === "call" && e.name === "QueryView") {
+    if (e.kind === "call" && (e.name === "QueryView" || e.name === "Chart")) {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
       if (idx >= 0 && e.args[idx]) out.push(e.args[idx]!);
@@ -263,11 +270,22 @@ export function renderAppConfig(): string {
  *  `FutureProvider.family<T?, String>` (GET `/<coll>/$id`, 404 → `null`). */
 function renderReadProvider(read: FlutterRead): string {
   const { aggregate, varName, routePath } = read;
-  if (read.projection) {
+  // A projection, or a named find that declares NO parameters.  Both fetch one
+  // fixed URL with nothing to key on, so both are a PLAIN `FutureProvider` —
+  // which is also what the call site already emits for them (`renderApiHoisting`
+  // watches the bare `<var>Provider` when a read renders no args).  A zero-param
+  // find used to fall into the `.family` branch below, whose key type is a Dart
+  // RECORD of the params: with none, that spells `({})`, and the empty record
+  // type in Dart is `()`.  The result did not analyze at all — 19 errors from
+  // one line, cascading into every page that watched the provider.
+  if (read.projection || read.params?.length === 0) {
     // A SINGLETON projection returns ONE object and a GROUPED one a bare array
     // — neither is the paged `{items: […]}` envelope a `.all` read unwraps, and
-    // neither takes an argument.  Tested BEFORE the `single` branch below,
-    // which means "byId `.family` keyed by a route id": a projection has no id.
+    // neither takes an argument.  A parameterless find is the same shape: the
+    // backend emits `c.json(result.map(toWire))`, a BARE array, so it decodes
+    // like the grouped projection rather than like `.all`.  Tested BEFORE the
+    // `single` branch below, which means "byId `.family` keyed by a route id":
+    // neither a projection nor a named find has one.
     //
     // The singleton yields `Row?`, not `Row`, for the same reason Feliz lifts
     // it into `Row option`: the walker renders a `QueryView`'s authored
@@ -296,7 +314,7 @@ function renderReadProvider(read: FlutterRead): string {
       "});",
     );
   }
-  if (read.params) {
+  if (read.params && read.params.length > 0) {
     // A parameterized find → a `.family` keyed by a Dart RECORD of the declared
     // params, matching the call the page walker already emits.  A record (not a
     // class) for the same reason the paged `LoomQuery` is one: `.family`

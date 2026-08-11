@@ -70,8 +70,8 @@ function renderComponent(spec: DataGridSpec): string {
   // produces markup.  Consistent with `Table` on Svelte, whose sortable header
   // is likewise walker-emitted (`svelteTarget.renderSortableHeader`).
   const body = spec.renderBody({
-    headerBody: headerBody(selection, spec.sortByAria),
-    cellBody: cellBody(columns, selection),
+    headerBody: headerBody(selection, spec.sortByAria, spec.selectAllRowsAria),
+    cellBody: cellBody(columns, selection, spec.selectRowAria),
   });
 
   const needsDecimalSort = columns.some((c) => c.numericSort);
@@ -306,7 +306,7 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
 
 /** The full header-cell content: the select-all checkbox (when selection is
  *  on), a sortable header button, or the plain header. */
-function headerBody(selection: boolean, sortByAria: string): string {
+function headerBody(selection: boolean, sortByAria: string, selectAllRowsAria: string): string {
   const style =
     "background: none; border: none; padding: 0; font: inherit; cursor: pointer; user-select: none;";
   const label = `{String(h.column.columnDef.header ?? h.id)}`;
@@ -317,7 +317,7 @@ function headerBody(selection: boolean, sortByAria: string): string {
           `{#if h.column.id === "loom-select"}`,
           `  <input`,
           `    type="checkbox"`,
-          `    aria-label="Select all rows"`,
+          `    ${selectAllRowsAria}`,
           `    checked={table.getIsAllPageRowsSelected()}`,
           `    onchange={() => table.toggleAllPageRowsSelected()}`,
           `  />`,
@@ -343,7 +343,11 @@ function headerBody(selection: boolean, sortByAria: string): string {
  *
  *  Branching on `c.column.id` rather than an index keeps it correct under the
  *  column reordering and hiding TanStack does at runtime. */
-function cellBody(columns: readonly DataGridColumn[], selection: boolean): string {
+function cellBody(
+  columns: readonly DataGridColumn[],
+  selection: boolean,
+  selectRowAria: string,
+): string {
   const branches: string[] = [];
   if (selection) {
     branches.push(
@@ -351,7 +355,7 @@ function cellBody(columns: readonly DataGridColumn[], selection: boolean): strin
         `{#if c.column.id === "loom-select"}`,
         `  <input`,
         `    type="checkbox"`,
-        `    aria-label="Select row"`,
+        `    ${selectRowAria}`,
         `    checked={c.row.getIsSelected()}`,
         `    disabled={!c.row.getCanSelect()}`,
         `    onchange={() => c.row.toggleSelected()}`,

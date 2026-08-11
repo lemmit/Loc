@@ -168,6 +168,17 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.criterion-alias-collision": (p: { name: unknown; alias: unknown }) =>
     `criterion '${p.name}' binds the candidate alias '${p.alias}', but a parameter of the same name already exists — rename one so a bare '${p.alias}' is unambiguous.`,
+  // The canonical `create` / `destroy` body no backend renders.  `reason` is
+  // computed at the call site (it varies by statement kind AND by action), so
+  // the catalog owns the frame and the site owns the clause.
+  "loom.lifecycle-body-dropped": (p: {
+    agg: unknown;
+    label: unknown;
+    kind: unknown;
+    reason: unknown;
+    plural: unknown;
+  }) =>
+    `aggregate '${p.agg}': the \`${p.label}\` body's \`${p.kind}\` is not emitted on a state-based aggregate, so ${p.reason}. The body is lowered into the IR but no backend renders it (an event-sourced \`create\` is the exception — that path does run). Move the logic to a named \`operation\`, which emits its guards and statements on every backend, or drop the clause.`,
   "loom.criterion-unsupported-target": (p: { name: unknown }) =>
     `criterion '${p.name}' has an unsupported candidate type. v1 supports 'of <Aggregate>' (a predicate over that aggregate) or 'of bool' (a pure ambient predicate); predicates over primitives / value objects / enums are reserved for the forthcoming 'from <Criterion>(args)' parameter-binding surface.`,
   "loom.criterion-impure#member-call": (p: { name: unknown; member: unknown }) =>
@@ -1347,6 +1358,22 @@ export const DIAGNOSTIC_MESSAGES = {
     findName: unknown;
   }) =>
     `denyByDefault: find '${p.name}.${p.findName}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-handler": (p: {
+    kind: unknown;
+    ctx: unknown;
+    handler: unknown;
+    method: unknown;
+    path: unknown;
+  }) =>
+    `denyByDefault: ${p.kind} '${p.ctx}.${p.handler}' is bound to \`route ${p.method} "${p.path}"\` on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` to its body (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-handler-extern": (p: {
+    kind: unknown;
+    ctx: unknown;
+    handler: unknown;
+    method: unknown;
+    path: unknown;
+  }) =>
+    `denyByDefault: ${p.kind} '${p.ctx}.${p.handler}' is \`extern\` — it has no body, so it cannot carry a \`requires\` gate — yet it is bound to \`route ${p.method} "${p.path}"\` on an 'auth: required' deployable. Give it a body (drop \`extern\`) so it can declare a gate, or remove the route binding.`,
   "loom.audit-history-ungated": (p: {
     aggregateName: unknown;
     aggregateName2: unknown;
@@ -1692,10 +1719,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `is not emitted by the ${p.unsupported} backend(s) yet (node emits it; the other ` +
     `backends are the stacked follow-on). Drop the \`mask unless\` clause for those targets, ` +
     `or track authorization.md §5 (M-T3.2 item 6).`,
-  "loom.field-mask-projection-source": (p: { name: unknown; src: unknown }) =>
-    `projection '${p.name}' sources from aggregate '${p.src}', which has a \`mask unless\` ` +
-    `field — query-time projection responses are not yet read-masked, so this would expose ` +
-    `the masked field. Read the aggregate through its own routes, or drop the mask.`,
+  "loom.field-mask-projection-source": (p: { name: unknown; src: unknown; via?: unknown }) =>
+    `projection '${p.name}' ${p.via === "join" ? `joins` : `sources from`} aggregate '${p.src}', ` +
+    `which has a \`mask unless\` field — query-time projection responses are not yet read-masked, ` +
+    `so this would expose the masked field. Read the aggregate through its own routes, or drop ` +
+    `the mask.`,
   "loom.audited-backend-unsupported": (p: {
     name: unknown;
     kind: unknown;

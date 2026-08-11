@@ -73,6 +73,13 @@ export interface PyRenderContext {
    *  workflow path wires this — aggregate-op render contexts leave it undefined
    *  (and the validator forbids them calling a non-pure service anyway). */
   readPortArgs?: (service: string, op: string) => string[];
+  /** Text an operation-PARAMETER ref renders as, overriding the default
+   *  snake-cased parameter name.  A hoisted `requires` gate (op-gates.ts) is
+   *  evaluated by the CALLER, where the operation's arguments are not yet
+   *  bound to locals — they live at whatever the call site reads them from
+   *  (`body.<name>` on a route).  Unset everywhere the parameters really are
+   *  in scope, which keeps every existing render byte-identical. */
+  paramExpr?: (name: string) => string | undefined;
 }
 
 const DEFAULT: PyRenderContext = { thisName: "self" };
@@ -312,6 +319,15 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       // use matches the (also-escaped) binding.
       return escapePythonIdent(snake(e.name));
     case "param":
+      // A hoisted `requires` gate (op-gates.ts) is evaluated by the CALLER,
+      // where the operation's params are not locals — `paramExpr` names what
+      // the call site reads each one from.  Checked first because it is an
+      // explicit per-render remap; it is unset everywhere the params really
+      // are in scope, including the wire-refine path below.
+      if (ctx.paramExpr) {
+        const mapped = ctx.paramExpr(e.name);
+        if (mapped !== undefined) return mapped;
+      }
       // Wire DTO (`wireField`): an operation's params ARE the request model's
       // own fields, carried verbatim in camelCase — exactly like `this-prop`
       // below.  Without this the `@model_validator` refine for a messaged (or

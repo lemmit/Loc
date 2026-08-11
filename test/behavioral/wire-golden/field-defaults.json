@@ -1,0 +1,213 @@
+{
+  "case": "field-defaults",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/items",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/items/{id}",
+      "status": 200,
+      "body": {
+        "active": true,
+        "archived": false,
+        "flag": false,
+        "id": "<volatile:key>",
+        "name": "Widget",
+        "note": "none",
+        "qty": 1,
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/items/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/items/{id}",
+      "status": 200,
+      "body": {
+        "active": false,
+        "archived": true,
+        "flag": true,
+        "id": "<volatile:key>",
+        "name": "Widget-2",
+        "note": "sent",
+        "qty": 7,
+        "version": 2
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/items",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/items?dir=asc&sort=name",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "active": false,
+            "archived": true,
+            "flag": true,
+            "id": "<volatile:key>",
+            "name": "Widget-2",
+            "note": "sent",
+            "qty": 7,
+            "version": 2
+          },
+          {
+            "active": true,
+            "archived": false,
+            "flag": false,
+            "id": "<volatile:key>",
+            "name": "Widget-3",
+            "note": "none",
+            "qty": 1,
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 6,
+      "method": "DELETE",
+      "path": "/api/items/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/items/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Item {id} not found",
+        "instance": "/api/items/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/items",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "active": false,
+            "archived": true,
+            "flag": true,
+            "id": "<volatile:key>",
+            "name": "Widget-2",
+            "note": "sent",
+            "qty": 7,
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "DELETE",
+      "path": "/api/items/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/items/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Item {id} not found",
+        "instance": "/api/items/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/items",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 12,
+      "method": "PATCH",
+      "path": "/api/items",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/items",
+        "instance": "/api/items",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "POST",
+      "path": "/api/items",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/items",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

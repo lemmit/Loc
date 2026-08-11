@@ -86,6 +86,33 @@ describe("flutter Table controls — server-driven (M-T1.1)", () => {
     expect(dart).not.toContain("i18n.dart");
   });
 
+  it("the sortable header's accessible NAME translates — and keeps its own with i18n off", async () => {
+    // Flutter is the only target whose sortable header carries an explicit
+    // name: a Dart widget has no implicit accessible name, so it wraps the
+    // header in `Semantics(label: …)` where the JSX targets and Feliz render a
+    // real `<button>` whose CONTENT names it.  That made it the last emitter-
+    // built string on this target that no locale could reach.
+    //
+    // The hole is the header TEXT and it is STATIC — known at emit time — so it
+    // rides in as a Dart string literal, unlike the grid's, which is read off
+    // the TanStack column at runtime.
+    const on = await page();
+    expect(on).toContain(
+      "label: t('chrome.sortBy', 'Sort by {column}', <String, Object>{'column': 'Name'})",
+    );
+    expect(on).not.toContain("label: 'Sort by Name'");
+
+    // With nothing to translate the target keeps its own sentence — the
+    // `undefined`-means-keep-yours contract, byte-identical by construction.
+    const off = await page(`QueryView { of: Shop.Product.all,
+      data: rows => Table(
+        Column("Name", p => p.name, sortable: true),
+        rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 3,
+        testid: "product-table") }`);
+    expect(off).toContain("label: 'Sort by Name'");
+    expect(off).not.toContain("chrome.sortBy");
+  });
+
   it("emits Dart for the client page window — never JavaScript", async () => {
     const dart = await page();
     // The shared default is literal JS (`.slice`, `Math.max`, `Math.ceil`).

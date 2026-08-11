@@ -226,8 +226,9 @@ function renderComponent(spec: DataGridSpec, ctx: WalkContext): string {
       localizedChromeIcuExpr(ctx, "sortBy", [
         { name: "column", expr: "loomText (h?column?columnDef?header)" },
       ]),
+      spec.selectAllRowsAriaValue,
     ),
-    cellBody: cellBody(columns, selection),
+    cellBody: cellBody(columns, selection, spec.selectRowAriaValue),
     // The pager's ICU counter (M-T1.11).  Supplied HERE rather than in
     // `emitDataGrid` alongside the other chrome tokens because its two hole
     // expressions are Fable's dynamic-access dialect (`table?getState()?…`),
@@ -384,7 +385,7 @@ function selectionEffect(): string[] {
  *  than a hand-rolled toggle, because that handler is what reads `shiftKey` to
  *  decide multi-sort.  Re-implementing it would fork exactly the behaviour this
  *  target exists to share. */
-function headerBody(selection: boolean, sortByAria: string): string {
+function headerBody(selection: boolean, sortByAria: string, selectAllRowsAria: string): string {
   const label = `loomText (h?column?columnDef?header)`;
   const indicator =
     `(match unbox<obj> (h?column?getIsSorted()) with` +
@@ -401,7 +402,7 @@ function headerBody(selection: boolean, sortByAria: string): string {
     return `(if unbox<bool> (h?column?getCanSort()) then ${sortButton} else ${plain})`;
   }
   const selectAll =
-    `Html.input [ prop.type' "checkbox"; prop.ariaLabel "Select all rows";` +
+    `Html.input [ prop.type' "checkbox"; prop.ariaLabel ${selectAllRowsAria};` +
     ` prop.isChecked (unbox<bool> (table?getIsAllPageRowsSelected()));` +
     ` prop.onChange (fun (_: bool) -> loomInvoke (table?toggleAllPageRowsSelected)) ]`;
   return (
@@ -414,7 +415,11 @@ function headerBody(selection: boolean, sortByAria: string): string {
 /** Cell CONTENT: the row checkbox, else the computed-cell thunk when the column
  *  has one, else the plain value.  Branching on the column id (not an index)
  *  keeps it correct under the hiding and reordering TanStack does at runtime. */
-function cellBody(columns: readonly DataGridColumn[], selection: boolean): string {
+function cellBody(
+  columns: readonly DataGridColumn[],
+  selection: boolean,
+  selectRowAria: string,
+): string {
   const plain = `Html.text (loomText (c?getValue()))`;
   const computed =
     `(let __cell = loomCellThunk c in` +
@@ -423,7 +428,7 @@ function cellBody(columns: readonly DataGridColumn[], selection: boolean): strin
   const value = hasComputed ? computed : plain;
   if (!selection) return value;
   const checkbox =
-    `Html.input [ prop.type' "checkbox"; prop.ariaLabel "Select row";` +
+    `Html.input [ prop.type' "checkbox"; prop.ariaLabel ${selectRowAria};` +
     ` prop.isChecked (unbox<bool> (c?row?getIsSelected()));` +
     ` prop.onChange (fun (_: bool) -> loomInvoke (c?row?toggleSelected)) ]`;
   return `(if unbox<string> (c?column?id) = "${SELECT_COL}" then ${checkbox} else ${value})`;

@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR } from "../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { operationBodyUsesCurrentUser } from "../../ir/util/op-gates.js";
 import { lowerFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderOperationReturnType } from "./emit/aggregate.js";
@@ -40,7 +40,7 @@ export function buildExternSubclassFile(agg: AggregateIR, ctx: BoundedContextIR)
   const methods: string[] = [];
   const sigScanParts: string[] = [];
   for (const op of externOps) {
-    const usesUser = operationUsesCurrentUser(op);
+    const usesUser = operationBodyUsesCurrentUser(op);
     // Params are `_`-prefixed (unused in the throwing stub — keeps the emitted
     // file's Biome lint clean); the user renames them when filling in the body.
     const params = [

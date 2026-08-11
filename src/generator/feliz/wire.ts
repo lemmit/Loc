@@ -46,6 +46,7 @@ import {
 } from "../../ir/util/feliz-async-effect.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
+import { projectionReadShape } from "../../ir/util/projection-read.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
@@ -82,6 +83,16 @@ export interface FelizRead {
   binding: string;
   /** True for a byId (single-record) read — fired on page entry, not init. */
   single: boolean;
+  /** True when the loaded value is a COLLECTION (`Remote<'T list>`, rendered by
+   *  `View.remoteList`) rather than one record (`Remote<'T option>`,
+   *  `View.remoteOne`).
+   *
+   *  Separate from `single` on purpose: that flag conflates the record shape
+   *  with the FIRING RULE ("page-entry keyed, off the route id"), and the two
+   *  come apart on a projection read — always id-less, but list-shaped when the
+   *  projection groups and single-shaped when it aggregates the whole table.
+   *  Every consumer that asks "which matcher?" asks this. */
+  listShaped: boolean;
   /** For a byId read, the `Page` union case hosting it (`ProductDetail`) — the
    *  arm `pageCmd` fires the fetch from.  Undefined for list reads. */
   pageCase?: string;
@@ -226,6 +237,7 @@ export function felizAllRead(aggregate: string, opts: FelizAllReadOpts = {}): Fe
     route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
     binding: lowerFirst(field),
     single: false,
+    listShaped: true,
     paging,
   };
 }
@@ -245,6 +257,7 @@ export function felizByIdRead(aggregate: string, pageCase: string): FelizRead {
     route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
     binding: lowerFirst(field),
     single: true,
+    listShaped: false,
     pageCase,
   };
 }
@@ -263,31 +276,49 @@ export function projectionRowType(projection: string): string {
   return `${upperFirst(projection)}Row`;
 }
 
-/** Build the `FelizRead` for a singleton query-time projection.
+/** Build the `FelizRead` for a query-time projection.
  *
- *  Decoded as `'Row option` (via `Decode.map Some`) rather than a bare `'Row`
- *  so the EXISTING `View.remoteOne` matcher renders it — the walker already
- *  classifies a singleton projection as single-record (`controls.ts` derives
- *  `single` from the read, ahead of `autoPaged`), so the whole byId rendering
- *  path applies unchanged: no new matcher, no new pack template. */
-export function felizProjectionRead(projection: string): FelizRead {
-  const field = projectionFieldName(projection);
-  const row = projectionRowType(projection);
+ *  THE SHAPE IS ASKED, NOT ASSUMED.  This used to take only the projection's
+ *  NAME, which made the shape question structurally unaskable — so every
+ *  projection read was hard-coded to the singleton (`'Row option`) form.  A
+ *  `group by` read returns a JSON ARRAY, and the halves then disagreed with
+ *  each other: the wire decoded one object into `Remote<Row option>` while the
+ *  walker (which does ask, via `queryShape`) rendered `View.remoteList` — a
+ *  matcher `renderViewModule` had not even emitted, because its `hasList` also
+ *  assumed every projection was single.  The result was F# that named an
+ *  undefined function AND mistyped the field it passed it: a `dotnet fable`
+ *  break for any Feliz ui reading a grouped projection, from a model with no
+ *  diagnostic.
+ *
+ *  It now reads `projectionReadShape` — the same single detector the client
+ *  emitters and the walker use — so all three answer from one place.
+ *
+ *  - `"one"` (the whole-table aggregation): `'Row option` via `Decode.map Some`,
+ *    rendered by the existing `View.remoteOne`.  The route always yields a row
+ *    (aggregates over an empty table still produce zeroes), so there is no
+ *    `None` wire case; the `option` exists only to reuse the byId matcher.
+ *  - `"many"` (a `group by` read — one row per group): `'Row list` via
+ *    `Decode.list`, rendered by `View.remoteList`, exactly like an aggregate
+ *    collection read. */
+export function felizProjectionRead(proj: ProjectionIR): FelizRead {
+  const field = projectionFieldName(proj.name);
+  const row = projectionRowType(proj.name);
+  const many = projectionReadShape(proj) === "many";
   return {
     field,
     msgCase: `${field}Loaded`,
     apiFn: lowerFirst(field),
-    aggregate: projection,
-    resultType: `${row} option`,
-    // `Decode.map Some` lifts the ONE decoded object into the `option` the
-    // remoteOne matcher expects; the route always yields a row (aggregates over
-    // an empty table still produce zeroes), so there is no `None` wire case.
-    decoderExpr: `(Decode.map Some Decoders.${lowerFirst(row)})`,
-    route: `${API_BASE_PATH}/projections/${snake(projection)}`,
+    aggregate: proj.name,
+    resultType: many ? `${row} list` : `${row} option`,
+    decoderExpr: many
+      ? `(Decode.list Decoders.${lowerFirst(row)})`
+      : `(Decode.map Some Decoders.${lowerFirst(row)})`,
+    route: `${API_BASE_PATH}/projections/${snake(proj.name)}`,
     binding: lowerFirst(field),
     // SINGLE-shaped but NOT page-entry-keyed — see `FelizRead.projection`.
     single: false,
     projection: true,
+    listShaped: many,
   };
 }
 
@@ -1027,11 +1058,18 @@ function exprChildren(e: ExprIR): ExprIR[] {
   }
 }
 
-/** Every `QueryView(of: <expr>)` `of:` argument in a page body, in tree order. */
+/** Every READ-BEARING `of:` argument in a page body, in tree order.
+ *
+ *  `QueryView` is the general one; `Chart` (M-T1.3 Phase 4) carries the same
+ *  kind of `of:` — a projection read — without being wrapped in one, and its
+ *  read has to be collected for exactly the same reason: on Elmish the read IS
+ *  the Model field the view names, so a body whose only read is a chart would
+ *  otherwise emit `View.chart … model.<Field>` against a field no Model
+ *  declares, no Cmd fills and no update arm stores. */
 function queryViewOfArgs(body: ExprIR): { of: ExprIR; explicitPaged: boolean }[] {
   const out: { of: ExprIR; explicitPaged: boolean }[] = [];
   const walk = (e: ExprIR): void => {
-    if (e.kind === "call" && e.name === "QueryView") {
+    if (e.kind === "call" && (e.name === "QueryView" || e.name === "Chart")) {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
       // `paged: true` is the explicit OPT-IN the scaffold emits beside its
@@ -1056,6 +1094,7 @@ export function collectPageReads(
   nameCtx: PageNameCtx,
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   projectionsByName: ReadonlySet<string> = new Set(),
+  projectionIRs: ReadonlyMap<string, ProjectionIR> = new Map(),
 ): FelizRead[] {
   if (!page.body) return [];
   // `projectionsByName` arms the detector's Pattern H (`<apiHandle>.<Proj>`).
@@ -1072,7 +1111,11 @@ export function collectPageReads(
   for (const { of: ofArg, explicitPaged } of queryViewOfArgs(page.body)) {
     const detected = tryDetectApiHook(ofArg, detCtx);
     if (detected?.kind === "projection") {
-      const projRead = felizProjectionRead(detected.aggregateName);
+      // The detector answers with a NAME; the read's shape is a property of the
+      // projection, so resolve it back to the IR the detector matched against.
+      const proj = projectionIRs.get(detected.aggregateName);
+      if (!proj) continue;
+      const projRead = felizProjectionRead(proj);
       if (!out.some((r) => r.field === projRead.field)) {
         seen.add(projRead.field);
         out.push(projRead);
@@ -2620,14 +2663,16 @@ export function renderViewModule(
   reads: FelizRead[],
   hasIdSelect = false,
   hasFieldErrors = false,
+  hasChart = false,
 ): string {
-  // A projection read is SINGLE-shaped (`Remote<'T option>` → `remoteOne`) but
-  // carries `single: false` because that flag also means "page-entry keyed"
-  // (see `FelizRead.projection`).  Both predicates therefore ask about the
-  // SHAPE, not the firing rule — otherwise a projection-only page would emit
-  // `remoteList` it never calls and omit the `remoteOne` it does.
-  const hasList = reads.some((r) => !r.single && !r.projection);
-  const hasSingle = reads.some((r) => r.single || r.projection);
+  // Which matcher a read needs is a question about its RESULT SHAPE, and
+  // `listShaped` is the one field that answers it — `single` cannot, because it
+  // also means "page-entry keyed, off the route id", and a projection read is
+  // id-less whatever its shape.  Reading the firing rule as if it were the
+  // shape is what emitted `remoteList` for a page that only called `remoteOne`,
+  // and then the reverse once grouped projections became readable.
+  const hasList = reads.some((r) => r.listShaped);
+  const hasSingle = reads.some((r) => !r.listShaped);
   // The per-field form-error matcher — factored here beside the Remote matchers
   // (the codebase's convention for repeated view logic) instead of inlined at
   // every input.  Shows the message only for a touched field, else nothing.
@@ -2644,6 +2689,65 @@ export function renderViewModule(
     "    match r with",
     "    | Loaded items -> items |> List.map (fun x -> Html.option [ prop.value (idOf x); prop.text (labelOf x) ])",
     "    | _ -> []",
+  ];
+  // `Chart` (M-T1.3 Phase 4) — inline SVG computed from the rows already in the
+  // Model, with NO charting library.  Same argument as the HEEx leg: a chart
+  // plots a grouped projection's rows, the rows are already decoded here, so
+  // the geometry is arithmetic and the output is markup.  Feliz has no pack
+  // matrix to backfill either, so there is no library to choose.
+  //
+  // A HELPER rather than markup inlined at the call site, for the reason every
+  // other `View.*` matcher is one: the scale/axis maths is F#, and a Feliz body
+  // is a `[ … ]` element list where a multi-line `let` block is offside.
+  //
+  // Attributes go through `svg.custom` rather than typed setters: a Feliz SVG
+  // element takes an `ISvgAttribute list`, NOT the `IReactProperty list` that
+  // `prop.*` builds (Fable rejects the mix outright — "No overloads match for
+  // method 'rect'"), and `custom` is the one spelling that cannot drift with a
+  // Feliz minor.
+  const chart = [
+    "  let chart (isBar: bool) (label: string) (r: Remote<'T list>) (xOf: 'T -> string) (yOf: 'T -> float) : ReactElement =",
+    "    let rows = match r with | Loaded items -> items | _ -> []",
+    "    let values = rows |> List.map yOf",
+    // An all-zero (or empty) series would divide by zero and plot NaN
+    // coordinates, which React renders as an invisible chart rather than an
+    // error — the floor keeps a flat series flat instead.
+    "    let maxValue = if List.isEmpty values then 1.0 else max 1.0 (List.max values)",
+    "    let width = 320.0",
+    "    let height = 160.0",
+    "    let slot = if List.isEmpty rows then width else width / float (List.length rows)",
+    "    let marks =",
+    "      if isBar then",
+    "        rows |> List.mapi (fun i row ->",
+    "          let barHeight = (yOf row / maxValue) * height",
+    "          Svg.rect [",
+    '            svg.custom ("x", slot * float i + slot * 0.15)',
+    '            svg.custom ("y", height - barHeight)',
+    '            svg.custom ("width", slot * 0.7)',
+    '            svg.custom ("height", barHeight)',
+    '            svg.custom ("className", "fill-primary")',
+    "          ])",
+    "      else",
+    "        let points =",
+    "          rows",
+    "          |> List.mapi (fun i row ->",
+    '            sprintf "%f,%f" (slot * (float i + 0.5)) (height - (yOf row / maxValue) * height))',
+    '          |> String.concat " "',
+    "        [ Svg.polyline [",
+    '            svg.custom ("points", points)',
+    '            svg.custom ("fill", "none")',
+    '            svg.custom ("strokeWidth", 2)',
+    '            svg.custom ("className", "stroke-primary")',
+    "          ] ]",
+    "    Svg.svg [",
+    '      svg.custom ("viewBox", sprintf "0 0 %d %d" (int width) (int height))',
+    // A chart is an image of data (the registry's a11y contract) — the derived
+    // name is the only thing a screen reader gets, since the marks carry none.
+    '      svg.custom ("role", "img")',
+    '      svg.custom ("aria-label", label)',
+    '      svg.custom ("className", "w-full h-40")',
+    "      svg.children marks",
+    "    ]",
   ];
   const list = [
     "  let remoteList (r: Remote<'T list>) (loading: ReactElement) (error: ReactElement) (empty: ReactElement) (render: 'T list -> ReactElement) : ReactElement =",
@@ -2670,5 +2774,7 @@ export function renderViewModule(
     ...(hasIdSelect ? idOptions : []),
     (hasList || hasSingle || hasIdSelect) && hasFieldErrors ? "" : undefined,
     ...(hasFieldErrors ? fieldError : []),
+    (hasList || hasSingle || hasIdSelect || hasFieldErrors) && hasChart ? "" : undefined,
+    ...(hasChart ? chart : []),
   );
 }

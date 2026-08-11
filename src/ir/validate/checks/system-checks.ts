@@ -364,12 +364,8 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
 
 /** Frontends that can render `Chart` (M-T1.3 Phase 4).
  *
- *  react reaches a charting LIBRARY through its design pack; heex needs none —
- *  the rows are already server-side in a LiveView assign, so it renders inline
- *  SVG from arithmetic (`renderChart` → the generated `LoomChart` component).
- *  The remaining frontends have no chart emitter at all. */
-const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView"]);
-
+ *  react reaches a charting LIBRARY through its design pack; the other three
+ *  need none — see the rollout note on the gate below. */
 /** `Chart` on a target that can't render it (M-T1.3 Phase 4).
  *
  *  The gate was per-PACK during the staged rollout (mantine v9 was the only
@@ -377,9 +373,22 @@ const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView"]);
  *  backfill is complete — all EIGHT tsx packs ship both — so `primitive-chart`
  *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
  *  it a pack-LOAD failure rather than something to re-check here.  What remains
- *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`: vue,
- *  svelte, angular, feliz and flutter have no chart emitter and would render an
- *  unsupported-primitive comment, so they stay honest gaps. */
+ *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`.
+ *
+ *  Phoenix, Feliz and Flutter join react by rendering the chart THEMSELVES —
+ *  inline SVG (HEEx, Feliz) and a `CustomPainter` (Flutter), computed from rows
+ *  the client (or the LiveView socket) has already decoded, with no charting
+ *  library and no dependency added.  None of the three has a `.hbs` pack matrix
+ *  to backfill, so unlike the tsx leg there was no per-pack library to choose —
+ *  which is what made them the cheap legs.  Vue, Svelte and Angular have no
+ *  chart renderer and would render an unsupported-primitive comment, so they
+ *  stay honest gaps.
+ *
+ *  NOTE for the sibling ports: this one-line Set is edited by every frontend's
+ *  chart PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
+ *  already present plus yours — never by taking one side wholesale. */
+const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter"]);
+
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
     if (!d.uiName) continue;
@@ -762,6 +771,65 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             source: `find/${repo.name}.history`,
           });
         }
+      }
+    }
+  }
+
+  // Explicit handlers (`commandHandler` / `queryHandler`) reachable through an
+  // `api { route <METHOD> "<path>" -> <Ctx>.<Handler> }` binding.  These are
+  // real HTTP endpoints on all five backends, and default-deny walked right
+  // past them: it enumerated aggregate actions, workflow command entries,
+  // finds and history, but never `ctx.commandHandlers` / `ctx.queryHandlers`.
+  //
+  // Scoped to ROUTE-BOUND handlers deliberately — an unrouted handler has no
+  // transport surface, so demanding a gate from it would be noise.  The route
+  // is the reachability proof, exactly as `visibility === "public"` is for an
+  // aggregate operation.
+  const ctxByName = new Map<string, (typeof sys.subdomains)[number]["contexts"][number]>();
+  for (const sd of sys.subdomains) for (const c of sd.contexts) ctxByName.set(c.name, c);
+  for (const api of sys.apis) {
+    for (const route of api.routes) {
+      const c = ctxByName.get(route.target.context);
+      if (!c || !guarded.has(c.name)) continue;
+      const cmd = (c.commandHandlers ?? []).find((h) => h.name === route.target.handler);
+      const qry = cmd
+        ? undefined
+        : (c.queryHandlers ?? []).find((h) => h.name === route.target.handler);
+      const handler = cmd ?? qry;
+      // A workflow `handle` can also be a route target; those are already
+      // covered by `workflowCommandEntries` above, so skip rather than
+      // double-report.
+      if (!handler) continue;
+      if (isGated(handler.statements)) continue;
+      const params = {
+        kind: cmd ? "commandHandler" : "queryHandler",
+        ctx: c.name,
+        handler: handler.name,
+        method: route.method,
+        path: route.path,
+      };
+      // An `extern` handler has NO body — there is nowhere to put a gate — so
+      // "add a `requires`" would be an unsatisfiable instruction.  Say what is
+      // actually actionable instead (drop `extern`, or drop the route).  The
+      // two arms are separate `diags.push` calls, not a ternary on `message:`,
+      // because the catalog scanner (`diagnostic-catalog.test.ts`) reads the key
+      // off a DIRECT `diagMessage("literal", …)` call expression — a ternary or
+      // a computed key reads to it as inline wording.
+      const source = `${c.name}/handler/${handler.name}`;
+      if (handler.extern) {
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-handler-extern", params),
+          source,
+        });
+      } else {
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-handler", params),
+          source,
+        });
       }
     }
   }
@@ -3542,6 +3610,25 @@ export function validateFieldMask(
           severity: "error",
           code: "loom.field-mask-projection-source",
           message: diagMessage("loom.field-mask-projection-source", { name: proj.name, src }),
+          source: `${ctx.name}/projection/${proj.name}`,
+        });
+        continue;
+      }
+      // A `join` reaches the masked aggregate just as directly as `from` does —
+      // `select leaked = c.ssn` off a join alias emitted the raw column on all
+      // five backends while the identical read through `from` was rejected.
+      // Checking only the source made the bound bypassable by adding a join,
+      // which is the opposite of a bound.  Same rule, same diagnostic.
+      const joined = (proj.query?.joins ?? []).find((j) => maskedAggNames.has(j.aggregate));
+      if (joined) {
+        diags.push({
+          severity: "error",
+          code: "loom.field-mask-projection-source",
+          message: diagMessage("loom.field-mask-projection-source", {
+            name: proj.name,
+            src: joined.aggregate,
+            via: "join",
+          }),
           source: `${ctx.name}/projection/${proj.name}`,
         });
       }

@@ -235,12 +235,60 @@ export function makeWireGate(backend, workDir) {
 export function recorderPreamble() {
   return `import { toWireEntry as __toWireEntry } from ${JSON.stringify(join(REPO, "test/_helpers/wire-record.ts"))};
 const __wire = [];
+// The raw URLs, kept beside the recording rather than derived from it: the
+// recorded \`path\` is TEMPLATED (\`/api/x/{id}\`), which is right for aligning
+// two runs and useless as a URL to request.  Not itself compared.
+const __urls = [];
+// The credentials the tier itself used.  Without them the probes below measure the
+// AUTH arm instead of the framework arm on any \`auth {}\` system — and the two
+// disagree across backends for a reason that has nothing to do with RS-9 (node
+// mounts auth as \`app.use("*", …)\` ahead of routing, so an unauthenticated
+// miss is 401; phoenix routes first, so it is 404).  Forwarding them keeps the
+// probe pointed at the thing it is meant to measure.
+let __authHeaders = {};
 const __record = (dispatch) => async (req) => {
   const out = await dispatch(req);
   try {
     const r = out?.response;
-    if (r) __wire.push(__toWireEntry(__wire.length, req.method, req.url, r.status, r.body ?? ""));
+    if (r) {
+      __urls.push(req.url);
+      for (const [k, v] of Object.entries(req.headers ?? {})) {
+        if (!/^content-(type|length)$/i.test(k)) __authHeaders[k] = v;
+      }
+      __wire.push(__toWireEntry(__wire.length, req.method, req.url, r.status, r.body ?? ""));
+    }
   } catch { /* recording must never affect the tier's pass/fail */ }
   return out;
+};
+
+// ── framework-fault probes (RS-9) ───────────────────────────────────────────
+// The emitted e2e suites only ever request what the API serves, so the wire
+// golden ran five legs green while a wrong verb, an unknown path and an
+// unreadable body answered five different shapes across three statuses.  These
+// three requests go through the SAME dispatch, so they are recorded, diffed and
+// waivable exactly like every other entry — no new boot, no new workflow.
+//
+// The target is taken from what the tier already requested: the first plain
+// \`/api/<collection>\` it hit.  That keeps the probe backend-agnostic (the HTTP
+// runners have only a base URL; there is no router to introspect) and skips a
+// case that never makes such a call rather than guessing a path.
+//
+// PATCH is the wrong verb because no emitter produces a PATCH route — the REST
+// surface is GET/POST/DELETE — so the mismatch is guaranteed rather than
+// dependent on the fixture.  If the tier DID use PATCH on that path (an
+// explicit \`route PATCH …\` api), the probe steps aside rather than assert a
+// mismatch that isn't one.
+const __frameworkProbes = async (dispatch) => {
+  const paths = __urls.map((u) => { try { return new URL(u); } catch { return null; } }).filter(Boolean);
+  const collection = paths.find((u) => /^\\/api\\/[^/]+$/.test(u.pathname));
+  if (!collection) return;
+  const usedPatch = __wire.some((e) => e.method === "PATCH");
+  const origin = collection.origin;
+  const json = { ...__authHeaders, "content-type": "application/json" };
+  if (!usedPatch) {
+    await dispatch({ method: "PATCH", url: origin + collection.pathname, headers: json, body: "{}" });
+  }
+  await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: { ...__authHeaders } });
+  await dispatch({ method: "POST", url: origin + collection.pathname, headers: json, body: "{not json" });
 };`;
 }

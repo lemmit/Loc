@@ -52,6 +52,13 @@ export interface JavaRenderContext {
    *  .currentOrNull()`), so the fail-closed predicate reads that narrowed local
    *  rather than the bean-injected `currentUser` a static mapper can't see. */
   currentUserExpr?: string;
+  /** Text an operation-PARAMETER ref renders as, overriding the default bare
+   *  parameter name.  A hoisted `requires` gate (op-gates.ts) is evaluated by
+   *  the CALLER; at a workflow's inline op-call the operation's parameters are
+   *  not locals at all — the arguments are the caller's own expressions.  (The
+   *  aggregate SERVICE needs no mapping: it already binds each param as a
+   *  `var <name> = …` local above the call.)  Unset everywhere else. */
+  paramExpr?: (name: string) => string | undefined;
   /** Aggregate whose bodies we're lowering — used by `new <Part>` to
    *  order the part's constructor arguments by declared field order. */
   agg?: EnrichedAggregateIR;
@@ -463,7 +470,7 @@ function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
       // use matches the (also-escaped) binding (`let class` → `class_`).
       return escapeJavaIdent(e.name);
     case "param":
-      return e.name;
+      return ctx.paramExpr?.(e.name) ?? e.name;
     case "this-prop":
     case "this-vo-prop":
       if (ctx.bareProps) return e.name;

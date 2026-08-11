@@ -226,6 +226,45 @@
         "total": 0,
         "totalPages": 0
       }
+    },
+    {
+      "seq": 19,
+      "method": "PATCH",
+      "path": "/api/products",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/products",
+        "instance": "/api/products",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 21,
+      "method": "POST",
+      "path": "/api/products",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/products",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
     }
   ]
 }

@@ -23,7 +23,7 @@
 // `data-grid.ts`.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { boolNamed, positionalArgs, stringNamed } from "../shared/args.js";
+import { boolNamed, namedArgValue, positionalArgs, stringNamed } from "../shared/args.js";
 
 /** `o => o.sku` → `"sku"`.  Undefined for anything more complex. */
 export function simpleAccessorField(accessor: ExprIR | undefined): string | undefined {
@@ -66,6 +66,18 @@ export function gridColumns(grid: ExprIR & { kind: "call" }): (ExprIR & { kind: 
  *  turns the pack's per-column filter row (and its "Filter" placeholder) on. */
 export function gridHasFilterableColumn(grid: ExprIR & { kind: "call" }): boolean {
   return gridColumns(grid).some(columnIsFilterable);
+}
+
+/** True when this grid renders the row-SELECTION checkbox column.
+ *
+ *  A `selection:` naming something that is not a declared state field is an
+ *  ERROR (`loom.datagrid-selection-not-state`), so in valid input the arg's mere
+ *  presence settles it — which is what lets the two selection chrome keys be
+ *  contributed EXACTLY rather than merged.  The emitter's own resolution
+ *  (`stateNameArg`) additionally checks `ctx.stateNames`, invisible here; the
+ *  validator is what makes the two questions equivalent. */
+export function gridHasSelection(grid: ExprIR & { kind: "call" }): boolean {
+  return namedArgValue(grid, "selection")?.kind === "ref";
 }
 
 /** True when ANY column of this grid is sortable — the grid-wide switch behind

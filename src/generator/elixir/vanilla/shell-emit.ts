@@ -224,6 +224,7 @@ export function emitVanillaShellFiles(
     }
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
+  out.set(`lib/${appName}_web/body_parser.ex`, renderVanillaBodyParser(appModule));
   out.set(
     `lib/${appName}_web/controllers/not_found_controller.ex`,
     renderVanillaNotFoundController(appModule),
@@ -571,7 +572,7 @@ ${liveViewPlugs}${spaStaticPlug}  plug Plug.RequestId
   plug ${appModule}.RequestContext
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
-  plug Plug.Parsers,
+  plug ${appModule}Web.BodyParser,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
@@ -757,6 +758,69 @@ end
 `;
 }
 
+function renderVanillaBodyParser(appModule: string): string {
+  // `Plug.Parsers` runs in the ENDPOINT, before the router, so a body it cannot
+  // read never reaches a generated controller.  It propagates to
+  // `Phoenix.Endpoint.RenderErrors`, which owns TWO things we then cannot
+  // control: the response FORMAT (rendering through `json`, whose MIME type is
+  // `application/json` — not the `application/problem+json` every other error
+  // on this API sends), and the dev/prod SWITCH (`debug_errors: true`, the
+  // generated dev config, answers a full HTML debug page).
+  //
+  // Both are symptoms of the same thing: the fault is handled by phoenix's
+  // machinery instead of by ours.  Rescuing inside a wrapper is the last point
+  // where it is still ours — before RenderErrors exists as a concept — so one
+  // change fixes the content type AND makes the answer identical in dev and
+  // prod.  (Fixing `ErrorJSON`'s body left the content type wrong and the dev
+  // HTML in place; routing error views through a `problem_json` format broke
+  // negotiation for `Accept: */*`.  Both were downstream of the raise.)
+  return `# Auto-generated.
+defmodule ${appModule}Web.BodyParser do
+  @moduledoc """
+  \`Plug.Parsers\` with its failures answered by this app rather than by
+  \`Phoenix.Endpoint.RenderErrors\` — see the RFC 7807 contract in
+  docs/conformance-semantics.md (RS-9).  Opts are \`Plug.Parsers\`' own.
+  """
+  @behaviour Plug
+
+  @impl true
+  def init(opts), do: Plug.Parsers.init(opts)
+
+  @impl true
+  def call(conn, opts) do
+    Plug.Parsers.call(conn, opts)
+  rescue
+    e in [
+      Plug.Parsers.ParseError,
+      Plug.Parsers.UnsupportedMediaTypeError,
+      Plug.Parsers.RequestTooLargeError
+    ] ->
+      status = Plug.Exception.status(e)
+      title = Plug.Conn.Status.reason_phrase(status)
+
+      # The exception message names the decoder and echoes the raw input, so it
+      # is neither safe nor portable as a \`detail\`.  400 gets the one wording
+      # every backend sends for this fault; the rest get the reason phrase.
+      detail = if status == 400, do: "Malformed JSON in request body", else: title
+
+      body =
+        Jason.encode!(%{
+          type: "about:blank",
+          title: title,
+          status: status,
+          detail: detail,
+          instance: conn.request_path
+        })
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/problem+json")
+      |> Plug.Conn.send_resp(status, body)
+      |> Plug.Conn.halt()
+  end
+end
+`;
+}
+
 function renderVanillaNotFoundController(appModule: string): string {
   return `# Auto-generated.
 defmodule ${appModule}Web.NotFoundController do
@@ -766,21 +830,63 @@ defmodule ${appModule}Web.NotFoundController do
   Catch-all for a request no route matched — an unknown path, or a verb an
   existing path does not serve.  Answers the same RFC 7807 envelope every
   domain error on this API answers, under \`application/problem+json\`.
+
+  The two cases get different statuses.  A phoenix router keys on
+  (method, path), so its miss carries no reason and both used to answer 404 —
+  but RFC 9110 §15.5.6 reserves 405 for a resource that exists and does not
+  serve the method, and the difference is what tells a caller to fix the verb
+  rather than the URL.  \`Phoenix.Router.route_info/4\` separates them: ask the
+  router the same path under the other verbs.
   """
 
+  @probe_methods ~w(GET POST PUT PATCH DELETE)
+
   def not_found(conn, _params) do
+    allow =
+      Enum.filter(@probe_methods, fn method ->
+        method != conn.method and serves?(method, conn)
+      end)
+
+    case allow do
+      [] ->
+        respond(conn, 404, "Not Found", "no route for #{conn.method} #{conn.request_path}")
+
+      methods ->
+        conn
+        |> put_resp_header("allow", Enum.join(methods, ", "))
+        |> respond(
+          405,
+          "Method Not Allowed",
+          "method #{conn.method} is not supported for #{conn.request_path}"
+        )
+    end
+  end
+
+  # This controller IS the catch-all, registered for \`:*\`, so route_info
+  # matches it for every method on every path.  Counting those would report an
+  # \`Allow\` on all four other verbs for a URL that serves nothing — so the
+  # module's own route is excluded and only a REAL one counts.
+  defp serves?(method, conn) do
+    case Phoenix.Router.route_info(${appModule}Web.Router, method, conn.request_path, conn.host) do
+      :error -> false
+      %{plug: __MODULE__} -> false
+      _ -> true
+    end
+  end
+
+  defp respond(conn, status, title, detail) do
     body =
       Jason.encode!(%{
         type: "about:blank",
-        title: "Not Found",
-        status: 404,
-        detail: "no route found for #{conn.method} #{conn.request_path}",
+        title: title,
+        status: status,
+        detail: detail,
         instance: conn.request_path
       })
 
     conn
     |> put_resp_content_type("application/problem+json")
-    |> send_resp(404, body)
+    |> send_resp(status, body)
   end
 end
 `;
