@@ -53,12 +53,18 @@ export function emitTypescriptSeeds(
 /** MikroORM variant (persistence: mikroorm) — same domain `create` path (the
  *  mikro `<Agg>Repository` takes the EntityManager), with raw INSERTs + the
  *  `__loom_seed` marker going through `em.getConnection().execute(...)` instead
- *  of drizzle's `sql.raw`. */
-export function emitMikroSeeds(
-  ctx: EnrichedBoundedContextIR,
-  out: Map<string, string>,
-  schemaFor: SchemaFor = () => undefined,
-): void {
+ *  of drizzle's `sql.raw`.
+ *
+ *  Deliberately UNQUALIFIED, unlike the drizzle sibling: this adapter's
+ *  `EntitySchema`s are mapped `tableName: "<plural>"` with no `schema`, and the
+ *  adapter creates its own tables via `orm.schema.updateSchema()` rather than
+ *  running the emitted migration chain — so its tables really are in `public`,
+ *  and a `"<ctx>".` qualifier would point the raw INSERT at a table the ORM
+ *  never created.  (That the adapter IGNORES the dataSource `schema:` the
+ *  migration chain uses is a divergence in its own right, one shape further
+ *  along than the two schema sources the drizzle path already has — recorded
+ *  with #2517's findings, not fixed here.) */
+export function emitMikroSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
   emitSeeds(
     ctx,
     out,
@@ -67,7 +73,7 @@ export function emitMikroSeeds(
       renderFile: renderMikroSeedFile,
       renderCli: renderMikroSeedCliFile,
     },
-    schemaFor,
+    () => undefined,
   );
 }
 

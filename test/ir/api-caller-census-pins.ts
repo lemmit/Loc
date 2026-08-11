@@ -232,6 +232,15 @@ export const R = {
    *     synthesized from drizzle metadata.  Same class as items (4) and (6) in
    *     the header; recorded, not fixed (no shipped app hits it — the
    *     repositories always write `version` explicitly).
+   *   • the MikroORM adapter ignores the dataSource `schema:` altogether: its
+   *     `EntitySchema`s are mapped `tableName: "<plural>"` with no schema and it
+   *     creates them with `orm.schema.updateSchema()` instead of running the
+   *     emitted migration chain — so the same `.ddd` puts its tables in
+   *     `"<ctx>"` on drizzle and in `public` on mikroorm.  A THIRD source of
+   *     truth for one table.  Its raw seed INSERT is therefore left unqualified
+   *     ON PURPOSE (`emitMikroSeeds`); the divergence itself is recorded, not
+   *     fixed — found because qualifying it broke that adapter's own test,
+   *     which is the test doing its job.
    *
    * Kept as a class because it recurs the moment a new fixture seeds a table
    * nothing lists.

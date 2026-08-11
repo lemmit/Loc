@@ -1012,7 +1012,10 @@ export function generateTypeScriptForContexts(
       const agg = merged.aggregates.find((a) => a.name === aggName);
       return agg && resolveDataSource ? resolveDataSource(agg)?.schema : undefined;
     };
-    if (usingMikro) emitMikroSeeds(merged, out, seedSchemaFor);
+    // …drizzle only: the mikroorm adapter maps its tables with no schema and
+    // creates them itself, so its raw INSERT stays unqualified (see
+    // `emitMikroSeeds`).
+    if (usingMikro) emitMikroSeeds(merged, out);
     else emitTypescriptSeeds(merged, out, seedSchemaFor);
   }
   const hasSeeds = out.has("db/seed.ts");
