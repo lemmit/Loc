@@ -21,7 +21,9 @@
 // `money` is decimal.js `Decimal` on BOTH surfaces (the frontend's
 // `moneySchema` parses a decimal string into a `Decimal`, and `jsExprLeaves`
 // already emits `new Decimal(...)` for a money `convert`), so the money arms
-// are shared verbatim too — with one caveat, see `renderJsIntrinsic`.
+// are shared verbatim too.  The arms that name the `Decimal` binding need it
+// imported wherever they land; each page shell decides that by scanning its
+// rendered source — see `usesDecimalBinding`.
 
 import type { TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
@@ -80,17 +82,33 @@ export const JS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
     `new Date(Date.UTC((${recv}).getUTCFullYear(), (${recv}).getUTCMonth(), (${recv}).getUTCDate()))`,
 };
 
-/** Snippets that reference the bare `Decimal` CONSTRUCTOR (as opposed to
- *  calling a method on an already-`Decimal` receiver) need
- *  `import Decimal from "decimal.js"` in scope.  The backend emitters inject
- *  it; the frontend PAGE emitters do not (only `store-builder.ts` does), so
- *  the walker must decline those arms rather than emit an unresolvable
- *  identifier.  Detected structurally off the rendered snippet, so the guard
- *  can't drift out of sync with the table — and it disappears on its own the
- *  day the page emitters inject the import.  `frontendIntrinsicSupport` in the
- *  tests pins exactly which keys this currently excludes. */
-function needsDecimalImport(snippet: string): boolean {
-  return /\bDecimal\./.test(snippet);
+/**
+ * True when `source` references decimal.js's `Decimal` binding — either the
+ * CONSTRUCTOR (`new Decimal(…)`, which `jsExprLeaves.exprConvert` emits for a
+ * cast to money) or a STATIC (`Decimal.min(…)`, `Decimal.ROUND_HALF_UP`, from
+ * the table above).  Both need the binding in scope wherever the source lands.
+ *
+ * Matched on RENDERED source rather than on a declaration, because that is the
+ * only signal covering both producers at once — and it cannot drift out of
+ * sync with the tables the way a hand-kept key list would.  The pattern is
+ * deliberately narrow (a construction or a member access, never the bare
+ * word), so a literal `"Decimal"` in user-authored page text does not trip it.
+ *
+ * This used to be a private `needsDecimalImport`, used to make
+ * `renderJsIntrinsic` DECLINE the three arms that hit it — `money.min`,
+ * `money.max`, `money.round` — because the frontend PAGE shells never imported
+ * decimal.js (only `store-builder.ts` did).  Declining did not avoid broken
+ * output, it chose a different one: the walker's verbatim
+ * `<recv>.<member>(…)` fallthrough emitted `amt.min(x)` / `amt.max(x)`, for
+ * which decimal.js has no INSTANCE method (TS2339), and `amt.round(2)`, whose
+ * instance method takes no arguments (TS2554).  Since no `.ddd` in the repo
+ * put a money intrinsic in a page body, no build gate ever said so.
+ *
+ * Now every page shell consumes this to bring the binding into scope itself,
+ * so the arms render.
+ */
+export function usesDecimalBinding(source: string): boolean {
+  return /\bnew Decimal\(|\bDecimal\.[a-zA-Z]/.test(source);
 }
 
 /**
@@ -114,6 +132,5 @@ export function renderJsIntrinsic(
   if (!intrinsicFor(receiverType.name, member)) return undefined;
   const render = JS_INTRINSIC_RENDERERS[intrinsicKey(receiverType.name, member)];
   if (!render) return undefined;
-  const snippet = render(recv, [...args]);
-  return needsDecimalImport(snippet) ? undefined : snippet;
+  return render(recv, [...args]);
 }

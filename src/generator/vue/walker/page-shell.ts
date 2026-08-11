@@ -13,6 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
@@ -517,10 +518,14 @@ export function renderVuePage(input: VuePageShellInput): string {
   if (vueImports.size > 0) {
     script.push(`import { ${[...vueImports].sort().join(", ")} } from "vue";`);
   }
-  // A money-typed `state {}` field refs as `ref(new Decimal("0"))` —
-  // pull decimal.js into the <script setup> (the dep rides the
-  // deployable's money-usage flag in package.json).
-  if (result.usesState && page.state.some((f) => typeUsesMoney(f.type))) {
+  // A money-typed `state {}` field refs as `ref(new Decimal("0"))` — pull
+  // decimal.js into the <script setup> (the dep rides the deployable's
+  // money-usage flag in package.json).  This narrow trigger is the FALLBACK;
+  // the authoritative decision is a scan of the assembled SFC below, which
+  // also catches a `Decimal` produced by the body (a cast to money, or the
+  // shared intrinsic table's `Decimal.min`/`max`/`ROUND_HALF_UP`).
+  const moneyStateImport = result.usesState && page.state.some((f) => typeUsesMoney(f.type));
+  if (moneyStateImport) {
     script.push(`import Decimal from "decimal.js";`);
   }
   if (needsRoute && needsNavigate) {
@@ -675,7 +680,7 @@ export function renderVuePage(input: VuePageShellInput): string {
 ${indent(result.tsx, "    ")}${dialogs}
   </template>`
     : `${indent(result.tsx, "  ")}${dialogs}`;
-  return `<!-- Auto-generated.  Do not edit by hand.  (${title}) -->
+  const sfc = `<!-- Auto-generated.  Do not edit by hand.  (${title}) -->
 <script setup lang="ts">
 ${script.join("\n")}
 </script>
@@ -684,6 +689,30 @@ ${script.join("\n")}
 ${templateBody}
 </template>
 `;
+  return withDecimalImport(sfc, moneyStateImport);
+}
+
+/** Ensure the SFC imports decimal.js when anything in it names the `Decimal`
+ *  binding.
+ *
+ *  Decided by scanning the ASSEMBLED file rather than the walk result, because
+ *  a `Decimal` can enter from several places that are stitched together at
+ *  different points — a money `state {}` field (the narrow `already` trigger),
+ *  a body cast to money (`jsExprLeaves.exprConvert` → `new Decimal(…)`), the
+ *  shared intrinsic table (`Decimal.min`/`max`/`ROUND_HALF_UP`), a hoisted
+ *  dialog block, a form template.  Scanning the finished artifact cannot miss
+ *  one, and cannot drift as those tables change.
+ *
+ *  A Vue template CAN see a module-scoped binding (`<script setup>` bindings
+ *  are exposed to the template), which is why the import alone suffices here —
+ *  unlike Angular, whose template resolves against the component instance and
+ *  needs the binding hoisted onto the class. */
+function withDecimalImport(sfc: string, already: boolean): string {
+  if (already || !usesDecimalBinding(sfc)) return sfc;
+  return sfc.replace(
+    '<script setup lang="ts">\n',
+    '<script setup lang="ts">\nimport Decimal from "decimal.js";\n',
+  );
 }
 
 /** Wire the stores a page/component body references (named-actions-and-

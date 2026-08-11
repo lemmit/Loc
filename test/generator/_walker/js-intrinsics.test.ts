@@ -26,6 +26,7 @@ import { describe, expect, it } from "vitest";
 import {
   JS_INTRINSIC_RENDERERS,
   renderJsIntrinsic,
+  usesDecimalBinding,
 } from "../../../src/generator/_expr/js-intrinsics.js";
 import { TS_INTRINSIC_RENDERERS } from "../../../src/generator/typescript/render-expr.js";
 import { INTRINSIC_SIGNATURES, intrinsicKey } from "../../../src/util/intrinsics.js";
@@ -173,12 +174,21 @@ describe("what renderJsIntrinsic declines", () => {
   const num = { kind: "primitive", name: "money" } as const;
   const str = { kind: "primitive", name: "string" } as const;
 
-  it("declines the arms needing a `Decimal` import the page emitters don't inject", () => {
-    // `money.min` / `money.max` / `money.round` reference the bare `Decimal`
-    // constructor.  Backend files import decimal.js; frontend PAGE files do
-    // not (only `store-builder.ts` injects it), so emitting them would be a
-    // TS2304 — a different broken output, not a fix.  Declining keeps today's
-    // behaviour until the page emitters gain the import.
+  it("declines NOTHING the table has an arm for — every catalogue row renders", () => {
+    // This used to assert the OPPOSITE: `money.min` / `money.max` /
+    // `money.round` were declined because they name the `Decimal` binding and
+    // the frontend PAGE shells never imported decimal.js (only
+    // `store-builder.ts` did).  Declining did not avoid broken output, it
+    // chose a DIFFERENT broken output — the walker's verbatim fallthrough
+    // emitted `amt.min(x)` / `amt.max(x)`, for which decimal.js has no
+    // INSTANCE method (TS2339), and `amt.round(2)`, whose instance method
+    // takes no arguments (TS2554).
+    //
+    // The shells now decide the import by scanning their rendered source
+    // (`usesDecimalBinding`), and Angular additionally HOISTS the binding onto
+    // the component class — its templates resolve identifiers against the
+    // instance, never module scope, so an import alone would not have been
+    // enough there.  So there is nothing left to decline.
     const declined = INTRINSIC_SIGNATURES.map((s) => intrinsicKey(s.receiver, s.name)).filter(
       (key) => {
         const [receiver, name] = key.split(".") as [string, string];
@@ -189,7 +199,27 @@ describe("what renderJsIntrinsic declines", () => {
         );
       },
     );
-    expect(declined.sort()).toEqual(["money.max", "money.min", "money.round"]);
+    expect(declined.sort()).toEqual([]);
+  });
+
+  it("renders the three arms that name the `Decimal` binding", () => {
+    const money = { kind: "primitive", name: "money" } as const;
+    expect(renderJsIntrinsic(money, "min", "m", ["c"])).toBe("Decimal.min(m, c)");
+    expect(renderJsIntrinsic(money, "max", "m", ["c"])).toBe("Decimal.max(m, c)");
+    expect(renderJsIntrinsic(money, "round", "m", ["2"])).toBe(
+      "m.toDecimalPlaces(2, Decimal.ROUND_HALF_UP)",
+    );
+  });
+
+  it("`usesDecimalBinding` sees both producers, and no false positive on text", () => {
+    // The single structural signal every page shell keys its import off — it
+    // must catch the intrinsic table's statics AND `exprConvert`'s
+    // constructor, without firing on the word in user-authored page copy.
+    expect(usesDecimalBinding("Decimal.min(m, c)")).toBe(true);
+    expect(usesDecimalBinding("m.toDecimalPlaces(2, Decimal.ROUND_HALF_UP)")).toBe(true);
+    expect(usesDecimalBinding("new Decimal(v)")).toBe(true);
+    expect(usesDecimalBinding("<Text>Decimal precision matters</Text>")).toBe(false);
+    expect(usesDecimalBinding("const x = m.abs();")).toBe(false);
   });
 
   it("declines a non-intrinsic member so ordinary method-call emission still runs", () => {

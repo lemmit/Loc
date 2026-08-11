@@ -12,6 +12,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
+import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { unwrapOpt } from "../../_frontend/form-helpers.js";
 import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
@@ -535,6 +536,24 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // "Property 'String' does not exist".
   if (result.tsx.includes("String(")) {
     members.push(`  protected readonly String = String;`);
+  }
+
+  // decimal.js's `Decimal`, hoisted for the SAME reason as `Math` and `String`
+  // above — an Angular template resolves identifiers against the component
+  // instance, never module scope, so an `import Decimal from "decimal.js"`
+  // alone would NOT make `Decimal.min(…)` resolve here (it does on React /
+  // Vue / Svelte, whose markup reads module-scoped bindings directly).  That
+  // asymmetry is why this arrived as a design call rather than one uniform
+  // fix: Angular needs the binding on the class.
+  //
+  // The producers are the shared intrinsic table's money arms —
+  // `Decimal.min` / `Decimal.max` / `toDecimalPlaces(…, Decimal.ROUND_HALF_UP)`
+  // — which `renderJsIntrinsic` used to DECLINE precisely because the page
+  // shells had no way to bring the binding into scope.  Declining fell through
+  // to a verbatim `amt.min(x)`, which decimal.js has no instance method for.
+  if (usesDecimalBinding(result.tsx)) {
+    imports.push(`import Decimal from "decimal.js";`);
+    members.push(`  protected readonly Decimal = Decimal;`);
   }
 
   // Extern frontend functions the walked body / action bodies call — import
