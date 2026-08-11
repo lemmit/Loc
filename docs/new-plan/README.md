@@ -63,7 +63,7 @@ Loom lets you program architecturally correct business apps concisely, with a no
 1. **M-T3.6** `organizationContext` — the last governance-spine piece, explicitly unblocked now that the item-3 gate machinery it depends on ships. Pair with **M-T3.3** (P4 `deny`) — same spine, same ordering.
 2. **M-T5.1** the A4 `Repo.getById → T or NotFound` coordinated re-shape (one PR + fixture re-baseline, don't slice) — plus **M-T5.20** denial-ladder routing, the same exception-less family.
 3. **M-T6.23 emitters + M-T6.25** — the persistence-adapter silent-gap drain (mikroorm's five non-persistence features; dapper query-time projections). The gates are honest today; the emitters are the open half.
-4. **M-T9.13–9.15** the remaining runtime-validity tier — `resources`/`extern` runtime validation, the Flutter full-stack cell, one non-React per-PR round-trip. The classes the compile tiers are structurally blind to.
+4. **M-T9.13–9.15** the remaining runtime-validity tier — draining `E2E_LESS_CORPUS_FIXTURES` (7 left: `resources`/`extern`/`extern-handlers`/`outbox`/`channels-broker`/`tenancy-hierarchy`/`api-call`, plus the registry-principal harness fix), the Flutter full-stack cell, one non-React per-PR round-trip. The classes the compile tiers are structurally blind to.
 5. **Tracker hygiene as work**: land the #2340 rebase/renumber (M-T9.25) so M-T9.26 unblocks, and mint the coverage.md quality-audit R-row missions — unminted work is how this repo duplicates effort.
 
 ## Statuses rot — verify, then verify the verifier

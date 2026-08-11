@@ -224,3 +224,40 @@ describe("Hono seeding — raw explicit-id path", () => {
     expect(seed).not.toContain("Customer.create(");
   });
 });
+
+describe("Hono seeding — the raw INSERT is schema-qualified", () => {
+  // A dataSource binding routes every table of the context into its own Postgres
+  // schema (`pgSchema("sales")`, and `"sales"."customers"` in the migration DDL).
+  // The DOMAIN seed path goes through the drizzle table object and is qualified
+  // by construction; the RAW path builds SQL by hand, and did NOT qualify it — so
+  // `INSERT INTO "customers"` could never resolve a table created as
+  // `"sales"."customers"`, and every `default`-dataset raw row was a first-boot
+  // break (`relation "customers" does not exist`) in shipped output.  python and
+  // java qualified theirs from the start; this surfaced when the behavioural node
+  // leg started running the emitted seeder at all (#2517).
+  const RAW_WITH_SCHEMA = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      repository Customers for Customer { }
+      seed default raw {
+        Customer { id: "11111111-1111-1111-1111-111111111111", name: "Acme" }
+      }
+    } }
+    api A from Sales
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api { platform: node contexts: [Sales] dataSources: [salesState] serves: A port: 3000 }
+  }`;
+
+  it("qualifies the raw INSERT with the aggregate's dataSource schema", async () => {
+    const { model, errors } = await parseString(RAW_WITH_SCHEMA);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const files = generateSystems(model).files;
+    const seed = find(files, /\/db\/seed\.ts$/);
+    expect(seed).toContain('INSERT INTO \\"sales\\".\\"customers\\"');
+    // …the same qualifier the drizzle schema and the migration DDL use, which is
+    // the invariant that matters: three emitted views of one table must agree.
+    expect(find(files, /\/db\/schema\.ts$/)).toContain('pgSchema("sales")');
+    expect(find(files, /migrations\/.*\.sql$/)).toContain('"sales"."customers"');
+  });
+});

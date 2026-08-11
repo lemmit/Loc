@@ -62,6 +62,16 @@ now fixed; all corpus cases boot green on all five backends.
 
 ---
 
+## B19 ⛔ elixir — `seed` datasets emit NO seeder at all (silently dropped)
+
+- **Where:** `src/generator/elixir/` — nothing reads `ctx.seeds`. The layout adapter reserves the slot (`adapters/by-feature-layout.ts` → `"seeds"` → `priv/repo/seeds.exs`) and `docs/generators.md`'s Phoenix file map lists that file, but no emitter ever writes it. node (`db/seed.ts`), python (`app/db/seed.py`), java (`<Ctx>SeedRunner`) and .NET (`Infrastructure/Persistence/Seed.cs`) all emit a seeder AND invoke it at boot after migrating.
+- **Repro:** `test/fixtures/corpus/seeding.ddd` on elixir → generate and `find -iname "*seed*"`: no file. Boot the leg and read a collection: the table is empty, where the other four legs hold the `default` dataset's rows.
+- **Impact:** every `seed` block is a no-op on `platform: elixir` — first-boot reference data simply does not exist, with no diagnostic. A SILENT gap of the class `CLAUDE.md` forbids (a feature the manifest claims on all five backends: `manifest.ts` `{ id: "seeding", backends: ALL }`). It stayed invisible because seed data is only observable through a COLLECTION read, and the one fixture that has seeds had none — the node behavioural leg didn't even run its own seeder (`R.unseededListRead`), so no leg could assert a seeded row.
+- **Found by:** #2517 (M-T9.13), giving `seeding`'s two list routes their first callers.
+- **Status:** OPEN. Registered honestly as `BEHAVIOURAL_SKIP.elixir.seeding` (`test/behavioral/cases.mjs`) with this cause, so the elixir leg does not fail on rows it cannot have; the case still runs on the other four and the emit-everywhere gate still requires it to generate. **The fix is its own slice:** an Ecto seeder module (domain rows through the context `create` path, raw rows as **schema-qualified** INSERTs, the ship-once `__loom_seed` marker, `LOOM_SEED` dataset gating — the java `SeedRunner` is the closest model) plus an invocation at boot next to the migrations. Delete the skip entry when it lands. Until then, the honest alternative would be a `loom.elixir-unsupported`-style gate on `seed` for that platform — deliberately NOT added here, because it would fail generation for every seeded elixir system and break the corpus compile matrix in the same PR that only meant to observe the gap.
+
+---
+
 ## B18 ✅ elixir — a derived field has no domain-struct accessor (domain test can't read it)
 
 - **Where:** `src/generator/elixir/vanilla/` — the domain module (`domain-core-emit.ts`) emitted no accessor for a `derived` field, and the domain-test emitter (`tests-emit.ts`) rendered `o.<derived>` as a plain struct-field read.

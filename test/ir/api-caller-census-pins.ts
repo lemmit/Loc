@@ -8,15 +8,19 @@
 //   • a pin that stops matching (the op gained a caller, or the op / fixture was
 //     renamed or deleted) fails as STALE, so the drain deletes it in the same PR.
 //
-// The reasons are shared constants rather than 13 hand-written sentences —
+// The reasons are shared constants rather than 16 hand-written sentences —
 // the gaps fall into a handful of classes, and the class is the honest
 // explanation.  EVERY remaining pin is now in a class that is NOT an
-// un-authored test: `tenantRegistryRow` (10), `unseededListRead` (2) and
-// `gateProbe` (1) name routes that **cannot be driven from the `test e2e`
-// surface as it stands**, so no amount of test writing drains them — each needs
-// a change to the harness, the fixture set, or the DSL.  Keeping that
-// distinction is the point of writing the reason down: an un-authored pin is
-// work, an unreachable pin is a finding.
+// un-authored test: `tenantRegistryRow` (15) and `gateProbe` (1) name routes
+// that **cannot be driven from the `test e2e` surface as it stands**, so no
+// amount of test writing drains them — each needs a change to the harness, the
+// fixture set, or the DSL.  Keeping that distinction is the point of writing the
+// reason down: an un-authored pin is work, an unreachable pin is a finding.
+//
+// `unseededListRead` (2) exited by having its HARNESS fixed (#2517): the node
+// leg now runs the emitted first-boot seeder, so the oracle reads the same table
+// as the other four legs.  `tenantRegistryRow` is the ONE remaining harness fix,
+// and it is now the whole board: 15 of the 16 pins are that single cause.
 //
 // `autoFindAll` and `destroy` USED to be in the unreachable class — 104 of the
 // 216 pins were those two routes, together the delete and list paths of every
@@ -25,7 +29,12 @@
 // are now fully drained.
 //
 // COUNT HISTORY.  216 (#2380, the census) → 210 (#2429, destroy + all reach
-// their routes) → 126 (the `crudishUpdate` drain) → 13 (this change).
+// their routes) → 126 (the `crudishUpdate` drain) → 13 (the destroy/all drain)
+// → 16 (#2517: −2 seeded list reads drained by fixing the node leg's seeder,
+// +5 for `policy-deny`'s registry, which joined the census when the fixture
+// gained its first `test e2e` block).  A pin count that goes UP is not a
+// regression when the population grows: what must not grow is the number of
+// CLASSES, and that went 3 → 2.
 //
 // The 113 drained here are the two big remaining classes and their tails —
 // `destroy` (41), `autoFindAll` (53), plus the `getById` (9), `domainOp` (5)
@@ -94,7 +103,7 @@
 //      (a representation decision); the two sorted reads that hit it now sort by
 //      a timestamp instead, with the finding written down at both sites.
 //
-// WHAT IS LEFT, by class: tenantRegistryRow 10, unseededListRead 2, gateProbe 1.
+// WHAT IS LEFT, by class: tenantRegistryRow 15, gateProbe 1.
 
 /** Why an operation is pinned.  Grouped by CLASS — see the header. */
 export const R = {
@@ -138,6 +147,29 @@ export const R = {
    * Draining these needs a HARNESS change, not a test: a principal whose claim
    * is a real registry id (the signup-bootstrap path `tenancy-e2e` drives),
    * which is that suite's job, not this fixture's.
+   *
+   * THE SHAPE THAT WORKS, scouted while draining `unseededListRead` (#2517), so
+   * the next agent starts from a checked design rather than from scratch:
+   *   1. the registry row cannot be MINTED with a known id through the api (the
+   *      create input has no `id` — identity is always a server-side `guid`,
+   *      `docs/language.md` "there is no `ids` clause"), and it cannot be a
+   *      readable string either, so `tenantId: "acme"` can never BE a row id;
+   *   2. it CAN be seeded with a fixed one: `seed default raw { Org { id:
+   *      "<fixed guid>", … } }` — `raw` is required for an explicit id
+   *      (`loom.seed-explicit-id-needs-raw`), and `default` is the dataset that
+   *      always runs.  That only became viable on all five legs once the node
+   *      leg ran the seeder at all, which is why the two classes were coupled;
+   *   3. so the fix is: seed the row, and point `DEV_CLAIMS`' claim at that same
+   *      guid (`cases.mjs`).  It is a SHARED principal, so the change lands on
+   *      every fixture at once — `tenancy-filter` asserts the literal `"acme"`
+   *      as an explicit user-set field and would move with it, and the
+   *      `tenancy-*` wire goldens are re-recorded.  That blast radius (plus the
+   *      five-leg reverify and `tenancy-e2e`, which drives the same `.ddd` with
+   *      its own claims) is why it is its own slice and not a footnote in this
+   *      one.
+   * Blocked on nothing except that work; `seeding`'s Elixir gap (B19) is the
+   * one thing that must land first, since a seeded registry row is exactly what
+   * the Elixir backend would silently drop.
    */
   tenantRegistryRow:
     "unreachable: registry self-scope `this.id == currentUser.<claim>` — the harness principal's claim is not a row id",
@@ -168,23 +200,41 @@ export const R = {
   unseedableAggregate:
     "unreachable: crudish(updateOnly:) emits no create route, so no row can be minted through the api",
   /**
-   * UNREACHABLE — a COLLECTION read on an aggregate carrying first-boot SEED
-   * data.  Not a property of the route: a property of the harness.  The four
-   * cross-backend behavioural legs boot the generated entrypoint, which calls
-   * `runSeeds` after migrating (`index.ts` / `app/main.py` / …), while the node
-   * leg — the wire-golden ORACLE — composes `createApp` directly and never
-   * reaches it.  So the same table starts with the `default` dataset's rows on
-   * four legs and empty on the fifth.
+   * WAS UNREACHABLE — a COLLECTION read on an aggregate carrying first-boot
+   * SEED data.  Not a property of the route: a property of the harness.  The
+   * four cross-backend behavioural legs boot the generated entrypoint, which
+   * calls `runSeeds` after migrating (`index.ts` / `app/main.py` / …), while the
+   * node leg — the wire-golden ORACLE — composed `createApp` directly and never
+   * reached it.  So the same table started with the `default` dataset's rows on
+   * four legs and empty on the fifth, and a collection read (the only route
+   * class that can SEE seed data) would have recorded that harness gap as a
+   * wire divergence on four backends at once.
    *
-   * A by-id read cannot see that; a collection read sees nothing else.  And the
-   * wire golden compares whole bodies, so writing `api.widgets.all()` would
-   * encode a harness gap as a wire divergence on four backends at once — the
-   * shape the ratchet exists to keep out.
+   * EXITED — the harness was fixed rather than the test written differently:
+   * `run.mjs` now imports the EMITTED `db/seed.ts` and runs `runSeeds(db)`
+   * between the DDL and `createApp`, exactly where the generated entrypoint
+   * does, so all five legs read the same table.  `corpus/seeding`'s two list
+   * routes are drained with assertions on the seeded VALUES (the int + enum
+   * columns the seeder writes) and on the dataset GATE (`demo` / `wired raw`
+   * are opt-in, so their rows must be absent).
    *
-   * Draining these needs the harness fixed (run the seeder on the node leg, or
-   * make the seed application explicit and uniform), not a test.  It is also a
-   * coverage finding in its own right: `seed` datasets have NO runtime coverage
-   * on the oracle backend today.
+   * What the drain found, and why this class was worth writing down twice:
+   *   • `seed raw` INSERTs were NOT schema-qualified on node or .NET (python and
+   *     java always were), so `INSERT INTO "widgets"` could never resolve a
+   *     table created as `"catalog"."widgets"` — a first-boot break in shipped
+   *     output for any `default` dataset carrying raw rows.  Fixed.
+   *   • the Elixir backend emits NO seeder at all — a silent gap, now an honest
+   *     `BEHAVIOURAL_SKIP` entry (B19) with the case named.
+   *   • the node leg's TWO schema sources disagree on `version`: the migration
+   *     DDL says `NOT NULL DEFAULT 1`, the emitted drizzle column says only
+   *     `.notNull()`, so a raw row (which omits `version`) inserts fine against
+   *     a migrated Postgres and violates the constraint on the PGlite schema
+   *     synthesized from drizzle metadata.  Same class as items (4) and (6) in
+   *     the header; recorded, not fixed (no shipped app hits it — the
+   *     repositories always write `version` explicitly).
+   *
+   * Kept as a class because it recurs the moment a new fixture seeds a table
+   * nothing lists.
    */
   unseededListRead:
     "unreachable: the node leg never runs runSeeds, so a collection read starts from a different table than the other four legs",
@@ -255,9 +305,9 @@ export const R = {
 /** `<case key> → { <derived operationId>: reason }`.  Case keys match
  *  `POPULATION` in `api-caller-census.test.ts`. */
 export const UNCALLED_PINS: Record<string, Record<string, string>> = {
-  // ── The two TENANT REGISTRIES ────────────────────────────────────────────
-  // Ten pins, one cause: the derived self-scope filter narrows every read (and
-  // every write's load-before-save) to the row whose id IS the principal's
+  // ── The THREE TENANT REGISTRIES ──────────────────────────────────────────
+  // Fifteen pins, one cause: the derived self-scope filter narrows every read
+  // (and every write's load-before-save) to the row whose id IS the principal's
   // claim, and the harness principal's claim is not a row id.  See
   // `R.tenantRegistryRow` — draining them needs a harness change, not a test.
   "corpus/tenancy-owned": {
@@ -276,15 +326,20 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     updateOrganization: R.tenantRegistryRow,
     allOrganization: R.tenantRegistryRow,
   },
-  // ── The SEEDED collection reads ──────────────────────────────────────────
-  // The only fixture whose tables do not start empty, and the behavioural legs
-  // disagree about that — so a collection read here would record a harness gap
-  // as a wire divergence on four backends at once.  Both aggregates' by-id
-  // routes ARE driven (create / getById / update / destroy); only the two list
-  // reads are held.  See `R.unseededListRead`.
-  "corpus/seeding": {
-    allWidget: R.unseededListRead,
-    allGadget: R.unseededListRead,
+  // ── The DENY fixture's tenant registry ───────────────────────────────────
+  // `policy-deny` declares `tenancy by user.tenantId of Org`, so `Org` is a
+  // third TENANT REGISTRY and its five routes join the ten above under the same
+  // one cause — not a deny question at all (the deny stances themselves are
+  // fully driven: read-denied with and without a tenant floor, write-denied, and
+  // the undenied control).  Asserting the 404s these routes DO answer would pin
+  // the harness artefact rather than the feature, and would have to be inverted
+  // by the same harness fix that drains the other ten.
+  "corpus/policy-deny": {
+    createOrg: R.tenantRegistryRow,
+    getOrgById: R.tenantRegistryRow,
+    destroyOrg: R.tenantRegistryRow,
+    updateOrg: R.tenantRegistryRow,
+    allOrg: R.tenantRegistryRow,
   },
   // ── The `when`-gate probe ────────────────────────────────────────────────
   // The one route with no `test e2e` verb at all.  The gate itself is
@@ -344,28 +399,60 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
  * of this list, the census gains a case, and BOTH halves fail until the entry
  * is deleted and the new case's pins are written.
  */
+// Each entry carries WHY it is still here, checked against the emitted routes
+// rather than assumed — the three classes are "needs a sidecar the behavioural
+// leg does not stand up", "needs a second deployable", and "needs a fixture
+// change before any caller is even expressible".  Written down because the
+// classes decide the ORDER of the remaining drain, and re-deriving them costs
+// the next agent an hour (#2517).
 export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
+  // TWO DEPLOYABLES — the caller's client is derived from the callee's served
+  // operation set (see the manifest note), and the behavioural corpus requires
+  // exactly one `platform: node` deployable per case so dispatch is unambiguous.
+  // Its own runtime leg is `api-call-e2e.yml` (label/post-merge).
   "api-call",
+  // BROKER SIDECAR — redis/rabbitmq/kafka; the node leg boots in-process on
+  // PGlite with no broker. Runtime home: `channels-e2e.yml` (label/post-merge).
   "channels-broker",
+  // FIXTURE CHANGE FIRST — `Order` carries no `crudish` and no author-declared
+  // create, so the emitted route set is getById/all/confirm/flag/cancel with NO
+  // `POST /api/orders`: nothing can mint a row, so no caller is expressible at
+  // all (the `unseedableAggregate` shape wearing a different hat).  The drain is
+  // therefore: give `Order` a create — the precedent is `scaffold-macros`' `Item`
+  // (#2468) and `eventsourced-workflow`'s `Order` (M-T9.12) — then drive the half
+  // that IS meaningful: the PRECONDITIONS gating the user handler (422 on
+  // `riskScore < 80` and on a non-`Draft` status) plus the non-extern `cancel` as
+  // the control.  The handler bodies stay uncalled on purpose: an unimplemented
+  // `extern` throws honest fail-fast, and asserting that 500 would pin the
+  // scaffold instead of the feature.
   "extern",
   "extern-handlers",
+  // BROKER SIDECAR (the outbox relay's delivery half). Same home as
+  // `channels-broker`.
   "outbox",
-  // `deny` compiles on all five backends (that is what the fixture was added
-  // for — see docs/new-plan T3 M-T3.3), but nothing calls a denied aggregate's
-  // routes at runtime, so "a denied read 404s / lists empty over HTTP" is still
-  // unproven.  Registered rather than silently absent: before this fixture the
-  // feature had no `.ddd` at all, so it could not even appear on this list.
-  "policy-deny",
-  // The `shape: document` × authz crossing (pairwise F1).  Codegen CRASHED on
-  // node/java/python until the in-app desugar landed, so the fixture's first job
-  // is the compile tier — but "the deep ladder actually hides an out-of-subtree
-  // document row over HTTP" is still unproven at runtime.  A runtime caller here
-  // needs an AUTHENTICATED principal (the ladder is meaningless without one),
-  // which is the multi-principal harness work, not this fixture's.  The emitted
-  // predicate IS executed against fabricated rows in
-  // `test/generator/policy-document-inapp.test.ts`, so the filtering semantics
-  // are proven — just not end-to-end over the wire.
+  // `policy-deny` DRAINED in #2517 — the fixture now drives all four deny
+  // stances over HTTP (read-denied with and without a tenant floor, write-denied,
+  // and the undenied control), so "a denied read 404s / lists empty" is proven
+  // rather than assumed.  Its five registry routes are pinned above.
+  //
+  // The `shape: document` × authz crossing (pairwise F1) is a DIFFERENT fixture
+  // and stays: codegen CRASHED on node/java/python until the in-app desugar
+  // landed, so its first job is the compile tier — but "the deep ladder actually
+  // hides an out-of-subtree document row over HTTP" is still unproven at runtime.
+  // A runtime caller there needs an AUTHENTICATED, UNAUTHORIZED principal (the
+  // ladder is meaningless with one identity), which is the multi-principal
+  // harness work (#2515), not that fixture's.  The emitted predicate IS executed
+  // against fabricated rows in `test/generator/policy-document-inapp.test.ts`, so
+  // the filtering semantics are proven — just not end-to-end over the wire.
   "policy-document",
+  // SIDECARS — `objectStore` (S3/minio), `queue`, an http `api` peer and a
+  // `mailer` (mailpit).  A put→get round-trip needs them standing up, which is
+  // `email-e2e.yml`'s and `channels-e2e.yml`'s shape, not this leg's.
   "resources",
+  // NEEDS THE REGISTRY-PRINCIPAL HARNESS FIX — subtree scoping is a statement
+  // about two principals in different parts of the tree, and the behavioural
+  // suite authenticates as one whose claim is not a registry id at all.  Same
+  // blocker as `R.tenantRegistryRow`; drain them together.  Runtime home today:
+  // `tenancy-e2e.yml`'s hierarchy legs (label/post-merge).
   "tenancy-hierarchy",
 ];

@@ -246,6 +246,17 @@ const BEHAVIOURAL_SKIP = {
       "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
   },
   elixir: {
+    // B19 — a SILENT gap the `seeding` fixture's first collection read found
+    // (#2517): the Elixir backend emits NO seeder at all.  `priv/repo/seeds.exs`
+    // is listed in the Phoenix file map (docs/generators.md) and reserved as a
+    // layout slot (`elixir/adapters/by-feature-layout.ts` → "seeds"), but no
+    // emitter ever writes it, so every `seed` dataset is dropped and the tables
+    // start empty — while node/python/java/dotnet all seed at boot.  Invisible
+    // until something read a seeded row back: the fixture compiled green on all
+    // five backends and the case passed here because nothing asserted the rows.
+    // Delete this entry when the Elixir seeder lands (M-T9.13 follow-up).
+    seeding:
+      "elixir emits no seed runner — `seed` datasets are silently dropped, so the seeded rows the fixture reads back never exist (B19)",
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
     // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
     // now mints a valid PascalCase module alias; openapi-emit.ts.)

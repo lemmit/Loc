@@ -32,26 +32,54 @@ import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/s
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderTsExpr } from "../render-expr.js";
 
-export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
-  emitSeeds(ctx, out, {
-    // drizzle: raw INSERTs go through the drizzle `sql.raw` execute.
-    rawInsert: (sql) => `  await db.execute(sql.raw(${JSON.stringify(sql)}));`,
-    renderFile: renderSeedFile,
-    renderCli: renderSeedCliFile,
-  });
+export function emitTypescriptSeeds(
+  ctx: EnrichedBoundedContextIR,
+  out: Map<string, string>,
+  schemaFor: SchemaFor = () => undefined,
+): void {
+  emitSeeds(
+    ctx,
+    out,
+    {
+      // drizzle: raw INSERTs go through the drizzle `sql.raw` execute.
+      rawInsert: (sql) => `  await db.execute(sql.raw(${JSON.stringify(sql)}));`,
+      renderFile: renderSeedFile,
+      renderCli: renderSeedCliFile,
+    },
+    schemaFor,
+  );
 }
 
 /** MikroORM variant (persistence: mikroorm) — same domain `create` path (the
  *  mikro `<Agg>Repository` takes the EntityManager), with raw INSERTs + the
  *  `__loom_seed` marker going through `em.getConnection().execute(...)` instead
  *  of drizzle's `sql.raw`. */
-export function emitMikroSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
-  emitSeeds(ctx, out, {
-    rawInsert: (sql) => `  await db.getConnection().execute(${JSON.stringify(sql)});`,
-    renderFile: renderMikroSeedFile,
-    renderCli: renderMikroSeedCliFile,
-  });
+export function emitMikroSeeds(
+  ctx: EnrichedBoundedContextIR,
+  out: Map<string, string>,
+  schemaFor: SchemaFor = () => undefined,
+): void {
+  emitSeeds(
+    ctx,
+    out,
+    {
+      rawInsert: (sql) => `  await db.getConnection().execute(${JSON.stringify(sql)});`,
+      renderFile: renderMikroSeedFile,
+      renderCli: renderMikroSeedCliFile,
+    },
+    schemaFor,
+  );
 }
+
+/** Postgres schema an aggregate's table lives in (its dataSource's), or
+ *  `undefined` for a system that routes everything through `public`.  The RAW
+ *  seed path builds its INSERT as a string, so — unlike the domain path, which
+ *  goes through the drizzle table object and is qualified by construction — it
+ *  has to be told.  Without it the statement said `INSERT INTO "widgets"` for a
+ *  table created as `"catalog"."widgets"`, i.e. every `seed raw` row failed at
+ *  first boot with `relation "widgets" does not exist` (python/java qualified
+ *  theirs from the start; this brought node and .NET into line). */
+export type SchemaFor = (aggName: string) => string | undefined;
 
 interface SeedBackend {
   /** Emit the raw-INSERT statement for a `raw` seed row (already SQL). */
@@ -64,6 +92,7 @@ function emitSeeds(
   ctx: EnrichedBoundedContextIR,
   out: Map<string, string>,
   backend: SeedBackend,
+  schemaFor: SchemaFor,
 ): void {
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return;
@@ -85,7 +114,7 @@ function emitSeeds(
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries, typesByAgg, backend.rawInsert));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, typesByAgg, backend.rawInsert, schemaFor));
     callLines.push(`  await seed${upperFirst(ds.name)}(db, requested);`);
   }
   if (callLines.length === 0) return;
@@ -105,6 +134,7 @@ function renderDatasetFn(
   entries: Entry[],
   typesByAgg: Map<string, Map<string, TypeIR>>,
   rawInsert: (sql: string) => string,
+  schemaFor: SchemaFor,
 ): string {
   // One repository instance per distinct aggregate used on the domain path.
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
@@ -113,8 +143,9 @@ function renderDatasetFn(
   );
   const saveLines = entries.map((e) =>
     e.raw
-      ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
-        rawInsert(renderSeedRowInsert(e.row.aggregate, e.row.fields))
+      ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns,
+        // qualified with the aggregate's dataSource schema (see `SchemaFor`).
+        rawInsert(renderSeedRowInsert(e.row.aggregate, e.row.fields, schemaFor(e.row.aggregate)))
       : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row, typesByAgg.get(e.row.aggregate))}));`,
   );
   return lines(
