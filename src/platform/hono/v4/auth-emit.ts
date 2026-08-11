@@ -287,6 +287,7 @@ function rootOrgOf(orgPath: string): string {
     ? `["/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout", "${AUTH_BASE_PATH}/refresh"]`
     : '["/health", "/ready", "/openapi.json", "/swagger"]';
   return `// Auto-generated.
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { requestContext } from "../obs/als";
 import type { User, UserClaims } from "./user-types";
@@ -300,6 +301,32 @@ ${resolverSeam}${rootOrgSeam}
  *  Hono request scope under "currentUser" for HTTP-layer reads.  Bypass
  *  list matches the .NET side — framework endpoints stay anonymous so
  *  smoke tests + the OpenAPI cross-check don't need tokens. */
+/** RFC 7807 for a request that carried no valid credentials — the same envelope
+ *  every other error on this API sends, where this used to be
+ *  \`{"error":"unauthorized"}\`, a shape appearing nowhere else.
+ *
+ *  \`WWW-Authenticate\` is not decoration: RFC 9110 §15.5.2 makes it a MUST on
+ *  every 401 ("at least one challenge applicable to the target resource"), and
+ *  it is what tells a client HOW to authenticate rather than merely that it
+ *  failed.  The challenge is the RFC 6750 §3 bearer form. */
+function unauthorized(c: Context) {
+  const detail = \`no valid credentials for \${c.req.method} \${c.req.path}\`;
+  return c.body(
+    JSON.stringify({
+      type: "about:blank",
+      title: "Unauthorized",
+      status: 401,
+      detail,
+      instance: c.req.path,
+    }),
+    401,
+    {
+      "content-type": "application/problem+json",
+      "www-authenticate": 'Bearer realm="api", error="invalid_token"',
+    },
+  );
+}
+
 export const authMiddleware = createMiddleware<{
   Variables: { currentUser: User };
 }>(async (c, next) => {
@@ -314,7 +341,7 @@ export const authMiddleware = createMiddleware<{
   try {
     claims = await verifyUserOrThrow(c.req.raw);
   } catch {
-    return c.json({ error: "unauthorized" }, 401);
+    return unauthorized(c);
   }
   ${buildUser}
   // Attach the principal to the ambient frame (read by non-HTTP code via

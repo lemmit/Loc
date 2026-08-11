@@ -362,8 +362,10 @@ export function renderAuthFiles(
       `            user = null;`,
       `        }`,
       `        if (user == null) {`,
-      `            response.setStatus(401);`,
-      `            response.getWriter().write("unauthorized");`,
+      // RFC 7807 + the RFC 9110 §15.5.2 challenge.  This wrote a bare
+      // `unauthorized` with no content type at all, so the one error a caller
+      // is most likely to meet was the only one that wasn't even JSON.
+      `            unauthorized(request, response);`,
       `            return;`,
       `        }`,
       `        accessor.set(user);`,
@@ -378,6 +380,20 @@ export function renderAuthFiles(
       // never serves a stale tenant path to the next request.
       orgPathRegistry ? `            OrgPathResolver.clearRequestCache();` : null,
       `        }`,
+      `    }`,
+      ``,
+      // RFC 7807 body + the RFC 9110 §15.5.2 challenge, written straight onto
+      // the servlet response because this filter runs before any @ControllerAdvice.
+      `    private static void unauthorized(HttpServletRequest request, HttpServletResponse response)`,
+      `            throws java.io.IOException {`,
+      `        var detail = "no valid credentials for " + request.getMethod() + " " + request.getRequestURI();`,
+      `        response.setStatus(401);`,
+      `        response.setContentType("application/problem+json");`,
+      `        response.setHeader("WWW-Authenticate", "Bearer realm=\\"api\\", error=\\"invalid_token\\"");`,
+      `        response.getWriter().write(`,
+      `            "{\\"type\\":\\"about:blank\\",\\"title\\":\\"Unauthorized\\",\\"status\\":401,\\"detail\\":\\""`,
+      `                + detail.replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"")`,
+      `                + "\\",\\"instance\\":\\"" + request.getRequestURI() + "\\"}");`,
       `    }`,
       `}`,
       ``,
@@ -843,7 +859,12 @@ function renderAuthController(pkg: string, auth: AuthIR | undefined): string {
     ...handshakeImports,
     `import io.swagger.v3.oas.annotations.Hidden;`,
     ``,
-    `import org.springframework.http.ResponseEntity;`,
+    `import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;`,
+    // `me()` takes the request so its 401 can name the occurrence, which is
+    // what RFC 7807 asks `detail` for.
+    `import jakarta.servlet.http.HttpServletRequest;`,
     `import org.springframework.web.bind.annotation.GetMapping;`,
     `import org.springframework.web.bind.annotation.RestController;`,
     ...(handshakeParamImports.length ? [``, ...handshakeParamImports] : []),
@@ -863,10 +884,22 @@ function renderAuthController(pkg: string, auth: AuthIR | undefined): string {
     `    /** The frontend guard's session probe.  UserFilter has already`,
     `     *  resolved (or rejected) the principal by the time this runs. */`,
     `    @GetMapping("${AUTH_BASE_PATH}/me")`,
-    `    public ResponseEntity<?> me() {`,
+    `    public ResponseEntity<?> me(HttpServletRequest request) {`,
     `        User user = accessor.user();`,
     `        if (user == null) {`,
-    `            return ResponseEntity.status(401).body("unauthorized");`,
+    // Spring's own ProblemDetail rather than the advice's `problem(...)`
+    // helper: this is a CONTROLLER, and that helper is private to
+    // ApiExceptionAdvice.  `type` rides as a property because ProblemDetail
+    // defaults it to the rfc9110 URI, not `about:blank` (RS-9).
+    `            var pd = ProblemDetail.forStatus(401);`,
+    `            pd.setTitle("Unauthorized");`,
+    `            pd.setDetail("no valid credentials for " + request.getMethod() + " " + request.getRequestURI());`,
+    `            pd.setInstance(URI.create(request.getRequestURI()));`,
+    `            pd.setProperty("type", "about:blank");`,
+    `            return ResponseEntity.status(401)`,
+    `                .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
+    `                .header("WWW-Authenticate", "Bearer realm=\\"api\\", error=\\"invalid_token\\"")`,
+    `                .body(pd);`,
     `        }`,
     `        return ResponseEntity.ok(user);`,
     `    }`,
