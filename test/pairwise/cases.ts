@@ -23,17 +23,21 @@ import {
   CAPABILITIES,
   type Capability,
   type PairwiseCase,
+  PERSISTENCE,
+  PERSISTENCE_BACKEND,
   type Persistence,
   SHAPES,
   type Shape,
 } from "./axes.js";
 
-/** The persistence values reachable on a given backend (`default` plus that
- *  backend's own non-default adapter, if it has one). */
+/** The persistence values reachable on a given backend — `default`, plus every
+ *  non-default adapter whose home backend this is.  DERIVED from the one
+ *  `PERSISTENCE_BACKEND` table rather than restated as a second `if` ladder, so
+ *  adding an adapter to the axes cannot leave the cover blind to it. */
 export function persistenceFor(platform: string): Persistence[] {
-  if (platform === "node") return ["default", "mikroorm"];
-  if (platform === "dotnet") return ["default", "dapper"];
-  return ["default"];
+  return PERSISTENCE.filter(
+    (p) => PERSISTENCE_BACKEND[p] === null || PERSISTENCE_BACKEND[p] === platform,
+  );
 }
 
 type AxisValues = readonly (readonly string[])[];
