@@ -88,7 +88,11 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
     expect(files.get("api/package.json")).toContain("@mikro-orm/postgresql");
     expect(files.get("api/package.json")).not.toContain("drizzle");
     expect(files.get("api/index.ts")).toContain("MikroORM.init");
-    expect(files.get("api/index.ts")).toContain("orm.schema.updateSchema()");
+    // Safe mode, not the bare call: `updateSchema()` defaults to
+    // `dropTables: true` over an unpruned introspection, which destroys every
+    // table outside the entity metadata on the SECOND boot (the timer watermark,
+    // `__loom_seed`, pg-boss's schema).  See node-mikroorm-timers.test.ts.
+    expect(files.get("api/index.ts")).toContain("orm.schema.updateSchema({ safe: true })");
   });
 
   it("the drizzle default is unchanged (drizzle schema, no entities)", async () => {
@@ -548,7 +552,9 @@ describe("mikroorm — `seed` data", () => {
     // Mikro CLI inits the ORM + applies the schema before seeding.
     const cli = files.get("api/db/seed-cli.ts")!;
     expect(cli).toContain('import { MikroORM } from "@mikro-orm/postgresql";');
-    expect(cli).toContain("await orm.schema.updateSchema();");
+    // …and the seed CLI is non-destructive for the same reason — it would
+    // otherwise drop the `__loom_seed` marker it is about to write.
+    expect(cli).toContain("await orm.schema.updateSchema({ safe: true });");
     expect(cli).toContain("await runSeeds(orm.em);");
     // Boot path runs the seeds after schema update.
     expect(files.get("api/index.ts")).toContain("await runSeeds(db);");
