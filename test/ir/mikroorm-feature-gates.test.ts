@@ -3,10 +3,11 @@
 // The MikroORM adapter reached full parity with drizzle on the PERSISTENCE axis
 // (M-T6.9), but five NON-persistence features stayed gated `&& !usingMikro` in
 // the Hono emitter: query-time projections, realtime SSE, the transactional
-// outbox, timers, and broker channel drivers.  TWO are still gated — the outbox
-// (slice 1), the broker channel driver (slice 2) and the timer scheduler
-// (slice 3) EMITTERS landed, so their clauses are deleted and their cases here
-// assert emission instead of rejection.  Each one used to generate a
+// outbox, timers, and broker channel drivers.  ONE is still gated (the realtime
+// SSE wire) — the outbox (slice 1), the broker channel driver (slice 2), the
+// timer scheduler (slice 3) and the query-time projection reads (slice 4)
+// EMITTERS landed, so their clauses are deleted and their cases here assert
+// emission instead of rejection.  Each one used to generate a
 // project with the feature SILENTLY absent — the model validated clean, the CLI
 // reported success, and the emitted tree simply had no `scheduler.ts` /
 // `http/channels.ts` / `http/realtime.ts` / `http/query-projections.ts` / outbox
@@ -92,9 +93,10 @@ async function drizzleErrorCodes(body: string, systemTail = "", depTail = ""): P
     .map((d) => d.code ?? "");
 }
 
-// --- The five feature bodies (three CLOSED — outbox, broker, timers) --------
+// --- The five feature bodies (four CLOSED — only realtime SSE is left) ------
 
-/** Query-time projection (`from … select …`) — `http/query-projections.ts`. */
+/** Query-time projection (`from … select …`) — `http/query-projections.ts`.
+ *  CLOSED by M-T6.23 slice 4 (kept here as the ratchet). */
 const QUERY_TIME_PROJECTION = `
       projection Board {
         rowId: Order id
@@ -140,11 +142,14 @@ const BROKER_TAIL = `  storage bus { type: rabbitmq }
 const BROKER_DEP_TAIL = `    channels: [lifecycleBus]`;
 
 describe("persistence: mikroorm — feature gates are honest, not silent", () => {
-  it("rejects a query-time projection (R1: emitted zero projection routes)", async () => {
-    const msgs = await mikroDiags(QUERY_TIME_PROJECTION);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("query-time projection 'Board'");
-    expect(msgs[0]).toContain("/projections/board");
+  it("CLOSED (slice 4): a query-time projection generates — its read routes emit", async () => {
+    // R1 closed: `http/query-projections.ts` emits on this adapter (aggregations
+    // push down through the mikro QueryBuilder; the repository-sourced shape was
+    // always adapter-neutral).  Emitter pins live in
+    // `test/adapters/node-mikroorm-query-projections.test.ts`; this is the
+    // ratchet.
+    expect(await mikroDiags(QUERY_TIME_PROJECTION)).toEqual([]);
+    expect(await mikroDiags(QUERY_TIME_PROJECTION, "", "", "warning")).toEqual([]);
   });
 
   it("warns (not errors) on a broadcast channel with no realtime consumer", async () => {
