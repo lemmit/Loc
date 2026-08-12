@@ -49,7 +49,7 @@ import {
   stmtUsesCurrentUser,
 } from "../../types/loom-ir.js";
 import { isMacroEmitted } from "../../types/origin.js";
-import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
+import { backendServesRealtime } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
@@ -2884,14 +2884,17 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 //      included.  Only one survives M-T6.9: an abstract inheritance base that
 //      owns its own `contains` (the base has no repository and concretes do not
 //      inherit its parts, so its tables would have no reader/writer).
-//  (b) FEATURE rejects (`rejectFeature`, M-T6.23) — parity is persistence-only,
-//      and five NON-persistence features are gated `&& !usingMikro` in the Hono
-//      emitter: query-time projections, realtime SSE, the transactional outbox,
-//      timers (`scheduler.ts`) and broker channel drivers.  Each one used to
-//      generate a project with the feature SILENTLY absent; each is now an
-//      honest error.  Closing any of them means deleting its clause here — the
-//      gate is the interim, the emitter is the principled fix
-//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1).
+//  (b) FEATURE rejects (M-T6.23) — GONE, all five.  Parity is persistence-only,
+//      but five NON-persistence features were once gated `&& !usingMikro` in the
+//      Hono emitter and emitted NOTHING: query-time projections, realtime SSE,
+//      the transactional outbox, timers (`scheduler.ts`) and broker channel
+//      drivers.  Each was first made an honest error here, then closed by its
+//      emitter — the gate was always the interim, never the answer
+//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1 named the
+//      projection case; the other four were unrecorded).  Nothing about a
+//      non-persistence feature is gated on this adapter any more; if a new one
+//      is ever `!usingMikro`-gated, gate it HERE rather than dropping it
+//      silently, and delete the clause with the emitter that closes it.
 //
 // Persist-time audit stamping IS supported (node-persist-time-auditing): the
 // MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
@@ -2917,31 +2920,6 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         code: "loom.mikroorm-unsupported",
       });
     };
-    // The FEATURE-gap twin of `reject`.  The clauses below do not reject an
-    // unmappable SHAPE — they reject a feature whose Hono emitter is gated
-    // `&& !usingMikro`, so on this adapter it emits NOTHING.  Each of these was
-    // a SILENT drop (a valid model generated a project with the feature simply
-    // absent, no diagnostic) until this gate; see
-    // `docs/old/proposals/integrity-audit-2026-07-residue.md` R1, which named
-    // the query-time-projection case, and M-T6.23 for the rest.  The honest
-    // answer names the default adapter as the way out — every one of these
-    // features emits on drizzle.
-    const rejectFeature = (
-      subject: string,
-      emits: string,
-      severity: "error" | "warning" = "error",
-    ): void => {
-      diags.push({
-        severity,
-        message:
-          `Deployable '${dep.name}' selects 'persistence: mikroorm', but ${subject}, which the ` +
-          `MikroORM adapter does not emit — the generated project would silently omit ${emits}. ` +
-          `Drop the 'persistence: mikroorm' clause to use the default (drizzle) adapter, which ` +
-          `emits it, or host the feature on a different deployable.`,
-        source: `${sys.name}/${dep.name}`,
-        code: "loom.mikroorm-unsupported",
-      });
-    };
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -2956,31 +2934,13 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       // outside the FilterQuery subset is refused by
       // `validateFindPredicateAdapterSupport` (which now walks projection
       // filters), so an aggregation can never silently drop its filter.
-      // (2) Realtime SSE: `http/realtime.ts` and the index.ts realtime tee are
-      // both `!usingMikro`-gated, so a `delivery: broadcast` channel loses the
-      // browser-observable wire.
-      //
-      // Severity is CONSUMER-DEPENDENT, because a broadcast channel does double
-      // duty: it is also the routing declaration that makes a projection fold or
-      // a saga subscribe to the event — and that half works fine here (the
-      // in-process dispatcher is emitted on this adapter).  So:
-      //   - a FRONTEND targeting this backend emits `src/api/realtime.ts`
-      //     unconditionally for a broadcast channel (the frontend gate keys on
-      //     the target's PLATFORM, not its persistence), so its EventSource
-      //     would poll a route that 404s → error, a real broken feature.
-      //   - with no such frontend the wire is unobserved: fold/saga routing is
-      //     intact and nothing notices the missing endpoint → warning, so the
-      //     omission is on the record without failing a working model.
-      if (realtimeEventTypes(ctx).size > 0) {
-        const consumed = sys.deployables.some((f) => f.targetName === dep.name);
-        rejectFeature(
-          `context '${ctxName}' carries a 'delivery: broadcast' channel`,
-          consumed
-            ? `the realtime SSE wire ('GET /realtime/events') that the frontend targeting it subscribes to`
-            : `the realtime SSE wire ('GET /realtime/events') — the fold/saga routing half of the channel is unaffected`,
-          consumed ? "error" : "warning",
-        );
-      }
+      // (2) Realtime SSE: CLOSED by M-T6.23 slice 5, the last of the five —
+      // `http/realtime.ts` and the boot tee emit on this adapter, so a
+      // `delivery: broadcast` channel keeps its browser-observable wire and a
+      // frontend's EventSource has a route to subscribe to.  The
+      // consumer-dependent severity split that used to live here (error when a
+      // frontend targeted the backend, warning otherwise) goes with the gap it
+      // described: the module reads no `db`, so there is nothing left to gate.
       // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
       // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
       // `startOutboxRelay` over the EntityManager, so a durable channel
