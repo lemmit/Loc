@@ -213,10 +213,9 @@ system Helpdesk {
     context Tickets {
       aggregate Ticket with crudish { subject: string open: bool }
       repository Tickets for Ticket { }
-      projection TicketTotals {
+      projection TicketTotals requires currentUser.role == "agent" {
         tickets: int
         from Ticket as t
-        requires currentUser.role == "agent"
         select tickets = count
       }
     }

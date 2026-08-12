@@ -1199,9 +1199,6 @@ export const DIAGNOSTIC_MESSAGES = {
     `exists yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` ` +
     "is not available here. Use `where` to scope which rows return; use `requires` to " +
     "allow / deny the caller.",
-  "loom.projection-gate-without-source": (p: { name: unknown }) =>
-    `projection '${p.name}': a \`requires\` gate guards a query-time read, but this ` +
-    "projection declares no `from` source. Add a `from <Aggregate>` clause, or drop the gate.",
   "loom.projection-gate-not-current-user": (p: { name: unknown; offending: unknown }) =>
     `projection '${p.name}': a \`requires\` gate runs before the query (no row exists ` +
     `yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` is not ` +
@@ -1364,6 +1361,8 @@ export const DIAGNOSTIC_MESSAGES = {
     findName: unknown;
   }) =>
     `denyByDefault: find '${p.name}.${p.findName}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-projection": (p: { name: unknown }) =>
+    `denyByDefault: projection '${p.name}' is served as a read endpoint on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` after its declaration header (use \`requires true\` to allow anonymous access).`,
   "loom.default-deny-ungated#denybydefault-handler": (p: {
     kind: unknown;
     ctx: unknown;

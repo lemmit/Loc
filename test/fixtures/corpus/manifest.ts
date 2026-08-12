@@ -69,6 +69,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection-groupby", title: "group by — grouped query-time projection (one row per group, key selects + per-group aggregates, GROUP BY/ORDER BY pushed to SQL)", doc: "language", backends: ALL },
   { id: "auth-oidc", title: "OIDC authentication — provider config + requires-guard", doc: "auth", backends: ALL },
   { id: "auth-simple", title: "dev-stub auth — user shape + requires-guard", doc: "auth", backends: ALL },
+  { id: "read-gates", title: "read-side requires gates — gated list read + folded and query-time projections", doc: "auth", backends: ALL },
   { id: "outbox", title: "durable channel / transactional outbox + relay", doc: "workflow", backends: ALL },
   {
     id: "channels-broker",
