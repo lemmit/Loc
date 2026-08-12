@@ -118,6 +118,20 @@ const MIKRO_SKIP = {
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
   "projection-groupby":
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
+  // Same class again, and the most honest entry in this map: the narrowing is
+  // DECLARED in the adapter's own capability descriptor.  `MIKROORM_SUBSET`
+  // (`src/ir/util/find-predicate-capability.ts`) lowers only comparisons, bare
+  // boolean columns, unary `!` and `&&`/`||` of them — no scalar intrinsic at
+  // all — so a `startsWith` predicate is refused at validation with
+  // `loom.find-predicate-unsupported` naming the shape and the subset.  Nothing
+  // is hidden by skipping: the fixture's whole point is a queryable intrinsic,
+  // and this adapter says up front it cannot lower one.  Widening the subset
+  // belongs to the remaining M-T6.23 mikroorm-emitter slices — slice 1 (#2516)
+  // landed the outbox/relay and did NOT touch the predicate lowerer — so delete
+  // this entry when `whereToMikroFilter` grows an intrinsic arm (and drop the
+  // `MIKROORM_SUBSET` narrowing that declares its absence in the same change).
+  "prefix-filter":
+    "mikroorm lowers no scalar intrinsic in a find/filter predicate — `MIKROORM_SUBSET` declares the narrowing and `loom.find-predicate-unsupported` refuses to generate (widen it in M-T6.23)",
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`

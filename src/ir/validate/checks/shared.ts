@@ -3,7 +3,7 @@
 // queryable-subset predicate helpers, used across several check modules.
 // -------------------------------------------------------------------------
 
-import { intrinsicFor } from "../../../util/intrinsics.js";
+import { intrinsicFor, intrinsicReturnType } from "../../../util/intrinsics.js";
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
 import { durationCtorOperand, isDatetimeTypedIR } from "../../util/temporal.js";
 import { walkExprDeep } from "../../util/walk.js";
@@ -289,6 +289,37 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       if (e.receiverType.kind === "primitive") {
         const sig = intrinsicFor(e.receiverType.name, e.member);
         if (sig?.queryable) {
+          // A BOOL-returning queryable intrinsic (`startsWith`) is a whole
+          // PREDICATE, not a comparison operand, so its receiver has to be the
+          // COLUMN — every backend renders it as `<sqlfn>(col, value)`, reaching
+          // its snippet table from the column-position renderer.  Swap the sides
+          // (`p.startsWith(this.path)` — the ancestor mirror of the subtree read)
+          // and the receiver is a value: drizzle's `renderColumnRef` returns null
+          // → the find builder throws its internal "validator should have caught
+          // this", Java's Criteria arm throws `unsupported`, and Python renders
+          // the HOST `p.startswith(...)` against a column attribute — a runtime
+          // TypeError, not a predicate.  Three outcomes for one source, none of
+          // them a diagnostic, all freshly reachable when `startsWith` became
+          // queryable, and exactly the crash class this operator's PR fixed for
+          // Dapper.  So reject the shape HERE, where the two throwing backends
+          // both say it should have been rejected.
+          //
+          // Scalar intrinsics are unaffected: they only ever appear as comparison
+          // operands, where a value receiver (`this.name == q.trim()`) is
+          // legitimate and renders host-side.  Supporting the swapped-side form
+          // would mean teaching three renderers to bind a value receiver against
+          // a column argument — a real feature, with its own runtime fixture,
+          // not a validator relaxation.
+          if (
+            intrinsicReturnType(sig, e.receiverType.name) === "bool" &&
+            !isColumnRef(e.receiver)
+          ) {
+            return (
+              `intrinsic '.${e.member}' on a non-column receiver ` +
+              `(a bool-returning queryable intrinsic is the whole predicate, so it must read ` +
+              `'this.<column>.${e.member}(<value>)')`
+            );
+          }
           const recv = firstNonQueryableNode(e.receiver);
           if (recv) return recv;
           for (const a of e.args) {

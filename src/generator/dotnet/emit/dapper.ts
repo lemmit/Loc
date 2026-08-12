@@ -46,7 +46,9 @@ import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
+import { intrinsicFor, intrinsicKey } from "../../../util/intrinsics.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PG_INTRINSIC_SQL } from "../../_expr/pg-intrinsics.js";
 import { renderCreateTableIfNotExists } from "../../sql-pg.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
 import {
@@ -598,6 +600,22 @@ const SQL_BINOP: Record<string, string> = {
   "||": "OR",
 };
 
+// Raw-Postgres scalar-intrinsic snippets come from the shared
+// `PG_INTRINSIC_SQL` table (`src/generator/_expr/pg-intrinsics.ts`), which this
+// adapter shares with Java's `@SQLRestriction` renderer — the other emitter that
+// writes a filter predicate as SQL TEXT.  The EF Core sibling adapter needs no
+// table at all (its where-path feeds the same C# expression to EF, which
+// translates it), but Dapper writes the SQL itself, so every `queryable`
+// catalogue row needs a snippet or `whereToSql` throws.
+//
+// It threw for ALL of them until M-T3.6: `whereToSql` had no intrinsic arm at
+// all, while `DAPPER_SUBSET` (`src/ir/util/find-predicate-capability.ts`)
+// declared this adapter fully-lowerable — so `criterion C of X = this.s.trim()
+// == "a"` + `filter C` under `persistence: dapper` died at generate time with a
+// bare `Error`, never a `loom.*` diagnostic.  Same shape as the `policy { deny }`
+// crash of #2492.  The fix is the table, not a narrowing of the descriptor:
+// every one of these IS expressible in Postgres SQL.
+
 /** Optional context threaded into `whereToSql` so a
  *  `this.<refColl>.contains(x)` membership predicate can resolve its
  *  AssociationIR and correlate the EXISTS subquery on the owner table's
@@ -641,6 +659,23 @@ function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
           return (
             `EXISTS (SELECT 1 FROM ${assoc.joinTable} __j ` +
             `WHERE __j.${assoc.ownerFk} = ${sqlCtx.table}.id AND __j.${assoc.targetFk} = ${arg})`
+          );
+        }
+      }
+      // Queryable scalar intrinsic (src/util/intrinsics.ts) — `this.s.trim()`,
+      // `this.dataKey.startsWith(p)`, `this.total.abs()`, …  Keyed off the
+      // catalogue's `queryable` flag exactly like the four sibling SQL tables,
+      // so a new queryable row is a completeness-test failure here rather than
+      // a generate-time crash on this adapter.
+      if (e.receiverType.kind === "primitive") {
+        const key = intrinsicKey(e.receiverType.name, e.member);
+        const snippet = intrinsicFor(e.receiverType.name, e.member)?.queryable
+          ? PG_INTRINSIC_SQL[key]
+          : undefined;
+        if (snippet) {
+          return snippet(
+            whereToSql(e.receiver, sqlCtx),
+            e.args.map((a) => whereToSql(a, sqlCtx)),
           );
         }
       }

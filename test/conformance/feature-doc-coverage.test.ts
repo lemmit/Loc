@@ -54,6 +54,10 @@ const FEATURE_DOCS: readonly string[] = [
   "provenance",
   "resources",
   "scaffold-macros",
+  // The expression stdlib (scalar intrinsics + collection ops) — authorable
+  // surface, not toolchain meta, and now corpus-covered: `prefix-filter.ddd`
+  // proves the `queryable` half generates on every backend (M-T3.6).
+  "stdlib",
   "tenancy",
   "workflow",
 ];

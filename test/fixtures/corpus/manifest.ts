@@ -131,6 +131,13 @@ export const CORPUS: readonly CorpusFeature[] = [
     backends: ALL,
   },
   {
+    id: "prefix-filter",
+    title: "`startsWith` prefix-match filter operator — inline find + criterion filter",
+    doc: "stdlib",
+    backends: ALL,
+    note: "the first bool-returning QUERYABLE intrinsic: it stands alone in predicate position, where a scalar intrinsic only ever appears as a comparison operand",
+  },
+  {
     id: "domain-services",
     title: "domainService — cross-aggregate pure/reading/mutating ops orchestrated by workflows",
     doc: "domain-services",
