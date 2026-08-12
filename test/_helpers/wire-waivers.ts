@@ -192,4 +192,43 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     reason:
       "M-T6.20 — elixir's precondition denial puts the authored message in detail (the domain-floor shape) instead of the wire-validation sentence",
   },
+  // M-T9.11 (4xx wire goldens) — the FIRST finding the authorization ladder's
+  // recorded 401 rung surfaces: the unauthenticated 401 body is NOT the same
+  // shape across backends.  node, python and elixir answer JSON
+  // `{"error":"unauthorized"}` (the golden); .NET and Java answer the BARE TEXT
+  // `unauthorized` (`ctx.Response.WriteAsync("unauthorized")` in the .NET
+  // auth-emit; `response.getWriter().write("unauthorized")` /
+  // `ResponseEntity.status(401).body("unauthorized")` in the Java auth filter),
+  // so the recorded body is the string "unauthorized" and the differ reports a
+  // `type-mismatch` at `$` against the JSON golden.  Only `auth-oidc` carries the
+  // 401 rung (the dev-stub `auth-simple` has no anonymous caller), and only on
+  // the gated `POST /api/tickets/{id}/close`.
+  //
+  // This is a REAL cross-backend wire bug, not a golden error: the golden is
+  // node's reviewed answer, and #2500 ("The 401 violates an RFC 9110 MUST on all
+  // five backends, and is a problem document on none") is the open PR that makes
+  // the 401 a uniform problem document everywhere — at which point node's shape
+  // ALSO changes and this whole rung is rebaselined.  Waived (not golden-edited)
+  // so the 401/403/2xx wire contract still gates on every OTHER field/status
+  // while the body-shape fix lands; ratchets stale the moment #2500 (or any 401
+  // reshape) makes these backends match.  dotnet+dapper share the one .NET
+  // emitter; java is the parallel bug in its own emitter.
+  {
+    backends: ["dotnet", "dapper"],
+    cases: ["auth-oidc"],
+    request: "POST /api/tickets/{id}/close",
+    path: "$",
+    kinds: ["type-mismatch"],
+    reason:
+      'M-T9.11 / #2500 — .NET emits a bare-text `unauthorized` 401 body where node/python/elixir emit JSON {"error":"unauthorized"}',
+  },
+  {
+    backends: ["java"],
+    cases: ["auth-oidc"],
+    request: "POST /api/tickets/{id}/close",
+    path: "$",
+    kinds: ["type-mismatch"],
+    reason:
+      'M-T9.11 / #2500 — Java emits a bare-text `unauthorized` 401 body where node/python/elixir emit JSON {"error":"unauthorized"}',
+  },
 ];
