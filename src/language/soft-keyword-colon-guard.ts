@@ -153,15 +153,28 @@ export function applySoftKeywordColonGuard(tokens: TokenType[]): string[] {
 export function guardedKeywordsUsedBeforeColon(grammar: Grammar): string[] {
   const guarded = new Set(GUARDED_SOFT_KEYWORDS);
   const offenders = new Set<string>();
+
+  // Deliberately OVER-approximate: every guarded keyword appearing ANYWHERE
+  // inside the element that precedes a `':'` counts, not just a bare `'kw' ':'`
+  // sibling pair — so `('secret' | 'x') ':'` or `('secret' y)? ':'` is caught
+  // too.  A false positive fails this check and gets reviewed; a false negative
+  // would silently un-parse a rule.  Erring toward the reviewable direction is
+  // the whole point of the check.
+  const guardedKeywordsIn = (node: GrammarAST.AbstractElement): string[] =>
+    [node, ...AstUtils.streamAllContents(node)]
+      .filter((n): n is GrammarAST.Keyword => n.$type === "Keyword")
+      .map((k) => k.value)
+      .filter((v) => guarded.has(v));
+
   for (const node of AstUtils.streamAllContents(grammar)) {
     if (node.$type !== "Group" && node.$type !== "UnorderedGroup") continue;
     const elements = (node as GrammarAST.Group).elements ?? [];
-    for (let i = 0; i < elements.length - 1; i++) {
-      const here = elements[i];
-      const next = elements[i + 1];
-      if (here?.$type !== "Keyword" || next?.$type !== "Keyword") continue;
-      const value = (here as GrammarAST.Keyword).value;
-      if (guarded.has(value) && (next as GrammarAST.Keyword).value === ":") offenders.add(value);
+    for (let i = 1; i < elements.length; i++) {
+      const next = elements[i];
+      const here = elements[i - 1];
+      if (!here || next?.$type !== "Keyword") continue;
+      if ((next as GrammarAST.Keyword).value !== ":") continue;
+      for (const v of guardedKeywordsIn(here)) offenders.add(v);
     }
   }
   return [...offenders].sort();
