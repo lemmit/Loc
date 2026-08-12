@@ -31,6 +31,8 @@ Sources: [ai-diagnostics-contract](../old/proposals/ai-diagnostics-contract.md).
 The cross-origin flip (`SANDBOX_ORIGIN` → distinct origin — no real isolation until then; gates untrusted user expressions), Phase 3 API test runner, Phase 4 UI driver + `page` shim, Phase 5 console/screenshots, CSP pack-render confirmation.
 Sources: [playground-sandbox-redesign](../old/plans/playground-sandbox-redesign.md).
 
+**Gate-health note (2026-08-10, #2445):** the Playground-e2e gate had been red on `main` since Aug 4 — two same-shaped races on shared mutable refs written outside the guard protecting the state they must agree with (`lastBundleReadyRef`: the Bundle button was live ~700ms before it did anything; `lastMappedGenerateRef`: overlapping cycles clobbered each other's sourcemaps — fixed by deleting the shared slot). New per-PR gate `e2e/bundle-starts.spec.ts`. Second instance of the "red-on-main-for-days, alarm not listening" pattern in one week (with #2434) — the alarm half is now `ci-red-alarm.yml`; the flake half is M-T9.30.
+
 ## M-T8.7 — Packaging split unblock — `blocked(browser discovery)` · **L** · P3
 P3-s5 (move `src/platform/hono/v*` into `packages/`) is blocked on browser-capable backend discovery for the playground worker (`ResolutionStrategy` seam, esbuild-wasm spike → RegistryStrategy → WorkspaceStrategy). P4 publish follows. Related: [per-package-output-tree](../old/proposals/per-package-output-tree.md) (output-side twin, deferred), [server-side-generation](../old/proposals/server-side-generation.md) (fills the same worker seam with a server call — evaluate together).
 Sources: [packaging-split](../old/plans/packaging-split.md), [backend-packages](../old/plans/backend-packages.md) B3+.

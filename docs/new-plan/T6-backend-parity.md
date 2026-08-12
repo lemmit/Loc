@@ -423,36 +423,14 @@ RS-28 made every backend's 404 `detail` name its resource. That is necessary and
 
 Sources: M-T9.25 census sweep 3 (casing/absence). Relates to RS-28 (the string half, already fixed), M-T6.25 (the same "one backend, two envelope shapes" defect on elixir's 500), M-T9.11 (blind here for the coverage reason above).
 
-## M-T6.27 — Elixir's named-operation path has no optimistic lock — `in-flight` (PR #2505) · **M** · P1 ⭐ silent lost update, not a wire-string divergence
-**#2505 lands the fix:** the op changeset rides `optimistic_lock(:version)` on all three write paths (context named-op, returning-op ×7 sites, document op ×3 sites — the manual bump stays only for the unversioned document column); `persist_change/1` gains the `Ecto.StaleEntryError -> {:error, :conflict}` rescue + `| :conflict` spec on both repo shapes (its document `@doc` claimed "unused on the document path" — false, the doc op sites call it); the op controller action and the returning-op result mapper gain the gated `{:error, :conflict}` → `conflict_response/1` arm. The lock supplies the same +1 the plain bump did, so RS-14's wire values are unchanged. Static gate `test/generator/elixir/vanilla-named-op-optimistic-lock.test.ts`, mutation-proven (4/4 red with the fix stashed). **Deliberately out of scope, recorded:** a raced op invoked from a WORKFLOW/explicit-handler `respond/2` now answers the sanitized 500 tail instead of 409 (strictly better than the silent loss; same ladder-width class as M-T6.28's node routers) — and the two-writer behavioural case remains the honest runtime gate this mission's text calls for.
-Found 2026-08-02 by the M-T9.25 409/500 census sweep. **The most severe finding of the three sweeps, and the only one that is a data-correctness bug rather than a contract one.**
+## M-T6.27 — Elixir's named-operation path has no optimistic lock — `done` (PR #2505, merged 2026-08-11) · **M** · P1
+All three op write paths (context named-op, returning-op, document op) now ride `Ecto.Changeset.optimistic_lock(:version)`; `persist_change/1` rescues `Ecto.StaleEntryError -> {:error, :conflict}`; the op controller + returning-op mapper answer 409 via `conflict_response/1` (gated on `versioned`). Same +1 bump, so RS-14's wire values unchanged — no golden moved. Gate: `test/generator/elixir/vanilla-named-op-optimistic-lock.test.ts`, mutation-proven 4/4; real `mix compile --warnings-as-errors` on the three affected corpus shapes. Deliberately out of scope (recorded in #2505): a raced op behind a workflow/explicit-handler `respond/2` answers the sanitized 500 tail, the ladder-width class M-T6.28 tracks; the two-writer behavioural case remains the honest runtime gate (M-T9.3).
+Sources: M-T9.25 census sweep 3 (409/500); PR #2505.
 
-On a `versioned` aggregate, four backends answer **409** when two writers race a named operation:
-
-| backend | mechanism |
-|---|---|
-| node | guarded `UPDATE … WHERE version = <expected>` |
-| python | `repo.save(expected_version=…)` |
-| java | `ifMatch` check + Hibernate `@Version` |
-| dotnet | EF concurrency token |
-| **elixir** | **none — the write lands** |
-
-`src/generator/elixir/vanilla/changeset-emit.ts` attaches `optimistic_lock(:version)` only to `update_changeset`, the generic `PUT` seam. The named-operation path does `Ecto.Changeset.change(%{version: record.version + 1})` and calls `persist_change/1`, a bare `Repo.update` with **no `optimistic_lock` and no `StaleEntryError` rescue** — and `src/generator/elixir/vanilla/context-emit.ts` comments this deliberately ("a plain bump, not `optimistic_lock/2`").
-
-So `POST /orders/{id}/cancel` under contention is a **silent lost update** on elixir, where the other four 409. It is also an intra-backend split: the *same aggregate* CAS-guards on `PUT /orders/{id}` and does not on its own operation route.
-
-**Why no gate sees it.** Every existing gate compares emitted *strings* or single-writer responses. A lost update needs two concurrent writers, which no tier runs — the behavioural runners drive one client serially. `conformance-parity` compares declared responses, and elixir declares a 409 it cannot produce, which makes the spec-diff green and is arguably worse than not declaring it.
-
-**The work.** Route the named-operation persist through `optimistic_lock(:version)` and rescue `Ecto.StaleEntryError` into the existing `conflict_response/1`. Read the deliberate comment in `context-emit.ts` first — it may be guarding an ordering constraint the fix has to preserve.
-
-**Verification.** A two-writer concurrency case in the behavioural tier is the only honest gate (fetch version, fire two operation calls, assert exactly one 409). Until that exists, a static assertion that the operation persist path carries `optimistic_lock` on a `versioned` aggregate is the cheap stand-in.
-
-Sources: M-T9.25 census sweep 3 (409/500). Relates to RS-20 (`$.version` on the wire, already waived on java) and M-T9.3 (per-PR runtime boot gates — a concurrency case belongs there).
-
-## M-T6.28 — Node's error ladder reaches three of its five sub-apps — `open` · **M** · P2 ⭐ the node twin of M-T6.25
+## M-T6.28 — Node's error ladder: the root floor exists now; two routers still can't say 409 — `partial` (re-verified in code 2026-08-10) · **M** · P2 ⭐ the node twin of M-T6.29
 Found 2026-08-02 by the M-T9.25 409/500 census sweep.
 
-Node does not install an app-global handler. `api/http/index.ts` mounts five sub-apps with `app.route(...)` and defines **no `onError`**; each router carries its own copy of the ladder. Three consequences, all in one generated app:
+Originally: node installed no app-global handler — `api/http/index.ts` mounted five sub-apps with no `onError`, each router carrying its own copy of the ladder. **The root `onError`/`notFound` RFC-7807 floor has since landed** (see the heading's re-verify), so the remainder is the two routers whose typed ladder cannot express 409 (in flight: #2520). The original three consequences, kept for the record:
 
 1. **Two sub-apps have no ladder at all** — `projections.ts` (built on a bare `new OpenAPIHono()`, not `newApp()`) and `realtime.ts`. A fault there escapes to hono's default handler: **`500`, `content-type: text/plain`, body `Internal Server Error`** — not 7807, wrong content type. A missing projection row therefore answers **500 where the other four answer 404**.
 2. **The two ladders that exist are not the same ladder.** `order.routes.ts` carries eight rungs; `a-routes.ts` (the api-route/extern-handler router — a **write** path, `POST /place`) and `workflows.ts` carry five, and their `problem` signature is literally typed `400 | 403 | 404 | 422 | 500`, so **no 409 is expressible**. They don't even import `DisallowedError` / `ConcurrencyError`. An extern `commandHandler` that saves a versioned aggregate, trips a `unique (…)` index, or invokes a `when`-gated operation answers **`500 / "internal"`** on `/api/place` and **`409`** on `/api/orders/…` — same wire concept, same app, two answers. Reachable exactly as `docs/extern.md` describes the surface.
