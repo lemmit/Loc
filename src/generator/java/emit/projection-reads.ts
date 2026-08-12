@@ -3,10 +3,10 @@ import type {
   ProjectionIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
-import { javaValueTypeForId } from "../render-expr.js";
+import { collectJavaExprImports, javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import { projectionCorrIdClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 
@@ -111,6 +111,33 @@ function renderProjectionsController(
   const anyUuid = folded.some((p) => corrValueType(p) === "UUID");
 
   const routes: string[] = [];
+  // The `requires` gate — the folded read model's twin of the query-time
+  // projection gate in `query-projection-reads.ts`: bind the principal (only
+  // when the predicate reads it), then 403 BEFORE the read.  Collected across
+  // projections because the import set and the accessor injection are
+  // controller-wide decisions.
+  const gateImports = new Set<string>();
+  let anyGate = false;
+  let anyGateUsesUser = false;
+  for (const proj of folded) {
+    const g = proj.query?.requires;
+    if (!g) continue;
+    anyGate = true;
+    collectJavaExprImports(g, gateImports);
+    if (exprUsesCurrentUser(g)) anyGateUsesUser = true;
+  }
+  const gateLines = (proj: ProjectionIR): string[] => {
+    const g = proj.query?.requires;
+    if (!g) return [];
+    const gl: string[] = [];
+    if (exprUsesCurrentUser(g)) gl.push(`        var currentUser = currentUserAccessor.user();`);
+    gl.push(
+      `        if (!(${renderJavaExpr(g, { thisName: "this" })})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: projection ${proj.name}`,
+      )});`,
+    );
+    return gl;
+  };
   for (const proj of folded) {
     const T = `${upperFirst(proj.name)}Response`;
     const slug = snake(proj.name);
@@ -126,6 +153,7 @@ function renderProjectionsController(
     routes.push(
       `    @GetMapping("/${slug}")`,
       `    public List<${T}> list${upperFirst(proj.name)}() {`,
+      ...gateLines(proj),
       `        return ${repo}.findAll().stream()`,
       `            .map(x -> new ${T}(${projRow("x")}))`,
       `            .toList();`,
@@ -133,6 +161,9 @@ function renderProjectionsController(
       ``,
       `    @GetMapping("/${slug}/{key}")`,
       `    public ResponseEntity<${T}> get${upperFirst(proj.name)}(@PathVariable ${paramJava} key) {`,
+      // Gate before the lookup: a caller who fails it must not learn whether
+      // the key exists.
+      ...gateLines(proj),
       `        return ${repo}.findById(new ${idClass}(key))`,
       `            .map(x -> ResponseEntity.ok(new ${T}(${projRow("x")})))`,
       `            .orElse(ResponseEntity.notFound().build());`,
@@ -142,15 +173,20 @@ function renderProjectionsController(
   }
   while (routes[routes.length - 1] === "") routes.pop();
 
-  const fieldDecls = folded.map(
-    (p) => `    private final ${upperFirst(p.name)}RowRepository ${projectionRepoField(p)};`,
-  );
-  const ctorParams = folded
-    .map((p) => `${upperFirst(p.name)}RowRepository ${projectionRepoField(p)}`)
-    .join(", ");
-  const ctorAssigns = folded.map(
-    (p) => `        this.${projectionRepoField(p)} = ${projectionRepoField(p)};`,
-  );
+  const fieldDecls = [
+    ...folded.map(
+      (p) => `    private final ${upperFirst(p.name)}RowRepository ${projectionRepoField(p)};`,
+    ),
+    ...(anyGateUsesUser ? [`    private final CurrentUserAccessor currentUserAccessor;`] : []),
+  ];
+  const ctorParams = [
+    ...folded.map((p) => `${upperFirst(p.name)}RowRepository ${projectionRepoField(p)}`),
+    ...(anyGateUsesUser ? [`CurrentUserAccessor currentUserAccessor`] : []),
+  ].join(", ");
+  const ctorAssigns = [
+    ...folded.map((p) => `        this.${projectionRepoField(p)} = ${projectionRepoField(p)};`),
+    ...(anyGateUsesUser ? [`        this.currentUserAccessor = currentUserAccessor;`] : []),
+  ];
 
   return lines(
     `package ${pctx.basePkg}.api;`,
@@ -161,8 +197,12 @@ function renderProjectionsController(
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
+    ...[...gateImports].sort().map((i) => `import ${i};`),
+    gateImports.size > 0 ? `` : null,
     `import ${pctx.pkg}.*;`,
     `import ${pctx.rowRepoPkg}.*;`,
+    anyGate ? `import ${pctx.basePkg}.domain.common.ForbiddenException;` : null,
+    anyGateUsesUser ? `import ${pctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${pctx.basePkg}.domain.ids.*;`,
     ``,
     `@RestController`,

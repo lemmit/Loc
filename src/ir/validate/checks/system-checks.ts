@@ -767,6 +767,28 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
           });
         }
       }
+      // Projections.  Every projection — folded or query-time — is served as a
+      // GET endpoint (`/projections/<name>`, plus `/{key}` for a keyed folded
+      // one), so under denyByDefault an ungated one publishes its rows to any
+      // caller exactly as an ungated find publishes an aggregate's.
+      //
+      // This was the last read surface default-deny walked past.  It could not
+      // have been enforced before: a folded projection was unable to SPELL a
+      // gate (the keyword lived in the query-clause fragment) and no backend
+      // emitted one, so demanding a gate would have been demanding the
+      // impossible.  Both halves are fixed, so the requirement is now
+      // satisfiable and the exemption has no reason left.
+      for (const proj of c.projections) {
+        if (proj.query?.requires) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-projection", {
+            name: proj.name,
+          }),
+          source: `projection/${proj.name}`,
+        });
+      }
     }
   }
 

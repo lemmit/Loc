@@ -1519,8 +1519,9 @@ Projection:
     // `handle … requires`, `find … requires`) — not inside the body among the
     // query clauses.  It used to sit in `ProjectionQueryClauses`, which made it
     // unspellable on a FOLDED projection (no `from`, so no query-clause tail to
-    // hold it) — `loom.projection-gate-without-source` reads like a semantic
-    // law but was really an artifact of which production the keyword landed in.
+    // hold it); a validator then rejected the folded case as if that were a
+    // semantic law rather than an artifact of which production held the keyword.
+    // Both kinds carry it now, and both ENFORCE it.
     ('requires' gate=Expression)? '{'
         members+=ProjectionMember*
         ProjectionQueryClauses

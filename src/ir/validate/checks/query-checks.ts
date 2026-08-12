@@ -342,32 +342,23 @@ export function validateFindGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]
   }
 }
 
-// Query-time projection `requires` gate — the projection twin of the find gate.
-// A query-time projection's optional `requires <expr>` runs before the query;
-// because no row exists yet it may reference only `currentUser` (+ constants),
-// never the source row.  A gate on a projection with no query source has nothing
-// to protect (the folded read model is keyed, not query-time), so reject that too.
+// Projection `requires` gate — the projection twin of the find gate.  The gate
+// runs before the read; because no row exists yet it may reference only
+// `currentUser` (+ constants), never the projection row or the source row.
+//
+// It applies to BOTH projection kinds.  A query-time projection evaluates it
+// before the comprehension runs; a folded (materialized) projection evaluates it
+// on its read-model routes (`GET /projections/<p>` and `.../{key}`), which are
+// just as client-reachable.  There used to be a
+// `loom.projection-gate-without-source` rejecting the folded case — its stated
+// reason was that a folded projection "has nothing to protect", which was never
+// true: it protects a table of rows.  The real reason was that the gate lived
+// inside the query-clause fragment, so a folded projection could not spell one,
+// and then that no backend emitted it.  Both are fixed; the check is gone.
 export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const proj of ctx.projections) {
     const gate = proj.query?.requires;
     if (!gate) continue;
-    // The gate now rides the DECLARATION HEADER (after `keyed by`), so a folded
-    // projection can SPELL one — the old grammar position made it unspellable,
-    // which is why this check historically read as "a gate guards a query-time
-    // read".  That framing was an artifact.  It is still rejected, but for the
-    // honest reason: no backend emits the gate on a folded projection's
-    // read-model routes, so accepting it would ship an inert gate — the exact
-    // silent-no-op class M-T3.15 exists to close.  Lift this once those routes
-    // enforce it.
-    if (!proj.query?.source) {
-      diags.push({
-        severity: "error",
-        code: "loom.projection-gate-without-source",
-        message: diagMessage("loom.projection-gate-without-source", { name: proj.name }),
-        source: `projection/${proj.name}`,
-      });
-      continue;
-    }
     const offending = firstNonGateRef(gate, GATE_ALLOWED_REFS);
     if (offending !== null) {
       diags.push({

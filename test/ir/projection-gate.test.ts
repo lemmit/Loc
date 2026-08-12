@@ -1,9 +1,16 @@
-// Query-time projection `requires` gate validation (D-AUTH-OIDC / default-deny)
-// — the projection twin of the find gate.  A projection's `requires <expr>` runs
-// before the query (no row exists yet), so it may only reference `currentUser`
-// (+ constants), never the source row.  Two gates:
+// Projection `requires` gate validation (D-AUTH-OIDC / default-deny) — the
+// projection twin of the find gate.  A projection's `requires <expr>` runs
+// before the read (no row is bound yet), so it may only reference `currentUser`
+// (+ constants), never the source row.  One gate remains:
 //   loom.projection-gate-not-current-user — a source-row / non-principal ref
-//   loom.projection-gate-without-source   — a gate on a projection with no `from`
+//
+// `loom.projection-gate-without-source` used to be the second, rejecting a gate
+// on a FOLDED projection.  Its message claimed a folded projection had nothing
+// to protect; it protects a table of rows served at `/projections/<p>`.  The
+// real cause was that the keyword lived in the query-clause fragment, so a
+// folded projection could not spell one — and no backend emitted one if it
+// could.  Both are fixed, so the rejection is gone and the folded case is a
+// SUPPORTED case, asserted below.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -35,7 +42,7 @@ system Sys {
     .map((d) => ({ code: d.code!, message: d.message }));
 }
 
-describe("query-time projection requires gate validation", () => {
+describe("projection requires gate validation", () => {
   it("accepts a currentUser gate", async () => {
     expect(
       await diags(
@@ -61,12 +68,22 @@ describe("query-time projection requires gate validation", () => {
     expect(errs[0]!.message).toContain("currentUser");
   });
 
-  it("loom.projection-gate-without-source — a gate on a folded projection (no `from`)", async () => {
+  it("accepts a gate on a FOLDED projection (no `from`) — it guards the read model", async () => {
+    expect(
+      await diags(
+        `projection Book keyed by order requires currentUser.role == "admin" { order: Order id  on(e: Placed) { order := e.order } }`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("still rejects a source-row reference in a FOLDED projection's gate", async () => {
+    // The currentUser-only rule is about WHEN the gate runs, not about which
+    // projection kind declares it: on a folded projection the gate guards the
+    // whole read model, so there is no row in scope to reference either.
     const errs = await diags(
-      `projection Book keyed by order requires currentUser.role == "admin" { order: Order id  on(e: Placed) { order := e.order } }`,
+      `projection Book2 keyed by order requires order == "x" { order: Order id  on(e: Placed) { order := e.order } }`,
     );
-    expect(errs.map((e) => e.code)).toEqual(["loom.projection-gate-without-source"]);
-    expect(errs[0]!.message).toContain("Book");
+    expect(errs.map((e) => e.code)).toEqual(["loom.projection-gate-not-current-user"]);
   });
 
   it("no diagnostic for an ungated projection (the gate is optional)", async () => {
