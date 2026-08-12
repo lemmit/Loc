@@ -26,6 +26,7 @@ import type { ApiRoute } from "../api-emit.js";
 import { renderExpr } from "../render-expr.js";
 import { plugRelativePath } from "./api-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
+import { denialOverrides, denialResponse } from "./denial.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 
 /** Non-`all` custom finds an aggregate's repository declares — the ones that
@@ -233,9 +234,12 @@ ${cuLine}${innerBody}
       return `
   def ${findSnake}(conn, ${paramArg}) do
 ${cuLine}    if not (${gate}) do
-      ${webModule}.ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
-        `Forbidden: find ${f.name}`,
-      )})
+      ${denialResponse(
+        "forbidden",
+        JSON.stringify(`Forbidden: find ${f.name}`),
+        denialOverrides(ctx),
+        `${webModule}.ProblemDetails`,
+      )}
     else
 ${innerBody}
     end
@@ -269,7 +273,7 @@ ${innerBody}
             // spellings of one 404 inside ONE controller (the `T?` arm below
             // said `"<Agg> not found"`), which is this rule's own lesson:
             // don't hand-roll a 404, reach the producer.
-            `        ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")`
+            `        ${denialResponse("notFound", '"not_found"', denialOverrides(ctx))}`
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
       return wrap(`    case ${call} do
       {:ok, nil} ->
@@ -297,7 +301,7 @@ ${absentArm}
       if (f.returnType.kind === "optional") {
         return wrap(`    case ${call} do
       {:ok, nil} ->
-        ProblemDetails.problem_response(conn, 404, "Not Found", "not_found")
+        ${denialResponse("notFound", '"not_found"', denialOverrides(ctx))}
 
       {:ok, record} ->
         json(conn, serialize(record))
