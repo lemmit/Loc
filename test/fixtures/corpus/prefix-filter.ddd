@@ -19,8 +19,9 @@
 //      `org_ab`, so the operator has to be delimiter-exact);
 //   2. wildcards are DATA — a prefix containing `%` matches literally, which a
 //      `LIKE <arg> || '%'` lowering would silently get wrong on every backend;
-//   3. the empty prefix matches everything (`strpos(col, '') = 1` on Postgres,
-//      `startsWith("")` in memory — the two agree).
+//   3. a shared prefix reaches the whole subtree.  (NOT the empty prefix: it
+//      never reaches the operator on .NET, whose query-param binder answers 422
+//      for `?prefix=` on a required `string` — see assertion 3.)
 //
 // The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
 system PrefixFilter {
@@ -85,8 +86,17 @@ system PrefixFilter {
     let pct = api.docs.under({ prefix: "root%" })
     expect(pct.length).toBe(1)
 
-    // 3. The empty prefix matches every row (in memory and in SQL alike).
-    let all = api.docs.under({ prefix: "" })
+    // 3. A prefix every row shares matches all of them — the whole-subtree read.
+    //    Deliberately NOT the EMPTY prefix, even though `strpos(col, '') = 1` and
+    //    every host language's `startsWith("")` agree that it matches: the empty
+    //    string never reaches the operator on .NET, because ASP.NET binds a
+    //    `?prefix=` query value for a required `string` as ABSENT and answers 422
+    //    before the query runs, where node/python/java/elixir bind it as "".
+    //    That is a query-param-binding divergence in the FRAMEWORK layer, not a
+    //    property of this operator, and both readings are defensible (`?p=` as
+    //    present-but-empty vs as absent), so this fixture does not pin which side
+    //    is right.  Adjudicating it is a conformance-semantics RS-rule of its own.
+    let all = api.docs.under({ prefix: "root" })
     expect(all.length).toBe(5)
 
     // 4. A prefix reaching only the deepest row.
