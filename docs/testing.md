@@ -189,3 +189,4 @@ fails the fast suite.
 | `ci-red-alarm.yml` | CI-only housekeeping (main-red notifier) — nothing to reproduce locally | — |
 | `quality-delta.yml` | `node scripts/quality-delta.mjs --dry-run` (prints the full report, posts nothing; the Actions-API and R12 sections need `GITHUB_TOKEN` + `GITHUB_REPOSITORY`) | — |
 | `cleanup-artifacts.yml` | CI-only housekeeping (artifact tidy) — nothing to reproduce locally | — |
+| `flake-budget.yml` | `GITHUB_TOKEN=<token> node scripts/flake-budget.mjs` (prints the report; add `--out r.json` for the issue payloads). Classification logic alone: `npx vitest run test/system/flake-budget.test.ts`. The issue-filing half is CI-only | network |
