@@ -38,6 +38,7 @@ import type { ElixirChannelsCfg } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
+import { unguardedName } from "../lifecycle-seam.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
@@ -530,6 +531,15 @@ ${body}
       agg: agg as EnrichedAggregateIR,
     });
     const createStampsActor = stampUsesPrincipal(agg);
+    // The GUARDED seam keeps the plain name, and the authorization-free entry the
+    // in-process callers use is named `_unguarded` — see
+    // `../lifecycle-seam.ts` for why that direction and not the other:
+    // a caller that guesses `create_<agg>` gets the gate, and bypassing it is
+    // something a call site has to SAY.  A workflow step / event dispatch /
+    // emitted integration test has no request and no principal, and every other
+    // backend's workflow body calls the domain factory directly — so routing
+    // those through the guarded seam would 403 (or MatchError) a workflow whose
+    // own caller does hold the permission, on this backend only.
     const createDelegate =
       createClauses.length === 0
         ? `  defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert`
@@ -538,9 +548,12 @@ ${body}
     lifecycleGatesUseCurrentUser(agg.canonicalCreate) || createStampsActor,
   )}) do
     with ${createClauses.join(",\n         ")} do
-      ${repoMod}.insert(attrs${createStampsActor ? ", current_user" : ""})
+      ${unguardedName("create", agg.name)}(attrs${createStampsActor ? ", current_user" : ""})
     end
-  end`;
+  end
+
+  @doc "Create a ${aggPascal} with NO authorization gate — the in-process entry (workflow step, event dispatch, emitted integration test), which carries no request principal.  Request-side callers use \`create_${aggSnake}/2\`."
+  defdelegate ${unguardedName("create", agg.name)}(attrs${stampActorArg}), to: ${repoMod}, as: :insert`;
     const deleteClauses = lifecycleEnsureClauses(agg.canonicalDestroy, destroyGateRc);
     const deleteDelegate = !emitsRestDelete(agg)
       ? ""
@@ -552,9 +565,12 @@ ${body}
     lifecycleGatesUseCurrentUser(agg.canonicalDestroy),
   )}) do
     with ${deleteClauses.join(",\n         ")} do
-      ${repoMod}.delete(record)
+      ${unguardedName("delete", agg.name)}(record)
     end
-  end`;
+  end
+
+  @doc "Delete a ${aggPascal} with NO authorization gate — the in-process entry (a workflow \`destroy\` step holds the row already and has no request principal).  Request-side callers use \`delete_${aggSnake}/2\`."
+  defdelegate ${unguardedName("delete", agg.name)}(record), to: ${repoMod}, as: :delete`;
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${listDelegateArgs}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id${

@@ -442,14 +442,41 @@ is a separate process from the HTTP request, so the plug's `conn.assigns` is not
 reachable from it), and a nil principal denies rather than raising:
 
 ```elixir
-# lib/<app>/<context>.ex — every caller passes through this
+# lib/<app>/<context>.ex — every REQUEST-side caller passes through this
 def create_shipment(attrs, current_user \\ nil) do
   with :ok <- ensure(not is_nil(current_user) and (Enum.member?(current_user.permissions, "ops.manage")),
                      {:forbidden, "Forbidden: currentUser.permissions.contains(permissions.manage)"}) do
-    App.Warehouse.ShipmentRepository.insert(attrs)
+    create_shipment_unguarded(attrs)
   end
 end
+
+@doc "Create a Shipment with NO authorization gate — the in-process entry."
+defdelegate create_shipment_unguarded(attrs), to: App.Warehouse.ShipmentRepository, as: :insert
 ```
+
+**The seam splits, because not every caller is a request.**  A workflow
+`factory-let` step, an event dispatcher, and the emitted integration tests all
+create aggregates IN-PROCESS, with no request and no principal — and on the other
+four backends a workflow body calls the domain factory directly, so the
+aggregate's create gate never applies there at all.  Routing those through the
+guarded seam denied (nil principal) a workflow whose own caller *did* hold the
+permission: the same `.ddd` answering 200 on four backends and 403 on one.
+
+So there are two entries, and the naming is the safety property:
+
+| function | who calls it |
+|---|---|
+| `create_<agg>/2` (the plain name) | the request-side doors — controller, LiveView form, `DestroyForm` |
+| `create_<agg>_unguarded/1` | the in-process callers — workflow step, event dispatch, emitted integration test |
+
+The guarded one keeps the obvious name and delegates *through* the unguarded one,
+so a caller that guesses `create_<agg>` gets the gate and there is exactly one
+write path; bypassing authorization is something a call site has to say in a word
+that shows up in review.  A workflow's own authorization is its own `requires`
+gate, evaluated where the request is — re-checking the aggregate's create gate
+underneath it would make Phoenix enforce a rule the other four do not, and would
+fail closed for every principal-less internal caller (a timer, a seed, a saga).
+`delete_<agg>` splits the same way for a workflow `destroy` step.
 
 **Not supported: an event-sourced lifecycle guard.**  An `eventLog` aggregate's
 create body renders into the domain `_init`, which has no principal in scope, so

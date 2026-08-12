@@ -39,6 +39,9 @@
 // That is why this one reads the emitted HANDLER rather than the emitted spec.
 
 import { describe, expect, it } from "vitest";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
+import { toLoomModel } from "../_helpers/ir.js";
+import { parseString } from "../_helpers/parse.js";
 import type { Backend } from "../fixtures/corpus/backends.js";
 import { generateCorpusCase } from "../fixtures/corpus/harness.js";
 
@@ -248,7 +251,7 @@ const SPECS: Record<Backend, BackendSpec> = {
         "with :ok <- ensure(not is_nil(current_user) and " +
         '(Enum.member?(current_user.permissions, "ops.manage")), ' +
         '{:forbidden, "Forbidden: currentUser.permissions.contains(permissions.manage)"}) do',
-      before: ["D.Warehouse.ShipmentRepository.insert(attrs)"],
+      before: ["create_shipment_unguarded(attrs)"],
     },
     destroy: {
       region: { file: "lib/d/warehouse.ex", from: "def delete_shipment(", to: "\n  end" },
@@ -256,7 +259,7 @@ const SPECS: Record<Backend, BackendSpec> = {
         "with :ok <- ensure(not is_nil(current_user) and " +
         '(Enum.member?(current_user.permissions, "ops.manage") and record.quantity == 0), ' +
         '{:forbidden, "Forbidden: currentUser.permissions.contains(permissions.manage) && quantity == 0"}) do',
-      before: ["D.Warehouse.ShipmentRepository.delete(record)"],
+      before: ["delete_shipment_unguarded(record)"],
     },
     ungatedCreate: { file: "lib/d/warehouse.ex", from: "create_crate(", to: "\n  defdelegate" },
     principalOnlyDestroy: {
@@ -265,15 +268,19 @@ const SPECS: Record<Backend, BackendSpec> = {
         "with :ok <- ensure(not is_nil(current_user) and " +
         '(Enum.member?(current_user.permissions, "ops.manage")), ' +
         '{:forbidden, "Forbidden: currentUser.permissions.contains(permissions.manage)"}) do',
-      before: ["D.Warehouse.CrateRepository.delete(record)"],
+      before: ["delete_crate_unguarded(record)"],
     },
     extra: (files) => {
       const ctx = read(files, "lib/d/warehouse.ex");
       // The CONTEXT-placement pin, stated as the thing that would break if the
       // gate moved back to the controller: the gated seams are real functions
       // taking a principal, not bare `defdelegate`s to the repository.
-      expect(ctx).not.toMatch(/defdelegate create_shipment/);
-      expect(ctx).not.toMatch(/defdelegate delete_shipment/);
+      // The PLAIN name specifically — `create_shipment_unguarded` IS a
+      // delegate, deliberately (see the in-process note below), so the pin has
+      // to be anchored on the arity-opening paren or it forbids the seam split
+      // it is meant to allow.
+      expect(ctx).not.toMatch(/defdelegate create_shipment\(/);
+      expect(ctx).not.toMatch(/defdelegate delete_shipment\(/);
       expect(ctx).toContain("def create_shipment(attrs, current_user \\\\ nil) do");
       expect(ctx).toContain("def delete_shipment(record, current_user \\\\ nil) do");
       // The DestroyForm seam (`destroy_<agg>!/2`) gates too, and raises on
@@ -295,6 +302,41 @@ const SPECS: Record<Backend, BackendSpec> = {
       expect(ctx).toContain(
         "defdelegate create_crate(attrs), to: D.Warehouse.CrateRepository, as: :insert",
       );
+
+      // ── the IN-PROCESS caller, and why the seam splits ───────────────────
+      // Gating in the context also catches callers that are not requests at
+      // all: a workflow `factory-let`, an event dispatch, and the emitted
+      // integration tests create aggregates in-process with no principal.  The
+      // other four backends call the domain factory directly from the workflow
+      // body, so the create gate never applies there — routing those through the
+      // guarded seam denied (nil principal) a workflow whose own caller DID hold
+      // the permission: the same `.ddd` answering 200 on four backends and
+      // 403/500 on one.
+      //
+      // So the guarded seam keeps the PLAIN name (a caller that guesses it gets
+      // the gate) and the in-process entry is `_unguarded` (bypassing has to be
+      // said out loud).  Both halves are asserted, because either one alone is a
+      // bug: the workflow on the ungated entry, the request doors on the gated
+      // one.
+      expect(ctx).toContain(
+        "defdelegate create_shipment_unguarded(attrs), to: D.Warehouse.ShipmentRepository, as: :insert",
+      );
+      expect(ctx).toContain(
+        "defdelegate delete_shipment_unguarded(record), to: D.Warehouse.ShipmentRepository, as: :delete",
+      );
+      // The guarded function delegates THROUGH the unguarded one, so there is
+      // exactly one write path and the gate cannot be skipped by editing one.
+      const guardedCreate = region(ctx, "def create_shipment(attrs,", "\n  end");
+      expect(guardedCreate).toContain("create_shipment_unguarded(attrs)");
+      expect(indexOfOrThrow(guardedCreate, "ensure(")).toBeLessThan(
+        indexOfOrThrow(guardedCreate, "create_shipment_unguarded(attrs)"),
+      );
+      // The workflow's `factory-let` — an in-process caller — targets the
+      // ungated entry.  This is the assertion that fails if the seam collapses
+      // back to one function.
+      const wf = read(files, "workflows/receiving/start_crate_ready.ex");
+      expect(wf).toContain("D.Warehouse.create_shipment_unguarded(");
+      expect(wf).not.toContain("D.Warehouse.create_shipment(");
     },
   },
 };
@@ -345,6 +387,60 @@ function assertGate(files: ReadonlyMap<string, string>, spec: GateSpec, label: s
  *  the ungated control, so a gate-everything emitter cannot hide behind one
  *  backend's idiom. */
 const DENIAL_SPELLINGS = ["ForbiddenError(", "ForbiddenException(", ":forbidden", "403"] as const;
+
+// ── the emission's PRECONDITION, per spelling ──────────────────────────────
+// Every backend above renders the create gate with NO receiver in scope: Hono
+// and FastAPI put it in a module-scope handler, .NET in a Mediator handler, Java
+// in a service method, Elixir in a context function.  That is only sound because
+// a guard that reads the instance is REFUSED upstream — so the refusal is part of
+// this suite, not just of the validator's.  If it ever regresses, these five
+// sources reach the emitters and produce an unbound receiver on all five
+// backends (and, for the bare `helper-fn` spelling, a gate that never denies).
+//
+// One case per SPELLING, because "reads the instance" has five of them and only
+// one lowers to a `ref` — the hole the owner review found in the contract check
+// (#2487): the predicate keyed on `refKind`, so four spellings walked around it.
+const UNREADABLE = "loom.lifecycle-guard-unreadable";
+
+const SPELLINGS: Record<string, string> = {
+  "a field ref": "requires quantity == 0",
+  "an explicit `this.` receiver": "requires this.quantity == 0",
+  "a bare aggregate-`function` call": "requires isEmpty()",
+  "a `this.`-qualified call": "requires this.isEmpty()",
+  "a function named but not called": "requires isEmpty",
+};
+
+describe("the emitters never see an instance-reading create guard", () => {
+  for (const [label, guard] of Object.entries(SPELLINGS)) {
+    it(`refuses ${label} before codegen`, async () => {
+      const { model } = await parseString(
+        `
+system P {
+  user { id: string  role: string }
+  subdomain D {
+    context Orders {
+      aggregate Order {
+        code: string
+        quantity: int
+        function isEmpty(): bool { return quantity == 0 }
+        create(code: string) { ${guard} }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] port: 3000 auth: required }
+}`,
+        { validate: false },
+      );
+      const codes = validateLoomModel(toLoomModel(model))
+        .filter((d) => d.severity === "error")
+        .map((d) => d.code);
+      expect(codes, `${label} must be refused, not rendered`).toContain(UNREADABLE);
+    });
+  }
+});
 
 describe("lifecycle `requires` — the emitted gate ENFORCES, per backend", () => {
   for (const [backend, spec] of Object.entries(SPECS) as [Backend, BackendSpec][]) {

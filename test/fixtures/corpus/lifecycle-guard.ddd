@@ -69,11 +69,27 @@ system LifecycleGuard {
       // #2450's gate passed was exactly a gate below the write), and it is the
       // one interaction the compile tiers can observe — an extra load, an extra
       // local, a rollback arm the `case` has no clause for.
+      event CrateReady { crate: Crate id }
+      // The in-process channel is what makes the workflow below a real
+      // SUBSCRIBER — without it no dispatcher is derived and the `factory-let`
+      // never reaches an emitter, so the divergence this fixture pins would be
+      // invisible again.
+      channel Lifecycle {
+        carries: CrateReady
+        delivery: broadcast
+        retention: ephemeral
+      }
+
       aggregate Crate audited {
         label: string
 
         // No create guard — the ungated control.
         create(label: string) { }
+
+        // Starts the workflow below, which creates a GUARDED Shipment.
+        operation release() {
+          emit CrateReady { crate: id }
+        }
 
         // Principal-ONLY destroy guard: the gate never reads the loaded row.
         destroy {
@@ -82,6 +98,25 @@ system LifecycleGuard {
       }
 
       repository Crates for Crate { }
+
+      // A WORKFLOW that creates the guarded aggregate — the shape that exposed a
+      // one-backend behavioural divergence.  Four backends call the domain
+      // factory directly from the workflow body, so the aggregate's create gate
+      // never applies; Phoenix gates in the CONTEXT (its LiveView calls the
+      // context directly, so a controller gate has a second front door), which
+      // also caught this IN-PROCESS caller — a workflow with no request
+      // principal, denied by the nil-principal rule.  Same `.ddd`, 200 on four
+      // backends and 403/500 on one.  The seam split (`create_<agg>_unguarded`
+      // for in-process callers, the gated plain name for request-side doors)
+      // is what this fixture pins: the workflow must compile against the ungated
+      // entry on Phoenix, and the controller / LiveView must still take the
+      // guarded one.
+      workflow Receiving {
+        crateId: Crate id
+        create(e: CrateReady) by e.crate {
+          let ship = Shipment.create({ reference: "auto", quantity: 0 })
+        }
+      }
     }
   }
 

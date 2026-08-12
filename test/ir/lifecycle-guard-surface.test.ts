@@ -262,15 +262,23 @@ describe("a lifecycle `requires` may only read what the gate can see", () => {
     ).not.toContain(CODE);
   });
 
-  it("checks an EVENT-SOURCED create's guard too", async () => {
-    // It used to sit below the ES `continue` that exempts a rendered create body
-    // from the DROP report, so an ES create's guard was never checked at all —
-    // and the ES body IS rendered (into the domain `_init`), which makes it the
-    // one place an unreadable guard reaches a compiler instead of a diagnostic.
-    // "Is this body dropped" and "what may this guard read" are two questions;
-    // one `continue` was answering both.
-    expect(
-      await codesFor(`
+  it("defers to the ES REFUSAL on an event-sourced create, and reports only that", async () => {
+    // The two-layer decision, asserted rather than described.  The contract
+    // check runs unconditionally for every other shape — that is what closed the
+    // hole where an ES create's guard was never checked at all, because it sat
+    // below the `continue` that exempts a RENDERED create body from the DROP
+    // report ("is this body dropped" and "what may this guard read" are two
+    // questions; one `continue` was answering both).
+    //
+    // But an ES lifecycle guard cannot be enforced AT ALL — its body renders
+    // into a domain `_init` with no principal in scope — so
+    // `loom.lifecycle-guard-event-sourced` refuses the whole construct, and
+    // adding "…and it reads something the gate cannot see" to that is noise
+    // about a gate that will never exist.  One clause, one error, the more
+    // specific one.  On #2487 alone (before this refusal exists) the same source
+    // draws the contract error instead, which is what keeps the hole closed in
+    // the interim.
+    const codes = await codesFor(`
       event Opened { order: Order id }
       aggregate Order persistedAs: eventLog {
         code: string
@@ -280,8 +288,9 @@ describe("a lifecycle `requires` may only read what the gate can see", () => {
           emit Opened { order: id }
         }
         apply(e: Opened) { }
-      }`),
-    ).toContain(CODE);
+      }`);
+    expect(codes).toContain("loom.lifecycle-guard-event-sourced");
+    expect(codes).not.toContain(CODE);
   });
 
   it("rejects a CREATE guard reading a declared parameter", async () => {
