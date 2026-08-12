@@ -57,12 +57,19 @@ describe("generics — soft-keyword admission (P3a)", () => {
     expect(parseRawOk(`context C { valueobject V { a: int[] envelope: string } }`)).toBe(true);
   });
 
-  it("documents the one ambiguous position: a bare-type field directly before `paged`", () => {
-    // `a: int paged: ...` greedily reads `paged` as a carrier on `int`
-    // (`paged(int)`), then chokes on the `:` — the accepted, narrow cost of
-    // keyword-postfix instantiation (see the P3 plan's load-bearing decision).
-    // Adding an `?`/`[]` suffix or reordering avoids it.
-    expect(parseRawOk(`context C { valueobject V { a: int paged: string } }`)).toBe(false);
+  it("allows a `paged`-named field directly after a bare-type field", () => {
+    // This position used to be the accepted, narrow cost of keyword-postfix
+    // instantiation: `a: int paged: …` greedily read `paged` as a carrier on
+    // `int` (`paged(int)`) and then choked on the `:`, so the carrier words
+    // were only usable as field names when the PRECEDING field carried a `?` /
+    // `[]` suffix.  Pairwise finding F4 showed the same swallow on the
+    // `FieldAccess` modifiers (`secret`) and the `message "…"` clause, i.e. a
+    // class rather than a one-off, and it is closed in the lexer:
+    // `src/language/soft-keyword-colon-guard.ts` — a guarded soft keyword
+    // immediately followed by `:` is an `ID`, never a keyword.  The cost is
+    // therefore no longer paid, and no suffix/reordering workaround is needed.
+    expect(parseRawOk(`context C { valueobject V { a: int paged: string } }`)).toBe(true);
+    expect(parseRawOk(`context C { valueobject V { a: int envelope: string } }`)).toBe(true);
   });
 });
 
