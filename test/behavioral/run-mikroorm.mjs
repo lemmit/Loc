@@ -118,6 +118,27 @@ const MIKRO_SKIP = {
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
   "projection-groupby":
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
+  // A CAPABILITY BOUNDARY, not a gap — and the distinction is the reason this
+  // entry reads differently from the four above.  `policy { deny [write] on X }`
+  // lowers the always-false sentinel into the aggregate's `filter` capability
+  // predicates, and this adapter's find-predicate subset (comparisons, bare
+  // boolean columns, `!`, `&&`/`||` of those) cannot lower the `authz-filter`
+  // term — so `loom.find-predicate-unsupported` REFUSES to generate, naming the
+  // two read-denied aggregates and telling the author to pick
+  // `drizzle`/`efcore`.  Nothing is silently absent, and nothing boots wrong:
+  // the case cannot be built here at all.
+  //
+  // Surfaced by #2517 giving the fixture its first `test e2e` block, which is
+  // what makes this leg collect it — the rejection itself predates the block.
+  // The write-denied `Account` is NOT named by the error (its sentinel becomes
+  // the write-scope load, not a read filter), so only the READ-deny form trips
+  // the subset.
+  //
+  // Deleting this entry is what re-arms the case, and the work behind it is a
+  // twin of M-T6.29 (which landed `deny` on `persistence: dapper`, #2492 — that
+  // adapter generates this fixture fine today).  Recorded, not built here.
+  "policy-deny":
+    "mikroorm's find-predicate subset cannot lower the deny `authz-filter` term — `loom.find-predicate-unsupported` refuses to generate (twin of M-T6.29, which did this for dapper)",
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`
