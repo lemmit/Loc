@@ -111,7 +111,7 @@ export function renderPyAggregate(
   /** The principal's id attribute (`actorIdAttr(sys.user)`) — a bare
    *  `currentUser` stamp value resolves to `current_user.<attr>`.  Only
    *  threaded for auth deployables; principal stamps without auth are
-   *  gated upstream (loom.python-stamp-unsupported). */
+   *  gated upstream (loom.stamp-principal-without-auth). */
   principalIdAttr?: string | null,
   /** Collector for source-map Milestone 3 statement sub-regions — only
    *  allocated by the caller when a recorder is present (zero cost

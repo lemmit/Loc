@@ -150,7 +150,7 @@ system TS {
     );
     const loom = await buildLoomModel(noAuth);
     const errors = validateLoomModel(loom).filter(
-      (d) => d.code === "loom.dotnet-stamp-unsupported",
+      (d) => d.code === "loom.stamp-principal-without-auth",
     );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("no auth");
