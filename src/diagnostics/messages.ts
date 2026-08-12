@@ -168,6 +168,14 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.criterion-alias-collision": (p: { name: unknown; alias: unknown }) =>
     `criterion '${p.name}' binds the candidate alias '${p.alias}', but a parameter of the same name already exists — rename one so a bare '${p.alias}' is unambiguous.`,
+  // What a lifecycle `requires` may READ.  Two arms rather than one message
+  // with a conditional clause: the reason `create` is narrower than `destroy`
+  // is a different fact in each case, and an author hitting one should not have
+  // to read past the other.
+  "loom.lifecycle-guard-unreadable#create": (p: { agg: unknown; refs: unknown }) =>
+    `aggregate '${p.agg}': the \`create\` guard reads ${p.refs}, which the gate cannot see. A \`create\` guard may read \`currentUser\` only — there is no instance until the factory runs, and the emitted POST takes the field-derived create input, not the declared parameter list, so a parameter has no wire slot either. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
+  "loom.lifecycle-guard-unreadable#destroy": (p: { agg: unknown; refs: unknown }) =>
+    `aggregate '${p.agg}': the \`destroy\` guard reads ${p.refs}, which the gate cannot see. A \`destroy\` guard may read \`currentUser\` and \`this\` (the route already loads the row), but not a parameter — a DELETE carries no body. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
   // The canonical `create` / `destroy` body no backend renders.  `reason` is
   // computed at the call site (it varies by statement kind AND by action), so
   // the catalog owns the frame and the site owns the clause.
