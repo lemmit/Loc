@@ -609,6 +609,65 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // `shape: document` × capability filters × the `policy` read/write ladder.
+    // The crossing that had NO .NET fixture (`dapper-document.ddd` had the
+    // shape, `dapper-tenancy.ddd` the filter, nothing crossed them on the EF
+    // adapter), which is how a SILENT cross-tenant read lived here: a document
+    // aggregate's columns are inside its jsonb blob, so EF has nothing to hang
+    // a `HasQueryFilter` on and .NET emitted no filter AT ALL (#2527's
+    // follow-up 1).  The filter now runs in-app over the rehydrated aggregate.
+    //
+    // Two failure modes here are invisible to any string-level pin and only a
+    // real build sees them — both actually failed while developing the fix:
+    //   - CS0535: `policy { allow … }` × document (the interface declares
+    //     `GetByIdForWriteAsync`, the document repo implemented nothing).
+    //   - CA1310: the `deep` ladder's `.StartsWith` is an unexecuted expression
+    //     tree on the relational path but a REAL call in-app, where the
+    //     culture-sensitive overload is an analyzer error under /warnaserror.
+    it("system `shape: document` × tenancy + policy (dotnet) — in-app read filter builds under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dn-doc-tenancy-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/document-tenancy.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const docRepo = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Repositories", "NoteRepository.cs"),
+          "utf8",
+        );
+        // The document twin enforces IN-APP…
+        expect(docRepo).toContain("_CapabilityVisible");
+        expect(docRepo).toContain("GetByIdForWriteAsync");
+        // …while the RELATIONAL control keeps its EF query filter.  Asserted
+        // here as well as in the fast tier because this build is the only place
+        // both halves are proven to co-exist in one compiled assembly.
+        const ctx = fs.readFileSync(
+          path.join(proj, "Infrastructure", "Persistence", "AppDbContext.cs"),
+          "utf8",
+        );
+        expect(ctx).toContain("Entity<Ledger>().HasQueryFilter");
+        expect(ctx).not.toContain("Entity<Note>().HasQueryFilter");
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // M-T5.10 handler-param rewrite — the SCAFFOLDED explicit handlers take a
     // single `command`/`query` record param; on .NET the Mediator record flattens
     // the request record's fields (`command.<Field>`) and a read declares
