@@ -15,6 +15,7 @@ import {
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
+import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { renderTsExpr } from "./render-expr.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
@@ -252,10 +253,17 @@ export function buildDocumentRepositoryFile(
  *  the aggregate's filters, or null.  A principal/tenancy predicate renders its
  *  `currentUser.<claim>` access against a `currentUser` binding the caller
  *  introduces (`requireCurrentUser()` for by-id reads, the find's own
- *  `currentUser` param when it has one) — DEBT-02 Slice B. */
+ *  `currentUser` param when it has one) — DEBT-02 Slice B.
+ *
+ *  An `authz-filter` SENTINEL (`policy { allow deep … }` / `deny`) is desugared
+ *  to ordinary IR first: it exists to be intercepted by a backend's
+ *  QUERY-filter translator, and this path has no query to translate into
+ *  (pairwise finding F1 — the sentinel reached the generic dispatcher and blew
+ *  its invariant).  In-app, both decisions are plain expressions over the
+ *  rehydrated row. */
 export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string): string | null {
   const preds = (agg.contextFilters ?? []).map(
-    (p) => `(${renderTsExpr(p, { thisName: varName })})`,
+    (p) => `(${renderTsExpr(desugarAuthzFilterInApp(p, agg.name), { thisName: varName })})`,
   );
   return preds.length > 0 ? preds.join(" && ") : null;
 }

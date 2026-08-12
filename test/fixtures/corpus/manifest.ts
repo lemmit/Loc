@@ -17,6 +17,12 @@ import { type Backend, BACKENDS } from "./backends.js";
 /** All backends — the common case for platform-agnostic domain features. */
 const ALL: readonly Backend[] = BACKENDS;
 
+/** The three backends that filter a `shape: document` aggregate IN-APP over the
+ *  rehydrated instance (the jsonb blob is not per-field queryable).  Used by the
+ *  document × authorization crossing; the row's `note` must say what the other
+ *  two do instead, and whether that is an honest rejection or a gap. */
+const IN_APP_DOCUMENT_FILTER: readonly Backend[] = ["node", "java", "python"];
+
 export interface CorpusFeature {
   /** Matches `<id>.ddd` in this directory. */
   readonly id: string;
@@ -75,6 +81,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "tenancy-hierarchy", title: "tenancy hierarchy — `implements tenantRegistry` + `policy` deep/global/local read ladder", doc: "tenancy", backends: ALL },
   { id: "tenancy-claim-name", title: "tenancy claim not named `tenantId` — the declared claim binds the tenantOwned stamp/filter", doc: "tenancy", backends: ALL },
   { id: "policy-deny", title: "`policy { deny [write] on <Agg> }` — the deny-wins carve-out on both the read-filter and write-scope seams", doc: "auth", backends: ALL },
+  { id: "policy-document", title: "`policy { allow deep / deny }` on a `shape: document` aggregate — the authz ladder applied IN-APP, where it cannot be a column predicate", doc: "auth", backends: IN_APP_DOCUMENT_FILTER, note: "vanilla (elixir) REFUSES this crossing by name (`loom.context-filter-unsupported`: capability filters are wired for relational aggregates only) — an honest, coded rejection.  dotnet is excluded for a GAP, not a rejection: it generates, but (a) the emitted project does not compile (CS0535 — the document repository never implements the `GetByIdForWriteAsync` write-scope port member the `allow` ladder adds), and (b) a `shape: document` aggregate gets no EF `HasQueryFilter` at all, with or without a policy, so a `tenantOwned` document aggregate reads unfiltered across tenants.  Both are silent; declaring dotnet here would make this fixture a false coverage claim.  See the F1 PR." },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },

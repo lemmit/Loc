@@ -49,6 +49,7 @@ import {
   renderFelizGate,
   uiHasPageGate,
 } from "./auth-gate.js";
+import { emitFelizUserComponents, renderFelizComponentModule } from "./component-emit.js";
 import { FELIZ_GRID_PRELUDE } from "./data-grid-child.js";
 import { felizTarget } from "./feliz-target.js";
 import {
@@ -1100,6 +1101,37 @@ function renderAppFs(
         hasFileUploads,
       )
     : "";
+  // Walked (non-`extern`) user components — one F# function per declaration,
+  // spliced ahead of the page views below (`component-emit.ts`).  Rendered HERE,
+  // after the wire layer, because a component param naming an aggregate / value
+  // object is only spellable when this app actually emits that wire record — read
+  // straight off the rendered records rather than re-derived, so the two can
+  // never disagree.  Only what emitted joins `userComponents`, so a deferred
+  // shape keeps the pre-existing give-up comment instead of calling a function
+  // that was never written.
+  const emittedRecords = new Set(
+    [...wire.domain.matchAll(/^type (\w+) =/gm)].map((m) => m[1] as string),
+  );
+  const walkedComponents = emitFelizUserComponents(ui.components, {
+    aggregatesByName,
+    bcByAggregate,
+    workflowsByName,
+    bcByWorkflow,
+    apiParams: ui.apiParams,
+    externFunctionNames,
+    authUi,
+    i18nEnabled,
+    emittedRecords,
+  });
+  // The map every call site resolves against: both flavours, since
+  // `felizTarget.renderUserComponent` renders them identically (an extern name
+  // additionally `open`s its module — walked ones are declared in THIS module,
+  // so they contribute no `open`).
+  const userComponents = new Map<string, PageIR["params"]>([
+    ...externComponents,
+    ...[...walkedComponents.params].map(([n, p]) => [n, p as PageIR["params"]] as const),
+  ]);
+
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
   const validation = hasForms ? renderValidation(formRecords) : "";
@@ -1120,7 +1152,7 @@ function renderAppFs(
             hasRouteParam(p),
             bcByAggregate,
             bcByWorkflow,
-            externComponents,
+            userComponents,
             externFunctionNames,
             used,
             asyncEffectActions,
@@ -1142,7 +1174,7 @@ function renderAppFs(
           false, // single-page (non-routed) branch: no `:id` route param
           bcByAggregate,
           bcByWorkflow,
-          externComponents,
+          userComponents,
           externFunctionNames,
           used,
           asyncEffectActions,
@@ -1299,6 +1331,12 @@ function renderAppFs(
     used.usesDataGrid ? "" : false,
     used.usesDataGrid ? FELIZ_GRID_PRELUDE : false,
     ...used.gridDecls.flatMap((d) => ["", d]),
+    // Walked user components (`component-emit.ts`) — BEFORE the page views, for
+    // the same reason the grid children are: F# is order-sensitive and the views
+    // call these.  Declared in a nested `Components` module (then `open`ed) so a
+    // component named after a wire record / `Model` / `Api` can't collide with an
+    // App.fs member — see `renderFelizComponentModule`.
+    ...renderFelizComponentModule(walkedComponents.decls),
     "",
     views.join("\n"),
     "",

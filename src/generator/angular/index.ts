@@ -5,6 +5,7 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ParamIR,
   RepositoryIR,
   SystemIR,
   WorkflowIR,
@@ -41,6 +42,7 @@ import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
+import { emitAngularUserComponents } from "./components-emit.js";
 import {
   renderAngularExternComponentProps,
   renderAngularExternComponentShim,
@@ -86,10 +88,8 @@ export interface GenerateAngularOptions {
   topLevelComponents?: ComponentIR[];
   /** Generate-time source-map recorder (`--sourcemap`) — see
    *  `PlatformSurface.emitProject`'s doc comment.  Records whole-file
-   *  page regions alongside their `out.set(...)`.  Angular has no
-   *  per-component emission today (user components in page bodies
-   *  aren't rendered — see `pages/route` loop below), so there is no
-   *  component-loop counterpart to wire here. */
+   *  page regions alongside their `out.set(...)`, and the same for every
+   *  walked user-component class (`components-emit.ts`). */
   sourcemap?: SourceMapRecorder;
 }
 
@@ -203,10 +203,9 @@ export function generateAngularForContexts(
   // typed props interface + a class re-export shim under `src/components/`, and
   // is threaded into the walker's `userComponents` map so a body call renders
   // through `angularTarget.renderUserComponent` (an `NgComponentOutlet`
-  // container).  Only EXTERN components are supported on Angular today —
-  // non-extern user components have no walked-component emit here, so they stay
-  // out of the map and fall through unchanged.  A component is `extern`, so it
-  // carries no body/state/derived to walk.
+  // container).  A component is `extern`, so it carries no body/state/derived to
+  // walk.  The WALKED (non-extern) flavour emits below, once the aggregate /
+  // workflow lookups its body walk needs exist (`components-emit.ts`).
   const externComponents = [
     ...(options.topLevelComponents ?? []),
     ...(ui?.components ?? []),
@@ -250,6 +249,46 @@ export function generateAngularForContexts(
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
   };
 
+  // Walked (non-`extern`) user components — one standalone component class per
+  // declaration at `src/app/components/<Name>.ts`, assembled by the page shell
+  // in component mode (`components-emit.ts`).  ONLY the names that actually
+  // emitted are threaded into the walker's `userComponents` map, so a deferred
+  // shape keeps the pre-existing give-up comment instead of a dangling import.
+  const walkedComponents = emitAngularUserComponents(
+    [...(options.topLevelComponents ?? []), ...(ui?.components ?? [])],
+    {
+      pack,
+      apiParams: ui?.apiParams ?? [],
+      aggregatesByName: aggregatesIRByName,
+      bcByAggregate,
+      workflowsByName,
+      bcByWorkflow,
+      pageRoutes,
+      externFunctions: externFunctionNames,
+      authUi,
+      i18nEnabled,
+    },
+  );
+  for (const e of walkedComponents.emitted) {
+    out.set(e.path, e.source);
+    if (ui) {
+      options.sourcemap?.file(
+        e.path,
+        e.source,
+        e.component.origin,
+        `${ui.name}.${e.component.name}`,
+      );
+    }
+  }
+  // The map every page / component call site resolves against: both flavours,
+  // since `angularTarget.renderUserComponent` renders them identically (only the
+  // page shell's IMPORT path differs, resolved from `walkedComponents.params`).
+  const userComponentParams = new Map<string, readonly ParamIR[]>([
+    ...externComponentParams,
+    ...walkedComponents.params,
+  ]);
+  const walkedComponentNames = new Set(walkedComponents.params.keys());
+
   const routeDescs: AngularRouteDesc[] = [];
   for (const page of pages) {
     const slug = pageSlug(page, pageCtx);
@@ -268,7 +307,7 @@ export function generateAngularForContexts(
         pack,
         new Set(page.params.map((p) => p.name)),
         new Set(page.state.map((s) => s.name)),
-        externComponentParams,
+        userComponentParams,
         ui?.apiParams ?? [],
         aggregatesIRByName,
         bcByAggregate,
@@ -302,6 +341,7 @@ export function generateAngularForContexts(
             workflowsByName,
             bcByWorkflow,
             externFunctions: externFunctionNames,
+            walkedComponents: walkedComponentNames,
           });
     }
     const pagePath = `src/app/pages/${slug}.component.ts`;

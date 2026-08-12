@@ -382,8 +382,22 @@ function renderCsAuthzFilter(
       // name the claim `tenantId`.
       const tenant = `${principal}.${upperFirst(deepScopeTenantClaim(e))}`;
       const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
+      // `StartsWith` overload by POSITION, and the two requirements are exactly
+      // opposed.  In an EF query filter the call is never executed — it lives in
+      // an `Expression<Func<>>` EF rewrites into SQL `LIKE` — and the
+      // `StringComparison` overload has NO SQL translation, so the bare form is
+      // mandatory there (CA1310 does not fire inside an expression tree).  In an
+      // EXECUTED position (the in-app document read filter, where the fields
+      // live inside the jsonb blob and there is no query to translate into) the
+      // bare call is culture-sensitive: CA1310 rejects it under /warnaserror,
+      // and ordinal is also the semantics that MATCHES the SQL `LIKE` the
+      // relational twin runs — a culture-sensitive prefix test could admit a row
+      // the relational path excludes. So the overload follows `efQuery`.
+      const startsWith = ctx.efQuery
+        ? `${col}.StartsWith(${org} + ${prefix})`
+        : `${col}.StartsWith(${org} + ${prefix}, StringComparison.Ordinal)`;
       return (
-        `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +
+        `((${col} != null && (${col} == ${org} || ${startsWith})) ` +
         `|| (${col} == null && ${tenantCol} == ${tenant}))`
       );
     }

@@ -424,9 +424,17 @@ export function emitQueryView(
   const autoPaged = !explicitPaged && !single && shape.paged;
   const paged = explicitPaged || autoPaged;
 
-  const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
-  const errorJsx = error ? walk(error, ctx, depth + 2) : "null";
-  const emptyJsx = empty ? walk(empty, ctx, depth + 2) : "null";
+  // An ABSENT optional slot renders nothing — but "nothing" is not the same
+  // string in every host language, and the pack template only interpolates.
+  // JSX wants `null` (the branch is a `{ cond && ( … ) }` expression, where an
+  // empty string would not parse); a target whose template puts the slot in a
+  // markup BLOCK (`@if (…) { … }`, `<template v-if>`, `{#if}`) would render that
+  // `null` as literal TEXT, so it supplies the empty string instead.  See
+  // `WalkerTarget.emptyChild`.
+  const nothing = ctx.target.emptyChild ?? "null";
+  const loadingJsx = loading ? walk(loading, ctx, depth + 2) : nothing;
+  const errorJsx = error ? walk(error, ctx, depth + 2) : nothing;
+  const emptyJsx = empty ? walk(empty, ctx, depth + 2) : nothing;
 
   // `data:` branch supports the lambda-binding form `rows => …`.
   // Lambda body walks with the lambda param rebound to the
@@ -505,12 +513,12 @@ export function emitQueryView(
         : ctx.listRowAggregates,
       pagedEnvelopeBindings: childPagedEnvelopeBindings,
     };
-    dataJsx = data.body ? walk(data.body, childCtx, depth + 2) : "null";
+    dataJsx = data.body ? walk(data.body, childCtx, depth + 2) : nothing;
     propagateChildFlags(ctx, childCtx);
   } else if (data) {
     dataJsx = walk(data, ctx, depth + 2);
   } else {
-    dataJsx = "null";
+    dataJsx = nothing;
   }
 
   // `paged` drives the pack template's empty / non-empty length checks to read

@@ -5,6 +5,7 @@ import type {
   DerivedIR,
   ExprIR,
   PageIR,
+  ParamIR,
   StateFieldIR,
   TypeIR,
   UiApiParamIR,
@@ -25,6 +26,7 @@ import {
   type WalkContext,
   type WalkResult,
 } from "../../_walker/walker-core.js";
+import { angularWireType } from "../extern-components.js";
 import {
   type AngularFieldArraySpec,
   type AngularFieldGroupSpec,
@@ -131,6 +133,32 @@ export interface AngularPageShellInput {
    *  use so the shell imports the shim and re-exposes it as a component member
    *  (same as a main-body call, resolved via `result.usedExternFunctions`). */
   externFunctions?: ReadonlySet<string>;
+  /** Set for a walked USER COMPONENT rather than a routed page — see
+   *  `AngularComponentMode` and `../components-emit.ts`.  Undefined for a page,
+   *  which keeps every line below byte-identical. */
+  componentMode?: AngularComponentMode;
+  /** Walked (non-`extern`) user-component names.  Their class files are
+   *  siblings under `src/app/` (`src/app/components/<Name>.ts`), while an
+   *  `extern` component's re-export shim sits at `src/components/<Name>.ts` —
+   *  so the import path a call site needs differs by flavour.  A name absent
+   *  here is treated as extern (the pre-existing path). */
+  walkedComponents?: ReadonlySet<string>;
+}
+
+/** Component mode — render the walked body as a reusable standalone component
+ *  instead of a routed page.  The two subjects share ONE assembler (state
+ *  signals, `derived` computeds, action methods, api-read hoists, Reactive
+ *  Forms, the i18n / format-helper / `Decimal` member lifts), and diverge only
+ *  in what this carries: the exported class name + selector, and the declared
+ *  params, which bind as `@Input()` fields rather than off the route snapshot. */
+export interface AngularComponentMode {
+  /** Exported class name — the BARE component name, because a call site
+   *  imports `{ <Name> }` and passes it to `[ngComponentOutlet]`. */
+  className: string;
+  selector: string;
+  /** Declared params → `@Input()` class fields the walked template reads as
+   *  bare identifiers (exactly as a page reads a bound route param). */
+  inputs: readonly ParamIR[];
 }
 
 /** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`).
@@ -261,6 +289,11 @@ const FORMAT_HELPERS: readonly string[] = FORMAT_CALL_HELPERS;
 
 export function renderAngularPage(input: AngularPageShellInput): string {
   const { page, result, nameCtx } = input;
+  // Component mode (a walked user component, `../components-emit.ts`) — set,
+  // this diverts the class name / selector, binds declared params as `@Input()`
+  // fields instead of route params, and resolves sibling-component imports
+  // relative to `src/app/components/` instead of `src/app/pages/`.
+  const cm = input.componentMode;
   // The Angular render seams parked the per-primitive form/action specs on the
   // walker's opaque `sink` slot; drain it here (empty when the body had none).
   const sink = angularSink(result);
@@ -276,6 +309,39 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // front so the `inject` core symbol is registered BEFORE the import lines are
   // built (the gate's `inject(SessionService)` member needs it).  Stays
   // undefined — byte-identical to the ungated page — without `auth: ui`.
+  // Component mode: declared params → `@Input()` class fields, FIRST in the
+  // member list so a later field initializer (an api-read hoist, a `computed`)
+  // may reference them without tripping TS2729 ("used before its
+  // initialization").  The walked template reads them as bare identifiers, the
+  // same shape a page's bound route param has — which is why a decorated field
+  // is used rather than a signal `input()` (that would read `label()`).
+  const inputImportLines: string[] = [];
+  if (cm) {
+    const dtoImports = new Map<string, string>();
+    for (const p of cm.inputs) {
+      coreSymbols.add("Input");
+      const ts = angularWireType(p.type, dtoImports);
+      // Deliberately NOT `@Input({ required: true })`: a call site may legally
+      // omit an argument (no validator gates component-call arity), and every
+      // other frontend renders that as `undefined`.  A required input would turn
+      // the same `.ddd` into an Angular-only runtime throw (NG0950) — a
+      // divergence one target should not invent.  The honest place for that rule
+      // is a cross-frontend validator, not this decorator.
+      members.push(
+        p.type.kind === "optional"
+          ? `  @Input() ${p.name}?: ${ts};`
+          : `  @Input() ${p.name}!: ${ts};`,
+      );
+    }
+    for (const [type, mod] of [...dtoImports.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      // `angularWireType` spells the api root as `../api/<agg>` (the depth the
+      // extern props file sits at); a component class is one hop deeper.
+      inputImportLines.push(
+        `import type { ${type} } from "${mod.replace(/^\.\.\/api\//, "../../api/")}";`,
+      );
+    }
+  }
+
   const requires = input.authUi ? page.requires : undefined;
   // The verified-session `currentUser` accessor is needed for the page guard
   // (`requires`) AND for a currentUser-gated `Action` button inside the body
@@ -468,7 +534,16 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // Route params (`/orders/:id`) the body or a byId read references — bound from
   // the `ActivatedRoute` snapshot below.  Compute + register the imports here
   // (before the import lines are built); the member fields emit further down.
-  const routeParams = [...(page.route ?? "").matchAll(/:(\w+)/g)].map((m) => m[1]);
+  // A component has no route of its own, but it renders INSIDE one — an
+  // `Order.byId(id)` read in a component body resolves `id` off the enclosing
+  // page's `ActivatedRoute` snapshot exactly as the page would.  So the
+  // candidate set is the magic route `id` when the walk asked for it, rather
+  // than the (absent) route pattern's `:params`.
+  const routeParams = cm
+    ? result.usesRouteId
+      ? ["id"]
+      : []
+    : [...(page.route ?? "").matchAll(/:(\w+)/g)].map((m) => m[1]);
   const argRefs = new Set<string>();
   for (const h of result.usedApiHooks.values()) for (const a of h.argsRendered) argRefs.add(a);
   // The magic route `id` (`usesRouteId` — `byId(id)` / a bare `id` read) binds
@@ -493,6 +568,8 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (routerSymbols.size > 0) {
     imports.push(`import { ${[...routerSymbols].sort().join(", ")} } from "@angular/router";`);
   }
+  // Wire-DTO types an aggregate-typed `@Input()` names (component mode only).
+  imports.push(...inputImportLines);
 
   // Store-service imports for each used store (the `inject(<Store>Store)`
   // members registered above) — `import { CartStore } from
@@ -585,7 +662,10 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // `imports: []` entry (unlike the extern components below, which route
   // through `NgComponentOutlet`).
   for (const g of sink.dataGrids) {
-    imports.push(`import { ${g.className} } from "${g.importPath}";`);
+    // The seam spells the path from `src/app/pages/`; a component class is
+    // already IN `src/app/components/`, so its grid child is a sibling.
+    const from = cm ? g.importPath.replace(/^\.\.\/components\//, "./") : g.importPath;
+    imports.push(`import { ${g.className} } from "${from}";`);
     componentImports.add(g.className);
   }
 
@@ -594,7 +674,17 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     imports.push('import { NgComponentOutlet } from "@angular/common";');
     componentImports.add("NgComponentOutlet");
     for (const name of usedComponents) {
-      imports.push(`import { ${name} } from "../../components/${name}";`);
+      // A WALKED component is a class Loom emitted at
+      // `src/app/components/<Name>.ts` — a sibling of the page dir (and of
+      // another component); an EXTERN one is the re-export shim at
+      // `src/components/<Name>.ts`, two hops up from either.
+      const walked = input.walkedComponents?.has(name) ?? false;
+      const from = walked
+        ? cm
+          ? `./${name}`
+          : `../components/${name}`
+        : `../../components/${name}`;
+      imports.push(`import { ${name} } from "${from}";`);
       members.push(`  protected readonly ${name} = ${name};`);
     }
   }
@@ -935,13 +1025,13 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     ...imports,
     "",
     "@Component({",
-    `  selector: ${JSON.stringify(pageSelector(page, nameCtx))},`,
+    `  selector: ${JSON.stringify(cm ? cm.selector : pageSelector(page, nameCtx))},`,
     `  imports: [${componentImportsList.join(", ")}],`,
     "  template: `",
     template,
     "  `,",
     "})",
-    `export class ${pageComponentName(page, nameCtx)} {${members.length > 0 ? "\n" + members.join("\n") + "\n" : ""}}`,
+    `export class ${cm ? cm.className : pageComponentName(page, nameCtx)} {${members.length > 0 ? "\n" + members.join("\n") + "\n" : ""}}`,
     "",
   ].join("\n");
 }
