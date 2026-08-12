@@ -112,11 +112,14 @@ jobs:
         include:
           - backend: node
             script: test:channels
-          # The SECOND node persistence adapter (M-T6.23 slice 2): same
+          # The SECOND node persistence adapter (M-T6.23 slice 2): the same
           # choreography with `persistence: mikroorm` forced onto both
-          # deployables, so the publish tee composed over the MikroORM outbox
-          # dispatcher (and the relay publishing drained rows to the broker) is
-          # proven at runtime, not just tsc-compiled.
+          # deployables, so the broker DRIVER + producer tee + consumer loop are
+          # proven at runtime on that adapter, not just tsc-compiled.  This
+          # channel is broadcast/ephemeral, so nothing here is durable and the
+          # OUTBOX RELAY does not run — that half is the rabbit leg's
+          # `node-mikroorm` cell below (queue/work is the only shipped durable
+          # broker combo).
           - backend: node-mikroorm
             script: test:channels-mikroorm
           - backend: python
@@ -229,6 +232,14 @@ jobs:
         include:
           - backend: node
             script: test:channels-rabbit
+          # The mikroorm adapter on the DURABLE combo (M-T6.23 slice 2): this is
+          # the cell that boots the outbox relay — `queue`/`work` makes the
+          # producer's events durable, so `createOutboxDispatcher` captures and
+          # `startOutboxRelay` drains through the publish tee to the real broker.
+          # It also asserts the drain's bookkeeping (`__loom_outbox` marked once,
+          # no re-publish), which the transport-only redis cell cannot see.
+          - backend: node-mikroorm
+            script: test:channels-rabbit-mikroorm
           - backend: python
             script: test:channels-rabbit-python
           - backend: dotnet

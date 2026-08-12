@@ -27,11 +27,22 @@ const ENABLED = process.env.LOOM_CHANNELS_E2E === "1";
 // forces a `persistence:` clause onto both node deployables, so the SAME
 // cross-process choreography runs on the second node persistence adapter — the
 // pattern `run-dapper.mjs` uses (run-dotnet with the clause forced) rather than
-// a duplicated harness.  `http/channels.ts` itself reads no `db`, but the boot
-// wiring composes the publish tee OVER the outbox dispatcher, and that half is
-// adapter-specific: on mikroorm this is the first runtime caller for
-// `channelPublishTee(transports, createOutboxDispatcher(em, …))` and for the
-// relay publishing drained `__loom_outbox` rows to a real broker.
+// a duplicated harness.
+//
+// SCOPE, precisely (an owner review caught this claim being wider than the
+// boot): this fixture's `channel Lifecycle { carries: OrderPlaced }` defaults to
+// `broadcast`/`ephemeral`, so NO event here is durable — `outboxRelay` is false
+// on both deployables and the emitted `index.ts` contains no
+// `createOutboxDispatcher` / `startOutboxRelay` at all.  What this leg proves is
+// the TRANSPORT half on the mikro adapter: the driver, the producer publish tee
+// composed over the mikro in-process dispatcher, the consumer loop, and a real
+// cross-process + cross-database delivery.  It does NOT exercise the outbox
+// relay or the relay→broker hop.
+//
+// The durable half lives in the RABBIT leg (`channels-e2e-rabbit.test.ts`,
+// `queue`/`work` — the only shipped durable broker combo, since
+// SHIPPED_COMBOS.redis is `broadcast/ephemeral` only), which carries the same
+// `LOOM_CHANNELS_PERSISTENCE` knob and asserts the drain.
 const PERSISTENCE = process.env.LOOM_CHANNELS_PERSISTENCE;
 const PLATFORM = PERSISTENCE ? `node { persistence: ${PERSISTENCE} }` : "node";
 const LEG = PERSISTENCE ?? "drizzle";
