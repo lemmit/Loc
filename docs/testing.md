@@ -187,4 +187,5 @@ fails the fast suite.
 | `playground-realm-check.yml` | `cd web && npm run e2e:realm` | — |
 | `pages.yml` | `node docs/build.mjs && cd web && npm ci && npm run typecheck && npm run test:ddl && npm run e2e:smoke && npm run build` (deploy half is CI-only) | — |
 | `ci-red-alarm.yml` | CI-only housekeeping (main-red notifier) — nothing to reproduce locally | — |
+| `quality-delta.yml` | `node scripts/quality-delta.mjs --dry-run` (prints the full report, posts nothing; the Actions-API and R12 sections need `GITHUB_TOKEN` + `GITHUB_REPOSITORY`) | — |
 | `cleanup-artifacts.yml` | CI-only housekeeping (artifact tidy) — nothing to reproduce locally | — |
