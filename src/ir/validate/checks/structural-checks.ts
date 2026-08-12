@@ -1760,3 +1760,71 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// A NAMED `create` / `destroy` is dropped WHOLE — not just its body.
+//
+// The check above reads `canonicalCreate` / `canonicalDestroy`, so it says
+// nothing here, while the loss is strictly larger: the canonical case at least
+// keeps a route and a factory (synthesized from the field set) and loses only
+// the braces; a named action reaches no emitter at all.  Measured on a
+// state-based aggregate declaring `create open(...)` + `destroy close(...)`:
+// `ddd parse` reports 0 errors, and the emitted API carries two GET routes,
+// NO POST and NO DELETE.  The aggregate is not constructible over HTTP, and a
+// `requires` inside `open` never runs.
+//
+// Which lifecycle action each backend actually renders — read off the five
+// emitters, not assumed:
+//
+//   create   event-sourced → `agg.creates[0]`   (hono/python/java/dotnet/elixir
+//                                                all index [0]); else the
+//                                                CANONICAL create
+//   destroy  the CANONICAL destroy only (elixir additionally declines on an
+//            event-sourced aggregate)
+//
+// The event-sourced create arm therefore needs no exemption logic beyond
+// picking `creates[0]`: `loom.event-sourced-multiple-creates` already refuses
+// a second create there, so the single create IS `creates[0]` whether it is
+// named or not — which is why every named create in this repo's own `.ddd`
+// corpus (all of them event-sourced) keeps compiling.
+//
+// A named lifecycle action also makes two elixir artifacts appear that carry
+// none of its body — a `change_<name>` changeset (dead) and, via a
+// `destroys.length > 0` gate, the `destroy_<agg>!` DestroyForm seam, which
+// hard-deletes with the author's `requires` removed.  Refusing the declaration
+// makes both unreachable, which is the cheap half of the fix; rendering named
+// lifecycle actions as real commands is the expensive half and is not this.
+// ---------------------------------------------------------------------------
+
+export function validateNamedLifecycleDropped(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const agg of ctx.aggregates) {
+    // The one create an event-sourced aggregate renders is `creates[0]` — by
+    // INDEX, not by canonicality, so a named `create open(...)` on an event
+    // stream is emitted and must not be flagged.
+    const renderedCreate = aggregateIsEventSourced(agg)
+      ? (agg.creates?.[0] ?? null)
+      : (agg.canonicalCreate ?? null);
+
+    for (const [label, actions, rendered] of [
+      ["create", agg.creates ?? [], renderedCreate],
+      ["destroy", agg.destroys ?? [], agg.canonicalDestroy ?? null],
+    ] as const) {
+      for (const action of actions) {
+        if (action === rendered) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.named-lifecycle-dropped",
+          message: diagMessage("loom.named-lifecycle-dropped", {
+            agg: agg.name,
+            label,
+            name: action.name,
+          }),
+          source: `${ctx.name}/aggregate ${agg.name}.${label} ${action.name}`,
+        });
+      }
+    }
+  }
+}

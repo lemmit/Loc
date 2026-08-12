@@ -179,6 +179,15 @@ export const DIAGNOSTIC_MESSAGES = {
     plural: unknown;
   }) =>
     `aggregate '${p.agg}': the \`${p.label}\` body's \`${p.kind}\` is not emitted on a state-based aggregate, so ${p.reason}. The body is lowered into the IR but no backend renders it (an event-sourced \`create\` is the exception — that path does run). Move the logic to a named \`operation\`, which emits its guards and statements on every backend, or drop the clause.`,
+  // The sibling of the above, one level up: the whole ACTION is dropped, not
+  // just its body.  Kept separate because the remedy differs — the canonical
+  // case keeps its route and loses the braces, this one has no route to keep.
+  "loom.named-lifecycle-dropped": (p: { agg: unknown; label: unknown; name: unknown }) =>
+    `aggregate '${p.agg}': the named \`${p.label} ${p.name}\` reaches no backend — it drives no route and no factory, so nothing in its body runs (guards included). ` +
+    (p.label === "create"
+      ? "Only the canonical (unnamed) `create` is emitted — on an event-sourced aggregate, its single `create`, named or not."
+      : "Only the canonical (unnamed) `destroy` is emitted.") +
+    ` Drop the name to make it canonical, or model it as an \`operation\`, which emits on every backend.`,
   "loom.criterion-unsupported-target": (p: { name: unknown }) =>
     `criterion '${p.name}' has an unsupported candidate type. v1 supports 'of <Aggregate>' (a predicate over that aggregate) or 'of bool' (a pure ambient predicate); predicates over primitives / value objects / enums are reserved for the forthcoming 'from <Criterion>(args)' parameter-binding surface.`,
   "loom.criterion-impure#member-call": (p: { name: unknown; member: unknown }) =>
