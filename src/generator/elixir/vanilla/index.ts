@@ -169,6 +169,9 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       uniquenessStatus,
       concurrencyStatus,
       notFoundStatus,
+      denialStatus("forbidden", ladderStatuses),
+      denialStatus("disallowed", ladderStatuses),
+      resolveErrorStatus("ReferencedInUse", structuralStatuses),
       validationMessages.length > 0,
     ),
   );

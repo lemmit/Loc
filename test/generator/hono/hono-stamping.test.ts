@@ -11,7 +11,7 @@
 // request context (`requestContext().actorId`); the domain entity is pure (no
 // `_stampOn*`) and the route handler never stamps.  Principal-referencing
 // stamps on a deployable WITHOUT auth and stamps on an event-sourced aggregate
-// stay fail-fast gated (loom.node-stamp-unsupported), mirroring java / dotnet.
+// stay fail-fast gated (loom.stamp-principal-without-auth), mirroring java / dotnet.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -207,7 +207,9 @@ describe("Hono (node) generator — lifecycle stamps", () => {
     // principal to thread.
     const noAuth = PRINCIPAL_SRC.replace("\n    auth: required", "");
     const loom = await buildLoomModel(noAuth);
-    const errors = validateLoomModel(loom).filter((d) => d.code === "loom.node-stamp-unsupported");
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.code === "loom.stamp-principal-without-auth",
+    );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("no auth");
   });
@@ -243,7 +245,9 @@ describe("Hono (node) generator — lifecycle stamps", () => {
       }
     }`;
     const loom = await buildLoomModel(es);
-    const errors = validateLoomModel(loom).filter((d) => d.code === "loom.node-stamp-unsupported");
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.code === "loom.stamp-on-event-sourced-invalid",
+    );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("event-sourced");
   });
