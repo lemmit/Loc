@@ -439,6 +439,14 @@ export const vueTarget: WalkerTarget = {
    *  attribute would terminate at the first inner `"`.  A condition that
    *  ALSO carries an apostrophe is entity-escaped (`'`→`&#39;`) via
    *  `quoteAttrExpr` rather than silently emitting a broken `v-if`. */
+  /** Render-NOTHING in child position is the EMPTY STRING here, not the walker's
+   *  default `null`: a `<template v-if>` body is markup, so a bare `null` token
+   *  inside it is literal TEXT.  Same insight as the `elseS === "null"` guard
+   *  below, applied where a PACK TEMPLATE (which only interpolates) receives the
+   *  slot — a slotless `QueryView` used to render the word "null".  See
+   *  `WalkerTarget.emptyChild`. */
+  emptyChild: "",
+
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);

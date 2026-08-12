@@ -7,7 +7,7 @@
 // (`current_user.<idAttr>`, threaded from `request.state.current_user`).
 // The aggregate exposes `_stamp_on_create` / `_stamp_on_update`; the
 // create / operation / extern routes call them before `repo.save(...)`.
-// Two cases stay fail-fast gated (loom.python-stamp-unsupported): a
+// Two cases stay fail-fast gated (loom.stamp-principal-without-auth): a
 // principal-referencing stamp on a deployable WITHOUT auth, and stamps on
 // an event-sourced aggregate.  Build-verified end-to-end under
 // `uv sync` + ruff + mypy --strict via
@@ -127,7 +127,7 @@ describe("python generator — lifecycle stamps", () => {
       }
     `);
     const errors = validateLoomModel(loom).filter(
-      (d) => d.code === "loom.python-stamp-unsupported",
+      (d) => d.code === "loom.stamp-principal-without-auth",
     );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("no auth");
@@ -158,7 +158,7 @@ describe("python generator — lifecycle stamps", () => {
       }
     `);
     const errors = validateLoomModel(loom).filter(
-      (d) => d.code === "loom.python-stamp-unsupported",
+      (d) => d.code === "loom.stamp-on-event-sourced-invalid",
     );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("event-sourced");

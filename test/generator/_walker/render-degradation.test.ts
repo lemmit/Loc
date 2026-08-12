@@ -90,19 +90,19 @@ const SENTINELS: ReadonlyArray<{ label: string; re: RegExp }> = [
  * Keyed `<framework>:<sentinel label>`.
  */
 const KNOWN_DEGRADATIONS: ReadonlyMap<string, string> = new Map([
-  // USER COMPONENTS ARE NOT EMITTED ON ANGULAR OR FELIZ.  A declared
-  // `component TierBadge(…)` produces NO component file on either frontend
-  // (verified: react emits `src/components/TierBadge.tsx`, angular and feliz
-  // emit nothing), so `ctx.userComponents` never learns the name and the use
-  // site renders `{/* unknown layout component: TierBadge */}` — the
-  // declaration and its every use vanish together.
+  // EMPTY — and the "still real" test below keeps it honest in both
+  // directions: a NEW sentinel fails the per-target scan above, and a
+  // re-added entry that no longer fires fails as stale.
   //
-  // This is a frontend-parity mission of its own (component emission for two
-  // frameworks), not an expression-layer defect, so it is queued rather than
-  // fixed here.  The companion "still real" test below fails if it silently
-  // starts working, so the entry cannot rot.
-  ["angular:unknown layout component", "user components not emitted on Angular"],
-  ["feliz:unknown layout component", "user components not emitted on Feliz"],
+  // The last two rows were "user components are not emitted on Angular /
+  // Feliz": a declared `component TierBadge(…)` produced no component on
+  // either frontend, so `ctx.userComponents` never learned the name and every
+  // use site rendered `unknown layout component: TierBadge` — declaration and
+  // use vanishing together.  Both now emit for real (Angular: a standalone
+  // `@Component` class at `src/app/components/<Name>.ts` via the page shell's
+  // component mode, `src/generator/angular/components-emit.ts`; Feliz: an F#
+  // props function spliced into `App.fs` ahead of the page views,
+  // `src/generator/feliz/component-emit.ts`).
 ]);
 
 /**

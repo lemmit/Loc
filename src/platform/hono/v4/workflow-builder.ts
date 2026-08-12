@@ -7,6 +7,7 @@ import {
 import type { OpFragment } from "../../../generator/typescript/emit/aggregate.js";
 import {
   eventRowClassOf,
+  MIKRO_OUTBOX_ROW_CLASS,
   mikroWorkflowRowClass,
 } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr, renderTsType } from "../../../generator/typescript/render-expr.js";
@@ -114,7 +115,7 @@ export function buildWorkflowsFile(
    *  of Drizzle.  Default false keeps the Drizzle output byte-identical. */
   usingMikro = false,
 ): string {
-  if (ctx.workflows.length === 0) return buildProducerOutboxFile(ctx);
+  if (ctx.workflows.length === 0) return buildProducerOutboxFile(ctx, usingMikro);
   // Build the body first; imports are derived from what the body actually
   // references (keeps the generated import line free of dead names per the
   // generated-code Biome gate). Aggregate / repository / VO / enum imports
@@ -452,7 +453,12 @@ export function buildWorkflowsFile(
     .map(() => eventRowClassOf(ctx.name))
     .filter((n, i, a) => a.indexOf(n) === i)
     .filter((n) => new RegExp(`\\b${n}\\b`).test(bodyStr));
-  const entityImports = [...workflowRowsReferenced, ...eventRowsReferenced];
+  // The mikro outbox tier's capture + drain read/write the `__loom_outbox` Row
+  // entity (M-T6.23 slice 1); same body-scan gate.
+  const outboxRowReferenced = new RegExp(`\\b${MIKRO_OUTBOX_ROW_CLASS}\\b`).test(bodyStr)
+    ? [MIKRO_OUTBOX_ROW_CLASS]
+    : [];
+  const entityImports = [...workflowRowsReferenced, ...eventRowsReferenced, ...outboxRowReferenced];
   if (entityImports.length > 0)
     imports.push(`import { ${entityImports.join(", ")} } from "../db/entities";`);
   // The persisted-workflow load helper filters by the correlation column.
@@ -1100,7 +1106,7 @@ function emitSubscriptionHandlers(
   const durable = durableEventTypes(ctx);
   if (durable.size > 0) {
     out.push("");
-    out.push(...emitOutboxMachinery(durable));
+    out.push(...emitOutboxMachinery(durable, usingMikro));
   }
   return out;
 }
@@ -1111,14 +1117,22 @@ function emitSubscriptionHandlers(
  *  dispatched in-process; `startOutboxRelay` drains undispatched rows through
  *  the in-process dispatcher — at-least-once, so consumers must tolerate
  *  redelivery.  Exhausted rows (attempts ≥ maxAttempts) stay in the table and
- *  log `event_dead_lettered` once. */
-function emitOutboxMachinery(durable: ReadonlySet<string>): string[] {
+ *  log `event_dead_lettered` once.
+ *
+ *  `usingMikro` swaps the store for the EntityManager + `LoomOutboxRow`
+ *  EntitySchema (M-T6.23 slice 1) — same table, same at-least-once contract,
+ *  same `__loomEventId` marker threaded onto the redelivered event. */
+function emitOutboxMachinery(durable: ReadonlySet<string>, usingMikro = false): string[] {
   const types = [...durable].sort().map((t) => JSON.stringify(t));
   const out: string[] = [];
   out.push(
     `export const DURABLE_EVENT_TYPES: ReadonlySet<string> = new Set([${types.join(", ")}]);`,
   );
   out.push(``);
+  if (usingMikro) {
+    out.push(...emitMikroOutboxMachinery());
+    return out;
+  }
   out.push(`export function createOutboxDispatcher(`);
   out.push(`  db: NodePgDatabase<typeof schema>,`);
   out.push(`  inner: DomainEventDispatcher,`);
@@ -1190,6 +1204,88 @@ function emitOutboxMachinery(durable: ReadonlySet<string>): string[] {
   return out;
 }
 
+/** The `persistence: mikroorm` half of the outbox tier (M-T6.23 slice 1).
+ *
+ *  Same two exports, same signatures modulo the `db` handle (EntityManager),
+ *  same wire contract — only the store differs:
+ *    - capture: `em.nativeInsert(LoomOutboxRow, …)` on a fork that KEEPS the
+ *      ambient transaction context, so the row commits with the aggregate save
+ *      when the route opened one (the drizzle path gets this by inserting on
+ *      the same `db` handle).  The id / occurredAt / attempts are filled here
+ *      because the mikro-owned schema carries no column defaults.
+ *    - drain: `em.find` on the same undispatched-and-not-exhausted predicate,
+ *      `occurredAt` ascending, `nativeUpdate` to mark dispatched / bump the
+ *      attempt counter.  A FRESH fork per drain — the relay outlives every
+ *      request, so a reused EntityManager's identity map would grow unbounded. */
+function emitMikroOutboxMachinery(): string[] {
+  const ROW = MIKRO_OUTBOX_ROW_CLASS;
+  return [
+    `export function createOutboxDispatcher(`,
+    `  db: EntityManager,`,
+    `  inner: DomainEventDispatcher,`,
+    `): DomainEventDispatcher {`,
+    `  return {`,
+    `    async dispatch(event: Events.DomainEvent): Promise<void> {`,
+    `      if (DURABLE_EVENT_TYPES.has(event.type)) {`,
+    `        await db.fork({ keepTransactionContext: true }).insert(${ROW}, {`,
+    `          id: randomUUID(),`,
+    `          occurredAt: new Date(),`,
+    `          type: event.type,`,
+    `          payload: event,`,
+    `          dispatchedAt: null,`,
+    `          attempts: 0,`,
+    `        });`,
+    `        return; // the relay delivers`,
+    `      }`,
+    `      await inner.dispatch(event);`,
+    `    },`,
+    `  };`,
+    `}`,
+    ``,
+    `export function startOutboxRelay(`,
+    `  db: EntityManager,`,
+    `  inner: DomainEventDispatcher,`,
+    `  opts: { intervalMs?: number; maxAttempts?: number; batchSize?: number } = {},`,
+    `): () => void {`,
+    `  const intervalMs = opts.intervalMs ?? 500;`,
+    `  const maxAttempts = opts.maxAttempts ?? 5;`,
+    `  const batchSize = opts.batchSize ?? 50;`,
+    `  let draining = false;`,
+    `  const drain = async (): Promise<void> => {`,
+    `    if (draining) return;`,
+    `    draining = true;`,
+    `    try {`,
+    `      const em = db.fork();`,
+    `      const rows = await em.find(`,
+    `        ${ROW},`,
+    `        { dispatchedAt: null, attempts: { $lt: maxAttempts } },`,
+    `        { orderBy: { occurredAt: "asc" }, limit: batchSize },`,
+    `      );`,
+    `      for (const row of rows) {`,
+    `        try {`,
+    // The outbox row id rides on the dispatched event so the saga handler's
+    // idempotent-consumer marker can no-op on redelivery — identical to the
+    // drizzle relay above.
+    `          await inner.dispatch({ ...(row.payload as Events.DomainEvent), __loomEventId: row.id } as unknown as Events.DomainEvent);`,
+    `          await em.nativeUpdate(${ROW}, { id: row.id }, { dispatchedAt: new Date() });`,
+    `        } catch (err) {`,
+    `          const attempts = row.attempts + 1;`,
+    `          await em.nativeUpdate(${ROW}, { id: row.id }, { attempts });`,
+    `          if (attempts >= maxAttempts) {`,
+    `            baseLogger.warn({ event: "event_dead_lettered", type: row.type, attempts, error: err instanceof Error ? err.message : String(err) });`,
+    `          }`,
+    `        }`,
+    `      }`,
+    `    } finally {`,
+    `      draining = false;`,
+    `    }`,
+    `  };`,
+    `  const timer = setInterval(() => void drain(), intervalMs);`,
+    `  return () => clearInterval(timer);`,
+    `}`,
+  ];
+}
+
 /** `loadX` / `saveX` for a workflow's persisted correlation row, plus the row
  *  type.  `loadX` reads by the correlation column; `saveX` upserts on it.
  *  Keyed off the Drizzle table the schema emitter produces (PR #991). */
@@ -1236,13 +1332,20 @@ function emitWorkflowStateHelpers(wf: WorkflowIR, usingMikro = false): string[] 
  *  key plus a typed default for each required (non-optional) non-key saga state
  *  field, so the literal satisfies the row's insert type.  Optional fields are
  *  omitted (nullable columns). */
-function allocateLiteral(wf: WorkflowIR): string {
+function allocateLiteral(wf: WorkflowIR, opts: { mikroDurable?: boolean } = {}): string {
   const corr = wf.correlationField as string;
   const parts = [`${corr}: __key`];
   for (const f of wf.stateFields ?? []) {
     if (f.name === corr || f.optional) continue;
     parts.push(`${f.name}: ${defaultLiteralFor(f.type)}`);
   }
+  // The idempotent-consumer marker is a NULLABLE column, which drizzle's
+  // `$inferInsert` makes optional — so the drizzle literal omits it.  The mikro
+  // state type is the Row CLASS, where `lastEventId!: string | null` is a
+  // required (if nullable) property, so a fresh instance must spell out the
+  // null: without it the `load ?? allocate` union loses the property and the
+  // marker read below does not type-check.
+  if (opts.mikroDurable) parts.push(`lastEventId: null`);
   return `{ ${parts.join(", ")} }`;
 }
 
@@ -1331,7 +1434,11 @@ function emitHandlerFn(
     out.push(`  const __key = ${keyExpr};`);
     if (trigger === "create") {
       // Load-or-allocate: a starter creates the instance if its key is new.
-      out.push(`  const state = (await load${T}(db, __key)) ?? ${allocateLiteral(wf)};`);
+      out.push(
+        `  const state = (await load${T}(db, __key)) ?? ${allocateLiteral(wf, {
+          mikroDurable: usingMikro && durable,
+        })};`,
+      );
     } else {
       // Route-to-existing, else drop + log: a continuation needs a started
       // instance.  `requestLog()` resolves the request-bound logger (the
@@ -1536,22 +1643,30 @@ function emitEventSourcedHandlerFn(
  *  (index.ts wraps the relay dispatcher in the channel tee).  The
  *  in-process dispatcher is the empty fan-out.  A workflow-less context
  *  with no durable events keeps returning "" (byte-identical). */
-function buildProducerOutboxFile(ctx: EnrichedBoundedContextIR): string {
+function buildProducerOutboxFile(ctx: EnrichedBoundedContextIR, usingMikro = false): string {
   const durable = durableEventTypes(ctx);
   if (durable.size === 0) return "";
   const out: string[] = [
     "// Auto-generated.  Do not edit by hand.",
     `import type { DomainEventDispatcher } from "../domain/events";`,
     `import type * as Events from "../domain/events";`,
-    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    `import { and, asc, eq, isNull, lt } from "drizzle-orm";`,
-    `import * as schema from "../db/schema";`,
+    ...(usingMikro
+      ? [
+          `import { EntityManager } from "@mikro-orm/postgresql";`,
+          `import { randomUUID } from "node:crypto";`,
+          `import { ${MIKRO_OUTBOX_ROW_CLASS} } from "../db/entities";`,
+        ]
+      : [
+          `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+          `import { and, asc, eq, isNull, lt } from "drizzle-orm";`,
+          `import * as schema from "../db/schema";`,
+        ]),
     `import { baseLogger } from "../obs/log";`,
     "",
   ];
-  out.push(...emitDispatcherFactory(new Map()));
+  out.push(...emitDispatcherFactory(new Map(), usingMikro));
   out.push("");
-  out.push(...emitOutboxMachinery(durable));
+  out.push(...emitOutboxMachinery(durable, usingMikro));
   return `${out.join("\n")}\n`;
 }
 

@@ -572,7 +572,14 @@ export function generateTypeScriptForContexts(
         merged.aggregates,
         merged,
         (agg) => effectiveSavingShape(agg, resolveDataSource?.(agg)),
-        { audit: emitAudit, provenance: emitProvenance },
+        {
+          audit: emitAudit,
+          provenance: emitProvenance,
+          // Transactional-outbox Row — the mikro twin of the drizzle
+          // `__loom_outbox` table, on the same condition the drizzle schema
+          // emitter uses (any durable channel in the deployable).
+          outbox: durableEventTypes(merged).size > 0,
+        },
       ),
     );
     out.set("mikro-orm.config.ts", renderMikroConfig());
@@ -1126,12 +1133,12 @@ export function generateTypeScriptForContexts(
       usingMikro,
       // Outbox relay (dispatch-delivery-semantics.md): started at boot when
       // any context carries a durable channel AND the in-process dispatcher
-      // is wired (subscriptions exist; drizzle persistence).
-      !usingMikro &&
-        (contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0) ||
-          // A durable-broker producer relays even without local subscribers:
-          // the drained rows publish to the broker (M-T4.4 slice 3).
-          (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0)),
+      // is wired (subscriptions exist).  Persistence-neutral since M-T6.23
+      // slice 1 — the mikro adapter emits the same relay over the EntityManager.
+      contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0) ||
+        // A durable-broker producer relays even without local subscribers:
+        // the drained rows publish to the broker (M-T4.4 slice 3).
+        (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0),
       // Realtime tee: the relay's inner dispatcher rides through it so
       // relayed (durable) events reach the SSE wire too.
       !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
@@ -1500,6 +1507,39 @@ function renderProjectIndexTs(
   const orgPathRegistration = wireOrgPath
     ? `\n// Register the tenant-registry \`orgPath\` resolver (multi-tenancy P2.2):\n// currentUser.orgPath = the caller org's materialized \`data_key\`, memoized\n// per request in the auth middleware; a missing row / dataKey falls back to\n// the claim (root-segment path) — fail-safe, never null/crash.\nregisterOrgPathResolver(async (claim) => {\n  const rows = await db\n    .select({ dataKey: schema.${orgPathRegistryTable}.dataKey })\n    .from(schema.${orgPathRegistryTable})\n    .where(eq(schema.${orgPathRegistryTable}.id, claim))\n    .limit(1);\n  return rows[0]?.dataKey ?? null;\n});\n`
     : "";
+  // Event-dispatch / relay / scheduler imports — SHARED by both persistence
+  // branches (M-T6.23 slice 1: the mikro adapter now emits the outbox relay
+  // too, so this block can no longer live inside the drizzle arm).  Empty when
+  // nothing needs the in-process dispatcher, which keeps every project that
+  // wires none byte-identical.
+  const dispatcherImports = `${
+    // The in-process dispatcher is shared by the outbox relay and the timer
+    // scheduler (scheduling.md) — import it (and the realtime tee) whenever
+    // either is wired; the outbox-only helpers stay behind the outbox flag.
+    needsDispatcher
+      ? `${
+          withInProcess
+            ? `import { createInProcessDispatcher${
+                outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
+              } } from "./http/workflows";\n`
+            : `import { NoopDomainEventDispatcher } from "./domain/events";\n${
+                // Pure producer of durable broker-bound events (M-T4.4 slice 3):
+                // the outbox captures on save; the relay publishes on drain.
+                outboxRelay
+                  ? `import { createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n`
+                  : ""
+              }`
+        }${hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""}${
+          hasTimers ? `import { startTimerScheduler } from "./scheduler";\n` : ""
+        }${
+          hasChannels
+            ? `import { channelPublishTee, createChannelTransports${
+                hasChannelConsumers ? ", startChannelConsumers" : ", closeChannelTransports"
+              } } from "./http/channels";\n`
+            : ""
+        }`
+      : ""
+  }`;
   // Persistence wiring (D-REALIZATION-AXES `persistence:`) — drizzle (pg pool +
   // boot-time migrate) vs mikroorm (MikroORM.init + schema:update at startup).
   // The drizzle import header is kept byte-identical to the pre-mikroorm shape.
@@ -1507,41 +1547,14 @@ function renderProjectIndexTs(
     ? `import { serve } from "@hono/node-server";
 import { createApp } from "./http/index";
 ${MIKRO_INDEX_IMPORTS.join("\n")}
-${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
+${dispatcherImports}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
 import { shutdownTracing } from "./obs/tracing";`
     : `import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-${
-  // The in-process dispatcher is shared by the outbox relay and the timer
-  // scheduler (scheduling.md) — import it (and the realtime tee) whenever
-  // either is wired; the outbox-only helpers stay behind the outbox flag.
-  needsDispatcher
-    ? `${
-        withInProcess
-          ? `import { createInProcessDispatcher${
-              outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
-            } } from "./http/workflows";\n`
-          : `import { NoopDomainEventDispatcher } from "./domain/events";\n${
-              // Pure producer of durable broker-bound events (M-T4.4 slice 3):
-              // the outbox captures on save; the relay publishes on drain.
-              outboxRelay
-                ? `import { createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n`
-                : ""
-            }`
-      }${hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""}${
-        hasTimers ? `import { startTimerScheduler } from "./scheduler";\n` : ""
-      }${
-        hasChannels
-          ? `import { channelPublishTee, createChannelTransports${
-              hasChannelConsumers ? ", startChannelConsumers" : ", closeChannelTransports"
-            } } from "./http/channels";\n`
-          : ""
-      }`
-    : ""
-}${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";
+${dispatcherImports}${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";
 import { shutdownTracing } from "./obs/tracing";`;
   const connectionBlock = usingMikro
     ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`

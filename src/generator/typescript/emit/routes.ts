@@ -102,8 +102,7 @@ export function renderHttpIndex(
   // (routing emitted events to reactors / event-creates) instead of the no-op.
   // The MikroORM adapter is included: the workflow correlation store is now
   // persistence-neutral (usingMikro branch → EntityManager), so the synchronous
-  // in-process saga cascade runs on mikro exactly as on drizzle.  Only the
-  // DURABLE outbox tier stays drizzle-only (see `wireOutbox`).
+  // in-process saga cascade runs on mikro exactly as on drizzle.
   // Workflow saga dispatch: driven by WORKFLOW subscriptions only (projection
   // subs carry a `projection` discriminant and are handled by the projectionTee
   // below).  Excluding them keeps a workflow-only project byte-identical and a
@@ -125,12 +124,11 @@ export function renderHttpIndex(
   // default dispatcher wraps the in-process one — durable events are
   // recorded in __loom_outbox and the relay (started by index.ts) delivers
   // them; ephemeral events keep the inline at-most-once path.
-  // The durable outbox tier (loomOutbox table + createOutboxDispatcher) is still
-  // drizzle-only — mikroorm has no outbox emitter — so a durable channel on the
-  // mikro adapter keeps the plain in-process dispatcher (its channels are gated
-  // off in emit.ts anyway); the ephemeral saga cascade above is unaffected.
-  const wireOutbox =
-    !usingMikro && (wireDispatcher || !!options?.forceOutbox) && durableEventTypes(ctx).size > 0;
+  // Persistence-neutral since M-T6.23 slice 1: the MikroORM adapter emits the
+  // same two exports over the `LoomOutboxRow` EntitySchema, so a durable channel
+  // is at-least-once on both adapters (it silently degraded to the at-most-once
+  // in-process path here before).
+  const wireOutbox = (wireDispatcher || !!options?.forceOutbox) && durableEventTypes(ctx).size > 0;
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable — createApp wraps its
   // default dispatcher with the realtime tee and mounts GET /realtime/events.

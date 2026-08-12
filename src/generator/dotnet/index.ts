@@ -1539,7 +1539,7 @@ function emitAggregate(
     // `currentUser` lifecycle stamp resolves the principal id from the ambient
     // RequestContext, exactly as the EF AuditableInterceptor does (index.ts's
     // `actorIdProp` for the interceptor).  Undefined without auth (a principal
-    // stamp is then rejected upstream by loom.dotnet-stamp-unsupported).
+    // stamp is then rejected upstream by loom.stamp-principal-without-auth).
     const authed = !!(emitCtx?.deployable.auth?.required && emitCtx.sys.user);
     const userFields = authed ? emitCtx?.sys.user?.fields : undefined;
     const actorIdField = userFields?.find((f) => f.name === "id") ?? userFields?.[0];
