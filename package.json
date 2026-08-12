@@ -77,6 +77,7 @@
     "test:tenancy-hierarchy-dotnet": "LOOM_TENANCY_E2E_DOTNET=1 vitest run test/e2e/tenancy-hierarchy-dotnet.test.ts",
     "test:tenancy-hierarchy-elixir": "LOOM_TENANCY_E2E_ELIXIR=1 vitest run test/e2e/tenancy-hierarchy-elixir.test.ts",
     "test:schema-load": "LOOM_SCHEMA_LOAD=1 vitest run test/e2e/schema-load.test.ts",
+    "test:schemathesis": "LOOM_SCHEMATHESIS=1 node test/behavioral/run-schemathesis.mjs",
     "test:migration-evolution": "LOOM_MIGRATION_E2E=1 vitest run test/e2e/migration-evolution.test.ts",
     "test:migration-evolution-python": "LOOM_MIGRATION_E2E_PYTHON=1 vitest run test/e2e/migration-evolution-python.test.ts",
     "test:migration-evolution-java": "LOOM_MIGRATION_E2E_JAVA=1 vitest run test/e2e/migration-evolution-java.test.ts",

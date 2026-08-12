@@ -199,9 +199,11 @@ system FulfillmentSys {
     const body = ctx.slice(ctx.indexOf("def touch_order(%"));
 
     // The plain terminal pipe — unchanged from before S5a.
+    // (M-T6.27: the versioned bump rides `optimistic_lock(:version)` now.)
     expect(body).toContain(`    record
-    |> Ecto.Changeset.change(%{version: record.version + 1})
+    |> Ecto.Changeset.change(%{})
     |> Ecto.Changeset.force_change(:status, record.status)
+    |> Ecto.Changeset.optimistic_lock(:version)
     |> Api.Ordering.OrderRepository.persist_change()`);
     // No persist_change `case`, no broadcast/dispatch.
     expect(body).not.toContain("case Api.Ordering.OrderRepository.persist_change");

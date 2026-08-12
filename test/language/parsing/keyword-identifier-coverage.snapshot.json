@@ -9,6 +9,7 @@
   "abstract": [],
   "action": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -39,6 +40,7 @@
   "as": [],
   "asc": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -50,6 +52,7 @@
   "auth": [],
   "await": [
     "fieldName",
+    "fieldNameAfterField",
     "paramName"
   ],
   "bigquery": [],
@@ -59,6 +62,7 @@
   ],
   "body": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -69,6 +73,7 @@
   "broadcast": [],
   "by": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -81,6 +86,7 @@
   ],
   "canonical": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -94,6 +100,7 @@
   "channelSource": [],
   "channels": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -107,6 +114,7 @@
   "clientSecret": [],
   "command": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -120,6 +128,7 @@
   ],
   "config": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -128,6 +137,7 @@
   ],
   "connection": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -159,6 +169,7 @@
   "cron": [],
   "crossTenant": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -168,6 +179,7 @@
   "daisyui": [],
   "dataSources": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -186,6 +198,7 @@
   "derived": [],
   "desc": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -194,6 +207,7 @@
   ],
   "description": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -227,6 +241,7 @@
   "enum": [],
   "env": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -235,6 +250,7 @@
   ],
   "envelope": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -244,6 +260,7 @@
   "ephemeral": [],
   "error": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -253,6 +270,7 @@
   "event": [],
   "eventLog": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -262,6 +280,7 @@
   "eventSourced": [],
   "every": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -276,6 +295,7 @@
   ],
   "favicon": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -285,6 +305,7 @@
   "feliz": [],
   "filter": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -311,6 +332,7 @@
   ],
   "group": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -320,6 +342,7 @@
   "guid": [],
   "handle": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -343,6 +366,7 @@
   ],
   "immutable": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -351,6 +375,7 @@
   ],
   "implements": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -365,6 +390,7 @@
   "inheritanceUsing": [],
   "instance": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -374,6 +400,7 @@
   "int": [],
   "internal": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -383,6 +410,7 @@
   "invariant": [],
   "isolationLevel": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -393,6 +421,7 @@
   "java": [],
   "join": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -405,6 +434,7 @@
   "key": [],
   "keyPrefix": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -414,6 +444,7 @@
   "keyed": [],
   "kind": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -428,6 +459,7 @@
   ],
   "literal": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -436,6 +468,7 @@
   ],
   "loads": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -450,6 +483,7 @@
   "long": [],
   "mailer": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -459,6 +493,7 @@
   "main": [],
   "managed": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -475,6 +510,7 @@
   ],
   "message": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -483,6 +519,7 @@
   ],
   "migration": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -497,6 +534,7 @@
   ],
   "money": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -513,6 +551,7 @@
   ],
   "objectStore": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -524,6 +563,7 @@
   ],
   "ogImage": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -538,6 +578,7 @@
   "opt": [],
   "option": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -546,6 +587,7 @@
   ],
   "or": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -556,6 +598,7 @@
   "ownTable": [],
   "page": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -564,6 +607,7 @@
   ],
   "paged": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -572,6 +616,7 @@
   ],
   "parent": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -580,6 +625,7 @@
   ],
   "payload": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -613,6 +659,7 @@
   "python": [],
   "query": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -622,6 +669,7 @@
   "queryHandler": [],
   "queue": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -635,6 +683,7 @@
   "readUncommitted": [],
   "readonly": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -646,6 +695,7 @@
   "repeatableRead": [],
   "replica": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -658,6 +708,7 @@
   "requires": [],
   "resource": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -666,6 +717,7 @@
   ],
   "response": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -675,6 +727,7 @@
   "restApi": [],
   "retain": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -684,6 +737,7 @@
   "retention": [],
   "retrieval": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -698,6 +752,7 @@
   "s3": [],
   "schema": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -707,6 +762,7 @@
   "scopes": [],
   "secret": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -720,6 +776,7 @@
   "seed": [],
   "select": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -732,6 +789,7 @@
   "serves": [],
   "service": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -750,6 +808,7 @@
   "smtp": [],
   "snapshot": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -759,6 +818,7 @@
   "solution": [],
   "sort": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -768,6 +828,7 @@
   "spartanNg": [],
   "sql": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -777,6 +838,7 @@
   "sqlite": [],
   "stamp": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -785,6 +847,7 @@
   ],
   "state": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -798,6 +861,7 @@
   "storage": [],
   "store": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -810,6 +874,7 @@
   "system": [],
   "tablePrefix": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -822,6 +887,7 @@
   ],
   "tenancy": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -837,6 +903,7 @@
   "timerSource": [],
   "title": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -845,6 +912,7 @@
   ],
   "token": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -859,6 +927,7 @@
   ],
   "ttl": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -880,6 +949,7 @@
   ],
   "use": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",
@@ -912,6 +982,7 @@
   ],
   "write": [
     "fieldName",
+    "fieldNameAfterField",
     "lValue",
     "memberAccess",
     "nameRef",

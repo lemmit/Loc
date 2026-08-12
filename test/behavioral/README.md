@@ -188,6 +188,29 @@ will generate old code and produce misleading failures.
 Both tiers gate: any `api` or `unit` failure, or a boot/infra error,
 fails the run.
 
+### Contract fuzzing (`run-schemathesis.mjs`)
+
+A sibling runner reusing this tier's boot, for a different question. The
+suites above ask *"does the backend do what the model said?"* with
+example-shaped input. This one asks *"does the backend honour the contract
+it published?"* with adversarial input — it serves the generated Hono app on
+a **real port** (`@hono/node-server` over the same PGlite boot, because
+Schemathesis is an out-of-process HTTP client and cannot reach `app.fetch`)
+and feeds it its own emitted `/openapi.json`:
+
+```bash
+uv tool install schemathesis          # once (or pipx)
+npm run test:schemathesis             # from the repo root; ~1 min
+LOOM_SCHEMATHESIS=1 node run-schemathesis.mjs storefront-system   # one case
+```
+
+Known findings are **ratcheting root-cause rules** in
+`schemathesis-waivers.json`, explained in
+[`docs/audits/schemathesis-findings-2026-08.md`](../../docs/audits/schemathesis-findings-2026-08.md):
+a finding no rule matches fails the run, and a rule that stops reproducing
+fails it too, so a fix deletes its rule in the same PR. Nightly in CI
+(`schemathesis.yml`), or on demand via the `run-schemathesis` label.
+
 ## Corpus
 
 `corpus.json` is a curated allowlist. **Constraint:** each system has
@@ -219,6 +242,60 @@ prints a per-system verdict line:
 
 So the rollup surfaces requirement coverage honestly without false-gating
 on coverage the node tier can't provide.
+
+## Principals — and the authorization ladder (M-T9.28)
+
+The tier authenticates as a **canonical principal** (`DEV_CLAIMS` in
+`cases.mjs`, or the mock-issuer token under OIDC). For a long time that
+was the *only* identity available, and it capped what the tier could say
+about authorization: it could assert "the satisfying principal gets
+through", which a `requires` **emitted as a no-op passes identically**.
+That is exactly how #2446 shipped a guarded `create` with an open route.
+
+There are now **two** principals, in both auth flavours:
+
+| | dev-stub | OIDC |
+|---|---|---|
+| authorized | `DEV_CLAIMS` (`role: "agent"`) | `oidc.token` |
+| authenticated-but-**un**authorized | `DEV_CLAIMS_UNAUTHORIZED` (`role: "visitor"`) | `oidc.unauthorizedToken` |
+
+Both members of each pair verify identically — same issuer and signing key
+under OIDC, same claim channel under the dev stub — so the **only** thing
+separating them by the time a request reaches a route is the authorization
+predicate. A 403 from the second one therefore cannot be confused with a
+verifier failure (which is a 401).
+
+`AUTHZ_LADDERS` (`cases.mjs`) declares, per case, a `requires`-gated
+surface; `__authzLadder` (the shared recorder preamble in
+`wire-differential.mjs`, so every leg can adopt it) walks the three rungs:
+
+```
+unauthenticated                → 401     authn precedes authz
+authenticated-but-unauthorized → 403     the gate actually denies
+authorized                     → 2xx     the gate is not always-deny
+```
+
+The third rung is what keeps the first two honest — a backend that denied
+*everything* would pass rungs 1 and 2 on its own.
+
+Two deliberate properties:
+
+- **An unavailable rung is reported `skip`, never a quiet pass.** The
+  emitted dev-stub verifier accepts every request and falls back to its
+  built-in identity when no `x-loom-dev-claims` header is present, so under
+  the dev stub there is no anonymous caller to express and the 401 rung is
+  *unavailable*, not green. Only the OIDC flavour asserts it.
+- **The ladder rides the UNRECORDED dispatch.** Its requests are assertions
+  about status codes, not part of the wire contract, so routing them through
+  the recorder would shift the ordinals the golden aligns on — and would do
+  so only on the legs that have adopted the ladder, failing the differential
+  for a reason unrelated to the wire. (M-T9.11 may promote the ladder to a
+  recorded probe; that is a golden rebaseline, taken deliberately.)
+
+Slice 1 wires the ladder on the **node** leg and hand-writes `AUTHZ_LADDERS`
+over one gated surface. Slice 2 replaces that map with a census **derived
+from the enriched IR** — every `requires`, `policy` ladder, `mask unless`
+field and tenancy stance — so a gated surface with no probe fails the gate.
 
 ## How it works
 

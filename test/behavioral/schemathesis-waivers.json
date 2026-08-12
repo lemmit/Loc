@@ -1,0 +1,79 @@
+{
+  "comment": "Ratcheting waivers for the schemathesis contract-fuzzing leg (M-T9.21). A rule names one ROOT CAUSE — a check plus a regex over the operation label — and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision).",
+  "waivers": [
+    {
+      "id": "W1",
+      "findings": ["F1", "F2"],
+      "check": "not_a_server_error",
+      "operations": "^POST /api/",
+      "kind": "bug",
+      "reason": "Two root causes share this surface. F1: a request whose Content-Type is not application/json skips the zod body validator entirely, so the handler dereferences an undefined body and 500s (with the right Content-Type, an absent or malformed body correctly 400s). F2: an `X id` reference field lowers to a bare z.string() with no uuid check, so a non-UUID value reaches Postgres and the driver's `invalid input syntax for type uuid` escapes as a 500 — while the SAME id in a path parameter IS uuid-validated and 422s, so the backend disagrees with itself."
+    },
+    {
+      "id": "W2",
+      "findings": ["F3"],
+      "check": "not_a_server_error",
+      "operations": "^GET /api/[a-z_]+/[a-z_]+$",
+      "kind": "bug",
+      "reason": "F3 — the query-parameter twin of F2: a find-by-reference route (`?owner=`) validates its `X id` parameter as a bare string, so an empty/non-UUID value reaches Postgres and 500s instead of 422."
+    },
+    {
+      "id": "W3",
+      "findings": ["F4"],
+      "check": "not_a_server_error",
+      "operations": "^GET /api/[a-z_]+$",
+      "kind": "bug",
+      "reason": "F4 — the paged collection read computes `offset = (page - 1) * pageSize` with `minimum: 1` and no maximum declared on either, so a large-but-in-contract page × pageSize overflows Postgres's bigint OFFSET and 500s."
+    },
+    {
+      "id": "W4",
+      "findings": ["F6"],
+      "check": "status_code_conformance",
+      "operations": "^(GET|DELETE) ",
+      "kind": "bug",
+      "reason": "F6 — every read/delete route validates its path and query parameters and answers 422 on a bad one, but the emitted OpenAPI declares only 200/404 (GET) and 204/404/409 (DELETE). The 422 is real, documented nowhere, and every client generated from this spec is blind to it."
+    },
+    {
+      "id": "W5",
+      "findings": ["F1", "F2", "F4"],
+      "check": "status_code_conformance",
+      "operations": "^POST ",
+      "kind": "bug",
+      "reason": "The consequence half of W1: a 500 is not a declared response on any route, so every server error also trips status_code_conformance. These clear when F1/F2 clear — they are not an independent defect."
+    },
+    {
+      "id": "W6",
+      "findings": ["F5"],
+      "check": "response_schema_conformance",
+      "operations": ".",
+      "kind": "bug",
+      "intermittent": true,
+      "intermittentReason": "Reproducing it needs the fuzzer to BOTH persist an astral-character currency AND then read that row back inside the same run, so its absence from a given run is not evidence of a fix. It still absorbs its findings; it is only exempt from the staleness half of the ratchet. Graduating it to a pinned deterministic case (per the plan's 'every finding graduates to an RS-rule + wire golden') is the follow-up that removes this exemption.",
+      "reason": "F5 — `minLength`/`maxLength` are enforced by zod in UTF-16 CODE UNITS but declared in JSON Schema as CODE POINTS. A 3-code-unit / 2-code-point currency (an astral character plus one) is accepted on write and then served back in violation of the server's own published schema: the same value is simultaneously valid on the way in and invalid on the way out."
+    },
+    {
+      "id": "W7",
+      "findings": ["F7"],
+      "check": "negative_data_rejection",
+      "operations": "^POST ",
+      "kind": "bug",
+      "reason": "F7 — the emitted wire validators COERCE, so a declared `format: date-time` string field accepts the boolean `false` (`new Date(false)` → the epoch) and a declared `type: number` money amount accepts `false` too. Declared bounds ARE honoured (a negative amount against `minimum: 0` correctly 422s) — it is the type that is not."
+    },
+    {
+      "id": "W8",
+      "findings": ["F9"],
+      "check": "negative_data_rejection",
+      "operations": "^GET ",
+      "kind": "by-design",
+      "reason": "F9 — schemathesis counts an unknown QUERY parameter as a schema-violating request that the API accepted. Ignoring unrecognised query parameters is ordinary HTTP behaviour and deliberate here; recorded so the decision is visible rather than silently filtered out of the check set."
+    },
+    {
+      "id": "W9",
+      "findings": ["F8"],
+      "check": "unsupported_method",
+      "operations": ".",
+      "kind": "bug",
+      "reason": "F8 — a verb that is genuinely undeclared on a declared path correctly answers 405 (the #2485 fix holds). But a wrong verb on a STATIC sub-path is captured by the sibling `/{id}` route instead: `DELETE /api/customers/by_email` matches `DELETE /api/customers/{id}` with id=\"by_email\" and answers 422 Invalid UUID, when the path has no DELETE and 405 is the honest answer."
+    }
+  ]
+}

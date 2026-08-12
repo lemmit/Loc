@@ -399,6 +399,13 @@ export function renderSveltePage(
     tableHelperNames.length > 0
       ? `  import { ${tableHelperNames.join(", ")} } from "$lib/table-sort";\n`
       : "";
+  // The chart component (`Chart`, M-T1.3 Phase 4).  Keyed off the same MARKER
+  // the template carries rather than a walker import, so the emitted file and
+  // its import cannot dangle apart — the discipline the Flutter and Vue shells
+  // already use for `LoomModalHost` / `LoomChart`.
+  const chartImport = tsx.includes("<LoomChart")
+    ? `  import LoomChart from "$lib/components/LoomChart.svelte";\n`
+    : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `  import ${name} from "$lib/components/${name}.svelte";\n`)
@@ -468,7 +475,7 @@ export function renderSveltePage(
     content: withDecimalImport(
       `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
+${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${tableSortImport}${chartImport}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
 
 ${markup}
 ${templateScope}`,
@@ -704,6 +711,11 @@ export function renderSvelteComponentFile(
     usesNavigate || form.usesNavigate
       ? `  import { goto as navigate } from "$app/navigation";\n`
       : "";
+  // Same marker-keyed chart import as the page shell above — a ui-scoped
+  // component can host a `Chart` too.
+  const chartImport = tsx.includes("<LoomChart")
+    ? `  import LoomChart from "$lib/components/LoomChart.svelte";\n`
+    : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((n) => `  import ${n} from "./${n}.svelte";\n`)
@@ -759,7 +771,7 @@ export function renderSvelteComponentFile(
   return withDecimalImport(
     `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
+${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${tableSortImport}${chartImport}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`,
