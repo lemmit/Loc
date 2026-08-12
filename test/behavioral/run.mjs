@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AUTHZ_LADDERS, DEV_CLAIMS, DEV_CLAIMS_UNAUTHORIZED, featureCases, sharedSystemCases } from "./cases.mjs";
-import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
+import { authzLadderTail, makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -163,15 +163,11 @@ export async function run() {
     // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
     // golden aligns on, and so a failing tier is diagnosed on its own requests.
     await __frameworkProbes(dispatch);
-    // M-T9.28 — the authorization ladder, on the cases that declare one.  Runs
-    // last and off the RECORDER (see __authzLadder) so it neither shifts wire
-    // ordinals nor perturbs the tier it follows.
-    if (AUTHZ_LADDER && UNAUTHORIZED_CREDS) {
-      for (const r of await __authzLadder(AUTHZ_LADDER, {
-        authorized: __authHeaders,
-        unauthorized: UNAUTHORIZED_CREDS,
-      })) out.push(r);
-    }
+    // M-T9.28 / M-T9.11 — the authorization ladder, on the cases that declare
+    // one.  RECORDED through the same dispatch, so its 401/403/2xx enter the wire
+    // golden; runs last, after the framework probes, so it only appends trailing
+    // ordinals rather than shifting the ones the golden already aligns on.
+    ${authzLadderTail("out")}
   }
 
   const req = createRequire(import.meta.url);
