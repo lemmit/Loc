@@ -132,10 +132,57 @@ const SHOWCASE: Case = {
       }
       ui WebApp {
         api Sales: SalesApi
+        // User (non-extern) components — emitted as standalone @Component
+        // classes under src/app/components/ (angular/components-emit.ts).
+        // THREE shapes, because they typecheck differently under
+        // strictTemplates: scalar @Input()s read bare in the template; an
+        // aggregate-typed input carrying the wire DTO (its ../../api/<agg>
+        // import resolves only at component depth); and a STATEFUL component
+        // whose signal / computed / action-method members come from the page
+        // shell's own machinery; a component that ISSUES A READ (its TanStack
+        // query hoists as a class field, the same as a page's); and the
+        // canonical Action host (an @Input()-typed record + the mutation the
+        // click method awaits).  ng build is the only gate that type-checks a
+        // generated Angular TEMPLATE, so all five live here.
+        component TierBadge(label: string, level: int) {
+          body: Stack {
+            Text { label },
+            Text { level > 2 ? "high" : "low" },
+            Text { string(level * 2) }
+          }
+        }
+        component OrderLine(order: Order) {
+          body: Stack { Text { order.customerId }, Text { string(order.priority) } }
+        }
+        component OrderActions(order: Order) {
+          body: Stack { Action { order.confirm } }
+        }
+        component OrderCount() {
+          body: QueryView {
+            of: Sales.Order.all,
+            loading: Loader { },
+            error: Alert { "Could not count orders" },
+            empty: Text { "No orders yet" },
+            data: rows => Text { string(rows.length) }
+          }
+        }
+        component Ticker(caption: string) {
+          state { n: int = 0 }
+          derived doubled: int = n * 2
+          action bump() { n := n + 1 }
+          body: Stack {
+            Text { caption },
+            Text { string(doubled) },
+            Button { "more", onClick: bump }
+          }
+        }
         page OrderList {
           route: "/"
           body: Stack {
             Heading { "Orders" },
+            TierBadge { label: "gold", level: 3 },
+            Ticker { caption: "hits" },
+            OrderCount { },
             QueryView {
               of: Sales.Order.all,
               loaded: rows => Table { of: rows, columns: [o => o.customerId, o => o.status] }
@@ -166,6 +213,8 @@ const SHOWCASE: Case = {
             data: o => Stack {
               Heading { "Order" },
               Text { o.customerId },
+              OrderLine { order: o },
+              OrderActions { order: o },
               Action { o.confirm }
             }
           }
@@ -194,9 +243,10 @@ const SHOWCASE: Case = {
  *  client-side `store Cart { state {…} action … }` injectable signal service,
  *  a page that READS store state by dotted name (`Cart.lines`, `Cart.count`)
  *  in markup (`For { each: Cart.lines }`, a Heading) and CALLS a store action
- *  from a page action (`discard() { Cart.clear() }`).  Page-only (Angular emits
- *  no standalone user-component files), so the store-from-component path of the
- *  React `store-showcase.ddd` is covered here purely through pages.  Asserts
+ *  from a page action (`discard() { Cart.clear() }`).  Page-only by choice — the
+ *  showcase case above is where walked user components are compiled — so the
+ *  store-from-component path of the React `store-showcase.ddd` is covered here
+ *  purely through pages.  Asserts
  *  the `@Injectable` signal store at `src/app/stores/cart.store.ts` and the
  *  per-page `inject(CartStore)` + `this.cart.lines()` read / `this.cart.clear()`
  *  call all `ng build` cleanly. */
@@ -525,11 +575,32 @@ describe.skipIf(!ENABLED)("generated Angular project compiles + bundles (ng buil
       });
       // `ng build` runs the Angular compiler (strict template typecheck) +
       // esbuild bundle in one step.
-      execSync(`npx ng build`, {
-        cwd: projectDir,
-        stdio: "inherit",
-        timeout: 240_000,
-      });
+      //
+      // `stdio: "inherit"` is the convention across the e2e harnesses (in CI each
+      // matrix cell is its own job, so the child's output IS the job log). The
+      // cost lands locally, where this file loops over ALL 21 cells: execSync
+      // throws a bare `Command failed: npx ng build`, and the reason is somewhere
+      // up in interleaved output. Re-throw with the one piece of context that is
+      // always relevant here and never in that output at the point of failure —
+      // the Node version — because the Angular CLI enforces a hard floor and
+      // failing it fails every cell at once, which reads exactly like a broken
+      // diff. Deliberately does NOT hardcode the floor: the CLI prints its own
+      // requirement, which cannot go stale.
+      try {
+        execSync(`npx ng build`, {
+          cwd: projectDir,
+          stdio: "inherit",
+          timeout: 240_000,
+        });
+      } catch (e) {
+        throw new Error(
+          `npx ng build failed in ${projectDir} (running node ${process.version}).\n` +
+            `See the build output above for the compiler's own message. If it names a ` +
+            `minimum Node version, that is an environment limit, not a code defect — ` +
+            `every cell in this matrix fails together when the floor is unmet.\n` +
+            `Original: ${(e as Error).message}`,
+        );
+      }
     } finally {
       fs.rmSync(outDir, { recursive: true, force: true });
     }

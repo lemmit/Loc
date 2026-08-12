@@ -836,6 +836,31 @@ export interface WalkerTarget {
    *  block (Svelte template expressions cannot evaluate to markup). */
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string;
 
+  /** OPTIONAL — the markup for "render NOTHING" in a child position: what the
+   *  walker hands a pack template for an ABSENT optional slot (a `QueryView`
+   *  with no `loading:` / `error:` / `empty:`).
+   *
+   *  The default is the string `null`, which is correct for the JSX family and
+   *  ONLY there: react's `primitive-query-view` wraps each branch in
+   *  `{ cond && ( … ) }`, so the slot sits in a JS EXPRESSION position where
+   *  `null` renders nothing — and where an empty string would be a syntax
+   *  error.  A target whose template puts the slot in a MARKUP-BLOCK position
+   *  instead (`@if (…) { … }`, `<template v-if>…</template>`, `{#if …}`)
+   *  renders that same `null` as literal TEXT — the user sees the word "null"
+   *  while the query loads — so those targets override this with the empty
+   *  string and get an empty branch.
+   *
+   *  Targets that own their no-op spelling elsewhere need no override: the
+   *  Feliz pack maps `""`/`"null"` to `Html.none`, Flutter's to
+   *  `SizedBox.shrink()`, and the HEEx engine substitutes its own default
+   *  loading/error/empty chrome.
+   *
+   *  Distinct from `renderConditionalChild`'s `elseS === "null"` sentinel: that
+   *  one is INTERPRETED by each target (Angular drops the `@else` entirely),
+   *  whereas a pack template only interpolates, so the walker has to hand it
+   *  something already correct for the host language. */
+  emptyChild?: string;
+
   /** Render the `style: { … }` named arg as a markup attribute
    *  fragment (leading space included; empty string for no entries).
    *  Each entry carries the source CSS key plus the rendered value

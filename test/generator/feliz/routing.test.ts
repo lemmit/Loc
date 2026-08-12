@@ -193,6 +193,48 @@ describe("feliz multi-page routing", () => {
     expect(app).toContain("let view (model: Model) (dispatch: Msg -> unit) =");
   });
 
+  // A SINGLE page that NAVIGATES — the gap between the two conditions that used
+  // to decide this.  `routed` is false (one page, no `:param`) and there is no
+  // form, but `Button { to: }` still reaches `Router.navigatePath` through the
+  // `renderNavigateExpr` seam.  The open was therefore missing and `dotnet
+  // fable` failed outright:
+  //
+  //   ./src/App.fs(84,80): error FSHARP: The value, namespace, type or module
+  //   'Router' is not defined.
+  //
+  // Neither this nor the counter case above is "single page ⇒ no router" — the
+  // question is whether the BODY navigates.
+  const SINGLE_PAGE_NAV = `
+    system S {
+      subdomain S { context C { } }
+      ui WebApp {
+        framework: feliz
+        page Home {
+          route: "/"
+          body: Stack { Button { "New", to: "/new" } }
+        }
+      }
+      deployable api { platform: node contexts: [C] port: 3000 }
+      deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
+    }
+  `;
+
+  it("a navigating Button opens Feliz.Router even on a single formless page", async () => {
+    const app = await appFs(SINGLE_PAGE_NAV);
+    expect(app).toContain("Router.navigatePath");
+    expect(app).toContain("open Feliz.Router");
+    // Still not ROUTED — no Page union / React.router root. Only the open.
+    expect(app).not.toContain("type Page =");
+    expect(app).not.toContain("React.router");
+  });
+
+  it("and the fsproj references the package that open needs", async () => {
+    // The two used to be independent predicates over the model, free to
+    // disagree; the fsproj now reads the emitted App.fs. A missing reference for
+    // code that is emitted is a build failure, not a cosmetic drift.
+    expect(await fsproj(SINGLE_PAGE_NAV)).toContain('Include="Feliz.Router"');
+  });
+
   // Reachability — the multi-page system must PARSE + VALIDATE cleanly
   // (generator tests bypass validateLoomModel; experience_gathered.md §22).
   it("validates cleanly through validateLoomModel", async () => {

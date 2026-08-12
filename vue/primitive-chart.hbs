@@ -1,0 +1,18 @@
+{{!--
+  Chart — a line/bar series over a grouped query-time projection (M-T1.3
+  Phase 4).
+
+  This template lives in the SHARED Vue layer rather than in each pack, and
+  that is the point: `loader.ts` merges the shared sources into the same
+  template map a pack renders from, so one file here serves every vue pack
+  (vuetify, shadcnVue, and any pack added later) with no per-pack work.  A pack
+  that wants its own charting component can still override `primitive-chart` by
+  emitting a template of that name — the shared entry is a default, not a
+  ceiling.
+
+  All the geometry lives in `LoomChart.vue` (emitted by `vue/chart-runtime.ts`
+  only when a page actually charts), so there is no charting dependency and
+  nothing here to compute: `rows` arrives already projected to the flat
+  `{ label, value }` point shape by `vueTarget.renderChartData`.
+--}}
+<LoomChart :is-bar="{{#if isLine}}false{{else}}true{{/if}}" label="{{ariaLabel}}" :rows="{{{dataExpr}}}"{{{testidAttr}}} />

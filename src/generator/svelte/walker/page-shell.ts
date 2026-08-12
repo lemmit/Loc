@@ -34,6 +34,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { paramPropTsType } from "../../_frontend/component-prop-type.js";
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
@@ -398,6 +399,13 @@ export function renderSveltePage(
     tableHelperNames.length > 0
       ? `  import { ${tableHelperNames.join(", ")} } from "$lib/table-sort";\n`
       : "";
+  // The chart component (`Chart`, M-T1.3 Phase 4).  Keyed off the same MARKER
+  // the template carries rather than a walker import, so the emitted file and
+  // its import cannot dangle apart — the discipline the Flutter and Vue shells
+  // already use for `LoomModalHost` / `LoomChart`.
+  const chartImport = tsx.includes("<LoomChart")
+    ? `  import LoomChart from "$lib/components/LoomChart.svelte";\n`
+    : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `  import ${name} from "$lib/components/${name}.svelte";\n`)
@@ -464,12 +472,15 @@ export function renderSveltePage(
     ? `${gate.guardOpen}\n${indentJsx(tsx, "  ")}\n${gate.guardClose}`
     : indentJsx(tsx, "");
   return {
-    content: `<!-- Auto-generated.  Do not edit by hand. -->
+    content: withDecimalImport(
+      `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
+${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${tableSortImport}${chartImport}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
 
 ${markup}
 ${templateScope}`,
+      decimalImport !== "",
+    ),
     componentFiles: hoistedComponentFiles ?? [],
   };
 }
@@ -700,6 +711,11 @@ export function renderSvelteComponentFile(
     usesNavigate || form.usesNavigate
       ? `  import { goto as navigate } from "$app/navigation";\n`
       : "";
+  // Same marker-keyed chart import as the page shell above — a ui-scoped
+  // component can host a `Chart` too.
+  const chartImport = tsx.includes("<LoomChart")
+    ? `  import LoomChart from "$lib/components/LoomChart.svelte";\n`
+    : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((n) => `  import ${n} from "./${n}.svelte";\n`)
@@ -752,12 +768,15 @@ export function renderSvelteComponentFile(
       ? `  import Decimal from "decimal.js";\n`
       : "";
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
-  return `<!-- Auto-generated.  Do not edit by hand. -->
+  return withDecimalImport(
+    `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${tableSortImport}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
+${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${tableSortImport}${chartImport}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
 
 ${indentJsx(markup, "")}
-${templateScope}`;
+${templateScope}`,
+    decimalImport !== "",
+  );
 }
 
 function isSlotShape(t: ParamIR["type"]): boolean {
@@ -1039,4 +1058,25 @@ function typeRefAsTsString(p: ParamIR): string {
   // here (the caller resolves those to their wire DTO first), so an empty
   // aggregate map and a throwaway import sink are correct.
   return paramPropTsType(p, new Map(), new Map());
+}
+
+/** Ensure the Svelte file imports decimal.js when anything in it names the
+ *  `Decimal` binding.
+ *
+ *  Decided by scanning the ASSEMBLED file rather than the walk result: a
+ *  `Decimal` can enter from a money `state {}` field (the narrow `already`
+ *  trigger), a body cast to money (`jsExprLeaves.exprConvert` → `new
+ *  Decimal(…)`), or the shared intrinsic table
+ *  (`Decimal.min`/`max`/`ROUND_HALF_UP`).  Scanning the finished artifact
+ *  cannot miss one, and cannot drift as those tables change.
+ *
+ *  Svelte markup reads module-scoped `<script>` bindings directly, so the
+ *  import alone suffices — unlike Angular, whose template resolves against the
+ *  component instance and needs the binding hoisted onto the class. */
+function withDecimalImport(file: string, already: boolean): string {
+  if (already || !usesDecimalBinding(file)) return file;
+  return file.replace(
+    '<script lang="ts">\n',
+    '<script lang="ts">\n  import Decimal from "decimal.js";\n',
+  );
 }

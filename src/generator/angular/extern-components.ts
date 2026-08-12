@@ -22,14 +22,17 @@
 import type { AggregateIR, ParamIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst } from "../../util/naming.js";
 
-/** Map a Loom param type to its wire-side TS spelling for the props interface.
+/** Map a Loom param type to its wire-side TS spelling for the props interface —
+ *  and, for a WALKED component, for its generated `@Input()` fields
+ *  (`components-emit.ts` via the page shell's component mode), so both flavours
+ *  of a `component <Name>(…)` param list type identically.
  *  Aggregates use the wire DTO (`<Agg>Response`, recorded into `dtoImports`);
  *  primitives / ids / enums map to their TS equivalents; a `slot` param has no
  *  `ngComponentOutlet` input analogue in v0, so it types as `unknown`; an
  *  `action` maps to a void callback.  Anything unrecognised falls back to
  *  `unknown` rather than throwing — the props file is a contract the user types
  *  against, so it must always emit. */
-function wireType(t: TypeIR, dtoImports: Map<string, string>): string {
+export function angularWireType(t: TypeIR, dtoImports: Map<string, string>): string {
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
@@ -54,11 +57,11 @@ function wireType(t: TypeIR, dtoImports: Map<string, string>): string {
     case "enum":
       return "string";
     case "array":
-      return `${wireType(t.element, dtoImports)}[]`;
+      return `${angularWireType(t.element, dtoImports)}[]`;
     case "optional":
-      return `${wireType(t.inner, dtoImports)} | undefined`;
+      return `${angularWireType(t.inner, dtoImports)} | undefined`;
     case "action":
-      return t.arg ? `(arg: ${wireType(t.arg, dtoImports)}) => void` : "() => void";
+      return t.arg ? `(arg: ${angularWireType(t.arg, dtoImports)}) => void` : "() => void";
     default:
       return "unknown";
   }
@@ -77,7 +80,7 @@ export function renderAngularExternComponentProps(
     const optional =
       p.type.kind === "optional" &&
       (p.type.inner.kind === "slot" || p.type.inner.kind === "action");
-    return `  ${p.name}${optional ? "?:" : ":"} ${wireType(p.type, dtoImports)};`;
+    return `  ${p.name}${optional ? "?:" : ":"} ${angularWireType(p.type, dtoImports)};`;
   });
   const dtoImportLines = [...dtoImports.entries()]
     .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)

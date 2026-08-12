@@ -9,6 +9,7 @@ import {
   uiUsesMoney,
 } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
+import { uiUsesChart } from "../../ir/util/chart.js";
 import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
@@ -41,6 +42,7 @@ import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { packChromeCatalog } from "../_packs/pack-chrome.js";
 import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { buildSvelteApiModule } from "./api-builder.js";
+import { renderSvelteChartRuntime } from "./chart-runtime.js";
 import {
   SVELTE_APP_DTS,
   SVELTE_LAYOUT_TS,
@@ -272,6 +274,11 @@ export function generateSvelteForContexts(
   const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
   if (hasRealtimeHandlers) {
     out.set("src/lib/components/RealtimeHandlers.svelte", buildSvelteRealtimeHandlers(ui, pack));
+  }
+  // The chart component — emitted only when a page actually charts, the same
+  // use-driven rule every sibling leg applies.
+  if (uiUsesChart(ui)) {
+    out.set("src/lib/components/LoomChart.svelte", renderSvelteChartRuntime());
   }
   const usesMoney = contexts.some(contextUsesMoney) || uiUsesMoney(ui);
   // Provenance surfaces the co-located lineage sibling on the wire so the

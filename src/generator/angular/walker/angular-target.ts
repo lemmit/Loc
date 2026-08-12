@@ -496,6 +496,14 @@ export const angularTarget: WalkerTarget = {
    *  nothing" sentinel the JSX frontends pass — e.g. the action-button
    *  gate) drops the `@else` entirely, since Angular renders bare `null`
    *  as the visible text "null" rather than nothing. */
+  /** Render-NOTHING in child position is the EMPTY STRING here, not the walker's
+   *  default `null`: an Angular template block (`@if (…) { … }`) is markup, so a
+   *  bare `null` token inside it is literal TEXT — the user would see the word
+   *  "null" while a slotless `QueryView` loads.  Same insight as the
+   *  `elseS === "null"` guard below, applied where a PACK TEMPLATE (which only
+   *  interpolates) receives the slot.  See `WalkerTarget.emptyChild`. */
+  emptyChild: "",
+
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);

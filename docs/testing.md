@@ -159,6 +159,7 @@ fails the fast suite.
 | `conformance-full.yml` | `LOOM_E2E=1 npm run test:e2e` | docker |
 | `differential-report.yml` | `LOOM_DIFF_REPORT=1 npx vitest run test/e2e/e2e.test.ts` | docker |
 | `schema-load.yml` | `npm run test:schema-load` (or point `LOOM_MIGRATION_PG_URL` at a running pg) | docker |
+| `schemathesis.yml` | `npm run test:schemathesis` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`) | — |
 | `migration-evolution-e2e.yml` | `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}` | docker |
 | `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{…}` (or `LOOM_TENANCY_PG_URL`) | docker |
 | `hono-obs-e2e.yml` | `npm run test:obs` | — |
@@ -187,4 +188,6 @@ fails the fast suite.
 | `playground-realm-check.yml` | `cd web && npm run e2e:realm` | — |
 | `pages.yml` | `node docs/build.mjs && cd web && npm ci && npm run typecheck && npm run test:ddl && npm run e2e:smoke && npm run build` (deploy half is CI-only) | — |
 | `ci-red-alarm.yml` | CI-only housekeeping (main-red notifier) — nothing to reproduce locally | — |
+| `quality-delta.yml` | `node scripts/quality-delta.mjs --dry-run` (prints the full report, posts nothing; the Actions-API and R12 sections need `GITHUB_TOKEN` + `GITHUB_REPOSITORY`) | — |
 | `cleanup-artifacts.yml` | CI-only housekeeping (artifact tidy) — nothing to reproduce locally | — |
+| `flake-budget.yml` | `GITHUB_TOKEN=<token> node scripts/flake-budget.mjs` (prints the report; add `--out r.json` for the issue payloads). Classification logic alone: `npx vitest run test/system/flake-budget.test.ts`. The issue-filing half is CI-only | network |

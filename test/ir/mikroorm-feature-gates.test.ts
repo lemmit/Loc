@@ -3,7 +3,9 @@
 // The MikroORM adapter reached full parity with drizzle on the PERSISTENCE axis
 // (M-T6.9), but five NON-persistence features stayed gated `&& !usingMikro` in
 // the Hono emitter: query-time projections, realtime SSE, the transactional
-// outbox, timers, and broker channel drivers.  Each one used to generate a
+// outbox, timers, and broker channel drivers.  FOUR are still gated — the
+// outbox EMITTER landed (slice 1), so its clause is deleted and its case here
+// asserts emission instead of rejection.  Each one used to generate a
 // project with the feature SILENTLY absent — the model validated clean, the CLI
 // reported success, and the emitted tree simply had no `scheduler.ts` /
 // `http/channels.ts` / `http/realtime.ts` / `http/query-projections.ts` / outbox
@@ -89,7 +91,7 @@ async function drizzleErrorCodes(body: string, systemTail = "", depTail = ""): P
     .map((d) => d.code ?? "");
 }
 
-// --- The five feature bodies ------------------------------------------------
+// --- The five feature bodies (one now CLOSED — see the outbox case) ---------
 
 /** Query-time projection (`from … select …`) — `http/query-projections.ts`. */
 const QUERY_TIME_PROJECTION = `
@@ -104,7 +106,8 @@ const QUERY_TIME_PROJECTION = `
 const BROADCAST_CHANNEL = `
       channel Live { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }`;
 
-/** A durable channel WITH a local reactor — the transactional outbox + relay. */
+/** A durable channel WITH a local reactor — the transactional outbox + relay.
+ *  CLOSED by M-T6.23 slice 1 (kept here as the ratchet). */
 const DURABLE_WITH_REACTOR = `
       channel Work { carries: OrderPlaced  delivery: queue  retention: work }
       workflow React {
@@ -161,11 +164,14 @@ describe("persistence: mikroorm — feature gates are honest, not silent", () =>
     expect(msgs[0]).toContain("frontend targeting it subscribes to");
   });
 
-  it("rejects a durable channel with a reactor (the outbox relay was dropped)", async () => {
-    const msgs = await mikroDiags(DURABLE_WITH_REACTOR);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("durable channel");
-    expect(msgs[0]).toContain("at-least-once");
+  it("CLOSED (slice 1): a durable channel with a reactor generates — the outbox emits", async () => {
+    // The clause this used to assert is gone: the adapter emits the
+    // `LoomOutboxRow` EntitySchema + `createOutboxDispatcher` / `startOutboxRelay`
+    // over the EntityManager, so the at-least-once contract is honoured here.
+    // Emitter pins live in `test/adapters/node-mikroorm-outbox.test.ts`; this is
+    // the ratchet — a re-added gate fails right here.
+    expect(await mikroDiags(DURABLE_WITH_REACTOR)).toEqual([]);
+    expect(await mikroDiags(DURABLE_WITH_REACTOR, "", "", "warning")).toEqual([]);
   });
 
   it("rejects an owned timerSource (scheduler.ts was never written)", async () => {
@@ -177,10 +183,12 @@ describe("persistence: mikroorm — feature gates are honest, not silent", () =>
 
   it("rejects a broker-bound channelSource (compose started a broker nothing used)", async () => {
     const msgs = await mikroDiags(BROKER_CHANNEL, BROKER_TAIL, BROKER_DEP_TAIL);
-    // The broker channel is `queue/work`, so the outbox clause fires too — both
-    // are real, independent omissions on this adapter.
-    expect(msgs.some((m) => m.includes("channelSource 'lifecycleBus'"))).toBe(true);
-    expect(msgs.some((m) => m.includes("http/channels.ts"))).toBe(true);
+    // The broker DRIVER is the only remaining omission for this shape — the
+    // `queue/work` channel's outbox half now emits (slice 1), so this is the one
+    // diagnostic left.
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toContain("channelSource 'lifecycleBus'");
+    expect(msgs[0]).toContain("http/channels.ts");
   });
 
   it("does NOT fire for a durable channel with no subscriber (identical on both adapters)", async () => {

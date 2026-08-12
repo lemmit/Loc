@@ -28,7 +28,6 @@ import type {
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
@@ -48,11 +47,7 @@ import {
   isGroupedProjection,
   isQueryTimeProjection,
 } from "../../types/loom-ir.js";
-import {
-  backendServesRealtime,
-  durableEventTypes,
-  realtimeEventTypes,
-} from "../../util/channels.js";
+import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
@@ -68,6 +63,7 @@ import {
   isDocumentShaped,
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
+import { isDeepScopeFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
@@ -386,7 +382,7 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
  *  NOTE for the sibling ports: this one-line Set is edited by every frontend's
  *  chart PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
  *  already present plus yours — never by taking one side wholesale. */
-const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter"]);
+const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter", "vue", "svelte"]);
 
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
@@ -1803,43 +1799,61 @@ export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagn
 // containments (the overwhelmingly common case) are fully supported via
 // unidirectional @OneToMany.
 
-interface StampBackend {
-  /** The `platformFamily` value this validator gates, and the literal used in
-   *  the `(platform <x>)` diagnostic label. */
-  family: string;
-  /** The `loom.<x>-stamp-unsupported` diagnostic code. */
-  code: string;
-  /** The noun for the missing request principal.  Elixir says
-   *  "principal (request actor)"; every other backend says "principal". */
-  principalNoun: string;
-}
+// ---------------------------------------------------------------------------
+// Lifecycle-stamp rejections (M-T6.33).
+//
+// This check USED to carry five codes — `loom.{node,dotnet,java,python,elixir}
+// -stamp-unsupported` — one per backend, over a shared body.  The M-T9.27
+// re-verify killed that framing on two counts:
+//
+//   1. NEITHER ARM IS BACKEND-SPECIFIC.  The body below reads only `dep.auth`,
+//      `sys.user` and `agg.persistedAs` — facts about the MODEL.  It never
+//      consults a backend capability.  The per-backend stamp MECHANISMS do
+//      differ (Java `_stampOnCreate` entity methods; .NET EF
+//      `AuditableInterceptor`; node Hono `_stampOnCreate`; python pre-persist;
+//      Elixir Ecto `put_change`) — but none of them is what these two arms are
+//      about, so the family only ever selected a message noun.
+//   2. NEITHER ARM IS A GAP.  A backend-named `-unsupported` code promises
+//      "not yet, on this target".  Both arms are permanent:
+//
+//        * a principal stamp on a deployable with no auth has NO PRINCIPAL TO
+//          READ.  No backend can implement that; it is a misuse, and the
+//          message says how to fix it (add `auth: required`, or use a
+//          non-principal stamp).  A plain language rule.
+//        * a stamp on an event-sourced aggregate contradicts the storage model
+//          — stamps mutate state fields, and an event-sourced aggregate's state
+//          is FOLDED FROM ITS EVENT STREAM.  Semantically impossible, on every
+//          backend, forever.
+//
+// So the five collapse to TWO codes named for what they mean, not for who
+// rejected them — and they leave the `*-unsupported` register entirely (that
+// register holds work; these are not work).  Splitting by meaning rather than
+// merging to one `loom.stamp-unsupported` is deliberate: the two arms are
+// different failures with different fixes, and a caller matching on identity
+// should be able to tell them apart.
+//
+// Naming follows M-T9.27 slice 2 (`-invalid` = impossible or refused) and
+// M-T5.21 §Symptom 1 (a target name never belongs in a code identity — it
+// becomes a lie the day that target supports it).
+// ---------------------------------------------------------------------------
 
-// The per-backend stamp mechanisms differ (Java `_stampOnCreate` entity
-// methods; .NET EF `AuditableInterceptor`; node Hono `_stampOnCreate`; python
-// pre-persist; Elixir Ecto `put_change`), but the two UNSUPPORTED shapes are
-// backend-independent facts about the model: a principal-referencing stamp on a
-// deployable without auth (no request-scoped principal to thread), and a stamp
-// on an event-sourced aggregate (state is folded from events, not
-// field-stamped).  So the check is one shared body over a per-backend table —
-// the diagnostics stay byte-identical, only the family label, code, and (for
-// Elixir) the principal noun vary.
-const STAMP_BACKENDS: readonly StampBackend[] = [
-  { family: "java", code: "loom.java-stamp-unsupported", principalNoun: "principal" },
-  { family: "dotnet", code: "loom.dotnet-stamp-unsupported", principalNoun: "principal" },
-  { family: "node", code: "loom.node-stamp-unsupported", principalNoun: "principal" },
-  { family: "python", code: "loom.python-stamp-unsupported", principalNoun: "principal" },
-  {
-    family: "elixir",
-    code: "loom.elixir-stamp-unsupported",
-    principalNoun: "principal (request actor)",
-  },
-];
+/** The noun for the missing request principal.  Elixir says "principal
+ *  (request actor)"; every other family says "principal".  A message detail —
+ *  deliberately NOT part of any code identity. */
+const PRINCIPAL_NOUN: Readonly<Record<string, string>> = {
+  elixir: "principal (request actor)",
+};
 
-function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[], backend: StampBackend): void {
+/** Backend families whose deployables carry lifecycle stamps at all. */
+const STAMP_FAMILIES: readonly string[] = ["java", "dotnet", "node", "python", "elixir"];
+
+export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
   for (const dep of sys.deployables) {
-    if (platformFamily(dep.platform) !== backend.family) continue;
+    const family = platformFamily(dep.platform);
+    if (family === undefined || !STAMP_FAMILIES.includes(family)) continue;
+    const principalNoun = PRINCIPAL_NOUN[family] ?? "principal";
     const authed = !!(dep.auth?.required && sys.user);
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
@@ -1854,53 +1868,33 @@ function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[], backend: S
         if (usesPrincipal && !authed) {
           diags.push({
             severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform ${backend.family}) hosts aggregate '${ctxName}.${agg.name}' ` +
-              `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
-              `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
-              `${backend.principalNoun} to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
-              `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+            message: diagMessage("loom.stamp-principal-without-auth", {
+              dep: dep.name,
+              family,
+              ctxName,
+              name: agg.name,
+              principalNoun,
+            }),
             source: `${sys.name}/${dep.name}`,
-            code: backend.code,
+            code: "loom.stamp-principal-without-auth",
           });
         }
         if (enriched.persistedAs === "eventLog") {
           diags.push({
             severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform ${backend.family}) hosts event-sourced aggregate ` +
-              `'${ctxName}.${agg.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
-              `event-sourced aggregate's state is folded from its event stream. ` +
-              `Record the timestamp in an event instead, or drop persistedAs: eventLog.`,
+            message: diagMessage("loom.stamp-on-event-sourced-invalid", {
+              dep: dep.name,
+              family,
+              ctxName,
+              name: agg.name,
+            }),
             source: `${sys.name}/${dep.name}`,
-            code: backend.code,
+            code: "loom.stamp-on-event-sourced-invalid",
           });
         }
       }
     }
   }
-}
-
-// Thin per-backend wrappers preserve the public surface + validate.ts call
-// sites; each just picks its row from STAMP_BACKENDS.
-export function validateJavaStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  validateStampSupport(sys, diags, STAMP_BACKENDS[0]);
-}
-
-export function validateDotnetStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  validateStampSupport(sys, diags, STAMP_BACKENDS[1]);
-}
-
-export function validateNodeStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  validateStampSupport(sys, diags, STAMP_BACKENDS[2]);
-}
-
-export function validatePythonStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  validateStampSupport(sys, diags, STAMP_BACKENDS[3]);
-}
-
-export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  validateStampSupport(sys, diags, STAMP_BACKENDS[4]);
 }
 
 // M-T6.19: `shape: embedded` reference collections (`X id[]`) now map on
@@ -1995,7 +1989,8 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
   // Backends that gate one or both of the deferred capability-filter cases.
-  // .NET (EF `HasQueryFilter`) supports BOTH, so it's deliberately absent.
+  // .NET supports BOTH (EF `HasQueryFilter` on the mapped-column shapes, an
+  // in-app predicate on `document`), so it gates neither.
   // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
   // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
   // `python` is included because it now emits the non-principal relational case
@@ -2064,8 +2059,16 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // `document`** now (DEBT-02 tail complete): the blob is one JSONB column, not
   // per-field queryable, so the predicate is evaluated IN-APP over the rehydrated
   // instance (`documentCapabilityBody` → a list-comprehension filter in
-  // `repository-document-builder.ts`), mirroring node.  .NET handles all shapes
-  // (it's not in LIMITED_FAMILIES).  A PRINCIPAL filter on a `document` shape is
+  // `repository-document-builder.ts`), mirroring node.  **.NET** handles all
+  // shapes too, but NOT all of them through EF: `relational`/`embedded` ride the
+  // EF `HasQueryFilter` (real mapped columns), while `document` — whose fields
+  // live inside one jsonb blob, so EF has no column to hang a filter on — is
+  // filtered IN-APP over the rehydrated aggregate (`_CapabilityVisible` in
+  // `emit/repository.ts`'s `renderDocumentRepositoryImpl`), exactly like
+  // node/java/python.  That document arm did NOT exist until #2530: this
+  // function asserted .NET filtered every shape while the emitter emitted no
+  // document filter at all — a SILENT cross-tenant read (#2527's follow-up 1).
+  // A PRINCIPAL filter on a `document` shape is
   // wired on node/Java **and now python** (DEBT-02 Slice B — the actor binds into
   // the in-app predicate; see `supportsPrincipalNonRelationalFilter` below and the
   // `document-tenancy.ddd` ts-/java-/python-build fixtures); it stays gated only
@@ -2075,7 +2078,10 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     (family === "java" && (shp === "document" || shp === "embedded")) ||
     (family === "elixir" && shp === "embedded") ||
     (family === "python" && (shp === "document" || shp === "embedded")) ||
-    // .NET (EF) filters every shape; in LIMITED_FAMILIES only for the auth gate.
+    // .NET filters every shape — `embedded` via the EF query filter (its root
+    // scalars are real columns), `document` in-app over the rehydrated
+    // aggregate (its fields are inside the jsonb blob).  It is in
+    // LIMITED_FAMILIES for the auth gate, not because a shape is unwired.
     (family === "dotnet" && (shp === "document" || shp === "embedded"));
   // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
   // actor + non-relational intersection).  An `embedded` aggregate's root
@@ -2131,7 +2137,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         // node/elixir/java) still needs a request principal to scope by — so the
         // deployable must enforce auth (and the system must declare a `user {}`
         // block).  Without it the ambient `requireCurrentUser()` accessor isn't
-        // even emitted.  Mirror the `validateJavaStampSupport` precedent with a
+        // even emitted.  Mirror the `validateStampSupport` precedent with a
         // clear, actionable error.
         if (
           usesPrincipal &&
@@ -2536,7 +2542,35 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // `RequestContext.Current!.CurrentUser!` accessor (a bare `currentUser`
         // → the principal id, `currentUser.<claim>` → the claim), exactly as
         // the EF AuditableInterceptor.  A principal stamp on a no-auth
-        // deployable stays rejected by the category-A loom.dotnet-stamp-unsupported.
+        // deployable stays rejected by the category-A loom.stamp-principal-without-auth.
+        //
+        // HIERARCHICAL TENANCY (M-T6.29).  The `deep`/`global` read level lowers
+        // to the materialized-path `authz-filter` sentinel, whose
+        // `currentUser.<claim>` sub-expressions the Dapper principal-param
+        // collector does not descend into — so it cannot bind the `@__cu_*`
+        // params the fragment would need.  This USED to escape the gate entirely
+        // and crash codegen (`capability filter … is outside the Dapper SQL
+        // subset`) — the corpus map claimed the validator rejected it, and it did
+        // not.  Now it is what that map always said: an honest boundary.  The
+        // `deny` sentinel is principal-free and DOES render (`1 = 0`), so it is
+        // deliberately not gated here.
+        for (const f of [...(a.contextFilters ?? []), a.writeScopeFilter].filter(
+          (x): x is ExprIR => x != null,
+        )) {
+          if (isDeepScopeFilter(f)) {
+            diags.push({
+              severity: "error",
+              message: diagMessage("loom.dapper-unsupported#deep-scope", {
+                name: dep.name,
+                subject: where,
+                reason: "carries a hierarchical (deep/global) tenancy scope filter",
+              }),
+              source: `${sys.name}/${dep.name}`,
+              code: "loom.dapper-unsupported",
+            });
+            break;
+          }
+        }
         // Capability filters are supported too (spliced into every SELECT's
         // WHERE); a principal-referencing one lowers `currentUser.<claim>` to a
         // `@__cu_<claim>` Dapper param bound from the same ambient principal.
@@ -2667,21 +2701,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           consumed ? "error" : "warning",
         );
       }
-      // (3) Transactional outbox: the relay argument to `renderProjectIndexTs`
-      // is `!usingMikro`-gated and no `__loom_outbox` table is created, so a
-      // channel that asked for durability (`retention: log | work`) silently
-      // degrades to the at-most-once in-process path — the declared
-      // at-least-once contract is not honoured (dispatch-delivery-semantics.md).
-      // Conjoined with the local-reactor test exactly as the emitter does: with
-      // no subscriber there is nothing for a relay to drain, so the model is
-      // functionally identical on both adapters and must not be rejected.
-      const subs = (ctx as EnrichedBoundedContextIR).eventSubscriptions ?? [];
-      if (subs.length > 0 && durableEventTypes(ctx).size > 0) {
-        rejectFeature(
-          `context '${ctxName}' carries a durable channel ('retention: log | work') with a local reactor`,
-          `the transactional outbox + relay that make its delivery at-least-once`,
-        );
-      }
+      // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
+      // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
+      // `startOutboxRelay` over the EntityManager, so a durable channel
+      // (`retention: log | work`) is at-least-once here exactly as on drizzle
+      // (dispatch-delivery-semantics.md).  Nothing to gate.
       // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
       // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
       // A retrieval whose `where` falls outside the MikroORM FilterQuery subset

@@ -13,6 +13,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channels.js";
+import { uiUsesChart } from "../../ir/util/chart.js";
 import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
@@ -61,6 +62,7 @@ import {
   REACT_LIB_SCHEMAS_MONEY_TS,
 } from "../react/emit-templates.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
+import { renderVueChartRuntime } from "./chart-runtime.js";
 import { prepareVueNamedLayouts } from "./layouts-emitter.js";
 import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
 import { renderVueStoreModule } from "./store-builder.js";
@@ -498,6 +500,12 @@ export function generateVueForContexts(
   const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
   if (hasRealtimeHandlers) {
     out.set("src/components/RealtimeHandlers.vue", buildVueRealtimeHandlers(ui, pack));
+  }
+  // The chart component — emitted only when a page actually charts, the same
+  // use-driven rule the react leg applies to its chart DEPENDENCY and the
+  // Flutter leg to `lib/chart.dart`.
+  if (uiUsesChart(ui)) {
+    out.set("src/components/LoomChart.vue", renderVueChartRuntime());
   }
   // The toast queue + app-shell host serve realtime `on` handlers AND
   // form-submit success toasts; emit `lib/toast.ts` when either needs it.

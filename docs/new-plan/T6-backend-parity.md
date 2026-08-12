@@ -100,7 +100,7 @@ A workflow `let x = <expr>` whose bound `x` is **never referenced downstream** (
 
 Sources: found 2026-07-20 while draining the compose `parity` gate (the .NET `global::` / Phoenix `def/3` / Python indent+`/metrics` chain). Related pattern: M-T6.15 (Feliz unused-binder → `_`).
 
-## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; emitters open) · **M–L** · P2 ⭐ was silent
+## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; 1 of 5 emitters done) · **M–L** · P2 ⭐ was silent
 M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persistence** axis, and the validator's comment block said so without qualification. But **five non-persistence features are gated `&& !usingMikro` in the Hono emitter** and emitted *nothing*, with no diagnostic — a valid model generated a project with the feature simply absent and the CLI reported success:
 
 | feature | file drizzle writes | mikroorm | now |
@@ -108,16 +108,22 @@ M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persist
 | query-time `projection` (`from … select …`) | `http/query-projections.ts` | — | error |
 | `timerSource` | `scheduler.ts` | — | error |
 | broker `channelSource` | `http/channels.ts` | — (compose still starts the broker) | error |
-| durable channel + local reactor | outbox + relay wiring | — (silently at-most-once) | error |
+| durable channel + local reactor | outbox + relay wiring | **EMITS** (slice 1, PR #2516) | — |
 | realtime (`delivery: broadcast`) | `http/realtime.ts` | — | error / warning (below) |
 
 **Landed (gates, 2026-07-30):** all five are `loom.mikroorm-unsupported` diagnostics naming the omitted file and the way out (`src/ir/validate/checks/system-checks.ts`, `validateMikroOrmSupport`); `test/ir/mikroorm-feature-gates.test.ts` pins both directions per feature (mikroorm rejects, the same model on drizzle stays clean). Only R1 (the projection case) was on record — in [`integrity-audit-2026-07-residue.md`](../old/proposals/integrity-audit-2026-07-residue.md), which proposed exactly this interim; the other four were unrecorded.
 
 **The realtime severity split** is the load-bearing design call: a `broadcast` channel does double duty, and its *routing* half (what makes a projection fold or saga subscribe) works fine on this adapter. A frontend targeting the backend emits `src/api/realtime.ts` off the target's **platform**, not its persistence, so its EventSource would poll a 404 → **error**. With no such frontend the wire is unobserved and the fold/saga path is intact → **warning**. Without that split the gate rejects working models (it broke 4 `test/adapters/` suites and 3 corpus features before the split).
 
-**Open (the principled fix):** port the five emitters to the EntityManager — a projection read-model query path, a `scheduler.ts` on the mikro connection, the broker driver/tee/consumer, an outbox table + relay, and the SSE wire. Each closes by **deleting its clause** here; the gate is the interim, not the answer. Sequence by blast radius: outbox (unblocks the `outbox` corpus feature) → broker → timers → query-time projection → realtime.
+**Open (the principled fix):** port the remaining four emitters to the EntityManager — a projection read-model query path, a `scheduler.ts` on the mikro connection, the broker driver/tee/consumer, and the SSE wire. Each closes by **deleting its clause** here; the gate is the interim, not the answer. Remaining sequence by blast radius: broker → timers → query-time projection → realtime.
 
-**Hollow-cell note (feeds M-T9.8):** `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg (`test/behavioral/run-mikroorm.mjs`) with the feature absent — the api-tier assertions are satisfied by the synchronous in-process dispatch that survives on this adapter, so the missing broker driver and outbox relay were invisible to a green run. Both are now honest entries in that runner's `MIKRO_SKIP` register. A `done` mission's gate can still be hollow; this is what that looks like.
+**Slice 1 — outbox: DONE (PR #2516).** The adapter emits a `LoomOutboxRow` EntitySchema (`__loom_outbox`, `src/generator/typescript/emit/mikroorm.ts`) plus `createOutboxDispatcher` / `startOutboxRelay` over the EntityManager (`src/platform/hono/v4/workflow-builder.ts` — capture on a `fork({ keepTransactionContext: true }).insert`, drain on a fresh fork with `find` + `nativeUpdate`), and the `wireOutbox` / boot-relay / `index.ts`-import gates lost their `!usingMikro`. The validator clause is **deleted**; its `mikroorm-feature-gates` case flips to asserting the model generates, and emitter pins live in `test/adapters/node-mikroorm-outbox.test.ts`.
+
+Two things the port surfaced that the gate hid. (1) The mikro **saga Row had no `lastEventId`** — the drizzle table adds it under a durable channel and the reactor preamble reads it, so the adapter could not have compiled this shape even with an outbox; it is emitted now, and the allocate literal spells `lastEventId: null` (the mikro state type is the Row CLASS, where a nullable property is still required — drizzle's `$inferInsert` makes it optional). (2) `em.nativeInsert` does not exist in MikroORM v6 (`em.insert` is the native insert); `tsc` on the generated project caught it — the compile tier, not a test.
+
+*Evidence.* `tsc --noEmit` clean on the generated mikro project; **booted** against a real Postgres: `POST /orders` → `POST /orders/{id}/place` leaves exactly one `__loom_outbox` row (`type=OrderPlaced`, so capture replaced inline dispatch), the relay drains it (`dispatched_at` set, `attempts=0`), and the saga row lands with `last_event_id` = that row's id; forcing `dispatched_at = null` re-drains and the saga stays at one row (the idempotent-consumer marker no-ops the redelivery). Mutation-proved four ways: re-gating `wireOutbox`, dropping the outbox entity, dropping the `lastEventId` column, and re-adding the validator clause each turn the suites red (the last one reddens all 13 cases across both files).
+
+**Hollow-cell note (feeds M-T9.8), corrected 2026-08-11.** The 2026-07-30 note claimed `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg with the feature absent. They were not passing — they were never **collected**: neither corpus fixture carries a `test e2e` block, so `featureCases` skips both on every backend, and the `MIKRO_SKIP` entries were silently **inert** (a register entry claiming a checked gap that nothing checks — hollower than the original diagnosis). `run-mikroorm.mjs` now ratchets its own register: a key naming no fixture fails the run, and a key whose fixture has no behavioural block prints `INERT` so the claim is visible. Giving `outbox.ddd` / `channels-broker.ddd` real `test e2e` blocks is its own mission-sized change (it arms five backend legs + the wire golden at once, like #2468) — **not** folded into slice 1, whose runtime proof is the booted check above.
 
 Sources: found 2026-07-30 auditing the archived proposal corpus for unmapped work (R1 was the thread that led to the other four). Gate reproduced as a silent drop first (generate on mikroorm vs drizzle, file trees diffed), then as a diagnostic.
 
@@ -237,7 +243,7 @@ over-requires. It has no caller in generated code (every write path goes
 through `base_changeset`); threading defaults onto crudish create params would
 ripple through every param-driven surface on all five backends.
 
-## M-T6.29 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `open` · **S–M** · P2 ⭐ security-adjacent
+## M-T6.29 — `persistence: dapper`: the `deny` authz sentinel crashes codegen, and the write scope is absent — `done` · **S–M** · P2 ⭐ security-adjacent
 
 Found by `test/fixtures/corpus/policy-deny.ddd` the moment it joined the corpus (the fixture's own PR): the dotnet compile tier runs BOTH persistence adapters, and `deny` had never been through either.
 
@@ -250,6 +256,45 @@ Two halves, both in `src/generator/dotnet/emit/dapper.ts`:
 
 Sibling of M-T6.23 (the same class on the node/mikroorm adapter) and M-T6.25 (the other dapper compile-tier gap). Adapter-axis gaps like this are invisible to the "five backends" framing — the persistence adapter is a second axis.
 Sources: `test/e2e/corpus-dotnet-dapper-build.test.ts` (`DAPPER_COMPILE_SKIP.policy-deny`), `src/generator/dotnet/emit/dapper.ts`, [authorization-phase4-deny](../old/plans/authorization-phase4-deny.md).
+
+**Done (PR #2492).** Both halves landed on `src/generator/dotnet/emit/dapper.ts`, not one:
+`whereToSql` gained an `authz-filter` arm (`authzFilterToSql`, discriminated so a future
+`AuthzFilterKind` is a `tsc` error rather than a fall-through), and the relational Dapper
+repository now reads `writeScopeFilter` and emits `GetByIdForWriteAsync` — a
+`SELECT EXISTS` write-scope pre-guard with the READ `filterSql` spliced in (EF gets that
+from `HasQueryFilter` free; without it the Dapper write scope would be *wider* than the
+read scope). `DAPPER_COMPILE_SKIP.policy-deny` deleted, ratchet `max` 3 → 2.
+
+*Evidence.* (1) Compile: `dotnet build /warnaserror` clean on the generated `policy-deny`
+project under `persistence: dapper` (`mcr.microsoft.com/dotnet/sdk:10.0`). (2) Emitters:
+`test/generator/policy-deny.test.ts` gained a Dapper leg pinning `1 = 0` at **every** read
+site (GetById / FindManyByIds / findAll page + its COUNT / the author's own named find)
+plus the write guard, and pinning the control aggregate untouched. (3) **Runtime, booted**
+(the compile tier cannot see whether the value binds — §81): against a real Postgres, a
+`deny`-read row present in the table (`select count(*) from secrets` → 1) answers `GET/{id}`
+404, `findAll` `total=0` and the named find `[]`, while the control returns its row; a
+`deny write` aggregate reads 200 but `update`/`destroy` 404 with the balance unchanged at
+100, while the control's update returns 204 and moves to 999. (4) **Mutation-proved**, three
+ways: dropping only the write method → `CS0535: 'AccountRepository' does not implement
+'IAccountRepository.GetByIdForWriteAsync'`; dropping the read arm → the original codegen
+throw returns; flipping the fragment to `1 = 1` → the generator test fails **and** all four
+booted assertions invert (404→200, total 0→1, 404→204, balance 100→999).
+
+**Bonus — a stale `DAPPER_UNSUPPORTED` claim, verified false.** That map asserted
+`tenancy-hierarchy` was rejected by `loom.dapper-unsupported`. It was not: the deep-scope
+sentinel escaped `validateDapperSupport` exactly as the deny sentinel did, and the fixture
+crashed with the *same* "outside the Dapper SQL subset" throw. `validateDapperSupport` now
+gates it for real, under a dedicated `loom.dapper-unsupported#deep-scope` catalog message —
+the generic tail claims every surviving Dapper reject has no relational mapping on *any*
+adapter, which is untrue here (efcore renders it fine; what Dapper lacks is the
+principal-param binding for the sentinel's `currentUser.<claim>` sub-expressions).
+Pinned by `test/adapters/dotnet-dapper.test.ts`.
+
+**Known residue (pre-existing, not introduced here).** `GetByIdForWriteAsync` is emitted by
+the RELATIONAL repository emitter only — on **both** adapters. A `shape: document` or
+`persistedAs: eventLog` aggregate carrying a `writeScopeFilter` would have the interface
+declare a method neither `repository.ts` nor `dapper.ts` implements. No fixture reaches it;
+worth a mission if one ever does.
 
 ## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
 
@@ -372,7 +417,8 @@ RS-28 made every backend's 404 `detail` name its resource. That is necessary and
 
 Sources: M-T9.25 census sweep 3 (casing/absence). Relates to RS-28 (the string half, already fixed), M-T6.25 (the same "one backend, two envelope shapes" defect on elixir's 500), M-T9.11 (blind here for the coverage reason above).
 
-## M-T6.27 — Elixir's named-operation path has no optimistic lock — `open` · **M** · P1 ⭐ silent lost update, not a wire-string divergence
+## M-T6.27 — Elixir's named-operation path has no optimistic lock — `in-flight` (PR #2505) · **M** · P1 ⭐ silent lost update, not a wire-string divergence
+**#2505 lands the fix:** the op changeset rides `optimistic_lock(:version)` on all three write paths (context named-op, returning-op ×7 sites, document op ×3 sites — the manual bump stays only for the unversioned document column); `persist_change/1` gains the `Ecto.StaleEntryError -> {:error, :conflict}` rescue + `| :conflict` spec on both repo shapes (its document `@doc` claimed "unused on the document path" — false, the doc op sites call it); the op controller action and the returning-op result mapper gain the gated `{:error, :conflict}` → `conflict_response/1` arm. The lock supplies the same +1 the plain bump did, so RS-14's wire values are unchanged. Static gate `test/generator/elixir/vanilla-named-op-optimistic-lock.test.ts`, mutation-proven (4/4 red with the fix stashed). **Deliberately out of scope, recorded:** a raced op invoked from a WORKFLOW/explicit-handler `respond/2` now answers the sanitized 500 tail instead of 409 (strictly better than the silent loss; same ladder-width class as M-T6.28's node routers) — and the two-writer behavioural case remains the honest runtime gate this mission's text calls for.
 Found 2026-08-02 by the M-T9.25 409/500 census sweep. **The most severe finding of the three sweeps, and the only one that is a data-correctness bug rather than a contract one.**
 
 On a `versioned` aggregate, four backends answer **409** when two writers race a named operation:
@@ -417,10 +463,18 @@ Four capability-shaped features are declared in `.ddd`, accepted by the validato
 **First step is a re-verify:** the register rows are classified `gap` but unverified. Confirm against each emission site that the backend genuinely cannot emit (a gap) rather than that the combination is meaningless (which would make it a rename, per M-T9.27 slice 2).
 Sources: M-T9.27 register rows (`src/diagnostics/unsupported-register.ts`). Relates to M-T3.2 (`mask unless`, the same silent-governance class, already missioned).
 
-## M-T6.33 — Lifecycle stamps: one rule wearing five names — `open` · **S–M** · P2 ⚠ verify-first
-`loom.{node,dotnet,java,python,elixir}-stamp-unsupported` are **five codes for one rule** — the check is already a single shared body over a per-backend table (`STAMP_BACKENDS`, `src/ir/validate/checks/system-checks.ts`), whose own comment says the two rejected shapes are *"backend-independent facts about the model"*. Only the code identity is forked, kept for the tests that match on it.
-Two jobs, in order: (1) **re-verify the classification** — a principal stamp with no auth has no principal to read, and a stamp on an event-sourced aggregate contradicts folding state from events; both may be permanent refusals rather than gaps, in which case this is a rename (M-T9.27 slice 2), not emitter work. (2) Whatever the verdict, **collapse five codes to one** (`loom.stamp-unsupported`, backend in the message and a structured field) — the target name never belongs in the identity, since it becomes a lie the day that backend supports it. See [M-T5.21](./missions/M-T5.21-callable-unification-design.md) §Symptom 1.
-Sources: M-T9.27 register rows; `system-checks.ts` `STAMP_BACKENDS`.
+## M-T6.33 — Lifecycle stamps: one rule wearing five names — `done` (2026-08-11) · **S–M** · P2 ⭐ the re-verify changed the answer
+**Verdict: they were never gaps.** The mission's first job was to re-verify the classification, and it overturned it. `loom.{node,dotnet,java,python,elixir}-stamp-unsupported` were five codes over one shared body, and reading that body settled both questions at once:
+
+1. **Neither arm is backend-specific.** The check reads only `dep.auth`, `sys.user` and `agg.persistedAs` — facts about the MODEL. It never consults a backend capability. The per-backend stamp *mechanisms* genuinely differ (Java `_stampOnCreate`, .NET EF `AuditableInterceptor`, node Hono write hooks, python pre-persist, Elixir Ecto `put_change`) — but none of them is what these arms are about; the family only ever selected a message noun.
+2. **Neither arm is a gap.** A principal stamp on a deployable with no auth has *no principal to read* — no backend can implement that, and the message already says how to fix it: a plain misuse rule. A stamp on an event-sourced aggregate contradicts the storage model — stamps mutate state fields, and event-sourced state is folded from its event stream: impossible everywhere, forever.
+
+**Landed:** five codes → **two named for what they mean** — `loom.stamp-principal-without-auth` (misuse) and `loom.stamp-on-event-sourced-invalid` (impossible). Split by meaning rather than merged to one `loom.stamp-unsupported`, because the two arms are different failures with different fixes and a caller matching on identity should tell them apart. Five `validateXStampSupport` functions → one `validateStampSupport` walking deployables once. Target names leave the identity per [M-T5.21](./missions/M-T5.21-callable-unification-design.md) §Symptom 1 (a backend-named code becomes a lie the day that backend supports it).
+
+**Register effect:** all five rows leave — they were never work. `MAX_OPEN_GAPS` **42 → 37**, the first drop since the register was minted, and it came from re-classification rather than from emitting anything.
+
+**Coverage gap found and closed:** the event-sourced arm was tested in only three of the five generator suites (dotnet and java asserted the principal arm only). With one shared body the arm belongs at the IR layer, so `test/ir/stamp-support.test.ts` now covers it per-family; mutation-proven (disabling the arm fails exactly those five cases and nothing else).
+Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 
 ## M-T6.34 — Event-sourced storage exists on one backend of five — `open` · **L** · P2
 `persistedAs: eventLog` emits storage on Hono only (`loom.event-sourcing-backend-unsupported`), and **event-sourced workflow storage — a per-correlation event stream folded into workflow state — exists nowhere** (`loom.event-sourced-workflow-unsupported`, rejected on all five). The aggregate half is a four-backend port of a shipped design; the workflow half is unbuilt everywhere and should be scoped before it is started. Sized L because the two halves are not the same work and the second may want its own mission once scoped.

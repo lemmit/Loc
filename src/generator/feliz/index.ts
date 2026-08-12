@@ -49,6 +49,7 @@ import {
   renderFelizGate,
   uiHasPageGate,
 } from "./auth-gate.js";
+import { emitFelizUserComponents, renderFelizComponentModule } from "./component-emit.js";
 import { FELIZ_GRID_PRELUDE } from "./data-grid-child.js";
 import { felizTarget } from "./feliz-target.js";
 import {
@@ -390,6 +391,11 @@ function externModuleFromPath(path: string): string {
     .map(pascalSeg)
     .join(".");
 }
+
+/** The `open` line for Feliz.Router.  Named because it is BOTH emitted into
+ *  App.fs and matched against the emitted App.fs to decide the `.fsproj`
+ *  package reference — one constant, so the two can never drift apart. */
+const ROUTER_OPEN = "open Feliz.Router";
 
 // --- Multi-page routing helpers (Feliz.Router) ----------------------------
 
@@ -1095,6 +1101,37 @@ function renderAppFs(
         hasFileUploads,
       )
     : "";
+  // Walked (non-`extern`) user components — one F# function per declaration,
+  // spliced ahead of the page views below (`component-emit.ts`).  Rendered HERE,
+  // after the wire layer, because a component param naming an aggregate / value
+  // object is only spellable when this app actually emits that wire record — read
+  // straight off the rendered records rather than re-derived, so the two can
+  // never disagree.  Only what emitted joins `userComponents`, so a deferred
+  // shape keeps the pre-existing give-up comment instead of calling a function
+  // that was never written.
+  const emittedRecords = new Set(
+    [...wire.domain.matchAll(/^type (\w+) =/gm)].map((m) => m[1] as string),
+  );
+  const walkedComponents = emitFelizUserComponents(ui.components, {
+    aggregatesByName,
+    bcByAggregate,
+    workflowsByName,
+    bcByWorkflow,
+    apiParams: ui.apiParams,
+    externFunctionNames,
+    authUi,
+    i18nEnabled,
+    emittedRecords,
+  });
+  // The map every call site resolves against: both flavours, since
+  // `felizTarget.renderUserComponent` renders them identically (an extern name
+  // additionally `open`s its module — walked ones are declared in THIS module,
+  // so they contribute no `open`).
+  const userComponents = new Map<string, PageIR["params"]>([
+    ...externComponents,
+    ...[...walkedComponents.params].map(([n, p]) => [n, p as PageIR["params"]] as const),
+  ]);
+
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
   const validation = hasForms ? renderValidation(formRecords) : "";
@@ -1115,7 +1152,7 @@ function renderAppFs(
             hasRouteParam(p),
             bcByAggregate,
             bcByWorkflow,
-            externComponents,
+            userComponents,
             externFunctionNames,
             used,
             asyncEffectActions,
@@ -1137,7 +1174,7 @@ function renderAppFs(
           false, // single-page (non-routed) branch: no `:id` route param
           bcByAggregate,
           bcByWorkflow,
-          externComponents,
+          userComponents,
           externFunctionNames,
           used,
           asyncEffectActions,
@@ -1165,15 +1202,29 @@ function renderAppFs(
   }
   const externOpens = [...externModules].sort().map((m) => `open ${m}`);
 
+  // A page body that NAVIGATES reaches `Router.navigatePath` through the
+  // `renderNavigate` / `renderNavigateExpr` seams — and a SINGLE-page ui with no
+  // forms (`Button { "New", to: "/new" }`) satisfies neither `routed` nor
+  // `hasForms`, so the open was missing and `dotnet fable` failed outright with
+  // "The value, namespace, type or module 'Router' is not defined".
+  //
+  // Asked of the RENDERED views rather than re-derived from the model: two seams
+  // decide to emit `Router.`, so a model-level predicate would be a second copy
+  // of that decision, free to drift from it.  The views are the only place that
+  // already knows.  Purely additive — it can turn the open ON where it was
+  // missing, never off, so every app that compiled before is byte-identical.
+  const viewsNavigate = views.some((v) => v.includes("Router."));
+
   return lines(
     "module App",
     "",
     "open Feliz",
     // Hand-written extern component / function modules (extern-*-escape-hatch.md).
     ...externOpens,
-    // Feliz.Router provides `React.router` (routed) AND `Cmd.navigate` (any form
-    // navigates on success), so a single-page ui with a form still needs it.
-    (routed || hasForms) && "open Feliz.Router",
+    // Feliz.Router provides `React.router` (routed), `Cmd.navigate` (any form
+    // navigates on success), and `Router.navigatePath` (a `to:` navigation
+    // anywhere in a page body).
+    (routed || hasForms || viewsNavigate) && ROUTER_OPEN,
     "open Elmish",
     "open Elmish.React",
     // Thoth is needed for decoders (reads + async effects), encoders (forms),
@@ -1280,6 +1331,12 @@ function renderAppFs(
     used.usesDataGrid ? "" : false,
     used.usesDataGrid ? FELIZ_GRID_PRELUDE : false,
     ...used.gridDecls.flatMap((d) => ["", d]),
+    // Walked user components (`component-emit.ts`) — BEFORE the page views, for
+    // the same reason the grid children are: F# is order-sensitive and the views
+    // call these.  Declared in a nested `Components` module (then `open`ed) so a
+    // component named after a wire record / `Model` / `Api` can't collide with an
+    // App.fs member — see `renderFelizComponentModule`.
+    ...renderFelizComponentModule(walkedComponents.decls),
     "",
     views.join("\n"),
     "",
@@ -1533,9 +1590,14 @@ export function generateFelizForContexts(
     );
   }
   // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
-  // when there's any Http (reads or mutations/forms), Feliz.Router when routed
-  // (>1 page OR a lone `:id` detail page) OR any form exists (forms navigate via
-  // `Cmd.navigate` on success).
+  // when there's any Http (reads or mutations/forms).
+  //
+  // Feliz.Router is no longer a SECOND predicate over the model — it is read off
+  // the emitted App.fs below (`open Feliz.Router`).  Two independent conditions
+  // for one invariant is what let them disagree: the open gained a
+  // navigating-body case while this side still asked "routed or any form", and
+  // the mismatch is a package reference missing for code that uses it.  Deriving
+  // it from the source makes them agree by construction.
   // Auth gate (D-AUTH-OIDC, `auth: ui`): this feliz deployable opts in AND its
   // target backend enforces auth AND the system declares a `user { }` claim
   // shape — mirrors the React frontend's `authUi` gate.
@@ -1556,10 +1618,11 @@ export function generateFelizForContexts(
     authUi ||
     hasEffects ||
     hasFileUploads;
-  const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
   const backendRealtime = backendServesRealtime(target?.platform);
-  out.set("src/App.fs", renderAppFs(ui, contexts, authUi, sys.user, backendRealtime));
-  out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi, hasFileUploads));
+  const appFs = renderAppFs(ui, contexts, authUi, sys.user, backendRealtime);
+  out.set("src/App.fs", appFs);
+  // The emitted source is the authority for its own package refs — see above.
+  out.set("App.fsproj", fsproj(hasHttp, appFs.includes(ROUTER_OPEN), authUi, hasFileUploads));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   const theme = felizThemeFor(deployable.design);
   out.set(

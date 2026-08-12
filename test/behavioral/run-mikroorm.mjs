@@ -88,13 +88,16 @@ const MIKRO_SKIP = {
   // is supported here; what skips it is the sibling broadcast channel below.)
   //
   // --- M-T6.23: features the adapter never emitted, now honest errors ---------
-  // Both of these are `loom.mikroorm-unsupported` ERRORS as of M-T6.23, so
+  // `channels-broker` is a `loom.mikroorm-unsupported` ERROR as of M-T6.23, so
   // forcing the case onto mikroorm no longer generates — it fails validation.
-  // Before the gate landed each booted and PASSED here with the feature silently
+  // Before the gate landed it booted and PASSED here with the feature silently
   // absent: the api-tier assertions are satisfied by the synchronous in-process
   // dispatch that survives on this adapter, so a missing broker driver / outbox
   // relay was invisible to the run.  That is what made them hollow cells rather
-  // than coverage.  Removing an entry is the re-arm once the emitter lands.
+  // than coverage.  Removing an entry is the re-arm once the emitter lands —
+  // which is what happened to the `outbox` case (slice 1: the adapter emits the
+  // `LoomOutboxRow` + relay over the EntityManager, so it RUNS here again, and
+  // this time the relay it exercises actually exists).
   //
   // The `projection` / `saga` / `eventsourced-workflow` cases are deliberately
   // NOT here: their `delivery: broadcast` channel is only missing the SSE wire
@@ -103,8 +106,6 @@ const MIKRO_SKIP = {
   // works on this adapter.  They keep booting here.
   "channels-broker":
     "mikroorm emits no http/channels.ts (broker driver/producer tee/consumer loop) — M-T6.23",
-  outbox:
-    "mikroorm emits no transactional outbox + relay, so `retention: work` is at-most-once — M-T6.23",
   // Same class, found by the first runtime callers for these two fixtures
   // (#2468): the adapter emits no QUERY-time projection reads, and — unlike
   // the silent gaps above — `loom.mikroorm-unsupported` already says so as a
@@ -288,9 +289,28 @@ const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 // the api tier gates here: the unit tier is pure-domain (persistence-independent)
 // and already covered by run.mjs.  A case that emits no `test e2e` suite is
 // skipped (nothing for the api tier to dispatch).
-const corpus = [...(await featureCases("node", "node", WORK)), ...sharedSystemCases("node")].filter(
-  (c) => only.length === 0 || only.includes(c.name),
-);
+const allCases = [...(await featureCases("node", "node", WORK)), ...sharedSystemCases("node")];
+const corpus = allCases.filter((c) => only.length === 0 || only.includes(c.name));
+
+// Ratchet on the register itself: a MIKRO_SKIP key that names no COLLECTED case
+// is dead weight — the entry keeps CLAIMING a checked gap while nothing runs.
+// Both entries were exactly that until M-T6.23 slice 1 looked: their corpus
+// fixtures carry no behavioural block, so `featureCases` never collected them
+// and the skip was silently inert (the mission's "hollow cell" was hollower
+// still).  A key naming no fixture at all is a typo and fails the run; a key
+// whose fixture exists but has no `test e2e` block prints INERT, so the claim is
+// visible instead of silent — and still guards the day that fixture grows one.
+for (const key of Object.keys(MIKRO_SKIP)) {
+  if (allCases.some((c) => c.name === key)) continue;
+  const fixture = join(REPO, "test", "fixtures", "corpus", `${key}.ddd`);
+  if (!existsSync(fixture)) {
+    process.stdout.write(`\nMIKRO_SKIP key '${key}' names no corpus fixture — stale register entry.\n`);
+    process.exit(1);
+  }
+  process.stdout.write(
+    `\n▶ ${key}  [mikroorm]\n  ⤼ INERT skip (${key}.ddd carries no behavioural block, so no case is collected): ${MIKRO_SKIP[key]}\n`,
+  );
+}
 
 // Drop the tracked mikroorm-gap cases (unless one is named explicitly, so a fix
 // can be re-checked with `node run-mikroorm.mjs value-collections`).

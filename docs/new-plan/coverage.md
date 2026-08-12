@@ -227,6 +227,7 @@
 | Audit | Open findings → missions |
 |---|---|
 | quality-audit-2026-08.md | R1→ci-gating.md's queue plan (blocked(admin)); R2→**landed** (pr-gate #2447/#2463/#2465/#2483); R3→**landed** (#2354 + #2498); R4→**landed** (#2380, CLAUDE.md convention); R5→**landed** (#2448/#2468 — 19 bugs); R6→M-T9.13/9.14/9.15; R7→M-T9.9 done; R8→route-builder unification #2453–#2462 + M-T9.26; R9→M-T5.18/M-T9.22; R10→**M-T9.30**; R11/R12→**M-T9.31**. Scoreboard + follow-up classification: [bug-discovery-plan-2026-08.md](bug-discovery-plan-2026-08.md) |
+| schemathesis-findings-2026-08.md | 9 root-cause findings from spec-driven contract fuzzing (4× 500, 1 self-schema violation, 3 contract gaps, 1 by-design) → M-T9.21; each written up as an all-five-backend follow-up |
 | architecture-weak-spots-2026-07.md | §1→T1, §2→T2, §3→T3/M-T7.1, §4→M-T4.1, §5→T9, §6→M-T6.1/M-T6.4, §7→M-T5.16/M-T8.1 |
 | direction-review-2026-07.md | target-freeze decision→T10 (closed); redirected depth budget→M-T4.1/T2; honest-gate discipline→M-T9.8; customization-cliff + bus-factor→open (no mission — noted below) |
 | completeness-audit-2026-07.md | stdlib→M-T5.5, reporting/money→M-T2.12, jobs/email→M-T4.1/M-T4.6, pagination→M-T1.1, metrics→M-T7.1, identity→M-T3.12, API versioning → no mission (needs proposal; note here) |
