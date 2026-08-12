@@ -283,6 +283,16 @@ function findErrorStatuses(
   aggName: string,
   statuses: ApiStatusContext | undefined,
 ): number[] {
+  // The SAME resolver `operationErrorStatuses` below already threads.  It was
+  // missing from all three find arms (M-T9.25 round 2, probe 1): `errorStatuses`
+  // takes `resolve` as an OPTIONAL parameter, so omitting it reads exactly like
+  // "nothing declared" — no type error, and with no override the resolved value
+  // IS the literal, so default emission cannot tell the two apart.  Result:
+  // `httpStatus Forbidden -> 451` moved a gated OPERATION's declared response
+  // set on all five backends and silently not a gated FIND's.  Same shape as the
+  // `mergeContexts` bug that opened this mission — an optional field whose
+  // absence is indistinguishable from its default.
+  const resolve = (name: string): number => resolveErrorStatus(name, denialOverridesFor(statuses));
   const absent = absenceUnionAbsent(find.returnType, aggName);
   if (absent) {
     // The `none` unit is the stdlib 404; an error payload answers its
@@ -292,15 +302,19 @@ function findErrorStatuses(
     // `requires` gate keeps its 403 on BOTH absence shapes (#2363's rung —
     // python's union arm declares it by hand; dropping it here would re-open
     // the exact "patched one arm, not the other" split that PR fixed).
-    if (absent.kind === "none") return errorStatuses("findOptional", guarded);
-    const set = new Set(guarded ? [403] : []);
+    if (absent.kind === "none") return errorStatuses("findOptional", guarded, resolve);
+    const set = new Set(guarded ? [resolve("Forbidden")] : []);
     set.add(resolveErrorStatus(absent.tag, statuses?.errorStatusOverrides));
     return [...set].sort((a, b) => a - b);
   }
   if (find.returnType?.kind === "optional") {
-    return errorStatuses("findOptional", guarded);
+    return errorStatuses("findOptional", guarded, resolve);
   }
-  return errorStatuses(collectionSuccess(find.returnType) ? "findList" : "findSingle", guarded);
+  return errorStatuses(
+    collectionSuccess(find.returnType) ? "findList" : "findSingle",
+    guarded,
+    resolve,
+  );
 }
 
 /**
