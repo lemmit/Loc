@@ -142,7 +142,12 @@ describe("`.ddd` source census — every tracked file, not a hand-kept list", ()
         "returns a partial AST, so nothing else in the suite would notice — fix the " +
         "source, or pin it in UNPARSEABLE with the reason it cannot parse.",
     ).toEqual([]);
-  });
+    // Explicit budget, not the suite default: this walks EVERY tracked `.ddd`,
+    // so its cost grows with the repo, and CI runs it under 4-way shard
+    // contention with coverage instrumentation attached — where the ~3s local
+    // parse sweep is nowhere near the ~30s default, but the validate sweep
+    // below was, and timed out at 30s on its first CI run.
+  }, 300_000);
 
   it("pins no file that parses fine (a stale pin is a lie)", () => {
     const stale = (UNPARSEABLE as readonly string[]).filter(
@@ -170,7 +175,9 @@ describe("`.ddd` source census — every tracked file, not a hand-kept list", ()
         "multi-file project, it should be reached by an `import` from its entry " +
         "(membership is derived from the import graph, not listed here).",
     ).toEqual([]);
-  });
+    // ~15s locally for 339 files; the budget is the same one the parse sweep
+    // carries, for the same reason.
+  }, 300_000);
 
   it("still rejects the deliberately-invalid fixture", async () => {
     // The negative control. Without it, a validator that stopped reporting
