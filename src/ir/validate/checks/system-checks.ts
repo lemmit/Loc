@@ -1902,6 +1902,125 @@ export function validateStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
   }
 }
 
+// ---------------------------------------------------------------------------
+// A `requires` that reads `currentUser`, on a deployable with NO AUTH.
+//
+// The third sibling of a rule that already exists twice: a principal-reading
+// `filter` is refused (`loom.context-filter-unsupported#no-auth-user`) and so
+// is a principal-reading `stamp` (`loom.stamp-principal-without-auth`), for the
+// same reason — with no auth there is no request-scoped principal, so the
+// clause is not unimplemented, it is unimplementable.  The GUARD was missed,
+// and it is the one that EMITS.
+//
+// Measured on `main` before adding this, from ordinary Loom (an `operation`
+// carrying `requires currentUser.role == "editor"`, on a deployable with no
+// `auth:` and no system `user {}`):
+//
+//   node    if (!(currentUser.role === "editor")) throw new ForbiddenError(…)
+//           → tsc: error TS2304: Cannot find name 'currentUser'
+//   python  if not (currentUser.role == "editor"):        ← `publish_doc` binds no such name
+//   .NET    if (!(currentUser.Role == "editor"))          ← the handler holds only `_repo`
+//   java    if (!(Objects.equals(currentUser.role(), …))) ← likewise in the service
+//
+// i.e. a FREE IDENTIFIER in the emitted source: the generated project does not
+// compile.  `ddd parse` reported `0 error(s), 0 warning(s)`.
+//
+// WHY it comes out unbound is the part that also decides how to detect it.
+// With no auth there is nothing for lowering to resolve `currentUser` against,
+// so the ref lands as `refKind: "unknown"` carrying the source name — and each
+// backend's renderer prints an unknown ref verbatim.  So the principal test
+// here CANNOT be `exprUsesCurrentUser` alone: that asks for
+// `refKind === "current-user"`, which is exactly the shape this case fails to
+// produce.  Both spellings must count — the resolved one (a system that
+// declares `user {}` while this deployable opts out of `auth:`) and the
+// unresolved one (no auth anywhere).  Testing only the resolved kind reports
+// the harmless half and misses the half that does not compile.
+//
+// Every principal-reading gate site is covered rather than just the one that
+// was found: operation / create / destroy bodies, `find … requires`, and a
+// query-time projection's `requires`.  Covering one site would repeat the
+// original mistake — the filter and stamp rules were each written for the site
+// in front of whoever wrote them, which is why the guard went missing.
+// ---------------------------------------------------------------------------
+
+/** Backend families that render a `requires` gate at all (the frontends
+ *  consume the wire shape and run no domain guard). */
+const GUARD_FAMILIES: readonly string[] = ["java", "dotnet", "node", "python", "elixir"];
+
+/** True when this gate reads the request principal — under EITHER lowering.
+ *  See the note above: with no auth the ref never resolves, so the
+ *  `refKind`-only test is blind to precisely the failing case. */
+function guardReadsPrincipal(e: ExprIR | undefined): boolean {
+  let found = false;
+  walkExprDeep(e, (node) => {
+    if (node.kind === "ref" && (node.refKind === "current-user" || node.name === "currentUser")) {
+      found = true;
+    }
+  });
+  return found;
+}
+
+export function validateGuardPrincipalWithoutAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    const family = platformFamily(dep.platform);
+    if (family === undefined || !GUARD_FAMILIES.includes(family)) continue;
+    // The same `authed` test the stamp and filter rules use: a deployable is
+    // principal-bearing only when it opts in AND the system declares the
+    // identity shape the claim is read off.
+    if (dep.auth?.required && sys.user) continue;
+    const principalNoun = PRINCIPAL_NOUN[family] ?? "principal";
+
+    const report = (ctxName: string, site: string): void => {
+      diags.push({
+        severity: "error",
+        message: diagMessage("loom.guard-principal-without-auth", {
+          dep: dep.name,
+          family,
+          ctxName,
+          site,
+          principalNoun,
+        }),
+        source: `${sys.name}/${dep.name}`,
+        code: "loom.guard-principal-without-auth",
+      });
+    };
+
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        for (const [kind, actions] of [
+          ["operation", agg.operations],
+          ["create", agg.creates ?? []],
+          ["destroy", agg.destroys ?? []],
+        ] as const) {
+          for (const op of actions) {
+            const guarded = (op.statements ?? []).some(
+              (s) => s.kind === "requires" && guardReadsPrincipal(s.expr),
+            );
+            // A canonical lifecycle action's synthesised `name` IS its keyword,
+            // so this reads `create Doc.create` / `destroy Doc.archive` /
+            // `operation Doc.publish` without a special case.
+            if (guarded) report(ctxName, `${kind} ${agg.name}.${op.name}`);
+          }
+        }
+      }
+      for (const repo of ctx.repositories) {
+        for (const f of repo.finds) {
+          if (guardReadsPrincipal(f.requires)) report(ctxName, `find ${repo.name}.${f.name}`);
+        }
+      }
+      // A query-time projection's gate is the twin of `FindIR.requires`, and
+      // lives on its comprehension rather than on the projection itself.
+      for (const p of ctx.projections ?? []) {
+        if (guardReadsPrincipal(p.query?.requires)) report(ctxName, `projection ${p.name}`);
+      }
+    }
+  }
+}
+
 // M-T6.19: `shape: embedded` reference collections (`X id[]`) now map on
 // java.  The jsonb id-array column rides a per-target `AttributeConverter`
 // (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
