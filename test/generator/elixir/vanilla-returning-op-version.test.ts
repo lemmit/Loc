@@ -6,8 +6,8 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 //
 // `versioned` declares `version: int token = 1`, incremented per command
 // (`src/macros/prelude.ts`).  The NAMED-operation path in `context-emit.ts`
-// already emits `change(%{version: record.version + 1})` — its own comment says
-// that "brings the relational/embedded path in line" with the document path.
+// bumped via `change(%{version: record.version + 1})` at the time — since
+// M-T6.27 both paths ride `optimistic_lock(:version)` (same +1, plus the CAS).
 // The RETURNING-operation path (an exception-less `: T or Error` op) emitted a
 // bare `change(%{})`: it persisted the field write and left `version` untouched.
 //
@@ -60,16 +60,17 @@ describe("vanilla Phoenix — returning-op version bump", () => {
     expect(mod).toContain("def accept_order(%D.Shop.Order{} = record, params)");
     expect(mod).toContain("def touch_order(%D.Shop.Order{} = record, params)");
 
-    // The named-op path bumps (it always did) …
+    // The named-op path bumps — via `optimistic_lock(:version)` since M-T6.27
+    // (same +1 on the wire, plus the CAS filter a plain bump lacked) …
     const touch = mod.slice(mod.indexOf("def touch_order(%D.Shop.Order{}"));
-    expect(touch.slice(0, touch.indexOf("\n  end"))).toContain(
-      "Ecto.Changeset.change(%{version: record.version + 1})",
-    );
-    // … and now so does the returning-op path.
+    const touchBody = touch.slice(0, touch.indexOf("\n  end"));
+    expect(touchBody).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
+    expect(touchBody).not.toContain("version: record.version + 1");
+    // … and so does the returning-op path.
     const accept = mod.slice(mod.indexOf("def accept_order(%D.Shop.Order{}"));
     const acceptBody = accept.slice(0, accept.indexOf("\n  end"));
-    expect(acceptBody).toContain("Ecto.Changeset.change(%{version: record.version + 1})");
-    expect(acceptBody).not.toContain("Ecto.Changeset.change(%{})");
+    expect(acceptBody).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
+    expect(acceptBody).not.toContain("version: record.version + 1");
     // The write itself is unchanged.
     expect(acceptBody).toContain("Ecto.Changeset.force_change(:reserved, record.reserved)");
   });
