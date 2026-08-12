@@ -379,10 +379,27 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
  *  chart renderer and would render an unsupported-primitive comment, so they
  *  stay honest gaps.
  *
- *  NOTE for the sibling ports: this one-line Set is edited by every frontend's
- *  chart PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
- *  already present plus yours — never by taking one side wholesale. */
-const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter", "vue", "svelte"]);
+ *  NOTE for the sibling ports: this Set is edited by every frontend's chart PR,
+ *  so it conflicts on rebase.  Resolve by keeping EVERY framework already
+ *  present plus yours — never by taking one side wholesale.
+ *
+ *  With the last frontend ported the Set names every shipping framework, so the
+ *  gate no longer fires for anything that exists — it is the seam a NEW frontend
+ *  gates on until it ports, not dead code.  EXPORTED so its own test can prove
+ *  it still bites: with nothing left to gate, "the check works" and "the check
+ *  is unreachable" are indistinguishable from the outside, and the only honest
+ *  way to tell them apart is to remove a framework and watch the diagnostic
+ *  come back (`ui-chart-gates.test.ts`) — the same discipline
+ *  `PROJECTION_READ_FRAMEWORKS` already uses one gate over. */
+export const CHART_FRAMEWORKS = new Set([
+  "react",
+  "phoenixLiveView",
+  "feliz",
+  "flutter",
+  "vue",
+  "svelte",
+  "angular",
+]);
 
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
