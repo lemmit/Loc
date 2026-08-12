@@ -203,8 +203,12 @@ state — they cannot synthesise pages, routes, or menu entries.
 ### 5.1 Where components may live
 
 Components declare in two scopes; both forms parse identically and share the
-same emission path (one `src/components/<Name>.tsx` per ui that references
-them).
+same emission path (one component per ui that references them: react
+`src/components/<Name>.tsx`, vue `.vue`, svelte `src/lib/components/<Name>.svelte`,
+**angular** a standalone class at `src/app/components/<Name>.ts`, flutter a widget
+in `lib/components.dart`, and **feliz** — which has no per-component file — an F#
+props function in App.fs's nested `Components` module).  Per-target deferrals are
+listed in [`generators.md`](generators.md).
 
 - **`ui`-scope** (`ui WebApp { component X(…) { … } }`) — visible only to
   pages and other components inside the same ui block. Use when the

@@ -187,6 +187,23 @@ jobs:
 
             ui WebApp {
               api Shop: ShopApi
+              // User (non-extern) components — emitted as F# props functions
+              // spliced ahead of the page views (`feliz/component-emit.ts`).
+              // Two shapes, because they compile differently: SCALAR props
+              // (a `{| label: string; cents: int |}` record, read as re-bound
+              // locals) and a WIRE-RECORD prop (`{| p: Product |}`), which only
+              // typechecks if the emitted domain record and the call site's row
+              // binding agree — exactly what `dotnet fable` is here to prove.
+              component PriceTag(label: string, cents: int) {
+                body: Stack {
+                  Text { label },
+                  Text { cents > 100 ? "premium" : "budget" },
+                  Text { string(cents * 2) }
+                }
+              }
+              component ProductLine(p: Product) {
+                body: Card { p.name, Text { p.price } }
+              }
               page Home {
                 route: "/"
                 state { count: int = 0 }
@@ -197,6 +214,7 @@ jobs:
                   Text { `Clicks: {count}` },
                   Button { "+", onClick: inc },
                   Divider { },
+                  PriceTag { label: "Deal of the day", cents: 250 },
                   Button { "Browse products", to: "/products" }
                 }
               }
@@ -210,9 +228,7 @@ jobs:
                     error:   Text { "Failed to load" },
                     empty:   Text { "No products yet." },
                     data:    rows => Stack {
-                      For { each: rows, p => Card { p.name,
-                        Text { p.price }
-                      } }
+                      For { each: rows, p => ProductLine { p: p } }
                     }
                   },
                   Button { "Add a product", to: "/products/new" },
