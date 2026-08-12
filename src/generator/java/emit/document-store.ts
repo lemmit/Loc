@@ -6,6 +6,7 @@ import {
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
+import { desugarAuthzFilterInApp } from "../../_expr/authz-filter-inapp.js";
 import { bypassDrops, type FilterBypass } from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import { javaNotFoundThrow } from "./common.js";
@@ -72,8 +73,12 @@ export function renderJavaDocumentRepositoryImpl(
   // with `accessorProps` so `currentUser.tenantId` → `currentUser.tenantId()`.
   const principalPreds: ExprIR[] = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
   const hasPrincipal = aggregateUsesPrincipalContextFilter(agg);
+  // An `authz-filter` SENTINEL (`policy { allow deep … }` / `deny`) is desugared
+  // to ordinary IR first — it exists to be intercepted by a QUERY-filter
+  // translator (the relational path's JPQL/Criteria/@SQLRestriction renderers),
+  // and a document read has no query to translate into (pairwise finding F1).
   const renderPred = (p: ExprIR, varName: string): string =>
-    `(${renderJavaExpr(p, { thisName: varName, agg, accessorProps: true })})`;
+    `(${renderJavaExpr(desugarAuthzFilterInApp(p, agg.name), { thisName: varName, agg, accessorProps: true })})`;
   // The principal conjunct over `varName`, guarded fail-closed: a null
   // `currentUser` (unauthenticated scope) short-circuits to NO rows rather than
   // NPE-ing on `currentUser.tenantId()`.  This is the in-app analogue of the
