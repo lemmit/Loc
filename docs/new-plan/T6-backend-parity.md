@@ -482,7 +482,7 @@ Sources: M-T9.27 register rows. Relates to M-T6.23 (mikroorm) and M-T6.25 (dappe
 Two narrow Java-only rejections: `loom.java-projection-field-unsupported` (projection field shapes the emitter does not handle) and `loom.java-workflow-instance-field-unsupported` (workflow instance field shapes). Both name Java in the code identity, which M-T5.21 §Symptom 1 argues against — fold the target into the message when the shapes land.
 Sources: M-T9.27 register rows.
 
-## M-T6.37 — A `when` state gate is not enforced off the aggregate route — `open` · **M** · P1 ⭐ silent gate bypass, not a wire divergence
+## M-T6.38 — A `when` state gate is not enforced off the aggregate route — `open` · **M** · P1 ⭐ silent gate bypass, not a wire divergence
 Found 2026-08-11 while landing M-T6.28 ([#2520](https://github.com/lemmit/Loc/pull/2520)), by **disproving that mission's own premise.** M-T6.28 claimed an extern `commandHandler` that "invokes a `when`-gated operation answers `500 / "internal"`". It does not. **It succeeds.**
 
 The `when` predicate (criterion.md use site 2 — the canCommand state gate) is emitted at the **route/handler layer only**:
@@ -509,7 +509,9 @@ So on node and .NET a state-gated operation invoked from a workflow step, a saga
 
 Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) (M-T6.31 + M-T6.28); the corrected premise is recorded in M-T6.28's body. Relates to M-T6.32 (silent-governance class) and M-T3.2 (the same class on authorization).
 
-## M-T6.38 — The `/files/{key}` absent-object 404 is a fourth envelope, on zero backends — `open` · **S–M** · P2
+> **ID note.** Minted as M-T6.37, renumbered to M-T6.38 before merge: [#2517](https://github.com/lemmit/Loc/pull/2517) (the M-T9.13 drain) had claimed M-T6.37 for the Elixir-seeder gap in the same hour, and neither PR could see the other's ID on `main`. First claim wins. The next-free-ID check has to span open PR branches, not just `main` — which is [M-T9.32](./T9-toolchain-health.md)'s job (dup-claim automation, minted by #2495); this is a live instance of what it exists to prevent.
+
+## M-T6.39 — The `/files/{key}` absent-object 404 is a fourth envelope, on zero backends — `open` · **S–M** · P2
 Found 2026-08-11 by the M-T6.31 drain, at the one absent-read site outside that mission's five.
 
 `GET /files/{key}` (the root file-download route over the bound `objectStore` — M-T1.2) answers a missing object in **two shapes, neither of them RFC 7807**:
