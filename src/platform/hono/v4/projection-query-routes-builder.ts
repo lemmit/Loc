@@ -73,6 +73,14 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // synthesises the very same projection find (`synthProjectionFinds`), so those
 // route bodies are byte-identical between adapters and are not part of the seam.
 //
+// All four are ported.  The raw-table arm was missing in the first version of
+// this slice while its gate was already deleted, so the shape fell through to
+// the drizzle branch and emitted `db.select().from(schema.…)` into an
+// EntityManager file with no `schema` import (an owner review caught it).  If a
+// FIFTH shape is ever added, add its mikro arm in the same change as the emit —
+// a fall-through here is a generate-then-broken-build, which is worse than the
+// gate that used to stand in its place.
+//
 // One MikroORM constraint shapes the emission: a `raw()` fragment is
 // SINGLE-USE per query ("Trying to modify a raw query fragment that was already
 // used"), so a computed grouping key that appears in SELECT, GROUP BY and ORDER
@@ -525,6 +533,31 @@ function emitQueryProjectionRoute(
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
   const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
+  // RAW-TABLE source on the mikro adapter (M-T6.23 slice 4, completed after an
+  // owner review): a WORKFLOW source reads its saga-state Row, a PROJECTION
+  // source the folded read-model Row.  `em.find` hands back ENTITIES whose
+  // property names are exactly what the shared `select` projection reads off
+  // `r`, so only the READ differs from drizzle — the projection body below is
+  // untouched.
+  //
+  // This arm existed on drizzle only; without it the mikro path fell through to
+  // the drizzle branch and emitted `db.select().from(schema.…)` into a file with
+  // no `schema` import — a generate-then-`tsc`-fail, which is the exact silent
+  // class M-T6.23 exists to kill.  No corpus fixture carries this shape, which
+  // is why the runtime leg stayed green; `node-mikroorm-query-projections.test.ts`
+  // now pins it.
+  if (mikro && rawRead) {
+    const rowClass = mikroRowClassFor(p, source);
+    out.push(`    const rows = await db.find(${rowClass}, ${mikro.where ?? "{}"});`);
+    const projectedFields = (p.query!.selects ?? [])
+      .map((sel) => `      ${sel.field}: ${renderProjectionSelect(sel.expr, aliasMap)}`)
+      .join(",\n");
+    out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
+  }
   if (rawRead) {
     // RAW-TABLE source (WORKFLOW saga-state table or a folded PROJECTION's
     // `<Proj>Row` read-model table): read the table directly (no repository, no

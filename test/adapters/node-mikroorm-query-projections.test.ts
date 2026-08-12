@@ -7,12 +7,23 @@
 // routes 404'd — the R1 case from `integrity-audit-2026-07-residue.md`, and a
 // `loom.mikroorm-unsupported` error until this slice.
 //
-// Three of the four shapes read the SOURCE TABLE directly (the point of an
-// aggregation is that it pushes down to SQL and materialises no rows), so those
-// are the ported part: a mikro `createQueryBuilder` with `raw()` SQL fragments
-// and a `whereToMikroFilter` WHERE.  The fourth (repository-sourced) was
-// adapter-neutral already — `synthProjectionFinds` in the mikro emitter
-// synthesises the same `repo.<projName>()` find the drizzle repository does.
+// Four shapes, and each needs a different thing on this adapter:
+//
+//   whole-table aggregation   pushed down: `createQueryBuilder` + `raw()` SQL
+//   grouped aggregation       same, plus GROUP BY / ORDER BY
+//   raw-table source          `em.find(<Row>, <FilterQuery>)` — a WORKFLOW source
+//                             reads its saga-state Row, a PROJECTION source the
+//                             folded read-model Row
+//   repository-sourced        NOTHING: `synthProjectionFinds` already synthesises
+//                             the same `repo.<projName>()` find drizzle uses
+//
+// The raw-table arm was MISSING in the first version of this slice while the
+// gate for it was already deleted — an owner review caught it: the shape fell
+// through to the drizzle branch and emitted `db.select().from(schema.…)` into an
+// EntityManager file with no `schema` import, i.e. generate-then-`tsc`-fail, the
+// exact silent class M-T6.23 exists to kill.  No corpus fixture carries a
+// workflow-/projection-sourced query projection, which is why the runtime leg
+// stayed green.  It is ported and pinned below.
 //
 // Runtime proof: `node run-mikroorm.mjs projection-aggregation
 // projection-groupby` (both booted against real Postgres); compile proof:
@@ -96,6 +107,53 @@ system M {
   }
 }`;
 
+/** A WORKFLOW-sourced query-time projection with a plain `select` — the
+ *  raw-table arm (a PROJECTION source takes the identical path, reading the
+ *  folded read-model Row instead of the saga-state one). */
+const wfSourced = (persistence: string, filtered = true) => `
+system M {
+  api A from Sales
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { orderRef: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      event OrderPlaced { orderRef: Order id, at: datetime }
+      channel Live { carries: OrderPlaced  delivery: queue  retention: ephemeral }
+      workflow Fulfillment {
+        orderRef: Order id
+        stage: string
+        create(p: OrderPlaced) by p.orderRef {
+          orderRef := p.orderRef
+          stage := "Open"
+        }
+      }
+      projection OpenFulfillments {
+        ref: Order id
+        stage: string
+        from Fulfillment as f
+${filtered ? '        where f.stage == "Open"' : ""}
+        select ref = f.orderRef, stage = f.stage
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d {
+    platform: node { persistence: ${persistence} }
+    contexts: [Orders]
+    dataSources: [s]
+    serves: A
+    port: 8080
+  }
+}`;
+
 describe("MikroORM query-time projections", () => {
   it("emits http/query-projections.ts over the EntityManager", async () => {
     const files = await emit(sys("mikroorm"));
@@ -160,6 +218,42 @@ describe("MikroORM query-time projections", () => {
     const repo = mikro.get("d/db/repositories/order-repository.ts") as string;
     expect(repo).toContain("async openOrders(");
     expect(repo).toContain("EntityManager");
+  });
+
+  it("reads a WORKFLOW-sourced projection off its saga-state Row (the raw-table arm)", async () => {
+    // The shape the review named, verbatim: a correlated (non-event-sourced)
+    // workflow as the source, a plain `select`, no aggregate.  Neither mikro
+    // aggregation branch matches it, so before the fix it fell through to
+    // drizzle's `db.select().from(schema.…)`.
+    const files = await emit(wfSourced("mikroorm"));
+    const src = files.get("d/http/query-projections.ts") as string;
+    // The Row entity, imported and read through the EntityManager.
+    expect(src).toContain('import { FulfillmentRow } from "../db/entities";');
+    expect(src).toContain('const rows = await db.find(FulfillmentRow, { stage: "Open" });');
+    // The `where` rides the same FilterQuery lowering every mikro find uses.
+    expect(src).not.toContain("db.select(");
+    // The regression itself: no `schema` value/type import, and no reference to
+    // one — that combination is what failed `tsc` with TS2304.
+    expect(src).not.toContain("../db/schema");
+    expect(src).not.toMatch(/\bschema\./);
+    // The projection body is UNCHANGED from the drizzle arm — the entity's
+    // property names are exactly what `select` reads off `r`.
+    expect(src).toContain("ref: r.orderRef,");
+    expect(src).toContain("stage: r.stage,");
+  });
+
+  it("passes an empty FilterQuery when the raw-table projection has no `where`", async () => {
+    const src = (await emit(wfSourced("mikroorm", false))).get(
+      "d/http/query-projections.ts",
+    ) as string;
+    expect(src).toContain("const rows = await db.find(FulfillmentRow, {});");
+  });
+
+  it("keeps the drizzle raw-table arm byte-identical", async () => {
+    const src = (await emit(wfSourced("drizzle"))).get("d/http/query-projections.ts") as string;
+    expect(src).toContain("await db.select().from(schema.fulfillments)");
+    expect(src).toContain('import * as schema from "../db/schema";');
+    expect(src).not.toContain("db.find(");
   });
 
   it("keeps the drizzle projection routes byte-identical", async () => {
