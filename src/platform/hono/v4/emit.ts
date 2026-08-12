@@ -372,6 +372,19 @@ export function generateTypeScript(
  * http/index.ts.  Loose top-level contexts (no enclosing system)
  * skip the auth path entirely.
  */
+/** Does this deployable OWN at least one timerSource?  Ownership is derived (the
+ *  subdomain's `migrationsOwner`), and it decides two things that must agree: the
+ *  `scheduler.ts` emit and — on mikroorm — the `loom_timer_runs` watermark
+ *  ENTITY, without which `updateSchema()` drops the table on the second boot.
+ *  Shared so the two cannot drift. */
+function ownsTimers(system: { deployable: DeployableIR; sys: SystemIR } | undefined): boolean {
+  if (!system) return false;
+  return (system.sys.timerSources ?? []).some((ts) => {
+    const sub = system.sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
+    return sub?.migrationsOwner === system.deployable.name;
+  });
+}
+
 export function generateTypeScriptForContexts(
   contexts: EnrichedBoundedContextIR[],
   pins: BackendPins,
@@ -579,6 +592,10 @@ export function generateTypeScriptForContexts(
           // `__loom_outbox` table, on the same condition the drizzle schema
           // emitter uses (any durable channel in the deployable).
           outbox: durableEventTypes(merged).size > 0,
+          // Timer-scheduler watermark Row — same condition as `scheduler.ts`
+          // below (this deployable OWNS a timerSource).  It has to be an entity
+          // on this adapter or `updateSchema()` drops it on the second boot.
+          timerRuns: ownsTimers(system),
         },
       ),
     );
@@ -1075,6 +1092,13 @@ export function generateTypeScriptForContexts(
         return sub?.migrationsOwner === system.deployable.name;
       })
     : [];
+  // Invariant the watermark entity relies on: `ownsTimers` (used above, before
+  // the entity file is rendered) must agree with this filter.
+  if (ownedTimers.length > 0 !== ownsTimers(system)) {
+    throw new Error(
+      "internal: timer ownership disagrees between the entity opt and the scheduler filter",
+    );
+  }
   // Persistence-neutral since M-T6.23 slice 3: the scheduler's watermark table
   // and advisory lock run on the EntityManager under `persistence: mikroorm`
   // (`TimerStore` in scheduler-builder.ts).
