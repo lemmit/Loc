@@ -260,19 +260,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 23,
-      "method": "GET",
-      "path": "/api/cars/{id}",
-      "status": 404,
-      "body": {
-        "detail": "Car {id} not found",
-        "instance": "/api/cars/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }

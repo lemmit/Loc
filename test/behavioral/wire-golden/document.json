@@ -203,19 +203,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 16,
-      "method": "GET",
-      "path": "/api/articles/{id}",
-      "status": 404,
-      "body": {
-        "detail": "Article {id} not found",
-        "instance": "/api/articles/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }

@@ -144,11 +144,11 @@
     {
       "seq": 12,
       "method": "GET",
-      "path": "/api/tickets/{id}",
+      "path": "/api/auth/me",
       "status": 401,
       "body": {
-        "detail": "no valid credentials for GET /api/tickets/{id}",
-        "instance": "/api/tickets/{id}",
+        "detail": "no valid credentials for GET /api/auth/me",
+        "instance": "/api/auth/me",
         "status": 401,
         "title": "Unauthorized",
         "type": "about:blank"

@@ -307,19 +307,35 @@ const __frameworkProbes = async (dispatch) => {
   // 401 outside the RFC 7807 contract, two of them in text/plain, and none of
   // them with the WWW-Authenticate header RFC 9110 makes mandatory.
   //
-  // A SERVED verb on a real path, so the request reaches authentication:
-  // route -> authenticate means a wrong verb is answered by the router (405)
-  // and never challenged, so only a verb the path serves can record the 401.
+  // The session probe, anonymously.  /api/auth/me is emitted by every
+  // auth-bearing backend and is deliberately NOT on the middleware's bypass
+  // list, so it is the one path guaranteed to reach authentication with no id,
+  // no body and no dependence on the fixture's shape:
   //
-  // By-id with a fixed all-zero uuid rather than the collection, because the
-  // collection was tried and coupled the golden to END-OF-TIER DATA — it
-  // recorded every row, so the seeding fixture rows and an operation-returns
-  // version counter became wire divergences with nothing to do with
-  // authentication.  A miss answers a fixed not-found document instead.
+  //   auth system -> 401 + the RFC 7807 body this probe exists to pin
+  //   no auth     -> 404, the framework miss, equally fixed
   //
-  // Auth system  -> 401 + the RFC 7807 body this probe exists to pin.
-  // No auth      -> the domain 404, equally fixed.
-  await dispatch({ method: "GET", url: origin + collection.pathname + "/00000000-0000-0000-0000-000000000000", headers: {} });
+  // The two shapes tried before both asserted more than that.  An anonymous
+  // GET of the collection coupled the golden to END-OF-TIER DATA (seeding's
+  // fixture rows, an operation-returns version counter).  A by-id GET with a
+  // fixed all-zero uuid assumed every aggregate keys on a uuid — elixir raised
+  // ArgumentError and answered 500 for an id its type could not parse, which
+  // is a real defect but not this probe's subject.
+  //
+  // Only where the tier itself carried a credential.  A dev-stub \`auth {}\`
+  // system (no \`oidc\` block) fabricates a principal for ANY caller, so it has
+  // no unauthenticated arm to reach — the probe would answer 200 and record
+  // the stub's User instead, which is a third thing this probe does not
+  // assert.  (It diverges: node serialises \`{id, tenantId}\`, phoenix
+  // \`{id, role, tenantId}\` with the opposite two populated.  Real, and filed
+  // separately — the dev stub's principal shape is not the RS-9 error
+  // contract.)  A no-auth system is skipped for free and loses nothing: its
+  // \`/api/auth/me\` 404 is the same framework miss \`/__loom_no_such_path\`
+  // already pins.
+  const authed = Object.keys(__authHeaders).some((k) => /^authorization$/i.test(k));
+  if (authed) {
+    await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
+  }
 };
 
 // ── authorization ladder (M-T9.28 slice 1) ──────────────────────────────────

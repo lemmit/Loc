@@ -164,19 +164,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 15,
-      "method": "GET",
-      "path": "/api/widgets/{id}",
-      "status": 404,
-      "body": {
-        "detail": "Widget {id} not found",
-        "instance": "/api/widgets/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }

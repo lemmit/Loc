@@ -900,7 +900,12 @@ import org.springframework.http.ResponseEntity;`,
     `            var pd = ProblemDetail.forStatus(401);`,
     `            pd.setTitle("Unauthorized");`,
     `            pd.setDetail("no valid credentials for " + request.getMethod() + " " + request.getRequestURI());`,
-    `            pd.setInstance(URI.create(request.getRequestURI()));`,
+    // Fully qualified: `java.net.URI` is imported by the OIDC handshake (it
+    // builds redirect URIs) and by nothing else, so a plain `URI.create` here
+    // compiles under `auth { oidc }` and fails on every simple-auth system.
+    // Verifying only the oidc fixture is what hid it — that is the one
+    // configuration where the import arrives for an unrelated reason.
+    `            pd.setInstance(java.net.URI.create(request.getRequestURI()));`,
     `            pd.setProperty("type", "about:blank");`,
     `            return ResponseEntity.status(401)`,
     `                .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,

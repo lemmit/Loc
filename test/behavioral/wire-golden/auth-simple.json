@@ -140,19 +140,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 12,
-      "method": "GET",
-      "path": "/api/tickets/{id}",
-      "status": 404,
-      "body": {
-        "detail": "Ticket {id} not found",
-        "instance": "/api/tickets/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }

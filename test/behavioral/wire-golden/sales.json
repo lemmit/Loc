@@ -439,19 +439,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 34,
-      "method": "GET",
-      "path": "/api/products/{id}",
-      "status": 404,
-      "body": {
-        "detail": "Product {id} not found",
-        "instance": "/api/products/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }

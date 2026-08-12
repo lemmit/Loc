@@ -238,19 +238,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 21,
-      "method": "GET",
-      "path": "/api/credit_cards/{id}",
-      "status": 404,
-      "body": {
-        "detail": "CreditCard {id} not found",
-        "instance": "/api/credit_cards/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }

@@ -230,19 +230,6 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 21,
-      "method": "GET",
-      "path": "/api/customers/{id}",
-      "status": 404,
-      "body": {
-        "detail": "Customer {id} not found",
-        "instance": "/api/customers/{id}",
-        "status": 404,
-        "title": "Not Found",
-        "type": "about:blank"
-      }
     }
   ]
 }
