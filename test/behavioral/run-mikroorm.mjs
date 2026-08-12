@@ -88,24 +88,19 @@ const MIKRO_SKIP = {
   // is supported here; what skips it is the sibling broadcast channel below.)
   //
   // --- M-T6.23: features the adapter never emitted, now honest errors ---------
-  // `channels-broker` is a `loom.mikroorm-unsupported` ERROR as of M-T6.23, so
-  // forcing the case onto mikroorm no longer generates — it fails validation.
-  // Before the gate landed it booted and PASSED here with the feature silently
-  // absent: the api-tier assertions are satisfied by the synchronous in-process
-  // dispatch that survives on this adapter, so a missing broker driver / outbox
-  // relay was invisible to the run.  That is what made them hollow cells rather
-  // than coverage.  Removing an entry is the re-arm once the emitter lands —
-  // which is what happened to the `outbox` case (slice 1: the adapter emits the
-  // `LoomOutboxRow` + relay over the EntityManager, so it RUNS here again, and
-  // this time the relay it exercises actually exists).
+  // The `outbox` (slice 1) and `channels-broker` (slice 2) entries are GONE:
+  // both emitters landed, so neither is a gap to skip any more.  Removing an
+  // entry is the re-arm — and for those two it was doubly warranted, since the
+  // register had been claiming a checked gap that this runner never even
+  // collected (neither fixture carries a behavioural block; see the ratchet
+  // below).  The broker's runtime home is `npm run test:channels-mikroorm`,
+  // which provisions a real broker — something no behavioural leg does.
   //
   // The `projection` / `saga` / `eventsourced-workflow` cases are deliberately
   // NOT here: their `delivery: broadcast` channel is only missing the SSE wire
   // (a WARNING, since no frontend consumes it in these fixtures), while the
   // fold/saga routing they actually assert rides the in-process dispatcher and
   // works on this adapter.  They keep booting here.
-  "channels-broker":
-    "mikroorm emits no http/channels.ts (broker driver/producer tee/consumer loop) — M-T6.23",
   // Same class, found by the first runtime callers for these two fixtures
   // (#2468): the adapter emits no QUERY-time projection reads, and — unlike
   // the silent gaps above — `loom.mikroorm-unsupported` already says so as a
