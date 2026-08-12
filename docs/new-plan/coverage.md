@@ -227,6 +227,7 @@
 | Audit | Open findings → missions |
 |---|---|
 | quality-audit-2026-08.md | *(row rewritten 2026-08-10 — the "needs missions" placeholders are minted)* R1/R2→ci-gating.md's queue plan (+ the pr-gate substitute, #2447/#2463/#2465/#2483); R3(b) **done** (#2447 — `ddd parse` surfaces IR errors, `src/cli/main.ts:205`), R3(a)→**M-T9.28**; R4 **done** (CLAUDE.md "Mutation-prove a new gate" convention, cited in practice); R5 half-shipped untracked (`test/ir/api-caller-census.test.ts`, #2448/#2468, 216→13 pins — residue owned by M-T9.13) + walker-primitive driven census→**M-T9.29**; R6→M-T9.13/9.14/9.15; R7→M-T9.9 (done); R8→M-T4.8 endgame (+ route-derivation PRs 0–5, #2453–#2462); R9→M-T5.18/M-T9.21; R10→**M-T9.30** (ci-red-alarm #2434 covers only always-red); R11→**M-T9.31**; R12→**M-T9.32** |
+| schemathesis-findings-2026-08.md | 9 root-cause findings from spec-driven contract fuzzing (4× 500, 1 self-schema violation, 3 contract gaps, 1 by-design) → M-T9.21; each written up as an all-five-backend follow-up |
 | architecture-weak-spots-2026-07.md | §1→T1, §2→T2, §3→T3/M-T7.1, §4→M-T4.1, §5→T9, §6→M-T6.1/M-T6.4, §7→M-T5.16/M-T8.1 |
 | direction-review-2026-07.md | target-freeze decision→T10 (closed); redirected depth budget→M-T4.1/T2; honest-gate discipline→M-T9.8; customization-cliff + bus-factor→open (no mission — noted below) |
 | completeness-audit-2026-07.md | stdlib→M-T5.5, reporting/money→M-T2.12, jobs/email→M-T4.1/M-T4.6, pagination→M-T1.1, metrics→M-T7.1, identity→M-T3.12, API versioning → no mission (needs proposal; note here) |

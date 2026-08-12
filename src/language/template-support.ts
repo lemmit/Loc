@@ -26,6 +26,7 @@
 import type { TokenType, TokenVocabulary } from "chevrotain";
 import type { CstNode, Grammar, TokenBuilderOptions, ValueType } from "langium";
 import { DefaultTokenBuilder, DefaultValueConverter, type GrammarAST } from "langium";
+import { applySoftKeywordColonGuard } from "./soft-keyword-colon-guard.js";
 
 const INTERPOLATION_MODE = "interpolation";
 const DEFAULT_MODE = "default";
@@ -119,10 +120,20 @@ function matchTemplateFormat(
 
 /** Emits a multi-mode lexer definition so the `}`-leading MIDDLE / END
  *  terminals live ONLY in `interpolation` mode (never shadowing the block
- *  `}` keyword), and holes carry no literal brace blocks. */
+ *  `}` keyword), and holes carry no literal brace blocks.  Also applies the
+ *  soft-keyword-before-`:` guard (see `soft-keyword-colon-guard.ts`) — a
+ *  lexer concern for the same reason the template modes are: the parser
+ *  cannot express either one. */
 export class DddTokenBuilder extends DefaultTokenBuilder {
   override buildTokens(grammar: Grammar, options?: TokenBuilderOptions): TokenVocabulary {
     const tokens = super.buildTokens(grammar, options) as TokenType[];
+
+    // Before anything mode-specific: make the trailing-modifier keywords lose
+    // to `ID` when a `:` follows, so `title: string` + `secret: string` is two
+    // fields and not one swallowed one.  Mutates the shared token objects, so
+    // both lexer modes below inherit it.
+    applySoftKeywordColonGuard(tokens);
+
     const byName = new Map(tokens.map((t) => [t.name, t]));
 
     const start = byName.get("TEMPLATE_START");

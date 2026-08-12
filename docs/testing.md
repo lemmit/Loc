@@ -159,6 +159,7 @@ fails the fast suite.
 | `conformance-full.yml` | `LOOM_E2E=1 npm run test:e2e` | docker |
 | `differential-report.yml` | `LOOM_DIFF_REPORT=1 npx vitest run test/e2e/e2e.test.ts` | docker |
 | `schema-load.yml` | `npm run test:schema-load` (or point `LOOM_MIGRATION_PG_URL` at a running pg) | docker |
+| `schemathesis.yml` | `npm run test:schemathesis` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`) | — |
 | `migration-evolution-e2e.yml` | `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}` | docker |
 | `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{…}` (or `LOOM_TENANCY_PG_URL`) | docker |
 | `hono-obs-e2e.yml` | `npm run test:obs` | — |

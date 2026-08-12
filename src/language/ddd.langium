@@ -1740,6 +1740,24 @@ DomainServiceOperation:
 // /name-ref positions via `Property.name`, `LooseName`, `NameRefIdent`
 // (same soft-keyword treatment as `money`) so this addition does not
 // break user code that already uses `secret` etc. as a field name.
+//
+// That parser-side admission is NOT sufficient on its own, because these are
+// TRAILING keywords: `Property` is `name ':' type (modifier)*` and the grammar
+// is newline-insensitive, so `title: string` followed by a property NAMED
+// `secret` parsed as `title: string secret` and reported the syntax error on
+// the wrong line (pairwise finding F4).  Chevrotain cannot decide that
+// repetition-exit at any lookahead — the "exit" continuation inside `Property`
+// is all-optional — and Langium has no syntactic predicate, so the rule
+// "a guarded soft keyword immediately followed by `:` is an ID, never a
+// keyword" is enforced in the LEXER by `soft-keyword-colon-guard.ts` (wired
+// into `DddTokenBuilder`).  The same guard covers the other trailing clauses
+// with the same shape: the `TypeRef` union/carrier words (`or` / `option` /
+// `paged` / `envelope`) and the `check`/`invariant` `message "…"` clause.
+//
+// CONSEQUENCE FOR GRAMMAR AUTHORS: do not write a guarded keyword immediately
+// before a `':'` in any rule — it would no longer lex as that keyword.  The
+// guarded list is in `soft-keyword-colon-guard.ts` and the constraint is
+// re-derived from this grammar by `soft-keyword-colon-guard.test.ts`.
 FieldAccess returns string:
     'immutable' | 'managed' | 'token' | 'internal' | 'secret';
 

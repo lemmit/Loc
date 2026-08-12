@@ -633,6 +633,18 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
 // the LINQ-to-objects predicate) — the document column carries no
 // queryable per-field shape in v1.  Reference-collection diff-sync and
 // join tables don't apply: those references fold into the document.
+//
+// CAPABILITY FILTERS (`tenantOwned`, `softDeletable`, a hand-written
+// `filter`, a `policy` read ladder) apply IN-APP here, over the
+// rehydrated aggregate — NOT as an EF `HasQueryFilter`.  A document
+// aggregate's persistence record is `(Id, Data jsonb, Version)`, so the
+// filter's columns (`tenantId`, `dataKey`, `isDeleted`) live INSIDE the
+// blob and there is no mapped column for EF to attach a predicate to.
+// Before this was wired, a `tenantOwned` document aggregate read
+// UNFILTERED across tenants while `validateContextFilterSupport` claimed
+// .NET filters every shape — a silent cross-tenant read (#2527's
+// follow-up 1).  node/java/python already filter document reads in-app
+// this way; this is the .NET half of that parity.
 // ---------------------------------------------------------------------------
 export function renderDocumentRepositoryImpl(
   agg: EnrichedAggregateIR,
@@ -656,6 +668,56 @@ export function renderDocumentRepositoryImpl(
   const setName = plural(upperFirst(agg.name));
   const snap = `${agg.name}Snapshot`;
   const deser = `${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.Data, __json)!)`;
+  // The aggregate's capability filters, AND-ed into ONE in-app predicate over
+  // the rehydrated instance (see the header note).  Hoisted into a private
+  // static method rather than inlined at each call site for two reasons: the
+  // three read paths must not drift apart, and a `deny` ladder renders the
+  // constant `false` — inlined as `if (!(false)) return null;` that makes the
+  // following statement unreachable (CS0162 → an error under /warnaserror),
+  // while a method body `=> false;` is clean.  Principal claims resolve through
+  // the ambient accessor, re-read per call, exactly like the reified retrieval
+  // spec and the Dapper adapter's non-EF reads.
+  const capPredicate =
+    (agg.contextFilters ?? []).length > 0
+      ? (agg.contextFilters ?? [])
+          .map(
+            (p) =>
+              `(${renderCsExpr(p, { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER })})`,
+          )
+          .join(" && ")
+      : null;
+  const capMethod = capPredicate
+    ? [
+        "",
+        `    /// <summary>Capability read filter (shape: document) — evaluated in-app over the`,
+        `    /// rehydrated aggregate, since the filtered fields live inside the jsonb blob.</summary>`,
+        `    private static bool _CapabilityVisible(${agg.name} x) => ${capPredicate};`,
+      ]
+    : [];
+  // Write-scope narrowing (authorization Phase 3 P3.1): the document twin of the
+  // relational `AnyAsync(x => x.Id == id && (<scope>))` pre-guard.  `GetByIdAsync`
+  // already applies the READ filter above (EF gets that for free on the
+  // relational path via the query filter), so this only adds the write-scope
+  // predicate on top — write scope ∩ read scope, same as relational.  Without
+  // it, a `policy { allow … }` on a document aggregate failed CS0535: the
+  // interface declares `GetByIdForWriteAsync` and the document impl had no
+  // implementation (#2527's follow-up 2).
+  const writeScopeMethod = agg.writeScopeFilter
+    ? [
+        "",
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        var __found = await GetByIdAsync(id, cancellationToken);",
+        "        if (__found == null) return null;",
+        "        return _WriteScopeAllows(__found) ? __found : null;",
+        "    }",
+        "",
+        `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+          agg.writeScopeFilter,
+          { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+        )};`,
+      ]
+    : [];
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
@@ -672,7 +734,10 @@ export function renderDocumentRepositoryImpl(
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
-      `        var __all = (await _db.${setName}.ToListAsync(cancellationToken)).Select(__d => ${deser});`,
+      // The capability filter narrows the visible set BEFORE the find's own
+      // predicate runs, so a find never returns a capability-hidden (foreign
+      // tenant, soft-deleted) document.
+      `        var __all = (await _db.${setName}.ToListAsync(cancellationToken)).Select(__d => ${deser})${capPredicate ? ".Where(_CapabilityVisible)" : ""};`,
       `        var result = __all${filter}${projection};`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
@@ -730,16 +795,28 @@ export function renderDocumentRepositoryImpl(
         { name: "found", valueExpr: "__doc != null" },
       ])}`,
       "        if (__doc == null) return null;",
-      `        return ${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__doc.Data, __json)!);`,
+      // With a capability filter, a row OUTSIDE the caller's scope reads as
+      // missing (→ 404), matching what EF's query filter does to the relational
+      // twin's `FirstOrDefaultAsync`.  Without one, the emission is unchanged.
+      ...(capPredicate
+        ? [
+            `        var __rec = ${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__doc.Data, __json)!);`,
+            "        return _CapabilityVisible(__rec) ? __rec : null;",
+          ]
+        : [
+            `        return ${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__doc.Data, __json)!);`,
+          ]),
       "    }",
+      ...writeScopeMethod,
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       "        var __raw = ids.Select(i => i.Value).ToList();",
       `        var __docs = await _db.${setName}.Where(x => __raw.Contains(x.Id)).ToListAsync(cancellationToken);`,
-      `        return __docs.Select(__d => ${deser}).ToList();`,
+      `        return __docs.Select(__d => ${deser})${capPredicate ? ".Where(_CapabilityVisible)" : ""}.ToList();`,
       "    }",
+      ...capMethod,
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",
