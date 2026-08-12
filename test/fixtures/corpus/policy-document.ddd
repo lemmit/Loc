@@ -1,0 +1,105 @@
+// `policy { allow deep / deny }` on a `shape: document` aggregate — the authz
+// ladder where it CANNOT be a column predicate (pairwise finding F1).
+//
+// The authorization filters are `authz-filter` SENTINELS: nodes each backend's
+// QUERY-filter translator intercepts and renders as its native column fragment
+// (Drizzle operator tree / JPQL / SQLAlchemy / EF).  A `shape: document`
+// aggregate is ONE opaque jsonb column, so node/java/python have no query to
+// translate into — they filter document reads IN-APP over the rehydrated
+// instance.  The sentinel reached the GENERIC expression dispatcher there and
+// threw its internal invariant, taking codegen down on three of five backends:
+//
+//   renderExprWith: 'authz-filter' must be handled by the backend's
+//   query-filter translator, not the generic expression dispatcher
+//
+// WHY THIS FIXTURE EXISTS.  `document.ddd` carries the saving shape and
+// `policy-deny.ddd` carries the policy block, but NOTHING crossed them — and
+// the bug lives only where they meet.  That is the whole argument for the
+// pairwise sweep that found it, and this fixture is the crossing's permanent
+// home in the per-feature corpus, so every backend's compile leg (and
+// `schema-load`) keeps proving it.
+//
+// The crossing is not exotic: a tenant-owned, document-shaped aggregate under a
+// subtree read ladder is an ordinary thing to write.
+//
+//   - `Thing` carries `allow deep`  → the descendant-or-self subtree scope.
+//     This is the `scope` sentinel, and the PRINCIPAL-referencing one: the
+//     in-app predicate must bind the request actor and compare the row's
+//     materialized `dataKey` path against the caller's `orgPath`, falling back
+//     to the flat tenant floor for a NULL-`dataKey` row (DEEP_SCOPE_SEMANTICS).
+//   - `Note` carries `deny`         → the always-false carve-out.  Principal-FREE,
+//     so it rides the static filter path; in-app it is a plain `false` conjunct.
+//     Kept beside `Thing` because the two sentinel decisions render through
+//     different seams and a fix for one can miss the other.
+//   - `Thing` also declares a find, so the ladder is proven to narrow the
+//     author's own `where` — not just the auto-`findAll`.
+//   - `Org` is the hierarchy registry (`tenancy by … of Org` +
+//     `tenantRegistry`), which the `deep` rung's materialized path needs.
+//
+// The deployable platform is substituted per leg (node/python/java) — the three
+// backends that filter a document aggregate IN-APP.  The other two are excluded
+// for OPPOSITE reasons, and the difference is the point:
+//
+//   - ELIXIR refuses this crossing BY NAME (`loom.context-filter-unsupported`).
+//     An honest, coded rejection — the contract being honoured.
+//   - .NET is a GAP.  It generates, but the emitted project does not compile
+//     (CS0535: the document repository never implements the
+//     `GetByIdForWriteAsync` write-scope port member the `allow` ladder adds),
+//     and a document aggregate gets no EF `HasQueryFilter` at ALL — with or
+//     without a policy — so a `tenantOwned` document aggregate reads unfiltered
+//     across tenants.  Both are SILENT.  Declaring dotnet here would make this
+//     fixture claim coverage it does not have; see the manifest row's note.
+system PolicyDocument {
+  user { id: guid  role: string  tenantId: string }
+
+  tenancy by user.tenantId of Org
+
+  subdomain Core {
+    context Main {
+      // The subtree read ladder on a document-shaped aggregate.
+      aggregate Thing shape: document, with crudish, tenantOwned {
+        label: string
+        amount: int = 0
+      }
+      // The deny carve-out on a document-shaped aggregate — invisible to
+      // every caller, mutations 404.
+      aggregate Note shape: document, with crudish, tenantOwned {
+        body: string
+      }
+
+      repository Things for Thing {
+        // The ladder must be AND-ed into the author's own `where`, not only
+        // into the auto-`findAll`.
+        find byLabel(l: string): Thing[] where this.label == l
+      }
+      repository Notes for Note { }
+
+      policy {
+        allow deep on Thing
+        deny on Note
+      }
+    }
+    // The registry lives in its own context so its state resource is separate
+    // from the document-shaped subject's.
+    context Registry {
+      aggregate Org with crudish {
+        name: string
+        implements tenantRegistry
+      }
+      repository Orgs for Org { }
+    }
+  }
+
+  api MainApi from Core
+  storage primary { type: postgres }
+  resource mainState { for: Main, kind: state, use: primary }
+  resource registryState { for: Registry, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Main, Registry]
+    dataSources: [mainState, registryState]
+    serves: MainApi
+    port: 4000
+    auth: required
+  }
+}
