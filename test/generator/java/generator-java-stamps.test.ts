@@ -10,7 +10,7 @@
 // principal.  There is NO service-called `_stampOn*` method — the listener
 // fills the columns at flush.  Principal-referencing (`currentUser`) stamps on
 // a deployable WITHOUT auth and stamps on event-sourced aggregates stay
-// fail-fast gated (loom.java-stamp-unsupported).  Boot-verified end-to-end
+// fail-fast gated (loom.stamp-principal-without-auth).  Boot-verified end-to-end
 // against Postgres via test/e2e/fixtures/java-build/stamps.ddd.
 // ---------------------------------------------------------------------------
 
@@ -134,7 +134,9 @@ describe("java generator — lifecycle stamps (persist-time JPA auditing)", () =
       .replace("createdAt: datetime", "createdAt: datetime\n        createdBy: guid")
       .replace("system ST {", "system ST {\n  user { id: guid  name: string }");
     const loom = await buildLoomModel(principal);
-    const errors = validateLoomModel(loom).filter((d) => d.code === "loom.java-stamp-unsupported");
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.code === "loom.stamp-principal-without-auth",
+    );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("no auth");
   });
