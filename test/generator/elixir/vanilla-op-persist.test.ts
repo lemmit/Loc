@@ -100,9 +100,7 @@ describe("vanilla named-op persistence (embedded containment put_embed)", () => 
     // RS-14: the op persist bumps `version` (default-on `versioned`) — the
     // document op path always did; the relational/embedded one used to leave it
     // frozen, so an operation persisted new state under a stale version.
-    expect(add).toContain(
-      "record_before\n    |> Ecto.Changeset.change(%{version: record_before.version + 1})",
-    );
+    expect(add).toContain("record_before\n    |> Ecto.Changeset.change(%{})");
     expect(add).toContain("|> Ecto.Changeset.put_embed(:items, record.items)");
   });
 });

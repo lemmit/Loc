@@ -77,7 +77,7 @@ describe("loom.chart-unsupported-target (per-pack gate)", () => {
   // genuinely still lack a renderer.  Swapping the subject rather than deleting
   // the case keeps the check biting: with every framework ported this reads as
   // "the gate works" and "the gate is unreachable" identically from outside.
-  for (const framework of ["svelte", "angular"]) {
+  for (const framework of ["angular"]) {
     it(`rejects Chart on a ${framework} frontend`, async () => {
       const diags = await diagsOf(sys({ framework }));
       const hit = diags.find((d) => d.code === "loom.chart-unsupported-target");
@@ -89,10 +89,12 @@ describe("loom.chart-unsupported-target (per-pack gate)", () => {
     });
   }
 
-  it("accepts Chart on a vue frontend", async () => {
-    const diags = await diagsOf(sys({ framework: "vue" }));
-    expect(diags.find((d) => d.code === "loom.chart-unsupported-target")).toBeUndefined();
-  });
+  for (const framework of ["vue", "svelte"]) {
+    it(`accepts Chart on a ${framework} frontend`, async () => {
+      const diags = await diagsOf(sys({ framework }));
+      expect(diags.find((d) => d.code === "loom.chart-unsupported-target")).toBeUndefined();
+    });
+  }
 
   // The pack backfill is complete (M-T1.3 Phase 5): every tsx pack emits
   // `primitive-chart`, so the gate collapsed from a per-PACK set to the same

@@ -463,6 +463,17 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
       {:error, {:precondition_failed, detail}} ->
         ${denialResponse("precondition", "detail", opDenialOverrides)}`
           : "");
+      // M-T6.27: the op persist now carries `optimistic_lock(:version)` on a
+      // `versioned` aggregate, so a raced write surfaces as `{:error, :conflict}`
+      // (rescued in `persist_change/1`) — map it to the shared 409 responder.
+      // Gated on `versioned` so an unversioned aggregate emits no unreachable
+      // clause (`--warnings-as-errors`).
+      const conflictArm = aggregateIsVersioned(agg)
+        ? `
+
+      {:error, :conflict} ->
+        ProblemDetails.conflict_response(conn)`
+        : "";
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
@@ -481,7 +492,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)${denialArms}
+        ProblemDetails.validation_error_response(conn, changeset)${conflictArm}${denialArms}
     end
 ${guardRescue(denialOverrides(ctx))}
   end`;
