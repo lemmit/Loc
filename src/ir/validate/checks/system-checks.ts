@@ -28,7 +28,6 @@ import type {
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
@@ -48,11 +47,7 @@ import {
   isGroupedProjection,
   isQueryTimeProjection,
 } from "../../types/loom-ir.js";
-import {
-  backendServesRealtime,
-  durableEventTypes,
-  realtimeEventTypes,
-} from "../../util/channels.js";
+import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
@@ -2694,21 +2689,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           consumed ? "error" : "warning",
         );
       }
-      // (3) Transactional outbox: the relay argument to `renderProjectIndexTs`
-      // is `!usingMikro`-gated and no `__loom_outbox` table is created, so a
-      // channel that asked for durability (`retention: log | work`) silently
-      // degrades to the at-most-once in-process path — the declared
-      // at-least-once contract is not honoured (dispatch-delivery-semantics.md).
-      // Conjoined with the local-reactor test exactly as the emitter does: with
-      // no subscriber there is nothing for a relay to drain, so the model is
-      // functionally identical on both adapters and must not be rejected.
-      const subs = (ctx as EnrichedBoundedContextIR).eventSubscriptions ?? [];
-      if (subs.length > 0 && durableEventTypes(ctx).size > 0) {
-        rejectFeature(
-          `context '${ctxName}' carries a durable channel ('retention: log | work') with a local reactor`,
-          `the transactional outbox + relay that make its delivery at-least-once`,
-        );
-      }
+      // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
+      // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
+      // `startOutboxRelay` over the EntityManager, so a durable channel
+      // (`retention: log | work`) is at-least-once here exactly as on drizzle
+      // (dispatch-delivery-semantics.md).  Nothing to gate.
       // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
       // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
       // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
