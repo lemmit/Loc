@@ -113,11 +113,19 @@ export function errorStatuses(
       return guarded ? set(400, forbidden, 404, 422, domain) : set(400, 404, 422, domain);
     case "workflow":
       return guarded ? set(400, forbidden, 422, domain) : set(400, 422, domain);
+    // The gated FIND arms resolve `forbidden` for the same reason `operation`
+    // and `workflow` do — and they are here because they did NOT.  M-T5.20
+    // converted the two command arms above and left these three as literal
+    // `403`s, so `httpStatus Forbidden -> 451` moved a gated OPERATION's
+    // declared set and silently not a gated FIND's, inside ONE function that
+    // every backend reads (M-T9.25 round 2, probe 1).  Invisible to every
+    // existing gate: with no override `forbidden` IS 403, so default emission
+    // cannot tell a resolved 403 from a hardcoded one.
     case "findOptional":
-      return guarded ? [403, 404] : [404];
+      return guarded ? set(forbidden, 404) : [404];
     case "findList":
     case "findSingle":
-      return guarded ? [403] : [];
+      return guarded ? [forbidden] : [];
     // `list` is the auto-`findAll`, which carries no `requires` of its own.
     case "list":
       return [];

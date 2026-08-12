@@ -872,7 +872,7 @@ export function renderDapperRepository(
    *  when the deployable carries auth.  A bare `currentUser` stamp value
    *  (`createdBy := currentUser`) resolves to `RequestContext.Current!.CurrentUser!.<actorIdProp>`,
    *  mirroring the EF AuditableInterceptor.  Undefined ⇒ no principal stamp
-   *  reaches this emitter (rejected upstream by loom.dotnet-stamp-unsupported). */
+   *  reaches this emitter (rejected upstream by loom.stamp-principal-without-auth). */
   actorIdProp?: string,
   /** shape: embedded: each containment folds into one JSONB column (serialised
    *  part snapshots) instead of a child table.  Adds the STJ `__json` options

@@ -77,6 +77,10 @@ on:
       - 'Elixir / Vanilla runtime e2e (observability)'
       - 'Elixir / Vanilla VO wire round-trip (runtime e2e)'
       - 'Mailer smtp (runtime e2e)'
+      # Never runs on a PR SHA (schedule/dispatch only), so it never appears in
+      # a PR's checks — listed to satisfy the completeness ratchet, which is
+      # deliberately mechanical rather than a judgement call per workflow.
+      - 'Flake budget (per-leg pass rates)'
       - 'Frontend full-stack e2e (nightly, no docker)'
       - 'Generated a11y (axe-core)'
       - 'Generated Angular build'
@@ -111,6 +115,7 @@ on:
       - 'Tenancy isolation (runtime e2e)'
       - 'Tests + coverage'
       - 'Lint GitHub Actions workflows'
+      - 'Quality delta (weekly)'
 
 permissions:
   checks: write

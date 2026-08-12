@@ -1592,6 +1592,33 @@ export const DIAGNOSTIC_MESSAGES = {
     `${p.site} on aggregate '${p.ctxName}.${p.aggName}' ignores ` +
     `capability '${p.cap}', but '${p.cap}' contributes no query-filter to bypass (it is a ` +
     `stamps-only / fields-only capability). Remove '${p.cap}' from the 'ignoring' clause.`,
+  // M-T6.33.  Two lifecycle-stamp refusals, neither of them backend-specific:
+  // the check reads only the model (auth presence, persistedAs).  They were
+  // INVISIBLE to this catalog gate until M-T6.33 — the five old per-backend
+  // codes were emitted as `code: backend.code` (a property access), and the
+  // scanner only records sites whose `code:` is a string literal.
+  "loom.stamp-principal-without-auth": (p: {
+    dep: unknown;
+    family: unknown;
+    ctxName: unknown;
+    name: unknown;
+    principalNoun: unknown;
+  }) =>
+    `Deployable '${p.dep}' (platform ${p.family}) hosts aggregate '${p.ctxName}.${p.name}' ` +
+    `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
+    `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
+    `${p.principalNoun} to stamp from. Add 'auth: required' (and a system 'user {}' block), or use ` +
+    `non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
+  "loom.stamp-on-event-sourced-invalid": (p: {
+    dep: unknown;
+    family: unknown;
+    ctxName: unknown;
+    name: unknown;
+  }) =>
+    `Deployable '${p.dep}' (platform ${p.family}) hosts event-sourced aggregate ` +
+    `'${p.ctxName}.${p.name}' with a lifecycle stamp — stamps mutate state fields, but an ` +
+    `event-sourced aggregate's state is folded from its event stream. ` +
+    `Record the timestamp in an event instead, or drop persistedAs: eventLog.`,
   "loom.dapper-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: dapper', but ${p.subject} ${p.reason}. ` +
     `The Dapper adapter is at full parity with EF Core (M-T6.9); the only shapes it now ` +

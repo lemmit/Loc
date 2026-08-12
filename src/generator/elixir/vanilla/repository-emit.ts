@@ -368,6 +368,11 @@ ${listSortArms}${listSortArms ? "\n" : ""}        _ -> :id
   const updateRescue = versioned
     ? "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}"
     : "";
+  // M-T6.27: the named-operation seam gets the SAME stale-write rescue the
+  // generic update has — the op changeset now carries `optimistic_lock(:version)`
+  // (context-emit / operation-returns-emit / document-emit), so a raced op write
+  // raises `Ecto.StaleEntryError` here and must answer 409, not crash.
+  const persistChangeRescue = "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}";
   const updateErrTail = versioned ? "Ecto.Changeset.t() | :conflict" : "Ecto.Changeset.t()";
   const updateSpecArgTail = `${hasStamps && stampPrincipal ? ", map() | nil" : ""}${versioned ? ", integer() | nil" : ""}`;
 
@@ -437,9 +442,9 @@ ${versionOverride}    record${updatePreload}
   end
 ${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
   @spec persist_change(Ecto.Changeset.t()) ::
-          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
-    Repo.update(changeset)
+    Repo.update(changeset)${versioned ? persistChangeRescue : ""}
   end${findBlock}${refHelpers || "\n"}end
 `;
 }

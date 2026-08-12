@@ -52,9 +52,7 @@ import {
   validateDataSourceCoverage,
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
-  validateDotnetStampSupport,
   validateElixirOpSelfCallPosition,
-  validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
   validateFieldMask,
@@ -65,21 +63,19 @@ import {
   validateGroupedProjectionBackend,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
-  validateJavaStampSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
-  validateNodeStampSupport,
   validatePagedQueryHandlerBackend,
   validatePermissions,
   validateProjectionSourceProjectionBackend,
   validateProvenancedStorage,
-  validatePythonStampSupport,
   validateQueryTimeProjectionBackend,
   validateReactIdReferences,
   validateRelayTargetNotSubscribed,
   validateRemoteApiOpSupport,
   validateResourceConfig,
   validateSavingShapeSupport,
+  validateStampSupport,
   validateSystem,
   validateUiProjectionReadFramework,
   validateUiRealtimeSupport,
@@ -161,11 +157,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateContextFilterSupport(sys, diags);
     validateFilterBypassSupport(sys, diags);
     validateJavaReadModelShapes(sys, diags);
-    validateJavaStampSupport(sys, diags);
-    validateDotnetStampSupport(sys, diags);
-    validateNodeStampSupport(sys, diags);
-    validatePythonStampSupport(sys, diags);
-    validateElixirStampSupport(sys, diags);
+    validateStampSupport(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);

@@ -244,7 +244,7 @@ describe("vanilla shape: document scalar finds + named ops (Route A slice 2 — 
     expect(ctx).toContain("with :ok <- ensure(record.item_count >= 0, {:precondition_failed, ");
     expect(ctx).not.toContain("raise(ArgumentError");
     expect(ctx).toContain("record = %{record | item_count: record.item_count + 1}");
-    expect(ctx).toContain("|> Ecto.Changeset.change(%{version: row.version + 1})");
+    expect(ctx).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
     expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(ctx).toContain("|> Api.Carts.CartRepository.persist_change()");
     // An enum assign uses the stored string form (struct field stays `:string`).
@@ -598,7 +598,7 @@ system Shop {
   it("persists a MUTATING fall-through success + projects off the saved embed", async () => {
     const bump = op(file(await generateSystemFiles(DOC_RET), "/shop.ex"), "bump_fall_cart");
     expect(bump).toContain("record = %{record | total: record.total + 1}");
-    expect(bump).toContain("|> Ecto.Changeset.change(%{version: row.version + 1})");
+    expect(bump).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
     expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(bump).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
     expect(bump).toContain(
