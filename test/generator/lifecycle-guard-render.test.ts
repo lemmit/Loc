@@ -232,7 +232,10 @@ const SPECS: Record<Backend, BackendSpec> = {
         "        {\n" +
         '            throw new ForbiddenException("Forbidden: currentUser.permissions.contains(permissions.manage)");',
       after: ["var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)"],
-      before: ["_audit.Stage(new AuditRecord", "await _repo.DeleteAsync(aggregate, cancellationToken);"],
+      before: [
+        "_audit.Stage(new AuditRecord",
+        "await _repo.DeleteAsync(aggregate, cancellationToken);",
+      ],
     },
   },
   vanilla: {
