@@ -1,0 +1,174 @@
+{
+  "_comment": [
+    "Fixtures for test/system/flake-budget.test.ts.",
+    "Each scenario is a list of runs NEWEST FIRST, the order the Actions API returns.",
+    "`daysAgo` is expanded to a `created_at` against a fixed clock by the test, so",
+    "nothing here depends on wall-clock time. `attempt` defaults to 1.",
+    "`reactBuildMain2026-08` is a REAL capture (conclusions + timestamps) of",
+    "generated-react-build.yml on main, taken 2026-08-11 — the history that",
+    "exposed the cancelled-runs-eat-the-window bug. Keep it real: it is the",
+    "regression pin for that fix."
+  ],
+
+  "allGreen": [
+    { "conclusion": "success", "daysAgo": 0 },
+    { "conclusion": "success", "daysAgo": 0.2 },
+    { "conclusion": "success", "daysAgo": 0.4 },
+    { "conclusion": "success", "daysAgo": 0.6 },
+    { "conclusion": "success", "daysAgo": 0.8 },
+    { "conclusion": "success", "daysAgo": 1.0 },
+    { "conclusion": "success", "daysAgo": 1.2 },
+    { "conclusion": "success", "daysAgo": 1.4 },
+    { "conclusion": "success", "daysAgo": 1.6 },
+    { "conclusion": "success", "daysAgo": 1.8 }
+  ],
+
+  "threeInTwentyFail": [
+    { "conclusion": "failure", "daysAgo": 0 },
+    { "conclusion": "success", "daysAgo": 0.1 },
+    { "conclusion": "success", "daysAgo": 0.2 },
+    { "conclusion": "failure", "daysAgo": 0.3 },
+    { "conclusion": "success", "daysAgo": 0.4 },
+    { "conclusion": "success", "daysAgo": 0.5 },
+    { "conclusion": "success", "daysAgo": 0.6 },
+    { "conclusion": "failure", "daysAgo": 0.7 },
+    { "conclusion": "success", "daysAgo": 0.8 },
+    { "conclusion": "success", "daysAgo": 0.9 },
+    { "conclusion": "success", "daysAgo": 1.0 },
+    { "conclusion": "success", "daysAgo": 1.1 },
+    { "conclusion": "success", "daysAgo": 1.2 },
+    { "conclusion": "success", "daysAgo": 1.3 },
+    { "conclusion": "success", "daysAgo": 1.4 },
+    { "conclusion": "success", "daysAgo": 1.5 },
+    { "conclusion": "success", "daysAgo": 1.6 },
+    { "conclusion": "success", "daysAgo": 1.7 },
+    { "conclusion": "success", "daysAgo": 1.8 },
+    { "conclusion": "success", "daysAgo": 1.9 }
+  ],
+
+  "fourInTwentyFail": [
+    { "conclusion": "failure", "daysAgo": 0 },
+    { "conclusion": "failure", "daysAgo": 0.1 },
+    { "conclusion": "failure", "daysAgo": 0.2 },
+    { "conclusion": "failure", "daysAgo": 0.3 },
+    { "conclusion": "success", "daysAgo": 0.4 },
+    { "conclusion": "success", "daysAgo": 0.5 },
+    { "conclusion": "success", "daysAgo": 0.6 },
+    { "conclusion": "success", "daysAgo": 0.7 },
+    { "conclusion": "success", "daysAgo": 0.8 },
+    { "conclusion": "success", "daysAgo": 0.9 },
+    { "conclusion": "success", "daysAgo": 1.0 },
+    { "conclusion": "success", "daysAgo": 1.1 },
+    { "conclusion": "success", "daysAgo": 1.2 },
+    { "conclusion": "success", "daysAgo": 1.3 },
+    { "conclusion": "success", "daysAgo": 1.4 },
+    { "conclusion": "success", "daysAgo": 1.5 },
+    { "conclusion": "success", "daysAgo": 1.6 },
+    { "conclusion": "success", "daysAgo": 1.7 },
+    { "conclusion": "success", "daysAgo": 1.8 },
+    { "conclusion": "success", "daysAgo": 1.9 }
+  ],
+
+  "fiveInTwentyFail": [
+    { "conclusion": "failure", "daysAgo": 0 },
+    { "conclusion": "failure", "daysAgo": 0.1 },
+    { "conclusion": "failure", "daysAgo": 0.2 },
+    { "conclusion": "failure", "daysAgo": 0.3 },
+    { "conclusion": "failure", "daysAgo": 0.4 },
+    { "conclusion": "success", "daysAgo": 0.5 },
+    { "conclusion": "success", "daysAgo": 0.6 },
+    { "conclusion": "success", "daysAgo": 0.7 },
+    { "conclusion": "success", "daysAgo": 0.8 },
+    { "conclusion": "success", "daysAgo": 0.9 },
+    { "conclusion": "success", "daysAgo": 1.0 },
+    { "conclusion": "success", "daysAgo": 1.1 },
+    { "conclusion": "success", "daysAgo": 1.2 },
+    { "conclusion": "success", "daysAgo": 1.3 },
+    { "conclusion": "success", "daysAgo": 1.4 },
+    { "conclusion": "success", "daysAgo": 1.5 },
+    { "conclusion": "success", "daysAgo": 1.6 },
+    { "conclusion": "success", "daysAgo": 1.7 },
+    { "conclusion": "success", "daysAgo": 1.8 },
+    { "conclusion": "success", "daysAgo": 1.9 }
+  ],
+
+  "allStartupFailure": [
+    { "conclusion": "startup_failure", "daysAgo": 0 },
+    { "conclusion": "startup_failure", "daysAgo": 1 },
+    { "conclusion": "startup_failure", "daysAgo": 2 }
+  ],
+
+  "retriedToGreen": [
+    { "conclusion": "success", "attempt": 2, "daysAgo": 0 },
+    { "conclusion": "success", "daysAgo": 0.1 },
+    { "conclusion": "success", "attempt": 3, "daysAgo": 0.2 },
+    { "conclusion": "success", "daysAgo": 0.3 },
+    { "conclusion": "success", "daysAgo": 0.4 },
+    { "conclusion": "success", "daysAgo": 0.5 },
+    { "conclusion": "success", "daysAgo": 0.6 },
+    { "conclusion": "success", "daysAgo": 0.7 },
+    { "conclusion": "success", "daysAgo": 0.8 },
+    { "conclusion": "success", "daysAgo": 0.9 }
+  ],
+
+  "goneQuiet": [
+    { "conclusion": "success", "daysAgo": 9 },
+    { "conclusion": "success", "daysAgo": 10 },
+    { "conclusion": "success", "daysAgo": 11 },
+    { "conclusion": "success", "daysAgo": 12 },
+    { "conclusion": "success", "daysAgo": 13 },
+    { "conclusion": "success", "daysAgo": 14 }
+  ],
+
+  "unknownConclusion": [
+    { "conclusion": "some_future_conclusion", "daysAgo": 0 },
+    { "conclusion": "some_future_conclusion", "daysAgo": 0.1 },
+    { "conclusion": "some_future_conclusion", "daysAgo": 0.2 },
+    { "conclusion": "some_future_conclusion", "daysAgo": 0.3 },
+    { "conclusion": "some_future_conclusion", "daysAgo": 0.4 },
+    { "conclusion": "success", "daysAgo": 0.5 }
+  ],
+
+  "twoGreenRestCancelled": [
+    { "conclusion": "cancelled", "daysAgo": 0 },
+    { "conclusion": "cancelled", "daysAgo": 0.1 },
+    { "conclusion": "cancelled", "daysAgo": 0.2 },
+    { "conclusion": "success", "daysAgo": 0.3 },
+    { "conclusion": "cancelled", "daysAgo": 0.4 },
+    { "conclusion": "skipped", "daysAgo": 0.5 },
+    { "conclusion": "success", "daysAgo": 0.6 }
+  ],
+
+  "reactBuildMain2026-08": [
+    { "conclusion": null, "status": "queued", "daysAgo": 0.01 },
+    { "conclusion": "cancelled", "daysAgo": 0.02 },
+    { "conclusion": "cancelled", "daysAgo": 0.03 },
+    { "conclusion": "failure", "daysAgo": 0.43 },
+    { "conclusion": "failure", "daysAgo": 0.55 },
+    { "conclusion": "cancelled", "daysAgo": 0.56 },
+    { "conclusion": "cancelled", "daysAgo": 0.57 },
+    { "conclusion": "failure", "daysAgo": 0.83 },
+    { "conclusion": "cancelled", "daysAgo": 0.84 },
+    { "conclusion": "cancelled", "daysAgo": 0.85 },
+    { "conclusion": "cancelled", "daysAgo": 0.86 },
+    { "conclusion": "failure", "daysAgo": 0.99 },
+    { "conclusion": "cancelled", "daysAgo": 1.0 },
+    { "conclusion": "cancelled", "daysAgo": 1.01 },
+    { "conclusion": "cancelled", "daysAgo": 1.05 },
+    { "conclusion": "cancelled", "daysAgo": 1.06 },
+    { "conclusion": "failure", "daysAgo": 1.22 },
+    { "conclusion": "cancelled", "daysAgo": 1.24 },
+    { "conclusion": "cancelled", "daysAgo": 1.26 },
+    { "conclusion": "cancelled", "daysAgo": 1.27 },
+    { "conclusion": "cancelled", "daysAgo": 1.28 },
+    { "conclusion": "failure", "daysAgo": 1.34 },
+    { "conclusion": "cancelled", "daysAgo": 1.35 },
+    { "conclusion": "cancelled", "daysAgo": 1.39 },
+    { "conclusion": "cancelled", "daysAgo": 1.4 },
+    { "conclusion": "cancelled", "daysAgo": 1.41 },
+    { "conclusion": "failure", "daysAgo": 1.7 },
+    { "conclusion": "failure", "daysAgo": 1.74 },
+    { "conclusion": "failure", "daysAgo": 1.8 },
+    { "conclusion": "failure", "daysAgo": 1.83 }
+  ]
+}

@@ -1,0 +1,122 @@
+name: Flake budget (per-leg pass rates)
+
+# M-T9.30. `ci-red-alarm.yml` watches for a gate's RED TRANSITION, which is the
+# wrong shape for a flake — a flake's steady state is green, so it gets re-run,
+# goes green, and is forgotten. It is also blind to the never-green class: a leg
+# that is never green has no transition to alarm on (`api-call-e2e`, red on 100%
+# of its main pushes for two days, #2434).
+#
+# This is the other half. Daily, `scripts/flake-budget.mjs` reads each monitored
+# leg's recent `main` run history through the Actions API and classifies it;
+# every leg outside budget gets ONE claiming issue labelled `flaky-gate`, updated
+# in place on later runs and closed when the leg recovers. A flake is a bug
+# report with a probability attached — this is what files it.
+#
+# The alarm files one undifferentiated "main is red" issue that accumulates
+# comments across every gate; this files one issue PER LEG carrying that leg's
+# rate, which is the thing you can actually assign, fix, and close.
+#
+# Read-only against Actions; writes nothing but issues.
+
+on:
+  schedule:
+    # 06:17 UTC daily — off the hour so it doesn't queue behind the :00 crons.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: flake-budget
+  cancel-in-progress: false
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No npm install: the script is dependency-free by design, so the budget
+      # keeps reporting even on a day the toolchain's own install is broken.
+      - name: Compute the flake budget
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/flake-budget.mjs --out flake-budget.json --markdown flake-budget.md
+
+      - name: Publish the report to the job summary
+        run: cat flake-budget.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File / update / close the claiming issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const report = JSON.parse(fs.readFileSync('flake-budget.json', 'utf8'));
+            const LABEL = report.label;
+
+            // Dedupe by the `flaky-gate` label (reliably indexed, unlike body
+            // text), then match each open issue to its leg by the hidden marker
+            // the script embeds. The marker is the key, NOT the title — a
+            // title carries the current status and changes as the rate moves.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            });
+            const byMarker = new Map();
+            for (const issue of open) {
+              const m = (issue.body || '').match(/<!-- flake-budget:([^ ]+?) -->/);
+              if (m) byMarker.set(m[1], issue);
+            }
+
+            const claimed = new Set();
+            for (const claim of report.claims) {
+              claimed.add(claim.file);
+              const existing = byMarker.get(claim.file);
+              if (existing) {
+                // Update in place. Re-running must never spam: the body is
+                // replaced with the current numbers instead of appending.
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: existing.number,
+                  title: claim.title, body: claim.body,
+                });
+                core.info(`updated #${existing.number} for ${claim.file}`);
+              } else {
+                const { data } = await github.rest.issues.create({
+                  ...context.repo, title: claim.title, body: claim.body, labels: [LABEL],
+                });
+                core.info(`opened #${data.number} for ${claim.file}`);
+              }
+            }
+
+            // A recovered leg gets a closing comment, so the issue's own
+            // history records that it came back inside budget rather than
+            // being silently deleted.
+            const monitored = new Set(report.legs.map((l) => l.file));
+            for (const [file, issue] of byMarker) {
+              if (claimed.has(file)) continue;
+              const leg = report.legs.find((l) => l.file === file);
+              const why = monitored.has(file)
+                ? `back inside budget — ${leg.headline}`
+                : 'no longer a monitored leg (workflow removed or renamed)';
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: issue.number,
+                body: `Closing: **${file}** is ${why}\n\n_Flake budget, ${report.generatedAt}._`,
+              });
+              await github.rest.issues.update({
+                ...context.repo, issue_number: issue.number,
+                state: 'closed', state_reason: 'completed',
+              });
+              core.info(`closed #${issue.number} for ${file}`);
+            }
+
+            core.summary.addRaw(
+              `\n\nflake budget: ${report.counts.flagged} of ${report.counts.monitored} legs outside budget.`,
+            );
+            await core.summary.write();
