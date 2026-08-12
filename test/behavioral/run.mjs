@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEV_CLAIMS, featureCases, sharedSystemCases } from "./cases.mjs";
+import { AUTHZ_LADDERS, DEV_CLAIMS, DEV_CLAIMS_UNAUTHORIZED, featureCases, sharedSystemCases } from "./cases.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -68,7 +68,7 @@ function findNodeDeployable(genDir) {
 }
 
 /** Synthesise the per-case boot+run entry (bundled by esbuild). */
-function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken }) {
+function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken, authzLadder }) {
   const J = JSON.stringify;
   // When the deployable is `auth: required` the generated boot module
   // (index.ts) registers a verifier before serving — but we boot via
@@ -102,6 +102,19 @@ function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerT
   });`;
   }
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
+  // The authenticated-but-unauthorized credential, in this system's auth
+  // flavour (M-T9.28).  Dev-stub: the same `x-loom-dev-claims` channel the
+  // authorized principal rides, carrying the non-granting claims.  OIDC: a
+  // second mock-issuer token — same key and issuer, so it VERIFIES and only the
+  // authorization predicate separates it from the authorized one.
+  const unauthorizedCreds =
+    authMode === "oidc"
+      ? unauthorizedToken
+        ? { authorization: `Bearer ${unauthorizedToken}` }
+        : null
+      : authMode === "devstub"
+        ? { "x-loom-dev-claims": Buffer.from(DEV_CLAIMS_UNAUTHORIZED).toString("base64") }
+        : null;
   return `
 ${recorderPreamble()}
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};
@@ -121,6 +134,8 @@ import { createRequire } from "node:module";
 
 const E2E_FILE = ${J(e2eFile)};
 const DEV_CLAIMS = ${J(DEV_CLAIMS)};
+const AUTHZ_LADDER = ${J(authzLadder ?? null)};
+const UNAUTHORIZED_CREDS = ${J(unauthorizedCreds)};
 const UNIT_FILES = ${J(unitFiles)};
 const TRACE_FILE = ${J(traceFile)};
 const SHIM = ${J(SHIM)};
@@ -148,6 +163,15 @@ export async function run() {
     // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
     // golden aligns on, and so a failing tier is diagnosed on its own requests.
     await __frameworkProbes(dispatch);
+    // M-T9.28 — the authorization ladder, on the cases that declare one.  Runs
+    // last and off the RECORDER (see __authzLadder) so it neither shifts wire
+    // ordinals nor perturbs the tier it follows.
+    if (AUTHZ_LADDER && UNAUTHORIZED_CREDS) {
+      for (const r of await __authzLadder(AUTHZ_LADDER, {
+        authorized: __authHeaders,
+        unauthorized: UNAUTHORIZED_CREDS,
+      })) out.push(r);
+    }
   }
 
   const req = createRequire(import.meta.url);
@@ -172,7 +196,12 @@ export async function run() {
   let verification = null;
   try {
     const trace = JSON.parse(readFileSync(TRACE_FILE, "utf8"));
-    const outcomes = out.map((r) => ({ name: r.name, suite: r.suite, status: r.status }));
+    // Harness probes are not DSL test cases — they have no requirement to join
+    // onto, so they stay out of the Definition-of-Done rollup entirely rather
+    // than arriving as unmatched (or, worse, skip-status) outcomes.
+    const outcomes = out
+      .filter((r) => r.tier !== "authz")
+      .map((r) => ({ name: r.name, suite: r.suite, status: r.status }));
     verification = computeVerification(trace.index, trace.requirements.map((r) => r.id), outcomes);
   } catch {
     /* no traceability emitted — verification stays null */
@@ -217,9 +246,13 @@ async function runCase(c) {
         ? "devstub"
         : "none";
     const bearerToken = authMode === "oidc" ? oidc?.token ?? null : null;
+    const unauthorizedToken = authMode === "oidc" ? oidc?.unauthorizedToken ?? null : null;
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken }));
+    writeFileSync(entry, entrySource({
+      deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken,
+      authzLadder: AUTHZ_LADDERS[c.name] ?? null,
+    }));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     return await run();
@@ -268,7 +301,7 @@ if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
 // Both tiers gate: `api` (emitted `test e2e`) and `unit` (emitted
 // aggregate `test`). A boot/infra error, or a FAILING requirement in the
 // Definition-of-Done rollup, fails the case.
-let pass = 0, fail = 0, errored = 0, reqFailing = 0;
+let pass = 0, fail = 0, errored = 0, reqFailing = 0, skipped = 0;
 // Cross-backend runtime wire differential (M-T9.11): every request this tier
 // makes is recorded at the dispatch chokepoint and compared to the committed
 // canonical golden.  node is the ORACLE the goldens are captured from, so here
@@ -285,6 +318,15 @@ for (const c of corpus) {
     continue;
   }
   for (const r of out.results) {
+    // `skip` is a THIRD outcome, not a quiet pass: the authz ladder reports an
+    // arm its auth flavour cannot express (a dev-stub system has no anonymous
+    // caller) as skipped, so the gap stays visible in the log instead of being
+    // counted as a rung that held.
+    if (r.status === "skip") {
+      skipped++;
+      process.stdout.write(`  ○ [${r.tier}] ${r.name}\n`);
+      continue;
+    }
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier}] ${r.name}\n`);
@@ -312,5 +354,5 @@ await oidc?.stop();
 const wireBad = await wire.finish();
 
 const reqTail = reqFailing ? `, ${reqFailing} requirement(s) FAILING` : "";
-process.stdout.write(`\n${pass} passed, ${fail} failed${reqTail}${errored ? `, ${errored} cases errored` : ""}\n`);
+process.stdout.write(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}${reqTail}${errored ? `, ${errored} cases errored` : ""}\n`);
 process.exit(fail > 0 || errored > 0 || reqFailing > 0 || wireBad > 0 ? 1 : 0);
