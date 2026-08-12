@@ -62,6 +62,15 @@ function grammarKeywords(): string[] {
 const POSITIONS: Record<string, (k: string) => string> = {
   // aggregate/VO/event field name — `Property.name`
   fieldName: (k) => `context C { aggregate A { ${k}: string } }`,
+  // ...the SAME declaration, but not first in the body.  A member rule with a
+  // trailing optional keyword clause (`FieldAccess`, the `TypeRef` union /
+  // carrier suffixes, `check … message "…"`) swallows a following field NAMED
+  // that keyword, because the grammar is newline-insensitive and the
+  // repetition-exit is greedy — so `fieldName` alone reports a word as
+  // admissible that is only admissible when it happens to come first
+  // (pairwise finding F4; closed by `src/language/soft-keyword-colon-guard.ts`).
+  // A word must be declarable ANYWHERE in the body, not just at the top of it.
+  fieldNameAfterField: (k) => `context C { aggregate A { title: string\n ${k}: string } }`,
   // operation parameter name — `Parameter` -> `LooseName`
   paramName: (k) => `context C { aggregate A { name: string\n operation op(${k}: string) { } } }`,
   // member read after a dot — `MemberName`
@@ -114,7 +123,9 @@ const DOMAIN_WORD_FLOOR = [
 // The floor positions: the "declare or read a domain value" surface, where all
 // floor words are (and must stay) admissible.  member-access / l-value / state
 // coverage is looser across the six lists and is governed by the snapshot only.
-const FLOOR_POSITIONS = ["fieldName", "paramName", "nameRef"] as const;
+// `fieldNameAfterField` is a floor position too: "you can name a field
+// `secret`" is not a guarantee if it only holds when the field comes first.
+const FLOOR_POSITIONS = ["fieldName", "fieldNameAfterField", "paramName", "nameRef"] as const;
 
 describe("keyword-as-identifier completeness (M-T5.18 Track B)", () => {
   let parse: ReturnType<typeof parseHelper>;
@@ -135,7 +146,11 @@ describe("keyword-as-identifier completeness (M-T5.18 Track B)", () => {
       }
       coverage[k] = soft;
     }
-  }, 120_000);
+    // Budget: ~280 keywords x 7 positions, each a full document build.  Runs
+    // in ~70s idle; the ceiling is generous because CI shards share a runner
+    // and the whole matrix lives in this one hook (a timeout here reports as
+    // "the suite failed", which is the least diagnosable failure shape).
+  }, 300_000);
 
   it("every DOMAIN_WORD_FLOOR term is a live grammar keyword", () => {
     const keywords = new Set(grammarKeywords());

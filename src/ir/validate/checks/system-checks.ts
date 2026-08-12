@@ -28,7 +28,6 @@ import type {
   DataSourceIR,
   DeployableIR,
   EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
@@ -48,11 +47,7 @@ import {
   isGroupedProjection,
   isQueryTimeProjection,
 } from "../../types/loom-ir.js";
-import {
-  backendServesRealtime,
-  durableEventTypes,
-  realtimeEventTypes,
-} from "../../util/channels.js";
+import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { bodyUsesDataGrid } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
@@ -1994,7 +1989,8 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
   // Backends that gate one or both of the deferred capability-filter cases.
-  // .NET (EF `HasQueryFilter`) supports BOTH, so it's deliberately absent.
+  // .NET supports BOTH (EF `HasQueryFilter` on the mapped-column shapes, an
+  // in-app predicate on `document`), so it gates neither.
   // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
   // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
   // `python` is included because it now emits the non-principal relational case
@@ -2063,8 +2059,16 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // `document`** now (DEBT-02 tail complete): the blob is one JSONB column, not
   // per-field queryable, so the predicate is evaluated IN-APP over the rehydrated
   // instance (`documentCapabilityBody` → a list-comprehension filter in
-  // `repository-document-builder.ts`), mirroring node.  .NET handles all shapes
-  // (it's not in LIMITED_FAMILIES).  A PRINCIPAL filter on a `document` shape is
+  // `repository-document-builder.ts`), mirroring node.  **.NET** handles all
+  // shapes too, but NOT all of them through EF: `relational`/`embedded` ride the
+  // EF `HasQueryFilter` (real mapped columns), while `document` — whose fields
+  // live inside one jsonb blob, so EF has no column to hang a filter on — is
+  // filtered IN-APP over the rehydrated aggregate (`_CapabilityVisible` in
+  // `emit/repository.ts`'s `renderDocumentRepositoryImpl`), exactly like
+  // node/java/python.  That document arm did NOT exist until #2530: this
+  // function asserted .NET filtered every shape while the emitter emitted no
+  // document filter at all — a SILENT cross-tenant read (#2527's follow-up 1).
+  // A PRINCIPAL filter on a `document` shape is
   // wired on node/Java **and now python** (DEBT-02 Slice B — the actor binds into
   // the in-app predicate; see `supportsPrincipalNonRelationalFilter` below and the
   // `document-tenancy.ddd` ts-/java-/python-build fixtures); it stays gated only
@@ -2074,7 +2078,10 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     (family === "java" && (shp === "document" || shp === "embedded")) ||
     (family === "elixir" && shp === "embedded") ||
     (family === "python" && (shp === "document" || shp === "embedded")) ||
-    // .NET (EF) filters every shape; in LIMITED_FAMILIES only for the auth gate.
+    // .NET filters every shape — `embedded` via the EF query filter (its root
+    // scalars are real columns), `document` in-app over the rehydrated
+    // aggregate (its fields are inside the jsonb blob).  It is in
+    // LIMITED_FAMILIES for the auth gate, not because a shape is unwired.
     (family === "dotnet" && (shp === "document" || shp === "embedded"));
   // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
   // actor + non-relational intersection).  An `embedded` aggregate's root
@@ -2694,21 +2701,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           consumed ? "error" : "warning",
         );
       }
-      // (3) Transactional outbox: the relay argument to `renderProjectIndexTs`
-      // is `!usingMikro`-gated and no `__loom_outbox` table is created, so a
-      // channel that asked for durability (`retention: log | work`) silently
-      // degrades to the at-most-once in-process path — the declared
-      // at-least-once contract is not honoured (dispatch-delivery-semantics.md).
-      // Conjoined with the local-reactor test exactly as the emitter does: with
-      // no subscriber there is nothing for a relay to drain, so the model is
-      // functionally identical on both adapters and must not be rejected.
-      const subs = (ctx as EnrichedBoundedContextIR).eventSubscriptions ?? [];
-      if (subs.length > 0 && durableEventTypes(ctx).size > 0) {
-        rejectFeature(
-          `context '${ctxName}' carries a durable channel ('retention: log | work') with a local reactor`,
-          `the transactional outbox + relay that make its delivery at-least-once`,
-        );
-      }
+      // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
+      // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
+      // `startOutboxRelay` over the EntityManager, so a durable channel
+      // (`retention: log | work`) is at-least-once here exactly as on drizzle
+      // (dispatch-delivery-semantics.md).  Nothing to gate.
       // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
       // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
       // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
