@@ -487,3 +487,52 @@ Sources: M-T9.27 register rows. Relates to M-T6.23 (mikroorm) and M-T6.25 (dappe
 ## M-T6.36 — Java emitter shape gaps — `open` · **S** · P3
 Two narrow Java-only rejections: `loom.java-projection-field-unsupported` (projection field shapes the emitter does not handle) and `loom.java-workflow-instance-field-unsupported` (workflow instance field shapes). Both name Java in the code identity, which M-T5.21 §Symptom 1 argues against — fold the target into the message when the shapes land.
 Sources: M-T9.27 register rows.
+
+## M-T6.38 — A `when` state gate is not enforced off the aggregate route — `open` · **M** · P1 ⭐ silent gate bypass, not a wire divergence
+Found 2026-08-11 while landing M-T6.28 ([#2520](https://github.com/lemmit/Loc/pull/2520)), by **disproving that mission's own premise.** M-T6.28 claimed an extern `commandHandler` that "invokes a `when`-gated operation answers `500 / "internal"`". It does not. **It succeeds.**
+
+The `when` predicate (criterion.md use site 2 — the canCommand state gate) is emitted at the **route/handler layer only**:
+
+| backend | where the gate lives | what a workflow step / extern handler calls |
+|---|---|---|
+| node | `routes-builder.ts` `whenGateLine` — inside the aggregate route handler | the DOMAIN method (`ship.markTracked()`), which carries no gate |
+| dotnet | `Application/<Agg>/Commands/<Op>Handler.cs` | the ENTITY method (`ship.MarkTracked()`) — verified in the emitted `…OnShipmentRequestedHandler.cs` |
+| java, python, elixir | `<Agg>Service.java` / `<agg>_routes.py` / the context module `<ctx>.ex` | **unverified — re-verify before building** |
+
+So on node and .NET a state-gated operation invoked from a workflow step, a saga cascade, or an extern handler **runs with the gate unevaluated**: no `DisallowedError`, no 409, the write lands. Verified empirically on both (generate a `when`-gated `markTracked()`, invoke it from an `on(e)` workflow step, read the emitted files: the gate appears in the route/handler and nowhere the workflow reaches).
+
+**Why this is worse than the envelope defects around it.** M-T6.25/6.28/6.31 are contract bugs — the right refusal in the wrong shape. This is the *absence of the refusal*: a rule the model declares, the validator accepts, and the docs describe as enforced, which silently does not run on the paths that reach the aggregate from inside the system. It is the silent-governance class (cf. M-T6.32, M-T3.2), applied to state rather than authorization — and `requires` gates deserve the same question asked of them on these paths.
+
+**Why no gate saw it.** Every `when` test drives the ROUTE (which is correct). No fixture invokes a gated operation from a workflow step or extern handler, so nothing has ever asked the question; and the wire goldens cannot see it, because the request that should have been refused *succeeds* — there is no error body to diff.
+
+**The design decision is NOT made, and this mission must not make it.** Two coherent answers, and they differ in blast radius:
+1. **Domain-layer gate** — the `when` predicate moves into (or is also asserted by) the aggregate's own method, so every caller is gated. Correct-by-construction, but it changes the emitted domain classes on five backends and makes the gate a domain invariant, which needs an owner call on whether `when` is part of the model's meaning or part of its HTTP surface.
+2. **Route-layer by design** — `when` stays an API-edge gate, and the language says so explicitly (docs + a validator note), leaving in-system callers deliberately ungated because the workflow *is* the authority. Cheap, but it must be written down, and `docs/criterion.md` currently reads as if the gate is unconditional.
+
+**First step: no code.** (a) finish the per-backend verification table above; (b) get the owner decision on 1 vs 2 (D-tag it in `docs/decisions.md`); (c) only then size the work. Sized M as a placeholder for (a)+(b) plus one backend of whichever answer wins — expect a re-size.
+
+**Verification when built.** A behavioral case, not a static pin: the golden cannot express "the request that should have been refused succeeded", so the fixture must drive a gated operation through a workflow step and assert the state did NOT change (the shape M-T6.27's two-writer case wants). A static per-backend pin that the gate appears on the path the workflow calls is the cheap companion.
+
+Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) (M-T6.31 + M-T6.28); the corrected premise is recorded in M-T6.28's body. Relates to M-T6.32 (silent-governance class) and M-T3.2 (the same class on authorization).
+
+> **ID note.** Minted as M-T6.37, renumbered to M-T6.38 before merge: [#2517](https://github.com/lemmit/Loc/pull/2517) (the M-T9.13 drain) had claimed M-T6.37 for the Elixir-seeder gap in the same hour, and neither PR could see the other's ID on `main`. First claim wins. The next-free-ID check has to span open PR branches, not just `main` — which is [M-T9.32](./T9-toolchain-health.md)'s job (dup-claim automation, minted by #2495); this is a live instance of what it exists to prevent.
+
+## M-T6.39 — The `/files/{key}` absent-object 404 is a fourth envelope, on zero backends — `open` · **S–M** · P2
+Found 2026-08-11 by the M-T6.31 drain, at the one absent-read site outside that mission's five.
+
+`GET /files/{key}` (the root file-download route over the bound `objectStore` — M-T1.2) answers a missing object in **two shapes, neither of them RFC 7807**:
+
+| backends | body | content-type |
+|---|---|---|
+| node, python, elixir | `{"error":"not found"}` | `application/json` |
+| dotnet, java | *empty* | none |
+
+Emission sites: `src/generator/typescript/emit/routes.ts` (the `app.get("/files/:key", …)` block), `src/generator/python/files-routes-builder.ts`, `src/generator/elixir/vanilla/files-controller-emit.ts`, and `emit/program.ts` on both dotnet (`Results.NotFound()`) and java (`ResponseEntity.notFound().build()`).
+
+**This is not the same fix as M-T6.31.** There, the correct envelope already existed in each app and the read sites merely had to reach it; here **no backend emits one on this route at all**, so it is a genuine wire change on the three that currently send `{"error":"not found"}` — a client parsing that key is broken by the fix. That is why it was deliberately left out of #2520 rather than folded in: it wants its own claim and its own reviewed golden diff.
+
+Two sub-decisions to settle in the PR, neither hard: (a) the `detail` sentence — `"file <key> not found"` is the RS-27-shaped answer, but the resource is an object key, not an aggregate id; (b) whether the route joins each backend's shared 404 producer (the M-T6.31 answer, and the reason those arms can't drift again) or hand-builds the body — on dotnet/java it is a **minimal-API / plain-controller** route, so `DomainExceptionFilter` / `ApiExceptionAdvice` do **not** apply to it as-is, which is the actual work.
+
+**Verification.** The absent-read wire-golden probe #2520 added (`test/behavioral/wire-differential.mjs`) is the natural home — extend it to `/files/<absent-key>` for any case that uploads a file, and the envelope is gated on all seven legs. A static five-backend site pin (the `absent-read-envelope-parity.test.ts` shape) is the fast companion. Note the corpus gap first: `resources.ddd` exercises the object store but no committed golden reaches the download route.
+
+Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) while draining M-T6.31; recorded in that mission's body as the remaining site. Relates to RS-22 (the envelope's membership) and M-T6.31 (the same class, the aggregate/projection/instance sites).
