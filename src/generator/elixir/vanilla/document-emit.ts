@@ -387,11 +387,11 @@ ${
     Repo.delete(record)
   end
 
-  @doc "Persist a pre-built changeset (named-operation seam — unused on the document path)."
+  @doc "Persist a pre-built changeset (named-operation seam — the document op path re-embeds through this)."
   @spec persist_change(Ecto.Changeset.t()) ::
-          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
-    Repo.update(changeset)
+    Repo.update(changeset)${versioned ? "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}" : ""}
   end${findBlock}
 end
 `;
@@ -605,12 +605,21 @@ export function renderDocNamedOpFunction(
   // The re-embed persist tail.  Guard-free/audit-free: the plain `put_embed` pipe.
   // Audited: build the changeset, then persist + record the audit row in ONE
   // `Repo.transaction` (the audit commits iff the write does).
+  // M-T6.27: on a `versioned` aggregate the bump rides `optimistic_lock(:version)`
+  // (same +1 on the wire, plus the CAS filter — a raced op write raises
+  // `Ecto.StaleEntryError`, rescued to `{:error, :conflict}` → 409 in
+  // `persist_change/1`).  An UNVERSIONED document keeps the plain bump: its
+  // row column still exists and must advance, but there is no CAS contract.
+  const opVersionPipe = (indent: string): string =>
+    aggregateIsVersioned(agg)
+      ? `${indent}|> Ecto.Changeset.change(%{})\n${indent}|> Ecto.Changeset.optimistic_lock(:version)`
+      : `${indent}|> Ecto.Changeset.change(%{version: row.version + 1})`;
   const persistTail = hasAudit
     ? [
         "",
         "    changeset =",
         "      row",
-        "      |> Ecto.Changeset.change(%{version: row.version + 1})",
+        opVersionPipe("      "),
         "      |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
         "",
         `    ${appModule}.Repo.transaction(fn ->`,
@@ -636,7 +645,7 @@ export function renderDocNamedOpFunction(
     : [
         "",
         "    row",
-        "    |> Ecto.Changeset.change(%{version: row.version + 1})",
+        opVersionPipe("    "),
         "    |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
         `    |> ${repoMod}.persist_change()`,
       ];
@@ -726,10 +735,14 @@ export function renderDocReturningOpFunction(
 
   // The persist changeset — re-embed the mutated struct + bump version, round-tripped
   // through the doc repo's `persist_change` (shared by every persisting shape).
+  // M-T6.27: on a `versioned` aggregate the bump rides `optimistic_lock(:version)`
+  // (CAS + the same +1); unversioned keeps the plain bump.
   const persistChangeset = [
     "    changeset =",
     "      row",
-    "      |> Ecto.Changeset.change(%{version: row.version + 1})",
+    aggregateIsVersioned(agg)
+      ? "      |> Ecto.Changeset.change(%{})\n      |> Ecto.Changeset.optimistic_lock(:version)"
+      : "      |> Ecto.Changeset.change(%{version: row.version + 1})",
     "      |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
     "",
   ];
