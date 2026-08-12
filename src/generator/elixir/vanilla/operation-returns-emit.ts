@@ -631,7 +631,15 @@ export function renderReturningOpFunction(
   // Found 2026-08-05 by the caller-census drain: `corpus/operation-returns`'
   // `accept()` (`reserved := true`, returning `: string or NotFound`) read back
   // `version: 2` where every other backend read 3.
-  const versionBump = aggregateIsVersioned(agg) ? `%{version: record.version + 1}` : "%{}";
+  //
+  // M-T6.27: the bump now rides `optimistic_lock(:version)` instead of a plain
+  // `change(%{version: …+1})` — same +1 on the wire, plus the CAS filter the
+  // plain bump lacked, so a raced returning operation raises
+  // `Ecto.StaleEntryError` (rescued to `{:error, :conflict}` → 409 in
+  // `persist_change/1`) instead of silently overwriting the other writer.
+  const versionLock = aggregateIsVersioned(agg)
+    ? "\n      |> Ecto.Changeset.optimistic_lock(:version)"
+    : "";
   // A trailing NON-aggregate success return (shape C), re-rendered to sit inside
   // the `{:ok, saved}` commit arm over the persisted struct — a preceding
   // `record = saved` rebinds `record`, so the return's `this.*` reads reflect the
@@ -676,7 +684,7 @@ export function renderReturningOpFunction(
             // so a rollback drops them too.
             `    changeset =`,
             `      record`,
-            `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+            `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
             ``,
             `    tx_result =`,
             `      ${appModule}.Repo.transaction(fn ->`,
@@ -702,7 +710,7 @@ export function renderReturningOpFunction(
         : [
             `    changeset =`,
             `      record`,
-            `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+            `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
             ``,
             `    ${appModule}.Repo.transaction(fn ->`,
             `      case ${repoMod}.persist_change(changeset) do`,
@@ -722,7 +730,7 @@ export function renderReturningOpFunction(
         [
           `    changeset =`,
           `      record`,
-          `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+          `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
           ``,
           `    tx_result =`,
           `      ${appModule}.Repo.transaction(fn ->`,
@@ -756,7 +764,7 @@ export function renderReturningOpFunction(
       ? [
           `    changeset =`,
           `      record`,
-          `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+          `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
           ``,
           `    case ${repoMod}.persist_change(changeset) do`,
           `      {:ok, saved} ->`,
@@ -770,7 +778,7 @@ export function renderReturningOpFunction(
       : [
           `    changeset =`,
           `      record`,
-          `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+          `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
           ``,
           `    case ${repoMod}.persist_change(changeset) do`,
           `      {:ok, saved} -> {:ok, ${wireMap("saved", true)}}`,
@@ -786,7 +794,7 @@ export function renderReturningOpFunction(
     tailLines = [
       `    changeset =`,
       `      record`,
-      `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+      `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
       ``,
       `    case ${repoMod}.persist_change(changeset) do`,
       `      {:ok, saved} ->`,
@@ -804,7 +812,7 @@ export function renderReturningOpFunction(
     tailLines = [
       `    changeset =`,
       `      record`,
-      `      |> Ecto.Changeset.change(${versionBump})${putBlock}`,
+      `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
       ``,
       `    case ${repoMod}.persist_change(changeset) do`,
       `      {:ok, saved} ->`,
@@ -1250,6 +1258,17 @@ export function renderReturningOpControllerAction(
       ? [
           `  def ${resultFn}(conn, {:error, %Ecto.Changeset{} = changeset}),
     do: ProblemDetails.validation_error_response(conn, changeset)`,
+        ]
+      : []),
+    // A persisting op on a `versioned` aggregate can lose the optimistic-lock
+    // race (`persist_change/1` rescues `Ecto.StaleEntryError` to
+    // `{:error, :conflict}`) — map it to the shared 409 responder.  Gated so an
+    // unversioned/non-persisting op emits no unreachable clause
+    // (`--warnings-as-errors`).
+    ...(persists && aggregateIsVersioned(agg)
+      ? [
+          `  def ${resultFn}(conn, {:error, :conflict}),
+    do: ProblemDetails.conflict_response(conn)`,
         ]
       : []),
   ].join("\n\n");

@@ -5,7 +5,7 @@
 // `Repo.insert` / `Repo.update`.  A non-principal value renders directly
 // (`now()` → `DateTime.utc_now()`); a bare `currentUser` value resolves to the
 // principal id read off the threaded actor map (`current_user.<idKey>`, nil-safe).
-// Two cases stay fail-fast (loom.elixir-stamp-unsupported): a principal stamp on
+// Two cases stay fail-fast (loom.stamp-principal-without-auth): a principal stamp on
 // a deployable WITHOUT auth, and stamps on an event-sourced aggregate.  Mirrors
 // test/generator/java/generator-java-stamps.
 // ---------------------------------------------------------------------------
@@ -172,7 +172,7 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
     const noAuth = VANILLA_PRINCIPAL.replace(", auth: required", "");
     const loom = await buildLoomModel(noAuth);
     const errors = validateLoomModel(loom).filter(
-      (d) => d.code === "loom.elixir-stamp-unsupported",
+      (d) => d.code === "loom.stamp-principal-without-auth",
     );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("no auth");
@@ -200,7 +200,7 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
     }`;
     const loom = await buildLoomModel(eventSourced);
     const errors = validateLoomModel(loom).filter(
-      (d) => d.code === "loom.elixir-stamp-unsupported",
+      (d) => d.code === "loom.stamp-on-event-sourced-invalid",
     );
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0]!.message).toContain("event-sourced");

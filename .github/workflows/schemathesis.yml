@@ -1,0 +1,101 @@
+name: Schemathesis contract fuzzing (node/Hono)
+
+# M-T9.21 — spec-driven API property fuzzing.
+#
+# Boots the generated Hono deployable and feeds it its OWN emitted
+# `/openapi.json` to Schemathesis, which derives thousands of adversarial cases
+# from the schema and asserts the server never 500s, never violates its own
+# declared response schema, and honours the `required`/`format`/`enum`/bounds it
+# published.
+#
+# WHY: every other runtime gate drives the backends with EXAMPLE-shaped input —
+# the emitted `test e2e` suite, the corpus fixtures, the hand-written negatives
+# in the auth/tenancy legs.  The adversarial space (wrong verb, absent body,
+# malformed fields, boundary numbers, non-UUID references) is exercised only
+# where a human wrote the case, which is why #2485, #2440, #2442, #2472, #2500
+# and #2261 all had to be found by hand inside nine days.
+#
+# Complements the wire differential (M-T9.11): that checks the backends against
+# EACH OTHER, this checks each backend against ITS OWN published contract.
+#
+# NOT per-PR: it needs a Python toolchain on top of the node one, and its
+# subject (the emitted route + spec surface) moves slowly.  Nightly, plus the
+# `run-schemathesis` label for an on-demand pre-merge run, plus dispatch — the
+# same shape as the other heavy feature gates (CLAUDE.md → "Forcing a
+# post-merge gate before merge").
+#
+# Local: `npm run test:schemathesis` (needs `uv tool install schemathesis` and
+# `cd test/behavioral && npm ci`).  Findings register:
+# docs/audits/schemathesis-findings-2026-08.md.  Known findings are ratcheting
+# root-cause rules in test/behavioral/schemathesis-waivers.json — an
+# unattributed finding fails the run, and a rule that stops reproducing fails it
+# too.
+#
+# Follow-up slices: the python / java / dotnet / elixir legs, each over that
+# backend's existing obs-e2e boot recipe (a real process + a postgres sidecar
+# rather than this leg's in-process PGlite).
+
+on:
+  schedule:
+    - cron: '0 4 * * *'      # 04:00 UTC nightly
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    # Schedule / manual always; on a PR only when `run-schemathesis` is set.
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-schemathesis'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install schemathesis
+        run: pipx install schemathesis==4.24.3
+
+      - name: Install toolchain deps
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        run: npm ci
+        working-directory: test/behavioral
+
+      - name: Fuzz the generated Hono backend against its own spec
+        run: npm run test:schemathesis
+
+      - name: Upload schemathesis reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schemathesis-reports
+          path: |
+            test/behavioral/.work-schemathesis/*/schemathesis.log
+            test/behavioral/.work-schemathesis/*/app-errors.log
+            test/behavioral/.work-schemathesis/*/openapi.json
+            test/behavioral/.work-schemathesis/*/report/*.ndjson
+          if-no-files-found: warn
+          retention-days: 14

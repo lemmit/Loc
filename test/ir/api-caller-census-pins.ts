@@ -356,6 +356,16 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // unproven.  Registered rather than silently absent: before this fixture the
   // feature had no `.ddd` at all, so it could not even appear on this list.
   "policy-deny",
+  // The `shape: document` × authz crossing (pairwise F1).  Codegen CRASHED on
+  // node/java/python until the in-app desugar landed, so the fixture's first job
+  // is the compile tier — but "the deep ladder actually hides an out-of-subtree
+  // document row over HTTP" is still unproven at runtime.  A runtime caller here
+  // needs an AUTHENTICATED principal (the ladder is meaningless without one),
+  // which is the multi-principal harness work, not this fixture's.  The emitted
+  // predicate IS executed against fabricated rows in
+  // `test/generator/policy-document-inapp.test.ts`, so the filtering semantics
+  // are proven — just not end-to-end over the wire.
+  "policy-document",
   "resources",
   "tenancy-hierarchy",
 ];

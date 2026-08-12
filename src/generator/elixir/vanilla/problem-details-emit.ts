@@ -31,6 +31,17 @@ export function renderVanillaProblemDetailsModule(
    *  here is what stops a remap from moving the per-controller arms while this
    *  one stayed a literal. */
   notFoundStatus = 404,
+  /** Resolved statuses for the remaining rungs that reach `problem_response/4`
+   *  — the `requires` authorization gate (`Forbidden`, 403 by default), the
+   *  `when` state gate (`Disallowed`, 409) and the FK-restrict destroy
+   *  (`ReferencedInUse`, 409).  They are not written into a response body here;
+   *  they key the CATALOG-EVENT classifier below, which used to be a literal
+   *  `case status do 403 … 409 … 404` and therefore silently reclassified every
+   *  remapped rung as `domain_error` (M-T9.25 round 2, probe 1).  Defaults
+   *  reproduce the literal arms exactly ⇒ byte-identical. */
+  forbiddenStatus = 403,
+  disallowedStatus = 409,
+  referencedInUseStatus = 409,
   /** True when this project ships a `priv/gettext` catalog carrying its authored
    *  validation messages (M-T1.11) — a changeset error's `loom_code` then
    *  resolves through gettext for the request locale.  False ⇒ byte-identical to
@@ -127,6 +138,54 @@ export function renderVanillaProblemDetailsModule(
     |> send_resp(${concurrencyStatus}, body)
   end`
     : "";
+  // The catalog-event classifier inside `problem_response/4`.  It keys on the
+  // RESOLVED rung statuses, not on literal 403/409/404: `problem_response/4` is
+  // the shared responder every denial rung funnels through, so a literal `409 ->
+  // disallowed` arm reclassified EVERY remapped conflict as `domain_error` while
+  // the response body itself moved correctly — the observability half of the
+  // rung silently disagreeing with its own wire half, inside one backend.
+  //
+  // Two rungs can legitimately resolve to the SAME code (they all default to
+  // 409), and a duplicate `case` clause is an unreachable-clause warning that
+  // `--warnings-as-errors` rejects, so the arms are deduped FIRST-WINS in the
+  // declaration order below.  With no override that collapses to exactly the
+  // three literal arms this replaced (403 / 409 / 404), in that order ⇒
+  // byte-identical.
+  const forbiddenArm = `${renderPhoenixLogCall("forbidden", [
+    { name: "message", valueExpr: "detail" },
+    { name: "status", valueExpr: "status" },
+  ])}
+        ${renderPhoenixDomainFault("forbidden")}`;
+  const disallowedArm = `${renderPhoenixLogCall("disallowed", [
+    { name: "message", valueExpr: "detail" },
+    { name: "status", valueExpr: "status" },
+  ])}
+        ${renderPhoenixDomainFault("disallowed")}`;
+  const notFoundArm = `${renderPhoenixLogCall("notFound", [
+    { name: "status", valueExpr: "status" },
+  ])}
+        ${renderPhoenixDomainFault("not_found")}`;
+  const seenStatuses = new Set<number>();
+  const classifyArms = (
+    [
+      [forbiddenStatus, forbiddenArm],
+      // `Disallowed`, `UniquenessConflict` and `ReferencedInUse` all classify as
+      // the `disallowed` catalog event — matching the four non-elixir backends,
+      // which choose the event at the THROW site (by exception class) and are
+      // therefore immune to a status remap by construction.
+      [disallowedStatus, disallowedArm],
+      [uniquenessStatus, disallowedArm],
+      [referencedInUseStatus, disallowedArm],
+      [notFoundStatus, notFoundArm],
+    ] as const
+  )
+    .filter(([status]) => {
+      if (seenStatuses.has(status)) return false;
+      seenStatuses.add(status);
+      return true;
+    })
+    .map(([status, arm]) => `      ${status} ->\n        ${arm}\n`)
+    .join("\n");
   const log422 = renderPhoenixLogCall("domainError", [
     { name: "message", valueExpr: `"Validation failed"` },
     { name: "status", valueExpr: "422" },
@@ -254,24 +313,7 @@ ${responseFns}
     # Each fault also feeds domain_faults_total{kind} (via [:loom, :domain, :fault]),
     # except a >=500 internal_error — that's infrastructure, not a domain fault.
     case status do
-      403 ->
-        ${renderPhoenixLogCall("forbidden", [
-          { name: "message", valueExpr: "detail" },
-          { name: "status", valueExpr: "status" },
-        ])}
-        ${renderPhoenixDomainFault("forbidden")}
-
-      409 ->
-        ${renderPhoenixLogCall("disallowed", [
-          { name: "message", valueExpr: "detail" },
-          { name: "status", valueExpr: "status" },
-        ])}
-        ${renderPhoenixDomainFault("disallowed")}
-
-      404 ->
-        ${renderPhoenixLogCall("notFound", [{ name: "status", valueExpr: "status" }])}
-        ${renderPhoenixDomainFault("not_found")}
-
+${classifyArms}
       _ when status >= 500 ->
         ${renderPhoenixLogCall("internalError", [
           { name: "error", valueExpr: "detail" },

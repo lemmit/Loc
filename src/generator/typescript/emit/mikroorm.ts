@@ -56,6 +56,7 @@ import {
   isMaterializedProjection,
   isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
+import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
   discriminatorValue,
   isTphBase,
@@ -523,14 +524,49 @@ const TEXT = (prop: string, opts: { primary?: boolean; nullable?: boolean } = {}
   nullable: opts.nullable ?? false,
   primary: opts.primary ?? false,
 });
-const TIMESTAMPTZ = (prop: string): MikroColumn => ({
+const TIMESTAMPTZ = (prop: string, opts: { nullable?: boolean } = {}): MikroColumn => ({
   prop,
   mikroType: "Date",
   tsType: "Date",
-  nullable: false,
+  nullable: opts.nullable ?? false,
   primary: false,
   columnType: "timestamptz",
 });
+const INT = (prop: string): MikroColumn => ({
+  prop,
+  mikroType: "number",
+  tsType: "number",
+  nullable: false,
+  primary: false,
+});
+
+/** Row-entity class name for the transactional-outbox table.  Exported so the
+ *  workflow builder's mikro outbox machinery references the same symbol. */
+export const MIKRO_OUTBOX_ROW_CLASS = "LoomOutboxRow";
+
+/** Transactional outbox Row (`__loom_outbox`) — the MikroORM edition of the
+ *  drizzle `loomOutbox` pgTable (dispatch-delivery-semantics.md).  Column
+ *  divergence from drizzle is deliberate on two properties, because MikroORM
+ *  owns this schema through `updateSchema()` rather than a migration:
+ *    - `id` is a TEXT pk the capture site fills with `randomUUID()`, not a
+ *      `uuid DEFAULT gen_random_uuid()` — every other id in the mikro model is
+ *      an application-generated text id, and a DB-side default would have to be
+ *      threaded as `defaultRaw` purely to be immediately overwritten.
+ *    - `occurredAt` / `attempts` are written by the capture site too, so they
+ *      need no DDL default (the drizzle table has `defaultNow()` / `default(0)`
+ *      because its INSERT omits them).
+ *  `dispatchedAt` NULL is the undispatched marker the relay's drain filters on,
+ *  exactly as on drizzle. */
+function outboxRowEntity(): { block: string; schemaName: string } {
+  return renderRecordRowEntity(MIKRO_OUTBOX_ROW_CLASS, "__loom_outbox", [
+    TEXT("id", { primary: true }),
+    TIMESTAMPTZ("occurredAt"),
+    TEXT("type"),
+    JSONB("payload", false),
+    TIMESTAMPTZ("dispatchedAt", { nullable: true }),
+    INT("attempts"),
+  ]);
+}
 
 /** Audit history Row (`audit_records`) — the MikroORM edition of the drizzle
  *  `auditRecords` table.  Property names + underscore-mapped columns match, so
@@ -586,11 +622,17 @@ export const mikroWorkflowRowClass = (wf: WorkflowIR): string => `${upperFirst(w
  *  the shared `fieldColumns` — mirroring the drizzle `emitWorkflowStateTable`. */
 function workflowStateColumns(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): MikroColumn[] {
   const corr = wf.correlationField;
-  return (wf.stateFields ?? []).flatMap((f) =>
+  const cols: MikroColumn[] = (wf.stateFields ?? []).flatMap((f) =>
     f.name === corr
       ? [{ prop: f.name, mikroType: "string", tsType: "string", nullable: false, primary: true }]
       : fieldColumns(f, ctx),
   );
+  // Idempotent-consumer marker (dispatch-delivery-semantics.md §3) — the twin
+  // of the drizzle `emitWorkflowStateTable`'s `last_event_id`.  Under a durable
+  // channel the reactor preamble reads `state.lastEventId` and stamps it before
+  // save, so without this column the emitted handler would not type-check.
+  if (durableEventTypes(ctx).size > 0) cols.push(TEXT("lastEventId", { nullable: true }));
+  return cols;
 }
 
 /** Row-entity class name for a folded projection's read-model row
@@ -618,7 +660,7 @@ export function renderMikroEntities(
   ctx: EnrichedBoundedContextIR,
   shapeOf: (agg: EnrichedAggregateIR) => "relational" | "embedded" | "document" = (a) =>
     (a.savingShape as "relational" | "embedded" | "document" | undefined) ?? "relational",
-  opts: { audit?: boolean; provenance?: boolean } = {},
+  opts: { audit?: boolean; provenance?: boolean; outbox?: boolean } = {},
 ): string {
   const blocks: string[] = [];
   const schemaNames: string[] = [];
@@ -806,6 +848,14 @@ export function renderMikroEntities(
   }
   if (opts.provenance) {
     const { block, schemaName } = provenanceRecordEntity();
+    schemaNames.push(schemaName);
+    blocks.push(block);
+  }
+  // Transactional-outbox Row — emitted (like the drizzle `__loom_outbox` table)
+  // only when a context carries a durable channel, so a project with no
+  // at-least-once delivery contract pays nothing.
+  if (opts.outbox) {
+    const { block, schemaName } = outboxRowEntity();
     schemaNames.push(schemaName);
     blocks.push(block);
   }
