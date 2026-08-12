@@ -24,6 +24,17 @@
 // this deserves in the fast suite; the depth belongs in a nightly with a much
 // larger range (the mission's shrinking/expanded form).
 //
+// RELATION TO THE PAIRWISE HARNESS (M-T9.29, #2512), which hunts the same class
+// by the opposite method: it composes a SYSTEMATIC matrix over curated axes
+// (capability x storage shape x authz x persistence adapter) and found four live
+// codegen throws on its first run — `shape: document` x `policy { allow … }`
+// among them.  Those shapes are outside THIS generator's grammar subset, which
+// is exactly why it found none of them: a curated axis list beats random
+// sampling wherever someone already knows which crossings are load-bearing.
+// What random generation adds is the region nobody curated — and the seed
+// -> repro story.  The two are complements, and the productive way to grow this
+// one is to teach it the axes #2512 proved were worth crossing.
+//
 // MUTATION-PROVED, because a gate that finds nothing on its first run proves
 // nothing: seeding a throw into the shared `TypeIR` dispatcher's `optional` arm
 // (reachable only from a model carrying an optional field) failed 156 of 250
