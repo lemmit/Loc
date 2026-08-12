@@ -117,6 +117,14 @@ npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}   # LOOM_MIGRAT
 # derivation python/java also emit from.  Runs per-PR (schema-load.yml), not behind a label.
 npm run test:schema-load           # LOOM_SCHEMA_LOAD=1 (docker sidecar, or LOOM_MIGRATION_PG_URL)
 
+# Spec-driven contract fuzzing (M-T9.21) — boots the generated Hono backend on PGlite over a real
+# port and feeds it its OWN emitted /openapi.json to Schemathesis: never a 500, responses conform to
+# the declared schema, declared required/format/enum/bounds honored.  Known findings are ratcheting
+# ROOT-CAUSE rules in test/behavioral/schemathesis-waivers.json (unattributed finding fails the run;
+# a rule that stops reproducing fails it too), documented in docs/audits/schemathesis-findings-2026-08.md.
+# Needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`.  ~1 min; nightly in CI.
+npm run test:schemathesis          # LOOM_SCHEMATHESIS=1 (node/Hono leg; other four backends are follow-ups)
+
 # Channels runtime e2e — cross-deployable eventing (redis/rabbitmq/kafka, CloudEvents + outbox relay);
 # per-broker × per-backend legs, each behind its own LOOM_CHANNELS_E2E[_<BROKER>][_<BACKEND>] var:
 npm run test:channels                                    # redis, Hono
@@ -367,6 +375,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - `channels-e2e.yml` — cross-deployable eventing runtime e2e (broker × backend legs). Main-push + dispatch + `run-channels` label.
 - `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch + `run-tenancy` label.
 - `migration-evolution-e2e.yml` — the runtime companion to the rename/baseline/data-migration language work (M-T2.13). Per SQL backend (5-cell matrix), against a postgres service: (1) migrate-chain schema ≡ fresh-create schema (order-independent fingerprint), and (2) seed v1 → regenerate `.ddd` to v2 → forward-migrate → the seeded row survives with correct values. Proves migrations **evolve** on data, not just emit/first-boot (the silent-data-loss class). Main-push + dispatch + the per-PR `run-migration-e2e` label.
+- `schemathesis.yml` — **nightly / `run-schemathesis` label / dispatch**: boots the generated **Hono** backend and feeds it its OWN emitted `/openapi.json` to [Schemathesis](https://schemathesis.readthedocs.io/), asserting it never 500s, never violates its own declared response schema, and honours the declared `required`/`format`/`enum`/bounds. Every other runtime gate drives EXAMPLE-shaped input, so the adversarial space (wrong verb, absent body, malformed fields, boundary numbers, non-UUID references) was only ever covered where a human wrote the case — the class behind #2485/#2440/#2442/#2472/#2500/#2261. Complements M-T9.11: the differential checks backends against *each other*, this checks each backend against *its own published contract*. Known findings are ratcheting root-cause rules in `test/behavioral/schemathesis-waivers.json` (an unattributed finding fails; a rule that stops reproducing fails too); the register is [`docs/audits/schemathesis-findings-2026-08.md`](docs/audits/schemathesis-findings-2026-08.md). The python/java/dotnet/elixir legs are follow-up slices.
 - `schema-load.yml` — **per-PR**: loads every corpus fixture's emitted migration chain into a real Postgres (`psql -f`, one db per deployable). The oracle the compile gates structurally lack — emitted schema is data, not code, so invalid DDL compiles green everywhere (G2). No build, no boot, <1min, so it runs on every PR rather than behind a label.
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
 - `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
@@ -390,6 +399,7 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 | `run-api-call` | `api-call-e2e` (typed in-system call, caller-backend matrix) |
 | `run-migration-e2e` | `migration-evolution-e2e` (5 SQL backends) |
 | `run-conformance` | `conformance-full` |
+| `run-schemathesis` | `schemathesis` (spec-driven contract fuzzing, node/Hono) |
 | `run-channels` | `channels-e2e` |
 | `run-differential` | `differential-report` |
 | `run-e2e` | `phoenix-ui-e2e`, `playground-e2e`, `elixir-vanilla-vo-e2e` |
