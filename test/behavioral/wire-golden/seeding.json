@@ -88,71 +88,13 @@
     },
     {
       "seq": 8,
-      "method": "GET",
-      "path": "/api/widgets?dir=asc&sort=name",
-      "status": 200,
-      "body": {
-        "items": [
-          {
-            "display": "Alpha",
-            "id": "<volatile:key>",
-            "name": "Alpha",
-            "size": 1,
-            "tier": "Free",
-            "version": 1
-          },
-          {
-            "display": "Beta",
-            "id": "<volatile:key>",
-            "name": "Beta",
-            "size": 2,
-            "tier": "Pro",
-            "version": 1
-          },
-          {
-            "display": "Delta-2",
-            "id": "<volatile:key>",
-            "name": "Delta-2",
-            "size": 10,
-            "tier": "Pro",
-            "version": 2
-          }
-        ],
-        "page": 1,
-        "pageSize": 20,
-        "total": 3,
-        "totalPages": 1
-      }
-    },
-    {
-      "seq": 9,
-      "method": "GET",
-      "path": "/api/gadgets?dir=asc&sort=label",
-      "status": 200,
-      "body": {
-        "items": [
-          {
-            "id": "<volatile:key>",
-            "label": "g2",
-            "version": 2,
-            "widgetId": "<volatile:key>"
-          }
-        ],
-        "page": 1,
-        "pageSize": 20,
-        "total": 1,
-        "totalPages": 1
-      }
-    },
-    {
-      "seq": 10,
       "method": "DELETE",
       "path": "/api/gadgets/{id}",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 11,
+      "seq": 9,
       "method": "GET",
       "path": "/api/gadgets/{id}",
       "status": 404,
@@ -165,14 +107,14 @@
       }
     },
     {
-      "seq": 12,
+      "seq": 10,
       "method": "DELETE",
       "path": "/api/widgets/{id}",
       "status": 204,
       "body": ""
     },
     {
-      "seq": 13,
+      "seq": 11,
       "method": "GET",
       "path": "/api/widgets/{id}",
       "status": 404,
@@ -185,37 +127,7 @@
       }
     },
     {
-      "seq": 14,
-      "method": "GET",
-      "path": "/api/widgets?dir=asc&sort=name",
-      "status": 200,
-      "body": {
-        "items": [
-          {
-            "display": "Alpha",
-            "id": "<volatile:key>",
-            "name": "Alpha",
-            "size": 1,
-            "tier": "Free",
-            "version": 1
-          },
-          {
-            "display": "Beta",
-            "id": "<volatile:key>",
-            "name": "Beta",
-            "size": 2,
-            "tier": "Pro",
-            "version": 1
-          }
-        ],
-        "page": 1,
-        "pageSize": 20,
-        "total": 2,
-        "totalPages": 1
-      }
-    },
-    {
-      "seq": 15,
+      "seq": 12,
       "method": "PATCH",
       "path": "/api/widgets",
       "status": 405,
@@ -228,7 +140,7 @@
       }
     },
     {
-      "seq": 16,
+      "seq": 13,
       "method": "GET",
       "path": "/__loom_no_such_path",
       "status": 404,
@@ -241,7 +153,7 @@
       }
     },
     {
-      "seq": 17,
+      "seq": 14,
       "method": "POST",
       "path": "/api/widgets",
       "status": 400,

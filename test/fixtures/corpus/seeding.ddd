@@ -65,41 +65,23 @@ system Seeding {
     let updatedGadget = api.gadgets.getById(g)
     expect(updatedGadget.label).toBe("g2")
 
-    // THE COLLECTION READS — the only route class that can see seed data at
-    // all, and the reason they were held back until now: the node leg composed
-    // `createApp` directly and never reached `runSeeds`, which the generated
-    // entrypoints (`index.ts` / `app/main.py` / …) call at boot, so this table
-    // started with the `default` dataset's rows on four legs and empty on the
-    // fifth.  `run.mjs` now runs the EMITTED seeder too, so all five legs read
-    // the same table and these assertions are about the SEEDER rather than
-    // about the harness (`R.unseededListRead`, now drained).
+    // NO `api.widgets.all()` / `api.gadgets.all()` here, and that absence is a
+    // finding rather than an omission — see `R.unseededOnElixir` in
+    // `test/ir/api-caller-census-pins.ts`.  A collection read is the only route
+    // class that can SEE seed data, and the wire golden compares whole bodies,
+    // so one here would be a divergence on any leg whose table starts
+    // differently.  The node leg used to be that leg (it composed `createApp`
+    // and never reached `runSeeds`); #2517 fixed it, and the same change found
+    // that **elixir emits no seeder at all** (B19 / M-T6.37) — so the odd leg
+    // out is now that one, and it stays odd until the Ecto seeder lands.
     //
-    // `sort`/`dir` are explicit because the page carries more than one row and
-    // the wire golden diffs item ORDER as its own divergence kind.  The seeded
-    // rows are asserted by VALUE, not just counted: `size`/`tier` are the int
-    // and enum columns the seeder writes through the domain `create` path, and
-    // until this read nothing anywhere had read a seeded row back.
-    let all = api.widgets.all({ sort: "name", dir: "asc" })
-    expect(all.total).toBe(3)
-    expect(all.items.length).toBe(3)
-    let alpha = all.items.where(w => w.name == "Alpha").first()
-    expect(alpha.size).toBe(1)
-    expect(alpha.tier).toBe("Free")
-    let beta = all.items.where(w => w.name == "Beta").first()
-    expect(beta.size).toBe(2)
-    expect(beta.tier).toBe("Pro")
-    // `demo` and `wired raw` are opt-in datasets (LOOM_SEED), so their rows must
-    // NOT be here — the dataset gate is as much a part of the feature as the
-    // insert, and a seeder that ran every dataset would look identical to one
-    // that ran the right one until something counted.
-    expect(all.items.where(w => w.name == "Gamma").length).toBe(0)
-    expect(all.items.where(w => w.name == "Anchor").length).toBe(0)
-    // The second seeded aggregate's list route: `Gadget` is only written by the
-    // opt-in `wired raw` dataset, so the table holds exactly the one row this
-    // test created — the same assertion read from the other side.
-    let allGadgets = api.gadgets.all({ sort: "label", dir: "asc" })
-    expect(allGadgets.total).toBe(1)
-    expect(allGadgets.items.first().label).toBe("g2")
+    // What the seeded rows ARE asserted by lives in `seed-values.ddd`, a
+    // sibling fixture that carries only the collection reads and is held off the
+    // elixir behavioural leg alone.  That split is deliberate: this case keeps
+    // its CRUD, enum write-back, cross-aggregate FK round-trip, FK-ordered
+    // destroys and 404 bodies armed on ALL FIVE backends — the coverage a
+    // whole-case skip here would have silently taken away (the FK-ordering half
+    // is B10's exact class, an elixir bug already fixed once).
 
     // DELETE, child BEFORE parent.  `Gadget.widgetId: Widget id` is emitted as
     // a real foreign key with ON DELETE RESTRICT, so this order is not
@@ -109,10 +91,5 @@ system Seeding {
     expect(api.gadgets.getById(g)).toThrow(404)
     api.widgets.destroy(w)
     expect(api.widgets.getById(w)).toThrow(404)
-    // …and the seeded rows are still there after it: a delete that took the
-    // whole table with it would pass every assertion above.
-    let afterDelete = api.widgets.all({ sort: "name", dir: "asc" })
-    expect(afterDelete.total).toBe(2)
-    expect(afterDelete.items.first().name).toBe("Alpha")
   }
 }
