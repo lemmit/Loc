@@ -11,7 +11,7 @@ import {
   localizedChromeText,
   localizedChromeValue,
 } from "../i18n-emit.js";
-import { renderPrimitive } from "../render-primitive.js";
+import { registerI18nImport, renderPrimitive } from "../render-primitive.js";
 import {
   actionHandlerName,
   actionRefArg,
@@ -485,6 +485,23 @@ function jsClientPaging(spec: ClientPagingSpec): ClientPagingResult {
  *  Angular, `model.Page` on Feliz, and Feliz binds the count to a local before
  *  the label reads it. */
 function pagerChrome(ctx: WalkContext): PagerChrome {
+  // Register the `t` import HERE, because none of the chrome helpers below do.
+  //
+  // `i18n-emit.ts` splits `translateCall` (registers the import, then emits)
+  // from `translateExpr` (emits only), and `localizedChrome*` take the second —
+  // deliberately, for chrome that lands in a HOISTED CHILD file, where the
+  // PAGE's import map is the wrong place and the child's own renderer places
+  // the import.  A `Table`'s pager is not that case: it renders straight into
+  // the page body, so nothing registered `t` and the page emitted
+  // `{t("chrome.prev", "Prev")}` against an unresolvable name (TS2304).
+  //
+  // `wirePackChromeImport` did not cover it either — it greps for
+  // `PACK_CHROME_T_CALL` (`t("pack.`), and these keys are `chrome.*`.
+  //
+  // Gated on `i18nPrefix` so an i18n-free body emits no import and stays
+  // byte-identical; a target with no import map (Feliz compiles one F# file)
+  // simply never reads `WalkResult.imports`.
+  if (ctx.i18nPrefix) registerI18nImport(ctx);
   return {
     prevText: localizedChromeText(ctx, "prev"),
     nextText: localizedChromeText(ctx, "next"),

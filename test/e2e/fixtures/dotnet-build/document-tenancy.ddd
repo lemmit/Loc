@@ -1,0 +1,99 @@
+// `shape: document` × capability filters × the `policy` read/write ladder, on
+// the .NET (EF Core) backend — the crossing that had NO .NET fixture anywhere,
+// which is how a SILENT cross-tenant read lived here (#2527's follow-up 1).
+//
+// `dapper-document.ddd` had the shape and `dapper-tenancy.ddd` had the filter;
+// nothing crossed them on the EF adapter, and the java backend's sibling
+// (`java-build/document-tenancy.ddd`) covered only java.  A document
+// aggregate's persistence record is `(Id, Data jsonb, Version)`, so the
+// filtered fields live INSIDE the blob: EF has no mapped column to hang a
+// `HasQueryFilter` on, and before the fix .NET emitted NO filter at all while
+// `validateContextFilterSupport` claimed it filters every shape.  The filter is
+// now applied IN-APP over the rehydrated aggregate, mirroring node/java/python.
+//
+// Two things here only a REAL `dotnet build /warnaserror` can catch, and both
+// actually failed during development:
+//
+//   1. `policy { allow … }` × document was CS0535 — the repository interface
+//      declares `GetByIdForWriteAsync` whenever the write scope is narrower
+//      than the read scope, and the document repository implemented nothing
+//      (#2527's follow-up 2).  `Note` carries `allow deep` read + `allow write
+//      local`, which is exactly what makes that member exist.
+//   2. CA1310.  The `deep` ladder's `.StartsWith` is an UNEXECUTED expression
+//      tree on the relational path (EF rewrites it to SQL LIKE) but a REAL
+//      call on the in-app document path, where the culture-sensitive overload
+//      is an analyzer error under /warnaserror.  Only a build sees this.
+//
+// `Ledger` is the RELATIONAL control carrying the identical capability +
+// policy: it must keep its EF `HasQueryFilter` (with the BARE StartsWith — the
+// StringComparison overload has no SQL translation), so a fix that wrongly
+// migrated the relational path to in-app filtering shows up as a diff here
+// rather than as uniform silence.
+system DotnetDocTenancy {
+  user { id: guid  tenantId: string }
+
+  tenancy by user.tenantId of Org
+
+  subdomain Core {
+    context Books {
+      // Read wider than write: `deep` read (the materialized-path ladder, the
+      // `.StartsWith` predicate) + `local` write (the narrower scope that makes
+      // `GetByIdForWriteAsync` exist on both twins).
+      policy {
+        allow deep on Note
+        allow write local on Note
+        allow deep on Ledger
+        allow write local on Ledger
+      }
+
+      // The DOCUMENT twin — one jsonb column, so its `tenantId` / `dataKey`
+      // are inside the blob and the ladder must run in-app.  `crudish` gives it
+      // the update/destroy command loads, which is what actually reaches the
+      // write-scope seam.
+      aggregate Note shape: document, with tenantOwned, crudish {
+        title: string
+        body: string
+        contains tags: Tag[]
+        entity Tag { label: string }
+        operation retitle(t: string) { title := t }
+      }
+
+      // The RELATIONAL control — identical capability + policy, real columns.
+      aggregate Ledger with tenantOwned, crudish {
+        label: string
+        amount: int
+      }
+
+      // The tenant registry, opted into the tree (the `dataKey` materialized
+      // path the `deep` ladder anchors against).
+      aggregate Org with crudish {
+        name: string
+        implements tenantRegistry
+        operation setPath(p: string) { dataKey := p }
+      }
+
+      repository Notes for Note {
+        // A named find on the document aggregate: the capability predicate has
+        // to narrow the rehydrated set BEFORE the author's own `where` runs,
+        // not just on the auto `findAll`.
+        find byTitle(t: string): Note[] where this.title == t
+      }
+      repository Ledgers for Ledger {
+        find byLabel(l: string): Ledger[] where this.label == l
+      }
+      repository Orgs for Org { }
+    }
+  }
+
+  api BooksApi from Core
+  storage primary { type: postgres }
+  resource booksState { for: Books, kind: state, use: primary }
+  deployable api {
+    platform: dotnet
+    contexts: [Books]
+    dataSources: [booksState]
+    serves: BooksApi
+    port: 4000
+    auth: required
+  }
+}
