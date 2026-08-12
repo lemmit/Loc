@@ -28,7 +28,7 @@ import { renderCsExpr } from "../render-expr.js";
 // `RequestContext.Current` (the AsyncLocal carrier UserMiddleware
 // attaches the verified `User` to) and stamps its id property
 // (`actorIdProp`).  Principal stamps without auth are rejected
-// upstream (`loom.dotnet-stamp-unsupported`), so when any arm uses
+// upstream (`loom.stamp-principal-without-auth`), so when any arm uses
 // the principal `actorIdProp` is guaranteed present.
 
 export function renderAuditableInterceptor(
@@ -58,7 +58,7 @@ export function renderAuditableInterceptor(
   // Principal stamps reach into the ambient RequestContext for the verified
   // User; the namespaces (and the special rendering) only apply when the
   // principal id property is known — i.e. the deployable carries auth.  Without
-  // it a principal stamp is rejected upstream (loom.dotnet-stamp-unsupported);
+  // it a principal stamp is rejected upstream (loom.stamp-principal-without-auth);
   // the legacy single-context generator path has no auth wiring, so it falls
   // back to the plain expr render (unchanged) rather than a dangling reference.
   const usesPrincipal =
@@ -151,7 +151,7 @@ function renderArm(
   // (`ctx.currentUserExpr`) — the interceptor has no request-scoped
   // `currentUser` local, exactly like the static EF query-filter lambda the
   // read side resolves through.  Without auth (`actorIdProp` undefined) a
-  // principal stamp is rejected upstream (loom.dotnet-stamp-unsupported), so
+  // principal stamp is rejected upstream (loom.stamp-principal-without-auth), so
   // the legacy fallback keeps the plain render.
   const renderValue = (value: ExprIR): string =>
     isCurrentUserRef(value) && actorIdProp

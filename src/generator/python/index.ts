@@ -401,7 +401,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const authRequired = !!(args.deployable.auth?.required && args.sys.user);
   // The principal's id attribute — a bare `currentUser` lifecycle-stamp value
   // resolves to `current_user.<attr>`.  Only meaningful under auth; principal
-  // stamps without auth are gated upstream (loom.python-stamp-unsupported).
+  // stamps without auth are gated upstream (loom.stamp-principal-without-auth).
   const principalIdAttr = authRequired && args.sys.user ? actorIdAttr(args.sys.user) : undefined;
   // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
   // absent it, the dev stub keeps a fresh stack callable out of the box.

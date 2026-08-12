@@ -151,7 +151,11 @@ describe("vanilla — custom find functions on the repository module", () => {
     // Regression: an empty findBlock must NOT collapse the persist_change
     // `end` into the module's `end` (the `endend` mix-compile bug from CI).
     expect(task).not.toContain("endend");
-    expect(task).toMatch(/Repo\.update\(changeset\)\n {2}end\nend\n?$/);
+    // (M-T6.27: `persist_change` on a versioned aggregate now carries the
+    // stale-write rescue between the update and the two `end`s.)
+    expect(task).toMatch(
+      /Repo\.update\(changeset\)\n {2}rescue\n {4}Ecto\.StaleEntryError -> \{:error, :conflict\}\n {2}end\nend\n?$/,
+    );
 
     // Regression: the per-aggregate context block must end with `\n` so the
     // module's `end` doesn't fuse with the last member (the `as: :deleteend`

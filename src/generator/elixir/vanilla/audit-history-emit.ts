@@ -42,6 +42,7 @@ import {
 } from "../../../ir/util/audit-history.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { denialOverrides, denialResponse } from "./denial.js";
 
 /** Path of the shared shape module inside the generated project. */
 export function vanillaHistoryModulePath(appName: string): string {
@@ -304,9 +305,11 @@ ${cuBind}${inner}
   // cannot even probe for the row's existence.
   return `  def history(conn, %{"id" => id}) do
 ${cuBind}    if not (${gate}) do
-      ProblemDetails.problem_response(conn, 403, "Forbidden", ${JSON.stringify(
-        `Forbidden: history ${aggPascal}`,
-      )})
+      ${denialResponse(
+        "forbidden",
+        JSON.stringify(`Forbidden: history ${aggPascal}`),
+        denialOverrides(ctx),
+      )}
     else
 ${inner
   .split("\n")
