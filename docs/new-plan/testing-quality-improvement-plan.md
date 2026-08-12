@@ -6,7 +6,7 @@
 
 The suite is large and, on the *structural* axis, thorough. Three things are genuinely healthy and should not be re-litigated:
 
-- **Compile-tier parity is drained on the BACKEND axis.** Every `*_COMPILE_SKIP` map (`test/e2e/corpus-{tsc,dotnet,java,python,elixir}-build.test.ts`) is **empty** — all 42 corpus features compile clean on all five backends per-PR (elixir via `LOOM_HEX_MIRROR`, M-T9.10). The **persistence-adapter axis is NOT drained**: `DAPPER_COMPILE_SKIP` = 3 + `DAPPER_UNSUPPORTED` = 1 (`corpus-dotnet-dapper-build.test.ts` — M-T6.25/M-T6.31 territory).
+- **Compile-tier parity is drained on the BACKEND axis.** Every `*_COMPILE_SKIP` map (`test/e2e/corpus-{tsc,dotnet,java,python,elixir}-build.test.ts`) is **empty** — all 42 corpus features compile clean on all five backends per-PR (elixir via `LOOM_HEX_MIRROR`, M-T9.10). The **persistence-adapter axis is NOT drained**: `DAPPER_COMPILE_SKIP` = 2 + `DAPPER_UNSUPPORTED` = 1 (`corpus-dotnet-dapper-build.test.ts` — M-T6.25 territory; the `policy-deny` entry was drained by #2492/M-T6.29).
 - **The corpus is a machine-checked matrix.** `test/fixtures/corpus/manifest.ts` (42 features) × 5 backends is gate-enforced by `corpus-coverage.test.ts`; a feature with no row, or a documented feature with no fixture, fails CI (`feature-doc-coverage.test.ts`).
 - **The hollow-work guards exist.** `dead-generator-exports.test.ts`, `generated-output-sentinels.test.ts` (no `TODO`/`unsupported` in emitted code), and `allowlist-ratchet.test.ts` already ride the fast per-PR suite (M-T9.8).
 
