@@ -146,7 +146,11 @@ describe("keyword-as-identifier completeness (M-T5.18 Track B)", () => {
       }
       coverage[k] = soft;
     }
-  }, 120_000);
+    // Budget: ~280 keywords x 7 positions, each a full document build.  Runs
+    // in ~70s idle; the ceiling is generous because CI shards share a runner
+    // and the whole matrix lives in this one hook (a timeout here reports as
+    // "the suite failed", which is the least diagnosable failure shape).
+  }, 300_000);
 
   it("every DOMAIN_WORD_FLOOR term is a live grammar keyword", () => {
     const keywords = new Set(grammarKeywords());
