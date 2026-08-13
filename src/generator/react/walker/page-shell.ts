@@ -19,7 +19,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
+import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
@@ -1301,8 +1301,10 @@ function collectExprRefs(expr: ExprIR, out: Set<string>): void {
 function renderUseState(field: StateFieldIR, pack: LoadedPack): string {
   const setter = "set" + field.name[0]!.toUpperCase() + field.name.slice(1);
   const tsType = stateTypeAsTsString(field.type);
-  const init =
-    field.init !== undefined ? renderInitExpr(field.init, pack) : zeroValueForType(field.type);
+  const init = coerceMoneyStateInit(
+    field.type,
+    field.init !== undefined ? renderInitExpr(field.init, pack) : zeroValueForType(field.type),
+  );
   return `const [${field.name}, ${setter}] = useState<${tsType}>(${init});`;
 }
 

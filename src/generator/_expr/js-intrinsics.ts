@@ -25,7 +25,7 @@
 // imported wherever they land; each page shell decides that by scanning its
 // rendered source — see `usesDecimalBinding`.
 
-import type { TypeIR } from "../../ir/types/loom-ir.js";
+import { type TypeIR, typeUsesMoney } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 export const JS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `${recv}.trim()`,
@@ -133,4 +133,35 @@ export function renderJsIntrinsic(
   const render = JS_INTRINSIC_RENDERERS[intrinsicKey(receiverType.name, member)];
   if (!render) return undefined;
   return render(recv, [...args]);
+}
+
+/**
+ * A page-`state {}` field's rendered initial value, coerced to a `Decimal`
+ * when the field is money-typed and the init isn't one already.
+ *
+ * A money field is a decimal.js `Decimal` on every JS frontend, but its init
+ * is rendered from the literal the author wrote — and `m: money = 1.50` writes
+ * a DECIMAL literal, which lowers as `lit: "decimal"` and renders as the bare
+ * number `1.50`.  That seeded `useState<Decimal>(1.50)` / `ref(1.50)` /
+ * `signal(1.50)`: a type error, and one every `.toDecimalPlaces(…)` read off
+ * the field then compounds.  (The `money("1.50")` conversion form was already
+ * correct — this closes the other spelling.)
+ *
+ * Keyed on the DECLARED TYPE rather than on the literal kind, because that is
+ * the fact that makes the coercion necessary: whatever the author wrote, a
+ * money-typed field has to hold a `Decimal`.
+ *
+ * A numeric literal is quoted on the way in — `new Decimal("1.50")`, not
+ * `new Decimal(1.50)` — so the decimal string is parsed exactly instead of
+ * round-tripping through a float, matching every other money emission.
+ * Anything already naming the binding (`new Decimal(…)` from the `money(…)`
+ * conversion form) is left alone, so those stay byte-identical.
+ */
+export function coerceMoneyStateInit(type: TypeIR, rendered: string): string {
+  if (!typeUsesMoney(type)) return rendered;
+  if (usesDecimalBinding(rendered)) return rendered;
+  const exact = /^-?\d+(\.\d+)?$/.test(rendered.trim())
+    ? JSON.stringify(rendered.trim())
+    : rendered;
+  return `new Decimal(${exact})`;
 }
