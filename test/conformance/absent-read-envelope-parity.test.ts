@@ -241,15 +241,19 @@ describe("M-T6.31 — an absent read raises the service's one 404 producer, all 
   // by the ROOT ladder in `http/index.ts` (M-T6.28).  Without that floor the
   // same throw answered 500 `"internal"` — a 404 raised correctly and reported
   // as a server fault — so the two halves of this family are pinned together.
-  it("node's root floor renders a projection-router throw as 404, not 500", async () => {
+  it("node renders a projection-router throw as 404, not 500 — router ladder or root floor", async () => {
     const files = await generateSystemFiles(systemFor("node", 3114));
     const projections = sourceFor(files, "http/projections.ts");
     const index = sourceFor(files, "http/index.ts");
-    // The premise: the projection router really does declare no handler of its
-    // own (if it grows one, this test's reasoning moves, and it should fail).
-    expect(projections).toContain("const app = new OpenAPIHono();");
-    expect(projections).not.toContain("app.onError(");
-    // …so the floor must carry the domain rung.
+    // The reasoning MOVED once already, by design: this arm originally pinned
+    // projections.ts ladder-less with the root floor carrying the 404.  #2523's
+    // read gates gave the router its own onError (a gated projection needs the
+    // 403 arm), and that ladder carries the AggregateNotFound rung itself — so
+    // the 404 guarantee now lives in the router, and the root floor remains the
+    // guarantee for whatever routers stay ladder-less (realtime.ts today).
+    expect(projections).toContain("app.onError(");
+    expect(projections).toContain("if (err instanceof AggregateNotFoundError) return problem(404");
+    // The floor still carries the domain rung for the ladder-less remainder.
     expect(index).toContain("if (err instanceof AggregateNotFoundError) {");
     expect(index).toContain('return problem(404, "Not Found", err.message);');
   });
