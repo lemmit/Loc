@@ -60,7 +60,7 @@ import {
   resolveErrorStatus,
 } from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
-import { isServerSourcedDefault } from "../_frontend/server-default.js";
+import { isServerSourcedDefault, isValueObjectDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { pyHistoryMapperName, renderPyHistoryMapper } from "./emit/audit-history.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
@@ -667,6 +667,22 @@ export function requestFieldDecl(
   // the per-request value.
   if (defaultExpr && isServerSourcedDefault(defaultExpr)) {
     return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
+  }
+  // A VALUE-OBJECT default constructs the DOMAIN class, but this field is
+  // typed as the WIRE model (`requestPyType` maps a VO to `<VO>Model`), so
+  // `renderPyExpr` would put `Money(...)` in a `MoneyModel` slot — a
+  // `mypy --strict` incompatible-assignment.  Re-render it in the wire shape.
+  // Pydantic evaluates a field default per model instantiation, so unlike the
+  // server-sourced case there is nothing frozen at import and no coalesce
+  // needed — the default can simply BE the wire value.
+  if (defaultExpr && isValueObjectDefault(defaultExpr) && defaultExpr.kind === "call") {
+    const args = defaultExpr.args
+      .map((a, i) => {
+        const slot = defaultExpr.argNames?.[i];
+        return `${slot ? `${slot}=` : ""}${renderPyExpr(a)}`;
+      })
+      .join(", ");
+    return `${base} = ${defaultExpr.name}Model(${args})`;
   }
   if (defaultExpr) return `${base} = ${renderPyExpr(defaultExpr)}`;
   const isOpt = optional || t.kind === "optional";
