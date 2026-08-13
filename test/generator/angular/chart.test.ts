@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
-const SYSTEM = (body: string, design = ""): string => `
+const SYSTEM = (body: string, design = "", components = ""): string => `
 system Shop {
   subdomain Sales {
     context Orders {
@@ -42,7 +42,7 @@ system Shop {
   storage pg { type: postgres }
   resource ordersState { for: Orders, kind: state, use: pg }
   ui WebApp {
-    api Sales: SalesApi
+    api Sales: SalesApi${components}
     page Dash {
       route: "/dash"
       title: "Dashboard"
@@ -56,8 +56,15 @@ system Shop {
 
 const CHART = `Chart { kind: "bar", of: Sales.SalesByStatus, x: r => r.status, y: r => r.revenue }`;
 
-async function emitted(body: string, design = ""): Promise<Map<string, string>> {
-  return await generateSystemFiles(SYSTEM(body, design));
+/** A walked user component that charts — the page invoking it renders only an
+ *  `<ng-container [ngComponentOutlet]>`, never the chart tag itself. */
+const COMPONENT = `
+    component RevenueTile(caption: string) {
+      body: Stack { Text { caption }, ${CHART} }
+    }`;
+
+async function emitted(body: string, design = "", components = ""): Promise<Map<string, string>> {
+  return await generateSystemFiles(SYSTEM(body, design, components));
 }
 
 function fileEndingWith(files: Map<string, string>, suffix: string): string {
@@ -126,6 +133,28 @@ describe("angular Chart — geometry in the component, not the template", () => 
     expect(
       [...files.keys()].some((p) => p.endsWith("src/app/components/loom-chart.component.ts")),
     ).toBe(false);
+  });
+
+  // The emission used to be keyed on the PAGE text, but the page shell lifts
+  // the `LoomChart` import in component mode too (`components-emit.ts` reuses
+  // `renderAngularPage`).  A chart that lives in a `component` therefore wrote
+  // `import { LoomChart } from "../components/loom-chart.component"` into the
+  // component file while the page — which only renders `<ng-container
+  // [ngComponentOutlet]>` — never said `<loom-chart`, so the runtime file was
+  // never emitted and `ng build` died on TS2307.
+  it("ships the component when the chart lives in a ui `component`, not the page", async () => {
+    const files = await emitted(`RevenueTile { caption: "Revenue" }`, "", COMPONENT);
+    const tile = fileEndingWith(files, "components/RevenueTile.ts");
+    expect(tile).toContain("<loom-chart");
+    expect(tile).toContain('import { LoomChart } from "../components/loom-chart.component";');
+    // The import above is only resolvable if the runtime file rides along.
+    expect(
+      [...files.keys()].some((p) => p.endsWith("src/app/components/loom-chart.component.ts")),
+    ).toBe(true);
+    // And the page itself never mentions the tag — the reason the old
+    // page-text predicate answered false.
+    const page = fileEndingWith(files, "dash.component.ts");
+    expect(page).not.toContain("<loom-chart");
   });
 
   it("carries the a11y contract — role=img plus the derived name", async () => {

@@ -46,6 +46,7 @@ import {
   isGroupedProjection,
   isQueryTimeProjection,
 } from "../../types/loom-ir.js";
+import { isMacroEmitted } from "../../types/origin.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { bodyUsesDataGrid } from "../../util/data-grid.js";
@@ -796,6 +797,16 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
       // satisfiable and the exemption has no reason left.
       for (const proj of c.projections) {
         if (proj.query?.requires) continue;
+        // A MACRO-emitted projection has no declaration header, so the
+        // diagnostic's "add a `requires` after its declaration header" names a
+        // line the author cannot open — `scaffoldDashboard` emits one singleton
+        // totals projection per aggregate, which made `scaffold` and
+        // `denyByDefault` an uncompilable pair.  Exempt for the same stated
+        // reason the enrichment-injected `find all` is exempt one loop up: it
+        // is compiler-synthesized and has no author source line
+        // (`src/ir/util/read-gates.ts`).  Derived from the origin chain the
+        // lowering already records — nothing new is stamped.
+        if (isMacroEmitted(proj.origin)) continue;
         diags.push({
           severity: "error",
           code: "loom.default-deny-ungated",
