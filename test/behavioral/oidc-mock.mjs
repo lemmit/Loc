@@ -78,9 +78,32 @@ export async function startMockIssuer() {
     .setExpirationTime("1h")
     .sign(privateKey);
 
+  // The SECOND principal (M-T9.28): **authenticated but not authorized**.  Same
+  // issuer, same signing key, same `sub` shape — so it passes signature/issuer
+  // verification and claim projection exactly like the token above, and the ONLY
+  // thing that differs by the time the request reaches a route is the value the
+  // `requires` predicate reads.  That isolation is the point: a 403 from this
+  // token cannot be confused with a verifier failure (which is a 401).
+  //
+  // `roles` is the same non-granting value the dev-stub twin uses
+  // (`DEV_CLAIMS_UNAUTHORIZED.role`), and `permissions` is empty so a
+  // permission-catalogue gate denies it too.
+  const unauthorizedToken = await new SignJWT({
+    realm_access: { roles: "visitor" },
+    email: "visitor@example.com",
+    permissions: [],
+  })
+    .setProtectedHeader({ alg: "RS256", kid })
+    .setSubject("00000000-0000-0000-0000-0000000000ff")
+    .setIssuer(issuer)
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .sign(privateKey);
+
   return {
     issuer,
     token,
+    unauthorizedToken,
     stop: () => new Promise((resolve) => server.close(resolve)),
   };
 }

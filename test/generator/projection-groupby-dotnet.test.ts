@@ -137,10 +137,10 @@ describe(".NET grouped query-time projection (group by)", () => {
   it("emits the requires gate (403 before the query) exactly like the other projection handlers", async () => {
     const handler = await fileEndingWith(
       system(
-        `projection SalesByStatus {
+        `projection SalesByStatus requires currentUser.role == "admin" {
           status: OrderStatus
           orders: int
-          from Order as o requires currentUser.role == "admin"
+          from Order as o
           group by o.status
           select status = o.status, orders = count()
         }`,

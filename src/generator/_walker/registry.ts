@@ -202,6 +202,22 @@ export interface PrimitiveDef {
    *  primitives (lowered to via IR rewrites, never written by users)
    *  can opt out by setting this to false. */
   admissibleInSource: boolean;
+  /** This primitive takes an `of:` argument that is an API/PROJECTION READ, so
+   *  a target which MATERIALISES reads (rather than hoisting them inline at the
+   *  call site) has to collect it.
+   *
+   *  Only the two non-JSX targets care: Feliz turns each read into a Model
+   *  field + `Msg` case + init `Cmd` + update arm, and Flutter into a Riverpod
+   *  provider.  Both used to enumerate the read-bearing primitives BY NAME in
+   *  their own collectors, and `Chart` — the second such primitive ever — was
+   *  duly missed by both: a chart-only page named a Model field nothing
+   *  declared (Feliz) and watched a provider nothing wrote (Flutter).  Two
+   *  copies of a list that must match this registry is one copy too many, so
+   *  the fact is declared HERE, where primitives are declared, and both
+   *  collectors ask `isOfReadPrimitive` (see `_walker/of-reads.ts`).
+   *
+   *  Adding a third read-bearing primitive is now this flag, and nothing else. */
+  readsOf?: true;
   /** React/TSX target renderer, or undefined if the TSX walker does
    *  NOT dispatch on this primitive directly (e.g. `Tab`/`Column` only
    *  appear as children of their parent, which consumes them inline). */
@@ -534,6 +550,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   Chart: {
     group: "layout",
     admissibleInSource: true,
+    readsOf: true,
     tsx: emitChart,
     heex: renderChartHeex,
     a11y: { role: "img", needsName: true },
@@ -626,6 +643,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   QueryView: {
     group: "layout",
     admissibleInSource: true,
+    readsOf: true,
     tsx: emitQueryView,
     heex: renderQueryViewHeex,
     a11y: "presentational",

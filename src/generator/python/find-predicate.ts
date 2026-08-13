@@ -19,6 +19,7 @@ import {
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { snake } from "../../util/naming.js";
 import type { DurationUnit } from "../../util/temporal.js";
+import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
 import { PY_INTRINSIC_RENDERERS, renderPyExpr } from "./render-expr.js";
 
@@ -56,6 +57,12 @@ export const SQLALCHEMY_INTRINSIC_SQL: Record<string, (recv: string, args: strin
   "string.trim": (recv) => `func.trim(${recv})`,
   "string.toUpper": (recv) => `func.upper(${recv})`,
   "string.toLower": (recv) => `func.lower(${recv})`,
+  // Prefix match (tenancy-authorization-final-surface decision 2).  `func.strpos`
+  // rather than SQLAlchemy's `.startswith(…)`: the ColumnOperators helper emits
+  // `LIKE`, whose autoescape mode differs by argument shape, and an anchored
+  // position test is escaping-free by construction — see
+  // `src/util/intrinsics.ts`.
+  "string.startsWith": (recv, args) => `(func.strpos(${recv}, ${args[0]}) == 1)`,
   // ---- numerics (A3 math batch) -------------------------------------------
   // Postgres round(numeric, n) is already half-away-from-zero (the catalogue
   // contract), so the SQL side needs no mode forcing; min/max are the
@@ -557,7 +564,10 @@ export function documentCapabilityBody(
     .filter((e) => !isFilterBypassed(e.origin, bypass));
   if (kept.length === 0) return null;
   const expr = kept
-    .map(({ predicate }) => `(${renderPyExpr(predicate, { thisName: varName })})`)
+    .map(
+      ({ predicate }) =>
+        `(${renderPyExpr(desugarAuthzFilterInApp(predicate, agg.name), { thisName: varName })})`,
+    )
     .join(" and ");
   const usesPrincipal = kept.some(({ predicate }) => exprUsesCurrentUser(predicate));
   return { expr, usesPrincipal };

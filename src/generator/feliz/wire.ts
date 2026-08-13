@@ -52,6 +52,7 @@ import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
+import { isOfReadCall } from "../_walker/of-reads.js";
 import { isPagedQuery } from "../_walker/paged-query.js";
 import { boolNamed } from "../_walker/shared/args.js";
 import { typeToFs } from "./type-fs.js";
@@ -1060,16 +1061,16 @@ function exprChildren(e: ExprIR): ExprIR[] {
 
 /** Every READ-BEARING `of:` argument in a page body, in tree order.
  *
- *  `QueryView` is the general one; `Chart` (M-T1.3 Phase 4) carries the same
- *  kind of `of:` — a projection read — without being wrapped in one, and its
- *  read has to be collected for exactly the same reason: on Elmish the read IS
- *  the Model field the view names, so a body whose only read is a chart would
- *  otherwise emit `View.chart … model.<Field>` against a field no Model
- *  declares, no Cmd fills and no update arm stores. */
+ *  Which primitives those are is the REGISTRY's answer (`readsOf`), not a list
+ *  kept here — see `_walker/of-reads.ts` for why: this collector and Flutter's
+ *  twin each used to enumerate them by name, and both missed `Chart`.  On
+ *  Elmish the read IS the Model field the view names, so a body whose only read
+ *  is a chart otherwise emits `View.chart … model.<Field>` against a field no
+ *  Model declares, no Cmd fills and no update arm stores. */
 function queryViewOfArgs(body: ExprIR): { of: ExprIR; explicitPaged: boolean }[] {
   const out: { of: ExprIR; explicitPaged: boolean }[] = [];
   const walk = (e: ExprIR): void => {
-    if (e.kind === "call" && (e.name === "QueryView" || e.name === "Chart")) {
+    if (isOfReadCall(e)) {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
       // `paged: true` is the explicit OPT-IN the scaffold emits beside its
@@ -1931,7 +1932,7 @@ export function renderAsyncOutcomeTypes(effects: readonly FelizAsyncEffect[]): s
 /** F# type spelling of a wire field's declared type, honouring the wire
  *  contract: an enum value arrives as its string name, so it decodes to a
  *  plain `string` (a proper DU decoder is a follow-up). */
-function wireFieldType(t: TypeIR): string {
+export function wireFieldType(t: TypeIR): string {
   // A `File` wire field is the fixed `FileRef` record (`renderFileRefType`),
   // not a scalar — decoded via `fileRefDecoder`.
   if (t.kind === "primitive" && t.name === "File") return "FileRef";

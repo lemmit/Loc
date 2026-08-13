@@ -14,7 +14,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
-import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
+import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../util/intrinsics.js";
 import { boxedJavaType, collectJavaExprImports, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +103,19 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
         ctx.imports.add("java.util.List");
         return `cb.isMember(${value(e.args[0]!, ctx)}, root.<List<${elem}>>get(${segs.map((s) => JSON.stringify(s)).join(").get(")}))`;
       }
+      // A bool-returning queryable intrinsic standing alone in a PREDICATE
+      // position (`filter this.dataKey.startsWith(p)`).  Its snippet already IS
+      // a `Predicate` (`cb.equal(cb.locate(…), 1)`), so there is no `cb.isTrue`
+      // to wrap — unlike the bare boolean field arms above.  A scalar intrinsic
+      // never reaches here: it only ever appears as a comparison operand, which
+      // `binary` routes through `criteriaPathExpr`.
+      if (
+        e.receiverType.kind === "primitive" &&
+        isQueryableBoolIntrinsic(e.receiverType.name, e.member)
+      ) {
+        const pred = criteriaPathExpr(e, ctx);
+        if (pred !== null) return pred;
+      }
       throw unsupported(`method call '${e.member}'`);
     default:
       throw unsupported(`expression kind '${e.kind}'`);
@@ -119,6 +132,14 @@ export const JAVA_CRITERIA_INTRINSICS: Record<string, (recv: string, args: strin
   "string.trim": (recv) => `cb.trim(${recv})`,
   "string.toUpper": (recv) => `cb.upper(${recv})`,
   "string.toLower": (recv) => `cb.lower(${recv})`,
+  // Prefix match (tenancy-authorization-final-surface decision 2).  JPA's
+  // `locate(x, pattern)` searches `pattern` INSIDE `x` and returns a 1-based
+  // position, so `= 1` anchors it at the start; the pre-rendered value arg is a
+  // plain Java String expression, which the `(Expression<String>, String)`
+  // overload takes directly (no `cb.literal` wrapper, unlike `cb.function`).
+  // Anchored position rather than `cb.like(path, concat(arg, "%"))` so a `%`/`_`
+  // in the value matches literally — see `src/util/intrinsics.ts`.
+  "string.startsWith": (recv, args) => `cb.equal(cb.locate(${recv}, ${args[0]}), 1)`,
   // ---- numerics (A3 math batch) — cb.abs is JPA-2.0-native; the typed
   // cb.round(x, n) / cb.floor / cb.ceiling landed in Jakarta Persistence 3.1
   // (generated projects build on Spring Boot 4.x → Hibernate 7 / JPA 3.2, so

@@ -1,0 +1,123 @@
+// The `startsWith` PREFIX-MATCH filter operator (docs/stdlib.md → `string`;
+// `docs/old/proposals/tenancy-authorization-final-surface.md` decision 2 — the
+// one genuinely-new operator the reconciled tenancy surface needs, since a
+// subtree read is a materialized-path prefix match and nothing else in the
+// queryable sublanguage expresses one).
+//
+// It is the FIRST bool-returning queryable intrinsic, so it exercises a shape no
+// other fixture reaches: a scalar intrinsic only ever appears as a comparison
+// OPERAND (`this.name.trim() == x`), whereas this one stands alone in PREDICATE
+// position.  Both queryable positions are covered here — an inline `find where`
+// and a reusable `criterion` installed as a capability `filter` — because they
+// take different routes through every backend's query lowerer (the find/JPQL/
+// Drizzle path vs the criterion/Specification/`@SQLRestriction` path).
+//
+// The e2e asserts what makes this an OPERATOR and not a `LIKE` convenience:
+//
+//   1. the delimiter trap — prefix `root.` must NOT match the sibling `root_a`
+//      (this is exactly the `deep`-scope trap where `org_a` must not match
+//      `org_ab`, so the operator has to be delimiter-exact);
+//   2. wildcards are DATA — a prefix containing `%` matches literally, which a
+//      `LIKE <arg> || '%'` lowering would silently get wrong on every backend;
+//   3. a shared prefix reaches the whole subtree.  (NOT the empty prefix: it
+//      never reaches the operator on .NET, whose query-param binder answers 422
+//      for `?prefix=` on a required `string` — see assertion 3.)
+//
+// The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
+system PrefixFilter {
+  subdomain Core {
+    context Docs {
+      // Reusable criterion in the queryable subset → installed as a capability
+      // `filter` below, which routes through the static/Specification path.
+      criterion UnderRoot of Doc = this.path.startsWith("root")
+
+      aggregate Doc with crudish {
+        path: string
+        title: string
+        // Every read is prefix-scoped to the `root` subtree.  `root_x` rows are
+        // still inside this filter (it has no trailing delimiter) — the
+        // delimiter-exactness assertion below uses the finer `find` instead.
+        filter UnderRoot
+      }
+
+      repository Docs for Doc {
+        // Inline `startsWith` in predicate position, with the prefix as a
+        // PARAMETER (so every backend binds it rather than inlining a literal).
+        find under(prefix: string): Doc[] where this.path.startsWith(prefix)
+      }
+    }
+  }
+  api DocsApi from Core
+  storage primary { type: postgres }
+  resource docsState { for: Docs, kind: state, use: primary, index: [Doc.path] }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Docs]
+    dataSources: [docsState]
+    serves: DocsApi
+    port: 4000
+  }
+
+  test e2e "startsWith is a delimiter-exact, wildcard-literal prefix match" against d {
+    // Inside the `UnderRoot` capability filter (all five start with `root`), so
+    // every one of these is readable; the `find` narrows within it.
+    let rootDoc = api.docs.create({ path: "root", title: "the root" })
+    api.docs.create({ path: "root.a", title: "child a" })
+    api.docs.create({ path: "root.a.b", title: "grandchild" })
+    let trap = api.docs.create({ path: "root_a", title: "delimiter trap" })
+    api.docs.create({ path: "root%pct", title: "wildcard trap" })
+
+    // The criterion filter rides every read, including the derived by-id and
+    // list ones — a backend that renders it wrongly empties these out.
+    expect(api.docs.getById(rootDoc).title).toBe("the root")
+    let everything = api.docs.all()
+    expect(everything.total).toBe(5)
+
+    // 1. Delimiter-exact: `root.` reaches the two dotted descendants and must
+    //    NOT reach `root_a` — a `_` is a single-character LIKE wildcard, so a
+    //    LIKE-based lowering that forgot to escape the PATTERN would match it.
+    let dotted = api.docs.under({ prefix: "root." })
+    expect(dotted.length).toBe(2)
+
+    // 2. Wildcards in the VALUE are data: `root%` matches only the row whose
+    //    path literally starts with `root%`, never all five.  This is the
+    //    assertion that distinguishes the shipped anchored-position lowering
+    //    (`strpos(col, $p) = 1`) from `col LIKE $p || '%'`.
+    let pct = api.docs.under({ prefix: "root%" })
+    expect(pct.length).toBe(1)
+
+    // 3. A prefix every row shares matches all of them — the whole-subtree read.
+    //    Deliberately NOT the EMPTY prefix, even though `strpos(col, '') = 1` and
+    //    every host language's `startsWith("")` agree that it matches: the empty
+    //    string never reaches the operator on .NET, because ASP.NET binds a
+    //    `?prefix=` query value for a required `string` as ABSENT and answers 422
+    //    before the query runs, where node/python/java/elixir bind it as "".
+    //    That is a query-param-binding divergence in the FRAMEWORK layer, not a
+    //    property of this operator, and both readings are defensible (`?p=` as
+    //    present-but-empty vs as absent), so this fixture does not pin which side
+    //    is right.  Adjudicating it is a conformance-semantics RS-rule of its own.
+    let all = api.docs.under({ prefix: "root" })
+    expect(all.length).toBe(5)
+
+    // 4. A prefix reaching only the deepest row.
+    let deepest = api.docs.under({ prefix: "root.a.b" })
+    expect(deepest.length).toBe(1)
+    expect(deepest.first().title).toBe("grandchild")
+
+    // 5. The WRITE path loads the row through the same criterion filter, so an
+    //    update/destroy inside the prefix lands.
+    api.docs.update(rootDoc, { path: "root", title: "renamed root" })
+    expect(api.docs.getById(rootDoc).title).toBe("renamed root")
+    api.docs.destroy(trap)
+    let afterDestroy = api.docs.under({ prefix: "root" })
+    expect(afterDestroy.length).toBe(4)
+
+    // 6. The capability `filter` is real: a row OUTSIDE the `root` prefix is
+    //    invisible to every read, including one whose `find` prefix would
+    //    otherwise select it.
+    api.docs.create({ path: "other.x", title: "outside" })
+    let outside = api.docs.under({ prefix: "other" })
+    expect(outside.length).toBe(0)
+    expect(api.docs.all().total).toBe(4)
+  }
+}

@@ -246,19 +246,31 @@ const __urls = [];
 // miss is 401; phoenix routes first, so it is 404).  Forwarding them keeps the
 // probe pointed at the thing it is meant to measure.
 let __authHeaders = {};
-const __record = (dispatch) => async (req) => {
-  const out = await dispatch(req);
-  try {
-    const r = out?.response;
-    if (r) {
-      __urls.push(req.url);
-      for (const [k, v] of Object.entries(req.headers ?? {})) {
-        if (!/^content-(type|length)$/i.test(k)) __authHeaders[k] = v;
+// The UNWRAPPED dispatch, stashed as the recorder is installed.  The authz
+// ladder below deliberately goes through THIS rather than the recorded wrapper:
+// its requests are assertions about status codes, not part of the wire contract
+// the golden freezes, and routing them through the recorder would shift every
+// subsequent ordinal the golden aligns on — on the legs that adopt the ladder
+// but not on the ones that haven't yet, which would fail the differential for a
+// reason that has nothing to do with the wire.  (M-T9.11 can promote the ladder
+// to a recorded probe later; that is a golden rebaseline, deliberately taken.)
+let __rawDispatch = null;
+const __record = (dispatch) => {
+  __rawDispatch = dispatch;
+  return async (req) => {
+    const out = await dispatch(req);
+    try {
+      const r = out?.response;
+      if (r) {
+        __urls.push(req.url);
+        for (const [k, v] of Object.entries(req.headers ?? {})) {
+          if (!/^content-(type|length)$/i.test(k)) __authHeaders[k] = v;
+        }
+        __wire.push(__toWireEntry(__wire.length, req.method, req.url, r.status, r.body ?? ""));
       }
-      __wire.push(__toWireEntry(__wire.length, req.method, req.url, r.status, r.body ?? ""));
-    }
-  } catch { /* recording must never affect the tier's pass/fail */ }
-  return out;
+    } catch { /* recording must never affect the tier's pass/fail */ }
+    return out;
+  };
 };
 
 // ── framework-fault probes (RS-9) ───────────────────────────────────────────
@@ -290,5 +302,124 @@ const __frameworkProbes = async (dispatch) => {
   }
   await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: { ...__authHeaders } });
   await dispatch({ method: "POST", url: origin + collection.pathname, headers: json, body: "{not json" });
+  // The AUTH arm, which no recording ever reached: an emitted suite always
+  // authenticates successfully, which is how all five backends came to answer
+  // 401 outside the RFC 7807 contract, two of them in text/plain, and none of
+  // them with the WWW-Authenticate header RFC 9110 makes mandatory.
+  //
+  // The session probe, anonymously.  /api/auth/me is emitted by every
+  // auth-bearing backend and is deliberately NOT on the middleware's bypass
+  // list, so it is the one path guaranteed to reach authentication with no id,
+  // no body and no dependence on the fixture's shape:
+  //
+  //   auth system -> 401 + the RFC 7807 body this probe exists to pin
+  //   no auth     -> 404, the framework miss, equally fixed
+  //
+  // The two shapes tried before both asserted more than that.  An anonymous
+  // GET of the collection coupled the golden to END-OF-TIER DATA (seeding's
+  // fixture rows, an operation-returns version counter).  A by-id GET with a
+  // fixed all-zero uuid assumed every aggregate keys on a uuid — elixir raised
+  // ArgumentError and answered 500 for an id its type could not parse, which
+  // is a real defect but not this probe's subject.
+  //
+  // Only where the tier itself carried a credential.  A dev-stub \`auth {}\`
+  // system (no \`oidc\` block) fabricates a principal for ANY caller, so it has
+  // no unauthenticated arm to reach — the probe would answer 200 and record
+  // the stub's User instead, which is a third thing this probe does not
+  // assert.  (It diverges: node serialises \`{id, tenantId}\`, phoenix
+  // \`{id, role, tenantId}\` with the opposite two populated.  Real, and filed
+  // separately — the dev stub's principal shape is not the RS-9 error
+  // contract.)  A no-auth system is skipped for free and loses nothing: its
+  // \`/api/auth/me\` 404 is the same framework miss \`/__loom_no_such_path\`
+  // already pins.
+  const authed = Object.keys(__authHeaders).some((k) => /^authorization$/i.test(k));
+  if (authed) {
+    await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
+  }
+};
+
+// ── authorization ladder (M-T9.28 slice 1) ──────────────────────────────────
+// The behavioural tier used to hold ONE identity, so the only authz statement it
+// could make was "the satisfying principal gets through".  A \`requires\` emitted
+// as a no-op passes that identically — which is exactly how #2446 shipped a
+// guarded create with an OPEN route.  This walks the full ladder over ONE gated
+// surface instead:
+//
+//   unauthenticated              → 401   (authn precedes authz)
+//   authenticated-but-UNauthORIZED → 403 (the gate actually denies)
+//   authorized                   → 2xx   (the gate is not always-deny)
+//
+// The middle rung is the one that needed the new principal, and the third rung
+// is what keeps the first two honest — a backend that 403s everything would pass
+// arms 1+2 alone.  All three requests go through the SAME dispatch chokepoint as
+// the tier, so the ladder is backend-agnostic: the HTTP runners hand it a base
+// URL and it never introspects a router.
+//
+// Credentials are supplied by the runner (\`creds\`), not derived here, because
+// what "unauthorized" means is auth-flavour-shaped: dev-stub → an
+// \`x-loom-dev-claims\` header carrying DEV_CLAIMS_UNAUTHORIZED; OIDC → a second
+// mock-issuer token.  \`authorized\` is whatever the tier itself just used, read
+// off the recorder — so it cannot drift from the credential the suite passed.
+//
+// An arm whose expected status is \`null\` is SKIPPED and reported as skipped, not
+// silently passed: under the dev stub there is no anonymous caller to express
+// (the emitted verifier accepts every request and falls back to its built-in
+// identity), so that rung is unavailable rather than green.
+const __authzLadder = async (spec, creds) => {
+  if (!spec || !__rawDispatch) return [];
+  const first = __urls.map((u) => { try { return new URL(u); } catch { return null; } }).find(Boolean);
+  if (!first) return [];
+  const origin = first.origin;
+  const dispatch = __rawDispatch;
+  const json = (h) => ({ ...h, "content-type": "application/json" });
+  const out = [];
+  const push = (name, status, error) => out.push({ tier: "authz", name, status, error });
+
+  // Seed with the AUTHORIZED principal so the gated surface addresses a real
+  // row.  Several backends load the aggregate BEFORE evaluating the guard, so a
+  // made-up id would answer 404 and the ladder would measure not-found instead
+  // of denial.
+  const seeded = await dispatch({
+    method: "POST",
+    url: origin + spec.seed.path,
+    headers: json(creds.authorized),
+    body: JSON.stringify(spec.seed.body ?? {}),
+  });
+  let id = null;
+  try {
+    id = JSON.parse(seeded?.response?.body ?? "{}")?.id ?? null;
+  } catch { /* handled by the null check below */ }
+  if (!id) {
+    push("authz ladder: seed", "fail", \`seed POST \${spec.seed.path} → \${seeded?.response?.status}: no id in body\`);
+    return out;
+  }
+
+  const arm = async (label, headers, expected) => {
+    if (expected === null || expected === undefined) {
+      push(\`authz ladder: \${label} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
+      return;
+    }
+    const r = await dispatch({
+      method: spec.gated.method,
+      url: origin + spec.gated.path.replace("{id}", id),
+      headers: json(headers),
+      body: JSON.stringify(spec.gated.body ?? {}),
+    });
+    const got = r?.response?.status;
+    push(
+      \`authz ladder: \${label} → \${expected}\`,
+      got === expected ? "pass" : "fail",
+      got === expected ? undefined : \`expected \${expected}, got \${got}: \${String(r?.response?.body ?? "").slice(0, 200)}\`,
+    );
+  };
+
+  // Order matters: the two DENIED arms run first, so the surface is still in its
+  // pre-operation state when they run and a 403 cannot be an artefact of the
+  // operation having already been applied.  The authorized arm mutates, so it
+  // goes last.
+  await arm("unauthenticated", {}, spec.arms.anonymous);
+  await arm("authenticated-but-unauthorized", creds.unauthorized, spec.arms.unauthorized);
+  await arm("authorized", creds.authorized, spec.arms.authorized);
+  return out;
 };`;
 }

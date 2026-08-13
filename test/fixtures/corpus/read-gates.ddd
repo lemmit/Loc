@@ -1,0 +1,75 @@
+// Read-side `requires` gates (auth.md) — the three read surfaces that carry one
+// and the compile proof that every backend emits it.
+//
+// A gate on a WRITE (`operation … requires`) is covered by `auth-simple.ddd`.
+// The read side has three distinct emission sites, each with its own route
+// shape, and each was at some point emitted WITHOUT the gate on a subset of
+// backends while every compile tier stayed green — because a missing guard is
+// not a syntax error anywhere:
+//
+//   1. `find all(): T[] requires <expr>` — the LIST endpoint (`GET /<aggs>`).
+//      node/Hono and .NET emit a route per repository find and picked it up for
+//      free; java/python/elixir each special-case `all` out of that loop and
+//      emitted the bespoke list route without reading its `requires`.
+//   2. a FOLDED (materialized) projection's gate — `GET /projections/<p>` and
+//      `.../{key}`, over the read-model table the fold upserts.
+//   3. a QUERY-TIME projection's gate — `GET /projections/<p>`, the
+//      comprehension evaluated per read.
+//
+// What this fixture buys that a unit test cannot: the emitted guard has to
+// COMPILE. That is where the gate's principal binding, its error type, and its
+// imports live — a `Objects.equals(...)` with no `java.util.Objects` import, a
+// `ForbiddenError` python never imported, an unused `current_user` that trips
+// `mix compile --warnings-as-errors`. Every one of those is invisible to a
+// string assertion over the generated text and fatal to the generated project.
+system ReadGates {
+  user { id: guid  role: string }
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        code: string
+        total: money
+        open: bool
+      }
+      repository Orders for Order {
+        // (1) The LIST read, gated.  An author-declared `find all` wins over
+        // the enrichment-injected one, gate included.
+        find all(): Order[] requires currentUser.role == "clerk"
+      }
+      event OrderPlaced { order: Order id  code: string }
+
+      // (2) FOLDED — no `from`, so it has no query-clause tail; the gate rides
+      // the declaration header, which is the only reason it can be spelled.
+      projection OrderBook keyed by order requires currentUser.role == "clerk" {
+        order: Order id
+        code: string
+        on(e: OrderPlaced) { order := e.order  code := e.code }
+      }
+
+      // (3) QUERY-TIME — computed per read, gated in the same position.
+      projection OpenOrders requires currentUser.role == "clerk" {
+        code: string
+        from Order as o
+        where o.open == true
+        select code = o.code
+      }
+    }
+  }
+  storage primary { type: postgres }
+  resource orderState { for: Orders, kind: state, use: primary }
+  api SalesApi from Sales
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    serves: SalesApi
+    dataSources: [orderState]
+    port: 4000
+    auth: required
+  }
+
+  // The behavioural harness authenticates as the canonical principal
+  // (`role: "clerk"` is NOT it — see cases.mjs DEV_CLAIMS), so this fixture
+  // deliberately declares no `test e2e` block: its job is the COMPILE tier.
+  // Asserting the runtime 403 needs an authenticated-but-unauthorized
+  // principal, which is M-T9.28's multi-principal harness.
+}

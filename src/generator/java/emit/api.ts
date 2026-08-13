@@ -12,6 +12,7 @@ import {
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { listReadFind } from "../../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import {
@@ -129,8 +130,16 @@ export function renderJavaController(
   // read and cannot drift from it.  Its gate joins the find gates for the
   // import / accessor-injection decisions below.
   const historyFind = javaHistoryFind(repo);
+  // The LIST read (`find all`).  `declaredFinds` filters it out — the list
+  // endpoint has its own route shape (paging controls / the `<Agg>Paged`
+  // envelope), emitted below rather than in the named-find loop — so its gate
+  // has to be picked up explicitly or it is silently dropped and the list
+  // serves ungated (`listReadGate`'s header for why this is a shared helper).
+  const listRead = listReadFind(repo);
+  const listReadGated = listRead?.requires ? listRead : undefined;
   const gatedFinds = [
     ...declaredFinds(repo).filter((f) => !f.synthesized && f.requires),
+    ...(listReadGated ? [listReadGated] : []),
     ...(historyFind?.requires ? [historyFind] : []),
   ];
   const anyFindGate = gatedFinds.length > 0;
@@ -462,6 +471,7 @@ export function renderJavaController(
       ? [
           `    @GetMapping`,
           `    public ${agg.name}Paged all${agg.name}(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {`,
+          ...(listReadGated ? findGateLines(listReadGated) : []),
           `        var result = service.all${agg.name}(page, pageSize, sort, dir);`,
           `        return new ${agg.name}Paged(result.items(), result.page(), result.pageSize(), result.total(), result.totalPages());`,
           `    }`,
@@ -470,6 +480,7 @@ export function renderJavaController(
       : [
           `    @GetMapping`,
           `    public List<${agg.name}Response> all${agg.name}() {`,
+          ...(listReadGated ? findGateLines(listReadGated) : []),
           `        return service.all${agg.name}();`,
           `    }`,
           ``,

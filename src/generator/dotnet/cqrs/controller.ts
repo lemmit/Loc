@@ -29,6 +29,7 @@ import type { ControllerShape } from "../emit/api.js";
 import { renderController } from "../emit.js";
 import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
 import { requestVoValidatorName } from "../validator-emit.js";
+import { isNullableWireDefault } from "../wire-default.js";
 
 /** One arm of a return-typed operation's controller translation. */
 export interface ReturnUnionArm {
@@ -252,7 +253,12 @@ export function emitController(
         ) ?? undefined,
       createCmdArgs: requiredFields.map((f) => {
         const wireArg = wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx);
-        if (f.default !== undefined && isServerSourcedDefault(f.default)) {
+        // Widened to VALUE-OBJECT defaults alongside the server-sourced ones:
+        // both are emitted as a NULLABLE request param (neither is a C#
+        // compile-time constant), so both coalesce here.  `renderCsExpr` yields
+        // the DOMAIN value in each case — `DateTime.UtcNow` / the ambient claim
+        // / `new Money(0m, "USD")` — which is exactly the command's param type.
+        if (isNullableWireDefault(f.default)) {
           // The nullable request field coalesces to the per-request default.
           // `renderCsExpr` yields the DOMAIN value (`DateTime.UtcNow`, the
           // ambient claim) matching the command's param type; in the `: <parse>`

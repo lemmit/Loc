@@ -356,6 +356,33 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // unproven.  Registered rather than silently absent: before this fixture the
   // feature had no `.ddd` at all, so it could not even appear on this list.
   "policy-deny",
+  // The `shape: document` × authz crossing (pairwise F1).  Codegen CRASHED on
+  // node/java/python until the in-app desugar landed, so the fixture's first job
+  // is the compile tier — but "the deep ladder actually hides an out-of-subtree
+  // document row over HTTP" is still unproven at runtime.  A runtime caller here
+  // needs an AUTHENTICATED principal (the ladder is meaningless without one),
+  // which is the multi-principal harness work, not this fixture's.  The emitted
+  // predicate IS executed against fabricated rows in
+  // `test/generator/policy-document-inapp.test.ts`, so the filtering semantics
+  // are proven — just not end-to-end over the wire.
+  "policy-document",
+  // `read-gates` exists for the COMPILE tier: it carries the three read
+  // surfaces that take a `requires` gate (the gated list read, a folded
+  // projection, a query-time projection) so every backend's emitted guard is
+  // proven to compile — the failure mode that unit assertions over generated
+  // TEXT cannot see (a missing `java.util.Objects` import, a `ForbiddenError`
+  // python never imported, a bound-and-unused `current_user` that trips
+  // `--warnings-as-errors`).
+  //
+  // The runtime half needs a principal the harness does not have. Asserting a
+  // read gate means asserting the 403, and that takes an AUTHENTICATED-BUT-
+  // UNAUTHORIZED caller; `DEV_CLAIMS` is a single authorized principal, so the
+  // only thing an e2e block here could assert is that the gate lets the
+  // authorized caller through — which is what `auth-simple`'s guarded
+  // operation already proves for the write side. M-T9.28 (multi-principal
+  // behavioural harness) is what makes the denial assertable; this entry
+  // drops when it lands.
+  "read-gates",
   "resources",
   "tenancy-hierarchy",
 ];

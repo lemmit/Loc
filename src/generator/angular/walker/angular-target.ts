@@ -50,6 +50,23 @@ import { renderAngularDataGridChild } from "./data-grid-child.js";
  *  by the cross-target conformance test and the shared markup walker. */
 export const angularTarget: WalkerTarget = {
   framework: "angular",
+
+  // The chart component takes a FLAT point list, so the `x:`/`y:` accessors are
+  // applied here rather than passed along as key names — the same split every
+  // component-rendered leg draws.  `String`/`Number` are lifted onto the page
+  // component by the shell (Angular templates resolve identifiers against the
+  // instance, never the JS global), which is what makes this legal in a
+  // binding.
+  renderChartData({ queryExpr, dataKey, seriesField }) {
+    // `.data()` — CALLED.  An Angular api read hoists as a SIGNAL, so the JS
+    // default's bare `.data` is `Signal<T[] | undefined>` and `.map` does not
+    // exist on it: `ng build` fails with TS2339, which no unit test would have
+    // seen.  Same spelling `renderQueryDataAccess` uses for every other read.
+    return (
+      `(${queryExpr}.data() ?? []).map((r) => ` +
+      `({ label: String(r.${dataKey}), value: Number(r.${seriesField}) }))`
+    );
+  },
   // Expression-syntax leaves (JS) — shared by all JSX-family frontends.
   ...jsExprLeaves,
 
@@ -496,6 +513,14 @@ export const angularTarget: WalkerTarget = {
    *  nothing" sentinel the JSX frontends pass — e.g. the action-button
    *  gate) drops the `@else` entirely, since Angular renders bare `null`
    *  as the visible text "null" rather than nothing. */
+  /** Render-NOTHING in child position is the EMPTY STRING here, not the walker's
+   *  default `null`: an Angular template block (`@if (…) { … }`) is markup, so a
+   *  bare `null` token inside it is literal TEXT — the user would see the word
+   *  "null" while a slotless `QueryView` loads.  Same insight as the
+   *  `elseS === "null"` guard below, applied where a PACK TEMPLATE (which only
+   *  interpolates) receives the slot.  See `WalkerTarget.emptyChild`. */
+  emptyChild: "",
+
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);

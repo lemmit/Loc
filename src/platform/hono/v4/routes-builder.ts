@@ -2121,6 +2121,23 @@ function wireDefaultLiteral(type: TypeIR, d: ExprIR): string {
   if (inner.kind === "enum" && d.kind === "ref" && d.refKind === "enum-value") {
     return JSON.stringify(d.name);
   }
+  // A VALUE-OBJECT default: `.default(...)` feeds a zod schema whose output is
+  // the WIRE object, so the literal must be that object — not the domain class
+  // `renderTsExpr` would produce.  This one COMPILES either way, because TS is
+  // structural and the emitted class happens to carry matching public fields,
+  // which is exactly why it went unnoticed while python (`mypy --strict`) and
+  // .NET (CS0246) could not build the same source at all.  A value object whose
+  // class shape diverges from its wire shape — a private field, a getter, a
+  // renamed property — would break here silently.
+  if (d.kind === "call" && d.callKind === "value-object-ctor") {
+    const entries = d.args
+      .map((a, i) => {
+        const slot = d.argNames?.[i];
+        return slot ? `${slot}: ${renderTsExpr(a)}` : renderTsExpr(a);
+      })
+      .join(", ");
+    return `{ ${entries} }`;
+  }
   return renderTsExpr(d);
 }
 
