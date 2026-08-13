@@ -107,12 +107,17 @@ const REGISTERED: Ratchet[] = [
     max: 2,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
-  // not gaps — these never reach the compiler.
+  // not gaps — these never reach the compiler.  Raised 1 -> 2 for `read-gates`:
+  // #2498 added the query-time-projection refusal without exempting the one corpus
+  // fixture that trips it, which left `corpus × dotnet (Dapper)` — and `main` — red.
+  // This is a widening, so it is stated rather than absorbed: the number goes back
+  // to 1 (and DAPPER_COMPILE_SKIP to 0) with the one raw-Npgsql port all three
+  // entries are waiting on.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_UNSUPPORTED",
     kind: "record",
-    max: 1,
+    max: 2,
   },
   // Primitives exempt from the pack testid contract.
   {
