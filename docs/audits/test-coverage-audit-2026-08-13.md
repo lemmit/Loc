@@ -170,16 +170,15 @@ The per-PR gate for that layer is `playground-e2e-no-network.yml` (9 Playwright 
 
 Each states the mutation proof its PR must show — per CLAUDE.md, a gate never observed failing proves nothing.
 
-### P1 — **Diagnostic firing census** (`S/M`) → [M-T9.33](../new-plan/T9-toolchain-health.md)
+### P1 — **Diagnostic firing census** (`S/M`) → [M-T9.33](../new-plan/T9-toolchain-health.md) — **slice 1 shipped with this audit**
 
-Every `loom.*` code must be *observed being raised* by at least one test, or carry a pinned entry saying why it cannot be (preempted / structurally unreachable / deliberately unexercised), with a stale-pin check so a code that gains coverage forces its pin's deletion. Baseline: 49 pins.
+`test/system/diagnostic-firing-census.test.ts`. The design moved during the build, and the move matters: **the instrumentation used to measure §3.1 is the right tool and the wrong gate.** A recorded run is a whole-run property (`test.yml` shards 4 ways → needs a shard-merge in the roll-up) and only ever proves *reached*, not *asserted*. So the gate neither searches nor instruments — it **drives**: each fixture is a minimal `.ddd` that must make its code come out of `validate()`. Deterministic, shard-safe, no CI plumbing, and the drain produces real negative tests instead of a report.
 
-Record through the chokepoint `diagnostic-catalog.test.ts` already mandates — `diagMessage` — behind an env flag. Two design constraints worth settling up front rather than discovering:
+Four buckets, every catalogued code in exactly one — `FIRING_FIXTURES` (11, proven by running them), `UNREACHABLE_PINS` (reason required, ≥20 chars), `UNCOVERED` (38, shrink-only, also registered in `allowlist-ratchet`), `COVERED_ELSEWHERE` (364, **frozen — no new code may join**). The frozen bucket is what makes it a ratchet: a code added tomorrow fails until its author writes a fixture or pins it.
 
-- **It is a whole-run property, not a per-file one.** `test.yml` shards 4 ways and each shard sees a different slice of the catalogue, so it cannot be an ordinary meta-test: write one record per shard and union them in the roll-up job, the way the `coverage` job already merges blob reports.
-- **It proves *reached*, not *asserted*.** A code constructed incidentally by a fixture nobody asserts on counts as covered. That is the honest limit — it closes the "no test in the repo even reaches this gate" class (the one that produced the four unemittable `workflow-checks.ts` arms and the stale `workflow-emit-unknown-field` claim) and says nothing about "reached but ignored". State that in the gate's header.
+Stated limit, in the gate's header: `COVERED_ELSEWHERE` credits coverage measured once, so a later-deleted test goes unnoticed. It closes "a code arrives with no proof it ever fires", not the general case.
 
-*Mutation proof:* delete one `if` in a covered check (e.g. `loom.duplicate-system` in `structural-checks.ts`) → the gate must name that code; pin a code that IS covered → the stale-pin half must fail.
+*Mutation-proved four ways* (file-copy reverts): disable the `duplicate-find` check → its fixture test fails naming it; add a catalogue code → "accounted for" fails naming it; drain an `UNCOVERED` entry without lowering the baseline → anti-slack fails; add one → shrink-only fails.
 
 *Do not build the grep version* — both static forms were measured here and both are wrong in both directions (§3.1).
 
