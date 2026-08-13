@@ -269,70 +269,58 @@ describe("M-T9.25 round 2, probe 2 — the 403 arm agrees on all five backends",
 // waiver is a reviewed decision with a reason, never a skip.
 // ---------------------------------------------------------------------------
 
-/** The 401 arm as each backend emits it TODAY: a bare token, not a problem
- *  document, and with no `WWW-Authenticate` challenge anywhere in the file.
- *  `body` is the exact current emission (the ratchet anchor); `authFile` is the
- *  file it lives in, asserted to carry neither the 7807 content type nor the RFC
- *  9110 §15.5.2 challenge header. */
-type Waiver401 = { authFile: string; body: string; why: string };
-
-const WAIVER_401: Record<Platform, Waiver401> = {
+/** The 401 arm — POSITIVE census since #2500 (which retired the bare-401
+ *  waiver this block replaced): every backend answers 401 as an RFC 7807
+ *  problem document AND carries the WWW-Authenticate Bearer challenge that
+ *  RFC 9110 §15.5.2 makes a MUST.  Pinned per backend at the emission site so
+ *  a regression on any one arm names the backend. */
+const SITES_401: Record<Platform, { authFile: string; mustContain: string[] }> = {
   node: {
     authFile: "auth/middleware.ts",
-    body: 'return c.json({ error: "unauthorized" }, 401);',
-    why:
-      "The 401 arm is a bare `{error:'unauthorized'}` JSON with no 7807 envelope and no " +
-      "WWW-Authenticate (an RFC 9110 §15.5.2 MUST).  In-flight #2500 is the runtime-boot fix " +
-      "that rewrites all five 401 arms into problem documents + a Bearer challenge; when it " +
-      "lands, delete this waiver and move the 401 into SITES.",
+    mustContain: [
+      'title: "Unauthorized"',
+      `"www-authenticate": 'Bearer realm="api", error="invalid_token"'`,
+    ],
   },
   python: {
     authFile: "auth/middleware.py",
-    body: 'return JSONResponse({"error": "unauthorized"}, status_code=401)',
-    why: "same 401 gap as node — bare JSON, no 7807, no challenge; fixed by #2500.",
+    mustContain: [
+      '"title": "Unauthorized"',
+      `headers={"WWW-Authenticate": 'Bearer realm="api", error="invalid_token"'}`,
+    ],
   },
   elixir: {
     authFile: "api_web/auth.ex",
-    body: 'send_resp(401, ~s({"error":"unauthorized"}))',
-    why: "same 401 gap as node — bare JSON (content-type application/json), no 7807, no challenge; fixed by #2500.",
+    mustContain: [
+      'title: "Unauthorized"',
+      'put_resp_header("www-authenticate", ~s(Bearer realm="api", error="invalid_token"))',
+    ],
   },
   java: {
     authFile: "auth/UserFilter.java",
-    body: 'response.getWriter().write("unauthorized");',
-    why:
-      "worse than node's — the 401 body is PLAIN TEXT `unauthorized` (getWriter default), so the " +
-      "two backends do not even agree on JSON-vs-text; no 7807, no challenge; fixed by #2500.",
+    mustContain: [
+      '\\"title\\":\\"Unauthorized\\"',
+      'response.setHeader("WWW-Authenticate", "Bearer realm=\\"api\\", error=\\"invalid_token\\"");',
+    ],
   },
   dotnet: {
     authFile: "Auth/UserMiddleware.cs",
-    body: 'await ctx.Response.WriteAsync("unauthorized");',
-    why: "same plain-text 401 as java (WriteAsync default), no 7807, no challenge; fixed by #2500.",
+    mustContain: [
+      'Title = "Unauthorized"',
+      'ctx.Response.Headers.WWWAuthenticate = "Bearer realm=\\"api\\", error=\\"invalid_token\\"";',
+    ],
   },
 };
 
-describe("M-T9.25 round 2, probe 2 — the 401 arm is a problem document on NONE (ratchet, #2500)", () => {
+describe("M-T9.25 round 2, probe 2 — the 401 arm is a problem document on ALL FIVE (positive census, #2500)", () => {
   for (const platform of PLATFORMS) {
-    it(`${platform}: still emits a bare 401 with no 7807 envelope and no WWW-Authenticate`, async () => {
-      const src = await fileOf(platform, WAIVER_401[platform].authFile);
-      // (1) the current bare-token emission is present — the ratchet anchor.
-      expect(
-        src,
-        `${platform}: the pinned bare-401 emission is gone — if #2500 (or equivalent) fixed it, ` +
-          "delete this waiver and move the 401 into SITES_403's sibling positive census.",
-      ).toContain(WAIVER_401[platform].body);
-      // (2) the RFC 9110 §15.5.2 MUST is still unmet at the 401 site.
-      expect(
-        src,
-        `${platform}: a WWW-Authenticate challenge appeared — the 401 arm was fixed; retire this waiver.`,
-      ).not.toContain("WWW-Authenticate");
+    it(`${platform}: the 401 is RFC 7807 and carries the Bearer challenge`, async () => {
+      const src = await fileOf(platform, SITES_401[platform].authFile);
+      for (const needle of SITES_401[platform].mustContain) {
+        expect(src, `${platform}: the 401 arm regressed at its emission site`).toContain(needle);
+      }
     });
   }
-
-  it("every 401 waiver carries a reason", () => {
-    for (const [platform, w] of Object.entries(WAIVER_401)) {
-      expect(w.why.length, `${platform}: a waiver without a reason is a skip`).toBeGreaterThan(40);
-    }
-  });
 });
 
 /** The 403 DETAIL on a declared-find `requires` gate.  node is the outlier: it
