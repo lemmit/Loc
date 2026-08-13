@@ -29,6 +29,7 @@ import {
 } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
+import { wireValue } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Query-time projection routes — `app/http/query_projections_routes.py`,
@@ -321,10 +322,20 @@ function projectionRoute(
     out.push("    return [repo.to_wire(r) for r in rows]");
     return out.join("\n");
   }
+  // The row's DECLARED wire types, by field name.  A `select` reads DOMAIN
+  // values (a hydrated aggregate, or a joined one), so each one is serialised
+  // by the aggregate's own `to_wire` renderer — money through `money_str` at
+  // the fixed RS-12 scale, datetimes through `iso`.  Without it the response
+  // model (which declares `str`) is handed a raw `Decimal`/`datetime` and
+  // FastAPI answers 500, and a `select` naming a money column would disagree
+  // with that same column read through the aggregate's own route.
+  const rowFieldType = new Map(proj.stateFields.map((f) => [f.name, f.type] as const));
   out.push("    return [");
   out.push("        {");
   for (const s of proj.query!.selects ?? []) {
-    out.push(`            "${s.field}": ${renderProjectionSelect(s.expr, aliasMap)},`);
+    const rendered = renderProjectionSelect(s.expr, aliasMap);
+    const t = rowFieldType.get(s.field);
+    out.push(`            "${s.field}": ${t ? wireValue(rendered, t, ctx, false) : rendered},`);
   }
   out.push("        }");
   out.push("        for r in rows");

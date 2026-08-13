@@ -6,6 +6,7 @@ import {
   DRIZZLE_INTRINSIC_SQL,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
+import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
@@ -268,6 +269,7 @@ export function buildQueryProjectionsFile(
     lines.push(
       ...emitQueryProjectionRoute(
         p,
+        ctx,
         rawReads.get(p.name),
         aggWheres.get(p.name),
         usingMikro ? { where: mikroWheres.get(p.name) } : undefined,
@@ -357,6 +359,7 @@ export function buildQueryProjectionsFile(
  *  projection's own row shape. */
 function emitQueryProjectionRoute(
   p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
   rawRead?: { table: string; where?: string },
   aggregateWhere?: string,
   /** Present ⇒ `persistence: mikroorm`: `where` is a MikroORM FilterQuery
@@ -615,10 +618,13 @@ function emitQueryProjectionRoute(
     out.push(`    const projected = rows.map((r) => repo.toWire(r));`);
   } else {
     const projectedFields = (p.query!.selects ?? [])
-      .map(
-        (s) =>
-          `      ${s.field}: ${coerceSelectToWire(rowFieldType.get(s.field), renderProjectionSelect(s.expr, aliasMap))}`,
-      )
+      .map((s) => {
+        const rendered = renderProjectionSelect(s.expr, aliasMap);
+        const t = rowFieldType.get(s.field);
+        // DOMAIN values (a hydrated aggregate, or a joined one) — so this is
+        // the aggregate's own `toWire` renderer, not the column table below.
+        return `      ${s.field}: ${t ? wireProjectionValue(rendered, t, ctx, false) : rendered}`;
+      })
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
   }

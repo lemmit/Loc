@@ -35,6 +35,7 @@ import type {
   ExprIR,
   ProjectionAggregateIR,
   ProjectionIR,
+  TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
@@ -364,6 +365,11 @@ ${moneyWireHelper(aggregates)}end
   // version), byte-identical to what its findAll returns.  Emitted as private
   // functions on this module and mapped over the source rows.
   let projectionHelpers = "";
+  // Set when a `select` projects a money field — gates the `__money_round/1`
+  // helper below.  Emitting the CALL without the helper is a compile error
+  // (`--warnings-as-errors` turns an undefined private fn into a failure), so
+  // the flag and the emission stay adjacent.
+  let usesMoneyRound = false;
   if (isShorthand && sourceAgg) {
     lines.push(`    Enum.map(rows, &serialize/1)`);
     const wire = renderWireSerialize(sourceAgg, ctx, { contextModule });
@@ -379,11 +385,27 @@ ${moneyWireHelper(aggregates)}end
     }${refIds}`;
   } else {
     const selects = query.selects ?? [];
+    // A `select` reads a DOMAIN value off the loaded row (or a joined one), so
+    // money needs the same RS-12 rounding the aggregate's own `serialize/1`
+    // applies (`order_controller.ex` emits `__money_round(record.total)`).  A
+    // bare `%Decimal{}` Jason-encodes at ITS OWN scale, so a projection row and
+    // an aggregate read would put `"10"` and `"10.0000"` on the wire for the
+    // same column — invisible to a status-code assertion, and invisible to the
+    // wire-golden differential until this fixture has a golden.
+    const rowFieldType = new Map(proj.stateFields.map((f) => [f.name, f.type] as const));
+    const isMoney = (t: TypeIR | undefined): boolean => {
+      if (!t) return false;
+      const inner = t.kind === "optional" ? t.inner : t;
+      return inner.kind === "primitive" && inner.name === "money";
+    };
     lines.push(`    Enum.map(rows, fn record ->`);
     lines.push(`      %{`);
     selects.forEach((s, i) => {
       const tail = i === selects.length - 1 ? "" : ",";
-      lines.push(`        ${s.field}: ${renderSelectEcto(s.expr, aliasMap, renderCtx)}${tail}`);
+      const rendered = renderSelectEcto(s.expr, aliasMap, renderCtx);
+      const ve = isMoney(rowFieldType.get(s.field)) ? `__money_round(${rendered})` : rendered;
+      if (ve !== rendered) usesMoneyRound = true;
+      lines.push(`        ${s.field}: ${ve}${tail}`);
     });
     lines.push(`      }`);
     lines.push(`    end)`);
@@ -406,7 +428,11 @@ defmodule ${moduleName} do
   @spec run(any()) :: [map()]
   def run(current_user \\\\ nil) do
 ${lines.filter((l) => l !== "").join("\n")}
-  end${projectionHelpers}
+  end${projectionHelpers}${
+    usesMoneyRound
+      ? `\n\n  defp __money_round(nil), do: nil\n\n  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`
+      : ""
+  }
 end
 `;
 }
