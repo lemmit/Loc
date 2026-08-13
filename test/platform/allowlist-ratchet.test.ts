@@ -112,7 +112,10 @@ const REGISTERED: Ratchet[] = [
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_UNSUPPORTED",
     kind: "record",
-    max: 1,
+    // 1 -> 2 (2026-08-13): `read-gates` (#2523) carries a query-time projection,
+    // which dapper honestly refuses until M-T6.25 lands its QP emitters — the
+    // entry cites that mission and deleting it is M-T6.25's acceptance ratchet.
+    max: 2,
   },
   // Primitives exempt from the pack testid contract.
   {
