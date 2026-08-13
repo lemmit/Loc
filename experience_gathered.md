@@ -4986,3 +4986,42 @@ rebaseline the case, which is how one notices if one is looking.
 "everything that isn't the good one". A third outcome added later then arrives
 as a compile-or-review question instead of silently disabling the check — and a
 new status must be classified deliberately, which is the whole point.
+## 87. The file-copy revert is only as good as the copy — verify the SOURCE, not just the command (2026-08-13)
+
+§84 and §85's relapse both end in the same rule: revert instrumentation by `cp`
+from a copy you took first, never `git checkout --`. This session obeyed that
+rule and still corrupted a file, because the rule protects the *direction* of
+the copy and says nothing about its *source*.
+
+The shape, mutation-proving a new gate:
+
+```bash
+cp test/util/naming.test.ts $SP/naming.orig 2>/dev/null || ls test/util | head -3
+# … seed the mutation into whichever file a glob picked (channels.test.ts) …
+cp $SP/naming.orig $TARGET      # "revert"
+```
+
+The backup was taken from a **different file than the one that got mutated** —
+a leftover from an earlier draft of the command where the target was chosen by
+hand. `cp` does not care: it wrote `naming.test.ts`'s contents over
+`channels.test.ts` and exited 0. The gate under test then passed, the mutation
+proof read as complete, and the only evidence was `git status` showing a file I
+had never intentionally touched as modified (`128 insertions, 83 deletions` —
+the diff between two unrelated test files).
+
+Three things made it survivable, and all three are the actual lesson:
+
+1. **`git status` after every mutation cycle, not just at commit time.** The
+   corruption was invisible in the gate's output — it was visible immediately in
+   one line of `git status`.
+2. **A `2>/dev/null || fallback` on the backup step hides exactly the failure
+   you need to see.** If the backup `cp` fails, the "revert" later writes either
+   nothing or something foreign. Let the backup fail loudly.
+3. **The safe restore for a file with no other uncommitted edits is
+   `git checkout HEAD -- <path>`** — and knowing that it *was* clean is why it
+   was safe here. §84's prohibition is about files carrying your own work; it is
+   not a blanket ban, and treating it as one leaves you with no recovery move.
+
+**Rule:** back up by copying *the file you are about to mutate*, in the same
+command that mutates it, with no error suppression — then `git status` before
+believing the proof.

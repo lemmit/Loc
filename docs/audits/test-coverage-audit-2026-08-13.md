@@ -131,13 +131,13 @@ The fix is not "assert validity everywhere" — some of these tests exist to exe
 
 M-T9.17 slice 1 proved the counter-pattern (mock-target unit tests for the four shared cores); slice 2 names the next set. This table says where the leverage is: `lower-expr.ts` and `structural-checks.ts` are pure functions over IR with no I/O, upstream of every backend — and `structural-checks.ts` is also where 9 of §3.1's unreached gates live.
 
-**Side finding — dead re-export shims.** 23 modules are imported by neither `src` nor `test`. About 15 are `export *` path-stability shims left by moves into `_walker`/`_frontend` (`react/walker/{icons,api-hooks,context}.ts`, `react/walker/primitives/*.ts`, `react/templating/preparers/form-fields.ts`, `typescript/zod-refine.ts`), plus `feliz/projection-read.ts` (its one export is used only by Angular's own copy) and `flutter/projection-read.ts`. `test/platform/dead-generator-exports.test.ts` misses them because it matches exported `render*/emit*/build*` **names**, and a bare `export *` declares none.
+**Side finding — dead re-export shims. Fixed with this audit.** 23 modules were imported by neither `src` nor `test`. Sixteen were `export *` path-stability shims left by moves into `_walker`/`_frontend` (`react/walker/{icons,api-hooks,context}.ts`, `react/walker/primitives/*.ts`, `react/templating/preparers/form-fields.ts`, `typescript/zod-refine.ts`), plus `feliz/projection-read.ts` (its one export is used only by Angular's own copy) and `flutter/projection-read.ts`. `test/platform/dead-generator-exports.test.ts` could not see them: it matches exported `render*/emit*/build*` **names**, and a bare `export *` declares none. All 16 are deleted and the gate now has a second half that resolves import specifiers and fails on any shim with no importer left — with one reviewed pin, `src/mcp/index.ts`, a published package barrel whose consumers are outside this repo by design.
 
 ### 3.4 The assertion-free class is drained — close the recurring sweep (P3, cheap)
 
 M-T9.8 item (e) has been a recurring manual sweep for a month. An AST sweep finds **35 assertion-free cases of 16,584**, and all 35 are benign on inspection: 3 type-level contract-shape tests where `tsc` *is* the assertion, 22 opt-in e2e cases delegating to a helper that asserts or throws (`runMigrationEvolutionGate`, `waitFor`), and the rest the same shape.
 
-Nothing to drain. Graduate it into a pinned ratchet at 35 and strike (e) from the recurring list — the move that already turned the dead-export and TODO-sentinel sweeps into permanent gates. (Use the AST sweep, not a regex: the naive brace-counting version reports 525, a 15× false-positive rate.)
+Nothing to drain — so it is graduated rather than drained. `test/platform/assertion-free-tests.test.ts` pins the exact set (per file, not per line — line numbers churn for unrelated reasons), fails on a new assertion-free case, and fails on a **stale** pin so a case that gains an assertion forces its pin's removal. M-T9.8 item (e) is struck from the recurring list. The gate uses the AST sweep, not a regex: the naive brace-counting version reports 525, a 15× false-positive rate, which is a fair description of why the manual sweep went unrun for a month.
 
 ### 3.5 The playground's 46k LOC sit outside the coverage lens (P2)
 
@@ -202,13 +202,15 @@ Land it with a ratcheting register of the current 174 files so it is mechanical 
 
 814 lines of pure store logic whose only gate is Playwright, half of it post-merge. No new infrastructure: `test/playground/` already imports `web/src` directly.
 
-### P3 — **Graduate the assertion-free sweep into a ratchet** (`S`) — §3.4
+### P3 — ~~Graduate the assertion-free sweep into a ratchet~~ — **shipped** (§3.4)
 
-Pin at 35 with `scripts/assertion-free-census.mjs`; strike M-T9.8 (e) from the recurring list.
+`test/platform/assertion-free-tests.test.ts`, pinned at 35 across 26 files, both directions ratcheting. M-T9.8 (e) struck.
 
-### P3 — **Extend `dead-generator-exports` to bare `export *` shims** (`S`) — §3.3
+### P3 — ~~Extend `dead-generator-exports` to bare `export *` shims~~ — **shipped** (§3.3)
 
-~15 dead shim modules, 4 lines each. Delete them and widen the matcher so the next move leaves no residue.
+16 shims deleted; the gate gained a resolved-specifier half. One reviewed pin (`src/mcp/index.ts`, a published barrel). *Mutation-proved:* restoring one deleted shim fails the gate by name.
+
+**One implementation note worth carrying forward**, because the first version of that half was wrong in a way that reads as working: matching import specifiers by **path suffix** reports live modules as dead, since a sibling imports `"./heex-walker.js"` — a string containing none of its own directory. It named nine live shims on its first run and was caught only because they were hand-checked. The gate resolves specifiers against the importer's directory instead.
 
 ---
 
