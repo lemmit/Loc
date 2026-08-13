@@ -34,7 +34,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
+import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { paramPropTsType } from "../../_frontend/component-prop-type.js";
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
@@ -870,10 +870,12 @@ export function renderSvelteExternComponentShim(name: string, externPath: string
 /** `let name = $state<T>(init);` — one per state field. */
 function renderRunesState(field: StateFieldIR, pack: LoadedPack): string {
   const tsType = stateTypeAsTsString(field.type);
-  const init =
+  const init = coerceMoneyStateInit(
+    field.type,
     field.init !== undefined
       ? renderInitExpr(field.init, pack)
-      : svelteTarget.defaultInitFor(field.type);
+      : svelteTarget.defaultInitFor(field.type),
+  );
   return `let ${field.name} = $state<${tsType}>(${init});`;
 }
 

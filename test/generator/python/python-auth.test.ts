@@ -44,7 +44,15 @@ describe("python auth gate", () => {
     // Bypass list matches Hono/.NET exactly.
     expect(mw).toContain('BYPASS_PREFIXES = ("/health", "/ready", "/openapi.json", "/swagger")');
     expect(mw).toContain("request.state.current_user = user");
-    expect(mw).toContain('return JSONResponse({"error": "unauthorized"}, status_code=401)');
+    // The 401 is RFC 7807 like every other error on this API, and carries the
+    // `WWW-Authenticate` challenge RFC 9110 §15.5.2 makes a MUST — this used to
+    // be `{"error": "unauthorized"}`, a shape appearing nowhere else, with no
+    // challenge at all.
+    expect(mw).toContain('"type": "about:blank"');
+    expect(mw).toContain('"title": "Unauthorized"');
+    expect(mw).toContain('media_type="application/problem+json"');
+    expect(mw).toContain("WWW-Authenticate");
+    expect(mw).not.toContain('{"error": "unauthorized"}');
     // Stamps the principal id into the RequestContext carrier after verify;
     // the user block's id key is `id`, so it reads user.id.
     expect(mw).toContain("from app.obs.log import set_actor_id");

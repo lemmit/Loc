@@ -187,7 +187,10 @@ describe("java", () => {
     // block, serving a `requires`-gated aggregation UNGATED on Java alone —
     // every other backend enforced it.  The route keeps the one-row shape.
     const gated = system("java")
-      .replace("from Order as o", 'from Order as o\n        requires currentUser.role == "admin"')
+      .replace(
+        "projection SalesTotals",
+        'projection SalesTotals requires currentUser.role == "admin"',
+      )
       .replace("system Shop {", "system Shop {\n  user { id: string role: string }")
       .replace("port: 8080 }", "port: 8080 auth: required }");
     const files = await generateSystemFiles(gated);

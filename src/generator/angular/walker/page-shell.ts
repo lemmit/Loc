@@ -13,7 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
-import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
+import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { unwrapOpt } from "../../_frontend/form-helpers.js";
 import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
@@ -228,7 +228,7 @@ function arrayElementTs(t: TypeIR): string | undefined {
  *  state/params — literals cover the realistic surface.) */
 function renderStateInit(field: StateFieldIR): string {
   const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
-  return lit ?? angularTarget.defaultInitFor(field.type);
+  return coerceMoneyStateInit(field.type, lit ?? angularTarget.defaultInitFor(field.type));
 }
 
 /** A `File`-typed `state {}` field (optional-unwrapped).  Its signal is typed

@@ -39,6 +39,7 @@ import {
 } from "../../../ir/util/api-surface.js";
 import { lifecycleGates } from "../../../ir/util/op-gates.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { listReadFind } from "../../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
@@ -355,21 +356,50 @@ function renderController(
   // helper find-controller emits — always present now that every non-abstract
   // controller pages) and returns the `%{items, …}` envelope.  A read-only
   // abstract-base controller keeps the plain unpaged list (honest gate).
-  const listAllFind = (ctx.repositories ?? [])
-    .find((r) => r.aggregateName === agg.name)
-    ?.finds?.find((f) => f.name === "all");
+  const listAllFind = listReadFind(
+    (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name),
+  );
   const indexPaged = !readOnly && (listAllFind ? !!pagedReturn(listAllFind.returnType) : false);
   const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
-  const indexAction = indexPaged
-    ? `  def index(conn, params) do
-${cuBind}    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
+  // The LIST read's authorization gate — 403 before the query, the same
+  // contract `renderFindActions` gives every NAMED find.  `index` is emitted
+  // here, outside that loop (the list endpoint has its own paged shape), which
+  // is how its `requires` came to be dropped on this backend while every named
+  // find's was honoured.
+  const indexGate = listAllFind?.requires;
+  const indexGateUsesUser = !!indexGate && exprUsesCurrentUser(indexGate);
+  // `current_user` may already be bound by `cuBind` (principal-scoped reads);
+  // bind it here only when the gate is the sole reason it's needed.
+  const indexCuBind =
+    indexGateUsesUser && !principal
+      ? "    current_user = Map.get(conn.assigns, :current_user)\n"
+      : "";
+  const indexBody = indexPaged
+    ? `    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+    end`
+    : `    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
+      json(conn, Enum.map(records, &serialize/1))
+    end`;
+  // Unchanged by the gate: the guard sits inside the function body, so the
+  // paged arm still binds `params` and the unpaged one still underscore-prefixes
+  // it for the unused-variable check.
+  const indexParamArg = indexPaged ? "params" : "_params";
+  const indexAction = indexGate
+    ? `  def index(conn, ${indexParamArg}) do
+${cuBind}${indexCuBind}    if not (${renderElixirExpr(indexGate, { thisName: "record", contextModule: facadeMod, foundation: "vanilla" })}) do
+      ${denialResponse(
+        "forbidden",
+        JSON.stringify(`Forbidden: find ${listAllFind!.name}`),
+        denialOverrides(ctx),
+        `${appModule}Web.ProblemDetails`,
+      )}
+    else
+${indexBody}
     end
   end`
-    : `  def index(conn, _params) do
-${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
-      json(conn, Enum.map(records, &serialize/1))
-    end
+    : `  def index(conn, ${indexParamArg}) do
+${cuBind}${indexBody}
   end`;
   // Command-load context fn a MUTATION action loads through (authorization
   // Phase 3 P3.1): `get_<agg>_for_write` when the aggregate's write scope is

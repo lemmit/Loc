@@ -99,13 +99,12 @@ const SRC = `system Shop {
         find byId(id: int): Order? requires permissions.read where this.id == id
         find open(): Order[] where true
       }
-      projection OrderRow(limit: int) keyed by sku {
+      projection OrderRow(limit: int) keyed by sku requires permissions.read {
         total: decimal
         on(e: Placed) {
           total := 1
         }
         from Order as o
-        requires permissions.read
         join Tenant as t on o.sku
         select total = o.sku
       }

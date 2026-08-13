@@ -13,7 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
+import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
@@ -41,7 +41,7 @@ import { vueTarget } from "./vue-target.js";
  *  (mirrors the Angular/Svelte page-shells honouring `field.init`). */
 function renderVueStateInit(field: StateFieldIR): string {
   const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
-  return lit ?? vueTarget.defaultInitFor(field.type);
+  return coerceMoneyStateInit(field.type, lit ?? vueTarget.defaultInitFor(field.type));
 }
 
 /** A page-state field's TS type, for the cases `ref()` can't infer.  Only the
