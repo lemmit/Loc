@@ -42,11 +42,10 @@ const SRC = `system Shop {
         group by o.status
         select status = o.status, orders = count(), revenue = sum(o.total)
       }
-      projection GatedByStatus {
+      projection GatedByStatus requires currentUser.role == "admin" {
         status: OrderStatus
         orders: int
         from Order as o
-        requires currentUser.role == "admin"
         group by o.status
         select status = o.status, orders = count()
       }
@@ -124,14 +123,14 @@ describe("java grouped projection (group by)", () => {
     // fixture reaches this arm.
     const files = await generateSystemFiles(
       SRC.replace(
-        "projection GatedByStatus {",
+        "projection GatedByStatus requires",
         `projection CountByStatus {
         n: int
         from Order as o
         group by o.status
         select n = count()
       }
-      projection GatedByStatus {`,
+      projection GatedByStatus requires`,
       ),
     );
     let svc = "";

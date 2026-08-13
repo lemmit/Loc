@@ -6,7 +6,8 @@ import type {
   TypeIR,
   WireField,
 } from "../../ir/types/loom-ir.js";
-import { isMaterializedProjection } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isMaterializedProjection } from "../../ir/types/loom-ir.js";
+import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import {
   collectWireUsings,
@@ -22,7 +23,7 @@ import {
   projectionRowDbSet,
   projectionRowTable,
 } from "./projection-state-emit.js";
-import { collectCsExprUsings } from "./render-expr.js";
+import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 import { renderExprWithEventParam } from "./workflow-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -237,6 +238,9 @@ function renderProjectionsController(
   // its read-model table into a private `<T>DbRow` + `Map<T>` to the POCO (the
   // same `dapperProjectionColumns` shape the fold store persists — M-T6.9).
   const rowMapDecls: string[] = [];
+  // Set when any projection's gate reads the principal — the controller then
+  // takes `ICurrentUserAccessor` alongside its persistence handle.
+  let needsCurrentUser = false;
   for (const proj of ctx.projections.filter(isMaterializedProjection)) {
     const slug = snake(proj.name);
     const T = upperFirst(proj.name);
@@ -300,18 +304,49 @@ function renderProjectionsController(
         `        if (x is null) ${dotnetNotFoundThrow(ns, T, "key")}\n` +
         `        return Ok(new ${T}Response(${proj_("x")}));\n`;
     }
+    // Authorization gate (authorization.md) — the folded read model's twin of
+    // the query-time projection's gate in `query-projection-emit.ts`: a
+    // `currentUser`-only predicate evaluated BEFORE the read, throwing
+    // `ForbiddenException` (→ 403 via the DomainExceptionFilter).  It guards
+    // BOTH routes; on the by-key route it runs before the lookup, so a caller
+    // who fails it cannot learn whether the key exists.
+    const gate = proj.query?.requires;
+    if (gate) {
+      collectCsExprUsings(gate, usings);
+      usings.add(`${ns}.Domain.Common`); // ForbiddenException
+      if (exprUsesCurrentUser(gate)) {
+        usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+        needsCurrentUser = true;
+      }
+    }
+    const gateLines = gate
+      ? (exprUsesCurrentUser(gate) ? `        var currentUser = _currentUser.User;\n` : "") +
+        `        if (!(${renderCsExpr(gate)})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: projection ${proj.name}`,
+        )});\n`
+      : "";
+    const forbiddenAttr = gate
+      ? `    [ProducesResponseType(typeof(ProblemDetails), ${resolveErrorStatus(
+          "Forbidden",
+          ctx.structuralErrorStatuses,
+        )})]\n`
+      : "";
     blocks.push(
       `    [HttpGet("${slug}")]\n` +
         `    [ProducesResponseType(typeof(IEnumerable<${T}Response>), 200)]\n` +
+        forbiddenAttr +
         `    public async Task<IActionResult> List${T}()\n` +
         `    {\n` +
+        gateLines +
         listBody +
         `    }\n` +
         `    [HttpGet("${slug}/{key}")]\n` +
         `    [ProducesResponseType(typeof(${T}Response), 200)]\n` +
+        forbiddenAttr +
         `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
         `    public async Task<IActionResult> Get${T}(${corrClr} key)\n` +
         `    {\n` +
+        gateLines +
         byIdBody +
         `    }\n`,
     );
@@ -320,9 +355,13 @@ function renderProjectionsController(
   const persistenceUsings = usingDapper
     ? "using Dapper;\nusing Npgsql;"
     : "using Microsoft.EntityFrameworkCore;";
-  const ctorField = usingDapper
-    ? `    private readonly NpgsqlDataSource _db;\n    public ${className}(NpgsqlDataSource db) => _db = db;`
-    : `    private readonly AppDbContext _db;\n    public ${className}(AppDbContext db) => _db = db;`;
+  const dbFieldType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
+  const ctorField = needsCurrentUser
+    ? `    private readonly ${dbFieldType} _db;\n` +
+      `    private readonly ICurrentUserAccessor _currentUser;\n` +
+      `    public ${className}(${dbFieldType} db, ICurrentUserAccessor currentUser)\n` +
+      `    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
+    : `    private readonly ${dbFieldType} _db;\n    public ${className}(${dbFieldType} db) => _db = db;`;
   const memberDecls = usingDapper && rowMapDecls.length > 0 ? `${rowMapDecls.join("\n")}\n\n` : "";
   return `// Auto-generated.
 using System;

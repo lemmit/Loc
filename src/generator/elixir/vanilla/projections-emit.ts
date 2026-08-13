@@ -4,11 +4,13 @@ import type {
   ProjectionIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
-import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { ectoIdType, projectionRowModule } from "../dispatch-emit.js";
+import { renderExpr } from "../render-expr.js";
+import { denialOverrides, denialResponse } from "./denial.js";
 import { mapTypeToEcto } from "./schema-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -122,7 +124,7 @@ export function emitVanillaProjectionsController(
   const webModule = `${appModule}Web`;
   const actions = projections
     .map(({ ctx, proj }) =>
-      renderProjectionActions(`${appModule}.${upperFirst(ctx.name)}`, appModule, proj),
+      renderProjectionActions(`${appModule}.${upperFirst(ctx.name)}`, appModule, proj, ctx),
     )
     .join("\n\n");
 
@@ -169,10 +171,57 @@ function renderProjectionActions(
   contextModule: string,
   appModule: string,
   proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
 ): string {
   const slug = snake(proj.name);
   const rowMod = projectionRowModule(contextModule, proj);
   const mapFields = (proj.wireShape ?? []).map((f) => `${f.name}: row.${snake(f.name)}`).join(", ");
+  // The `requires` gate — 403 before the read, mirroring the query-time
+  // projection action in `query-projections-emit.ts`.  A folded projection is a
+  // table of rows a client can GET; being written by folds rather than queried
+  // live says nothing about who may read it.  Ungated ⇒ byte-identical.
+  const gateExpr = proj.query?.requires
+    ? renderExpr(proj.query.requires, {
+        thisName: "record",
+        contextModule,
+        foundation: "vanilla",
+      })
+    : null;
+  const cuBind =
+    proj.query?.requires && exprUsesCurrentUser(proj.query.requires)
+      ? "    current_user = Map.get(conn.assigns, :current_user)\n"
+      : "";
+  const denial = denialResponse(
+    "forbidden",
+    JSON.stringify(`Forbidden: projection ${proj.name}`),
+    denialOverrides(ctx),
+  );
+  if (gateExpr) {
+    return `  @doc "GET /api/projections/${slug}"
+  def ${slug}_index(conn, _params) do
+${cuBind}    if not (${gateExpr}) do
+      ${denial}
+    else
+      data = Enum.map(${appModule}.Repo.all(${rowMod}), fn row -> %{${mapFields}} end)
+      json(conn, %{data: data})
+    end
+  end
+
+  @doc "GET /api/projections/${slug}/:key"
+  def ${slug}_show(conn, %{"key" => key}) do
+${cuBind}    if not (${gateExpr}) do
+      ${denial}
+    else
+      case ${appModule}.Repo.get(${rowMod}, key) do
+        nil ->
+          ProblemDetails.not_found_response(conn, "${upperFirst(proj.name)}", key)
+
+        row ->
+          json(conn, %{${mapFields}})
+      end
+    end
+  end`;
+  }
   return `  @doc "GET /api/projections/${slug}"
   def ${slug}_index(conn, _params) do
     data = Enum.map(${appModule}.Repo.all(${rowMod}), fn row -> %{${mapFields}} end)

@@ -1,0 +1,17 @@
+{{!--
+  Chart — a line/bar series over a grouped query-time projection (M-T1.3
+  Phase 4).
+
+  In the SHARED Angular layer rather than in each pack: `loader.ts` merges the
+  shared sources into the same template map a pack renders from, so this one
+  file serves angularMaterial, primeng AND spartanNg with no per-pack work.  A
+  pack that wants its own charting component can override `primitive-chart` by
+  name — the shared entry is a default, not a ceiling.
+
+  The geometry lives in `LoomChart` (emitted by `angular/chart-runtime.ts` only
+  when a page charts), which matters more here than on the other frameworks:
+  an Angular template resolves identifiers against the COMPONENT INSTANCE, so
+  scale maths inline in a binding would need every helper it touches re-exposed
+  as a member.  The binding passes plain data instead.
+--}}
+<loom-chart [isBar]="{{#if isLine}}false{{else}}true{{/if}}" [label]="'{{ariaLabel}}'" [rows]="{{{dataExpr}}}"{{{testidAttr}}} />

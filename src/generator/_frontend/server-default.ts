@@ -47,6 +47,32 @@ export function isServerSourcedDefault(e: ExprIR): boolean {
 }
 
 /**
+ * Whether a default constructs a VALUE OBJECT (`total: Money = Money { … }`).
+ *
+ * It matters at the WIRE boundary, and it matters differently per target,
+ * which is why this is a predicate here rather than a rendering decision
+ * anywhere:
+ *
+ *   * the default is rendered by each backend's DOMAIN expression renderer,
+ *     but it lands in a slot typed as the WIRE DTO — so a domain class ends up
+ *     where a wire model belongs (python `mypy --strict`: incompatible
+ *     assignment; .NET: CS0246, the domain type is not even in scope there);
+ *   * on .NET it is additionally not expressible at all: a record parameter
+ *     default must be a COMPILE-TIME CONSTANT (CS1736), and no constructor
+ *     call is one.  That backend therefore reuses its existing server-sourced
+ *     escape hatch (nullable param + per-request coalesce) rather than
+ *     rendering a wire-shaped constant;
+ *   * on Hono it currently COMPILES — `MoneySchema.default(new Money(0,"USD"))`
+ *     type-checks because TS is structural and the class happens to carry
+ *     matching public fields.  Fixing it there is a semantic correction, not a
+ *     build fix: the next value object whose class shape diverges from its wire
+ *     shape would break silently.
+ */
+export function isValueObjectDefault(e: ExprIR): boolean {
+  return e.kind === "call" && e.callKind === "value-object-ctor";
+}
+
+/**
  * Fields the SERVER must seed with a plain literal default during domain
  * CONSTRUCTION (the public `create` factory), because they are outside the
  * create-input set (`forCreateInput` drops `token`/`managed`/`internal`) so no

@@ -176,7 +176,7 @@ fails the fast suite.
 | `elixir-vanilla-vo-e2e.yml` | `LOOM_VO_E2E_PHOENIX_VANILLA=1 npx vitest run test/e2e/vo-roundtrip-elixir-vanilla.test.ts` | docker, mirror |
 | `phoenix-ui-e2e.yml` | `npm run test:phoenix-ui-e2e` | docker, mirror |
 | `api-call-e2e.yml` | `LOOM_API_CALL_CALLER=<node\|python\|dotnet\|java\|elixir> npm run test:api-call` (pg via `LOOM_API_CALL_PG_URL`; elixir caller adds mirror) | pg |
-| `channels-e2e.yml` | `npm run test:channels` family — `test:channels{,-python,-dotnet,-java,-elixir}`, `-rabbit*`, `-kafka*`, `-auth` (pg via `LOOM_CHANNELS_PG_URL`; redis/rabbit/kafka via docker) | docker, pg |
+| `channels-e2e.yml` | `npm run test:channels` family — `test:channels{,-mikroorm,-python,-dotnet,-java,-elixir}`, `-rabbit*` (incl. `-rabbit-mikroorm`), `-kafka*`, `-auth` (pg via `LOOM_CHANNELS_PG_URL`; redis/rabbit/kafka via docker; the two `*-mikroorm` legs are the redis/rabbit suites with `LOOM_CHANNELS_PERSISTENCE=mikroorm` and shifted ports, so they run beside the default ones — the RABBIT one is the durable/outbox-relay leg) | docker, pg |
 | `email-e2e.yml` | `npm run test:email{,-python,-dotnet,-java,-elixir}` (pg + a Mailpit container: `LOOM_MAILPIT_SMTP`/`LOOM_MAILPIT_API`) | docker, pg |
 | `context-integration-e2e.yml` | `bash scripts/context-integration-e2e.sh <node\|python\|dotnet\|java\|elixir>` | pg |
 | `k8s-build.yml` | `npm run test:k8s` (helm + kubeconform on PATH) | — |

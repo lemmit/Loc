@@ -14,7 +14,6 @@ import type {
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { type UnionMemberField, unionMembers } from "../../_payload/union-wire.js";
 import {
   aggregateResponseParams,
@@ -29,6 +28,7 @@ import {
 import { renderRequestDtos, renderResponseDtos } from "../emit.js";
 import { renderCsExpr } from "../render-expr.js";
 import { renderRequestValidators } from "../validator-emit.js";
+import { isNullableWireDefault } from "../wire-default.js";
 
 // ---------------------------------------------------------------------------
 // Response DTOs — value objects first (so subsequent records can reference
@@ -321,8 +321,15 @@ export function emitRequestDtos(
       // null`) instead; the create command construction coalesces the
       // per-request value (`request.Name is null ? <now()/currentUser.*> :
       // <parse>`) — the .NET twin of the Hono optional-wire + coalesce.
-      const serverSourced = d !== undefined && isServerSourcedDefault(d);
-      if (serverSourced) {
+      // A VALUE-OBJECT default hits the SAME C# restriction for the same
+      // reason: `new Money(0m, "USD")` is a constructor call, and a record
+      // parameter default must be a compile-time constant (CS1736).  It also
+      // could not name the domain type here even if it were one — the request
+      // file has no `Domain.ValueObjects` using.  So it takes the identical
+      // escape hatch, and the controller's coalesce (which DOES have the
+      // domain namespace in scope) supplies the value per request.
+      const nonConstant = isNullableWireDefault(d);
+      if (nonConstant) {
         const wt = wireType(f.type, ctx, "request");
         return {
           hasDefault: true,

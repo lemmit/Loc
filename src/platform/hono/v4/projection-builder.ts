@@ -5,7 +5,9 @@ import type {
   ProjectionIR,
   ProjectionOnIR,
 } from "../../../ir/types/loom-ir.js";
-import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, isMaterializedProjection } from "../../../ir/types/loom-ir.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { zodForResponse } from "./routes-builder.js";
 
@@ -60,7 +62,7 @@ export function buildProjectionsFile(ctx: EnrichedBoundedContextIR, usingMikro =
     for (const h of p.handlers) body.push(...emitFoldHandler(p, h, usingMikro), "");
   }
   body.push(...emitProjectionTee(folded, usingMikro), "");
-  body.push(...emitProjectionRoutes(folded, usingMikro));
+  body.push(...emitProjectionRoutes(folded, usingMikro, ctx));
   const bodyText = body.join("\n");
 
   // Enum zod schemas are inlined (a `<E>Schema` referenced by a response DTO);
@@ -102,7 +104,11 @@ export function buildProjectionsFile(ctx: EnrichedBoundedContextIR, usingMikro =
       ...persistenceImports,
       'import { type DomainEventDispatcher } from "../domain/events";',
       'import type * as Events from "../domain/events";',
-      'import { AggregateNotFoundError } from "../domain/errors";',
+      // `ForbiddenError` only when a projection actually declares a `requires`
+      // gate — an unused import fails the generated-code Biome gate.
+      bodyText.includes("ForbiddenError")
+        ? 'import { AggregateNotFoundError, ForbiddenError } from "../domain/errors";'
+        : 'import { AggregateNotFoundError } from "../domain/errors";',
       'import { ProblemDetails } from "./problem-details";',
       enumValueImportLine,
       "",
@@ -246,9 +252,36 @@ function emitProjectionTee(projections: ProjectionIR[], usingMikro = false): str
   return out;
 }
 
+/** The `requires` gate lines for one folded projection's read route: bind the
+ *  request principal (only when the predicate reads it) then 403 before the
+ *  query — the same contract the query-time projection routes emit, and the
+ *  reason a folded projection may now carry a gate at all. */
+function gateLines(p: ProjectionIR, pad: string): string[] {
+  const gate = p.query?.requires;
+  if (!gate) return [];
+  const out: string[] = [];
+  if (exprUsesCurrentUser(gate)) {
+    out.push(
+      `${pad}const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
+  }
+  out.push(
+    `${pad}if (!(${renderTsExpr(gate)})) throw new ForbiddenError(${JSON.stringify(
+      `Forbidden: projection ${p.name}`,
+    )});`,
+  );
+  return out;
+}
+
 /** The read routes — GET /<snake> (list) + /<snake>/{key} (by correlation id).
  *  Mounted under `/api/projections` by createApp. */
-function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): string[] {
+function emitProjectionRoutes(
+  projections: ProjectionIR[],
+  usingMikro: boolean,
+  ctx: EnrichedBoundedContextIR,
+): string[] {
+  const forbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  const anyGate = projections.some((p) => p.query?.requires);
   const out = [
     `export function projectionsRoutes(db: ${projDbType(usingMikro)}): OpenAPIHono {`,
     `  const app = new OpenAPIHono();`,
@@ -260,6 +293,10 @@ function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): 
     const table = `schema.${lowerFirst(plural(p.name))}`;
     const rowClass = mikroProjectionRowClass(p);
     const corr = p.correlationField;
+    const gated = !!p.query?.requires;
+    const forbiddenResponse = `        ${forbiddenStatus}: { description: ${JSON.stringify(
+      problemTitle(forbiddenStatus),
+    )}, content: { "application/problem+json": { schema: ProblemDetails } } },`;
     // List.
     out.push(`  app.openapi(`);
     out.push(`    createRoute({`);
@@ -267,11 +304,23 @@ function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): 
     out.push(`      path: "/${slug}",`);
     out.push(`      tags: ["projections"],`);
     out.push(`      operationId: "list${T}",`);
-    out.push(
-      `      responses: { 200: { description: "OK", content: { "application/json": { schema: ${T}ListResponse } } } },`,
-    );
+    // Single-line when ungated — the shape this route has always had, so an
+    // ungated projection stays byte-identical.
+    if (gated) {
+      out.push(`      responses: {`);
+      out.push(
+        `        200: { description: "OK", content: { "application/json": { schema: ${T}ListResponse } } },`,
+      );
+      out.push(forbiddenResponse);
+      out.push(`      },`);
+    } else {
+      out.push(
+        `      responses: { 200: { description: "OK", content: { "application/json": { schema: ${T}ListResponse } } } },`,
+      );
+    }
     out.push(`    }),`);
     out.push(`    async (httpCtx) => {`);
+    out.push(...gateLines(p, "      "));
     out.push(
       usingMikro
         ? `      const rows = await db.find(${rowClass}, {});`
@@ -294,6 +343,7 @@ function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): 
     out.push(
       `        200: { description: "OK", content: { "application/json": { schema: ${T}Response } } },`,
     );
+    if (gated) out.push(forbiddenResponse);
     out.push(
       `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
@@ -301,6 +351,9 @@ function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): 
     out.push(`    }),`);
     out.push(`    async (httpCtx) => {`);
     out.push(`      const { key } = httpCtx.req.valid("param");`);
+    // The gate precedes the read: a caller who fails it must not learn whether
+    // the key exists.
+    out.push(...gateLines(p, "      "));
     if (usingMikro) {
       out.push(`      const row = await db.findOne(${rowClass}, { ${corr}: key });`);
     } else {
@@ -317,6 +370,36 @@ function emitProjectionRoutes(projections: ProjectionIR[], usingMikro = false): 
     out.push(`  );`);
     out.push("");
   }
+  // The router's own error handler.  This sub-app had NONE, which is why the
+  // by-key miss above answered `500 Internal Server Error` in `text/plain`:
+  // `AggregateNotFoundError` escaped the sub-router, and `app.route()` runs a
+  // mounted handler under the SUB-app's error handler — hono's default, not the
+  // parent's problem+json one.  Every other emitted router carries this block;
+  // this one was serving a 404 as a 500 on node alone (java/python/dotnet/elixir
+  // all answer 404), and adding the 403 arm meant adding the handler regardless.
+  out.push(`  app.onError((err, c) => {`);
+  out.push(
+    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
+  );
+  out.push(
+    `    const problem = (status: ${[...new Set(anyGate ? [forbiddenStatus, 404, 500] : [404, 500])].sort((a, b) => a - b).join(" | ")}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+  );
+  if (anyGate) {
+    out.push(
+      `    if (err instanceof ForbiddenError) return problem(${forbiddenStatus}, ${JSON.stringify(
+        problemTitle(forbiddenStatus),
+      )}, err.message);`,
+    );
+  }
+  out.push(
+    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+  );
+  // Same tail as the query-projection router: an unexpected fault is logged and
+  // answered as problem+json, never as hono's text/plain default.
+  out.push(`    console.error(err);`);
+  out.push(`    return problem(500, "Internal Server Error", "internal");`);
+  out.push(`  });`);
+  out.push("");
   out.push(`  return app;`);
   out.push(`}`);
   return out;

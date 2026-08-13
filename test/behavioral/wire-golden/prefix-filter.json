@@ -1,0 +1,344 @@
+{
+  "case": "prefix-filter",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/docs/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "path": "root",
+        "title": "the root",
+        "version": 1
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/docs",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "path": "root",
+            "title": "the root",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root.a",
+            "title": "child a",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root.a.b",
+            "title": "grandchild",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root_a",
+            "title": "delimiter trap",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root%pct",
+            "title": "wildcard trap",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 5,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/docs/under?prefix=root.",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "path": "root.a",
+          "title": "child a",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root.a.b",
+          "title": "grandchild",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/docs/under?prefix=root%",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "path": "root%pct",
+          "title": "wildcard trap",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/docs/under?prefix=root",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "path": "root",
+          "title": "the root",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root.a",
+          "title": "child a",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root.a.b",
+          "title": "grandchild",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root_a",
+          "title": "delimiter trap",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root%pct",
+          "title": "wildcard trap",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/docs/under?prefix=root.a.b",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "path": "root.a.b",
+          "title": "grandchild",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/api/docs/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/docs/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "path": "root",
+        "title": "renamed root",
+        "version": 2
+      }
+    },
+    {
+      "seq": 13,
+      "method": "DELETE",
+      "path": "/api/docs/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 14,
+      "method": "GET",
+      "path": "/api/docs/under?prefix=root",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "path": "root.a",
+          "title": "child a",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root.a.b",
+          "title": "grandchild",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root%pct",
+          "title": "wildcard trap",
+          "version": 1
+        },
+        {
+          "id": "<volatile:key>",
+          "path": "root",
+          "title": "renamed root",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 15,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/api/docs/under?prefix=other",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/docs",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "path": "root",
+            "title": "renamed root",
+            "version": 2
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root.a",
+            "title": "child a",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root.a.b",
+            "title": "grandchild",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "path": "root%pct",
+            "title": "wildcard trap",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 4,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 18,
+      "method": "PATCH",
+      "path": "/api/docs",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/docs",
+        "instance": "/api/docs",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 19,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/api/docs",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/docs",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}
