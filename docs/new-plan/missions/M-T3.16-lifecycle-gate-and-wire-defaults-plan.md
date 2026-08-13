@@ -124,3 +124,90 @@ Two corollaries, both earned the hard way in this track:
 
 - **A green compile tier says nothing about the other four.** `build-generated-ts` was green while Python and .NET could not compile the same fixture — TypeScript's *structural* typing makes it the weakest oracle for wire/domain confusion, not the strongest. Java and Python are the strict ones; check those first.
 - **A check that never reaches the thing it names is indistinguishable from no check** (`experience_gathered.md` §59/§63). #2450's enforcement gate deleted whole gates and passed; inverting a gate's polarity also passed. The mutation must be the *plausible* defect, not the convenient one.
+
+---
+
+# Appendix A — implementing the two deferred items
+
+The two pieces §3.2 and §2 refused to fold into the emission, worked out to slices. Both are independently landable; **A2 needs nothing from the rest of this mission** and can run in parallel with a different owner.
+
+## A1 — Elixir: move the lifecycle gate into the CONTEXT (S1)
+
+### A1.1 Why the controller is the wrong home
+
+The withdrawn #2450 gated `def create` / `def delete` in `<App>Web.<Agg>Controller`. That covers the REST door and nothing else. Two other callers reach the same write:
+
+| caller | call | emitter |
+|---|---|---|
+| scaffolded LiveView new-form | `<App>.<Ctx>.create_<agg>(params)` | `src/generator/elixir/liveview-emit.ts` |
+| `DestroyForm` button | `<App>.<Ctx>.destroy_<agg>!(id)` | `src/generator/elixir/vanilla/context-emit.ts` (`destroy_<agg>!/1`, documented as a deliberately separate path in `rest-surface.ts`) |
+
+Phoenix is the **only** backend whose frontend runs in-process, so it is the only one where a route-level gate has a second front door — and it ships LiveView pages by default. Every other backend's frontend is a separate bundle that can only arrive over HTTP.
+
+**The context function is the narrowest point all three callers pass through.** That is the correct home, and it makes the Elixir placement *converge with*, not diverge from, the other four — each backend gates at its own narrowest chokepoint (Hono/FastAPI: the route; .NET: the Mediator handler; Java: the service; Elixir: the context).
+
+### A1.2 The principal is available in both processes — but NOT by the same means
+
+This is the part that decides the design, and it is easy to get wrong.
+
+- REST: the Auth **plug** assigns `conn.assigns.current_user`, and (only when `hasFieldMask`) also `Process.put(:loom_current_user, user)` — `src/generator/elixir/auth-emit.ts:440`.
+- LiveView: an **`on_mount` hook** assigns `socket.assigns.current_user` — `src/generator/elixir/auth-emit.ts:1086`.
+
+**The process dictionary is not a shared channel between them.** The plug runs in the HTTP request process; a LiveView is a separate socket process. `Process.get(:loom_current_user)` is `nil` inside a LiveView event handler, so a context gate reading the ambient principal would **fail closed on every LiveView write** — safe, but it silently breaks the default-scaffolded UI, which is a worse outcome than the bug being fixed.
+
+**Decision: thread `current_user` as an explicit context-function argument.** It already is the local precedent — principal-filtered context reads carry `current_user \\ nil` and both callers pass it (`api-emit.ts` `getActor`, `liveview-emit.ts:1063` `Map.get(socket.assigns, :current_user)`). No ambient state, one spelling, works in both processes.
+
+### A1.3 Slices
+
+1. **Context write seam.** `create_<agg>` / `delete_<agg>` are `defdelegate`s to the repository today (`context-emit.ts`), so there is no body to gate. Promote a guarded aggregate's pair to real `def`s that run the gate then delegate. Unguarded aggregates keep the `defdelegate` — byte-identical.
+2. **Thread the principal.** Signature `create_<agg>(attrs, current_user \\ nil)` / `destroy_<agg>!(id, current_user \\ nil)`, matching the read side. Denial → `{:error, {:forbidden, detail}}`, the tuple the controller already maps to 403 (`api-emit.ts` `denialArms`).
+3. **Update all three callers** — controller, LiveView new-form, `DestroyForm` handler.
+4. **Delete the controller wrapper** (`__create_authorized` / `__delete_authorized`). It becomes dead once the context gates, and leaving both would be two spellings of one gate.
+5. **C1 falls out here.** The unused-`record` warning that broke `--warnings-as-errors` was an artifact of the controller wrapper's `{:ok, record}` binding; a context gate that reads the row only when the guard does has nothing to bind.
+
+### A1.4 Gate
+
+A fixture with **`ui … with scaffold` + a guarded create + a guarded destroy**, asserting the LiveView and the controller both reach a gated context function — the current corpus fixture has no `ui`, which is exactly why the second front door was invisible. Plus the two destroy shapes (principal-only and row-reading), since C1 only reproduces on the first.
+
+Mutation-prove by **removing the gate from the context while leaving the controller wrapper in place**: the REST assertion must still pass and the LiveView one must fail. A gate that cannot tell those apart is the gate #2450 shipped.
+
+## A2 — the value-object wire default (§2)
+
+### A2.1 The defect in one line
+
+A field default is rendered by the **domain** expression renderer into a slot typed as the **wire** DTO.
+
+| backend | site | emitted | verdict |
+|---|---|---|---|
+| Python | `src/generator/python/routes-builder.ts:663` — `if (defaultExpr) return \`${base} = ${renderPyExpr(defaultExpr)}\`` | `total: MoneyModel = Money(0, "USD")` | `mypy --strict` error |
+| .NET | request-record emission (`Application/<Aggs>/Requests/`) | `new Money(...)` in a `MoneyRequest` slot | CS0246 — the domain type is not in scope |
+| Hono | `routes-builder.ts:508–535`, the `.default(...)` after the `.min/.max` chain | `MoneySchema.default(new Money(0, "USD"))` | **compiles by structural typing** |
+| Java | coalesces on the DOMAIN side in the factory (`request.total() != null ? toMoney(...) : new Money(...)`), so no wire slot takes a domain value | green on the same fixture, same CI run | likely unaffected — confirm with the fixture |
+| Elixir | no separate wire DTO | — | likely unaffected — confirm |
+
+### A2.2 The fix
+
+A default that lands in a **wire** schema must be rendered in the **wire** shape:
+
+```
+total: MoneyModel = MoneyModel(amount=0, currency="USD")     # python
+total: MoneySchema.default({ amount: 0, currency: "USD" })   # hono — plain object, not a class
+Total = new MoneyRequest(0, "USD")                           # .NET
+```
+
+The right shape is a small shared predicate + per-backend renderer, next to `isServerSourcedDefault` in `src/generator/_frontend/server-default.ts` — that file already owns "how does a field default behave at the wire boundary", and this is the same question for a non-scalar. The VO's wire form is already canonical in the IR (`wireShape`), so nothing new needs deriving.
+
+Note the **ordering constraint** the Hono comment at `routes-builder.ts:516` records: `.default(...)` must land after any `.min`/`.max` chain, because a `ZodDefault` has no `.min`. A wire-shaped default does not change that, but a careless refactor of the same block would.
+
+### A2.3 Slices
+
+1. Shared "render this default at the wire boundary" seam + the VO arm.
+2. Python, then .NET — the two that fail today, in that order (Python's `mypy --strict` gives the sharper message).
+3. Hono — currently compiles, so this is a *semantic* fix, not a build fix: it is putting a domain instance into a wire default and getting away with it structurally. Do it anyway; the next VO whose class shape diverges from its wire shape would break silently.
+4. Confirm Java and Elixir are genuinely unaffected rather than assumed so.
+
+### A2.4 Gate
+
+A **corpus fixture with a VO-typed field default**, on the compile tier. There is none today, which is the whole reason this survived — and it is why the interim state in the five `scaffold-handlers.ddd` fixtures is `total: Money` with no default rather than a re-added workaround.
+
+Run **Python and Java first**. Per §6, TypeScript's structural typing makes it the weakest oracle for exactly this confusion; a green `build-generated-ts` here means nothing.
