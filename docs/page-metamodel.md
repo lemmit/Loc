@@ -878,6 +878,49 @@ Three layered scales of override, all the same mechanism — explicit
 
 ---
 
+## 10b. `area { … }` — page grouping, and the identity it defines
+
+An `area <Name> { … }` block groups pages (and nested areas) inside a `ui`.
+The scaffold emits one per aggregate (`area Orders { page List, page New,
+page Detail }`), and you can write them by hand and nest them freely.
+
+The area path is not cosmetic — **it is half of a page's identity**:
+
+- **File placement.**  A page inside `area Ops { area Billing { … } }` lands at
+  `src/pages/ops/billing/<page>.tsx` (`.vue`, `.dart`, `_live.ex`, … per
+  frontend).  Lowering resolves this into `PageIR.emitPath`.
+- **Emitted identifiers.**  `page.name` is unique only WITHIN one area scope, so
+  every emitted identifier is derived from the area path plus the name:
+  `area Ops { page Dashboard }` emits the React component `OpsDashboard`, the
+  Angular `OpsDashboardComponent`, the Feliz `Page` case `OpsDashboard`, the
+  Phoenix `OpsDashboardLive`, the Flutter `OpsDashboardPage`, and the Playwright
+  page object `e2e/pages/ops_dashboard.ts`.  A page with no area keeps its bare
+  name.  Scaffold aggregate pages are the one exception: their role name
+  (`List`) is replaced by the aggregate-qualified `OrderList`, which is already
+  unique.  (`pageEmitName` / `pageFileBase`, `src/ir/util/page-kind.ts` +
+  `src/generator/_frontend/page-identity.ts`.)
+
+Because that identity has to be unique, three rules are enforced:
+
+| Rule | Diagnostic |
+|---|---|
+| Page names are unique **within one scope** (the ui top level, or one area) | duplicate-page error in `checkPageScope` |
+| Area names are unique **within one scope** — two `area Ops { … }` blocks compute the same directory | `loom.ui-duplicate-area` |
+| No two pages may resolve to the same `emitPath`, or claim the same scaffold archetype slot | `loom.ui-page-path-collision` / `loom.ui-page-slot-collision` |
+
+The last two used to be silent: the file map kept whichever page was written
+last, so one page's body simply vanished from the build.
+
+**Overriding a scaffold page** means declaring yours in the SAME scope as the
+scaffold's area — `area Orders { page List { … } }` at ui top level.  The macro
+expander merges same-named areas and drops the synthesised `page List`, leaving
+exactly one page in the slot.  Declaring it in a DIFFERENT scope
+(`area Sales { area Orders { page List } }`) does not override anything: it is
+a second page claiming the same archetype, and `loom.ui-page-slot-collision`
+rejects it.
+
+---
+
 ## 11. `menu` — layered defaults + explicit composition
 
 Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level

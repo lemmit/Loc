@@ -27,7 +27,7 @@
 // `prepareAppShellVM`.
 
 import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
-import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
+import { areaQualifiedName, classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { plural, snake } from "../../util/naming.js";
 import { renderGateExpr } from "./gate-expr.js";
 
@@ -248,10 +248,13 @@ function testIdAndActive(
     case "home":
       return { testId: "nav-home", activeArgs: `"/", { exact: true }` };
     default: {
-      // Explicit page (no archetype) — use the page name as
-      // the testid suffix and exact-match the route.
+      // Explicit page (no archetype) — use the page's AREA-QUALIFIED name as
+      // the testid suffix and exact-match the route.  The bare name is unique
+      // only within one area, so two `page Dashboard` blocks in sibling areas
+      // both produced `nav-dashboard` and every page object / e2e locator
+      // built on it matched two links (Playwright strict mode: ambiguous).
       return {
-        testId: `nav-${snake(page.name)}`,
+        testId: `nav-${snake(areaQualifiedName(page))}`,
         activeArgs: route ? JSON.stringify(route) : `""`,
       };
     }
