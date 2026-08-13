@@ -88,23 +88,19 @@ const MIKRO_SKIP = {
   // is supported here; what skips it is the sibling broadcast channel below.)
   //
   // --- M-T6.23: features the adapter never emitted, now honest errors ---------
-  // Both of these are `loom.mikroorm-unsupported` ERRORS as of M-T6.23, so
-  // forcing the case onto mikroorm no longer generates — it fails validation.
-  // Before the gate landed each booted and PASSED here with the feature silently
-  // absent: the api-tier assertions are satisfied by the synchronous in-process
-  // dispatch that survives on this adapter, so a missing broker driver / outbox
-  // relay was invisible to the run.  That is what made them hollow cells rather
-  // than coverage.  Removing an entry is the re-arm once the emitter lands.
+  // The `outbox` (slice 1) and `channels-broker` (slice 2) entries are GONE:
+  // both emitters landed, so neither is a gap to skip any more.  Removing an
+  // entry is the re-arm — and for those two it was doubly warranted, since the
+  // register had been claiming a checked gap that this runner never even
+  // collected (neither fixture carries a behavioural block; see the ratchet
+  // below).  The broker's runtime home is `npm run test:channels-mikroorm`,
+  // which provisions a real broker — something no behavioural leg does.
   //
   // The `projection` / `saga` / `eventsourced-workflow` cases are deliberately
   // NOT here: their `delivery: broadcast` channel is only missing the SSE wire
   // (a WARNING, since no frontend consumes it in these fixtures), while the
   // fold/saga routing they actually assert rides the in-process dispatcher and
   // works on this adapter.  They keep booting here.
-  "channels-broker":
-    "mikroorm emits no http/channels.ts (broker driver/producer tee/consumer loop) — M-T6.23",
-  outbox:
-    "mikroorm emits no transactional outbox + relay, so `retention: work` is at-most-once — M-T6.23",
   // Same class, found by the first runtime callers for these two fixtures
   // (#2468): the adapter emits no QUERY-time projection reads, and — unlike
   // the silent gaps above — `loom.mikroorm-unsupported` already says so as a
@@ -117,6 +113,20 @@ const MIKRO_SKIP = {
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
   "projection-groupby":
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
+  // Same class again, and the most honest entry in this map: the narrowing is
+  // DECLARED in the adapter's own capability descriptor.  `MIKROORM_SUBSET`
+  // (`src/ir/util/find-predicate-capability.ts`) lowers only comparisons, bare
+  // boolean columns, unary `!` and `&&`/`||` of them — no scalar intrinsic at
+  // all — so a `startsWith` predicate is refused at validation with
+  // `loom.find-predicate-unsupported` naming the shape and the subset.  Nothing
+  // is hidden by skipping: the fixture's whole point is a queryable intrinsic,
+  // and this adapter says up front it cannot lower one.  Widening the subset
+  // belongs to the remaining M-T6.23 mikroorm-emitter slices — slice 1 (#2516)
+  // landed the outbox/relay and did NOT touch the predicate lowerer — so delete
+  // this entry when `whereToMikroFilter` grows an intrinsic arm (and drop the
+  // `MIKROORM_SUBSET` narrowing that declares its absence in the same change).
+  "prefix-filter":
+    "mikroorm lowers no scalar intrinsic in a find/filter predicate — `MIKROORM_SUBSET` declares the narrowing and `loom.find-predicate-unsupported` refuses to generate (widen it in M-T6.23)",
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`
@@ -288,9 +298,28 @@ const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 // the api tier gates here: the unit tier is pure-domain (persistence-independent)
 // and already covered by run.mjs.  A case that emits no `test e2e` suite is
 // skipped (nothing for the api tier to dispatch).
-const corpus = [...(await featureCases("node", "node", WORK)), ...sharedSystemCases("node")].filter(
-  (c) => only.length === 0 || only.includes(c.name),
-);
+const allCases = [...(await featureCases("node", "node", WORK)), ...sharedSystemCases("node")];
+const corpus = allCases.filter((c) => only.length === 0 || only.includes(c.name));
+
+// Ratchet on the register itself: a MIKRO_SKIP key that names no COLLECTED case
+// is dead weight — the entry keeps CLAIMING a checked gap while nothing runs.
+// Both entries were exactly that until M-T6.23 slice 1 looked: their corpus
+// fixtures carry no behavioural block, so `featureCases` never collected them
+// and the skip was silently inert (the mission's "hollow cell" was hollower
+// still).  A key naming no fixture at all is a typo and fails the run; a key
+// whose fixture exists but has no `test e2e` block prints INERT, so the claim is
+// visible instead of silent — and still guards the day that fixture grows one.
+for (const key of Object.keys(MIKRO_SKIP)) {
+  if (allCases.some((c) => c.name === key)) continue;
+  const fixture = join(REPO, "test", "fixtures", "corpus", `${key}.ddd`);
+  if (!existsSync(fixture)) {
+    process.stdout.write(`\nMIKRO_SKIP key '${key}' names no corpus fixture — stale register entry.\n`);
+    process.exit(1);
+  }
+  process.stdout.write(
+    `\n▶ ${key}  [mikroorm]\n  ⤼ INERT skip (${key}.ddd carries no behavioural block, so no case is collected): ${MIKRO_SKIP[key]}\n`,
+  );
+}
 
 // Drop the tracked mikroorm-gap cases (unless one is named explicitly, so a fix
 // can be re-checked with `node run-mikroorm.mjs value-collections`).

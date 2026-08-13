@@ -28,7 +28,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
-import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
+import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../util/intrinsics.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
@@ -47,6 +47,12 @@ export const DRIZZLE_INTRINSIC_SQL: Record<string, (recv: string, args: string[]
   "string.trim": (recv) => `sql\`trim(\${${recv}})\``,
   "string.toUpper": (recv) => `sql\`upper(\${${recv}})\``,
   "string.toLower": (recv) => `sql\`lower(\${${recv}})\``,
+  // Prefix match (tenancy-authorization-final-surface decision 2).  Anchored
+  // `strpos` rather than `LIKE ${arg} || '%'`: the argument is a VALUE, so a
+  // `%`/`_` inside it must match literally, and an anchored position test needs
+  // no ESCAPE discipline to guarantee that.  `strpos(col, '')` is 1 on
+  // Postgres, matching every host language's `startsWith("")`.
+  "string.startsWith": (recv, args) => `sql\`strpos(\${${recv}}, \${${args[0]}}) = 1\``,
   // Numerics (A3) — int/long map to integer/bigint columns, decimal/money
   // both to `numeric`, so the same Postgres function applies per op.
   // `round(numeric, n)` is half-away-from-zero on Postgres, matching the
@@ -278,6 +284,20 @@ export function lowerToDrizzle(
       ops.add("inArray");
       ops.add("eq");
       return `inArray(schema.${tableName}.id, this.db.select({ id: schema.${joinConst}.${ownerCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${targetCol}, ${arg})))`;
+    }
+    // A bool-returning queryable intrinsic standing alone in a boolean
+    // position (`filter this.dataKey.startsWith(p)`).  Its SQL snippet already
+    // IS a complete predicate (`strpos(col, $p) = 1`), and Drizzle accepts a
+    // `sql` tag wherever an operator goes, so the column-position renderer is
+    // the whole answer — no comparison to synthesise, unlike the bare-boolean
+    // column below.
+    if (
+      e.kind === "method-call" &&
+      e.receiverType.kind === "primitive" &&
+      isQueryableBoolIntrinsic(e.receiverType.name, e.member)
+    ) {
+      const frag = renderColumnRef(e);
+      if (frag !== null) return frag;
     }
     // Bare boolean column standing alone in a boolean position
     // (`filter this.isActive`) — lower to `eq(col, true)`.

@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
+import { CHART_FRAMEWORKS } from "../../src/ir/validate/checks/system-checks.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseValid } from "../_helpers/index.js";
 
@@ -71,25 +72,27 @@ system S {
 `;
 
 describe("loom.chart-unsupported-target (per-pack gate)", () => {
-  // Vue used to be the example of a rejected framework here.  It renders now
-  // (M-T1.3 Phase 4, through the SHARED `vue/primitive-chart.hbs` + the
-  // generated `LoomChart.vue`), so the gate is asserted on the frameworks that
-  // genuinely still lack a renderer.  Swapping the subject rather than deleting
-  // the case keeps the check biting: with every framework ported this reads as
-  // "the gate works" and "the gate is unreachable" identically from outside.
-  for (const framework of ["angular"]) {
-    it(`rejects Chart on a ${framework} frontend`, async () => {
-      const diags = await diagsOf(sys({ framework }));
+  // EVERY shipping frontend renders a chart now, so there is no framework left
+  // to assert a rejection on — and that is exactly when a gate stops being
+  // checkable from the outside: "the check works" and "the check is
+  // unreachable" look identical.  The honest test is therefore to REMOVE a
+  // framework from the Set and watch the diagnostic come back, which is the
+  // discipline `PROJECTION_READ_FRAMEWORKS` already uses one gate over.
+  it("still fires for a framework without a chart renderer", async () => {
+    CHART_FRAMEWORKS.delete("angular");
+    try {
+      const diags = await diagsOf(sys({ framework: "angular" }));
       const hit = diags.find((d) => d.code === "loom.chart-unsupported-target");
       expect(hit).toBeDefined();
       expect(hit?.severity).toBe("error");
       // The message must point at the alternative that actually works.
       expect(hit?.message).toContain("Table");
-      expect(hit?.message).toContain("react");
-    });
-  }
+    } finally {
+      CHART_FRAMEWORKS.add("angular");
+    }
+  });
 
-  for (const framework of ["vue", "svelte"]) {
+  for (const framework of ["vue", "svelte", "angular"]) {
     it(`accepts Chart on a ${framework} frontend`, async () => {
       const diags = await diagsOf(sys({ framework }));
       expect(diags.find((d) => d.code === "loom.chart-unsupported-target")).toBeUndefined();

@@ -111,6 +111,71 @@ export async function featureCases(backendKey, platformClause, workDir) {
  *  extra key is inert everywhere else. */
 export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", orgId: "acme", role: "agent" });
 
+/** The SECOND dev-stub principal: **authenticated but not authorized** (M-T9.28).
+ *
+ *  Until this existed the behavioural tier had exactly ONE identity, so the only
+ *  authz arm it could assert was "the gate lets the satisfying principal
+ *  through" — a gate emitted as a no-op passes that just as well.  Three
+ *  consumers are on record as blocked on the gap: M-T9.28's authz-surface
+ *  census, M-T9.25 round 2's 401/403 problem-arm sweep, and M-T9.11's 4xx wire
+ *  goldens.
+ *
+ *  Same SHAPE as `DEV_CLAIMS` — same tenancy claims, so a probe with it stays
+ *  inside the tenant and the only thing that differs is the authorization
+ *  predicate — but `role` is deliberately a value no fixture's `requires`
+ *  accepts.  Keep it that way: a fixture that starts granting `"visitor"`
+ *  silently turns every 403 arm into a 2xx and the ladder stops proving
+ *  anything.  Strings only, for the same reason `DEV_CLAIMS` is strings only
+ *  (the non-node backends honour only string claims).
+ *
+ *  The OIDC twin is `oidc.unauthorizedToken` (oidc-mock.mjs) — same issuer, same
+ *  signing key, `realm_access.roles` set to the same non-granting value. */
+export const DEV_CLAIMS_UNAUTHORIZED = JSON.stringify({
+  tenantId: "acme",
+  orgId: "acme",
+  role: "visitor",
+});
+
+/** Per-case authorization-ladder probes (M-T9.28 slice 1).
+ *
+ *  Keyed by case name; the runner hands the matching entry to `__authzLadder`
+ *  in the shared recorder preamble.  Slice 1 is deliberately a HAND-WRITTEN
+ *  spec over one gated surface — slice 2 replaces this map with a census
+ *  DERIVED from the enriched IR (every `requires` / `policy` / `mask unless` /
+ *  tenancy stance), at which point this map goes away.  It is here to prove the
+ *  harness seam carries a real ladder, not to be the census.
+ *
+ *  Shape:
+ *    seed    — a create the AUTHORIZED principal performs first, so the gated
+ *              surface has a row to address.  `{ path, body }`; the response is
+ *              expected to carry `{ id }`.
+ *    gated   — the `requires`-guarded surface.  `{ method, path, body }`;
+ *              `{id}` in `path` is substituted with the seeded id.
+ *    arms    — expected status per identity.  `null` means "not expressible on
+ *              this system's auth flavour" and the arm is SKIPPED (see
+ *              `anonymousNote`), never silently passed.
+ *
+ *  `anonymous: null` on the dev-stub cases is not an oversight: the emitted
+ *  dev-stub verifier (`index.ts`, `registerUserVerifier`) accepts EVERY request
+ *  and falls back to its built-in identity when no `x-loom-dev-claims` header is
+ *  present.  Under the dev stub there is therefore no anonymous caller to
+ *  express — omitting credentials yields the built-in admin, not a 401.  Only
+ *  the OIDC flavour, whose verifier rejects a missing/invalid bearer, can assert
+ *  that rung. */
+export const AUTHZ_LADDERS = {
+  "auth-simple": {
+    seed: { path: "/api/tickets", body: { subject: "authz ladder probe", open: true } },
+    gated: { method: "POST", path: "/api/tickets/{id}/close", body: {} },
+    arms: { anonymous: null, unauthorized: 403, authorized: 204 },
+    anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
+  },
+  "auth-oidc": {
+    seed: { path: "/api/tickets", body: { subject: "authz ladder probe", open: true } },
+    gated: { method: "POST", path: "/api/tickets/{id}/close", body: {} },
+    arms: { anonymous: 401, unauthorized: 403, authorized: 204 },
+  },
+};
+
 /** Reset a shared Postgres to a pristine state before a case boots.  The backend
  *  runners (java/dotnet/python/elixir) boot against ONE external DB and each
  *  case emits its own migrations at a FIXED version — so running more than one
@@ -165,20 +230,20 @@ const BEHAVIOURAL_SKIP = {
   // The DAPPER adapter of the .NET backend (`run-dapper.mjs` forces this exact
   // clause, and looks the skip set up by it).
   "dotnet { persistence: dapper }": {
-    // A SILENT gap, unlike mikroorm's: `src/generator/dotnet/query-projection-emit.ts`
-    // contains no `dapper` branch at all — it hard-codes `using
-    // Microsoft.EntityFrameworkCore;` and `private readonly AppDbContext _db;`,
-    // neither of which exists on the Dapper adapter, so the generated project
-    // does not COMPILE (CS0234 / CS0246) and nothing warned at generate time.
-    // Found by these two fixtures' first runtime callers (#2468).  The proper
-    // fix is either a Dapper query-projection emitter or — at minimum — an
-    // honest `loom.dapper-unsupported` gate like the MikroORM one, so the
-    // failure is a diagnostic instead of a broken build.  Delete these when
-    // either lands.
+    // Was a SILENT gap — `src/generator/dotnet/query-projection-emit.ts` has no
+    // `dapper` branch at all, so it hard-coded `using
+    // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;` and
+    // the generated project simply did not COMPILE (CS0234 / CS0246), with
+    // nothing said at generate time.  Found by these two fixtures' first runtime
+    // callers (#2468); now an HONEST `loom.dapper-unsupported` error, so forcing
+    // the case here fails validation instead of the C# build.  Same shape as the
+    // MikroORM feature gates.  Delete both entries when a Dapper
+    // query-projection emitter lands (raw SQL — a query-time projection IS a SQL
+    // aggregate, so the port is smaller than the gate implies).
     "projection-aggregation":
-      "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
+      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
     "projection-groupby":
-      "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
+      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
   },
   elixir: {
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted

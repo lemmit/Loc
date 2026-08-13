@@ -382,8 +382,22 @@ function renderCsAuthzFilter(
       // name the claim `tenantId`.
       const tenant = `${principal}.${upperFirst(deepScopeTenantClaim(e))}`;
       const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
+      // `StartsWith` overload by POSITION, and the two requirements are exactly
+      // opposed.  In an EF query filter the call is never executed — it lives in
+      // an `Expression<Func<>>` EF rewrites into SQL `LIKE` — and the
+      // `StringComparison` overload has NO SQL translation, so the bare form is
+      // mandatory there (CA1310 does not fire inside an expression tree).  In an
+      // EXECUTED position (the in-app document read filter, where the fields
+      // live inside the jsonb blob and there is no query to translate into) the
+      // bare call is culture-sensitive: CA1310 rejects it under /warnaserror,
+      // and ordinal is also the semantics that MATCHES the SQL `LIKE` the
+      // relational twin runs — a culture-sensitive prefix test could admit a row
+      // the relational path excludes. So the overload follows `efQuery`.
+      const startsWith = ctx.efQuery
+        ? `${col}.StartsWith(${org} + ${prefix})`
+        : `${col}.StartsWith(${org} + ${prefix}, StringComparison.Ordinal)`;
       return (
-        `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +
+        `((${col} != null && (${col} == ${org} || ${startsWith})) ` +
         `|| (${col} == null && ${tenantCol} == ${tenant}))`
       );
     }
@@ -751,6 +765,20 @@ export const CS_INTRINSIC_QUERY_RENDERERS: Record<
 > = {
   "string.toUpper": (recv) => `${recv}.ToUpper()`,
   "string.toLower": (recv) => `${recv}.ToLower()`,
+  // The `StringComparison` overloads are NOT translatable either — the domain
+  // form (`StartsWith(p, StringComparison.Ordinal)`) throws "could not be
+  // translated", while the bare one-argument overload is EF Core's canonical
+  // prefix translation (a parameterized pattern lowers to an anchored
+  // `left(col, length(@p)) = @p`, not a `LIKE`, so a `%`/`_` in the value
+  // matches literally — the same escaping-free contract the other four
+  // backends render via `strpos`/`locate`).  Ordinality is the SQL collation's
+  // business here, so the culture-default C# SPELLING never executes; the
+  // catalogue's ordinal contract still holds.  (One exception, pre-existing and
+  // shared with the two rows above: a reified `criterion` renders ONE body for
+  // both of its faces — `criteria-emit.ts` passes `efQuery: true` even for the
+  // in-memory `IsSatisfiedBy`, so THAT face does run the culture-default
+  // spelling.  Splitting the two faces is its own change.)
+  "string.startsWith": (recv, args) => `${recv}.StartsWith(${args[0]})`,
   // The MidpointRounding overloads of Math.Round are NOT translatable — only
   // the bare Math.Round(x) / Math.Round(x, n) forms lower to SQL round()
   // (verified against EF Core 10.0.9 + Npgsql 10.0.2 via ToQueryString).

@@ -1019,9 +1019,6 @@ function printProjection(node: import("../generated/ast.js").Projection): string
   if (node.source) {
     items.push(`from ${node.source.$refText}${node.sourceAlias ? ` as ${node.sourceAlias}` : ""}`);
   }
-  // `requires <gate>` — the 403-before-query auth gate, printed in grammar order
-  // (after `from`, before `where`).
-  if (node.gate) items.push(`requires ${printExpr(node.gate)}`);
   if (node.filter) items.push(`where ${printExpr(node.filter)}`);
   // `ignoring */A, B` — source-aggregate capability-filter bypass, printed in
   // grammar order (after `where`, before `join`).  Trim the leading space the
@@ -1038,7 +1035,11 @@ function printProjection(node: import("../generated/ast.js").Projection): string
     const sels = node.selects.map((s) => `${s.field} = ${printExpr(s.expr)}`).join(", ");
     items.push(`select ${sels}`);
   }
-  return declBlock(`projection ${node.name}${params}${keyed}`, () => items);
+  // `requires <gate>` — the authorization gate rides the DECLARATION HEADER
+  // (after `keyed by`), like every other gate in the language, so it prints
+  // there rather than among the query clauses.
+  const gate = node.gate ? ` requires ${printExpr(node.gate)}` : "";
+  return declBlock(`projection ${node.name}${params}${keyed}${gate}`, () => items);
 }
 
 // `on(e: Event) [by <expr>] { … }` pure fold member of a projection.
