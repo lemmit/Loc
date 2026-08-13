@@ -31,8 +31,10 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { pageFileBase } from "../_frontend/page-identity.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
@@ -186,6 +188,12 @@ export function generateFlutterForContexts(
   );
 
   const pages = ui?.pages ?? [];
+  // Name-context for `pageEmitName` — the served declarations a role-named
+  // scaffold page (`List` in `area Products`) classifies against.
+  const nameCtx: PageNameCtx = {
+    aggregateNames: [...aggregatesByName.keys()],
+    workflowNames: [...workflowsByName.keys()],
+  };
   const usedComponents = new Set<string>();
   const rendered = pages.map((page) => {
     const r = renderPage(page, ui as UiIR, contexts, aggregatesByName, bcByAggregate, {
@@ -194,6 +202,7 @@ export function generateFlutterForContexts(
       componentParams,
       i18nEnabled,
       storeMembers,
+      nameCtx,
     });
     for (const name of r.usedComponents) usedComponents.add(name);
     return { page, ...r };
@@ -313,12 +322,29 @@ function renderPage(
       string,
       { fields: ReadonlySet<string>; actions: ReadonlySet<string> }
     >;
+    /** Declaration names `pageEmitName` classifies the page against — the
+     *  served aggregates + workflows.  Drives the widget class + file base. */
+    nameCtx: PageNameCtx;
   },
 ): Omit<RenderedPage, "page"> {
-  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled, storeMembers } = workflows;
-  const className = `${upperFirst(page.name)}Page`;
-  const fileBase = `${snake(page.name)}_page`;
-  const routePath = page.route ?? `/${snake(page.name)}`;
+  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled, storeMembers, nameCtx } =
+    workflows;
+  // Identity comes from the page's EMIT NAME, never its bare `page.name`.  The
+  // scaffold names aggregate pages by ROLE (`List` inside `area Products`), so
+  // `snake(page.name)` collapsed every aggregate's list onto ONE
+  // `lib/pages/list_page.dart` + one `ListPage` class: `main.dart` imported the
+  // same URI twice and routed BOTH `/products` and `/customers` to whichever
+  // page was rendered last.  `flutter analyze` calls a duplicate import an
+  // `info`, so the CI gate (`--no-fatal-infos`) stayed green on a frontend that
+  // showed the wrong aggregate.
+  const emitName = pageEmitName(page, nameCtx);
+  const className = `${upperFirst(emitName)}Page`;
+  const fileBase = `${pageFileBase(page, nameCtx)}_page`;
+  // Fallback route for a page with no `route:` — area-qualified for the same
+  // reason the file base is: two route-less same-named pages in sibling areas
+  // otherwise claim ONE key in the routes map and the second is dropped.
+  // Area-less pages keep `/<page-snake>`, unchanged.
+  const routePath = page.route ?? `/${pageFileBase(page, nameCtx)}`;
 
   const paramNames = new Set(page.params.map((p) => p.name));
   const stateNames = new Set(page.state.map((s) => s.name));
@@ -399,6 +425,7 @@ function renderPage(
         bodyWidget,
         contexts,
         apiParamNames,
+        emitName,
       )
     : renderStatelessPage(page, className, bodyWidget, {
         usesRouteId,
@@ -567,6 +594,8 @@ function renderConsumerPage(
   bodyWidget: string,
   contexts: EnrichedBoundedContextIR[],
   apiParamNames: ReadonlyMap<string, string>,
+  /** The page's emit name — see `renderRiverpod`'s `emitName` param. */
+  emitName: string,
 ): string {
   // Project reactive state / actions first — its `asyncEffectActions` decide
   // whether the page needs the route `id` (an async-effect method takes it).
@@ -574,7 +603,7 @@ function renderConsumerPage(
   let providerName = "";
   let asyncEffectActions = new Set<string>();
   if (b.stateful) {
-    const proj = renderRiverpod(page, contexts, apiParamNames);
+    const proj = renderRiverpod(page, contexts, apiParamNames, emitName);
     projSource = proj.source;
     providerName = proj.providerName;
     asyncEffectActions = proj.asyncEffectActions;

@@ -342,13 +342,15 @@ jobs:
             subdomain Sales {
               context Orders {
                 aggregate Product with crudish { name: string  price: money }
+                aggregate Customer with crudish { name: string  email: string }
                 repository Products for Product { }
+                repository Customers for Customer { }
               }
             }
             api ShopApi from Sales
             storage pg { type: postgres }
             resource ordersState { for: Orders, kind: state, use: pg }
-            ui App with scaffold(aggregates: [Product]) { api Shop: ShopApi }
+            ui App with scaffold(aggregates: [Product, Customer]) { api Shop: ShopApi }
             deployable api { platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 }
             deployable app { platform: flutter targets: api ui: App { Shop: api } port: 3006 }
           }
@@ -357,6 +359,33 @@ jobs:
       - name: Locate the scaffold project
         id: sproj
         run: echo "dir=$(dirname "$(find ci-flutter-scaffold/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      # PER-AGGREGATE PAGE IDENTITY — the assertion the build alone cannot make.
+      # The scaffold names aggregate pages by ROLE (`List` inside `area Products`),
+      # so an emitter keying its file/class on the bare `page.name` collapses
+      # EVERY aggregate's list onto one `lib/pages/list_page.dart` + one
+      # `ListPage`, and `main.dart` routes both `/products` and `/customers` to
+      # whichever was written last — `/products` renders the Customers list.
+      # Dart grades a duplicate import as an `info`, and this job runs
+      # `flutter analyze --no-fatal-infos`, so the collision compiled, tested and
+      # built CLEAN.  That is why the scaffold case declares TWO aggregates now
+      # (it had exactly one, which cannot express the bug) and why the check is
+      # an explicit assertion rather than another build step.
+      - name: Assert per-aggregate scaffold pages are distinct
+        working-directory: ${{ steps.sproj.outputs.dir }}
+        run: |
+          set -eu
+          echo "--- lib/pages ---"; ls lib/pages
+          for f in product_list_page.dart product_detail_page.dart \
+                   customer_list_page.dart customer_detail_page.dart; do
+            test -f "lib/pages/$f" || { echo "MISSING lib/pages/$f — per-aggregate pages collapsed onto one file"; exit 1; }
+          done
+          test ! -f lib/pages/list_page.dart || { echo "lib/pages/list_page.dart exists — role-named page file is back"; exit 1; }
+          grep -q "const ProductListPage()" lib/main.dart || { echo "no ProductListPage route in main.dart"; exit 1; }
+          grep -q "const CustomerListPage()" lib/main.dart || { echo "no CustomerListPage route in main.dart"; exit 1; }
+          # Each import URI appears exactly once — a repeated one means two pages
+          # resolved to a single module.
+          dupes=$(grep "^import 'pages/" lib/main.dart | sort | uniq -d)
+          test -z "$dupes" || { echo "duplicate page imports in main.dart:"; echo "$dupes"; exit 1; }
       - name: Drop in the Table-controls widget test
         working-directory: ${{ steps.sproj.outputs.dir }}
         run: cp "$GITHUB_WORKSPACE/scripts/flutter-table-controls-test.dart" test/table_controls_test.dart
