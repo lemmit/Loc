@@ -36,7 +36,7 @@ import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import { reflection } from "../../src/language/generated/ast.js";
-import { UNPARSEABLE_DDD, dddSourceOf, trackedDddFiles } from "../_helpers/ddd-corpus.js";
+import { dddSourceOf, trackedDddFiles, UNPARSEABLE_DDD } from "../_helpers/ddd-corpus.js";
 
 const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 
@@ -110,7 +110,7 @@ const UNAUTHORED_CLAUSES: Record<string, string> = {
   // and refs (`crudish(updateOnly: true)`, `scaffold(aggregates: [X])`), so the
   // two literal arms of `MacroArgValue` have never been parsed from a fixture.
   MacroArgInt: "no fixture passes an INT macro argument (`with m(n: 2)`)",
-  MacroArgString: "no fixture passes a STRING macro argument (`with m(s: \"x\")`)",
+  MacroArgString: 'no fixture passes a STRING macro argument (`with m(s: "x")`)',
 };
 
 describe("clause census — what the corpus authors, and what it never does", () => {
@@ -173,9 +173,7 @@ describe("clause census — what the corpus authors, and what it never does", ()
     // adding a frontend-conditional emission needs an `elixir-vanilla-build`
     // fixture (above), not a corpus one. If this ever flips, the comment is
     // wrong rather than the code — read it before deleting the assertion.
-    const corpus = [...byFile.entries()].filter(([f]) =>
-      f.startsWith("test/fixtures/corpus/"),
-    );
+    const corpus = [...byFile.entries()].filter(([f]) => f.startsWith("test/fixtures/corpus/"));
     expect(corpus.length).toBeGreaterThan(30);
     const withUi = corpus.filter(([, c]) => (c.get("Ui") ?? 0) > 0).map(([f]) => f);
     expect(withUi).toEqual([]);
