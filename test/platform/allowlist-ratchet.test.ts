@@ -164,6 +164,25 @@ const REGISTERED: Ratchet[] = [
     kind: "set",
     max: 38,
   },
+  // The MikroORM behavioural leg's skip register.  It was NOT registered here
+  // until a fourth entry had to be added (`projection-join`, a query-time
+  // projection the adapter refuses) — so it had been growing unwatched, which
+  // is precisely the silent-growth this ratchet exists to stop.  It carries its
+  // own STALE-key check inside the runner (a key naming no corpus fixture fails
+  // the leg), but nothing bounded its SIZE.  Three of the four are one boundary
+  // (no query-time projection reads) and drain together when the mikroorm read
+  // routes land in M-T6.23; the fourth is the declared `MIKROORM_SUBSET`
+  // predicate narrowing.
+  //
+  // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
+  // why it has no per-adapter ORACLE like the dapper maps just gained — the
+  // asymmetry is real and stated at the entry.
+  {
+    file: "test/behavioral/run-mikroorm.mjs",
+    name: "MIKRO_SKIP",
+    kind: "record",
+    max: 4,
+  },
 ];
 
 /** Extract the balanced `[...]` (set) or `{...}` (record) literal bound to
