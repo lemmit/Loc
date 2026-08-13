@@ -389,7 +389,8 @@ function emitQueryProjectionRoute(
   const grouped = groupedAggregates(p);
   const aggregates = wholeTableAggregates(p);
   // The row's DECLARED wire types, by field name — what each `select` must
-  // coerce to (see `coerceSelectToWire`).
+  // coerce to — see the repo-read arm, which serialises through the
+  // aggregate's own `wireProjectionValue`.
   const rowFieldType = new Map(p.stateFields.map((f) => [f.name, f.type] as const));
   out.push(`  async (httpCtx) => {`);
   // The `requires` gate (and any currentUser-scoped filter) needs the request
@@ -575,11 +576,20 @@ function emitQueryProjectionRoute(
     out.push(
       `    const rows = await db.select().from(${rawRead.table})${rawRead.where ? `.where(${rawRead.where})` : ""};`,
     );
+    // NO wire coercion here, deliberately.  This arm reads DRIZZLE COLUMNS off a
+    // raw table (a workflow's saga-state row, or a folded `<Proj>Row`), not
+    // domain values: an id/uuid column is already a string and a `numeric` money
+    // column is already `"10.0000"`, so the repo-arm's coercion below would only
+    // wrap them in a no-op `String(...)`.  Left byte-identical rather than
+    // churned — the defect that motivated the coercion (a domain `Decimal`
+    // reaching the wire unscaled) cannot occur on this arm.
+    //
+    // A selected `datetime` DOES arrive as a `Date` here, which is the one case
+    // this arm might still need; no fixture selects one, so it is stated rather
+    // than speculatively "fixed" — a change with no witness is how the last two
+    // bugs in this file got in.
     const projectedFields = (p.query!.selects ?? [])
-      .map(
-        (s) =>
-          `      ${s.field}: ${coerceSelectToWire(rowFieldType.get(s.field), renderProjectionSelect(s.expr, aliasMap))}`,
-      )
+      .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
     out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
@@ -870,30 +880,6 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
     default:
       return expr;
   }
-}
-
-/** Coerce one `select`ed value to the projection row's DECLARED wire type.
- *
- *  The plain-`select` arms read DOMAIN values (a hydrated aggregate, or a
- *  joined one) rather than Drizzle columns, so the mismatch is the same one
- *  `coerceGroupKey` handles on the grouped arm and the coercion table is
- *  shared: a branded `<Agg>Id` and a `Decimal` both wire-carry as strings, a
- *  `Date` as its ISO form.  `String(x)` is identity on the raw-table arm's
- *  already-stringy `numeric` column, so ONE rule serves both select arms.
- *
- *  Until this existed, only the grouped arm coerced.  A `select` that named an
- *  id or a money column verbatim emitted domain-typed rows under a wire-typed
- *  cast, and `tsc` rejected the route file outright (TS2352, "neither type
- *  sufficiently overlaps") — invisible to every runtime gate, because the
- *  emitted JS serialises correctly.  Found by the `projection-join` corpus
- *  fixture, which is the first `select` in the corpus to name `o.id`. */
-function coerceSelectToWire(type: TypeIR | undefined, expr: string): string {
-  if (!type) return expr;
-  const optional = type.kind === "optional";
-  const inner = type.kind === "optional" ? type.inner : type;
-  const coerced = groupKeyWireExpr(inner, expr);
-  if (coerced === expr) return expr;
-  return optional ? `${expr} == null ? null : ${coerced}` : coerced;
 }
 
 /** Render a `select` expression against the source row `r` and the join alias
