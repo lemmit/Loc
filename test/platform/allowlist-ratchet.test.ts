@@ -110,7 +110,13 @@ const REGISTERED: Ratchet[] = [
     max: 0,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
-  // not gaps — these never reach the compiler.
+  // not gaps — these never reach the compiler.  1 -> 5: the reclassification
+  // above (+3 query-time-projection fixtures, one of them the `projection-join`
+  // fixture minted by the clause census) plus `read-gates`, whose query-time
+  // gate kind hit the same boundary.  Every added entry is ONE pre-existing
+  // boundary meeting more fixtures, not a new suppression — but the raise is
+  // still a reviewed line, and `read-gates` costs this leg its find-gate and
+  // folded-projection-gate coverage as collateral (stated at the entry).
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_UNSUPPORTED",
