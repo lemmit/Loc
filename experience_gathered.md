@@ -4845,3 +4845,88 @@ is *semantically invisible* because both sides are valid current identifiers.
 **Rule:** after a mechanical rename, read the document that describes it. Prose
 about a rename is data the rename will match. (The same trap exists for
 migration notes, changelogs, and any before/after table.)
+
+## 85. A detector that keys on the resolved form is blind to the unresolved bug (2026-08-12)
+
+Closing M-T3.16 S3 (#2536) — a `requires currentUser.…` on a deployable with no
+`auth:` — turned up a detection trap that generalises well beyond that check,
+plus a relapse into §84 that is worth recording precisely *because* it happened
+an hour after citing §84 in a commit message.
+
+### The trap: the broken case is broken because it did not resolve
+
+Two sibling rules already existed for the same premise — with no auth there is
+no request-scoped principal, so a principal-reading clause is
+unimplement**able**:
+
+* `loom.context-filter-unsupported#no-auth-user` (a `filter`)
+* `loom.stamp-principal-without-auth` (a `stamp`)
+
+Both test for the principal with `exprUsesCurrentUser`, which asks for
+`refKind === "current-user"`. Writing the third sibling for the `requires`
+guard, reusing that helper is the obvious move — same premise, same shape, one
+import. **It is inert for the case that actually breaks.**
+
+With no auth in the system there is nothing for lowering to resolve
+`currentUser` against, so the ref lands as:
+
+```json
+{"kind":"ref","name":"currentUser","refKind":"unknown"}
+```
+
+and every backend's renderer prints an unknown ref verbatim — which is *why*
+the emitted gate is a free identifier (`tsc: error TS2304: Cannot find name
+'currentUser'`, and the structurally identical unbound read on python/.NET/
+java). The failure and the detector's blind spot have the **same root cause**:
+resolution didn't happen.
+
+So the two variants split exactly against the obvious implementation:
+
+| variant | ref lowers as | caught by the refKind test? |
+|---|---|---|
+| system has `user {}`, deployable opts out of `auth:` | `current-user` | yes |
+| no auth anywhere | `unknown` | **no** — and this is the one that fails to compile |
+
+i.e. it reports the harmless variant and misses the broken one.
+
+**The generalisation:** when a construct is broken *because* some resolution
+step failed, a detector keyed on the resolved form cannot see it. Ask what the
+IR looks like **in the failing case specifically** — not what it looks like in
+the working case that the sibling rule was written against. Inherited helpers
+carry the assumptions of the site they were written for, and "same premise"
+is not "same IR shape".
+
+**Second-order lesson: reuse is not automatically the safe choice.** The house
+style (rightly) prefers one shared helper over three spellings of the same
+predicate, and following it here produced a check that compiled, passed review
+reading, and did nothing.
+
+### And it passed its first green run
+
+The check was wired in, `ddd parse` on the repro printed `0 error(s), 0
+warning(s)` — the same output as before the check existed. A green run of a
+gate that *should* fire is not evidence; only a red one is. The bug was found
+by instrumenting the check body (`console.error` on the dep, the ctx, the
+statement kinds, then the guard expression JSON) until the dump showed
+`refKind: "unknown"`. Four increasingly narrow probes, each one cheap.
+
+The mutation set now pins it: narrowing the principal test back to `refKind`
+only fails 4 of 7 cases.
+
+### §84 relapse — `git checkout --` on a file whose only content is the new work
+
+Stripping that instrumentation, the revert was `git checkout --
+src/ir/validate/checks/system-checks.ts`. §84 warns this restores HEAD and eats
+*other* uncommitted edits in the file. The sharper form, met here: when the
+file's only uncommitted content **is the change under test**, `git checkout --`
+deletes the entire feature, not a stray edit alongside it. ~120 lines of new
+check, gone in one command — and the command "succeeded", so nothing announced
+it.
+
+The §84 rule already covers this (`cp` aside, `cp` back). What this adds is the
+failure mode's *shape*: the more focused the branch, the more total the loss —
+a clean single-purpose working tree is the worst case, not the safest one.
+
+**Rule, restated so it is mechanical:** never `git checkout --` a file you have
+edited this session. To drop instrumentation, either `cp` it back from the copy
+you took before mutating, or delete the debug lines by hand.

@@ -423,10 +423,10 @@ export function generateTypeScriptForContexts(
   // because they widen the merged vocabulary below — a consumer deployable
   // need not HOST the channel's owning context to react to its events; the
   // wired binding is what carries the routing knowledge across deployables.
-  const channelBindings =
-    system && system.deployable.persistence !== "mikroorm"
-      ? brokerChannelBindings(system.deployable, system.sys)
-      : [];
+  // Persistence-neutral since M-T6.23 slice 2: `http/channels.ts` (the driver,
+  // producer tee and consumer loop) reads no `db` at all, and the outbox relay
+  // it publishes drained rows through now emits on both adapters (slice 1).
+  const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   // Durable broker-bound events (M-T4.4 slice 3): carried by a wired
   // `queue`/`work` (or future `log`) channel — the producer path for these
   // rides the outbox relay (design §5), never the inline tee.
@@ -1096,7 +1096,7 @@ export function generateTypeScriptForContexts(
   // module (ChannelTransport seam + ioredis driver + producer tee + consumer
   // loop); index.ts composes the tee into the dispatcher chain and starts the
   // consumers.  A deployable with no wired bindings stays byte-identical.
-  const hasChannels = channelBindings.length > 0 && !usingMikro;
+  const hasChannels = channelBindings.length > 0;
   if (hasChannels) {
     out.set("http/channels.ts", renderChannelsModule(channelBindings));
   }

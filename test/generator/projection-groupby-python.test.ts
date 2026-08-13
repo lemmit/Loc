@@ -105,10 +105,10 @@ const GATED = `system S {
     enum OrderStatus { Draft Confirmed }
     aggregate Order { status: OrderStatus  total: money }
     repository Orders for Order { }
-    projection AdminSalesByStatus {
+    projection AdminSalesByStatus requires currentUser.role == "admin" {
       status: OrderStatus
       orders: int
-      from Order as o requires currentUser.role == "admin"
+      from Order as o
       group by o.status
       select status = o.status, orders = count()
     }

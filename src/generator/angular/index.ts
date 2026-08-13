@@ -42,6 +42,7 @@ import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
+import { renderAngularChartRuntime } from "./chart-runtime.js";
 import { emitAngularUserComponents } from "./components-emit.js";
 import {
   renderAngularExternComponentProps,
@@ -347,6 +348,12 @@ export function generateAngularForContexts(
     const pagePath = `src/app/pages/${slug}.component.ts`;
     out.set(pagePath, content);
     for (const f of hoistedComponentFiles) out.set(f.path, f.content);
+    // The chart component — one file per app rather than per page, emitted the
+    // first time a page charts (the same use-driven rule every sibling leg
+    // applies, and `out.set` makes the repeat a no-op).
+    if (content.includes("<loom-chart")) {
+      out.set("src/app/components/loom-chart.component.ts", renderAngularChartRuntime());
+    }
     // `ui` is guaranteed defined here: `pages` (the loop source) is derived
     // from `ui?.pages ?? []`, so a non-empty iteration implies `ui` exists.
     options.sourcemap?.file(pagePath, content, page.origin, pageConstructId(ui!.name, page));

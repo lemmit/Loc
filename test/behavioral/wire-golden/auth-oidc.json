@@ -140,6 +140,19 @@
         "title": "Bad Request",
         "type": "about:blank"
       }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401,
+      "body": {
+        "detail": "no valid credentials for GET /api/auth/me",
+        "instance": "/api/auth/me",
+        "status": 401,
+        "title": "Unauthorized",
+        "type": "about:blank"
+      }
     }
   ]
 }

@@ -69,6 +69,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection-groupby", title: "group by — grouped query-time projection (one row per group, key selects + per-group aggregates, GROUP BY/ORDER BY pushed to SQL)", doc: "language", backends: ALL },
   { id: "auth-oidc", title: "OIDC authentication — provider config + requires-guard", doc: "auth", backends: ALL },
   { id: "auth-simple", title: "dev-stub auth — user shape + requires-guard", doc: "auth", backends: ALL },
+  { id: "read-gates", title: "read-side requires gates — gated list read + folded and query-time projections", doc: "auth", backends: ALL },
   { id: "outbox", title: "durable channel / transactional outbox + relay", doc: "workflow", backends: ALL },
   {
     id: "channels-broker",
@@ -84,6 +85,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "policy-document", title: "`policy { allow deep / deny }` on a `shape: document` aggregate — the authz ladder applied IN-APP, where it cannot be a column predicate", doc: "auth", backends: IN_APP_DOCUMENT_FILTER, note: "vanilla (elixir) REFUSES this crossing by name (`loom.context-filter-unsupported`: capability filters are wired for relational aggregates only) — an honest, coded rejection.  dotnet is excluded for a GAP, not a rejection: it generates, but (a) the emitted project does not compile (CS0535 — the document repository never implements the `GetByIdForWriteAsync` write-scope port member the `allow` ladder adds), and (b) a `shape: document` aggregate gets no EF `HasQueryFilter` at all, with or without a policy, so a `tenantOwned` document aggregate reads unfiltered across tenants.  Both are silent; declaring dotnet here would make this fixture a false coverage claim.  See the F1 PR." },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
+  {
+    id: "vo-field-default",
+    title:
+      "VALUE-OBJECT-typed field default — the wire boundary renders a non-scalar default differently from a scalar one",
+    doc: "language",
+    backends: ALL,
+    note: "compile-tier by necessity: hono COMPILES the defect by structural typing, so only the strict backends (python mypy --strict, .NET) can see it",
+  },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
   { id: "extern-handlers", title: "extern commandHandler / queryHandler — bodyless, scaffold-once user impl", backends: ALL },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },
@@ -136,6 +145,13 @@ export const CORPUS: readonly CorpusFeature[] = [
     title: "reusable criterion (criterion.md) used as `filter <Criterion>`",
     doc: "criterion",
     backends: ALL,
+  },
+  {
+    id: "prefix-filter",
+    title: "`startsWith` prefix-match filter operator — inline find + criterion filter",
+    doc: "stdlib",
+    backends: ALL,
+    note: "the first bool-returning QUERYABLE intrinsic: it stands alone in predicate position, where a scalar intrinsic only ever appears as a comparison operand",
   },
   {
     id: "domain-services",

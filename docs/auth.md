@@ -40,14 +40,31 @@ escape — else `loom.default-deny-ungated` fires.  Covered:
 - **repository `find`s** — the same optional `requires` gate (see
   [Find gates](#find-requires-gates) below).  The auto-injected `find all`
   list route is the one exception: it is compiler-synthesized with no author
-  source line, so it is out of default-deny scope (declare an explicit
-  `find all(): T[] requires <expr>` to gate that route).
-- **query-time `projection`s** — the same optional `requires` gate on the
-  `from <Agg> requires <expr>` clause, evaluated against `currentUser` before
-  the read; failure → 403.  It is the projection twin of the find gate,
-  currentUser-only (a source-row reference is rejected by
-  `loom.projection-gate-not-current-user`), and emits a 403-before-query check
-  on all five backends.
+  source line, so it is out of default-deny scope.  Declaring an explicit
+  `find all(): T[] requires <expr>` gates that route, and does so on **all
+  five** backends — node/Hono and .NET emit a route per repository find and so
+  always honoured it, while java, python and elixir each special-case `all` out
+  of their named-find loop and used to emit the list route without reading its
+  gate.  All five now resolve the list read through one shared derivation
+  (`src/ir/util/read-gates.ts`).
+- **`projection`s — both kinds** — the same optional `requires` gate, declared
+  on the projection HEADER (`projection X keyed by k requires <expr> { … }`,
+  after `keyed by`, like every other gate in the language), evaluated against
+  `currentUser` before the read; failure → 403.  It is the projection twin of
+  the find gate, currentUser-only (a source-row reference is rejected by
+  `loom.projection-gate-not-current-user`), and it enforces on all five
+  backends:
+  - a **query-time** projection gates its comprehension route
+    (`GET /projections/<p>`), 403 before the query runs;
+  - a **folded** (materialized) projection gates BOTH read-model routes
+    (`GET /projections/<p>` and `GET /projections/<p>/{key}`), 403 before the
+    lookup — so a denied caller cannot distinguish "forbidden" from "no such
+    key".
+
+  A folded projection used to be unable to carry a gate at all: the keyword
+  lived inside the query-clause fragment, which a folded projection has none
+  of, and `loom.projection-gate-without-source` rejected the combination.  Both
+  halves are fixed and that diagnostic is gone.
 
 What's intentionally **not** here yet:
 

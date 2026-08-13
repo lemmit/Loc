@@ -630,6 +630,11 @@ export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: strin
   "string.trim": (recv) => `fragment("btrim(?)", ${recv})`,
   "string.toUpper": (recv) => `fragment("upper(?)", ${recv})`,
   "string.toLower": (recv) => `fragment("lower(?)", ${recv})`,
+  // Prefix match (tenancy-authorization-final-surface decision 2).  Anchored
+  // `strpos` rather than `like(field, ^(arg <> "%"))` so a `%`/`_` in the value
+  // matches literally — see `src/util/intrinsics.ts`.  Args arrive pre-rendered
+  // (a value-side param already carries its `^` pin).
+  "string.startsWith": (recv, args) => `fragment("strpos(?, ?) = 1", ${recv}, ${args[0]})`,
   // ---- numerics (A3 math batch) — Postgres SQL fragments ------------------
   // Args arrive pre-rendered (value-side params already carry the `^` pin) —
   // never add pins here.  Two-value min/max are SQL least()/greatest().
