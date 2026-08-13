@@ -51,6 +51,13 @@ const DAPPER_COMPILE_SKIP: Record<string, string> = {
 // documented capability boundary (`loom.dapper-unsupported`).  These never
 // reach the compiler, so they are excluded rather than skipped.
 const DAPPER_UNSUPPORTED: Record<string, string> = {
+  "read-gates":
+    "the fixture carries a query-time projection (`OpenOrders`) so its read-gate coverage spans " +
+    "all three gated read surfaces — and the Dapper adapter does not emit query-time projections " +
+    "(M-T6.25, the open half #2498's witnesses ratchet).  `loom.dapper-unsupported` refuses at " +
+    "generation, naming the projection and the fix.  Entered 2026-08-13: #2523 added the fixture " +
+    "and its dapper cell went red on main — the refusal predates it; the fixture merely walked in.  " +
+    "Delete this entry when M-T6.25 lands the Dapper query-time projection emitters.",
   "tenancy-hierarchy":
     "hierarchical tenancy's capability filter is outside the Dapper SQL subset; the validator " +
     "says so with loom.dapper-unsupported.  NOTE: that claim was FALSE until M-T6.29 — the " +

@@ -1199,9 +1199,6 @@ export const DIAGNOSTIC_MESSAGES = {
     `exists yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` ` +
     "is not available here. Use `where` to scope which rows return; use `requires` to " +
     "allow / deny the caller.",
-  "loom.projection-gate-without-source": (p: { name: unknown }) =>
-    `projection '${p.name}': a \`requires\` gate guards a query-time read, but this ` +
-    "projection declares no `from` source. Add a `from <Aggregate>` clause, or drop the gate.",
   "loom.projection-gate-not-current-user": (p: { name: unknown; offending: unknown }) =>
     `projection '${p.name}': a \`requires\` gate runs before the query (no row exists ` +
     `yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` is not ` +
@@ -1364,6 +1361,8 @@ export const DIAGNOSTIC_MESSAGES = {
     findName: unknown;
   }) =>
     `denyByDefault: find '${p.name}.${p.findName}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-projection": (p: { name: unknown }) =>
+    `denyByDefault: projection '${p.name}' is served as a read endpoint on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` after its declaration header (use \`requires true\` to allow anonymous access).`,
   "loom.default-deny-ungated#denybydefault-handler": (p: {
     kind: unknown;
     ctx: unknown;
@@ -1636,6 +1635,16 @@ export const DIAGNOSTIC_MESSAGES = {
     `The Dapper adapter renders capability filters as raw SQL and cannot bind the ` +
     `principal claims a hierarchical scope predicate reads — use 'persistence: efcore' ` +
     `on this deployable, or flatten the tenancy to a non-hierarchical registry.`,
+  "loom.dapper-unsupported#feature": (p: {
+    name: unknown;
+    ctxName: unknown;
+    projection: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
+    `the query-time projection '${p.projection}', which the Dapper adapter does not emit — the ` +
+    `generated project would reference EF Core's AppDbContext and fail to compile. Drop the ` +
+    `'persistence: dapper' clause to use the default (EF Core) adapter, which emits it, or host ` +
+    `the projection on a different deployable.`,
   "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +

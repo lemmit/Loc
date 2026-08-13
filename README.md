@@ -232,7 +232,7 @@ test runs against whichever runtime you point it at.
 | [`money-primitive.ddd`](examples/money-primitive.ddd) | The `Money` primitive and how decimal arithmetic is preserved across backends. |
 | [`provenance.ddd`](examples/provenance.ddd) | `provenanced` fields + the runtime trace SDK for explaining business decisions. |
 | [`roster.ddd`](examples/roster.ddd) | `X id[]` association collections and the join tables generated for them. |
-| [`sales-ui.ddd`](examples/sales-ui.ddd) | UI-focused &mdash; explicit pages, the page DSL, scaffolding macros. |
+| [`sales-ui.ddd`](examples/sales-ui.ddd) | **Historical prototype &mdash; does not parse.** The page-metamodel discussion's target syntax; several names in it were never shipped or were retired. Kept as the design record (its own header says so); read [`docs/page-metamodel.md`](docs/page-metamodel.md) for the shipping page DSL. |
 | [`acme.ddd`](examples/acme.ddd) | Full system mode &mdash; multi-deployable, OpenAPI parity-checked.  See the [annotated walkthrough](examples/acme.md). |
 | [`acme-order-explicit.ddd`](examples/acme-order-explicit.ddd) | Hand-written equivalent of `scaffold aggregates: Order`; asserted byte-equivalent in CI. |
 | [`showcase.ddd`](examples/showcase.ddd) | Multi-pack design showcase; exercised by the design-pack matrix in CI. |

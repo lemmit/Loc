@@ -24,7 +24,7 @@ import { combinePredicate, contextFilterPredicate } from "./repository-find-pred
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { projectFieldEntries } from "./repository-save-builder.js";
-import { toWireMethod } from "./repository-wire-builder.js";
+import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
 // Embedded-children (`shape: embedded`) repository for the Hono/Drizzle
@@ -87,7 +87,9 @@ export function buildEmbeddedRepositoryFile(
 ): string {
   const tableName = lowerFirst(plural(agg.name));
   const idVar = `Ids.${agg.name}Id`;
-  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+  // `toWireMasked(root, currentUser: User | null)` NAMES `User` — the mask is
+  // a second reason this file needs the import, as on the relational builder.
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
 
   // Drizzle ops the find where-clauses need (default eq/and/inArray; the
   // lowering adds ne/gt/or/… per filter shape).
@@ -229,6 +231,10 @@ export function buildEmbeddedRepositoryFile(
     ...findMethods.flatMap((m) => [m, ""]),
     toWireMethod(agg, ctx),
     "",
+    // `mask unless` response redaction — the routes call
+    // `repo.toWireMasked(row, __maskUser)` for every masked aggregate whatever
+    // its saving shape (pairwise F2).
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg), ""] : []),
     `}`,
     "",
     // Containment (de)serialisers — parts only; the root uses columns.

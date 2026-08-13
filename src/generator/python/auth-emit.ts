@@ -407,7 +407,21 @@ function renderAuthMiddleware(
     "        try:",
     "            user = await verify_user_or_throw(request)",
     "        except Exception:",
-    '            return JSONResponse({"error": "unauthorized"}, status_code=401)',
+    // RFC 7807, the envelope every other error on this API sends, plus the
+    // `WWW-Authenticate` challenge RFC 9110 §15.5.2 makes a MUST on any 401.
+    '            detail = f"no valid credentials for {request.method} {request.url.path}"',
+    "            return JSONResponse(",
+    "                {",
+    '                    "type": "about:blank",',
+    '                    "title": "Unauthorized",',
+    '                    "status": 401,',
+    '                    "detail": detail,',
+    '                    "instance": request.url.path,',
+    "                },",
+    "                status_code=401,",
+    '                media_type="application/problem+json",',
+    '                headers={"WWW-Authenticate": \'Bearer realm="api", error="invalid_token"\'},',
+    "            )",
     // Hierarchy (P2.2): resolve the caller's tenant materialized path once and
     // store it on the (frozen) principal, so `currentUser.orgPath` reads a
     // memoized value rather than recomputing per access.

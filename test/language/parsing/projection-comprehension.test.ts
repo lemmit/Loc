@@ -91,9 +91,9 @@ describe("parsing — projection comprehension", () => {
 
   it("parses + round-trips a projection `requires` gate through the structural printer", async () => {
     const src = wrap(`
-      projection AdminOrders {
+      projection AdminOrders requires currentUser.region == "eu" {
         status: OrderStatus
-        from Order as o requires currentUser.region == "eu"
+        from Order as o
         select status = o.status
       }
     `);
@@ -106,8 +106,12 @@ describe("parsing — projection comprehension", () => {
     expect(proj.gate).toBeDefined();
     const printed = printStructural(proj);
     expect(printed).toContain('requires currentUser.region == "eu"');
-    // grammar order: `from` before `requires` before `select`.
-    expect(printed.indexOf("from Order")).toBeLessThan(printed.indexOf("requires "));
+    // The gate rides the DECLARATION HEADER now — before the opening brace, and
+    // therefore before every query clause.  It used to print among them (after
+    // `from`, before `select`), which is the placement that made it unspellable
+    // on a folded projection.
+    expect(printed.indexOf("requires ")).toBeLessThan(printed.indexOf("{"));
+    expect(printed.indexOf("requires ")).toBeLessThan(printed.indexOf("from Order"));
     expect(printed.indexOf("requires ")).toBeLessThan(printed.indexOf("select "));
     const { errors: reErrors } = await parseString(wrap(printed));
     expect(reErrors).toEqual([]);

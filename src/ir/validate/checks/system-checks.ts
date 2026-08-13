@@ -783,6 +783,28 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
           });
         }
       }
+      // Projections.  Every projection — folded or query-time — is served as a
+      // GET endpoint (`/projections/<name>`, plus `/{key}` for a keyed folded
+      // one), so under denyByDefault an ungated one publishes its rows to any
+      // caller exactly as an ungated find publishes an aggregate's.
+      //
+      // This was the last read surface default-deny walked past.  It could not
+      // have been enforced before: a folded projection was unable to SPELL a
+      // gate (the keyword lived in the query-clause fragment) and no backend
+      // emitted one, so demanding a gate would have been demanding the
+      // impossible.  Both halves are fixed, so the requirement is now
+      // satisfiable and the exemption has no reason left.
+      for (const proj of c.projections) {
+        if (proj.query?.requires) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-projection", {
+            name: proj.name,
+          }),
+          source: `projection/${proj.name}`,
+        });
+      }
     }
   }
 
@@ -2447,6 +2469,36 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
+      // QUERY-TIME PROJECTIONS are the one FEATURE gap on this adapter, and it
+      // was SILENT in the worst way: `query-projection-emit.ts` has no dapper
+      // branch at all, so it emits the EF shape unconditionally — `using
+      // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;`,
+      // neither of which exists here.  The generated project does not COMPILE
+      // (CS0234 "namespace 'EntityFrameworkCore' does not exist" / CS0246
+      // "'AppDbContext' could not be found"), and nothing said so at generate
+      // time: the author gets a C# build error naming a type they never wrote.
+      // Found when `projection-aggregation`/`projection-groupby` got their first
+      // runtime callers (#2468) and the dapper behavioral leg failed to boot.
+      //
+      // Honest error until a Dapper query-projection emitter lands — the same
+      // interim-gate/principled-emitter split the MikroORM feature gate uses
+      // below.  Dapper is raw SQL and a query-time projection IS a SQL
+      // aggregate, so the port is a smaller job here than the gate implies;
+      // deleting this clause is what closes it.
+      for (const p of ctx.projections ?? []) {
+        if (isQueryTimeProjection(p)) {
+          diags.push({
+            severity: "error",
+            message: diagMessage("loom.dapper-unsupported#feature", {
+              name: dep.name,
+              ctxName,
+              projection: p.name,
+            }),
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dapper-unsupported",
+          });
+        }
+      }
       // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
