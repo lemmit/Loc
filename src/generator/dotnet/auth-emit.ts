@@ -843,8 +843,10 @@ function renderMiddleware(ns: string, oidc: boolean, orgPathClaimExpr?: string):
         }`
     : "";
   return `// Auto-generated.
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using ${ns}.Domain.Common;
 
 namespace ${ns}.Auth;
@@ -884,14 +886,12 @@ public sealed class UserMiddleware
         }
         catch
         {
-            ctx.Response.StatusCode = 401;
-            await ctx.Response.WriteAsync("unauthorized");
+            await UnauthorizedAsync(ctx);
             return;
         }
         if (user is null)
         {
-            ctx.Response.StatusCode = 401;
-            await ctx.Response.WriteAsync("unauthorized");
+            await UnauthorizedAsync(ctx);
             return;
         }
         // Attach the verified principal to the ambient frame opened by
@@ -899,6 +899,26 @@ public sealed class UserMiddleware
         // ICurrentUserAccessor and every currentUser-aware handler.
         if (RequestContext.Current is { } rc) rc.CurrentUser = user;${orgPathResolve}
         await _next(ctx);
+    }
+
+    /// <summary>RFC 7807 for a request that carried no valid credentials, plus
+    /// the challenge RFC 9110 §15.5.2 makes a MUST on every 401.  Written
+    /// directly on the response because this middleware runs ahead of MVC, so
+    /// DomainExceptionFilter never sees it — which is how this came to be a
+    /// bare <c>unauthorized</c> with no content type at all.</summary>
+    private static async Task UnauthorizedAsync(HttpContext ctx)
+    {
+        var detail = $"no valid credentials for {ctx.Request.Method} {ctx.Request.Path}";
+        ctx.Response.StatusCode = 401;
+        ctx.Response.Headers.WWWAuthenticate = "Bearer realm=\\"api\\", error=\\"invalid_token\\"";
+        await ctx.Response.WriteAsJsonAsync(new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = "Unauthorized",
+            Status = 401,
+            Detail = detail,
+            Instance = ctx.Request.Path,
+        }, (JsonSerializerOptions?)null, "application/problem+json");
     }
 }
 `;

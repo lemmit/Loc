@@ -302,6 +302,40 @@ const __frameworkProbes = async (dispatch) => {
   }
   await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: { ...__authHeaders } });
   await dispatch({ method: "POST", url: origin + collection.pathname, headers: json, body: "{not json" });
+  // The AUTH arm, which no recording ever reached: an emitted suite always
+  // authenticates successfully, which is how all five backends came to answer
+  // 401 outside the RFC 7807 contract, two of them in text/plain, and none of
+  // them with the WWW-Authenticate header RFC 9110 makes mandatory.
+  //
+  // The session probe, anonymously.  /api/auth/me is emitted by every
+  // auth-bearing backend and is deliberately NOT on the middleware's bypass
+  // list, so it is the one path guaranteed to reach authentication with no id,
+  // no body and no dependence on the fixture's shape:
+  //
+  //   auth system -> 401 + the RFC 7807 body this probe exists to pin
+  //   no auth     -> 404, the framework miss, equally fixed
+  //
+  // The two shapes tried before both asserted more than that.  An anonymous
+  // GET of the collection coupled the golden to END-OF-TIER DATA (seeding's
+  // fixture rows, an operation-returns version counter).  A by-id GET with a
+  // fixed all-zero uuid assumed every aggregate keys on a uuid — elixir raised
+  // ArgumentError and answered 500 for an id its type could not parse, which
+  // is a real defect but not this probe's subject.
+  //
+  // Only where the tier itself carried a credential.  A dev-stub \`auth {}\`
+  // system (no \`oidc\` block) fabricates a principal for ANY caller, so it has
+  // no unauthenticated arm to reach — the probe would answer 200 and record
+  // the stub's User instead, which is a third thing this probe does not
+  // assert.  (It diverges: node serialises \`{id, tenantId}\`, phoenix
+  // \`{id, role, tenantId}\` with the opposite two populated.  Real, and filed
+  // separately — the dev stub's principal shape is not the RS-9 error
+  // contract.)  A no-auth system is skipped for free and loses nothing: its
+  // \`/api/auth/me\` 404 is the same framework miss \`/__loom_no_such_path\`
+  // already pins.
+  const authed = Object.keys(__authHeaders).some((k) => /^authorization$/i.test(k));
+  if (authed) {
+    await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
+  }
 };
 
 // ── authorization ladder (M-T9.28 slice 1) ──────────────────────────────────
