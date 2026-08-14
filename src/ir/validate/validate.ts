@@ -48,6 +48,7 @@ import {
   validateChartSupport,
   validateComposeUniqueness,
   validateContextFilterSupport,
+  validateCurrentUserNeedsAuthUi,
   validateDapperSupport,
   validateDataGridFramework,
   validateDataSourceCoverage,
@@ -171,6 +172,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceUnwiredKnobs(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
+    validateCurrentUserNeedsAuthUi(sys, diags);
     validateDataGridFramework(sys, diags);
     validateChartSupport(sys, diags);
     validateUiRealtimeSupport(sys, diags);

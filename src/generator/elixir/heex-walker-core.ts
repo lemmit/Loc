@@ -1040,11 +1040,16 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
     const args = expr.args.map((a) => renderExpr(a, ctx)).join(", ");
     return `${mod}.${snake(expr.name)}(${args})`;
   }
-  // Registered primitive that the HEEx target doesn't support yet —
-  // emit a visible HEEx comment so the divergence shows up in
-  // generated output instead of silently producing wrong markup.
+  // Registered primitive that the HEEx target doesn't support yet — emit a
+  // comment so the divergence shows up in the generated template instead of
+  // silently producing wrong markup.  The EEx-NATIVE form (`<%!-- … --%>`), not
+  // an HTML comment: an HTML comment is markup, and a sub-primitive reaching
+  // here through an expression position would be wrapped as `<%= <!-- … --> %>`
+  // — a syntax error `mix compile` rejects.  `<%!-- … --%>` is inert in both
+  // positions (`isHEExCall` also keeps every registered primitive in markup
+  // position, so the wrap no longer happens either).
   if (def) {
-    return `<!-- ${expr.name}: not supported by Phoenix LiveView target -->`;
+    return `<%!-- ${expr.name}: not supported by Phoenix LiveView target --%>`;
   }
   // Helper function call.
   if (expr.callKind === "function" || expr.callKind === "free") {
@@ -1481,15 +1486,21 @@ function styleIrToHeex(expr: Extract<ExprIR, { kind: "call" }>): string | undefi
 
 /** Returns true for calls that produce raw HEEx markup (not Elixir
  *  expressions) — these should NOT be wrapped in `<%= %>`.  Consults
- *  the typed registry (anything with a `heex` renderer registered
- *  produces HEEx markup) so new primitives don't need a second list
+ *  the typed registry (ANY registered walker primitive renders in markup
+ *  position) so new primitives don't need a second list
  *  edit, AND the ui's user `component`s — a `component` invocation
  *  renders to a HEEx function-component tag
  *  (`<…UiComponents.order_panel … />`), which is markup, so wrapping it
  *  in `<%= %>` (e.g. inside a QueryView `data:` `cond` arm) produces
- *  invalid HEEx. */
+ *  invalid HEEx.
+ *
+ *  Membership is keyed on the primitive being REGISTERED, not on it having a
+ *  `heex` renderer: a registered primitive with no HEEx renderer falls through
+ *  to the unsupported-primitive comment, which is markup too — gating on
+ *  `.heex !== undefined` classified exactly that case as an expression and
+ *  wrapped the comment, emitting uncompilable EEx. */
 function isHEExCall(name: string, ctx: WalkContext): boolean {
-  if (WALKER_PRIMITIVES[name]?.heex !== undefined) return true;
+  if (WALKER_PRIMITIVES[name] !== undefined) return true;
   return ctx.ui.components.some((c) => c.name === name);
 }
 

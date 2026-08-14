@@ -97,7 +97,20 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
   }
 
   for (const sys of loom.systems) {
+    // Which uis this system renders through Feliz — the one frontend whose
+    // walker cannot render `.map(λ)` (see `MAP_UNRENDERED_FRAMEWORK`).  A ui
+    // declares its own `framework:`, but the LEGACY binding leaves it unset and
+    // derives the framework from the hosting deployable, so both are consulted
+    // (`platform: feliz` hosts only `framework: feliz` — the same detector
+    // `loom.feliz-async-effect-unsupported` uses in store-checks.ts).
+    const felizUis = new Set<string>();
+    for (const d of sys.deployables) {
+      if (d.platform !== MAP_UNRENDERED_FRAMEWORK && d.uiFramework !== MAP_UNRENDERED_FRAMEWORK)
+        continue;
+      for (const n of [d.uiName, ...(d.hostedUiNames ?? [])]) if (n) felizUis.add(n);
+    }
     for (const ui of sys.uis) {
+      const mapRendered = ui.framework !== MAP_UNRENDERED_FRAMEWORK && !felizUis.has(ui.name);
       const handles = new Set<string>([
         ...ui.apiParams.map((p) => p.name),
         ...(ui.channelParams ?? []).map((p) => p.name),
@@ -152,7 +165,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
-        checkFrontendCollectionOps(page, pageWhere(page), diags);
+        checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
@@ -191,7 +204,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         };
         checkBody(comp.body, ctx, diags);
         checkActionBodies(comp.actions, ctx, diags);
-        checkFrontendCollectionOps(comp, `component '${comp.name}'`, diags);
+        checkFrontendCollectionOps(comp, `component '${comp.name}'`, mapRendered, diags);
         checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkChartArgs(
@@ -300,9 +313,20 @@ function pageRouteHasParam(route: string | undefined): boolean {
 
 /** Collection ops the frontend walkers DO render, so the gate lets them through.
  *  `map` only: native `Array.prototype.map` (JS frontends) / `Enum.map/2`
- *  (HEEx).  Every other catalogue op emits verbatim on at least the four JS
- *  frontends.  Grow this set only alongside a real renderer on every frontend. */
+ *  (HEEx) / `Iterable.map` (Dart).  Every other catalogue op emits verbatim on
+ *  at least the four JS frontends.  Grow this set only alongside a real
+ *  renderer on every frontend. */
 const FRONTEND_RENDERED_COLLECTION_OPS: ReadonlySet<string> = new Set(["map"]);
+
+/** …with ONE framework carved out.  The walker has no `exprLambda` seam: a
+ *  `.map(λ)` falls through to `<recv>.map(<args>)` with a hardcoded JS arrow
+ *  (`(x) => …`).  That is real code on React/Vue/Svelte/Angular, valid Dart on
+ *  Flutter, and HEEx routes it through its own engine — but on FELIZ it emits
+ *  verbatim JS into an F# file, which `dotnet fable` rejects.  So `map` keeps
+ *  its exemption everywhere except Feliz, where it joins the gated ops rather
+ *  than shipping unbuildable output.  Delete this carve-out when the walker
+ *  grows a lambda seam and `feliz-target.ts` renders `List.map`. */
+const MAP_UNRENDERED_FRAMEWORK = "feliz";
 
 /** True when a receiver type is a real collection — an `array`, or an
  *  `optional` wrapping one (`rows?.count`). */
@@ -332,6 +356,7 @@ function isCollectionReceiver(
 function unsupportedCollectionOp(
   e: ExprIR,
   rowSetBindings: ReadonlySet<string>,
+  mapRendered: boolean,
 ): string | undefined {
   const named =
     e.kind === "method-call" && e.isCollectionOp
@@ -340,7 +365,7 @@ function unsupportedCollectionOp(
         ? e
         : undefined;
   if (!named) return undefined;
-  if (FRONTEND_RENDERED_COLLECTION_OPS.has(named.member)) return undefined;
+  if (mapRendered && FRONTEND_RENDERED_COLLECTION_OPS.has(named.member)) return undefined;
   if (!isCollectionReceiver(named.receiver, named.receiverType, rowSetBindings)) return undefined;
   return named.member;
 }
@@ -445,6 +470,7 @@ function checkUnknownPageElements(
 function checkFrontendCollectionOps(
   host: PageIR | ComponentIR,
   where: string,
+  mapRendered: boolean,
   diags: LoomDiagnostic[],
 ): void {
   const flagged = new Set<string>();
@@ -469,7 +495,7 @@ function checkFrontendCollectionOps(
       (n) => visitStmt(n, scope),
     );
   const visit = (e: ExprIR, rowSetBindings: ReadonlySet<string>): void => {
-    const op = unsupportedCollectionOp(e, rowSetBindings);
+    const op = unsupportedCollectionOp(e, rowSetBindings, mapRendered);
     if (op !== undefined) report(op);
     const rowParam = rowSetLambdaParam(e);
     const inner: ReadonlySet<string> = rowParam

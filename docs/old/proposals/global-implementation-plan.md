@@ -265,8 +265,10 @@ java-backend).
     Remaining: `spawn`/`onError`/`attempt`, multi-error reification; **(3)** retire the `Action {}` `then:` arg via a macro over
     a named action; **(4)** async action composition (`async` keyword,
     required+checked); **(5)** `store` — ✅ **SHIPPED in-memory** (grammar/IR/
-    lowering + Zustand/Pinia/Svelte/Angular/LiveView emission; the `persist:`/
-    `sync:` lifetime ladder remains, gated `loom.store-lifetime-unsupported`).
+    lowering + Zustand/Pinia/Svelte/Angular/LiveView emission; ~~the `persist:`/
+    `sync:` lifetime ladder remains, gated `loom.store-lifetime-unsupported`~~ —
+    **2026-08-14: `persist:` shipped on every frontend and that gate is retired;
+    only `sync:` is still reserved**).
     Deferred/additive within: `onError` sugar, `attempt { }` railway (→ F#
     `asyncResult` CE), `spawn`.
     **Dependencies:** none hard for Stage 1; **strengthens `loom-forms` (#5)** —
