@@ -30,6 +30,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { walkBody } from "../_walker/walker-core.js";
+import { FLUTTER_CHILD_PARAM } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
 import { flutterPack, usesIntl, usesMath } from "./pack.js";
@@ -64,6 +65,9 @@ interface ComponentWalkResult {
    *  declares, such a component is dropped from the emittable set and its call
    *  site falls back to the shared "unknown component" comment. */
   usesStores: boolean;
+  /** True when the body contains `Slot { }` — the widget then takes an optional
+   *  `child` constructor param for the caller's markup to land in. */
+  usesChildren: boolean;
 }
 
 /** Walk a component body once through the shared engine, with its own state +
@@ -100,6 +104,7 @@ function walkComponent(
     widget: r.tsx.trim(),
     hasReads: r.usedApiHooks.size > 0,
     usesStores: (r.usedStores?.size ?? 0) > 0,
+    usesChildren: r.usesChildren,
   };
 }
 
@@ -299,9 +304,17 @@ export function renderComponentsFile(
   if (used.length === 0) return "";
 
   const blocks = used.map((c) => {
-    const { widget } = walkComponent(c, componentParams, ctx);
-    const ctorArgs = c.params.map((p) => `required this.${p.name}`).join(", ");
+    const { widget, usesChildren } = walkComponent(c, componentParams, ctx);
+    const ctorParts = c.params.map((p) => `required this.${p.name}`);
     const fields = c.params.map((p) => `  final ${dartType(p.type)} ${p.name};`);
+    // `Slot { }` in the body reads the `child` param — OPTIONAL (not `required`),
+    // so a call site that passes no children still constructs, and the slot's
+    // `child ?? const SizedBox.shrink()` renders nothing.
+    if (usesChildren) {
+      ctorParts.push(`this.${FLUTTER_CHILD_PARAM}`);
+      fields.push(`  final Widget? ${FLUTTER_CHILD_PARAM};`);
+    }
+    const ctorArgs = ctorParts.join(", ");
     return isStateful(c)
       ? renderStatefulComponent(c, widget, ctorArgs, fields, componentParams, ctx)
       : renderStatelessComponent(c, widget, ctorArgs, fields);

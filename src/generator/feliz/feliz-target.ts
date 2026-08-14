@@ -7,14 +7,15 @@
 // `Msg` (the effect body lives in `update`, not the view).  Expression syntax
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
-import type { BoundedContextIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { BoundedContextIR, ExprIR, FieldIR, ParamIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
-import { emitExpr } from "../_walker/walker-core.js";
+import { emitExpr, walk } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
 import { FELIZ_GRID_ROW_VAR, renderFelizDataGridChild } from "./data-grid-child.js";
 import {
+  FELIZ_CHILDREN_FIELD,
   FS_LEAVES,
   fsString,
   fsTemporalBinary,
@@ -660,23 +661,63 @@ export const felizTarget: WalkerTarget = {
     const argNames = call.argNames ?? [];
     const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
     const fields: string[] = [];
+    // Args destined for a `slot`-typed param — which the synthetic `children`
+    // param of a `Slot { }`-bearing component is (`component-emit.ts`).  They
+    // are MARKUP, so they walk (not `emitExpr`), in the CALLER's scope, and
+    // several fold into one element.
+    const slotArgs = new Map<string, ExprIR[]>();
     let cursor = 0;
     for (let i = 0; i < call.args.length; i++) {
       const arg = call.args[i]!;
       const named = argNames[i];
-      let paramName: string | undefined;
+      let param: ParamIR | undefined;
       if (named !== undefined) {
-        paramName = named;
+        param = params.find((p) => p.name === named) ?? { name: named, type: { kind: "none" } };
       } else {
         while (cursor < params.length && filledByName.has(params[cursor]!.name)) cursor += 1;
-        paramName = params[cursor]?.name;
-        if (paramName !== undefined) cursor += 1;
+        param = params[cursor];
+        if (param !== undefined) cursor += 1;
       }
-      if (paramName === undefined) continue;
-      fields.push(`${paramName} = ${emitExpr(arg, ctx)}`);
+      // Past the declared params — with a `Slot { }` in the component this
+      // cannot happen (the synthetic `children` param absorbs the extras); with
+      // no slot to hold it, an extra positional arg has nowhere to go, so it is
+      // dropped exactly as before.
+      if (param === undefined) continue;
+      if (param.type.kind === "slot") {
+        const bucket = slotArgs.get(param.name) ?? [];
+        bucket.push(arg);
+        slotArgs.set(param.name, bucket);
+        // A TRAILING slot (the synthetic `children`) absorbs the whole run of
+        // positional args that follows, since children arrive as a run, not one
+        // — so re-point the cursor at it.  A slot declared mid-list keeps
+        // taking exactly one arg, as it did before.
+        if (named === undefined && cursor === params.length) cursor -= 1;
+        continue;
+      }
+      fields.push(`${param.name} = ${emitExpr(arg, ctx)}`);
+    }
+    for (const p of params) {
+      if (p.type.kind !== "slot") continue;
+      const walked = (slotArgs.get(p.name) ?? []).map((c) => oneLine(walk(c, ctx, 0)));
+      // An F# anonymous record is EXACT — an unfilled field is a type error, not
+      // an absent prop — so a slot the caller left empty is filled with the
+      // renders-nothing element rather than omitted.
+      const value =
+        walked.length === 0
+          ? "Html.none"
+          : walked.length === 1
+            ? walked[0]!
+            : `React.fragment [ ${walked.join("; ")} ]`;
+      fields.push(`${p.name} = ${value}`);
     }
     return fields.length > 0 ? `${call.name} {| ${fields.join("; ")} |}` : `${call.name} ()`;
   },
+
+  /** A component body's `Slot { }` → the `children` field of the props record
+   *  its function takes (`component-emit.ts` adds the field when the walk
+   *  reports `usesChildren`).  The JSX `{children}` default is an F# ANONYMOUS
+   *  RECORD expression over an unbound `children` — it does not compile. */
+  renderChildrenSlot: () => `props.${FELIZ_CHILDREN_FIELD}`,
 
   // --- Markup seams — F# flavoured ---------------------------------------
   renderComment: (text: string) => `(* ${text} *)`,

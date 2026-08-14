@@ -15,6 +15,12 @@ import type { ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 
+/** The constructor parameter a component widget's `Slot { }` reads, and the one
+ *  a call site fills with the children it passed.  `child` is Flutter's own name
+ *  for a single-widget slot (`Card(child: …)`), so the generated widget reads
+ *  the way a hand-written one would. */
+export const FLUTTER_CHILD_PARAM = "child";
+
 /** Dart single-quoted string literal.  Escapes the backslash, the quote, and
  *  `$` (Dart's string-interpolation sigil), plus the two structural whitespace
  *  escapes.  The order matters: the backslash must be escaped first. */
