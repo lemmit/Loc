@@ -26,6 +26,7 @@ import {
   validateFunctionBlockBodies,
   validateGenericInstancesUnimplemented,
   validateLifecycleBodyDropped,
+  validateNamedLifecycleDropped,
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateReservedStructuralErrorNames,
@@ -252,6 +253,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateLifecycleBodyDropped(c, diags);
+    validateNamedLifecycleDropped(c, diags);
     validateWhenGateSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,
