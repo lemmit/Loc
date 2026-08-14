@@ -91,7 +91,9 @@ describe("python grouped aggregation (group by)", () => {
     const routes = await routesFile(SRC);
     expect(routes).toContain('"status": r[0],');
     expect(routes).toContain('"orders": int(r[1] or 0),');
-    expect(routes).toContain('"revenue": str(r[2] or "0"),');
+    // money pins the fixed wire scale (RS-12 / #2549) via `money_str`, not a
+    // bare `str` of whatever scale SQL returned.
+    expect(routes).toContain('"revenue": money_str(Decimal(r[2] or 0)),');
     expect(routes).toContain("for r in result");
   });
 });
