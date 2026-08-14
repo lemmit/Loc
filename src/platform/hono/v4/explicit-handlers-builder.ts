@@ -66,6 +66,10 @@ import type {
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../../ir/types/wire-types.js";
+import {
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../../ir/util/aggregate-flags.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../../ir/util/handler-contracts.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
@@ -598,11 +602,39 @@ export function buildExplicitRoutesFile(
   const structuralMap = contexts[0]?.structuralErrorStatuses;
   const exDomainStatus = resolveErrorStatus("DomainError", structuralMap);
   const exForbiddenStatus = resolveErrorStatus("Forbidden", structuralMap);
-  const exProblemUnion = [
-    ...new Set<number>([400, exForbiddenStatus, 404, 422, exDomainStatus, 500]),
-  ]
-    .sort((a, b) => a - b)
-    .join(" | ");
+  // ── the CONFLICT rungs (M-T6.28) ──────────────────────────────────────
+  // This router is a WRITE path (`POST /api/place` — an extern `commandHandler`
+  // that loads an aggregate, invokes an operation and `save`s it), and its
+  // ladder could not express 409 at all: the `problem` signature was typed
+  // `400 | 403 | 404 | 422 | 500` and the file imported neither
+  // `DisallowedError` nor `ConcurrencyError`.  So a save that lost an optimistic
+  // -lock race, or tripped a `unique (…)` index, answered `500 / "internal"`
+  // here while the SAME concept on `/api/<agg>/…` answered 409 — one app, one
+  // wire concept, two answers.
+  //
+  // Gated exactly as the aggregate router gates them, over every context this
+  // file serves: `ConcurrencyError` is only emitted into `domain/errors.ts` for
+  // a versioned / event-sourced aggregate, and only a table with a declared
+  // `unique` key can raise SQLSTATE 23505 — so a project with neither stays
+  // byte-identical.
+  const exAggregates = contexts.flatMap((c) => c.aggregates);
+  const exNeedsConcurrency = aggregatesNeedConcurrency(exAggregates);
+  const exHasUniqueKeys = aggregatesHaveUniqueKeys(exAggregates);
+  const exDisallowedStatus = resolveErrorStatus("Disallowed", structuralMap);
+  const exUniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralMap);
+  const exConcurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralMap);
+  const exStatuses = new Set<number>([
+    400,
+    exForbiddenStatus,
+    404,
+    422,
+    exDomainStatus,
+    500,
+    exDisallowedStatus,
+  ]);
+  if (exHasUniqueKeys) exStatuses.add(exUniquenessStatus);
+  if (exNeedsConcurrency) exStatuses.add(exConcurrencyStatus);
+  const exProblemUnion = [...exStatuses].sort((a, b) => a - b).join(" | ");
   body.push(
     `    const problem = (status: ${exProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
@@ -610,11 +642,33 @@ export function buildExplicitRoutesFile(
     `    if (err instanceof ForbiddenError) return problem(${exForbiddenStatus}, ${JSON.stringify(problemTitle(exForbiddenStatus))}, err.message);`,
   );
   body.push(
+    // The state-gate rung.  Ordered before `DomainError` exactly as in the
+    // aggregate router.  NOTE on reachability: the emitted `when` gate is a
+    // ROUTE-layer check (`routes-builder.ts` `whenGateLine`), so an operation
+    // invoked from a handler here does not evaluate it — this arm answers a
+    // `DisallowedError` a user-authored extern impl raises.  The gate-bypass
+    // itself is a separate defect, recorded on M-T6.28.
+    `    if (err instanceof DisallowedError) return problem(${exDisallowedStatus}, "Disallowed", err.message);`,
+  );
+  body.push(
     `    if (err instanceof DomainError) return problem(${exDomainStatus}, ${JSON.stringify(problemTitle(exDomainStatus))}, err.message);`,
   );
   body.push(
     `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
   );
+  if (exHasUniqueKeys) {
+    body.push(
+      // PG unique_violation — drizzle wraps the driver error, so the SQLSTATE
+      // rides `err.cause` under v5 and `err` under older drizzle; read both, as
+      // the aggregate router does.
+      `    if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23505")) return problem(${exUniquenessStatus}, "Conflict", "A record with these values already exists.");`,
+    );
+  }
+  if (exNeedsConcurrency) {
+    body.push(
+      `    if (err instanceof ConcurrencyError) return problem(${exConcurrencyStatus}, "Conflict", err.message);`,
+    );
+  }
   body.push(
     // RS-28: the extern arm sanitizes like every other 500.  `err.message`
     // interpolates the INNER exception the user handler threw — driver text,
@@ -660,8 +714,10 @@ export function buildExplicitRoutesFile(
   const errorClasses = [
     "DomainError",
     "AggregateNotFoundError",
+    "DisallowedError",
     "ForbiddenError",
     "ExternHandlerError",
+    "ConcurrencyError",
   ].filter(hasRef);
 
   const imports: string[] = [];

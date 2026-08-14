@@ -46,6 +46,7 @@ import {
   isGroupedProjection,
   isQueryTimeProjection,
 } from "../../types/loom-ir.js";
+import { isMacroEmitted } from "../../types/origin.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { bodyUsesDataGrid } from "../../util/data-grid.js";
@@ -796,6 +797,16 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
       // satisfiable and the exemption has no reason left.
       for (const proj of c.projections) {
         if (proj.query?.requires) continue;
+        // A MACRO-emitted projection has no declaration header, so the
+        // diagnostic's "add a `requires` after its declaration header" names a
+        // line the author cannot open — `scaffoldDashboard` emits one singleton
+        // totals projection per aggregate, which made `scaffold` and
+        // `denyByDefault` an uncompilable pair.  Exempt for the same stated
+        // reason the enrichment-injected `find all` is exempt one loop up: it
+        // is compiler-synthesized and has no author source line
+        // (`src/ir/util/read-gates.ts`).  Derived from the origin chain the
+        // lowering already records — nothing new is stamped.
+        if (isMacroEmitted(proj.origin)) continue;
         diags.push({
           severity: "error",
           code: "loom.default-deny-ungated",
@@ -2469,6 +2480,36 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
+      // QUERY-TIME PROJECTIONS are the one FEATURE gap on this adapter, and it
+      // was SILENT in the worst way: `query-projection-emit.ts` has no dapper
+      // branch at all, so it emits the EF shape unconditionally — `using
+      // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;`,
+      // neither of which exists here.  The generated project does not COMPILE
+      // (CS0234 "namespace 'EntityFrameworkCore' does not exist" / CS0246
+      // "'AppDbContext' could not be found"), and nothing said so at generate
+      // time: the author gets a C# build error naming a type they never wrote.
+      // Found when `projection-aggregation`/`projection-groupby` got their first
+      // runtime callers (#2468) and the dapper behavioral leg failed to boot.
+      //
+      // Honest error until a Dapper query-projection emitter lands — the same
+      // interim-gate/principled-emitter split the MikroORM feature gate uses
+      // below.  Dapper is raw SQL and a query-time projection IS a SQL
+      // aggregate, so the port is a smaller job here than the gate implies;
+      // deleting this clause is what closes it.
+      for (const p of ctx.projections ?? []) {
+        if (isQueryTimeProjection(p)) {
+          diags.push({
+            severity: "error",
+            message: diagMessage("loom.dapper-unsupported#feature", {
+              name: dep.name,
+              ctxName,
+              projection: p.name,
+            }),
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dapper-unsupported",
+          });
+        }
+      }
       // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
@@ -2854,19 +2895,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // `with audit` → `stampInsert` in `em.upsert`) stays supported too.
       }
     }
-    // (4) Timers: `hasTimers` is `&& !usingMikro`, so `scheduler.ts` is never
-    // written — the cadence never fires and the timer's event is never emitted.
-    // Mirrors the emitter's ownership filter exactly (the subdomain's
-    // `migrationsOwner`), so a mikroorm deployable that merely HOSTS a timer's
-    // context without owning it is not blamed for another deployable's emission.
-    for (const ts of sys.timerSources ?? []) {
-      const owner = sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
-      if (owner?.migrationsOwner !== dep.name) continue;
-      rejectFeature(
-        `it owns the timerSource '${ts.name}' (firing '${ts.event}')`,
-        `'scheduler.ts' — the cadence would never fire`,
-      );
-    }
+    // (4) Timers: CLOSED by M-T6.23 slice 3 — `scheduler.ts` emits on this
+    // adapter (pg-boss for `cron:`, setInterval + a transaction-scoped advisory
+    // lock for `every:`), with the `loom_timer_runs` watermark and the lock query
+    // running through the EntityManager (`TimerStore` in scheduler-builder.ts).
+    // Nothing to gate.
     // (5) Broker-bound channels: CLOSED by M-T6.23 slice 2 — `channelBindings` is
     // no longer emptied for a mikroorm deployable, so `http/channels.ts` (the
     // driver, producer tee and consumer loop) and the boot-time transport /

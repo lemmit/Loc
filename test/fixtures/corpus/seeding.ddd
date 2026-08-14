@@ -66,16 +66,22 @@ system Seeding {
     expect(updatedGadget.label).toBe("g2")
 
     // NO `api.widgets.all()` / `api.gadgets.all()` here, and that absence is a
-    // finding rather than an omission — see `R.unseededListRead` in
-    // `test/ir/api-caller-census-pins.ts`.  This is the one fixture whose table
-    // does not start empty, and the behavioural legs disagree about that: the
-    // node leg composes `createApp` directly and never reaches `runSeeds`,
-    // which the generated entrypoints (`index.ts` / `app/main.py` / …) call at
-    // boot, so the other four legs start with the `default` dataset's rows and
-    // node starts with none.  A collection read is the first thing that can
-    // see the difference, and the wire golden compares whole bodies — so
-    // writing one here would encode a harness gap as a wire divergence on four
-    // backends at once.  The by-id routes below are seed-independent.
+    // finding rather than an omission — see `R.unseededOnElixir` in
+    // `test/ir/api-caller-census-pins.ts`.  A collection read is the only route
+    // class that can SEE seed data, and the wire golden compares whole bodies,
+    // so one here would be a divergence on any leg whose table starts
+    // differently.  The node leg used to be that leg (it composed `createApp`
+    // and never reached `runSeeds`); #2517 fixed it, and the same change found
+    // that **elixir emits no seeder at all** (B19 / M-T6.37) — so the odd leg
+    // out is now that one, and it stays odd until the Ecto seeder lands.
+    //
+    // What the seeded rows ARE asserted by lives in `seed-values.ddd`, a
+    // sibling fixture that carries only the collection reads and is held off the
+    // elixir behavioural leg alone.  That split is deliberate: this case keeps
+    // its CRUD, enum write-back, cross-aggregate FK round-trip, FK-ordered
+    // destroys and 404 bodies armed on ALL FIVE backends — the coverage a
+    // whole-case skip here would have silently taken away (the FK-ordering half
+    // is B10's exact class, an elixir bug already fixed once).
 
     // DELETE, child BEFORE parent.  `Gadget.widgetId: Widget id` is emitted as
     // a real foreign key with ON DELETE RESTRICT, so this order is not

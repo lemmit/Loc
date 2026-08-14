@@ -11,6 +11,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId } from "../render-expr.js";
+import { javaNotFoundThrow } from "./common.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 import {
   esEventLogTable,
@@ -184,7 +185,12 @@ function renderInstancesController(
         `        var __sid = ${idJava === "String" ? "id" : "String.valueOf(id)"};`,
         `        var __rows = jdbc.queryForList(`,
         `            "select type, data from ${table} where stream_type = ? and stream_id = ? order by version", "${streamType}", __sid);`,
-        `        if (__rows.isEmpty()) return ResponseEntity.notFound().build();`,
+        // M-T6.31 — the shared carrier, not Spring's own empty-bodied 404: the
+        // instance show is a by-id read and must answer the same envelope as
+        // every other 404 the app produces (`ApiExceptionAdvice.onNotFound`).
+        // The sentence is the node/python spelling (`<Wf> <id> not found`) —
+        // the RS-27 extension already documented in the Hono emitter.
+        `        if (__rows.isEmpty()) throw ${javaNotFoundThrow(upperFirst(wf.name), "id")};`,
         `        var __loaded = new ArrayList<DomainEvent>();`,
         `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
         `        var x = ${cls}._fromEvents(new ${corrId}(${idExpr}), __loaded);`,
@@ -207,7 +213,7 @@ function renderInstancesController(
         `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${paramJava} id) {`,
         `        return ${repo}.findById(new ${idClass}(${idExpr}))`,
         `            .map(x -> ResponseEntity.ok(new ${T}(${proj("x")})))`,
-        `            .orElse(ResponseEntity.notFound().build());`,
+        `            .orElseThrow(() -> ${javaNotFoundThrow(upperFirst(wf.name), "id")});`,
         `    }`,
         ``,
       );
@@ -245,6 +251,9 @@ function renderInstancesController(
     esPresent ? `import org.springframework.jdbc.core.JdbcTemplate;` : null,
     `import org.springframework.web.bind.annotation.*;`,
     ``,
+    // The 404 carrier the instance show raises (M-T6.31) — unconditional, since
+    // every instance-bearing workflow emits a show route.
+    `import ${wctx.basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${wctx.pkg}.*;`,
     stateWfs.length > 0 ? `import ${wctx.stateRepoPkg}.*;` : null,
     esPresent ? `import ${wctx.basePkg}.domain.events.*;` : null,
