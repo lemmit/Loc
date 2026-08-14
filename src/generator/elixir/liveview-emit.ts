@@ -43,6 +43,7 @@ import {
 } from "../_frontend/e2e-harness.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { opUsesCurrentUser } from "./domain/predicates.js";
 import {
   type ActionBinding,
   type HandleEventClause,
@@ -525,6 +526,14 @@ function buildActionHandlers(
       b.byId && lifecycleGates(aggregatesByName.get(b.agg)?.canonicalDestroy).length > 0;
     const destroyUsesUser =
       destroyGated && lifecycleGatesUseCurrentUser(aggregatesByName.get(b.agg)?.canonicalDestroy);
+    // A `requires currentUser.…` / `currentUser`-reading operation gets a
+    // trailing `current_user \\ nil` arity on its context bang fn (context-emit
+    // decides that with this same predicate).  The HTTP action threads
+    // `conn.assigns[:current_user]`; the LiveView seam must thread the socket's
+    // — an arity-1 call left the guard evaluating against `nil`, which the
+    // default arg makes silent rather than a compile error.
+    const op = (aggregatesByName.get(b.agg)?.operations ?? []).find((o) => snake(o.name) === b.op);
+    const actorArg = op && opUsesCurrentUser(op) ? ", Map.get(socket.assigns, :current_user)" : "";
     // `byId` actions (DestroyForm) call the code interface with the id
     // directly — the `get_by: [:id]` interface does the lookup.  Other
     // actions load the record first, then invoke the op on it.
@@ -536,7 +545,7 @@ function buildActionHandlers(
         ]
       : [
           `    record = ${ctxModule}.get_${aggSnake}!(id)`,
-          `    ${ctxModule}.${b.eventName}!(record)`,
+          `    ${ctxModule}.${b.eventName}!(record${actorArg})`,
           `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
         ];
     return {

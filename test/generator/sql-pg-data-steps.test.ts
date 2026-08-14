@@ -69,10 +69,19 @@ describe("renderEctoStep — data steps (M-T2.3)", () => {
 // -- expression renderer ----------------------------------------------------
 
 const STRING: TypeIR = { kind: "primitive", name: "string" };
+const INT: TypeIR = { kind: "primitive", name: "int" };
+const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
 const lit = (l: LiteralKind, value: string): ExprIR => ({ kind: "literal", lit: l, value });
 const prop = (name: string): ExprIR => ({ kind: "ref", name, refKind: "this-prop" });
 const ctx = {
-  columnFor: (f: string) => ({ firstName: "first_name", lastName: "last_name", qty: "qty" })[f],
+  columnFor: (f: string) =>
+    ({
+      firstName: "first_name",
+      lastName: "last_name",
+      qty: "qty",
+      parts: "parts",
+      rate: "rate",
+    })[f],
 };
 
 describe("renderSqlScalarExpr (M-T2.3)", () => {
@@ -122,6 +131,60 @@ describe("renderSqlScalarExpr (M-T2.3)", () => {
       otherwise: prop("qty"),
     };
     expect(renderSqlScalarExpr(tern, ctx)).toBe(`(CASE WHEN ("qty" = 0) THEN 1 ELSE "qty" END)`);
+  });
+
+  it("renders a null comparison as IS [NOT] NULL, either operand order", () => {
+    const nul = lit("null", "null");
+    const eqR: ExprIR = { kind: "binary", op: "==", left: prop("qty"), right: nul };
+    const eqL: ExprIR = { kind: "binary", op: "==", left: nul, right: prop("qty") };
+    const neR: ExprIR = { kind: "binary", op: "!=", left: prop("qty"), right: nul };
+    const neL: ExprIR = { kind: "binary", op: "!=", left: nul, right: prop("qty") };
+    expect(renderSqlScalarExpr(eqR, ctx)).toBe(`("qty" IS NULL)`);
+    expect(renderSqlScalarExpr(eqL, ctx)).toBe(`("qty" IS NULL)`);
+    expect(renderSqlScalarExpr(neR, ctx)).toBe(`("qty" IS NOT NULL)`);
+    expect(renderSqlScalarExpr(neL, ctx)).toBe(`("qty" IS NOT NULL)`);
+  });
+
+  it("keeps the null presence test correct inside a ternary backfill", () => {
+    const tern: ExprIR = {
+      kind: "ternary",
+      cond: { kind: "binary", op: "==", left: prop("qty"), right: lit("null", "null") },
+      // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
+      then: lit("int", "0"),
+      otherwise: prop("qty"),
+    };
+    expect(renderSqlScalarExpr(tern, ctx)).toBe(
+      `(CASE WHEN ("qty" IS NULL) THEN 0 ELSE "qty" END)`,
+    );
+  });
+
+  it("casts an int/int division that the type system widened to decimal", () => {
+    const div: ExprIR = {
+      kind: "binary",
+      op: "/",
+      left: prop("qty"),
+      right: prop("parts"),
+      leftType: INT,
+      rightType: INT,
+      resultType: DECIMAL,
+    };
+    expect(renderSqlScalarExpr(div, ctx)).toBe(`(("qty")::numeric / ("parts")::numeric)`);
+  });
+
+  it("leaves a division with a decimal operand alone", () => {
+    const mixed: ExprIR = {
+      kind: "binary",
+      op: "/",
+      left: prop("qty"),
+      right: prop("rate"),
+      leftType: INT,
+      rightType: DECIMAL,
+      resultType: DECIMAL,
+    };
+    expect(renderSqlScalarExpr(mixed, ctx)).toBe(`("qty" / "rate")`);
+    // …and an untyped synthetic node keeps the operand-blind spelling.
+    const bare: ExprIR = { kind: "binary", op: "/", left: prop("qty"), right: prop("parts") };
+    expect(renderSqlScalarExpr(bare, ctx)).toBe(`("qty" / "parts")`);
   });
 
   it("renders unary ! as NOT and - as negation", () => {

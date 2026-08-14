@@ -42,8 +42,35 @@ ${agg}
 }
 `;
 
+// The principal-guard cases need a legal principal: `loom.guard-principal-
+// without-auth` (its own suite) refuses `requires currentUser…` on an
+// auth-less deployable, so these two fixtures declare the auth the guard
+// reads.
+const wrapWithAuth = (agg: string): string => `
+system P {
+  user { role: string }
+  auth { oidc { issuer: "https://idp.example.com"  clientId: "app" } }
+  subdomain D {
+    context Orders {
+      enum Priority { low  high }
+      valueobject Money { amount: decimal  currency: string }
+${agg}
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] auth: required port: 3000 }
+}
+`;
+
 async function codesFor(agg: string): Promise<string[]> {
   const diags = validateLoomModel(await buildLoomModel(wrap(agg)));
+  return diags.filter((d) => d.severity === "error").map((d) => d.code);
+}
+
+async function codesForWithAuth(agg: string): Promise<string[]> {
+  const diags = validateLoomModel(await buildLoomModel(wrapWithAuth(agg)));
   return diags.filter((d) => d.severity === "error").map((d) => d.code);
 }
 
@@ -53,7 +80,7 @@ describe("validator — the lifecycle body no backend renders", () => {
     // drop-report would make the emitted gate unreachable from any valid source,
     // which is the same "the source and the runtime disagree" failure in the
     // other direction.
-    const codes = await codesFor(`
+    const codes = await codesForWithAuth(`
       aggregate Order {
         code: string
         create(code: string) {
@@ -68,7 +95,7 @@ describe("validator — the lifecycle body no backend renders", () => {
   it("ACCEPTS a `requires` in a destroy that reads the loaded row", async () => {
     // The destroy gate runs after the by-id load every backend already performs,
     // so `this` IS a legitimate receiver there (unlike in a create).
-    const codes = await codesFor(`
+    const codes = await codesForWithAuth(`
       aggregate Order {
         code: string
         status: string

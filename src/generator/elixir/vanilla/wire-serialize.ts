@@ -183,6 +183,15 @@ export interface WireSerializeOpts {
    *  derived wire fields.  Only consulted for a derived that references a
    *  context-qualified name; omit for the (common) scalar-prop derived. */
   contextModule?: string;
+  /** Snake-cased suffix appended to `serialize` and every nested
+   *  `serialize_<part|vo>` / `serialize_unmasked` name, so SEVERAL aggregates'
+   *  serializers can live in ONE module: the deployable-level WorkflowsController
+   *  / `<Api>RoutesController` dispatch across every hosted aggregate, and two
+   *  aggregates (or two contexts) may declare same-named parts / value objects.
+   *  Those callers emit their own `defp serialize(%<Agg>{} = r), do:
+   *  serialize_<suffix>(r)` dispatch clause.  Omit for a single-aggregate module
+   *  (byte-identical to before). */
+  nameSuffix?: string;
 }
 
 export function renderWireSerialize(
@@ -192,6 +201,10 @@ export function renderWireSerialize(
 ): WireSerializeResult {
   const headVar = opts.headVar ?? "record";
   const idExpr = opts.idExpr ?? "record.id";
+  // Name suffix that scopes EVERY emitted function name (see `nameSuffix`) so
+  // several aggregates' serializers coexist in one module.  Empty by default —
+  // the single-aggregate controllers stay byte-identical.
+  const sfx = opts.nameSuffix ? `_${snake(opts.nameSuffix)}` : "";
   // RS-25 — the API-read projection, NOT the raw wire shape.  `forApiRead`
   // drops `access: internal` / `access: secret` fields; every other backend
   // applies it on the read boundary (and vanilla's own OpenAPI emitter already
@@ -259,20 +272,20 @@ export function renderWireSerialize(
     switch (t.kind) {
       case "valueobject":
         ensureVoHelper(t.name);
-        return `serialize_${snake(t.name)}(${col})`;
+        return `serialize_${snake(t.name)}${sfx}(${col})`;
       case "entity":
         ensurePartHelper(t.name);
-        return `serialize_${snake(t.name)}(${col})`;
+        return `serialize_${snake(t.name)}${sfx}(${col})`;
       case "array": {
         const el = unwrapOptional(t.element);
         if (el.kind === "id") return `__ref_ids(${col})`;
         if (el.kind === "valueobject") {
           ensureVoHelper(el.name);
-          return `Enum.map(${col} || [], &serialize_${snake(el.name)}/1)`;
+          return `Enum.map(${col} || [], &serialize_${snake(el.name)}${sfx}/1)`;
         }
         if (el.kind === "entity") {
           ensurePartHelper(el.name);
-          return `Enum.map(${col} || [], &serialize_${snake(el.name)}/1)`;
+          return `Enum.map(${col} || [], &serialize_${snake(el.name)}${sfx}/1)`;
         }
         // Array of primitive / enum — Jason encodes the list of scalars, except
         // a `decimal[]`, whose elements need the same number coercion a scalar
@@ -365,7 +378,7 @@ export function renderWireSerialize(
     derived: Map<string, DerivedIR>,
     provFields: readonly FieldIR[] = [],
   ): void {
-    const hname = `serialize_${snake(name)}`;
+    const hname = `serialize_${snake(name)}${sfx}`;
     if (helpers.has(hname) || building.has(hname)) return;
     building.add(hname);
     const body = renderMap(shape, "    ", isVo, derived, "record.id", provFields);
@@ -468,7 +481,7 @@ export function renderWireSerialize(
   // single unmasked `serialize/1` verbatim (byte-identical).
   const maskedFields = wireShape.filter((wf) => wf.maskUnless !== undefined);
   if (maskedFields.length === 0) {
-    const serialize = `  defp serialize(${headVar}) do\n${preludeBind}${body}\n  end`;
+    const serialize = `  defp serialize${sfx}(${headVar}) do\n${preludeBind}${body}\n  end`;
     return { serialize, body, helpers: [...helpers.values()], masked: false };
   }
   const redactLines = maskedFields
@@ -482,13 +495,13 @@ export function renderWireSerialize(
     })
     .join("\n");
   const serialize =
-    `  defp serialize(${headVar}) do\n` +
+    `  defp serialize${sfx}(${headVar}) do\n` +
     `    current_user = Process.get(:loom_current_user)\n` +
-    `    wire = serialize_unmasked(${headVar})\n` +
+    `    wire = serialize_unmasked${sfx}(${headVar})\n` +
     `${redactLines}\n` +
     `    wire\n` +
     `  end`;
-  const serializeUnmasked = `  defp serialize_unmasked(${headVar}) do\n${preludeBind}${body}\n  end`;
+  const serializeUnmasked = `  defp serialize_unmasked${sfx}(${headVar}) do\n${preludeBind}${body}\n  end`;
   return {
     serialize,
     body,

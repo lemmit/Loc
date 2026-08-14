@@ -455,7 +455,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   );
   // One deployable-level WorkflowsController over every hosted context's command
   // workflows (the per-context emit above intentionally does NOT write it).
-  emitVanillaWorkflowsController(appName, appModule, workflowGroups, out);
+  emitVanillaWorkflowsController(appName, appModule, workflowGroups, out, sys);
   // One `<Api>RoutesController` per served api that declares explicit `route`
   // bindings — resolves each `route ... -> <Ctx>.<Handler>` against the hosted
   // contexts' handler modules and splices its POST/GET/... routes into `/api`.
@@ -463,7 +463,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     const api = sys.apis.find((a) => a.name === apiName);
     if (!api || api.routes.length === 0) continue;
     apiRoutes.push(
-      ...emitExplicitRoutesController(appName, appModule, apiName, api.routes, contexts, out),
+      ...emitExplicitRoutesController(appName, appModule, apiName, api.routes, contexts, out, sys),
     );
   }
 

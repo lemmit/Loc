@@ -280,3 +280,83 @@ system Demo {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// …with ONE framework carved back out of the `.map` exemption.
+//
+// `map` is exempt because the walker's fall-through — `<recv>.map(<args>)` with
+// a hardcoded JS arrow, since there is no `exprLambda` seam — happens to BE the
+// right code on the JS frontends, is valid Dart on Flutter, and HEEx runs its
+// own engine.  On FELIZ it is verbatim JavaScript inside an F# file, which
+// `dotnet fable` rejects: the exemption turned a build break into a SILENT one
+// (0 diagnostics, unbuildable output).  Until the walker grows a lambda seam and
+// Feliz renders `List.map`, `map` is gated there like every other collection op.
+// ---------------------------------------------------------------------------
+describe("loom.frontend-collection-op-unsupported — `.map` is exempt per FRAMEWORK", () => {
+  const mapBody = `
+      page X {
+        route: "/x"
+        body: Stack { For { each: [1, 2, 3].map(n => n), n => Bold { "x" } } }
+      }`;
+
+  it("gates `.map(λ)` on Feliz — the walker would emit a JS arrow into F#", async () => {
+    expect(await codes(mapBody, "feliz", "feliz")).toContain(CODE);
+  });
+
+  it("still exempts it on every frontend whose walker really renders it", async () => {
+    for (const [framework, platform] of [
+      ["react", "static"],
+      ["vue", "static"],
+      ["svelte", "static"],
+      ["angular", "static"],
+      ["flutter", "flutter"],
+    ] as const) {
+      expect(
+        await codes(mapBody, framework, platform),
+        `expected \`.map\` to stay clean on ${framework}`,
+      ).not.toContain(CODE);
+    }
+  });
+
+  it("gates a Feliz ui detected only by its HOST deployable's platform", async () => {
+    // The legacy binding leaves `ui { framework: … }` unset, so the framework
+    // comes from the hosting deployable — the gate has to consult both.
+    const src = `
+system Demo {
+  subdomain S {
+    context C {
+      aggregate Customer { name: string  tier: int }
+      repository Customers for Customer { }
+    }
+  }
+  api A from S
+  ui Web {
+    api C: A
+    ${mapBody}
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node  contexts: [C]  dataSources: [st]  serves: A  port: 3000 }
+  deployable web { platform: feliz  targets: api  ui: Web { C: api }  port: 3001 }
+}`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(`unexpected parse/validation errors:\n${errors.join("\n")}`);
+    expect(validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code)).toContain(
+      CODE,
+    );
+  });
+
+  it("keeps gating the OTHER ops on Feliz (the carve-out is `map`-only)", async () => {
+    expect(
+      await codes(queryViewPage("rows.count"), "feliz", "feliz"),
+      "expected `.count` to stay gated on feliz",
+    ).toContain(CODE);
+  });
+
+  it("names Feliz in the message, so the carve-out is discoverable", async () => {
+    const { model, errors } = await parseString(wrap(mapBody, "feliz", "feliz"));
+    if (errors.length) throw new Error(`unexpected parse/validation errors:\n${errors.join("\n")}`);
+    const d = validateLoomModel(enrichLoomModel(lowerModel(model))).find((x) => x.code === CODE)!;
+    expect(d.message).toContain("Feliz");
+  });
+});

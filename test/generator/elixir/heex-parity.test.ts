@@ -16,7 +16,11 @@ import { WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
 //
 // The one remaining drift risk: a primitive the TSX walker renders but the
 // HEEx walker does NOT (`tsx` set, `heex` undefined).  React/Vue users get the
-// component; Phoenix users get a visible "not supported" HEEx comment.  That
+// component; Phoenix users get a "not supported" note in the generated
+// template — the EEx-NATIVE `<%!-- … --%>` comment form, which is inert in both
+// markup and expression position (an HTML comment there was wrapped as
+// `<%= <!-- … --> %>` and syntax-errored `mix compile`; see
+// `heex-unsupported-primitive.test.ts`).  That
 // gap is legitimate — LiveView can't mirror every primitive — but it must be a
 // DELIBERATE, reviewed choice, not a silent regression a contributor introduces
 // by adding a `tsx`-only primitive and forgetting Phoenix.

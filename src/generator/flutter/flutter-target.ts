@@ -23,9 +23,13 @@
 // button that opens an op-form `AlertDialog`), and `renderWorkflowForm` (a
 // `WorkflowForm(runs:)` posting to `/workflows/<wf>`) also ship.  Still DEFERRED
 // success.  `renderUserComponent` ships too (a `Foo(...)` call → a Dart widget
-// constructor; the component widget is emitted by `component-emit.ts`).  Still
-// DEFERRED to full parity (omitted → they fall back to the shared
-// diagnostic-comment path): the interactive-table / store seams.
+// constructor; the component widget is emitted by `component-emit.ts`).
+//
+// The interactive-table seams (sort header / pager / client filter) and the
+// store seams (`renderStoreFieldRead` / `renderStoreActionCall`, over the
+// Riverpod store modules `store-builder.ts` emits) now ship too.  What a store
+// still does NOT carry here is the lifetime ladder — `persist: local|session|url`
+// emits an in-memory store under a visible TODO in `lib/stores.dart`.
 
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
@@ -41,6 +45,7 @@ import {
   workflowFormWidgetName,
 } from "./forms-emit.js";
 import { dartStringLit } from "./i18n.js";
+import { storeProviderName } from "./store-names.js";
 
 /** True when a value is provably a `string` already, so a `Text(…)` child can
  *  take it without the `.toString()` coercion. */
@@ -144,6 +149,30 @@ export const flutterTarget: WalkerTarget = {
     const path = rest.length ? `${root}.${rest.join(".")}` : (root ?? "");
     return `notifier.${setterName(root ?? "")}(${valueJs}) /* TODO(flutter): nested write ${path} */`;
   },
+
+  // --- Store seam — a store is its own Riverpod provider (Stage 5) ---------
+  // A `store Cart { … }` projects onto the same triad a stateful page does —
+  // `CartState` / `CartNotifier` / `cartProvider` in `lib/stores.dart`
+  // (`store-builder.ts`).  As on React, the page SHELL hoists one local per used
+  // member and the body references the bare name; these seams supply the
+  // expression the shell binds and the call form the body emits.
+  //
+  // Without them `walkBody` THREW on any store reference, so a model that
+  // validated clean failed codegen outright — flutter was the last frontend
+  // with neither seam.
+
+  /** The selector a field read binds to: a granular `.select` watch, so a page
+   *  reading `Cart.count` rebuilds on that cell rather than on any store write
+   *  (the Riverpod analogue of React's `useCart((s) => s.count)`). */
+  renderStoreFieldRead: (ref: { storeName: string; field: string }) =>
+    `ref.watch(${storeProviderName(ref.storeName)}.select((s) => s.${ref.field}))`,
+  /** `<Store>.<action>(args)` → the shell-bound tear-off call.  `local` is the
+   *  collision-resolved local name walker-core also gave the use site, so the
+   *  binding and the call always agree. */
+  renderStoreActionCall: (
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ) => `${ref.local}(${renderedArgs})`,
 
   // --- API seam — thin Riverpod projection ---------------------------------
   // A detected api call resolves to a provider-local (`customerAll`); the args
@@ -319,6 +348,39 @@ export const flutterTarget: WalkerTarget = {
       rowsExpr: `${src}.skip((${spec.pageRead} - 1) * ${size}).take(${size}).toList()`,
       totalPagesExpr: `(((${src}.length - 1) ~/ ${size}) + 1).clamp(1, 1 << 30)`,
     };
+  },
+
+  /** The search box above a filterable `Table`.  UNCONTROLLED on purpose: a
+   *  `TextEditingController` rebuilt from `state.<field>` on every keystroke is
+   *  what makes a Flutter text field jump the caret to position 0, and the
+   *  filter never needs to push a value back INTO the box.  So the widget owns
+   *  its text and `onChanged` mirrors it into the Notifier, which is what the
+   *  rows expression below reads.  Emitting `notifier.` here is also the signal
+   *  the page shell greps for to bind that local (`index.ts`). */
+  renderFilterInput(filter) {
+    const set = setterName(filter.name);
+    return (
+      `TextField(decoration: const InputDecoration(isDense: true, ` +
+      `prefixIcon: Icon(Icons.search), labelText: 'Filter table', hintText: 'Filter…'), ` +
+      `onChanged: (value) => notifier.${set}(value))`
+    );
+  },
+
+  /** Case-insensitive substring filter over the columns the table DISPLAYS.
+   *  Dart records have no runtime value enumeration, so — exactly like Feliz's
+   *  leg and unlike the four JSX targets' `Object.values(row)` — the searchable
+   *  set is `spec.columns` (every column whose accessor resolves to a plain
+   *  member).  A table whose columns are all computed has nothing to search, so
+   *  the rows pass through untouched rather than filtering to nothing. */
+  renderFilteredRows({ rowsExpr, filter, columns }) {
+    if (columns.length === 0) return rowsExpr;
+    const q = `state.${filter.name}`;
+    const vals = columns.map((f) => `row.${f}`).join(", ");
+    return (
+      `(${rowsExpr}).where((row) { final __q = ${q}.trim().toLowerCase(); ` +
+      `return __q.isEmpty || <Object?>[${vals}].any((v) => v != null && ` +
+      `v.toString().toLowerCase().contains(__q)); }).toList()`
+    );
   },
 
   /** A `Table` that emitted a filter box and/or a pager alongside the table is
@@ -521,6 +583,36 @@ export const flutterTarget: WalkerTarget = {
       `content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ${widget}(id: id))))), ` +
       `child: Text(${dartString(label)}))`
     );
+  },
+
+  // `FileLink(<file-ref>)` → a null-guarded, selectable file reference.  The
+  // shared primitive hand-builds an HTML `<a href download>` through the markup
+  // seams; Dart is not markup, so emitting that put a literal `<a href: …>` in
+  // `lib/pages/*.dart` and `flutter analyze` could not even parse the file.
+  //
+  // A `File` wire field decodes to `FileRef?` (always nullable — `dart-types.ts`),
+  // and a property read off a model class is NOT type-promotable in Dart, so the
+  // guard has to BIND: a null-check pattern (`final __f?`) does that without
+  // naming `FileRef`, which the page files do not import (`models.dart` is
+  // reached only transitively, through `reads.dart`).
+  //
+  // The label is the storage `key` with the download `url` on the tooltip, and
+  // it is SELECTABLE rather than tappable: opening a URL from Dart needs
+  // `url_launcher`, and a new pub dependency on every generated app — plus a
+  // plugin registration on each native surface — is a heavier change than this
+  // primitive earns.  A tappable affordance that opens nothing would be worse
+  // than one that lets the user copy the link.
+  renderFileLink: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const named = argNames.indexOf("value");
+    const arg = named >= 0 ? call.args[named] : (call.args ?? []).find((_, i) => !argNames[i]);
+    if (!arg) return null;
+    const recv = emitExpr(arg, ctx);
+    const link =
+      `Tooltip(message: __f.url, child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[` +
+      `const Icon(Icons.attach_file, size: 16), Flexible(child: SelectableText(__f.key))]))`;
+    return `(switch (${recv}) { final __f? => ${link}, _ => const Text(${dartString("—")}) })`;
   },
 
   // `WorkflowForm(runs: <wf>)` → `const <Wf>WorkflowForm()` — a self-contained
