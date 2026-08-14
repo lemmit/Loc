@@ -23,7 +23,13 @@
 // so it is computed on demand at each emission site rather than stored as an
 // IR field that a construction site could forget to set.
 
-import { type OperationIR, type StmtIR, stmtUsesCurrentUser } from "../types/loom-ir.js";
+import {
+  type ExprIR,
+  type OperationIR,
+  type StmtIR,
+  stmtUsesCurrentUser,
+} from "../types/loom-ir.js";
+import { walkExprDeep } from "./walk.js";
 
 /** A `requires` statement, narrowed out of the general `StmtIR` union. */
 export type RequiresStmtIR = Extract<StmtIR, { kind: "requires" }>;
@@ -59,6 +65,71 @@ export function operationGates(op: OperationIR): RequiresStmtIR[] {
 /** The statements the domain method still runs, with the hoisted gates removed. */
 export function operationBody(op: OperationIR): StmtIR[] {
   return splitLeadingGates(op.statements).body;
+}
+
+/** The authorization gates of a CANONICAL LIFECYCLE action (`create` /
+ *  `destroy`) — the same `requires` statements, hoisted to the same place (the
+ *  caller), denying with the same 403.  One helper rather than a second
+ *  spelling per backend: two emissions of "evaluate a `requires`, deny with
+ *  403" sitting next to each other is the two-truths problem this module
+ *  exists to remove.
+ *
+ *  EVERY `requires` in the body, not the leading run.  An operation's trailing
+ *  `requires` sits after statements that may have mutated the aggregate, so
+ *  hoisting it would change WHEN it evaluates — hence `splitLeadingGates`.  A
+ *  canonical lifecycle body has no such statements to sit after: everything
+ *  that is not a gate is either an exempt no-op (`field := <same-named param>`,
+ *  a restated field default) or a `loom.lifecycle-body-dropped` error, so
+ *  ordering carries no meaning and collecting only the leading run would
+ *  silently drop the gate in
+ *
+ *      create(name: string) { name := name  requires currentUser.role == "admin" }
+ *
+ *  — an open route with a `requires` in the source, which is the exact bug
+ *  class this gate closes.
+ *
+ *  `null` / `undefined` (no such lifecycle action) yields an empty list, so
+ *  every call site can use this unconditionally. */
+export function lifecycleGates(action: OperationIR | null | undefined): RequiresStmtIR[] {
+  return (action?.statements ?? []).filter((s): s is RequiresStmtIR => s.kind === "requires");
+}
+
+/** True when any lifecycle gate of `action` reads `currentUser` — so the caller
+ *  must bind a principal before evaluating them.  Twin of
+ *  `operationGatesUseCurrentUser`. */
+export function lifecycleGatesUseCurrentUser(action: OperationIR | null | undefined): boolean {
+  return lifecycleGates(action).some(stmtUsesCurrentUser);
+}
+
+/** True when any lifecycle gate of `action` reads the ROW (`this.<field>`, a
+ *  value-object member of one, or a derived) — so the caller must bind the
+ *  loaded aggregate as the gate's receiver.
+ *
+ *  A `destroy` gate may be principal-ONLY (`requires currentUser.permissions
+ *  .contains(permissions.manage)`), and then the receiver binding is unused:
+ *  `mix compile --warnings-as-errors` rejects an unused `record`, and a `const`
+ *  bound for nothing reads as dead code on the others.  The load itself still
+ *  has to happen — it is the 404 probe — so the question a backend asks is
+ *  "bind it, or discard it", which is exactly this predicate.  (C1 of the
+ *  M-T3.16 plan: the earlier attempt had no fixture that could observe this,
+ *  because its every destroy guard happened to read a field.) */
+export function lifecycleGatesReadRow(action: OperationIR | null | undefined): boolean {
+  return lifecycleGates(action).some((g) => exprReadsRow(g.expr));
+}
+
+function exprReadsRow(e: ExprIR): boolean {
+  let found = false;
+  walkExprDeep(e, (node) => {
+    if (
+      node.kind === "ref" &&
+      (node.refKind === "this-prop" ||
+        node.refKind === "this-vo-prop" ||
+        node.refKind === "this-derived")
+    ) {
+      found = true;
+    }
+  });
+  return found;
 }
 
 /** True when the operation's REMAINING body (post-hoist) references

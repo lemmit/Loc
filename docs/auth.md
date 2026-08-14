@@ -401,6 +401,108 @@ default) a deployable on `auth: required` still serves any
 operation that doesn't declare a `requires` gate — Slice 2's
 original behaviour.
 
+#### The canonical `create` / `destroy` gate
+
+`requires` is legal inside the canonical lifecycle actions too, and it is
+enforced the same way — 403, at the caller.  The two halves differ in one respect
+only, and it is the receiver:
+
+```ddd
+aggregate Shipment {
+  reference: string
+  quantity: int = 0
+
+  create(reference: string) {
+    requires currentUser.permissions.contains(permissions.manage)
+  }
+
+  destroy {
+    requires currentUser.permissions.contains(permissions.manage) && quantity == 0
+  }
+}
+```
+
+```ts
+// generated (Hono) — the create route: gate, THEN the factory
+const currentUser = (c as unknown as { get(k: "currentUser"): User }).get("currentUser");
+if (!((currentUser.permissions).includes("ops.manage"))) throw new ForbiddenError("Forbidden: currentUser.permissions.contains(permissions.manage)");
+const created = Shipment.create({ reference: body.reference, quantity: body.quantity });
+
+// …and the destroy route: load (the 404 probe), gate, THEN delete
+const __loaded = await repo.getById(Ids.ShipmentId(id));
+if (!((currentUser.permissions).includes("ops.manage") && __loaded.quantity === 0)) throw new ForbiddenError("Forbidden: …");
+await repo.delete(Ids.ShipmentId(id));
+```
+
+- A **`create`** guard may read `currentUser` and nothing else.  There is no
+  instance until the factory runs, and the emitted `POST /<aggs>` takes the
+  field-derived create input rather than the declared parameter list, so a
+  parameter has no wire slot either.  Both are refused by
+  `loom.lifecycle-guard-unreadable`, which names the offending refs.
+- A **`destroy`** guard may also read `this`: the route already loads the row for
+  its 404 probe, and the gate runs against that load.  So an unreachable id
+  answers **404**, not 403 — same order as the operation routes.  A parameter is
+  still out (a DELETE carries no body).
+- The gate precedes the write **and** any audit staging, so a denied create
+  constructs nothing and a denied destroy records nothing.
+- `errorStatuses("create" | "destroy", guarded)` declares the 403, so a generated
+  client types the denial instead of treating it as an unexpected throw.
+
+Placement per backend is each one's own chokepoint: the route (Hono, FastAPI),
+the Mediator command handler (.NET — its controller is a thin dispatch), the
+service (Java), and the **context function** (Phoenix).  Phoenix's placement is
+load-bearing rather than stylistic: it is the only backend whose frontend runs
+in-process, and its scaffolded LiveView calls `<Ctx>.create_<agg>` and
+`<Ctx>.destroy_<agg>!` **directly**, so a controller-level gate would have a
+second front door.  The principal is threaded as an explicit argument (a LiveView
+is a separate process from the HTTP request, so the plug's `conn.assigns` is not
+reachable from it), and a nil principal denies rather than raising:
+
+```elixir
+# lib/<app>/<context>.ex — every REQUEST-side caller passes through this
+def create_shipment(attrs, current_user \\ nil) do
+  with :ok <- ensure(not is_nil(current_user) and (Enum.member?(current_user.permissions, "ops.manage")),
+                     {:forbidden, "Forbidden: currentUser.permissions.contains(permissions.manage)"}) do
+    create_shipment_unguarded(attrs)
+  end
+end
+
+@doc "Create a Shipment with NO authorization gate — the in-process entry."
+defdelegate create_shipment_unguarded(attrs), to: App.Warehouse.ShipmentRepository, as: :insert
+```
+
+**The seam splits, because not every caller is a request.**  A workflow
+`factory-let` step, an event dispatcher, and the emitted integration tests all
+create aggregates IN-PROCESS, with no request and no principal — and on the other
+four backends a workflow body calls the domain factory directly, so the
+aggregate's create gate never applies there at all.  Routing those through the
+guarded seam denied (nil principal) a workflow whose own caller *did* hold the
+permission: the same `.ddd` answering 200 on four backends and 403 on one.
+
+So there are two entries, and the naming is the safety property:
+
+| function | who calls it |
+|---|---|
+| `create_<agg>/2` (the plain name) | the request-side doors — controller, LiveView form, `DestroyForm` |
+| `create_<agg>_unguarded/1` | the in-process callers — workflow step, event dispatch, emitted integration test |
+
+The guarded one keeps the obvious name and delegates *through* the unguarded one,
+so a caller that guesses `create_<agg>` gets the gate and there is exactly one
+write path; bypassing authorization is something a call site has to say in a word
+that shows up in review.  A workflow's own authorization is its own `requires`
+gate, evaluated where the request is — re-checking the aggregate's create gate
+underneath it would make Phoenix enforce a rule the other four do not, and would
+fail closed for every principal-less internal caller (a timer, a seed, a saga).
+`delete_<agg>` splits the same way for a workflow `destroy` step.
+
+**Not supported: an event-sourced lifecycle guard.**  An `eventLog` aggregate's
+create body renders into the domain `_init`, which has no principal in scope, so
+the guard could not be evaluated there at all — `loom.lifecycle-guard-event-sourced`
+refuses it and points at the caller (the named `operation` / `workflow` that
+issues the create) instead.  The rest of a canonical lifecycle body is still not
+rendered on a state-based aggregate: a `precondition`, an `emit`, or a computed
+`assign` there is a `loom.lifecycle-body-dropped` error, not a silent drop.
+
 ### Named policy functions (P3.2)
 
 A **named policy function** names a reusable `requires` predicate once so a

@@ -1642,8 +1642,17 @@ function flagStmt(
 function droppedStmtReason(kind: StmtIR["kind"], label: "create" | "destroy"): string | null {
   const subject = label === "create" ? "construction" : "deletion";
   switch (kind) {
+    // `requires` is RENDERED now (M-T3.16 step 5) — every backend evaluates a
+    // canonical create/destroy gate at its own chokepoint (Hono/FastAPI route,
+    // .NET command handler, Java service, Phoenix CONTEXT) and denies with 403,
+    // which `errorStatuses(<kind>, guarded)` declares.  What the guard may READ
+    // is enforced separately by `loom.lifecycle-guard-unreadable` below, and an
+    // EVENT-SOURCED lifecycle guard is refused by
+    // `loom.lifecycle-guard-event-sourced` — so the only `requires` that
+    // reaches here is one an emitter actually renders.  Reporting it as dropped
+    // would make the emitted gate unreachable from any valid source.
     case "requires":
-      return "the authorization gate never runs — the route is left OPEN";
+      return null;
     case "precondition":
       return `the guard never runs — ${subject} is left unchecked`;
     case "emit":
@@ -1836,6 +1845,26 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
     // silently exempted the half it was never justified for.
     const esCreateRendered = aggregateIsEventSourced(agg);
 
+    // An EVENT-SOURCED lifecycle guard is refused rather than rendered.  The ES
+    // create body renders into the domain `_init`, and `_init` has no principal
+    // in scope — `currentUser` is a free identifier there, so the guard does not
+    // raise, it does not COMPILE (`cannot find symbol` / CS0103 / F821).  The
+    // route cannot take it over either: the ES create arm dispatches a command
+    // whose handler is the fold, so hoisting the gate out of `_init` is a
+    // different (and larger) change than the state-based emission.  Naming it is
+    // honest and cheap; the state-based form is the supported one.
+    if (esCreateRendered) {
+      for (const s of agg.canonicalCreate?.statements ?? []) {
+        if (s.kind !== "requires") continue;
+        diags.push({
+          severity: "error",
+          code: "loom.lifecycle-guard-event-sourced",
+          message: diagMessage("loom.lifecycle-guard-event-sourced", { agg: agg.name }),
+          source: `${ctx.name}/aggregate ${agg.name}.create`,
+        });
+      }
+    }
+
     for (const [label, action] of [
       ["create", agg.canonicalCreate],
       ["destroy", agg.canonicalDestroy],
@@ -1855,11 +1884,16 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
       // (`loom.lifecycle-guard-event-sourced`, M-T3.16 step 3) answers a
       // different question: "can this guard be ENFORCED at all", and for an
       // event-sourced create the answer is no, because `_init` has no principal
-      // in scope.  Where both apply the ES refusal is the actionable one, so the
-      // emission-side change suppresses this arm for an action it has already
-      // refused; until then this arm standing alone is what keeps the ES hole
-      // closed.
-      for (const s of action?.statements ?? []) {
+      // in scope.  Where both apply the ES refusal is the actionable one, so
+      // THIS arm stands down for an ES create — the refusal above already told
+      // the author the guard cannot run at all, and adding "…and it reads
+      // something the gate cannot see" to that is noise about a gate that will
+      // never exist.  One clause, one error, the more specific one.  (The
+      // contract check remains unconditional for every OTHER shape, which is
+      // what keeps the hole the review found closed: the exemption is now scoped
+      // to "a refusal already fired here", not to "this aggregate is ES".)
+      const esCreateRefused = esCreateRendered && label === "create";
+      for (const s of esCreateRefused ? [] : (action?.statements ?? [])) {
         if (s.kind !== "requires") continue;
         const illegal = lifecycleGuardIllegalReads(s.expr, label);
         if (illegal.length === 0) continue;

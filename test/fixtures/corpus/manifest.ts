@@ -141,6 +141,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     note: "the CROSSING is the point: an audited op renders the masked projection twice into one method body, which is where a fixed principal-variable name collides (.NET CS0128)",
   },
   {
+    id: "lifecycle-guard",
+    title:
+      "lifecycle authorization gate — `requires` in the canonical `create` (principal-only, pre-construction) and `destroy` (principal + `this`, post-load)",
+    doc: "auth",
+    backends: ALL,
+    note: "the two halves render in DIFFERENT places — a create guard has no `this` yet, a destroy guard reads the row the caller already loaded; `Crate` carries the OTHER two shapes (an ungated create as the control, and a principal-ONLY destroy guard that leaves the loaded row unread)",
+  },
+  {
     id: "criterion-filter",
     title: "reusable criterion (criterion.md) used as `filter <Criterion>`",
     doc: "criterion",

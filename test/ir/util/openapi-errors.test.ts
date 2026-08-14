@@ -42,21 +42,22 @@ describe("errorStatuses — shared error matrix", () => {
     expect(errorStatuses("findSingle", true)).toEqual([403]);
   });
 
+  it("the canonical create / destroy carry the gated 403", () => {
+    // SETTLED (M-T3.16): the previous shape of this test recorded the open
+    // question — the grammar accepted a `requires` in a canonical `create` while
+    // no backend rendered it, so it was unclear whether the guard ran in the
+    // domain layer or was dropped.  It was DROPPED, leaving the route open;
+    // every backend now evaluates it at its own chokepoint (route / command
+    // handler / service / context) and denies with 403, so the declared set says
+    // so.  `create` keeps 400 + 422; `destroy` keeps 404 + the FK-restrict 409.
+    expect(errorStatuses("create", true)).toEqual([400, 403, 422]);
+    expect(errorStatuses("destroy", true)).toEqual([403, 404, 409]);
+  });
+
   it("guarded stays inert for the remaining kinds", () => {
     // `list` is the auto-`findAll` — synthesized, so it has no `requires` of
     // its own.  `getById` is a canonical route with no guard clause.
-    //
-    // `create` / `destroy` are NOT settled.  The grammar accepts a `requires`
-    // STATEMENT inside a canonical `create(...)` body (it parses), but the
-    // emitted create route neither renders the guard nor declares 403 — so
-    // either the guard is enforced in the domain layer (making this the same
-    // under-declaration the find kinds just had) or it is silently dropped
-    // (worse).  Not investigated here, and deliberately not asserted as
-    // "can't carry a guard": that phrasing is what let the find case sit in
-    // this list for so long.  Whoever settles it changes THIS assertion.
-    expect(errorStatuses("create", true)).toEqual([400, 422]);
     expect(errorStatuses("getById", true)).toEqual([404]);
-    expect(errorStatuses("destroy", true)).toEqual([404, 409]);
     expect(errorStatuses("list", true)).toEqual([]);
   });
 

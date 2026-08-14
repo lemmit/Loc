@@ -478,6 +478,18 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // scaffold instead of the feature.
   "extern",
   "extern-handlers",
+  // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
+  // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
+  // against ten seeded emitter defects), but no RUNTIME caller exercises it, and
+  // the two reasons are worth stating rather than hiding: an e2e proving the 403
+  // needs a principal whose `permissions` claim the behavioural harness does not
+  // mint (the OIDC fixture's mock issuer supplies `realm_access.roles` and
+  // nothing else), and the e2e DSL has no negative-status assertion form to
+  // spell a denial with — every emitted block asserts a SUCCESSFUL path.  The
+  // runtime negative-authz proof for `requires` lives in the M-T3.13 OIDC e2e
+  // legs; extending it to the lifecycle gate is M-T9.13's drain, not this
+  // slice's.
+  "lifecycle-guard",
   // BROKER SIDECAR (the outbox relay's delivery half). Same home as
   // `channels-broker`.
   "outbox",

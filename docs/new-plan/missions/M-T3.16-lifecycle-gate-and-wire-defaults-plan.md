@@ -1,6 +1,8 @@
 # M-T3.16 — the canonical `create` / `destroy` body: what is left, and in what order
 
-> **STATUS: PLAN.** Written after #2446 landed (the honest gap + the check) and #2450 was pulled back to draft (`[needs redesign]`). Every claim below is code-verified against `main` @ `25f7f78`; this repo's statuses rot, so **re-verify before picking anything up.**
+> **STATUS: STEPS 2, 3 and 5 LANDED** in [#2519](https://github.com/lemmit/Loc/pull/2519) — the gate is emitted and enforced on all five backends, an ES lifecycle guard is refused by name, and the enforcement gate is mutation-proven 10/10 (all four #2450 defects included). What remains is step 4 (the VO wire default, [#2509](https://github.com/lemmit/Loc/pull/2509)) and step 6 (the follow-ups, retriaged in §5 below). The body below is the ORIGINAL plan, kept as written; the sequencing table records what each step became.
+>
+> Written after #2446 landed (the honest gap + the check) and #2450 was pulled back to draft (`[needs redesign]`). Every claim below is code-verified against `main` @ `25f7f78`; this repo's statuses rot, so **re-verify before picking anything up.**
 
 ---
 
@@ -97,14 +99,16 @@ Two consequences:
 
 Ordered so that nothing lands on an unchecked assumption, and so each step is independently revertible.
 
-| step | item | why here |
-|---|---|---|
-| **1** | #2487 — the readable-surface contract | In flight. Everything downstream assumes it. |
-| **2** | **A gate that can fail** (B2) | Polarity probes *and* a destroy ordering probe (deny precedes the delete, not merely follows the load). Mutation-prove it against all four seeded defects from #2450 **before** writing any emission. |
-| **3** | S2 — reject an ES lifecycle guard | Cheap, honest, removes a false premise the design would otherwise inherit. |
-| **4** | §2 — the VO wire default | Independent of the rest; unblocks nothing but is a live `main` defect. Can run in parallel by a different agent. |
-| **5** | The emission, one backend per PR | Elixir **in the context** (S1), the rest at the route through `op-gates.ts`. Declaration flips in `api-surface.ts` with the last one, or the derivation publishes a 403 nobody answers. |
-| **6** | C1–C4, G1, S3 | Follow-ups; each small and independently gateable. |
+| step | item | why here | outcome |
+|---|---|---|---|
+| **1** | #2487 — the readable-surface contract | In flight. Everything downstream assumes it. | #2487, ready; #2519 is stacked on it |
+| **2** | **A gate that can fail** (B2) | Polarity probes *and* a destroy ordering probe (deny precedes the delete, not merely follows the load). Mutation-prove it against all four seeded defects from #2450 **before** writing any emission. | **DONE** (#2519) — `test/generator/lifecycle-guard-render.test.ts`: each gate line pinned BYTE-EXACT (polarity + receiver + `detail` in one assertion) + index-ordering probes. 10 seeded defects, 10 caught |
+| **3** | S2 — reject an ES lifecycle guard | Cheap, honest, removes a false premise the design would otherwise inherit. | **DONE** (#2519) — `loom.lifecycle-guard-event-sourced` |
+| **4** | §2 — the VO wire default | Independent of the rest; unblocks nothing but is a live `main` defect. Can run in parallel by a different agent. | in flight, #2509 |
+| **5** | The emission, one backend per PR | Elixir **in the context** (S1), the rest at the route through `op-gates.ts`. Declaration flips in `api-surface.ts` with the last one, or the derivation publishes a 403 nobody answers. | **DONE** (#2519), all five in ONE PR — see the note below |
+| **6** | C1–C4, G1, S3 | Follow-ups; each small and independently gateable. | C1 + C3 closed by #2519; G1, S3, C2 and a golden for a remapped `Forbidden` remain |
+
+**Why the emission landed as ONE PR rather than one per backend.** The per-backend split is the right revert granularity for an ADDITIVE change, and this one is not: the validator arm and the rendering have to flip together. `droppedStmtReason("requires")` is IR-level and backend-blind, so keeping it while one backend renders makes the new emitter code unreachable from any valid source, and dropping it early leaves the other four routes open again — `main` is dishonest in one direction or the other for as long as the split lasts. The DECLARATION half has the same property in the other direction: it is now one shared-table edit that moves all five backends' OpenAPI at once, so it cannot be staged per backend either.
 
 **Steps 2 and 4 are parallelisable.** Steps 3 and 5 are not — 5 depends on 1, 2, 3.
 

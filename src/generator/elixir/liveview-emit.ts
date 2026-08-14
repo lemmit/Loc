@@ -30,6 +30,7 @@ import type {
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../ir/util/op-gates.js";
 import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { listReadGate } from "../../ir/util/read-gates.js";
@@ -507,17 +508,30 @@ function gatherStoreHandlers(
 function buildActionHandlers(
   bindings: readonly ActionBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
 ): HandleEventClause[] {
   return bindings.map((b) => {
     const ctxModule = contextModuleByAggName.get(b.agg);
     const aggSnake = snake(b.agg);
     const navPipe = b.thenRoute ? ` |> push_navigate(to: ~p"${b.thenRoute}")` : "";
+    // A GUARDED canonical destroy threads the socket's principal into the
+    // context's `destroy_<agg>!/2`, which is where the gate lives on this
+    // backend.  This is the second front door the plan's A1 names: the
+    // DestroyForm button never touches a controller, so a controller-level gate
+    // would leave it wide open — and the principal has to come from
+    // `socket.assigns`, since the LiveView runs in its own process and cannot
+    // see the HTTP request's ambient one.
+    const destroyGated =
+      b.byId && lifecycleGates(aggregatesByName.get(b.agg)?.canonicalDestroy).length > 0;
+    const destroyUsesUser =
+      destroyGated && lifecycleGatesUseCurrentUser(aggregatesByName.get(b.agg)?.canonicalDestroy);
     // `byId` actions (DestroyForm) call the code interface with the id
     // directly — the `get_by: [:id]` interface does the lookup.  Other
     // actions load the record first, then invoke the op on it.
     const body = b.byId
       ? [
-          `    ${ctxModule}.${b.eventName}!(id)`,
+          ...(destroyUsesUser ? ["    current_user = Map.get(socket.assigns, :current_user)"] : []),
+          `    ${ctxModule}.${b.eventName}!(id${destroyUsesUser ? ", current_user" : ""})`,
           `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
         ]
       : [
@@ -619,6 +633,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   const actionHandlers = buildActionHandlers(
     gatherActionBindings(walked.actionBindings, walked.usedComponents, componentInfo),
     contextModuleByAggName,
+    aggregatesByName,
   );
   // Store-mutating component named-action handlers (`addOne() { Cart.add(...) }`)
   // hoist to the host page's LiveView — the component is a stateless function
@@ -631,7 +646,12 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   const createSuccessRoute = page.route ? page.route.replace(/\/new$/, "") : null;
   const handleEventClauses =
     renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
-    renderCreateEventClauses(walked.formBindings, contextModuleByAggName, createSuccessRoute) +
+    renderCreateEventClauses(
+      walked.formBindings,
+      contextModuleByAggName,
+      createSuccessRoute,
+      aggregatesByName,
+    ) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName) +
     renderTableControlClauses(
       walked.tableControls,
@@ -1290,6 +1310,7 @@ function renderCreateEventClauses(
   /** The create page's route with a trailing `/new` stripped
    *  (`/customers/new` → `/customers`), navigated to on success. */
   listRoute: string | null,
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
 ): string {
   const creates = formBindings.filter((fb) => fb.kind === "aggregate");
   if (creates.length === 0) return "";
@@ -1299,16 +1320,34 @@ function renderCreateEventClauses(
   const aggSnake = snake(fb.name);
   const human = humanizeOp(`create_${aggSnake}`);
   const nav = listRoute ? `\n         |> push_navigate(to: ~p"${listRoute}")` : "";
+  // The GUARDED create: the gate lives in the context (`create_<agg>/2`) so this
+  // form cannot walk around it — but the context can only evaluate a principal
+  // term if this handler passes one, and a LiveView's principal is its own
+  // `socket.assigns.current_user` (the HTTP plug's assign belongs to a different
+  // process).  A denial arrives as the same `{:error, {:forbidden, _}}` term the
+  // controller answers with; here it becomes an error flash, because the form is
+  // still on screen.  Without the clause it would be a CaseClauseError — the
+  // LiveView crash the plan's A1 warns about.
+  const createAgg = aggregatesByName.get(fb.name);
+  const gated = lifecycleGates(createAgg?.canonicalCreate).length > 0;
+  const usesUser = lifecycleGatesUseCurrentUser(createAgg?.canonicalCreate);
   return `\n  @impl true
   def handle_event("save_${aggSnake}", %{"${aggSnake}" => params}, socket) do
-    case ${ctxModule}.create_${aggSnake}(params) do
+${usesUser ? "    current_user = Map.get(socket.assigns, :current_user)\n" : ""}    case ${ctxModule}.create_${aggSnake}(params${gated ? (usesUser ? ", current_user" : ", nil") : ""}) do
       {:ok, _record} ->
         {:noreply,
          socket
          |> put_flash(:info, "${human} succeeded")${nav}}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset))}
+        {:noreply, assign(socket, :form, to_form(changeset))}${
+          gated
+            ? `
+
+      {:error, {:forbidden, detail}} ->
+        {:noreply, put_flash(socket, :error, detail)}`
+            : ""
+        }
     end
   end\n`;
 }

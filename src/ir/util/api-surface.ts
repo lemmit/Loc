@@ -63,6 +63,7 @@ import {
   type RepositoryIR,
   type TypeIR,
 } from "../types/loom-ir.js";
+import { lifecycleGates } from "./op-gates.js";
 import { errorStatuses } from "./openapi-errors.js";
 import {
   camelId,
@@ -450,7 +451,10 @@ export function deriveAggregateOperations(
       // typed from it and narrowing it to an id is a wire-visible retype of
       // every existing call site — a separate, deliberate change.
       entityType(agg.name),
-      errorStatuses("create", false, (name) =>
+      // A `requires` in the canonical `create` declares 403 — the gate is
+      // rendered by every backend (route / command handler / service /
+      // context), so the derivation must publish what they answer.
+      errorStatuses("create", lifecycleGates(agg.canonicalCreate).length > 0, (name) =>
         resolveErrorStatus(name, denialOverridesFor(statuses)),
       ),
     );
@@ -496,8 +500,15 @@ export function deriveAggregateOperations(
       `${base}/{id}`,
       [idParam()],
       undefined,
-      errorStatuses("destroy", false, (name) =>
-        resolveErrorStatus(name, statuses?.structuralErrorStatuses),
+      // Same for the canonical `destroy` — its gate runs after the load, so the
+      // declared set is 403 + 404 + the FK-restrict conflict.  The resolver
+      // widens from `structuralErrorStatuses` to the denial merge so the new
+      // `Forbidden` rung honours a `httpStatus Forbidden -> <code>` override
+      // exactly as the `operation` kind does; `ReferencedInUse` is unaffected —
+      // the structural fold enumerates all four structural names by
+      // construction and is spread last, so it still wins.
+      errorStatuses("destroy", lifecycleGates(agg.canonicalDestroy).length > 0, (name) =>
+        resolveErrorStatus(name, denialOverridesFor(statuses)),
       ),
     );
   }
