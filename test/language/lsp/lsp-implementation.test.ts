@@ -205,6 +205,51 @@ describe("DddImplementationProvider (textDocument/implementation)", () => {
     expect(links ?? []).toEqual([]);
   });
 
+  // (c2) a NEIGHBOUR project's map must not be adopted.
+  //
+  // Discovery walks UP and, at every ancestor, also scans that ancestor's
+  // immediate children — so a generated out-dir sitting BESIDE this project is
+  // on the search path. `matchPath` is a longest-common-SUFFIX match that
+  // accepts a single shared segment, and two independent projects that both
+  // call their entry point `main.ddd` share exactly that one segment. Without a
+  // strength floor the neighbour's map wins and "Go to Implementation" lands in
+  // the WRONG project's generated files — silently, because the locations
+  // returned are real files at real lines.
+  //
+  // The neighbour here is a REAL generated tree, not a stub: a hand-written map
+  // with an empty `files` yields no regions, so the assertion would hold with or
+  // without the fix and prove nothing. (It did, in the first draft of this test.)
+  it("does not adopt a NEIGHBOUR project's map that matches only on the filename", async () => {
+    // Both projects live under one workspace dir, so neither reaches for the
+    // shared system temp dir — the collision is fully local to this fixture.
+    const ws = path.join(tmp, "workspace");
+    const subjectDir = path.join(ws, "app-a");
+    const { services, doc } = await loadRealDocument(subjectDir, "main.ddd", SOURCE);
+
+    // The neighbour: a different project, generated with `--sourcemap` into an
+    // out-dir that sits beside the subject — exactly what `generate system -o`
+    // produces, and exactly what the ancestor child-scan looks at.
+    const neighbourSrcDir = path.join(ws, "app-b");
+    const { doc: neighbourDoc } = await loadRealDocument(neighbourSrcDir, "main.ddd", SOURCE);
+    writeGeneratedTree(
+      neighbourDoc.parseResult.value,
+      new Map([[neighbourDoc.uri.path, SOURCE]]),
+      path.join(ws, "app-b-out"),
+    );
+
+    const provider = services.Ddd.lsp.ImplementationProvider!;
+    const pos = positionOf(SOURCE, "customerName\n");
+    const links = await provider.getImplementation(doc, {
+      textDocument: { uri: doc.textDocument.uri },
+      position: pos,
+    });
+    expect(
+      (links ?? []).map((l) => l.targetUri),
+      "app-b's map shares only the filename `main.ddd` with app-a's document — " +
+        "adopting it navigates into ANOTHER project's generated output",
+    ).toEqual([]);
+  });
+
   // Discovery's ANCESTOR walk — the first test's doc sits right beside the
   // out dir (level-0 child scan). Here the doc is nested two directories
   // below the project root, so discovery must walk UP (src/orders →
