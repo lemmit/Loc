@@ -58,6 +58,12 @@ interface ComponentWalkResult {
   /** True when the body issues a data read (api hook) — a read component can't
    *  be a plain `StatelessWidget`/`StatefulWidget` here, so it stays deferred. */
   hasReads: boolean;
+  /** True when the body reads a store field / calls a store action.  A store is
+   *  a Riverpod provider, so reaching it needs a `WidgetRef` — which only the
+   *  page path's `ConsumerWidget` carries.  Rather than bind a name nothing
+   *  declares, such a component is dropped from the emittable set and its call
+   *  site falls back to the shared "unknown component" comment. */
+  usesStores: boolean;
 }
 
 /** Walk a component body once through the shared engine, with its own state +
@@ -90,7 +96,11 @@ function walkComponent(
     // i18n key prefix — `component.<Name>` matches the catalog.
     ctx.i18nEnabled ? `component.${c.name}` : undefined,
   );
-  return { widget: r.tsx.trim(), hasReads: r.usedApiHooks.size > 0 };
+  return {
+    widget: r.tsx.trim(),
+    hasReads: r.usedApiHooks.size > 0,
+    usesStores: (r.usedStores?.size ?? 0) > 0,
+  };
 }
 
 /** True when a component carries its own reactive state — the `StatefulWidget`
@@ -130,7 +140,8 @@ export function emittableComponentParams(
   const all = new Map(candidates(components).map((c) => [c.name, c.params] as const));
   const out = new Map<string, readonly ParamIR[]>();
   for (const c of candidates(components)) {
-    if (!walkComponent(c, all, ctx).hasReads) out.set(c.name, c.params);
+    const r = walkComponent(c, all, ctx);
+    if (!r.hasReads && !r.usesStores) out.set(c.name, c.params);
   }
   return out;
 }

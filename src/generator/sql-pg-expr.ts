@@ -1,5 +1,6 @@
 import type { ExprIR, TypeIR } from "../ir/types/loom-ir.js";
 import { sqlRenderableExpr } from "../ir/util/sql-renderable-expr.js";
+import { type BinaryExpr, isIntDivWidenedToDecimal } from "./_expr/target.js";
 import { qIdent, sqlStr } from "./sql-pg.js";
 
 export { sqlRenderableExpr };
@@ -76,8 +77,14 @@ export function renderSqlScalarExpr(e: ExprIR, ctx: SqlExprContext): string {
         ? `(NOT ${renderSqlScalarExpr(e.operand, ctx)})`
         : `(-${renderSqlScalarExpr(e.operand, ctx)})`;
     case "binary": {
+      const nullTest = renderNullTest(e, ctx);
+      if (nullTest) return nullTest;
       const l = renderSqlScalarExpr(e.left, ctx);
       const r = renderSqlScalarExpr(e.right, ctx);
+      // `int / int` widens to `decimal` in Loom's type system (5 / 2 = 2.5),
+      // but Postgres integer `/` truncates — cast both operands so a backfill
+      // computes the same value every backend does.
+      if (isIntDivWidenedToDecimal(e)) return `((${l})::numeric / (${r})::numeric)`;
       return `(${l} ${sqlBinOp(e.op, e.leftType)} ${r})`;
     }
     case "ternary": {
@@ -91,6 +98,24 @@ export function renderSqlScalarExpr(e: ExprIR, ctx: SqlExprContext): string {
         `renderSqlScalarExpr: unsupported expression kind '${e.kind}' (validator should have rejected this)`,
       );
   }
+}
+
+/** Render `x == null` / `x != null` (either operand order) as SQL's
+ *  `IS NULL` / `IS NOT NULL`.  Loom's `== null` is a presence test on every
+ *  backend; Postgres `= NULL` is three-valued and never TRUE, so the plain
+ *  operator spelling would send every row down the wrong branch.  Returns
+ *  undefined when neither operand is a null literal. */
+function renderNullTest(e: BinaryExpr, ctx: SqlExprContext): string | undefined {
+  if (e.op !== "==" && e.op !== "!=") return undefined;
+  const rightIsNull = isNullLit(e.right);
+  const leftIsNull = isNullLit(e.left);
+  if (!rightIsNull && !leftIsNull) return undefined;
+  const other = renderSqlScalarExpr(rightIsNull ? e.left : e.right, ctx);
+  return `(${other} IS${e.op === "!=" ? " NOT" : ""} NULL)`;
+}
+
+function isNullLit(e: ExprIR): boolean {
+  return e.kind === "literal" && e.lit === "null";
 }
 
 /** Map a Loom BinOp to its Postgres spelling.  String `+` is concatenation

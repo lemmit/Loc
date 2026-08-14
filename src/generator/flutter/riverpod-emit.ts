@@ -22,9 +22,9 @@
 //
 // SCOPE: scalar/collection `:=`/`+=`/`-=` writes (including NESTED targets —
 // `order.shipping.zip := v` folds into a `copyWith` chain, see `nestedCopyWith`),
-// `let`, bare expression statements, sibling-action calls, and `match await`
-// async effects.  Store-action / private-operation calls are the remaining
-// `TODO(flutter full-parity)` items.
+// `let`, bare expression statements, sibling-action calls, cross-store action
+// calls (through the Notifier's own `ref`), and `match await` async effects.
+// Private-operation calls are the remaining `TODO(flutter full-parity)` item.
 
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
@@ -45,6 +45,7 @@ import { dartString, dartZeroValue } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
 import { flutterPack } from "./pack.js";
+import { storeProviderName } from "./store-names.js";
 
 /** The projected Riverpod triad for one stateful page. */
 export interface RiverpodProjection {
@@ -158,7 +159,7 @@ function nestedCopyWith(seg: readonly string[], value: string): string {
  *  `copyWith` chain — see `nestedCopyWith`); a sibling-action call is a bare
  *  in-class method invocation.  The RHS routes through `emitExpr`, so a `count`
  *  read resolves through the state seam to `state.count`. */
-export function renderNotifierStmt(stmt: StmtIR, ctx: WalkContext): string {
+export function renderNotifierStmt(stmt: StmtIR, ctx: WalkContext, selfStore?: string): string {
   switch (stmt.kind) {
     case "assign": {
       const seg = stmt.target.segments;
@@ -190,12 +191,19 @@ export function renderNotifierStmt(stmt: StmtIR, ctx: WalkContext): string {
     case "call": {
       // A sibling page action (`target: "action"`) is another Notifier method —
       // an in-class bare call re-enters the update path.  Extern ui functions
-      // render the same bare form (the app supplies the binding).  Store /
-      // private-operation calls are full-parity follow-ups.
-      if (stmt.target === "store-action" || stmt.target === "private-operation") {
+      // render the same bare form (the app supplies the binding).
+      if (stmt.target === "private-operation") {
         return `// TODO(flutter full-parity): '${stmt.target}' call '${stmt.name}' in a Notifier method`;
       }
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
+      // A `<Store>.<action>(…)` call reaches the store's Notifier through `ref`
+      // (which every Riverpod `Notifier` carries) — EXCEPT inside that store's
+      // own module, where the method is in class scope and reading one's own
+      // provider is the circular dependency Riverpod asserts on.
+      if (stmt.target === "store-action" && stmt.store) {
+        if (stmt.store === selfStore) return `${stmt.name}(${args});`;
+        return `ref.read(${storeProviderName(stmt.store)}.notifier).${stmt.name}(${args});`;
+      }
       return `${stmt.name}(${args});`;
     }
     default:
@@ -361,20 +369,29 @@ function numericParse(dt: string): string | undefined {
 export function stateSetterMethods(
   fields: readonly DartStateField[],
   wrap: (assign: string) => string[],
+  /** Method names already declared on the class (a store/page's own `action`s).
+   *  A `store Filters { term: string  action setTerm(q) … }` names an action
+   *  exactly as the generated setter would, and two `void setTerm(...)` methods
+   *  in one Dart class do not compile.  The hand-written action wins — it is
+   *  the one a body can call by name. */
+  taken: ReadonlySet<string> = new Set(),
 ): string[] {
   const out: string[] = [];
   for (const f of fields) {
-    out.push(
-      "",
-      `  void set${upperFirst(f.name)}(${f.dt} v) {`,
-      ...wrap(`state = state.copyWith(${f.name}: v);`),
-      "  }",
-    );
-    const parse = numericParse(f.dt);
-    if (parse) {
+    const setter = `set${upperFirst(f.name)}`;
+    if (!taken.has(setter)) {
       out.push(
         "",
-        `  void set${upperFirst(f.name)}Text(String v) {`,
+        `  void ${setter}(${f.dt} v) {`,
+        ...wrap(`state = state.copyWith(${f.name}: v);`),
+        "  }",
+      );
+    }
+    const parse = numericParse(f.dt);
+    if (parse && !taken.has(`${setter}Text`)) {
+      out.push(
+        "",
+        `  void ${setter}Text(String v) {`,
         ...wrap(`state = state.copyWith(${f.name}: ${parse});`),
         "  }",
       );

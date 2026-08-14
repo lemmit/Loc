@@ -1316,8 +1316,8 @@ export const DIAGNOSTIC_MESSAGES = {
     platform: unknown;
   }) =>
     `projection '${p.name}' is sourced 'from ${p.source}' (another projection's read-model rows), which deployable '${p.dName}' (platform '${p.platform}') can't generate yet. Host it on a supported backend, or source the projection from an aggregate.`,
-  "loom.datagrid-unsupported-target": (p: { name: unknown; dName: unknown; fw: unknown }) =>
-    `page '${p.name}' uses 'DataGrid', which deployable '${p.dName}' can't render ` +
+  "loom.datagrid-unsupported-target": (p: { what: unknown; dName: unknown; fw: unknown }) =>
+    `${p.what} uses 'DataGrid', which deployable '${p.dName}' can't render ` +
     `(frontend '${p.fw}'). DataGrid is a TanStack row model, so it ships wherever ` +
     `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
     `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
@@ -1340,8 +1340,14 @@ export const DIAGNOSTIC_MESSAGES = {
     `(frontend '${p.fw}' generates no projection read). Projection reads ` +
     `ship on ${p.frameworks}; host this ui on one of those, or read the source ` +
     `aggregate directly.`,
-  "loom.auth-ui-unsupported-framework": (p: { name: unknown; uiFramework: unknown }) =>
-    `Deployable '${p.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${p.uiFramework}' isn't supported yet.`,
+  "loom.current-user-needs-auth-ui": (p: { what: unknown; uiName: unknown; dName: unknown }) =>
+    `${p.what} on ui '${p.uiName}' reads 'currentUser', but deployable '${p.dName}' binds no verified session user, so the read emits a dangling reference (react 'undefined.<claim>', invalid Dart on flutter, an unbound match on feliz). Add the auth guard: 'auth: ui' on a frontend deployable, or 'auth: required' on a fullstack deployable that mounts the ui itself.`,
+  "loom.auth-ui-unsupported-framework": (p: {
+    name: unknown;
+    uiFramework: unknown;
+    frameworks: unknown;
+  }) =>
+    `Deployable '${p.name}': 'auth: ui' is currently only supported on ${p.frameworks} frontends; framework '${p.uiFramework}' isn't supported yet.`,
   "loom.ui-realtime-unsupported#backend-serves-no-sse": (p: {
     name: unknown;
     uiName: unknown;
@@ -1845,7 +1851,8 @@ export const DIAGNOSTIC_MESSAGES = {
     `Angular, and the equivalent on Feliz/Flutter).  Collection ops are a backend ` +
     `vocabulary: compute the value server-side — a repository \`find\`, an aggregate ` +
     `\`derived\`, or a \`projection\` read model — and bind the result in the page.  ` +
-    `(\`.map\` is the one op the frontends do render.)`,
+    `(\`.map\` is the one op the frontends do render — except on Feliz, whose F# walker ` +
+    `has no lambda seam and would emit a JS arrow, so it is gated there too.)`,
   "loom.instance-effect-needs-route-id": (p: { name: unknown; route: unknown }) =>
     `page '${p.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
     `on the record identified by the page's route \`:id\` — but this page (route ` +

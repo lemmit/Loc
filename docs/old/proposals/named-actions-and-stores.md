@@ -7,9 +7,16 @@
 > `loom.action-payload-mismatch`/`loom.unresolved-action-ref`, and the
 > `event_N`-gensym-replacing hoist on all four JS frontends + Phoenix HEEx) is
 > live, with per-target `named-actions.test.ts`. `store` (Stage 5) shipped too —
-> **in-memory only**; the `persist:`/`sync:` lifetimes remain grammar-reserved and
+> ~~**in-memory only**; the `persist:`/`sync:` lifetimes remain grammar-reserved and
 > gated (`loom.store-lifetime-unsupported`, owned by
-> [`frontend-state-management.md`](frontend-state-management.md)). **Remaining:
+> [`frontend-state-management.md`](frontend-state-management.md)).~~
+> **[2026-08-14 correction]** `persist: memory|local|session|url` is real grammar
+> and ships on every frontend; `loom.store-lifetime-unsupported` is **retired**
+> (`src/ir/validate/checks/store-checks.ts` records the retirement). The live
+> store gates are `loom.store-lifetime-invalid` (bad `persist:` value, AST tier),
+> `loom.store-url-field-invalid` (an array / entity / value-object field on a
+> `persist: url` store — no round-trippable query encoding), and
+> `loom.store-cross-store-on-liveview-invalid`. `sync:` is still reserved. **Remaining:
 > Stages 2–4** (`await`/`match`, retire `Action {}` `then:`, `async` composition)
 > — the async surface in [`async-actions-and-effects.md`](async-actions-and-effects.md),
 > still unstarted and actively gated by `loom.action-requires-await` (an action

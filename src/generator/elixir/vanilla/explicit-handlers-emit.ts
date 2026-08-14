@@ -41,6 +41,7 @@ import type {
   ExprIR,
   QueryHandlerIR,
   RouteIR,
+  SystemIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { requestRecordFor } from "../../../ir/util/handler-contracts.js";
@@ -48,6 +49,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import type { ApiRoute } from "../api-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { renderControllerSerialize } from "./controller-serialize.js";
 import { denialOverrides, respondErrorTail } from "./denial.js";
 import {
   type BodyLine,
@@ -493,6 +495,7 @@ export function emitExplicitRoutesController(
   routes: readonly RouteIR[],
   contexts: readonly EnrichedBoundedContextIR[],
   out: Map<string, string>,
+  sys?: SystemIR,
 ): ApiRoute[] {
   if (routes.length === 0) return [];
   const byName = new Map<string, EnrichedBoundedContextIR>(contexts.map((c) => [c.name, c]));
@@ -563,6 +566,24 @@ export function emitExplicitRoutesController(
   }
   if (actions.length === 0) return [];
 
+  // A handler's `{:ok, result}` is frequently a loaded/saved aggregate struct —
+  // project it through that aggregate's `wireShape` (camelCase keys, no
+  // `inserted_at`), the same wire the aggregate's own REST controller serves.
+  // The `is_list` arm stays FIRST (a list is not a struct, but the clause must
+  // precede the struct heads to read as the collection projection it is) and the
+  // raw-struct `%_{}` clause stays behind them for a non-aggregate struct.
+  const serializeBlock = renderControllerSerialize(
+    appModule,
+    contexts,
+    [
+      "  # A collection result (a find handler declaring an Agg-Response array, whose",
+      "  # body returns the raw entity list) projects each element — an Ecto schema",
+      "  # struct is not Jason-encodable as-is, so a bare list would 500 on encode.",
+      "  defp serialize(list) when is_list(list), do: Enum.map(list, &serialize/1)",
+    ],
+    sys,
+  );
+
   out.set(
     `lib/${appName}_web/controllers/${snake(apiName)}_routes_controller.ex`,
     `# Auto-generated.
@@ -593,14 +614,9 @@ ${actions.join("\n\n")}
 
 ${respondErrorTail("respond", "  ", contexts[0] ? denialOverrides(contexts[0]) : undefined)}
 
-  # A collection result (a find handler declaring an Agg-Response array, whose
-  # body returns the raw entity list) projects each element — an Ecto schema
-  # struct is not Jason-encodable as-is, so a bare list would 500 on encode.
-  defp serialize(list) when is_list(list), do: Enum.map(list, &serialize/1)
-  defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
-  defp serialize(other), do: other${
-    hasPaged
-      ? `
+${serializeBlock.clauses}${
+  hasPaged
+    ? `
 
   # 1-based page coercion for a paged-run queryHandler route (Phoenix delivers
   # query params as strings; a missing/blank/non-integer value falls back to the
@@ -617,8 +633,8 @@ ${respondErrorTail("respond", "  ", contexts[0] ? denialOverrides(contexts[0]) :
       _ -> default
     end
   end`
-      : ""
-  }
+    : ""
+}${serializeBlock.helpers}
 end
 `,
   );

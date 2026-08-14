@@ -32,9 +32,26 @@ on the vanilla backend later — this file is the tracked list.
 > deferred): the audit before/after snapshot (`wireSnapshot`, internal jsonb — not a
 > wire response) and the `WorkflowsController` result serializer (heterogeneous
 > non-aggregate result shapes — needs per-workflow result-type dispatch).
+> *(2026-08-14: that tail is **four** sites, not two — the explicit-handler
+> controller and an ES ref-collection carve-out belong to it too; corrected list
+> in §14.)*
 > Independently spot-checked §7: generated Elixir is **not** `mix format`-clean
 > (long `Logger.info` calls, blank-line rules in `application.ex` and elsewhere) —
 > confirming it's a real multi-emitter M, still open.
+>
+> **[2026-08-14 correction]** Re-verified against fresh `main` (`ae0cb24`); four
+> more entries had rotted and are corrected in place below:
+> **§11c** "Still gated — part-in-part nesting" is **drained**
+> (`validateVanillaContainmentSupport` is deleted, `loom.vanilla-containment-unsupported`
+> fully retired — and the gate's stated reason was itself stale: `MigrationsIR`
+> always carried the grandchild table, only the elixir migration emitter dropped a
+> part FK'd to a sibling part); **§11 "To restore the gate"** describes a flip that
+> has already happened (`examples/showcase.ddd` carries `platform: elixir` again and
+> `conformance-parity.yml` sets no skip var — `LOOM_E2E_SKIP_PHOENIX` survives only
+> as a *local* opt-out in `test/e2e/e2e.test.ts`); **§2**'s remaining ask is now
+> **inverted** — acting on it would regress cross-backend union parity; and
+> **§4**'s dead-code cleanup is done in the emitter. §14's site list is likewise
+> re-derived below (it undercounted — `explicit-handlers-emit.ts` postdates it).
 
 ## Status summary
 
@@ -51,15 +68,23 @@ on the vanilla backend later — this file is the tracked list.
 | §6 | SPA embed under Phoenix host | **CLOSED** (#1886 / M-T6.1) — react/vue/svelte embed now wired; see correction below | L | done |
 | §7 | `mix format` / Dialyzer CI gates | REAL (output fails `mix format`) — now tracked as **M-T6.3** (`open`) | M (+defer Dialyzer) | 4 |
 | §9 | Op-level `currentUser` guard | **CLOSED** (#1568) | — | done |
-| §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
-| §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
+| §2 | Union per-variant struct tagging | **CLOSED** (doc mis-framed; the remaining test ask is INVERTED — see §2) | S | done |
+| §4 | `contains`-in-`where` membership | **CLOSED** (doc stale; the dead Ash arm is gone — see §4) | S | done |
 | §12 | `shape(document)` + custom ops/finds | **scalar ops + finds now emitted** (DEBT-07); gate narrowed to the non-scalar residual | M | done (residual below) |
 | §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
-| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **wireShape serializer swept across every wire surface** — relational REST (#1628), event-sourced (#1633), document (#1636), views both forms (#1639); all boot-verified. Only the audit snapshot (internal jsonb) + workflow-instance result (heterogeneous) remain | M–L | done (tail below) |
+| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **wireShape serializer swept across every wire surface** — relational REST (#1628), event-sourced (#1633), document (#1636), views both forms (#1639); all boot-verified. A four-site tail remains (re-derived 2026-08-14 — the old "only two remain" claim undercounted) | M–L | done (tail below) |
 | — | Ecto migration `default: now()`/`gen_random_uuid()` not `fragment(...)` | **FIX in #1628** — event-store table wouldn't compile; boot-blocker | S | done |
 | §15 | Inbound camelCase key normalization | **FIXED** — every relational nested changeset snakes its own keys (#1632); the document schemaless changeset snakes at the repository boundary, insert + update (#1636) | M | done |
 
-Restoring the 5-backend `conformance-parity` gate (removing
+**The 5-backend `conformance-parity` gate is RESTORED** *(verified 2026-08-14 —
+the paragraph below is kept as the record of what unblocked it)*.
+`examples/showcase.ddd` carries the elixir deployable again and
+`conformance-parity.yml` sets no skip variable — its own comment reads "Phoenix is
+back in the parity set … parity now runs over all five backends
+(node/.NET/Java/Python/Phoenix)", in **strict** mode. `LOOM_E2E_SKIP_PHOENIX`
+survives only as a *local* opt-out inside `test/e2e/e2e.test.ts`.
+
+Restoring the gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
 `examples/showcase.ddd`) — §11a (#1579), §11b (#1581), the §11c **core**
 (relational persist + preload), AND the §11c **follow-up** (`put_assoc`
@@ -104,10 +129,19 @@ struct with a nil PK is silently NOT inserted by `put_assoc`; boot-verified).  T
   …fields }` on every backend. Vanilla emits
   `json(conn, Map.put(serialize(record), :type, "Order"))` — **byte-equivalent**
   to Hono (`{ type, ...toWire }`) and .NET (`[JsonPolymorphic("type")]`).
-- **Remaining (S, no emitter change):** restore the Phoenix discriminator
+- ~~**Remaining (S, no emitter change):** restore the Phoenix discriminator
   assertion in `test/conformance/union-wire-parity.test.ts` (assert the vanilla
-  controller `:type`-tags the success body); the per-variant-struct framing is an
-  Ash artifact and is retracted here.
+  controller `:type`-tags the success body).~~
+- **[2026-08-14] DO NOT ACT ON THAT — it is now INVERTED, and acting on it would
+  regress cross-backend union parity.** The wire settled the other way: for the
+  validator-pinned `<Agg> or <Error>` shape every backend returns the success
+  record **untagged** (node `repo.toWire(result)`, python, java all do), and
+  `union-wire-parity.test.ts` pins exactly that for Phoenix — *"vanilla Phoenix
+  serializes the success record untagged (no `:type`), absence → 404"*, asserting
+  `json(conn, serialize(record))` **and** `not.toContain("Map.put(serialize(record),
+  :type")`. So the assertion this row asks for exists and asserts the opposite;
+  the paragraph above describing an emitted `:type` tag no longer matches the
+  emitter either. Nothing left to do.
 
 ## 3. `sensitive(...)` inspect-redaction — **CLOSED**
 
@@ -143,13 +177,19 @@ struct with a nil PK is silently NOT inserted by `put_assoc`; boot-verified).  T
   See `src/generator/elixir/vanilla/repository-emit.ts`
   (`containsRefCollField(f.filter, agg)` → direct join query); the filter never
   reaches `render-expr.ts`.
-- **Remaining (S, cleanup only):** the Ash-shaped `contains` arm in
+- ~~**Remaining (S, cleanup only):** the Ash-shaped `contains` arm in
   `src/generator/elixir/render-expr.ts` (the `exists(...)` / `^arg(:…)` branch +
-  `relationshipNameFor`) is dead for the *find* path. **Caution:** `ctx.agg` is
-  also set during action-body rendering, so prove the arm is unreachable from
-  operation bodies before deleting it — it is not provably dead. Optionally add a
-  `where`-output assertion (`join_row.id == ^…`) to
-  `test/generator/elixir/vanilla-ref-collection.test.ts`.
+  `relationshipNameFor`) is dead for the *find* path.~~
+- **[2026-08-14] DONE in the emitter.** `relationshipNameFor` has zero
+  occurrences in `src/`; the `exists(...)` / `^arg(:…)` Ash branch is gone.
+  `render-expr.ts` now renders `this.<refColl>.contains(x)` as
+  `Enum.member?(__ref_id_list(recv), arg)` for the domain-logic (action-body)
+  path — the caution above was right that the arm was reachable from operation
+  bodies, so it was *replaced*, not deleted — with an explicit note that the
+  repository FIND path still intercepts first via `containsRefCollField` in
+  `repository-emit.ts`. **Residual (not a gap, a stale comment in code):** the
+  `ctx.agg` field doc in `render-expr.ts` still describes the removed Ash
+  `exists(<rel>, id == ^arg(:<param>))` lowering as its reason to exist.
 
 ## 5. Workflow `isolationLevel` transaction option — **CLOSED** (#1574)
 
@@ -276,7 +316,12 @@ struct with a nil PK is silently NOT inserted by `put_assoc`; boot-verified).  T
 - **Test:** `test/generator/elixir/vanilla-destroy-form.test.ts`;
   `vanilla-destroy-form.ddd` moved out of `pending/` to re-gate `mix compile`.
 
-## 11. Full-showcase compile → 5-backend parity restoration
+## 11. Full-showcase compile → 5-backend parity restoration — **DONE**
+
+> **[2026-08-14]** This whole section is **historical**: the restoration landed.
+> Per-PR OpenAPI parity runs over all five backends (node/.NET/Java/Python/
+> Phoenix) in strict mode, `examples/showcase.ddd` carries `platform: elixir`,
+> and `conformance-parity.yml` sets no skip variable. 11a–11g are all closed.
 
 `#1568` removed the elixir deployable from `examples/showcase.ddd` and set
 `LOOM_E2E_SKIP_PHOENIX=1` in `conformance-parity.yml`, so per-PR OpenAPI parity
@@ -343,11 +388,24 @@ changeset; **boot-verified** against real Postgres), whereas a map without `id`
 inserts and one with `id` is kept/updated.  `loom.vanilla-containment-mutation-unsupported`
 is retired.  Embedded (`put_embed`) output stays byte-identical.
 
-**Still gated:**
+**~~Still gated:~~ NOTHING — drained 2026-08-14 (M-T6.2).**
 
-1. **Part-in-part nesting** (a part that itself declares `contains`) on a relational
-   owner — the shared `tableForPart` migration emits no child table for a part's own
-   containments, so there's no backing storage. Stays `loom.vanilla-containment-unsupported`.
+1. ~~**Part-in-part nesting** (a part that itself declares `contains`) on a
+   relational owner — the shared `tableForPart` migration emits no child table for
+   a part's own containments, so there's no backing storage. Stays
+   `loom.vanilla-containment-unsupported`.~~ **CLOSED.** Part-in-part on a
+   relational owner is emitted, `validateVanillaContainmentSupport` is **deleted**
+   (zero occurrences in `src/`), and `loom.vanilla-containment-unsupported` is
+   fully retired — the header of `test/ir/vanilla-containment-support.test.ts`
+   says so in as many words. **The gate's stated reason was itself stale:** the
+   shared `MigrationsIR` always carried the grandchild table (python's SQL
+   migration emitted it); what was missing was in the *elixir* migration emitter,
+   whose part tier only emitted parts FK'd to a parent **aggregate** and silently
+   dropped one FK'd to a sibling **part**. Fixed across the migration emitter
+   (grandchild tables emitted FK-topologically after their tier-0 parent),
+   `renderPartSchema` (`has_many` on the grandchild table + `belongs_to` the
+   direct parent + `cast_assoc`) and the read/update preload; boot-verified with
+   a nested `create → read` round-trip on real Postgres.
    (`shape(document)` containments were **un-gated** by Route A slice 4 — `embeds_many` +
    a shared serializer; `system-checks.ts` now skips the gate for `document`/`embedded` shapes.)
 
@@ -393,7 +451,8 @@ migrates** on elixir. A first flip attempt (PR #1612, closed) surfaced two more 
 gaps via the `conformance-parity` job — **both now CLOSED** (§11f, §11g below) — so
 the flip is **re-attempted** (re-add elixir + drop `LOOM_E2E_SKIP_PHOENIX`); the
 authoritative 5-backend parity match is verified by the flip PR's own
-`conformance-parity` job.
+`conformance-parity` job. **(2026-08-14: the flip LANDED — see the section
+header.)**
 
 ### §11f. Phoenix emits no OpenAPI spec (`/openapi.json` → 404) — **CLOSED** (#1615)
 
@@ -429,12 +488,20 @@ toward "showcase fully green under `mix test` on elixir".
   `mix compile --warnings-as-errors`; boot-verified child-row round-trip against
   real Postgres).
 
-### To restore the gate
+### To restore the gate — **DONE** (verified 2026-08-14)
 
-Land 11a + 11b + 11c, re-add the elixir deployable to `examples/showcase.ddd`,
-remove `LOOM_E2E_SKIP_PHOENIX` from `conformance-parity.yml`, and restore the
-phoenix legs of the `e2e.test.ts` parity cross-check (the spec-fetch, the diff
-pairs, and the 403 runtime-authorization target).
+*The instruction below is spent; it is kept only as the record of what the flip
+required.* All of it has happened: 11a–11g landed, `examples/showcase.ddd`
+carries the elixir deployable, `conformance-parity.yml` sets no
+`LOOM_E2E_SKIP_PHOENIX` (the variable survives only as a local opt-out in
+`test/e2e/e2e.test.ts`), and the phoenix legs of the `e2e.test.ts` parity
+cross-check run over all five backends in strict mode.
+
+> ~~Land 11a + 11b + 11c, re-add the elixir deployable to
+> `examples/showcase.ddd`, remove `LOOM_E2E_SKIP_PHOENIX` from
+> `conformance-parity.yml`, and restore the phoenix legs of the `e2e.test.ts`
+> parity cross-check (the spec-fetch, the diff pairs, and the 403
+> runtime-authorization target).~~
 
 ## 12. `shape(document)` aggregate with custom operations / finds — **scalar surface CLOSED** (DEBT-07)
 
@@ -467,8 +534,10 @@ pairs, and the 403 runtime-authorization target).
     relational non-audited returning path, no DB round-trip).
 - **Residual gate (still `loom.vanilla-document-unsupported`, now small):** an
   **audited** / **provenanced** op (needs the transactional struct-column
-  persist), **collection** mutation (a document's contained parts are gated
-  upstream by `loom.vanilla-containment-unsupported` anyway), a **derived** read
+  persist), **collection** mutation (~~a document's contained parts are gated
+  upstream by `loom.vanilla-containment-unsupported` anyway~~ — **2026-08-14: that
+  cross-reference is dead; the containment gate is retired and cannot fire, so
+  this clause stands on its own**), a **derived** read
   (not stored in `data`), a **dereferenced-entity** member (cross-aggregate
   join), a collection **method** (`.sum`/`.filter`/`.contains`), or a **paged /
   union** find. These fail fast (honest) rather than mis-emit.
@@ -536,12 +605,39 @@ pairs, and the 403 runtime-authorization target).
   full-form views project under the declared camelCase name (`:projectId`, matching
   the already-correct workflow-sourced view projection). Both forms boot-verified on
   real Postgres — `customerId`/`orderId` camelCase, no timestamp leak.
-- **Still open — audit + workflow-instance serialize sites:** the audit before/after
-  snapshot (`wireSnapshot`, internal jsonb — not a wire response) and the
-  `WorkflowsController` result `serialize/1` (heterogeneous non-aggregate result
-  shapes — a saga instance or a produced value) still `Map.from_struct`. Lowest
-  traffic / least wire-visible of the set; need a per-record projection or a generic
-  camelize helper. Tracked for a follow-up.
+- **Still open — the raw-`Map.from_struct` tail, re-derived 2026-08-14 against
+  `ae0cb24`.** The old wording ("only the audit snapshot + workflow-instance
+  result remain") **undercounted**: `explicit-handlers-emit.ts` postdates it and
+  carries its own copy of the same dump, and the ES controller has a documented
+  carve-out. The sites that still dump an Ecto struct instead of projecting
+  `wireShape`, as of this checkout:
+  1. `vanilla/workflow-execution-emit.ts` — the `WorkflowsController` result
+     `serialize/1` (`defp serialize(%_{} = struct), do: struct |> Map.from_struct()
+     |> Map.drop([:__meta__, :__struct__])`). Heterogeneous non-aggregate result
+     shapes — a saga instance or a produced value — so it needs per-workflow
+     result-type dispatch.
+  2. `vanilla/explicit-handlers-emit.ts` — the **same** `serialize/1` clause on the
+     explicit query/command-handler controller (plus its `is_list` element
+     projection). Not in the original ~7-site list because the file did not exist
+     yet.
+  3. `vanilla/audit-emit.ts` `wireSnapshot/2` — the audit before/after snapshot.
+     Internal jsonb, not a wire response, so lowest wire-visibility of the set
+     (the doc-shape branch merges `Map.from_struct(record.data)` under the row id;
+     the relational branch dumps the struct).
+  4. `vanilla/eventsourced-emit.ts` — a **deliberate, in-code-documented**
+     carve-out: an ES aggregate carrying a **ref collection** keeps the raw dump,
+     because the `__ref_ids/1` helper's Ecto-assoc semantics don't hold for an
+     in-memory fold. Every other ES aggregate goes through `renderWireSerialize`.
+
+  *(Not a serializer, despite matching a `Map.from_struct` grep:
+  `context-emit.ts`'s `__put_assoc_parts/1`, which normalises part structs to
+  `put_assoc`-ready maps.)*
+
+  **These are actively being drained** — the workflow and explicit-handler
+  serializers (1) and (2) are the subject of in-flight work; treat this list as a
+  snapshot of `ae0cb24`, not a standing backlog. Live status:
+  [`docs/new-plan/T6-backend-parity.md`](../../new-plan/T6-backend-parity.md)
+  § M-T6.2.
 - **Document INBOUND camelCase — FIXED (#1636, §15-analog, boot-found):** the
   document schemaless changeset casts snake `@all_fields` but never ran the §15
   `__normalize_keys` camelCase→snake pass, so a canonical camelCase create

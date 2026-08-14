@@ -33,6 +33,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
 import { renderFlutterChartRuntime } from "./chart-runtime.js";
@@ -57,6 +58,8 @@ import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import { dartPackageName } from "./package-name.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
+import { renderFlutterStores } from "./store-builder.js";
+import { storeProviderName } from "./store-names.js";
 
 export interface GenerateFlutterOptions {
   apiBaseUrl?: string;
@@ -159,6 +162,20 @@ export function generateFlutterForContexts(
     ? emittableComponentParams(ui.components, componentCtx)
     : new Map();
 
+  // Which of each store's members are STATE and which are ACTIONS.  The walk
+  // records only member NAMES (`usedStores`), and the two bind differently in a
+  // `ConsumerWidget` — a field is a `ref.watch(…select…)`, an action a
+  // `ref.read(….notifier).<action>` tear-off — so the shell needs the split.
+  const storeMembers = new Map<string, { fields: Set<string>; actions: Set<string> }>(
+    (ui?.stores ?? []).map((s) => [
+      s.name,
+      {
+        fields: new Set(s.state.map((f) => f.name)),
+        actions: new Set(s.actions.map((a) => a.name)),
+      },
+    ]),
+  );
+
   const pages = ui?.pages ?? [];
   const usedComponents = new Set<string>();
   const rendered = pages.map((page) => {
@@ -167,10 +184,19 @@ export function generateFlutterForContexts(
       bcByWorkflow,
       componentParams,
       i18nEnabled,
+      storeMembers,
     });
     for (const name of r.usedComponents) usedComponents.add(name);
     return { page, ...r };
   });
+
+  // Store modules (named-actions-and-stores.md §3, Stage 5) — one Riverpod
+  // triad per `store Cart { … }` in `lib/stores.dart`.  Emitted whenever the ui
+  // DECLARES a store, not only where one is used: an unused Dart top-level
+  // declaration is inert (unlike an unused import), and the file is what the
+  // page shells import.
+  const storesFile = ui ? renderFlutterStores(ui.stores, contexts) : undefined;
+  if (storesFile) out.set("lib/stores.dart", storesFile);
 
   if (ui && usedComponents.size > 0) {
     const componentsFile = renderComponentsFile(
@@ -273,9 +299,14 @@ function renderPage(
      *  walk then keys every literal text slot to the catalog and emits `t(…)`.
      *  False → no prefix, and the page is byte-identical to pre-i18n. */
     i18nEnabled: boolean;
+    /** Per-store field / action name split, for the shell's store bindings. */
+    storeMembers: ReadonlyMap<
+      string,
+      { fields: ReadonlySet<string>; actions: ReadonlySet<string> }
+    >;
   },
 ): Omit<RenderedPage, "page"> {
-  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled } = workflows;
+  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled, storeMembers } = workflows;
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
@@ -296,6 +327,7 @@ function renderPage(
   const usedActions = new Set<string>();
   let usedApiHooks = new Map<string, ApiHookUse>();
   const usedComponents = new Set<string>();
+  let usedStores = new Map<string, Set<string>>();
   if (page.body) {
     const result = walkBody(
       page.body,
@@ -323,6 +355,7 @@ function renderPage(
     usesState = result.usesState;
     usesRouteId = result.usesRouteId;
     usedApiHooks = result.usedApiHooks;
+    usedStores = result.usedStores ?? usedStores;
     for (const a of result.usedActions ?? []) usedActions.add(a);
     for (const c of result.usedUserComponents) usedComponents.add(c);
   }
@@ -332,7 +365,10 @@ function renderPage(
   // (this slice — `ref.watch(<var>Provider)`).  Display-only pages with neither
   // stay plain `StatelessWidget`s (Track A/B/C skeleton).
   const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
-  const consumer = stateful || usedApiHooks.size > 0;
+  // A store read/call needs a `WidgetRef` too (`ref.watch(cartProvider…)`), so a
+  // page whose only reactive input is a store is still a `ConsumerWidget` — the
+  // StatelessWidget path has no `ref` to bind against.
+  const consumer = stateful || usedApiHooks.size > 0 || usedStores.size > 0;
   const apiParamNames = new Map(ui.apiParams.map((p) => [p.name, p.apiName]));
   const usesComponent = usedComponents.size > 0;
   const source = consumer
@@ -348,6 +384,8 @@ function renderPage(
           stateful,
           hostsForm,
           usesComponent,
+          usedStores,
+          storeMembers,
         },
         bodyWidget,
         contexts,
@@ -403,6 +441,38 @@ interface ConsumerBindings {
   hostsForm: boolean;
   /** Page invokes a user component → imports `../components.dart`. */
   usesComponent: boolean;
+  /** Stores this body touched, keyed to the member names used (Stage 5). */
+  usedStores: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Per-store field / action split, so each used member binds the right way. */
+  storeMembers: ReadonlyMap<string, { fields: ReadonlySet<string>; actions: ReadonlySet<string> }>;
+}
+
+/** Bind one local per used store member, matching the body's use site
+ *  (`storeMemberLocal` — the SAME collision-resolved name walker-core gave it).
+ *  A field binds a granular `.select` watch so the page rebuilds on that cell
+ *  alone; an action binds the notifier method as a tear-off, so the body's
+ *  `<local>(args)` call resolves.  A member the store doesn't declare as state
+ *  is treated as an action — the validator has already rejected an unknown
+ *  member, so the fallback can only be an action. */
+function storeBindings(
+  usedStores: ReadonlyMap<string, ReadonlySet<string>>,
+  storeMembers: ReadonlyMap<string, { fields: ReadonlySet<string>; actions: ReadonlySet<string> }>,
+  reserved: ReadonlySet<string>,
+): string[] {
+  const out: string[] = [];
+  for (const storeName of [...usedStores.keys()].sort()) {
+    const provider = storeProviderName(storeName);
+    const fields = storeMembers.get(storeName)?.fields ?? new Set<string>();
+    for (const member of [...(usedStores.get(storeName) ?? [])].sort()) {
+      const local = storeMemberLocal(storeName, member, reserved);
+      out.push(
+        fields.has(member)
+          ? `    final ${local} = ref.watch(${provider}.select((s) => s.${member}));`
+          : `    final ${local} = ref.read(${provider}.notifier).${member};`,
+      );
+    }
+  }
+  return out;
 }
 
 /** Display-only page → a plain `StatelessWidget`.  The body references no
@@ -517,6 +587,21 @@ function renderConsumerPage(
   if (b.stateful && b.usesState) {
     bindings.push(`    final state = ref.watch(${providerName});`);
   }
+  // Store locals next — a store field can key a read the same way page state
+  // can, and the body references the bare local either way.  Reserved against
+  // the page's own bindings so a `Cart.items` read beside a `items` state cell
+  // binds `cartItems`, exactly as walker-core resolved the use site.
+  bindings.push(
+    ...storeBindings(
+      b.usedStores,
+      b.storeMembers,
+      new Set([
+        ...page.state.map((s) => s.name),
+        ...b.routeParams,
+        ...page.derived.map((d) => d.name),
+      ]),
+    ),
+  );
   // QueryView read hoists (`final <var> = ref.watch(<var>Provider…);`).
   if (b.usedApiHooks.size > 0) {
     const uses: ApiCallSite[] = [...b.usedApiHooks.values()].map((h) => ({
@@ -565,6 +650,7 @@ function renderConsumerPage(
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
   if (b.usesComponent) imports.push("import '../components.dart';");
+  if (b.usedStores.size > 0) imports.push("import '../stores.dart';");
   // The controlled-Modal bridge (the state-bearing page path — its stateless
   // sibling above sniffs the same marker).  A controlled Modal only exists on a
   // page WITH state, so this is the branch that actually fires.

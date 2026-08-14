@@ -18,6 +18,7 @@
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { upperFirst } from "../../util/naming.js";
+import { DURATION_UNIT_MS } from "../../util/temporal.js";
 
 /** F# spelling of a Loom binary operator. */
 function fsBinOp(op: BinOp): string {
@@ -208,6 +209,43 @@ export interface FsExprCtx {
    *  resolves to the namespaced Model field `model.<Store><Field>` (stores
    *  compose into the single Elmish Model).  Absent for page/component bodies. */
   storeScope?: { store: string; fields: ReadonlySet<string> };
+  /** The in-scope F# expression that yields the route `id` (an `ExprIR` of kind
+   *  `"id"` — `Order.byId(id)`, `sel := string(id)`).  Every consumer of this
+   *  renderer binds the route id DIFFERENTLY, which is why it is a context
+   *  field rather than a fixed spelling: the page VIEW fn takes it as a
+   *  parameter (`id`), while `update`/`init` run outside any view and have to
+   *  read it back off the parsed route (`routeId model.CurrentPage`, the helper
+   *  `renderRouting` emits beside `parseUrl`).  Absent on a NON-routed ui,
+   *  where no page carries a route param and an `id` read has no value to
+   *  resolve to — it renders as the empty string there, the F# analogue of
+   *  React's absent `useParams()` entry. */
+  routeId?: string;
+}
+
+/** The empty route id — what an `id` read resolves to on a ui with no routing
+ *  table at all (see `FsExprCtx.routeId`). */
+const NO_ROUTE_ID = '""';
+
+/** Name of the module-level accessor `renderRouting` emits beside `parseUrl`:
+ *  `let routeId (page: Page) : string`, the route param of the active page ("" when
+ *  it carries none).  It is what lets the MVU paths — which run outside any page
+ *  view fn — resolve an `id` read at all. */
+export const ROUTE_ID_FN = "routeId";
+
+/** The route id as read from the model, for an `update` arm (`CurrentPage` is
+ *  already the parsed route). */
+export const ROUTE_ID_FROM_MODEL = `(${ROUTE_ID_FN} model.CurrentPage)`;
+
+/** The route id for `init`, which runs BEFORE the model exists — parse the
+ *  current URL the same way `init` seeds `CurrentPage`. */
+export const ROUTE_ID_FROM_URL = `(${ROUTE_ID_FN} (parseUrl (Router.currentPath ())))`;
+
+/** True when rendered F# references the `routeId` accessor, so `renderRouting`
+ *  emits it only where it is actually used (a ui whose bodies never read the
+ *  route `id` keeps its `App.fs` byte-identical).  Asking the EMITTED text is
+ *  exact — no separate IR scan to drift from what the renderers did. */
+export function usesRouteIdFn(...emitted: readonly string[]): boolean {
+  return emitted.some((s) => s.includes(`(${ROUTE_ID_FN} `));
 }
 
 /** The single-program Elmish Model field a store field folds into
@@ -304,6 +342,24 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return FS_LEAVES.list(e.elements.map(r));
     case "object":
       return FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })));
+    case "id":
+      // The route `id` of a detail page (`/orders/:id`).  The VIEW path resolves
+      // it through `felizTarget.renderRouteId` to the view fn's `id` parameter;
+      // this path runs in `update`/`init`, where no such parameter exists — so
+      // the ctx carries whatever spelling IS in scope there.
+      return ctx.routeId ?? NO_ROUTE_ID;
+    case "duration":
+      // `7 days` — the same fixed-width millisecond translation the VIEW path
+      // emits (walker-core, off `DURATION_UNIT_MS`) and every backend agrees on,
+      // so a duration means the same number on both sides of the wire and on
+      // both feliz paths.
+      return `((${r(e.amount)}) * ${DURATION_UNIT_MS[e.unit]})`;
+    case "new":
+      // Part construction (`Shipment { … }`).  A part is a plain record on the
+      // wire exactly as a value object is, so it renders as the F# anonymous
+      // record the VIEW path emits for it (walker-core's `new` arm → the
+      // `exprObject` seam → this same leaf).
+      return `(${FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })))})`;
     case "member":
       // Record-field access — the receiver is a wire record (an async-effect
       // success binding `p`, a read row) whose F# fields keep the EXACT lowercase
@@ -355,15 +411,20 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return `(${r(e.inner)})`;
     default:
       // Fail fast rather than silently substituting `(* unsupported *) ()`.
-      // The remaining kinds are backend-only or subsystem-gated in a frontend
-      // value position: `this`/`id` (domain-body receivers), `action-ref` (a
-      // handler reference, bound by the view walker, never a value here), and
-      // `new` (part/VO construction — a domain concern).  Unreachable on valid
-      // frontend `.ddd`; a defensive fail-fast, not a silent drop.
+      // Three kinds reach here, none of them authored in a page body:
+      // `this` (a domain-body receiver — a page has no aggregate instance),
+      // `action-ref` (a handler reference the view walker binds as a dispatch
+      // wrapper, never a value in an update arm), and `authz-filter` (a
+      // synthesized query-filter sentinel that lives only on an aggregate's
+      // `contextFilters`).  So this is a defensive fail-fast on an IR shape the
+      // frontend pipeline does not produce — NOT a claim that every expression
+      // a user can write is covered.  If it fires on real `.ddd`, the arm is
+      // missing: add it here rather than widening the throw.
       throw new Error(
         `feliz: unsupported expression '${e.kind}' in an F# action/update body — ` +
-          `it has no meaning in a frontend value position. Rework the ` +
-          `expression, or implement the '${e.kind}' arm in fs-expr.ts.`,
+          `no arm renders it on the MVU update path. If a valid page body reaches ` +
+          `this, implement the '${e.kind}' arm in fs-expr.ts (the view path's ` +
+          `treatment of the same kind is in _walker/walker-core.ts).`,
       );
   }
 }
