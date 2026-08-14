@@ -101,18 +101,13 @@ const MIKRO_SKIP = {
   // (a WARNING, since no frontend consumes it in these fixtures), while the
   // fold/saga routing they actually assert rides the in-process dispatcher and
   // works on this adapter.  They keep booting here.
-  // Same class, found by the first runtime callers for these two fixtures
-  // (#2468): the adapter emits no QUERY-time projection reads, and — unlike
-  // the silent gaps above — `loom.mikroorm-unsupported` already says so as a
-  // hard validation ERROR, so forcing the case here does not even generate
-  // ("context 'Orders' declares the query-time projection 'SalesTotals', which
-  // the MikroORM adapter does not emit"). The gate is honest; what was missing
-  // was a runtime caller to walk into it. Delete both entries when the adapter
-  // grows the read routes.
-  "projection-aggregation":
-    "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
-  "projection-groupby":
-    "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
+  // (`projection-aggregation` / `projection-groupby` were here until M-T6.23
+  // slice 4: the adapter now emits the QUERY-time projection reads — the
+  // aggregation shapes push down through the mikro QueryBuilder — so both cases
+  // RUN here again, and their wire responses are diffed against the same
+  // canonical golden the drizzle leg produces.  That diff is the point: an
+  // aggregate that coerced a numeric differently, or a filter that silently
+  // stopped applying, is a VALUE divergence no compile tier can see.)
   // Same class again, and the most honest entry in this map: the narrowing is
   // DECLARED in the adapter's own capability descriptor.  `MIKROORM_SUBSET`
   // (`src/ir/util/find-predicate-capability.ts`) lowers only comparisons, bare

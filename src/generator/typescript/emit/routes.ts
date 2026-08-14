@@ -118,7 +118,9 @@ export function renderHttpIndex(
   // read-model store + fold routes land via `buildProjectionsFile(..., usingMikro)`),
   // so the fold tee + `/projections` mount are no longer drizzle-gated.
   const hasProjections = ctx.projections.some(isMaterializedProjection);
-  const hasQueryProjections = ctx.projections.some(isQueryTimeProjection) && !usingMikro;
+  // Persistence-neutral since M-T6.23 slice 4 (the query-projection routes emit
+  // on both adapters), so the `/projections` mount is no longer drizzle-gated.
+  const hasQueryProjections = ctx.projections.some(isQueryTimeProjection);
   // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
   // channel asks for durability (`retention: log | work`), createApp's
   // default dispatcher wraps the in-process one — durable events are
