@@ -570,3 +570,29 @@ Two sub-decisions to settle in the PR, neither hard: (a) the `detail` sentence �
 **Verification.** The absent-read wire-golden probe #2520 added (`test/behavioral/wire-differential.mjs`) is the natural home — extend it to `/files/<absent-key>` for any case that uploads a file, and the envelope is gated on all seven legs. A static five-backend site pin (the `absent-read-envelope-parity.test.ts` shape) is the fast companion. Note the corpus gap first: `resources.ddd` exercises the object store but no committed golden reaches the download route.
 
 Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) while draining M-T6.31; recorded in that mission's body as the remaining site. Relates to RS-22 (the envelope's membership) and M-T6.31 (the same class, the aggregate/projection/instance sites).
+
+---
+
+## M-T6.40 — A non-paged author `find all` + a scaffolded Elixir list page emits a project that will not compile — `open` · **S** · P2
+
+**The bug.** An author-declared `find all(): T[]` (non-paged) on a `platform: elixir` deployable that also mounts a scaffolded `ui` emits a LiveView calling `list_<agg>s/4` against a context that defines `list_<agg>s/0`:
+
+```elixir
+# lib/<app>_web/live/order_list_live.ex
+case PhoenixApp.Sales.list_orders(socket.assigns.page_num, 10, socket.assigns.sort_key, socket.assigns.sort_dir) do
+
+# lib/<app>/sales.ex
+defdelegate list_orders(), to: PhoenixApp.Sales.OrderRepository, as: :list
+```
+
+`mix compile --warnings-as-errors` fails with `PhoenixApp.Sales.list_orders/4 is undefined or private`, naming all three call sites (`handle_params/3` and both `handle_event/3` clauses). Nothing rejects the combination up front, so this is a SILENT gap: the `.ddd` validates, generation exits 0, and only the compile tier — which no fixture reaches — says otherwise.
+
+**Repro** (verified 2026-08-13, docker `hexpm/elixir` + `LOOM_HEX_MIRROR=1`): take `test/e2e/fixtures/elixir-vanilla-build/vanilla-list-read-gate.ddd` and change its `find all(): Order paged` to `find all(): Order[]`. Independent of the read gate — it reproduces with the `requires` clause removed entirely.
+
+**Why it survived.** The scaffolded list page assumes the enrichment-injected paged `findAll` (M-T2.6), which is what every other Elixir fixture has; an author-declared `all` replaces it (`ensureFindAll` — theirs wins) and may be non-paged. No fixture in `test/e2e/fixtures/elixir-vanilla-build/` paired an author-declared `find all` with a `ui` until `vanilla-list-read-gate.ddd`, so `mix compile` never saw the shape.
+
+**The decision this needs** (why it is not a drive-by fix): which side is wrong. Either (a) the scaffolded page should call the arity the repository actually exposes — dropping the page/sort assigns for a non-paged `all`, which silently un-pages the UI; or (b) the validator should reject a non-paged author `find all` on a deployable whose scaffolded ui renders a paged list, which is honest but rejects a `.ddd` that is fine on the other four backends. (b) reads correct — the scaffold's list page IS paged and cannot be un-paged without changing what it renders — but it is a new `loom.*` gate over a shape that compiles elsewhere, so it wants the parity call made deliberately.
+
+**Verification.** The fixture is already in place: flip `paged` off in `vanilla-list-read-gate.ddd` and the elixir-vanilla-build cell fails. Whichever side is chosen, add a fixture (or a validator negative test) pinning the non-paged pairing, so the compile tier keeps reaching it.
+
+Sources: found by [#2544](https://github.com/lemmit/Loc/pull/2544) while adding compile coverage for the LiveView list-read gate — the fixture it needed tripped this first.

@@ -45,6 +45,21 @@ export interface DerivedRef {
  *  derivation) that produced an IR node. */
 export type OriginRef = SourceRef | MacroRef | DerivedRef;
 
+/** True when the node was produced by a MACRO rather than written by the
+ *  author — i.e. it has no declaration header in the `.ddd` to point a
+ *  "declare X here" diagnostic at.  Both spellings the expander produces
+ *  count: a `macro` ref when the `with <macro>(...)` call site has a CST, and
+ *  the `macro:<name>` derived ref when it doesn't (a nested invocation).
+ *
+ *  A rule that tells the author to edit a declaration must consult this
+ *  first — the alternative is a diagnostic naming a line that does not
+ *  exist. */
+export function isMacroEmitted(origin: OriginRef | undefined): boolean {
+  if (!origin) return false;
+  if (origin.kind === "macro") return true;
+  return origin.kind === "derived" && origin.reason.startsWith("macro:");
+}
+
 /** Walk the chain to the nearest real source span: a `macro` resolves
  *  through its `call`, a `derived` resolves through `from` (if present).
  *  Returns `undefined` only for a bare `derived` ref with no `from` chain. */
