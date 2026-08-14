@@ -472,6 +472,13 @@ Sources: M-T9.27 register rows. Relates to M-T6.23 (mikroorm) and M-T6.25 (dappe
 Two narrow Java-only rejections: `loom.java-projection-field-unsupported` (projection field shapes the emitter does not handle) and `loom.java-workflow-instance-field-unsupported` (workflow instance field shapes). Both name Java in the code identity, which M-T5.21 §Symptom 1 argues against — fold the target into the message when the shapes land.
 Sources: M-T9.27 register rows.
 
+## M-T6.37 — Elixir emits no seeder: `seed` datasets are silently dropped — `open` · **M** · P1 ⭐ silent gap in a feature claimed on five backends
+`seed default { … }` / `seed <name> [raw] { … }` emits a first-boot seeder on four backends and **nothing at all** on `platform: elixir`: `priv/repo/seeds.exs` is listed in the Phoenix file map (`docs/generators.md`) and reserved as a layout slot (`elixir/adapters/by-feature-layout.ts` → `"seeds"`), but no emitter writes it and nothing reads `ctx.seeds`. So reference data an author declared simply does not exist there, with no diagnostic — while `manifest.ts` claims the `seeding` feature on all five backends and the corpus compile tier is green (there is nothing to fail to compile).
+
+Invisible until #2517 (M-T9.13) gave the fixture's collection reads their first callers: seed rows are only observable through a list read, and the node behavioural leg did not run its own seeder either. Registered honestly meanwhile as `BEHAVIOURAL_SKIP.elixir["seed-values"]` (the fixture that carries only the seeded-collection reads — `seeding`'s CRUD/FK/404 half stays armed on this backend) + [B19](../audits/behavioral-parity-bugs-2026-07.md#b19--elixir--seed-datasets-emit-no-seeder-at-all-silently-dropped); **deleting that entry is the acceptance test.**
+
+Scope: an Ecto seeder module — domain rows through the context `create` path (so invariants run, per D-SEED-PATH), raw rows as **schema-qualified** INSERTs (the qualifier bug #2517 fixed on node/.NET; python/java were always right), the ship-once `__loom_seed` marker (D-SEED-IDEMPOTENCY) and `LOOM_SEED` dataset gating — plus its invocation at boot beside the migrations. The java `<Ctx>SeedRunner` (`generator/java/emit/seed.ts`) is the closest model. Verify with `node run-elixir.mjs seeding` in the Elixir docker image, not with a string assertion.
+
 ## M-T6.38 — A `when` state gate is not enforced off the aggregate route — `open` · **M** · P1 ⭐ silent gate bypass, not a wire divergence
 Found 2026-08-11 while landing M-T6.28 ([#2520](https://github.com/lemmit/Loc/pull/2520)), by **disproving that mission's own premise.** M-T6.28 claimed an extern `commandHandler` that "invokes a `when`-gated operation answers `500 / "internal"`". It does not. **It succeeds.**
 

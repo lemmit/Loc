@@ -1005,8 +1005,18 @@ export function generateTypeScriptForContexts(
   // EntityManager (raw INSERTs + the `__loom_seed` marker via
   // `em.getConnection().execute`); the domain-`create` path is identical.
   if (merged.seeds.length > 0) {
+    // The RAW seed rows are hand-built SQL, so they need the same dataSource
+    // schema `renderSchema` routes the drizzle tables into — `resolveDataSource`
+    // is the one already resolved above.
+    const seedSchemaFor = (aggName: string): string | undefined => {
+      const agg = merged.aggregates.find((a) => a.name === aggName);
+      return agg && resolveDataSource ? resolveDataSource(agg)?.schema : undefined;
+    };
+    // …drizzle only: the mikroorm adapter maps its tables with no schema and
+    // creates them itself, so its raw INSERT stays unqualified (see
+    // `emitMikroSeeds`).
     if (usingMikro) emitMikroSeeds(merged, out);
-    else emitTypescriptSeeds(merged, out);
+    else emitTypescriptSeeds(merged, out, seedSchemaFor);
   }
   const hasSeeds = out.has("db/seed.ts");
   // decimal.js is conditional: only depended on when at least one
