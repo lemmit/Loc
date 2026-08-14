@@ -17,8 +17,9 @@
 // runtime).  `guarded` is the same predicate on every backend
 // (`operationIsGuarded` / `workflowIsGuarded`), so the three emitters stay
 // in lockstep.
-//   create  (POST /<aggs>)            → 400, 422  (domain / validation)
+//   create  (POST /<aggs>)            → 400, [403 if guarded], 422
 //   getById (GET  /<aggs>/{id})       → 404  (not found)
+//   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409
 //   operation (POST /<aggs>/{id}/op)  → 400, [403 if guarded], 404, 422
 //   find (optional return)            → 404
 //   workflow (POST /workflows/<wf>)   → 400, [403 if guarded], 422
@@ -100,15 +101,21 @@ export function errorStatuses(
     // 400 = a malformed/unparseable body; 422 = the wire-validation tier
     // (`errors[]`); `domain` = the domain floor.  The first two are framework
     // tiers, not remappable rungs, so they stay literal.
+    // A `requires` in the canonical `create` gates the POST BEFORE the factory
+    // runs (there is no instance to read yet, so the guard sees the principal
+    // only — `loom.lifecycle-guard-unreadable` enforces that) → 403 on denial.
     case "create":
-      return set(400, 422, domain);
+      return guarded ? set(400, forbidden, 422, domain) : set(400, 422, domain);
     case "getById":
       return [404];
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
     // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
     // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
+    // A `requires` in the canonical `destroy` gates it AFTER the row loads (the
+    // guard may read `this`), so the 403 lands between the two: an unreachable
+    // id still answers 404, matching the operation routes.
     case "destroy":
-      return set(404, referencedInUse);
+      return guarded ? set(forbidden, 404, referencedInUse) : set(404, referencedInUse);
     case "operation":
       return guarded ? set(400, forbidden, 404, 422, domain) : set(400, 404, 422, domain);
     case "workflow":

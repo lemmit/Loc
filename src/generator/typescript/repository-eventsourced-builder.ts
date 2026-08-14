@@ -18,7 +18,7 @@ import {
 } from "./repository-document-builder.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
-import { toWireMethod } from "./repository-wire-builder.js";
+import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced (`persistedAs: eventLog`) repository for the Hono/Drizzle
@@ -52,7 +52,9 @@ export function buildEventSourcedRepositoryFile(
   // aggregate's stream is the subset tagged `stream_type = "<Agg>"`.
   const table = `${lowerFirst(ctx.name)}Events`;
   const streamType = agg.name;
-  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+  // `toWireMasked(root, currentUser: User | null)` NAMES `User` — the mask is
+  // a second reason this file needs the import, as on the relational builder.
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
 
   // Every event type that can appear in this aggregate's stream — the
   // events its appliers fold.  Looked up in the context for field types.
@@ -162,6 +164,11 @@ export function buildEventSourcedRepositoryFile(
     ...findMethods.flatMap((m) => [m, ""]),
     toWireMethod(agg, ctx),
     "",
+    // `mask unless` response redaction — the routes call
+    // `repo.toWireMasked(row, __maskUser)` for every masked aggregate,
+    // event-sourced ones included: the mask applies to the FOLDED state's wire
+    // projection, not to the stream (pairwise F2).
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg), ""] : []),
     `}`,
     "",
     // Stream (de)serialisers — module-level switch over the event types

@@ -48,6 +48,7 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
+import { dotnetNotFoundThrow } from "./emit/common.js";
 import { dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
 import type { OpFragment } from "./emit/entity.js";
 import type { CsRenderContext } from "./render-expr.js";
@@ -2240,7 +2241,10 @@ function renderInstancesController(
           `        var __sid = id.ToString();\n` +
           `        await using var conn = await _db.OpenConnectionAsync();\n` +
           `        var __rows = (await conn.QueryAsync<${rec}>(new CommandDefinition("SELECT ${cols} FROM ${table} WHERE stream_type = @st AND stream_id = @sid ORDER BY version", new { st = "${st}", sid = __sid }))).ToList();\n` +
-          `        if (__rows.Count == 0) return NotFound();\n` +
+          // M-T6.31 — the shared carrier, not ASP.NET's own 404 (see
+          // `dotnetNotFoundThrow`): the instance show answered a different
+          // envelope from every other 404 in the same service.
+          `        if (__rows.Count == 0) ${dotnetNotFoundThrow(ns, T, "id")}\n` +
           `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
           `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
       } else {
@@ -2252,7 +2256,10 @@ function renderInstancesController(
         byIdBody =
           `        var __sid = id.ToString();\n` +
           `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();\n` +
-          `        if (__rows.Count == 0) return NotFound();\n` +
+          // M-T6.31 — the shared carrier, not ASP.NET's own 404 (see
+          // `dotnetNotFoundThrow`): the instance show answered a different
+          // envelope from every other 404 in the same service.
+          `        if (__rows.Count == 0) ${dotnetNotFoundThrow(ns, T, "id")}\n` +
           `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
           `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
       }
@@ -2284,7 +2291,7 @@ function renderInstancesController(
       byIdBody =
         `        await using var conn = await _db.OpenConnectionAsync();\n` +
         `        var __row = await conn.QuerySingleOrDefaultAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table} WHERE ${pkCol} = @id", new { id }));\n` +
-        `        if (__row is null) return NotFound();\n` +
+        `        if (__row is null) ${dotnetNotFoundThrow(ns, T, "id")}\n` +
         `        var x = ${mapFn}(__row);\n` +
         `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
     } else {
@@ -2294,7 +2301,7 @@ function renderInstancesController(
       byIdBody =
         `        var __key = new ${targetName}Id(id);\n` +
         `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
-        `        if (x is null) return NotFound();\n` +
+        `        if (x is null) ${dotnetNotFoundThrow(ns, T, "id")}\n` +
         `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
     }
     blocks.push(

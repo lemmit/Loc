@@ -69,6 +69,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection-groupby", title: "group by — grouped query-time projection (one row per group, key selects + per-group aggregates, GROUP BY/ORDER BY pushed to SQL)", doc: "language", backends: ALL },
   { id: "auth-oidc", title: "OIDC authentication — provider config + requires-guard", doc: "auth", backends: ALL },
   { id: "auth-simple", title: "dev-stub auth — user shape + requires-guard", doc: "auth", backends: ALL },
+  { id: "read-gates", title: "read-side requires gates — gated list read + folded and query-time projections", doc: "auth", backends: ALL },
   { id: "outbox", title: "durable channel / transactional outbox + relay", doc: "workflow", backends: ALL },
   {
     id: "channels-broker",
@@ -84,9 +85,24 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "policy-document", title: "`policy { allow deep / deny }` on a `shape: document` aggregate — the authz ladder applied IN-APP, where it cannot be a column predicate", doc: "auth", backends: IN_APP_DOCUMENT_FILTER, note: "vanilla (elixir) REFUSES this crossing by name (`loom.context-filter-unsupported`: capability filters are wired for relational aggregates only) — an honest, coded rejection.  dotnet is excluded for a GAP, not a rejection: it generates, but (a) the emitted project does not compile (CS0535 — the document repository never implements the `GetByIdForWriteAsync` write-scope port member the `allow` ladder adds), and (b) a `shape: document` aggregate gets no EF `HasQueryFilter` at all, with or without a policy, so a `tenantOwned` document aggregate reads unfiltered across tenants.  Both are silent; declaring dotnet here would make this fixture a false coverage claim.  See the F1 PR." },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
+  {
+    id: "vo-field-default",
+    title:
+      "VALUE-OBJECT-typed field default — the wire boundary renders a non-scalar default differently from a scalar one",
+    doc: "language",
+    backends: ALL,
+    note: "compile-tier by necessity: hono COMPILES the defect by structural typing, so only the strict backends (python mypy --strict, .NET) can see it",
+  },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
   { id: "extern-handlers", title: "extern commandHandler / queryHandler — bodyless, scaffold-once user impl", backends: ALL },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },
+  {
+    id: "seed-values",
+    title: "seed data read back — the seeder's rows through a collection read, and the opt-in dataset gate",
+    doc: "language",
+    backends: ALL,
+    note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it is held off the elixir behavioural leg — which emits no seeder at all (B19 / M-T6.37) — via BEHAVIOURAL_SKIP, while `seeding` keeps its CRUD/FK/404 round-trip armed on all five. `backends` stays ALL because GENERATION (what this field gates) is clean everywhere, including elixir; only the boot lacks rows.",
+  },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
   {
     id: "api-call",
@@ -125,10 +141,25 @@ export const CORPUS: readonly CorpusFeature[] = [
     note: "the CROSSING is the point: an audited op renders the masked projection twice into one method body, which is where a fixed principal-variable name collides (.NET CS0128)",
   },
   {
+    id: "lifecycle-guard",
+    title:
+      "lifecycle authorization gate — `requires` in the canonical `create` (principal-only, pre-construction) and `destroy` (principal + `this`, post-load)",
+    doc: "auth",
+    backends: ALL,
+    note: "the two halves render in DIFFERENT places — a create guard has no `this` yet, a destroy guard reads the row the caller already loaded; `Crate` carries the OTHER two shapes (an ungated create as the control, and a principal-ONLY destroy guard that leaves the loaded row unread)",
+  },
+  {
     id: "criterion-filter",
     title: "reusable criterion (criterion.md) used as `filter <Criterion>`",
     doc: "criterion",
     backends: ALL,
+  },
+  {
+    id: "prefix-filter",
+    title: "`startsWith` prefix-match filter operator — inline find + criterion filter",
+    doc: "stdlib",
+    backends: ALL,
+    note: "the first bool-returning QUERYABLE intrinsic: it stands alone in predicate position, where a scalar intrinsic only ever appears as a comparison operand",
   },
   {
     id: "domain-services",

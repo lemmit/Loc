@@ -14,9 +14,12 @@ import type {
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
 import {
+  lifecycleGates,
+  lifecycleGatesUseCurrentUser,
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
+  type RequiresStmtIR,
 } from "../../../ir/util/op-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -187,10 +190,43 @@ export function renderJavaService(
         `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
+  // --- the canonical create / destroy authorization gate ----------------------
+  // It lands in the SERVICE for the same reason the operation gate does
+  // (op-gates.ts): the create gate belongs beside the factory call, and the
+  // destroy gate needs the aggregate the service loads.  The controller is a
+  // thin dispatch that holds neither.
+  const createGates = lifecycleGates(agg.canonicalCreate);
+  const destroyGates = lifecycleGates(agg.canonicalDestroy);
+  if (createGates.length > 0 || destroyGates.length > 0) {
+    imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);
+  }
+  /** One line per lifecycle `requires`.  `thisName` is undefined for a create
+   *  (no instance exists yet — the guard reads the principal only) and the
+   *  loaded local for a destroy.  The gate's own expression imports are
+   *  collected here: this file emits it, so this file owns them (a tsc-green
+   *  emitter can still emit Java that doesn't compile). */
+  const lifecycleGateLines = (
+    gates: readonly RequiresStmtIR[],
+    thisName?: string,
+  ): readonly string[] =>
+    gates.map((g) => {
+      collectJavaExprImports(g.expr, imports);
+      // No `thisName` for a create: the guard reads the principal only, so
+      // there is nothing to name the (nonexistent) receiver after.
+      return `        if (!(${renderJavaExpr(
+        g.expr,
+        thisName ? { thisName, accessorProps: true } : undefined,
+      )})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${g.source}`)});`;
+    });
   const createLines = emitsRestCreate(agg)
     ? [
         `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
-        createDefaultUsesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        createDefaultUsesUser || lifecycleGatesUseCurrentUser(agg.canonicalCreate)
+          ? `        var currentUser = currentUserAccessor.user();`
+          : null,
+        // BEFORE the factory: a denied create constructs nothing, saves
+        // nothing, and stages no audit row.
+        ...lifecycleGateLines(createGates),
         ...createLets,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
         `        repository.save(aggregate);`,
@@ -361,7 +397,15 @@ export function renderJavaService(
   // system even when no operation otherwise uses the current user, so the
   // accessor must be injected whenever audit + auth are both present — not only
   // when `anyOpUsesUser`, or the audit call references an uninjected field.
-  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed) || createDefaultUsesUser;
+  const needsUserAccessor =
+    anyOpUsesUser ||
+    (anyAudited && !!ctx.authed) ||
+    createDefaultUsesUser ||
+    // A canonical create/destroy gate reading `currentUser` binds it off the
+    // accessor, so the accessor must be injected — otherwise the emitted method
+    // references an uninjected field.
+    lifecycleGatesUseCurrentUser(agg.canonicalCreate) ||
+    lifecycleGatesUseCurrentUser(agg.canonicalDestroy);
   // Optimistic concurrency (`versioned`): every public mutation threads the
   // client's expected version from the `If-Match` request header (think-time
   // CAS).  When supplied and it disagrees with the freshly-loaded aggregate's
@@ -491,6 +535,13 @@ export function renderJavaService(
       ? [
           `    public void destroy${agg.name}(${idClass} id) {`,
           `        var aggregate = repository.getById(id);`,
+          // AFTER the load (the gate may read the row) and BEFORE the audit row
+          // is staged, so a denied delete records nothing.  `aggregate` is bound
+          // regardless of whether the gate reads it — the delete needs it.
+          ...(lifecycleGatesUseCurrentUser(agg.canonicalDestroy)
+            ? [`        var currentUser = currentUserAccessor.user();`]
+            : []),
+          ...lifecycleGateLines(destroyGates, "aggregate"),
           ...(auditDestroy
             ? [
                 `        var __before = ${agg.name}Response.from(aggregate);`,

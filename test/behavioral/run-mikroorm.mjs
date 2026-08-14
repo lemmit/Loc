@@ -88,24 +88,19 @@ const MIKRO_SKIP = {
   // is supported here; what skips it is the sibling broadcast channel below.)
   //
   // --- M-T6.23: features the adapter never emitted, now honest errors ---------
-  // `channels-broker` is a `loom.mikroorm-unsupported` ERROR as of M-T6.23, so
-  // forcing the case onto mikroorm no longer generates — it fails validation.
-  // Before the gate landed it booted and PASSED here with the feature silently
-  // absent: the api-tier assertions are satisfied by the synchronous in-process
-  // dispatch that survives on this adapter, so a missing broker driver / outbox
-  // relay was invisible to the run.  That is what made them hollow cells rather
-  // than coverage.  Removing an entry is the re-arm once the emitter lands —
-  // which is what happened to the `outbox` case (slice 1: the adapter emits the
-  // `LoomOutboxRow` + relay over the EntityManager, so it RUNS here again, and
-  // this time the relay it exercises actually exists).
+  // The `outbox` (slice 1) and `channels-broker` (slice 2) entries are GONE:
+  // both emitters landed, so neither is a gap to skip any more.  Removing an
+  // entry is the re-arm — and for those two it was doubly warranted, since the
+  // register had been claiming a checked gap that this runner never even
+  // collected (neither fixture carries a behavioural block; see the ratchet
+  // below).  The broker's runtime home is `npm run test:channels-mikroorm`,
+  // which provisions a real broker — something no behavioural leg does.
   //
   // The `projection` / `saga` / `eventsourced-workflow` cases are deliberately
   // NOT here: their `delivery: broadcast` channel is only missing the SSE wire
   // (a WARNING, since no frontend consumes it in these fixtures), while the
   // fold/saga routing they actually assert rides the in-process dispatcher and
   // works on this adapter.  They keep booting here.
-  "channels-broker":
-    "mikroorm emits no http/channels.ts (broker driver/producer tee/consumer loop) — M-T6.23",
   // Same class, found by the first runtime callers for these two fixtures
   // (#2468): the adapter emits no QUERY-time projection reads, and — unlike
   // the silent gaps above — `loom.mikroorm-unsupported` already says so as a
@@ -118,6 +113,41 @@ const MIKRO_SKIP = {
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
   "projection-groupby":
     "mikroorm emits no query-time projection reads (`loom.mikroorm-unsupported` refuses to generate)",
+  // Same class again, and the most honest entry in this map: the narrowing is
+  // DECLARED in the adapter's own capability descriptor.  `MIKROORM_SUBSET`
+  // (`src/ir/util/find-predicate-capability.ts`) lowers only comparisons, bare
+  // boolean columns, unary `!` and `&&`/`||` of them — no scalar intrinsic at
+  // all — so a `startsWith` predicate is refused at validation with
+  // `loom.find-predicate-unsupported` naming the shape and the subset.  Nothing
+  // is hidden by skipping: the fixture's whole point is a queryable intrinsic,
+  // and this adapter says up front it cannot lower one.  Widening the subset
+  // belongs to the remaining M-T6.23 mikroorm-emitter slices — slice 1 (#2516)
+  // landed the outbox/relay and did NOT touch the predicate lowerer — so delete
+  // this entry when `whereToMikroFilter` grows an intrinsic arm (and drop the
+  // `MIKROORM_SUBSET` narrowing that declares its absence in the same change).
+  "prefix-filter":
+    "mikroorm lowers no scalar intrinsic in a find/filter predicate — `MIKROORM_SUBSET` declares the narrowing and `loom.find-predicate-unsupported` refuses to generate (widen it in M-T6.23)",
+  // A CAPABILITY BOUNDARY, not a gap — and the distinction is the reason this
+  // entry reads differently from the four above.  `policy { deny [write] on X }`
+  // lowers the always-false sentinel into the aggregate's `filter` capability
+  // predicates, and this adapter's find-predicate subset (comparisons, bare
+  // boolean columns, `!`, `&&`/`||` of those) cannot lower the `authz-filter`
+  // term — so `loom.find-predicate-unsupported` REFUSES to generate, naming the
+  // two read-denied aggregates and telling the author to pick
+  // `drizzle`/`efcore`.  Nothing is silently absent, and nothing boots wrong:
+  // the case cannot be built here at all.
+  //
+  // Surfaced by #2517 giving the fixture its first `test e2e` block, which is
+  // what makes this leg collect it — the rejection itself predates the block.
+  // The write-denied `Account` is NOT named by the error (its sentinel becomes
+  // the write-scope load, not a read filter), so only the READ-deny form trips
+  // the subset.
+  //
+  // Deleting this entry is what re-arms the case, and the work behind it is a
+  // twin of M-T6.29 (which landed `deny` on `persistence: dapper`, #2492 — that
+  // adapter generates this fixture fine today).  Recorded, not built here.
+  "policy-deny":
+    "mikroorm's find-predicate subset cannot lower the deny `authz-filter` term — `loom.find-predicate-unsupported` refuses to generate (twin of M-T6.29, which did this for dapper)",
 };
 
 /** Inject a `persistence: mikroorm` realization clause onto the `platform: node`

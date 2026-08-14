@@ -1,6 +1,8 @@
 # M-T3.16 — the canonical `create` / `destroy` body: what is left, and in what order
 
-> **STATUS: PLAN.** Written after #2446 landed (the honest gap + the check) and #2450 was pulled back to draft (`[needs redesign]`). Every claim below is code-verified against `main` @ `25f7f78`; this repo's statuses rot, so **re-verify before picking anything up.**
+> **STATUS: STEPS 2, 3 and 5 LANDED** in [#2519](https://github.com/lemmit/Loc/pull/2519) — the gate is emitted and enforced on all five backends, an ES lifecycle guard is refused by name, and the enforcement gate is mutation-proven 10/10 (all four #2450 defects included). What remains is step 4 (the VO wire default, [#2509](https://github.com/lemmit/Loc/pull/2509)) and step 6 (the follow-ups, retriaged in §5 below). The body below is the ORIGINAL plan, kept as written; the sequencing table records what each step became.
+>
+> Written after #2446 landed (the honest gap + the check) and #2450 was pulled back to draft (`[needs redesign]`). Every claim below is code-verified against `main` @ `25f7f78`; this repo's statuses rot, so **re-verify before picking anything up.**
 
 ---
 
@@ -78,7 +80,7 @@ From an adversarial review of the withdrawn emission. Full detail on #2450; this
 
 ### 3.4 Scope gap, unowned
 
-- **G1** A **named** `create open(...)` / `destroy` on a state-based aggregate is dropped just as hard, and no check looks at it — `validateLifecycleBodyDropped` reads only `canonicalCreate` / `canonicalDestroy`. `ddd parse` reports `0 error(s)`; the emitted output has **no POST route at all** and a factory synthesized from the field set. Same bug family, same silence, and the diagnostic's name reads as though it covers this.
+- **G1** ✅ **closed by #2532** (`loom.named-lifecycle-dropped`). A **named** `create open(...)` / `destroy` on a state-based aggregate is dropped just as hard, and no check looked at it — `validateLifecycleBodyDropped` reads only `canonicalCreate` / `canonicalDestroy`. Re-measured on `main` @ `c8185c2` before the fix: `ddd parse` reported `0 error(s)`, and the emitted API carried **two GET routes, no POST and no DELETE** with the factory synthesized from the field set. Which action each backend renders was then read off the five emitters rather than assumed — an event-sourced create is `agg.creates[0]` **by index** (so a named `create open(...)` on an event stream *is* emitted, and every named create in this repo's `.ddd` corpus is exactly that), everything else is the canonical action. The probe also found that a named lifecycle makes two elixir artifacts appear carrying none of its body: a dead `change_<name>` changeset, and — via a `destroys.length > 0` gate, the last survivor of the `destroys.length > 0` vs `canonicalDestroy` divergence the route-surface unification removed elsewhere — the `destroy_<agg>!` DestroyForm seam, which hard-deletes with the author's `requires` gone. Refusing the declaration makes both unreachable, so the check is the whole fix; *rendering* named lifecycle actions as real commands remains unowned.
 
 ---
 
@@ -97,14 +99,16 @@ Two consequences:
 
 Ordered so that nothing lands on an unchecked assumption, and so each step is independently revertible.
 
-| step | item | why here |
-|---|---|---|
-| **1** | #2487 — the readable-surface contract | In flight. Everything downstream assumes it. |
-| **2** | **A gate that can fail** (B2) | Polarity probes *and* a destroy ordering probe (deny precedes the delete, not merely follows the load). Mutation-prove it against all four seeded defects from #2450 **before** writing any emission. |
-| **3** | S2 — reject an ES lifecycle guard | Cheap, honest, removes a false premise the design would otherwise inherit. |
-| **4** | §2 — the VO wire default | Independent of the rest; unblocks nothing but is a live `main` defect. Can run in parallel by a different agent. |
-| **5** | The emission, one backend per PR | Elixir **in the context** (S1), the rest at the route through `op-gates.ts`. Declaration flips in `api-surface.ts` with the last one, or the derivation publishes a 403 nobody answers. |
-| **6** | C1–C4, G1, S3 | Follow-ups; each small and independently gateable. |
+| step | item | why here | outcome |
+|---|---|---|---|
+| **1** | #2487 — the readable-surface contract | In flight. Everything downstream assumes it. | #2487, ready; #2519 is stacked on it |
+| **2** | **A gate that can fail** (B2) | Polarity probes *and* a destroy ordering probe (deny precedes the delete, not merely follows the load). Mutation-prove it against all four seeded defects from #2450 **before** writing any emission. | **DONE** (#2519) — `test/generator/lifecycle-guard-render.test.ts`: each gate line pinned BYTE-EXACT (polarity + receiver + `detail` in one assertion) + index-ordering probes. 10 seeded defects, 10 caught |
+| **3** | S2 — reject an ES lifecycle guard | Cheap, honest, removes a false premise the design would otherwise inherit. | **DONE** (#2519) — `loom.lifecycle-guard-event-sourced` |
+| **4** | §2 — the VO wire default | Independent of the rest; unblocks nothing but is a live `main` defect. Can run in parallel by a different agent. | in flight, #2509 |
+| **5** | The emission, one backend per PR | Elixir **in the context** (S1), the rest at the route through `op-gates.ts`. Declaration flips in `api-surface.ts` with the last one, or the derivation publishes a 403 nobody answers. | **DONE** (#2519), all five in ONE PR — see the note below |
+| **6** | C1–C4, G1, S3 | Follow-ups; each small and independently gateable. | C1 + C3 closed by #2519; G1, S3, C2 and a golden for a remapped `Forbidden` remain |
+
+**Why the emission landed as ONE PR rather than one per backend.** The per-backend split is the right revert granularity for an ADDITIVE change, and this one is not: the validator arm and the rendering have to flip together. `droppedStmtReason("requires")` is IR-level and backend-blind, so keeping it while one backend renders makes the new emitter code unreachable from any valid source, and dropping it early leaves the other four routes open again — `main` is dishonest in one direction or the other for as long as the split lasts. The DECLARATION half has the same property in the other direction: it is now one shared-table edit that moves all five backends' OpenAPI at once, so it cannot be staged per backend either.
 
 **Steps 2 and 4 are parallelisable.** Steps 3 and 5 are not — 5 depends on 1, 2, 3.
 
@@ -124,3 +128,90 @@ Two corollaries, both earned the hard way in this track:
 
 - **A green compile tier says nothing about the other four.** `build-generated-ts` was green while Python and .NET could not compile the same fixture — TypeScript's *structural* typing makes it the weakest oracle for wire/domain confusion, not the strongest. Java and Python are the strict ones; check those first.
 - **A check that never reaches the thing it names is indistinguishable from no check** (`experience_gathered.md` §59/§63). #2450's enforcement gate deleted whole gates and passed; inverting a gate's polarity also passed. The mutation must be the *plausible* defect, not the convenient one.
+
+---
+
+# Appendix A — implementing the two deferred items
+
+The two pieces §3.2 and §2 refused to fold into the emission, worked out to slices. Both are independently landable; **A2 needs nothing from the rest of this mission** and can run in parallel with a different owner.
+
+## A1 — Elixir: move the lifecycle gate into the CONTEXT (S1)
+
+### A1.1 Why the controller is the wrong home
+
+The withdrawn #2450 gated `def create` / `def delete` in `<App>Web.<Agg>Controller`. That covers the REST door and nothing else. Two other callers reach the same write:
+
+| caller | call | emitter |
+|---|---|---|
+| scaffolded LiveView new-form | `<App>.<Ctx>.create_<agg>(params)` | `src/generator/elixir/liveview-emit.ts` |
+| `DestroyForm` button | `<App>.<Ctx>.destroy_<agg>!(id)` | `src/generator/elixir/vanilla/context-emit.ts` (`destroy_<agg>!/1`, documented as a deliberately separate path in `rest-surface.ts`) |
+
+Phoenix is the **only** backend whose frontend runs in-process, so it is the only one where a route-level gate has a second front door — and it ships LiveView pages by default. Every other backend's frontend is a separate bundle that can only arrive over HTTP.
+
+**The context function is the narrowest point all three callers pass through.** That is the correct home, and it makes the Elixir placement *converge with*, not diverge from, the other four — each backend gates at its own narrowest chokepoint (Hono/FastAPI: the route; .NET: the Mediator handler; Java: the service; Elixir: the context).
+
+### A1.2 The principal is available in both processes — but NOT by the same means
+
+This is the part that decides the design, and it is easy to get wrong.
+
+- REST: the Auth **plug** assigns `conn.assigns.current_user`, and (only when `hasFieldMask`) also `Process.put(:loom_current_user, user)` — `src/generator/elixir/auth-emit.ts:440`.
+- LiveView: an **`on_mount` hook** assigns `socket.assigns.current_user` — `src/generator/elixir/auth-emit.ts:1086`.
+
+**The process dictionary is not a shared channel between them.** The plug runs in the HTTP request process; a LiveView is a separate socket process. `Process.get(:loom_current_user)` is `nil` inside a LiveView event handler, so a context gate reading the ambient principal would **fail closed on every LiveView write** — safe, but it silently breaks the default-scaffolded UI, which is a worse outcome than the bug being fixed.
+
+**Decision: thread `current_user` as an explicit context-function argument.** It already is the local precedent — principal-filtered context reads carry `current_user \\ nil` and both callers pass it (`api-emit.ts` `getActor`, `liveview-emit.ts:1063` `Map.get(socket.assigns, :current_user)`). No ambient state, one spelling, works in both processes.
+
+### A1.3 Slices
+
+1. **Context write seam.** `create_<agg>` / `delete_<agg>` are `defdelegate`s to the repository today (`context-emit.ts`), so there is no body to gate. Promote a guarded aggregate's pair to real `def`s that run the gate then delegate. Unguarded aggregates keep the `defdelegate` — byte-identical.
+2. **Thread the principal.** Signature `create_<agg>(attrs, current_user \\ nil)` / `destroy_<agg>!(id, current_user \\ nil)`, matching the read side. Denial → `{:error, {:forbidden, detail}}`, the tuple the controller already maps to 403 (`api-emit.ts` `denialArms`).
+3. **Update all three callers** — controller, LiveView new-form, `DestroyForm` handler.
+4. **Delete the controller wrapper** (`__create_authorized` / `__delete_authorized`). It becomes dead once the context gates, and leaving both would be two spellings of one gate.
+5. **C1 falls out here.** The unused-`record` warning that broke `--warnings-as-errors` was an artifact of the controller wrapper's `{:ok, record}` binding; a context gate that reads the row only when the guard does has nothing to bind.
+
+### A1.4 Gate
+
+A fixture with **`ui … with scaffold` + a guarded create + a guarded destroy**, asserting the LiveView and the controller both reach a gated context function — the current corpus fixture has no `ui`, which is exactly why the second front door was invisible. Plus the two destroy shapes (principal-only and row-reading), since C1 only reproduces on the first.
+
+Mutation-prove by **removing the gate from the context while leaving the controller wrapper in place**: the REST assertion must still pass and the LiveView one must fail. A gate that cannot tell those apart is the gate #2450 shipped.
+
+## A2 — the value-object wire default (§2)
+
+### A2.1 The defect in one line
+
+A field default is rendered by the **domain** expression renderer into a slot typed as the **wire** DTO.
+
+| backend | site | emitted | verdict |
+|---|---|---|---|
+| Python | `src/generator/python/routes-builder.ts:663` — `if (defaultExpr) return \`${base} = ${renderPyExpr(defaultExpr)}\`` | `total: MoneyModel = Money(0, "USD")` | `mypy --strict` error |
+| .NET | request-record emission (`Application/<Aggs>/Requests/`) | `new Money(...)` in a `MoneyRequest` slot | CS0246 — the domain type is not in scope |
+| Hono | `routes-builder.ts:508–535`, the `.default(...)` after the `.min/.max` chain | `MoneySchema.default(new Money(0, "USD"))` | **compiles by structural typing** |
+| Java | coalesces on the DOMAIN side in the factory (`request.total() != null ? toMoney(...) : new Money(...)`), so no wire slot takes a domain value | green on the same fixture, same CI run | likely unaffected — confirm with the fixture |
+| Elixir | no separate wire DTO | — | likely unaffected — confirm |
+
+### A2.2 The fix
+
+A default that lands in a **wire** schema must be rendered in the **wire** shape:
+
+```
+total: MoneyModel = MoneyModel(amount=0, currency="USD")     # python
+total: MoneySchema.default({ amount: 0, currency: "USD" })   # hono — plain object, not a class
+Total = new MoneyRequest(0, "USD")                           # .NET
+```
+
+The right shape is a small shared predicate + per-backend renderer, next to `isServerSourcedDefault` in `src/generator/_frontend/server-default.ts` — that file already owns "how does a field default behave at the wire boundary", and this is the same question for a non-scalar. The VO's wire form is already canonical in the IR (`wireShape`), so nothing new needs deriving.
+
+Note the **ordering constraint** the Hono comment at `routes-builder.ts:516` records: `.default(...)` must land after any `.min`/`.max` chain, because a `ZodDefault` has no `.min`. A wire-shaped default does not change that, but a careless refactor of the same block would.
+
+### A2.3 Slices
+
+1. Shared "render this default at the wire boundary" seam + the VO arm.
+2. Python, then .NET — the two that fail today, in that order (Python's `mypy --strict` gives the sharper message).
+3. Hono — currently compiles, so this is a *semantic* fix, not a build fix: it is putting a domain instance into a wire default and getting away with it structurally. Do it anyway; the next VO whose class shape diverges from its wire shape would break silently.
+4. Confirm Java and Elixir are genuinely unaffected rather than assumed so.
+
+### A2.4 Gate
+
+A **corpus fixture with a VO-typed field default**, on the compile tier. There is none today, which is the whole reason this survived — and it is why the interim state in the five `scaffold-handlers.ddd` fixtures is `total: Money` with no default rather than a re-added workaround.
+
+Run **Python and Java first**. Per §6, TypeScript's structural typing makes it the weakest oracle for exactly this confusion; a green `build-generated-ts` here means nothing.

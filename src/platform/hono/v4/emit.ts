@@ -372,6 +372,19 @@ export function generateTypeScript(
  * http/index.ts.  Loose top-level contexts (no enclosing system)
  * skip the auth path entirely.
  */
+/** Does this deployable OWN at least one timerSource?  Ownership is derived (the
+ *  subdomain's `migrationsOwner`), and it decides two things that must agree: the
+ *  `scheduler.ts` emit and — on mikroorm — the `loom_timer_runs` watermark
+ *  ENTITY, without which `updateSchema()` drops the table on the second boot.
+ *  Shared so the two cannot drift. */
+function ownsTimers(system: { deployable: DeployableIR; sys: SystemIR } | undefined): boolean {
+  if (!system) return false;
+  return (system.sys.timerSources ?? []).some((ts) => {
+    const sub = system.sys.subdomains.find((s) => s.contexts.some((c) => c.name === ts.context));
+    return sub?.migrationsOwner === system.deployable.name;
+  });
+}
+
 export function generateTypeScriptForContexts(
   contexts: EnrichedBoundedContextIR[],
   pins: BackendPins,
@@ -423,10 +436,10 @@ export function generateTypeScriptForContexts(
   // because they widen the merged vocabulary below — a consumer deployable
   // need not HOST the channel's owning context to react to its events; the
   // wired binding is what carries the routing knowledge across deployables.
-  const channelBindings =
-    system && system.deployable.persistence !== "mikroorm"
-      ? brokerChannelBindings(system.deployable, system.sys)
-      : [];
+  // Persistence-neutral since M-T6.23 slice 2: `http/channels.ts` (the driver,
+  // producer tee and consumer loop) reads no `db` at all, and the outbox relay
+  // it publishes drained rows through now emits on both adapters (slice 1).
+  const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   // Durable broker-bound events (M-T4.4 slice 3): carried by a wired
   // `queue`/`work` (or future `log`) channel — the producer path for these
   // rides the outbox relay (design §5), never the inline tee.
@@ -579,6 +592,10 @@ export function generateTypeScriptForContexts(
           // `__loom_outbox` table, on the same condition the drizzle schema
           // emitter uses (any durable channel in the deployable).
           outbox: durableEventTypes(merged).size > 0,
+          // Timer-scheduler watermark Row — same condition as `scheduler.ts`
+          // below (this deployable OWNS a timerSource).  It has to be an entity
+          // on this adapter or `updateSchema()` drops it on the second boot.
+          timerRuns: ownsTimers(system),
         },
       ),
     );
@@ -1005,8 +1022,18 @@ export function generateTypeScriptForContexts(
   // EntityManager (raw INSERTs + the `__loom_seed` marker via
   // `em.getConnection().execute`); the domain-`create` path is identical.
   if (merged.seeds.length > 0) {
+    // The RAW seed rows are hand-built SQL, so they need the same dataSource
+    // schema `renderSchema` routes the drizzle tables into — `resolveDataSource`
+    // is the one already resolved above.
+    const seedSchemaFor = (aggName: string): string | undefined => {
+      const agg = merged.aggregates.find((a) => a.name === aggName);
+      return agg && resolveDataSource ? resolveDataSource(agg)?.schema : undefined;
+    };
+    // …drizzle only: the mikroorm adapter maps its tables with no schema and
+    // creates them itself, so its raw INSERT stays unqualified (see
+    // `emitMikroSeeds`).
     if (usingMikro) emitMikroSeeds(merged, out);
-    else emitTypescriptSeeds(merged, out);
+    else emitTypescriptSeeds(merged, out, seedSchemaFor);
   }
   const hasSeeds = out.has("db/seed.ts");
   // decimal.js is conditional: only depended on when at least one
@@ -1075,10 +1102,20 @@ export function generateTypeScriptForContexts(
         return sub?.migrationsOwner === system.deployable.name;
       })
     : [];
-  const hasTimers = ownedTimers.length > 0 && !usingMikro;
+  // Invariant the watermark entity relies on: `ownsTimers` (used above, before
+  // the entity file is rendered) must agree with this filter.
+  if (ownedTimers.length > 0 !== ownsTimers(system)) {
+    throw new Error(
+      "internal: timer ownership disagrees between the entity opt and the scheduler filter",
+    );
+  }
+  // Persistence-neutral since M-T6.23 slice 3: the scheduler's watermark table
+  // and advisory lock run on the EntityManager under `persistence: mikroorm`
+  // (`TimerStore` in scheduler-builder.ts).
+  const hasTimers = ownedTimers.length > 0;
   if (hasTimers) {
     const eventByName = new Map<string, EventIR>(merged.events.map((e) => [e.name, e]));
-    out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName));
+    out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName, usingMikro));
   }
 
   // Broker transport (channels.md; M-T4.4 slice 2).  A deployable that wires
@@ -1086,7 +1123,7 @@ export function generateTypeScriptForContexts(
   // module (ChannelTransport seam + ioredis driver + producer tee + consumer
   // loop); index.ts composes the tee into the dispatcher chain and starts the
   // consumers.  A deployable with no wired bindings stays byte-identical.
-  const hasChannels = channelBindings.length > 0 && !usingMikro;
+  const hasChannels = channelBindings.length > 0;
   if (hasChannels) {
     out.set("http/channels.ts", renderChannelsModule(channelBindings));
   }

@@ -117,7 +117,12 @@ describe("Dapper folded-projection read controller", () => {
     expect(src).toContain(
       'QuerySingleOrDefaultAsync<OrderBoardDbRow>(new CommandDefinition("SELECT order_ref, status, at FROM order_boards WHERE order_ref = @key", new { key }))',
     );
-    expect(src).toContain("if (__row is null) return NotFound();");
+    // M-T6.31 — raises the shared carrier (see the EF sibling); the Dapper leg
+    // carried the identical defect because the arm is in the shared emitter.
+    expect(src).toMatch(
+      /if \(__row is null\) throw new global::\w+\.Domain\.Common\.AggregateNotFoundException\(\$"OrderBoard \{key\} not found"\);/,
+    );
+    expect(src).not.toContain("NotFound()");
 
     // The read-model row POCO + the Dapper fold store still land (unchanged).
     expect(files.has("d/Infrastructure/Persistence/Projections/OrderBoardRow.cs")).toBe(true);

@@ -28,6 +28,7 @@ import { allContexts } from "../../types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { aggregateIsEventSourced, resolveDataSourceConfig } from "../../util/resolve-datasource.js";
 import {
+  walkExprDeep,
   walkStmtExprsDeep as walkExprsInStmt,
   walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
 } from "../../util/walk.js";
@@ -1641,8 +1642,17 @@ function flagStmt(
 function droppedStmtReason(kind: StmtIR["kind"], label: "create" | "destroy"): string | null {
   const subject = label === "create" ? "construction" : "deletion";
   switch (kind) {
+    // `requires` is RENDERED now (M-T3.16 step 5) — every backend evaluates a
+    // canonical create/destroy gate at its own chokepoint (Hono/FastAPI route,
+    // .NET command handler, Java service, Phoenix CONTEXT) and denies with 403,
+    // which `errorStatuses(<kind>, guarded)` declares.  What the guard may READ
+    // is enforced separately by `loom.lifecycle-guard-unreadable` below, and an
+    // EVENT-SOURCED lifecycle guard is refused by
+    // `loom.lifecycle-guard-event-sourced` — so the only `requires` that
+    // reaches here is one an emitter actually renders.  Reporting it as dropped
+    // would make the emitted gate unreachable from any valid source.
     case "requires":
-      return "the authorization gate never runs — the route is left OPEN";
+      return null;
     case "precondition":
       return `the guard never runs — ${subject} is left unchecked`;
     case "emit":
@@ -1725,6 +1735,106 @@ function assignEffectReproduced(s: StmtIR, agg: AggregateIR): boolean {
   return dflt !== undefined && sameEffectValue(dflt, s.value);
 }
 
+/**
+ * What a lifecycle `requires` may read, per action — the contract that makes
+ * gating of a canonical `create` / `destroy` possible at all.
+ *
+ * It is stated HERE, as a check, because the previous shape of this work
+ * ASSUMED it and shipped a regression: `create() { requires quantity == 0 }`
+ * parses, lowers to a `this-prop` ref, and would emit an unbound receiver on
+ * every backend (`this._quantity` in a module-scope handler, `cannot find
+ * symbol` on Java, CS1061 on .NET, `F821 Undefined name self` on Python).  A
+ * contract nothing enforces is a comment.
+ *
+ *   create  — `currentUser` only.  There is no instance until the factory
+ *             runs, and the emitted `POST /<aggs>` takes the FIELD-DERIVED
+ *             create input rather than the declared parameter list, so a
+ *             `param` ref has no wire slot to read either.
+ *   destroy — `currentUser` plus `this`.  The caller already loads the row for
+ *             its 404 probe, so the loaded aggregate is a legitimate receiver.
+ *             `param` is still out: a DELETE carries no body.
+ *
+ * IT REJECTS NODES, NOT JUST REFS — and that distinction is the whole bug the
+ * first version had.  "Reads the instance" has FOUR spellings in this grammar
+ * and only one of them lowers to a `ref`:
+ *
+ *   requires quantity == 0        → `ref` (`refKind: "this-prop"`)
+ *   requires this.quantity == 0   → `member` over `{kind: "this"}` — NO ref node
+ *   requires isEmpty()            → `call` (`callKind: "function"`)  — NO ref node
+ *   requires this.isEmpty()       → `method-call` over `{kind: "this"}`
+ *
+ * A `refKind`-only predicate returns empty for three of the four, and each of
+ * those three renders the same unbound receiver the check exists to prevent:
+ * `{kind:"this"}` renders as `ctx.thisName` (`_expr/target.ts`), and a
+ * `function` / `private-operation` call renders `this.<fn>(…)` on every backend
+ * even though the IR carries no `this` node to notice.  `refKind: "helper-fn"`
+ * was separately allowlisted while rendering `this.<fn>` too.  So the walk keys
+ * on the NODE, and the four spellings collapse to one rule: does this node read
+ * an instance that does not exist yet?
+ *
+ * Every one of them stays legal for `destroy`, where a receiver exists.
+ *
+ * `requires` answers "may this caller", not "is this input sane" — the latter
+ * is a `precondition` on a named `operation`.  Returns the offending SPELLINGS
+ * (`this`, `isEmpty()`, a ref name), so the diagnostic can name what it found
+ * rather than gesture at the clause.
+ */
+function lifecycleGuardIllegalReads(expr: ExprIR, label: "create" | "destroy"): string[] {
+  const bad: string[] = [];
+  // A `destroy` guard runs after the by-id load, so every instance-rooted
+  // spelling is fine there; only the refs with no binding at all are not.
+  const instanceIsBound = label === "destroy";
+  walkExprDeep(expr, (node) => {
+    switch (node.kind) {
+      // The explicit receiver (`this.quantity`, `this.isEmpty()`).  One rule for
+      // both, because `walkExprDeep` visits the receiver child of a `member` and
+      // a `method-call` alike.
+      case "this":
+        if (!instanceIsBound) bad.push("this");
+        return;
+      // The IMPLICIT receiver: an aggregate `function` or `private operation`
+      // called bare.  Rendered `this.<fn>(…)` / `<record>.<fn>(…)` by every
+      // backend, so it needs the instance exactly as much as a field read does.
+      // The other `CallKind`s are deliberately NOT here: a `value-object-ctor`
+      // renders `new Money(…)`, and `domain-service` / `resource-op` /
+      // `remote-api-op` / `repo-read` render a module- or class-qualified call —
+      // none of them touches the receiver, so none can be unbound.  (A guard
+      // doing IO is a different objection, not this one.)
+      case "call":
+        if (
+          !instanceIsBound &&
+          (node.callKind === "function" || node.callKind === "private-operation")
+        ) {
+          bad.push(`${node.name}()`);
+        }
+        return;
+      case "ref":
+        break;
+      default:
+        return;
+    }
+    switch (node.refKind) {
+      case "current-user":
+      case "enum-value":
+      case "unknown":
+        return;
+      // `helper-fn` joins the instance-rooted group: every backend renders it
+      // `this.<fn>` / `<record>.<fn>`, so allowlisting it was the same hole as
+      // the three spellings above, one node kind over.
+      case "helper-fn":
+      case "this-prop":
+      case "this-vo-prop":
+      case "this-derived":
+        if (instanceIsBound) return;
+        bad.push(node.name);
+        return;
+      default:
+        bad.push(node.name);
+    }
+  });
+  return [...new Set(bad)];
+}
+
 export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const agg of ctx.aggregates) {
     // Event-sourced CREATES are rendered — a different path (`agg.creates[0]`
@@ -1735,10 +1845,90 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
     // silently exempted the half it was never justified for.
     const esCreateRendered = aggregateIsEventSourced(agg);
 
+    // An EVENT-SOURCED lifecycle guard is refused rather than rendered.  The ES
+    // create body renders into the domain `_init`, and `_init` has no principal
+    // in scope — `currentUser` is a free identifier there, so the guard does not
+    // raise, it does not COMPILE (`cannot find symbol` / CS0103 / F821).  The
+    // route cannot take it over either: the ES create arm dispatches a command
+    // whose handler is the fold, so hoisting the gate out of `_init` is a
+    // different (and larger) change than the state-based emission.  Naming it is
+    // honest and cheap; the state-based form is the supported one.
+    if (esCreateRendered) {
+      for (const s of agg.canonicalCreate?.statements ?? []) {
+        if (s.kind !== "requires") continue;
+        diags.push({
+          severity: "error",
+          code: "loom.lifecycle-guard-event-sourced",
+          message: diagMessage("loom.lifecycle-guard-event-sourced", { agg: agg.name }),
+          source: `${ctx.name}/aggregate ${agg.name}.create`,
+        });
+      }
+    }
+
     for (const [label, action] of [
       ["create", agg.canonicalCreate],
       ["destroy", agg.canonicalDestroy],
     ] as const) {
+      // ── the guard's READABLE SURFACE ────────────────────────────────────
+      // Runs for EVERY lifecycle guard, event-sourced included.  It used to sit
+      // below the ES `continue` guarding the drop report, so an ES create's
+      // guard was never checked at all — and an ES create body IS rendered (into
+      // the domain `_init`), which makes it the one place where an unreadable
+      // guard reaches a compiler rather than a diagnostic.  The exemption below
+      // is about whether a body is DROPPED; it was never a statement about what
+      // a guard may read, and reusing it for both conflated two questions.
+      //
+      // WHICH LAYER OWNS THE ES CASE.  This check answers "what may a guard
+      // READ" for every lifecycle guard, ES included — that is why it now runs
+      // first and unconditionally.  A separate, stronger refusal
+      // (`loom.lifecycle-guard-event-sourced`, M-T3.16 step 3) answers a
+      // different question: "can this guard be ENFORCED at all", and for an
+      // event-sourced create the answer is no, because `_init` has no principal
+      // in scope.  Where both apply the ES refusal is the actionable one, so
+      // THIS arm stands down for an ES create — the refusal above already told
+      // the author the guard cannot run at all, and adding "…and it reads
+      // something the gate cannot see" to that is noise about a gate that will
+      // never exist.  One clause, one error, the more specific one.  (The
+      // contract check remains unconditional for every OTHER shape, which is
+      // what keeps the hole the review found closed: the exemption is now scoped
+      // to "a refusal already fired here", not to "this aggregate is ES".)
+      const esCreateRefused = esCreateRendered && label === "create";
+      for (const s of esCreateRefused ? [] : (action?.statements ?? [])) {
+        if (s.kind !== "requires") continue;
+        const illegal = lifecycleGuardIllegalReads(s.expr, label);
+        if (illegal.length === 0) continue;
+        // Two literal `diagMessage` keys, and two pushes rather than one
+        // with a conditional message: the catalog gate resolves the key
+        // STATICALLY, so both an interpolated key and a ternary around the
+        // call read to it as "no catalog use at all".
+        const refs = illegal.map((n) => `\`${n}\``).join(", ");
+        const source = `${ctx.name}/aggregate ${agg.name}.${label}`;
+        if (label === "create") {
+          diags.push({
+            severity: "error",
+            code: "loom.lifecycle-guard-unreadable",
+            message: diagMessage("loom.lifecycle-guard-unreadable#create", {
+              agg: agg.name,
+              refs,
+            }),
+            source,
+          });
+        } else {
+          diags.push({
+            severity: "error",
+            code: "loom.lifecycle-guard-unreadable",
+            message: diagMessage("loom.lifecycle-guard-unreadable#destroy", {
+              agg: agg.name,
+              refs,
+            }),
+            source,
+          });
+        }
+      }
+      // ── the DROPPED body ───────────────────────────────────────────────
+      // Event-sourced CREATES are rendered, so they are exempt HERE and only
+      // here.  (Their destroy is not rendered on any persistence shape, which is
+      // why the exemption scopes to the create arm.)
       if (label === "create" && esCreateRendered) continue;
       for (const s of action?.statements ?? []) {
         if (assignEffectReproduced(s, agg)) continue;
@@ -1755,6 +1945,74 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
             plural: plural(snake(agg.name)),
           }),
           source: `${ctx.name}/aggregate ${agg.name}.${label}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A NAMED `create` / `destroy` is dropped WHOLE — not just its body.
+//
+// The check above reads `canonicalCreate` / `canonicalDestroy`, so it says
+// nothing here, while the loss is strictly larger: the canonical case at least
+// keeps a route and a factory (synthesized from the field set) and loses only
+// the braces; a named action reaches no emitter at all.  Measured on a
+// state-based aggregate declaring `create open(...)` + `destroy close(...)`:
+// `ddd parse` reports 0 errors, and the emitted API carries two GET routes,
+// NO POST and NO DELETE.  The aggregate is not constructible over HTTP, and a
+// `requires` inside `open` never runs.
+//
+// Which lifecycle action each backend actually renders — read off the five
+// emitters, not assumed:
+//
+//   create   event-sourced → `agg.creates[0]`   (hono/python/java/dotnet/elixir
+//                                                all index [0]); else the
+//                                                CANONICAL create
+//   destroy  the CANONICAL destroy only (elixir additionally declines on an
+//            event-sourced aggregate)
+//
+// The event-sourced create arm therefore needs no exemption logic beyond
+// picking `creates[0]`: `loom.event-sourced-multiple-creates` already refuses
+// a second create there, so the single create IS `creates[0]` whether it is
+// named or not — which is why every named create in this repo's own `.ddd`
+// corpus (all of them event-sourced) keeps compiling.
+//
+// A named lifecycle action also makes two elixir artifacts appear that carry
+// none of its body — a `change_<name>` changeset (dead) and, via a
+// `destroys.length > 0` gate, the `destroy_<agg>!` DestroyForm seam, which
+// hard-deletes with the author's `requires` removed.  Refusing the declaration
+// makes both unreachable, which is the cheap half of the fix; rendering named
+// lifecycle actions as real commands is the expensive half and is not this.
+// ---------------------------------------------------------------------------
+
+export function validateNamedLifecycleDropped(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const agg of ctx.aggregates) {
+    // The one create an event-sourced aggregate renders is `creates[0]` — by
+    // INDEX, not by canonicality, so a named `create open(...)` on an event
+    // stream is emitted and must not be flagged.
+    const renderedCreate = aggregateIsEventSourced(agg)
+      ? (agg.creates?.[0] ?? null)
+      : (agg.canonicalCreate ?? null);
+
+    for (const [label, actions, rendered] of [
+      ["create", agg.creates ?? [], renderedCreate],
+      ["destroy", agg.destroys ?? [], agg.canonicalDestroy ?? null],
+    ] as const) {
+      for (const action of actions) {
+        if (action === rendered) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.named-lifecycle-dropped",
+          message: diagMessage("loom.named-lifecycle-dropped", {
+            agg: agg.name,
+            label,
+            name: action.name,
+          }),
+          source: `${ctx.name}/aggregate ${agg.name}.${label} ${action.name}`,
         });
       }
     }

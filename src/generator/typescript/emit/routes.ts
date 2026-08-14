@@ -1,9 +1,15 @@
 import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { isMaterializedProjection, isQueryTimeProjection } from "../../../ir/types/loom-ir.js";
+import {
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../../ir/util/aggregate-flags.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
+import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { API_BASE_PATH, AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono.js";
 
@@ -188,7 +194,7 @@ export function renderHttpIndex(
   // that the user supplied a verifier, and mount the middleware
   // after CORS but before any business route.
   const authImport = authRequired
-    ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";\nimport { authRoutes } from "../auth/handshake";`
+    ? `import { authMiddleware, registerRouteProbe } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";\nimport { authRoutes } from "../auth/handshake";`
     : null;
   // After the verifier assert, emit `auth_enabled` info so every boot's
   // log stream advertises whether auth is on for this deployable —
@@ -238,6 +244,102 @@ export function renderHttpIndex(
         `  });`,
       ].join("\n")
     : null;
+  // ── the root DOMAIN ladder (M-T6.28) ──────────────────────────────────
+  // The FLOOR every mounted sub-app inherits when it declares no `onError` of
+  // its own.  Same rungs, same statuses and same fault counters as the
+  // per-aggregate router's ladder (`routes-builder.ts`), resolved through the
+  // api's `httpStatus` override map so an override retargets the floor too;
+  // with no override the statuses collapse to 403 / 409 / 422 / 404 / 500.
+  //
+  // The `23505` and `ConcurrencyError` rungs are presence-gated exactly as they
+  // are per-router — on a declared `unique (…)` key and on `versioned` /
+  // event-sourced respectively — because only such a project can raise them
+  // (and `ConcurrencyError` is not even emitted into `domain/errors.ts`
+  // otherwise).
+  const rootForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  const rootDisallowedStatus = resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses);
+  const rootDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
+  const rootUniquenessStatus = resolveErrorStatus(
+    "UniquenessConflict",
+    ctx.structuralErrorStatuses,
+  );
+  const rootConcurrencyStatus = resolveErrorStatus(
+    "ConcurrencyConflict",
+    ctx.structuralErrorStatuses,
+  );
+  const rootNeedsConcurrency = aggregatesNeedConcurrency(ctx.aggregates);
+  const rootHasUniqueKeys = aggregatesHaveUniqueKeys(ctx.aggregates);
+  const rootProblemStatuses = new Set<number>([
+    rootForbiddenStatus,
+    404,
+    rootDomainStatus,
+    500,
+    rootDisallowedStatus,
+  ]);
+  if (rootHasUniqueKeys) rootProblemStatuses.add(rootUniquenessStatus);
+  if (rootNeedsConcurrency) rootProblemStatuses.add(rootConcurrencyStatus);
+  const rootProblemUnion = [...rootProblemStatuses].sort((a, b) => a - b).join(" | ");
+  const rootLadderErrorClasses = [
+    "AggregateNotFoundError",
+    ...(rootNeedsConcurrency ? ["ConcurrencyError"] : []),
+    "DisallowedError",
+    "DomainError",
+    "ExternHandlerError",
+    "ForbiddenError",
+  ];
+  const rootDomainLadder = [
+    // The request middleware mounts on THIS app (`app.use("*", …)`), so a fault
+    // from a mounted sub-app has a request id to correlate on — same read, same
+    // cast bridge as the sub-routers use.
+    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
+    `    const problem = (status: ${rootProblemUnion}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    "    if (err instanceof ForbiddenError) {",
+    `      ${renderHonoBaseLogCall("forbidden", `message: err.message, status: ${rootForbiddenStatus}`)}`,
+    '      recordDomainFault("forbidden");',
+    `      return problem(${rootForbiddenStatus}, ${JSON.stringify(problemTitle(rootForbiddenStatus))}, err.message);`,
+    "    }",
+    "    if (err instanceof DisallowedError) {",
+    `      ${renderHonoBaseLogCall("disallowed", `message: err.message, status: ${rootDisallowedStatus}`)}`,
+    '      recordDomainFault("disallowed");',
+    `      return problem(${rootDisallowedStatus}, "Disallowed", err.message);`,
+    "    }",
+    "    if (err instanceof DomainError) {",
+    `      ${renderHonoBaseLogCall("domainError", `message: err.message, status: ${rootDomainStatus}`)}`,
+    '      recordDomainFault("domain_error");',
+    `      return problem(${rootDomainStatus}, ${JSON.stringify(problemTitle(rootDomainStatus))}, err.message);`,
+    "    }",
+    "    if (err instanceof AggregateNotFoundError) {",
+    `      ${renderHonoBaseLogCall("notFound", "status: 404")}`,
+    '      recordDomainFault("not_found");',
+    '      return problem(404, "Not Found", err.message);',
+    "    }",
+    ...(rootHasUniqueKeys
+      ? [
+          // PG unique_violation, read through drizzle's wrapper exactly as the
+          // aggregate router reads it (SQLSTATE on `err` OR on `err.cause`).
+          `    if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23505")) {`,
+          `      ${renderHonoBaseLogCall("disallowed", `message: (err as { constraint?: string }).constraint ?? (err as { cause?: { constraint?: string } }).cause?.constraint ?? "unique_violation", status: ${rootUniquenessStatus}`)}`,
+          '      recordDomainFault("disallowed");',
+          `      return problem(${rootUniquenessStatus}, "Conflict", "A record with these values already exists.");`,
+          "    }",
+        ]
+      : []),
+    ...(rootNeedsConcurrency
+      ? [
+          "    if (err instanceof ConcurrencyError) {",
+          `      ${renderHonoBaseLogCall("conflict", `message: err.message, status: ${rootConcurrencyStatus}`)}`,
+          '      recordDomainFault("conflict");',
+          `      return problem(${rootConcurrencyStatus}, "Conflict", err.message);`,
+          "    }",
+        ]
+      : []),
+    "    if (err instanceof ExternHandlerError) {",
+    `      ${renderHonoBaseLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
+    // RS-28 — sanitized: the operator gets op + aggregate + the inner message on
+    // the log line; the wire gets the same "internal" every other 500 sends.
+    '      return problem(500, "Internal Server Error", "internal");',
+    "    }",
+  ];
   return (
     lines(
       "// Auto-generated.",
@@ -250,7 +352,12 @@ export function renderHttpIndex(
       'import { frameworkProblemBody } from "./problem-details";',
       usingMikro ? null : 'import { sql } from "drizzle-orm";',
       'import { requestIdMiddleware } from "../obs/request-id";',
-      'import { registry } from "../obs/metrics";',
+      // `recordDomainFault` joins `registry` here for the root DOMAIN ladder
+      // (M-T6.28): a fault answered by the floor must count exactly as the same
+      // fault answered by a sub-router, or the fault counters under-report by
+      // whichever router forgot its ladder.
+      'import { recordDomainFault, registry } from "../obs/metrics";',
+      `import { ${rootLadderErrorClasses.join(", ")} } from "../domain/errors";`,
       baseLoggerImport,
       authImport,
       ...aggregateImports,
@@ -373,9 +480,20 @@ export function renderHttpIndex(
       // 500.  That is a SECOND error contract on a wire that already
       // committed to `application/problem+json`, and a client cannot parse
       // both.  These two root handlers close it.  Registered on the parent
-      // app, so they run only for requests no sub-router claimed (Hono's
-      // `route()` wraps each mounted handler in that sub-app's own
-      // errorHandler, which therefore still wins for domain errors).
+      // app; a sub-app that declares its OWN `onError` still wins for its
+      // requests (hono's `route()` wraps each of that sub-app's handlers in it),
+      // so these answer (a) requests no sub-router claimed and (b) faults raised
+      // inside a sub-app that declared NO handler.
+      //
+      // (b) is why the root ladder below is not framework-only (M-T6.28).  Not
+      // every mounted router declares a ladder: `http/projections.ts` is built
+      // on a bare `new OpenAPIHono()` and `http/realtime.ts` likewise, so a
+      // DOMAIN fault raised there — the folded-projection show's own
+      // `AggregateNotFoundError`, most of all — inherited only the framework
+      // arms and answered **500 `"internal"`** where every other backend
+      // answered 404.  The floor therefore carries the same domain ladder the
+      // sub-routers do, and a per-router handler is a refinement rather than the
+      // only line of defence.
       "  const frameworkProblem = (",
       "    c: Context,",
       "    status: ContentfulStatusCode,",
@@ -417,6 +535,12 @@ export function renderHttpIndex(
       "    const probe = methodProbe;",
       "    return PROBE_METHODS.filter((m) => probe.match(m, path)[0].length > 0);",
       "  };",
+      // Route before authenticate (RFC 9110 §15.5.2/§15.5.4) — the auth
+      // middleware mounted above defers to this probe, so a path nothing serves
+      // answers 404 instead of challenging for credentials that could never
+      // make it resolve.  Installed here because this is where the router that
+      // can answer the question lives.
+      authRequired ? "  registerRouteProbe((m, p) => allowedFor(p).includes(m));" : null,
       "  app.notFound((c) => {",
       "    const allow = allowedFor(c.req.path).filter((m) => m !== c.req.method);",
       "    if (allow.length > 0) {",
@@ -430,9 +554,12 @@ export function renderHttpIndex(
       "    return frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`);",
       "  });",
       "  app.onError((err, c) => {",
+      ...rootDomainLadder,
       // HTTPException is what Hono itself throws for the faults it detects
       // (unreadable body, an aborted request); anything else reaching here is
       // a genuine server fault and must not put its message on the wire.
+      // LAST among the typed arms, exactly as in the per-router ladders, so no
+      // domain class it might subclass loses its own mapping.
       "    if (err instanceof HTTPException) {",
       "      return frameworkProblem(c, err.status as ContentfulStatusCode, err.message);",
       "    }",

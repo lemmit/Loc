@@ -20,7 +20,7 @@ import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { renderTsExpr } from "./render-expr.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
-import { toWireMethod } from "./repository-wire-builder.js";
+import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
 // Document-shaped (`shape: document`) repository for the Hono/Drizzle
@@ -48,7 +48,11 @@ export function buildDocumentRepositoryFile(
 ): string {
   const tableName = lowerFirst(plural(agg.name));
   const idVar = `Ids.${agg.name}Id`;
-  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+  // `toWireMasked(root, currentUser: User | null)` NAMES `User`, so the mask
+  // is a second reason this file needs the import — exactly as on the
+  // relational builder (repository-builder.ts).  Masking is a WIRE-PROJECTION
+  // concern, independent of the saving shape.
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
   // A principal-referencing (tenancy) capability filter evaluates the request
   // actor IN-APP over the rehydrated document (DEBT-02 Slice B): each read binds
   // `requireCurrentUser()` so the in-app predicate (`currentUser.tenantId`) can
@@ -166,6 +170,13 @@ export function buildDocumentRepositoryFile(
     ...findMethods.flatMap((m) => [m, ""]),
     toWireMethod(agg, ctx),
     "",
+    // `mask unless` response redaction.  The routes call
+    // `repo.toWireMasked(row, __maskUser)` for EVERY masked aggregate
+    // regardless of saving shape, so a document-shaped one must carry the
+    // method too (pairwise F2 — TS2339 without it).  It projects through
+    // `this.toWire(...)`, which the document repository already emits, so the
+    // shared builder needs nothing shape-specific.
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg), ""] : []),
     `}`,
     "",
     // Document (de)serialisers — module-level so they can recurse into

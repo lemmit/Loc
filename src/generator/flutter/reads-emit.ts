@@ -26,6 +26,7 @@ import { groupedProjectionNames, readableProjectionNames } from "../../ir/util/p
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
+import { isOfReadCall } from "../_walker/of-reads.js";
 import { bcByAggregateOf, isPagedQuery } from "../_walker/paged-query.js";
 import { dartType } from "./dart-types.js";
 
@@ -128,16 +129,15 @@ function exprChildren(e: ExprIR): ExprIR[] {
 
 /** Every READ-BEARING `of:` argument in a page body, in tree order.
  *
- *  `QueryView` is the general one; `Chart` (M-T1.3 Phase 4) carries the same
- *  kind of `of:` — a projection read — without being wrapped in one.  Its read
- *  has to be collected too, or a page whose only read is a chart imports
- *  `reads.dart` and watches a provider that the emitter never wrote: two
- *  `flutter analyze` errors (`uri_does_not_exist`, `undefined_identifier`), not
- *  a silent degradation. */
+ *  Which primitives those are is the REGISTRY's answer (`readsOf`), not a list
+ *  kept here — see `_walker/of-reads.ts`.  Miss one and a page whose only read
+ *  is that primitive imports `reads.dart` while watching a provider the emitter
+ *  never wrote: two `flutter analyze` errors (`uri_does_not_exist`,
+ *  `undefined_identifier`), not a silent degradation. */
 function queryViewOfArgs(body: ExprIR): ExprIR[] {
   const out: ExprIR[] = [];
   const walk = (e: ExprIR): void => {
-    if (e.kind === "call" && (e.name === "QueryView" || e.name === "Chart")) {
+    if (isOfReadCall(e)) {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
       if (idx >= 0 && e.args[idx]) out.push(e.args[idx]!);

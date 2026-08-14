@@ -42,6 +42,7 @@ import { collectUiMessages } from "../_walker/i18n-extract.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
+import { renderAngularChartRuntime } from "./chart-runtime.js";
 import { emitAngularUserComponents } from "./components-emit.js";
 import {
   renderAngularExternComponentProps,
@@ -269,8 +270,16 @@ export function generateAngularForContexts(
       i18nEnabled,
     },
   );
+  // The chart runtime is emitted once per app, the first time ANY walked
+  // source renders `<loom-chart` — a page, a hoisted sibling, or a user
+  // `component`.  Keyed on the emitted text rather than on `uiUsesChart(ui)`
+  // because a deferred shape renders a stub that drops the chart (and because
+  // `options.topLevelComponents` are not on `ui`), so the flag has to follow
+  // what was actually written, not what the IR declares.
+  let chartRendered = false;
   for (const e of walkedComponents.emitted) {
     out.set(e.path, e.source);
+    if (rendersChart(e.source)) chartRendered = true;
     if (ui) {
       options.sourcemap?.file(
         e.path,
@@ -347,10 +356,16 @@ export function generateAngularForContexts(
     const pagePath = `src/app/pages/${slug}.component.ts`;
     out.set(pagePath, content);
     for (const f of hoistedComponentFiles) out.set(f.path, f.content);
+    if (rendersChart(content) || hoistedComponentFiles.some((f) => rendersChart(f.content))) {
+      chartRendered = true;
+    }
     // `ui` is guaranteed defined here: `pages` (the loop source) is derived
     // from `ui?.pages ?? []`, so a non-empty iteration implies `ui` exists.
     options.sourcemap?.file(pagePath, content, page.origin, pageConstructId(ui!.name, page));
     routeDescs.push({ route: page.route!, component: pageComponentName(page, pageCtx), slug });
+  }
+  if (chartRendered) {
+    out.set("src/app/components/loom-chart.component.ts", renderAngularChartRuntime());
   }
 
   // Store modules (named-actions-and-stores.md §3, Stage 5) — one injectable
@@ -636,6 +651,15 @@ import { RouterLink } from "@angular/router";
 })
 export class NotFoundComponent {}
 `;
+
+/** True when an emitted Angular source renders the chart component — the
+ *  signal that `loom-chart.component.ts` has to be written alongside it.  The
+ *  page shell lifts the `LoomChart` import + `imports: []` entry whenever the
+ *  walk produced the element, and it does that in component mode too, so every
+ *  emitted source is asked, not just the page ones. */
+function rendersChart(source: string): boolean {
+  return source.includes("<loom-chart");
+}
 
 /**
  * A dependency-free Node static host for the built bundle (SPA fallback) with
