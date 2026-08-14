@@ -38,6 +38,7 @@ import type {
   SubdomainIR,
   SystemIR,
   TypeIR,
+  UiIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
@@ -45,11 +46,12 @@ import {
   exprUsesCurrentUser,
   isGroupedProjection,
   isQueryTimeProjection,
+  stmtUsesCurrentUser,
 } from "../../types/loom-ir.js";
 import { isMacroEmitted } from "../../types/origin.js";
 import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
-import { bodyUsesDataGrid } from "../../util/data-grid.js";
+import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
   firstUnlowerableForAdapter,
@@ -92,10 +94,12 @@ import { validateE2ETest } from "./test-checks.js";
 // ---------------------------------------------------------------------------
 
 // `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
-// and Angular generators.  A deployable whose resolved UI framework is none of
-// those (phoenixLiveView) would silently emit no guard — reject it loudly
-// so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
+// Angular and Feliz generators (`generator/feliz/auth-gate.ts` — the Elmish
+// session model + `AuthGate` view, driven end-to-end by the `authgate`
+// scenario in `generated-feliz-build.yml`).  A deployable whose resolved UI
+// framework is none of those (flutter) would silently emit no guard — reject
+// it loudly so the limitation is visible rather than a no-op.
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"]);
 
 // paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is
 // emitted by each backend whose explicit-handler emitter has grown the paged
@@ -336,25 +340,42 @@ const DATA_GRID_FRAMEWORKS = new Set<string>(["react", "vue", "svelte", "angular
 /** `DataGrid` on a frontend that can't render it (M-T1.1 follow-on). */
 export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
-    if (!d.uiName) continue;
-    const fw = d.uiFramework ?? "";
-    if (DATA_GRID_FRAMEWORKS.has(fw)) continue;
-    const ui = sys.uis.find((u) => u.name === d.uiName);
-    if (!ui) continue;
-    for (const page of ui.pages) {
-      if (!bodyUsesDataGrid(page.body)) continue;
-      diags.push({
-        severity: "error",
-        code: "loom.datagrid-unsupported-target",
-        message: diagMessage("loom.datagrid-unsupported-target", {
-          name: page.name,
-          dName: d.name,
-          fw: fw || "unknown",
-        }),
-        source: `${ui.name}/${page.name}`,
-      });
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (DATA_GRID_FRAMEWORKS.has(fw)) continue;
+      // Pages AND components — a grid moved into a component is just as
+      // unrenderable, and `dataGridHosts` is the same scan the Feliz emitter
+      // uses to decide whether to ship `@tanstack/table-core`.
+      for (const what of dataGridHosts(ui)) {
+        diags.push({
+          severity: "error",
+          code: "loom.datagrid-unsupported-target",
+          message: diagMessage("loom.datagrid-unsupported-target", {
+            what,
+            dName: d.name,
+            fw: fw || "unknown",
+          }),
+          source: `${ui.name}/${what}`,
+        });
+      }
     }
   }
+}
+
+/** Every ui a deployable actually mounts, with the framework that will render
+ *  it.  `hosts: [A, B]` mounts SEVERAL (D-PHOENIX-SURFACE); `ui:` sugar/compose
+ *  mounts one — a gate reading `d.uiName` alone never scans past the first, so
+ *  a primitive used only in the second slipped through.  The framework is
+ *  resolved per-ui (`ui.framework` wins) because `d.uiFramework` derives from
+ *  the FIRST hosted ui only.  Same idiom as `validateUiRealtimeSupport` /
+ *  `validateFlutterPrimitiveSupport`. */
+function mountedUis(sys: SystemIR, d: DeployableIR): { ui: UiIR; fw: string }[] {
+  const uiNames = d.hostedUiNames.length > 0 ? d.hostedUiNames : d.uiName ? [d.uiName] : [];
+  const out: { ui: UiIR; fw: string }[] = [];
+  for (const uiName of uiNames) {
+    const ui = sys.uis.find((u) => u.name === uiName);
+    if (ui) out.push({ ui, fw: ui.framework ?? d.uiFramework ?? "" });
+  }
+  return out;
 }
 
 /** Frontends that can render `Chart` (M-T1.3 Phase 4).
@@ -403,28 +424,27 @@ export const CHART_FRAMEWORKS = new Set([
 
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
-    if (!d.uiName) continue;
-    if (CHART_FRAMEWORKS.has(d.uiFramework ?? "")) continue;
-    const ui = sys.uis.find((u) => u.name === d.uiName);
-    if (!ui) continue;
-    // Components render into pages, so a chart moved into one must not slip
-    // the gate — same body coverage as `validateUiProjectionReadFramework`.
-    const bodies: Array<{ what: string; body: ExprIR | undefined }> = [
-      ...ui.pages.map((p) => ({ what: `page '${p.name}'`, body: p.body })),
-      ...ui.components.map((c) => ({ what: `component '${c.name}'`, body: c.body })),
-    ];
-    for (const { what, body } of bodies) {
-      if (!bodyUsesChart(body)) continue;
-      diags.push({
-        severity: "error",
-        code: "loom.chart-unsupported-target",
-        message: diagMessage("loom.chart-unsupported-target", {
-          what,
-          name: d.name,
-          uiFramework: d.uiFramework ?? "unknown",
-        }),
-        source: `${ui.name}/${what}`,
-      });
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (CHART_FRAMEWORKS.has(fw)) continue;
+      // Components render into pages, so a chart moved into one must not slip
+      // the gate — same body coverage as `validateUiProjectionReadFramework`.
+      const bodies: Array<{ what: string; body: ExprIR | undefined }> = [
+        ...ui.pages.map((p) => ({ what: `page '${p.name}'`, body: p.body })),
+        ...ui.components.map((c) => ({ what: `component '${c.name}'`, body: c.body })),
+      ];
+      for (const { what, body } of bodies) {
+        if (!bodyUsesChart(body)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.chart-unsupported-target",
+          message: diagMessage("loom.chart-unsupported-target", {
+            what,
+            name: d.name,
+            uiFramework: fw || "unknown",
+          }),
+          source: `${ui.name}/${what}`,
+        });
+      }
     }
   }
 }
@@ -469,34 +489,32 @@ export function validateUiProjectionReadFramework(sys: SystemIR, diags: LoomDiag
   const readable = readableProjectionNames(sys.subdomains.flatMap((sd) => sd.contexts));
   if (readable.size === 0) return;
   for (const d of sys.deployables) {
-    if (!d.uiName) continue;
-    const fw = d.uiFramework ?? "";
-    if (PROJECTION_READ_FRAMEWORKS.has(fw)) continue;
-    const ui = sys.uis.find((u) => u.name === d.uiName);
-    if (!ui) continue;
-    const handles = new Set(ui.apiParams.map((p) => p.name));
-    // Components read projections too — F3 walks their bodies, so this half
-    // must as well or a read simply moved into a component slips the gate.
-    const bodies: Array<{ what: string; body: ExprIR | undefined }> = [
-      ...ui.pages.map((p) => ({ what: `page '${p.name}'`, body: p.body })),
-      ...ui.components.map((c) => ({ what: `component '${c.name}'`, body: c.body })),
-    ];
-    for (const { what, body } of bodies) {
-      for (const name of projectionReads(body, handles, readable)) {
-        diags.push({
-          severity: "error",
-          code: "loom.ui-projection-read-unsupported",
-          message: diagMessage("loom.ui-projection-read-unsupported#frontend-has-no-client", {
-            what,
-            name,
-            dName: d.name,
-            fw: fw || "unknown",
-            // Named from the gate itself, so a port that widens the set can't
-            // leave the message advertising a stale list.
-            frameworks: [...PROJECTION_READ_FRAMEWORKS].sort().join(", "),
-          }),
-          source: `${ui.name}/${what}`,
-        });
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (PROJECTION_READ_FRAMEWORKS.has(fw)) continue;
+      const handles = new Set(ui.apiParams.map((p) => p.name));
+      // Components read projections too — F3 walks their bodies, so this half
+      // must as well or a read simply moved into a component slips the gate.
+      const bodies: Array<{ what: string; body: ExprIR | undefined }> = [
+        ...ui.pages.map((p) => ({ what: `page '${p.name}'`, body: p.body })),
+        ...ui.components.map((c) => ({ what: `component '${c.name}'`, body: c.body })),
+      ];
+      for (const { what, body } of bodies) {
+        for (const name of projectionReads(body, handles, readable)) {
+          diags.push({
+            severity: "error",
+            code: "loom.ui-projection-read-unsupported",
+            message: diagMessage("loom.ui-projection-read-unsupported#frontend-has-no-client", {
+              what,
+              name,
+              dName: d.name,
+              fw: fw || "unknown",
+              // Named from the gate itself, so a port that widens the set can't
+              // leave the message advertising a stale list.
+              frameworks: [...PROJECTION_READ_FRAMEWORKS].sort().join(", "),
+            }),
+            source: `${ui.name}/${what}`,
+          });
+        }
       }
     }
   }
@@ -533,11 +551,78 @@ export function validateAuthUiFramework(sys: SystemIR, diags: LoomDiagnostic[]):
         message: diagMessage("loom.auth-ui-unsupported-framework", {
           name: d.name,
           uiFramework: d.uiFramework ?? "unknown",
+          // Named from the gate itself, so widening the Set can't leave the
+          // message advertising a stale list.
+          frameworks: [...AUTH_UI_FRAMEWORKS].join(", "),
         }),
         source: d.name,
       });
     }
   }
+}
+
+/** `currentUser` read from a page/component with no principal bound.
+ *
+ *  `currentUser` in a page body is the VERIFIED SESSION user, and the only
+ *  thing that binds one is the auth guard: `auth: ui` on a frontend deployable
+ *  (React's `const currentUser = useSession().user`, and its Vue/Svelte/Angular/
+ *  Feliz twins) or `auth: required` on a fullstack deployable that mounts the ui
+ *  itself (Phoenix `LiveAuth.on_mount` assigns `@current_user`).  Without one,
+ *  every frontend emits a DANGLING reference — react `currentUser.email` against
+ *  no binding, flutter invalid Dart, feliz a `CurrentUser` match on a Model that
+ *  has no such field.  Nothing downstream re-checks it, so the model compiles
+ *  and the claim read is garbage at runtime.
+ *
+ *  The missing `user { … }` block is NOT this gate's case: without it the token
+ *  never resolves to a `current-user` ref at all, and `loom.auth-no-user-block`
+ *  (plus the AST-level `auth`-without-`user` error) already names it. */
+export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    // A guard is mounted — the session user is in scope, nothing to say.
+    if (d.auth?.ui || d.auth?.required) continue;
+    for (const { ui } of mountedUis(sys, d)) {
+      // Components are walked for the same reason charts and grids are — a
+      // read moved into one renders into the page all the same.  (Today a
+      // component's `currentUser` lowers to an UNRESOLVED ref, because
+      // `lowerComponent` threads `user: undefined` where `lowerPage` threads
+      // the system's user block; when that is threaded through, this arm
+      // starts biting with no edit here.)
+      const hosts: { what: string; host: UiRenderHost }[] = [
+        ...ui.pages.map((p) => ({ what: `page '${p.name}'`, host: p as UiRenderHost })),
+        ...ui.components.map((c) => ({ what: `component '${c.name}'`, host: c as UiRenderHost })),
+      ];
+      for (const { what, host } of hosts) {
+        if (!hostReadsCurrentUser(host)) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.current-user-needs-auth-ui",
+          message: diagMessage("loom.current-user-needs-auth-ui", {
+            what,
+            uiName: ui.name,
+            dName: d.name,
+          }),
+          source: `${ui.name}/${what}`,
+        });
+      }
+    }
+  }
+}
+
+/** The render-scope members a page and a component share — every place a
+ *  `currentUser` read can hide in one.  (`PageIR` carries more; only these
+ *  four are walked here.) */
+interface UiRenderHost {
+  body?: ExprIR;
+  state: { init?: ExprIR }[];
+  derived: { expr: ExprIR }[];
+  actions: { body: StmtIR[] }[];
+}
+
+function hostReadsCurrentUser(host: UiRenderHost): boolean {
+  if (exprUsesCurrentUser(host.body)) return true;
+  if (host.state.some((s) => exprUsesCurrentUser(s.init))) return true;
+  if (host.derived.some((d) => exprUsesCurrentUser(d.expr))) return true;
+  return host.actions.some((a) => a.body.some(stmtUsesCurrentUser));
 }
 
 // Frontends that CONSUME the realtime SSE wire (channels.md Part I) — each

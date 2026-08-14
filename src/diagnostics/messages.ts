@@ -1316,8 +1316,8 @@ export const DIAGNOSTIC_MESSAGES = {
     platform: unknown;
   }) =>
     `projection '${p.name}' is sourced 'from ${p.source}' (another projection's read-model rows), which deployable '${p.dName}' (platform '${p.platform}') can't generate yet. Host it on a supported backend, or source the projection from an aggregate.`,
-  "loom.datagrid-unsupported-target": (p: { name: unknown; dName: unknown; fw: unknown }) =>
-    `page '${p.name}' uses 'DataGrid', which deployable '${p.dName}' can't render ` +
+  "loom.datagrid-unsupported-target": (p: { what: unknown; dName: unknown; fw: unknown }) =>
+    `${p.what} uses 'DataGrid', which deployable '${p.dName}' can't render ` +
     `(frontend '${p.fw}'). DataGrid is a TanStack row model, so it ships wherever ` +
     `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
     `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
@@ -1340,8 +1340,14 @@ export const DIAGNOSTIC_MESSAGES = {
     `(frontend '${p.fw}' generates no projection read). Projection reads ` +
     `ship on ${p.frameworks}; host this ui on one of those, or read the source ` +
     `aggregate directly.`,
-  "loom.auth-ui-unsupported-framework": (p: { name: unknown; uiFramework: unknown }) =>
-    `Deployable '${p.name}': 'auth: ui' is currently only supported on react, vue, svelte, and angular frontends; framework '${p.uiFramework}' isn't supported yet.`,
+  "loom.current-user-needs-auth-ui": (p: { what: unknown; uiName: unknown; dName: unknown }) =>
+    `${p.what} on ui '${p.uiName}' reads 'currentUser', but deployable '${p.dName}' binds no verified session user, so the read emits a dangling reference (react 'undefined.<claim>', invalid Dart on flutter, an unbound match on feliz). Add the auth guard: 'auth: ui' on a frontend deployable, or 'auth: required' on a fullstack deployable that mounts the ui itself.`,
+  "loom.auth-ui-unsupported-framework": (p: {
+    name: unknown;
+    uiFramework: unknown;
+    frameworks: unknown;
+  }) =>
+    `Deployable '${p.name}': 'auth: ui' is currently only supported on ${p.frameworks} frontends; framework '${p.uiFramework}' isn't supported yet.`,
   "loom.ui-realtime-unsupported#backend-serves-no-sse": (p: {
     name: unknown;
     uiName: unknown;
