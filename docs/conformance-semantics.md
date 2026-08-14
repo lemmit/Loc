@@ -256,8 +256,11 @@ the conforming backends, and the fix that established it.
   and the DB `DEFAULT 1` never fired. The fix seeds the field's `= 1` IR default
   in each domain `create` factory (`constructionSeededDefaults`,
   `src/generator/_frontend/server-default.ts`), which is persistence-agnostic —
-  every create path flows through the factory (EF/Dapper/document, JPA
-  `@Version` keeps the non-unsaved value, SQLAlchemy inserts `aggregate.version`).
+  every create path flows through the factory (EF/Dapper/document, JPA, SQLAlchemy
+  `aggregate.version`). Java's `version` was mapped `@Version` at the time, which
+  keeps the factory's non-unsaved value; RS-20 later made it a plain column driven
+  by an explicit guarded bump, and a create — matching no row — still carries the
+  factory's `1`.
   (A cautionary case: the differential found the *divergence*, but the oracle
   came from the spec — the `= 1` declaration — not the three-backend majority.)
 - **Conforms.** node, dotnet, java, python, elixir. (dotnet/java/python fixed +
