@@ -37,6 +37,10 @@ export function fsString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
 }
 
+/** F# spelling of the `now()` literal — the current instant on the UTC clock.
+ *  Fully qualified because the generated `App.fs` opens no `System`. */
+export const FS_NOW = "System.DateTime.UtcNow";
+
 /** Pure F# leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `felizTarget` can forward straight to these. */
@@ -45,7 +49,15 @@ export const FS_LEAVES = {
     if (lit === "string") return fsString(value);
     if (lit === "bool") return value; // true/false spelled the same
     if (lit === "null") return "None"; // F# absence is the option None
-    // int / long / decimal / money / now → numeric literal verbatim
+    // `now()` is a LITERAL kind, not a number: its `value` is the word "now",
+    // so the numeric-verbatim fallthrough below emitted a bare `now` — an
+    // unbound identifier, and the only literal kind on this target that is not
+    // already valid F# text.  A Loom `datetime` is a `System.DateTime` here
+    // (`type-fs.ts`) decoded from the wire as UTC (`Decode.datetimeUtc`), so
+    // the current instant is `System.DateTime.UtcNow` — the same UTC-clock
+    // spelling the .NET backend emits for the same literal.
+    if (lit === "now") return FS_NOW;
+    // int / long / decimal / money → numeric literal verbatim
     return value;
   },
   binary(left: string, right: string, op: BinOp): string {
