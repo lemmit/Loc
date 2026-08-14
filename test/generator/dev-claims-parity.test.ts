@@ -51,3 +51,68 @@ describe("dev-auth-stub x-loom-dev-claims injection parity", () => {
     });
   }
 });
+
+// The BUILT-IN identity the header above merges over (#2548).
+//
+// `/api/auth/me` is a contract over the DECLARED `user { … }` shape — it is what
+// the generated frontends' `auth: ui` guard reads — so the dev stub must fill
+// every field the block declares, and a non-optional field must never answer
+// null.  Elixir used to return a fixed `%{"id", "role", "permissions"}` claim
+// map that `build_user/1` then read by declared field name: a field NAMED
+// `role` got "admin" by coincidence and every other declared field (the
+// `tenantId` of every tenancy system among them) came back nil, while the other
+// four backends filled it.  Neither half of that is derivable from the shape,
+// which is why this pins the whole identity rather than the presence of a key.
+//
+// The value table is shared by all five: string → "admin", guid → the zero
+// uuid, int/long → 0, decimal/money → zero, bool → false, datetime → the epoch,
+// array → EMPTY (a permission-guarded surface denies by default), optional →
+// null.  A backend's own rendering of it is per-language, so each arm pins the
+// construction site verbatim (whitespace-normalised).
+const identitySystem = (platform: string) => `
+  system Shop {
+    user { id: guid  role: string  tenantId: string }
+    subdomain Sales {
+      context Ordering {
+        aggregate Invoice { number: string }
+        repository Invoices for Invoice { }
+      }
+    }
+    api SalesApi from Sales
+    storage primarySql { type: postgres }
+    resource ordState { for: Ordering, kind: state, use: primarySql }
+    deployable api {
+      platform: ${platform}
+      contexts: [Ordering]
+      dataSources: [ordState]
+      serves: SalesApi
+      port: 3001
+      auth: required
+    }
+  }
+`;
+
+/** Collapse runs of whitespace so an arm pins the VALUES, not the emitter's
+ *  line wrapping. */
+const squash = (s: string) => s.replace(/\s+/g, " ");
+
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
+/** The built-in stub identity for `user { id: guid  role: string  tenantId: string }`,
+ *  as each backend spells it. */
+const STUB_IDENTITY: Record<string, string> = {
+  node: `id: "${ZERO_UUID}", role: "admin", tenantId: "admin",`,
+  dotnet: `Id: System.Guid.Empty, Role: "admin", TenantId: "admin")`,
+  python: `User(id="${ZERO_UUID}", role="admin", tenant_id="admin")`,
+  java: `return new User(new UUID(0L, 0L), "admin", "admin");`,
+  elixir: `"id" => "${ZERO_UUID}", "role" => "admin", "tenant_id" => "admin"`,
+};
+
+describe("dev-auth-stub built-in identity fills the declared user shape", () => {
+  for (const [platform, identity] of Object.entries(STUB_IDENTITY)) {
+    it(`${platform}: every declared user field carries a stub value`, async () => {
+      const files = await generateSystemFiles(identitySystem(platform));
+      expect(squash([...files.values()].join("\n\n"))).toContain(squash(identity));
+    });
+  }
+});

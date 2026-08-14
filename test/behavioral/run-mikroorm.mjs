@@ -200,7 +200,7 @@ async function waitForHealth(base, timeoutMs = 30_000) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted Hono/mikroorm server. */
-function entrySource(e2eFile, bearerToken) {
+function entrySource(e2eFile, bearerToken, hasAuth) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
@@ -235,7 +235,7 @@ export async function run() {
   const results = await runTests(cases);
   // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
   // golden aligns on, and so a failing tier is diagnosed on its own requests.
-  await __frameworkProbes(dispatch);
+  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)} });
   return { results, wire: __wire };
 }
 `;
@@ -261,6 +261,10 @@ async function runCase(c) {
     // dev-stub (`auth: required`, no block) needs no env — the generated boot
     // registers the dev-stub verifier itself; E2E_DEV_CLAIMS drives the header.
     const isOidc = /\n\s*auth\s*\{/.test(c.source);
+    // Does this case's backend deployable enforce auth (either flavour —
+    // dev stub or OIDC)?  A frontend's `auth: ui` rides its target's.
+    // Drives the anonymous `/api/auth/me` probe — see __frameworkProbes.
+    const hasAuth = /\n\s*auth:\s*required\b/.test(c.source);
     const oidcEnv =
       isOidc && oidc
         ? { OIDC_ISSUER: oidc.issuer, OIDC_CLIENT_ID: "loom-behavioural", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" }
@@ -300,7 +304,7 @@ async function runCase(c) {
 
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource(e2eFile, bearerToken));
+    writeFileSync(entry, entrySource(e2eFile, bearerToken, hasAuth));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     const api = await run();

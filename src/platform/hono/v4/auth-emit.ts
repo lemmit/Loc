@@ -1,5 +1,12 @@
 import { renderTsType } from "../../../generator/typescript/render-expr.js";
-import type { AuthIR, AuthValueIR, SystemIR, UserIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AuthIR,
+  AuthValueIR,
+  FieldIR,
+  SystemIR,
+  TypeIR,
+  UserIR,
+} from "../../../ir/types/loom-ir.js";
 import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
@@ -47,10 +54,59 @@ export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   // when an `auth { oidc }` block is present) are emitted whenever a
   // backend has auth — the frontend `auth: ui` guard probes `/auth/me`,
   // which works for both the OIDC verifier and the dev stub.
-  out.set("auth/handshake.ts", renderHandshake(oidc));
+  out.set("auth/handshake.ts", renderHandshake(sys.user, oidc));
   if (oidc) {
     out.set("auth/oidc.ts", renderOidcVerifier(sys.user, oidc));
+  } else {
+    // The dev stub gets its own module for the same reason the OIDC verifier
+    // does: it is the identity every non-OIDC caller resolves to, so anything
+    // that boots this project WITHOUT running `index.ts` — the behavioural
+    // harness boots `createApp` directly — must be able to register the SAME
+    // one instead of hand-writing a copy.  It hand-wrote a copy, and the copy
+    // was a fixed `{ id, tenantId }` that ignored the declared `user { … }`
+    // shape, so the node leg's `/api/auth/me` recording was a principal no
+    // generated backend ever produces (#2548).  One exported registrar, one
+    // identity.
+    out.set("auth/dev-stub.ts", renderDevStubVerifier(sys.user));
   }
+}
+
+/** The permissive dev-stub verifier: accepts every request as a built-in
+ *  identity filling every field the `user { … }` block declares, with an
+ *  optional base64-JSON `x-loom-dev-claims` override merged over it. */
+function renderDevStubVerifier(user: UserIR): string {
+  return `// Auto-generated.
+import { registerUserVerifier } from "./verifier";
+
+/** Register the DEV-STUB verifier — accepts every request as a built-in
+ *  identity carrying one value per field the system's \`user { … }\` block
+ *  declares, so \`/auth/me\` answers the full declared shape out of the box.
+ *
+ *  Dev-only: the Loom playground (or curl) can override the claims by sending a
+ *  base64-encoded JSON object in \`x-loom-dev-claims\`; absent the header the
+ *  built-in identity is used.
+ *
+ *  REPLACE for production by calling \`registerUserVerifier(...)\` with a real
+ *  JWT-decoding implementation, or declare an \`auth { oidc { … } }\` block to
+ *  get the generated OIDC verifier instead. */
+export function registerDevStubVerifier(): void {
+  registerUserVerifier((req) => {
+    const base = ${indentBy(renderStubUserLiteral(user), "    ")};
+    const injected = req.headers.get("x-loom-dev-claims");
+    if (!injected) return base;
+    try {
+      return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };
+    } catch {
+      return base;
+    }
+  });
+}
+`;
+}
+
+/** Re-indent a multi-line literal's continuation lines under `pad`. */
+function indentBy(s: string, pad: string): string {
+  return s.split("\n").join(`\n${pad}`);
 }
 
 /** The principal's id key — the claim named `id`, else the first declared
@@ -510,19 +566,38 @@ export function registerOidcVerifier(): void {
 // hosts the credential pages.
 // ---------------------------------------------------------------------------
 
-function renderHandshake(auth?: AuthIR): string {
+function renderHandshake(user: UserIR, auth?: AuthIR): string {
   // `/auth/me` (the session probe the frontend guard reads) is always
   // emitted when a backend has auth — it works for both the OIDC verifier
   // and the dev stub.  The OIDC redirect handshake (login/callback/logout)
   // is added only when an `auth { oidc }` block is present; the dev-stub
   // path (e.g. the in-browser playground, where no IdP is reachable) has
   // no IdP to redirect to.
+  // The DECLARED `user { … }` shape, by declared name — nothing else (#2548).
+  // Echoing the principal object leaked the per-request DERIVED members
+  // (`orgPath` / `rootOrg`, the tenancy scoping devices) onto the wire, which
+  // python already excluded and phoenix spelled `org_path`: three answers to
+  // "what is /auth/me?" on one endpoint.  The projection is the same rule the
+  // dev-stub identity follows — the declared shape is the contract, and a
+  // derived member is not part of it.
+  // Field names are grammar identifiers, so dot access + a bare key keep the
+  // emitted object Biome-clean (useLiteralKeys / complexity.useLiteralKeys).
+  const meProjection = user.fields
+    .map((f) => `      ${f.name}: user.${f.name} ?? null,`)
+    .join("\n");
   const meRoute = `  // Session probe for the frontend guard — NOT bypassed, so the auth
   // middleware has already verified the principal (or returned 401) by
-  // the time this runs.  Returns the resolved User as plain JSON.
+  // the time this runs.  Answers the declared \`user { … }\` shape as plain
+  // JSON — the per-request derived members (orgPath / rootOrg) are server-side
+  // scoping state, not part of the declared principal.
   app.get("/me", (c) => {
-    const user = (c as unknown as { get(k: "currentUser"): unknown }).get("currentUser");
-    return c.json(user ?? null);
+    const user = (c as unknown as { get(k: "currentUser"): Record<string, unknown> | undefined }).get(
+      "currentUser",
+    );
+    if (!user) return c.json(null);
+    return c.json({
+${meProjection}
+    });
   });`;
 
   if (!auth) {
@@ -721,4 +796,52 @@ ${meRoute}
   return app;
 }
 `;
+}
+
+/** Build a TS object literal matching the system's `user {}` shape, with
+ *  sensible defaults per primitive type — used as the body of the dev-stub
+ *  user verifier so a generated app boots without the caller having to wire
+ *  a JWT decoder. */
+function renderStubUserLiteral(userShape: UserIR): string {
+  const entries = userShape.fields.map((f) => `  ${snakeToCamel(f.name)}: ${stubValueFor(f)}`);
+  return `{\n${entries.join(",\n")},\n}`;
+}
+
+function stubValueFor(f: FieldIR): string {
+  if (f.optional) return "null";
+  return stubValueForType(f.type);
+}
+
+function stubValueForType(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "string":
+          return `"admin"`;
+        case "int":
+        case "long":
+          return "0";
+        case "decimal":
+        case "money":
+          return `"0"`;
+        case "bool":
+          return "false";
+        case "datetime":
+          return `new Date(0)`;
+        case "guid":
+          return `"00000000-0000-0000-0000-000000000000"`;
+        default:
+          return `""`;
+      }
+    case "id":
+      return `"00000000-0000-0000-0000-000000000000"`;
+    case "array":
+      return "[]";
+    default:
+      return "null";
+  }
+}
+
+function snakeToCamel(name: string): string {
+  return name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
