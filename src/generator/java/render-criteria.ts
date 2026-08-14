@@ -386,8 +386,9 @@ function value(e: ExprIR, ctx: CriteriaCtx): string {
 /** The `deep` read-level sentinel as a JPA Criteria predicate.  `dataKey` /
  *  `tenantId` are typed candidate paths; the principal claims render null-safe
  *  against the `currentUser` the `tenantScope` factory is handed (no actor →
- *  null → matches no rows, fail-closed).  The descendant LIKE pattern is built
- *  in plain Java (`orgPath() + ".%"`) so `cb.like(path, String)` binds it. */
+ *  null → matches no rows, fail-closed).  The descendant test is an anchored
+ *  position (`cb.locate(dataKey, orgPath + ".") = 1`), not a LIKE pattern — see
+ *  the comment on the emission below for why. */
 function deepScopeCriteria(
   f: Extract<AuthzFilterKind, { kind: "scope" }>,
   ctx: CriteriaCtx,

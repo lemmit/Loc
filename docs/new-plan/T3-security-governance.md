@@ -130,3 +130,28 @@ Sources: `docs/tenancy.md`, `docs/auth.md`, M-T9.9 (authz-filter exhaustiveness 
 Generated security-sensitive code (the OIDC PKCE/refresh-rotation flow, the tenant-isolation query predicates) gets the same correctness gates as any other emitter — but no *security* scanning. Run a focused CodeQL/semgrep ruleset over the emitted auth + tenancy source across all five backends: leaked/hardcoded secrets, a PKCE `state`/`nonce` check omitted on a code path, a tenant predicate missing from one query site, tokens logged. Generated security code deserves generated-code security scanning; the ruleset is small and targeted (not a general SAST sweep). Nightly / `security` label.
 Sources: `docs/auth.md` (D-AUTH-OIDC), `docs/tenancy.md`; pairs with M-T3.13 (static twin of the runtime deny gate).
 
+
+---
+
+## M-T3.17 — The tenancy subtree read is correct but no longer index-usable — `open` · **M** · P2
+
+**Context.** The `deep`/`global` descendant test used to be `data_key LIKE <anchor> || '.%'`, which rode the `text_pattern_ops` index the tenancy migration derives (`tenant-index.test.ts`). That spelling was a **cross-tenant read**: the anchor is a principal claim, so `_`/`%` inside it were LIKE wildcards, and an org named `acme_corp` matched `acmeXcorp.…`. Fixed by anchoring the test instead:
+
+```
+strpos(data_key, <anchor> || '.') = 1
+```
+
+which has no pattern language and so needs no ESCAPE discipline. Correct — and **not sargable**. Postgres cannot use a btree/`text_pattern_ops` index for a function-of-column predicate, so every deep/global read is now a sequential scan over the aggregate's table. The index is still derived (it serves equality, and any future sargable form), but nothing uses it for the subtree read.
+
+**Why it was taken anyway.** A wrong answer is worse than a slow one, and the leak was live on four backends. The perf cost is invisible until a tenant table is large, which is exactly when it hurts.
+
+**The options, none free.**
+
+1. **Escaped LIKE** — keep `LIKE <pattern> ESCAPE '\'` and escape `\`, `%`, `_` in the claim at the point the pattern is built. Sargable AND correct. Costs a per-backend runtime escape helper (5 spellings, and the ESCAPE clause differs), and an escaping bug reintroduces the leak silently — the failure mode this mission exists to avoid.
+2. **`^@` / `starts_with()`** — Postgres 11+ has a starts-with operator with SP-GiST support. Would need a second index kind on `data_key` and is Postgres-only, so the other SQL dialects still need an answer.
+3. **Half-open range** — `data_key >= p AND data_key < p || <max>`. Sargable, no pattern language, but collation-sensitive at the boundary.
+4. **Accept it** — document the scan and revisit when a tenant table is measured slow.
+
+**Verification.** Whatever is chosen must keep the `orgXa` / `orgXa.leak` wildcard trap in `assertHierarchyIsolation` green on all five backends (it fails on the LIKE form), and should add an `EXPLAIN`-level assertion that the subtree read uses the index — otherwise the sargability claim is prose again, which is how the first version went wrong.
+
+Sources: the leak and its fix are [#2562](https://github.com/lemmit/Loc/pull/2562); the sargability loss was flagged in the #2521 review that noted `strpos` cannot ride the prefix index the `startsWith` queryability rationale assumes.

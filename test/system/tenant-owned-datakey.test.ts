@@ -48,8 +48,11 @@ describe("tenantOwned — dataKey column flows through migrations + the create f
     expect(sql).toBeDefined();
     expect(sql!).toContain(`"tenant_id" TEXT NOT NULL`);
     expect(sql!).toContain(`"data_key" TEXT NULL`);
-    // P2.5: the materialized-path prefix index — `text_pattern_ops` opclass so
-    // `LIKE 'prefix.%'` (deep/global) is index-usable under any collation.
+    // P2.5: the materialized-path prefix index — `text_pattern_ops` opclass, the
+    // one a prefix scan needs under any collation.  The deep/global descendant
+    // test is now the anchored `strpos(…) = 1` (a LIKE pattern built from a
+    // principal claim treated `_`/`%` as wildcards), which does not use this
+    // index; restoring a sargable spelling is M-T3.17.
     expect(sql!).toMatch(
       /CREATE INDEX "?invoices_data_key_idx"? ON \S+ \("?data_key"? text_pattern_ops\)/,
     );
