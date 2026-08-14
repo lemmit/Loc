@@ -1479,10 +1479,22 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // name so the generated code references the local.
       if (expr.refKind === "let") return expr.name;
       return `/* unresolved: ${expr.name} */ undefined`;
-    case "binary":
+    case "binary": {
+      const left = emitExpr(expr.left, ctx);
+      const right = emitExpr(expr.right, ctx);
+      // Datetime-involving `+`/`-` first: `until + days(7)` is a method call on
+      // a target whose datetime is not numeric-ish (`.Add` on F#, `.add` on
+      // Dart), and a plain operator everywhere else.  The seam returns null —
+      // and a target that omits it stays byte-identical — for every pair it has
+      // no special form for.
+      if (expr.op === "+" || expr.op === "-") {
+        const temporal = ctx.target.exprTemporalBinary?.(left, right, expr);
+        if (temporal !== undefined && temporal !== null) return temporal;
+      }
       // Operator-spelling + strict-equality mapping lives in the target's leaf
       // (JS `===`/`!==`; F# `=`/`<>`).
-      return ctx.target.exprBinary(emitExpr(expr.left, ctx), emitExpr(expr.right, ctx), expr.op);
+      return ctx.target.exprBinary(left, right, expr.op);
+    }
     case "ternary":
       // Conditional value in expression position (e.g. a `bool` cell's
       // `onCall ? "Yes" : "No"`).  Distinct from the markup-child `ternary`
@@ -1772,12 +1784,20 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // wrapped operand so a formatted hole is byte-identical to a format-less
       // one, the format dropped.
       return emitExpr(expr.inner, ctx);
-    case "duration":
-      // `5 days` — the same fixed-width millisecond translation every backend
-      // uses (`src/util/temporal.ts`'s `DURATION_UNIT_MS`, mirroring the
-      // TypeScript backend's `duration` leaf), so a duration means the same
-      // number on both sides of the wire.
-      return `((${emitExpr(expr.amount, ctx)}) * ${DURATION_UNIT_MS[expr.unit]})`;
+    case "duration": {
+      // `5 days` — the same fixed-width millisecond SPAN every backend uses
+      // (`src/util/temporal.ts`'s `DURATION_UNIT_MS`), so a duration means the
+      // same length of time on both sides of the wire.  Its REPRESENTATION is
+      // per-target, though: the JS frontends spell it as the TypeScript
+      // backend does — a bare millisecond number, the fallback below — while a
+      // target whose datetime is `System.DateTime` / Dart `DateTime` needs its
+      // own duration type, which it supplies through `exprDuration`.
+      const amount = emitExpr(expr.amount, ctx);
+      return (
+        ctx.target.exprDuration?.(expr.unit, amount) ??
+        `((${amount}) * ${DURATION_UNIT_MS[expr.unit]})`
+      );
+    }
     case "new":
       // Part construction (`new Shipment { … }`).  A part is a plain record on
       // the wire exactly as a value object is, so this renders the wire-shaped

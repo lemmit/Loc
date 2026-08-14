@@ -37,7 +37,13 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/nami
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr } from "../_walker/walker-core.js";
-import { DART_LEAVES, dartString, dartZeroValue, renderDartIntrinsic } from "./dart-expr.js";
+import {
+  DART_LEAVES,
+  dartString,
+  dartTemporalBinary,
+  dartZeroValue,
+  renderDartIntrinsic,
+} from "./dart-expr.js";
 import {
   createFormWidgetName,
   destroyFormWidgetName,
@@ -744,6 +750,12 @@ export const flutterTarget: WalkerTarget = {
   exprConvert: (value, target, from) => DART_LEAVES.convert(value, target, from),
   exprList: (elements) => DART_LEAVES.list(elements),
   exprObject: (fields) => DART_LEAVES.object(fields),
+  // A duration is a Dart `Duration`, not the JS frontends' millisecond number —
+  // and Dart's `DateTime` has no arithmetic operators, so `until + days(7)` is
+  // `.add(...)`.  Both are the same shared table `riverpod-emit.ts`'s Notifier
+  // bodies reach, since Flutter has ONE dispatcher (the shared `emitExpr`).
+  exprDuration: (unit, amount) => DART_LEAVES.duration(unit, amount),
+  exprTemporalBinary: (left, right, e) => dartTemporalBinary(left, right, e),
 
   // Scalar intrinsics — the ONE table both the page-view walk and the
   // Notifier/action-body walk consume (both route through the shared
