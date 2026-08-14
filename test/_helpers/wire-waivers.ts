@@ -22,96 +22,17 @@
 //
 // The list was empty from the RS-13/RS-14 fixes until 2026-07-30, when the
 // M-T9.11 coverage expansion (5 shared systems -> the corpus feature cases)
-// found three java divergences no gate had reached.  Two of them share one
-// mechanism and are waived below; the third (RS-19, a declared `error` variant's
-// fields dropped from the problem body) was FIXED in the same change, which is
-// the disposition to prefer.  Empty is still the target state.
+// found three java divergences no gate had reached.  The RS-20 pair (java's
+// `version` counting Hibernate ROW DIRTINESS instead of persisted commands) held
+// five waivers here until the java repository save was made to drive the counter
+// explicitly with a guarded `where version = :expected` bump; all five were
+// deleted with that fix, which is the disposition the ratchet is built for.
+// Empty is still the target state.
 // ---------------------------------------------------------------------------
 
 import type { WireWaiver } from "./wire-record.js";
 
 export const WIRE_WAIVERS: readonly WireWaiver[] = [
-  // RS-20 — java maps `version` to JPA `@Version`, so Hibernate bumps it from
-  // the dirtiness of the ROOT entity rather than counting persisted mutations
-  // the way the `versioned` capability declares.  The two shapes below are the
-  // two directions that error runs in, and they are ONE bug:
-  //
-  //   * a mutation confined to a single `contains` child never marks the root
-  //     dirty, so the bump is MISSED (golden 2, java 1);
-  //   * a create that also writes a value-object collection flushes twice, so
-  //     the root is bumped TWICE (golden 1, java 2).
-  //
-  // Waived rather than fixed because the repair is Hibernate-semantics work
-  // needing a container build + boot per iteration — a different unit from the
-  // coverage expansion that found it.  Scoped to the exact case + path so any
-  // OTHER version divergence, on java or elsewhere, still fails the gate.
-  {
-    backends: ["java"],
-    cases: ["single-containment"],
-    path: "$.version",
-    kinds: ["value"],
-    reason: "RS-20 — java misses the version bump when only a contained child mutates",
-  },
-  {
-    backends: ["java"],
-    cases: ["value-collections"],
-    path: "$.version",
-    kinds: ["value"],
-    reason: "RS-20 — java double-bumps version when a create also writes a value collection",
-  },
-  // The SAME two RS-20 divergences, seen through a SECOND window.  The RS-27
-  // work added an `api.<aggs>.all()` caller to both fixtures, so each case now
-  // also reads the row through the root LIST route — and a wrong `version` on
-  // the entity is a wrong `version` on that row too.  Nothing new is wrong: the
-  // value, the direction and the cause are identical to the two waivers above
-  // (`golden 2 ≠ java 1` on single-containment, `golden 1 ≠ java 2` on
-  // value-collections), only the JSON path differs (`$.items[*].version`).
-  //
-  // Written as SEPARATE waivers rather than widening the existing pair to
-  // `**.version`, for the ratchet: the registry flags a waiver that stops
-  // matching, so four narrow entries record which windows are still affected
-  // and each disappears independently as RS-20 is fixed.  One broad pattern
-  // would go stale only when the LAST of them was fixed, and would also swallow
-  // a genuinely new `version` divergence at some other depth.
-  {
-    backends: ["java"],
-    cases: ["single-containment"],
-    path: "$.items[*].version",
-    kinds: ["value"],
-    reason:
-      "RS-20 — java misses the version bump when only a contained child mutates (same bug as $.version, via the root list read)",
-  },
-  {
-    backends: ["java"],
-    cases: ["value-collections"],
-    path: "$.items[*].version",
-    kinds: ["value"],
-    reason:
-      "RS-20 — java double-bumps version when a create also writes a value collection (same bug as $.version, via the root list read)",
-  },
-  // A THIRD face of the same RS-20 error, and the plainest statement of it yet:
-  // an IDEMPOTENT command.  `corpus/saga`'s workflow already ran
-  // `ship.markTracked()` in-process, so when the caller-census drain gave that
-  // operation its first HTTP caller the route re-assigned `status := "Tracked"`
-  // over the value it already held.  A command RAN and answered 204, so the
-  // `versioned` capability (`version: int token = 1`, incremented per command)
-  // says 3 — which node, python, dotnet and elixir all send.  Java sends 2,
-  // because Hibernate's dirty check sees no column change and skips the
-  // `@Version` bump: the counter tracks ROW DIRTINESS, not commands, which is
-  // exactly what RS-20 already names.
-  //
-  // Kept as its own narrow entry rather than widening the pair above, for the
-  // same ratchet reason: `$.version` on `saga` retires independently of the two
-  // list-read faces, and a broad `**.version` pattern would swallow a genuinely
-  // new divergence.
-  {
-    backends: ["java"],
-    cases: ["saga"],
-    path: "$.version",
-    kinds: ["value"],
-    reason:
-      "RS-20 — java skips the version bump on an IDEMPOTENT command (re-assigning the value a field already holds leaves the row un-dirty, so @Version never increments)",
-  },
   // RS-18 / docs/provenance.md — elixir does not re-capture a provenanced
   // field's lineage when the CRUDISH UPDATE writes it, so the row keeps the
   // lineage of the previous write.  On `corpus/provenance` the update sets

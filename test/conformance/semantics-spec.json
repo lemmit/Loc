@@ -360,19 +360,22 @@
     },
     {
       "id": "RS-20",
-      "title": "`version` counts persisted mutations, not entity-graph dirtiness — OPEN (java)",
-      "trigger": "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), or whose create also writes a value-object collection",
-      "observable": "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14). Java diverges in BOTH directions: a `ship` op mutating a single containment reads back 1 where the canonical value is 2 (the bump is missed), and a create carrying a value-object collection reads back 2 where the canonical value is 1 (an extra bump).",
+      "title": "`version` counts persisted mutations, not entity-graph dirtiness",
+      "trigger": "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), whose create also writes a value-object collection, or whose command re-assigns a value the row already holds",
+      "observable": "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14) and of whether any column value actually differs. Java diverged in BOTH directions: a `ship` op mutating a single containment read back 1 where the canonical value is 2 (the bump is missed), a create carrying a value-object collection read back 2 where the canonical value is 1 (an extra bump), and an idempotent command read back 2 where the canonical value is 3.",
       "conforms": [
         "node",
         "dotnet",
+        "java",
         "python",
         "elixir"
       ],
       "provenance": [
         "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `single-containment` and `value-collections` cases (java leg)",
         "single-containment #2 GET /api/orders/{id} $.version — golden 2 vs java 1",
-        "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2"
+        "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2",
+        "third face found later on `saga` (an IDEMPOTENT command): golden 3 vs java 2",
+        "fixed (java): @Version dropped from src/generator/java/emit/entity.ts (flat + TPH/TPC base arms); the counter is bumped by a guarded `bumpVersion` JPQL update from the repository save, src/generator/java/emit/repository.ts"
       ],
       "tier": "behavioral"
     },
