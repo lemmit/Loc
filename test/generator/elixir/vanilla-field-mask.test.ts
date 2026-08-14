@@ -21,7 +21,7 @@ system S {
       }
     }
   }
-  api Api from C
+  api Api from M
   storage pg { type: postgres }
   resource st { for: C, kind: state, use: pg }
   deployable api {

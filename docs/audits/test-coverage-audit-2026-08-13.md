@@ -182,17 +182,13 @@ Stated limit, in the gate's header: `COVERED_ELSEWHERE` credits coverage measure
 
 *Do not build the grep version* — both static forms were measured here and both are wrong in both directions (§3.1).
 
-### P1 — **Harness honesty: assert phases ④+⑦ in `generateSystemFiles`** (`M`) → [M-T9.34](../new-plan/T9-toolchain-health.md)
+### P1 — **Harness honesty: assert phases ④+⑦ in `generateSystemFiles`** (`M`) → [M-T9.34](../new-plan/T9-toolchain-health.md) — **phase ④ shipped with this audit**
 
-Make the helper assert a clean model by default and take an explicit opt-out that *names* the codes the fixture intends to carry:
+**Phase ④ is done.** With the offenders *fixed* rather than annotated, the register and the code-matched opt-out both turned out to be unnecessary: the helper simply throws on any error-severity AST diagnostic — the posture it already had for syntax errors — and the rare fixture that must stay invalid calls `generateSystemFilesUnchecked(source, why)`, where `why` is required. (Keying an opt-out on `loom.*` codes was abandoned on contact: many AST `accept()` sites attach no `code`.)
 
-```ts
-await generateSystemFiles(src, { expectInvalid: ["loom.persistence-mode-unsupported"] });
-```
+51 files drained across ~10 classes — unbound ui `api X: Y` parameters, `from <Context>` where `from` takes a Subdomain, user-visible concatenations, `+=` against an `int`, a Feliz `design:` naming a React pack, a Phoenix deployable carrying `targets:`. Two by-products justify the exercise on their own: it surfaced **a product bug** (a page's second `derived` was rejected while all six frontends emitted the chain and four suites asserted it — the single-valued-property loop was missing `DerivedProp`'s exclusion, now fixed), and it left **two fixtures deliberately invalid**, each with the open question written at the call site (the record-param `queryHandler` form cannot link, because payload types resolve only in workflow `create`/`handle` params; tenancy's documented `dataKey` path concatenates a nullable the type system cannot narrow).
 
-Land it with a ratcheting register of the current 174 files so it is mechanical rather than a flag day, then drain. Two things fall out: fixtures stop drifting into "green on approximately nothing" (#2489), and phase ⑦ starts running in the harness at the depth the CLI runs it (#2512's harness lesson, generalised). Start the drain with the concentrated shapes — the `phoenixSystem` builder in `user-visible-slot-coverage.test.ts` is 72 of the 776 by itself.
-
-*Mutation proof:* an entry whose fixture becomes valid must fail the stale half; a newly-invalid fixture must fail with the code named. Show both.
+**Phase ⑦ is slice 2**, deliberately separate: `generateSystems` does not run `validateLoomModel` either, so asserting it would gate the helper on a phase the code under test never sees. 776 calls / 174 files, dominated by `loom.persistence-mode-unsupported` (622) — start with the `phoenixSystem` builder in `user-visible-slot-coverage.test.ts`, 72 of them by itself.
 
 ### P2 — **Unit seams for the two biggest pure upstream modules** (`M`) — M-T9.17 slice 2
 

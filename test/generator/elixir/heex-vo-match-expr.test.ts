@@ -66,7 +66,7 @@ system Shop {
       repository Orders for Order { }
     }
   }
-  api SalesApi from Sales
+  api SalesApi from S
   storage pg { type: postgres }
   resource st { for: Sales, kind: state, use: pg }
   ui Web {

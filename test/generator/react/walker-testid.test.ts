@@ -125,12 +125,12 @@ describe("testid: named-arg convention on every primitive", () => {
   });
 
   it("Image: testid lands on the root <Image>", async () => {
-    const tsx = await emit(`Image { src: "/x.png", testid: "img" }`);
+    const tsx = await emit(`Image { src: "/x.png", alt: "x", testid: "img" }`);
     expect(tsx).toMatch(/<Image[^>]*\bdata-testid="img"/);
   });
 
   it("Avatar: testid lands on the root <Avatar>", async () => {
-    const tsx = await emit(`Avatar { src: "/x.png", testid: "av" }`);
+    const tsx = await emit(`Avatar { src: "/x.png", alt: "x", testid: "av" }`);
     expect(tsx).toMatch(/<Avatar[^>]*\bdata-testid="av"/);
   });
 

@@ -27,7 +27,7 @@ system S {
       action inc() { count := count + 1 }
       action bump(by: int) { count := count + by }
       body: Card { Stack {
-        Text { "Count: " + count },
+        Text { \`Count: {count}\` },
         Button { "+", onClick: inc }
       } }
     }
