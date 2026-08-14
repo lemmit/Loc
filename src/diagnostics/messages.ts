@@ -1851,7 +1851,8 @@ export const DIAGNOSTIC_MESSAGES = {
     `Angular, and the equivalent on Feliz/Flutter).  Collection ops are a backend ` +
     `vocabulary: compute the value server-side — a repository \`find\`, an aggregate ` +
     `\`derived\`, or a \`projection\` read model — and bind the result in the page.  ` +
-    `(\`.map\` is the one op the frontends do render.)`,
+    `(\`.map\` is the one op the frontends do render — except on Feliz, whose F# walker ` +
+    `has no lambda seam and would emit a JS arrow, so it is gated there too.)`,
   "loom.instance-effect-needs-route-id": (p: { name: unknown; route: unknown }) =>
     `page '${p.name}': \`match await …\` awaits an aggregate instance operation, which acts ` +
     `on the record identified by the page's route \`:id\` — but this page (route ` +

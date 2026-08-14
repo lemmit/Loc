@@ -6,7 +6,14 @@
 import type { ActionIR, StateFieldIR, StoreIR } from "../../ir/types/loom-ir.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { upperFirst } from "../../util/naming.js";
-import { type FsExprCtx, renderFsExpr, storeModelField, storeMsgCase } from "./fs-expr.js";
+import {
+  type FsExprCtx,
+  ROUTE_ID_FROM_MODEL,
+  ROUTE_ID_FROM_URL,
+  renderFsExpr,
+  storeModelField,
+  storeMsgCase,
+} from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
 import type {
   FelizAction,
@@ -239,7 +246,14 @@ export function renderInit(
         ]
       : []),
     ...state.map((f) => {
-      const ctx: FsExprCtx = { stateNames: new Set(), locals: new Set() };
+      // `init` has no `model` yet, so a state initialiser that reads the route
+      // `id` re-parses the current URL — the same source `CurrentPage` is seeded
+      // from two lines up.
+      const ctx: FsExprCtx = {
+        stateNames: new Set(),
+        locals: new Set(),
+        ...(routed ? { routeId: ROUTE_ID_FROM_URL } : {}),
+      };
       const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f);
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
@@ -551,6 +565,10 @@ export function renderUpdate(
   fileUploads: readonly FelizFileUpload[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
+  // An update arm runs outside every page view fn, so a body that reads the
+  // route `id` resolves it off the already-parsed `CurrentPage`.  Spread into
+  // every arm ctx below (a non-routed ui has no `Page` type at all).
+  const armRouteId = routed ? { routeId: ROUTE_ID_FROM_MODEL } : {};
   // One `| Set<Field> v -> …` arm per two-way-bound controlled input.
   // A control of a server-paged read turns its setter into a refetch; every
   // other bound input keeps the plain `Cmd.none` assignment.
@@ -617,7 +635,7 @@ export function renderUpdate(
   };
   const actionArms = actions.map((a) => {
     const p = a.params[0];
-    const ctx: FsExprCtx = { stateNames, locals: new Set(p ? [p.name] : []) };
+    const ctx: FsExprCtx = { stateNames, locals: new Set(p ? [p.name] : []), ...armRouteId };
     const head = p ? `  | ${msgCase(a.name)} ${p.name} ->` : `  | ${msgCase(a.name)} ->`;
     return assembleArm(head, a.body, ctx);
   });
@@ -632,6 +650,7 @@ export function renderUpdate(
         stateNames,
         locals: new Set(p ? [p.name] : []),
         storeScope: { store: store.name, fields },
+        ...armRouteId,
       };
       const msg = storeMsgCase(store.name, a.name);
       const head = p ? `  | ${msg} ${p.name} ->` : `  | ${msg} ->`;
@@ -747,7 +766,7 @@ export function renderUpdate(
   // (its body rendered with `p` bound), the `else` body under BOTH `(Ok None)`
   // (the tag didn't match / no success) and `(Error _)` (a thrown / non-2xx).
   const asyncEffectArms = asyncEffects.flatMap((e) => {
-    const elseCtx: FsExprCtx = { stateNames, locals: new Set() };
+    const elseCtx: FsExprCtx = { stateNames, locals: new Set(), ...armRouteId };
     // Trigger arm: destructure `(id, <param>, …)` (named after the op params) and
     // fire the curried api fn.
     const argNames = e.params.map((p) => p.name);
@@ -760,7 +779,11 @@ export function renderUpdate(
     // multi-variant → `(Ok (Some (<DuCase> b)))`.  A variant that binds a local
     // its body never reads gets a `_` binder so `--warnings-as-errors` stays green.
     for (const v of e.variants) {
-      const ctx: FsExprCtx = { stateNames, locals: new Set(v.binding ? [v.binding] : []) };
+      const ctx: FsExprCtx = {
+        stateNames,
+        locals: new Set(v.binding ? [v.binding] : []),
+        ...armRouteId,
+      };
       const inner = (b: string) => (e.isMulti ? `(${v.duCase} ${b})` : b);
       const arm = assembleArm(
         `  | ${e.resultMsg} (Ok (Some ${inner(v.binding ?? "_")})) ->`,
