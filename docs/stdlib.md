@@ -19,8 +19,16 @@ roadmap.
 
 Built-in operations on a scalar receiver.  A `queryable` op may appear in a
 `find … where` predicate (and criterion / capability filters); a
-non-queryable one in that position is rejected with `loom.intrinsic-not-queryable`
-rather than silently degrading.
+non-queryable one in that position is rejected — `loom.find-where-not-queryable`
+on a repository find, `loom.criterion-not-selectable` on a criterion or
+capability `filter` — rather than silently degrading.
+
+`startsWith` is the one BOOL-returning queryable op, so it stands alone as a
+whole predicate (`filter this.dataKey.startsWith(p)`) instead of feeding a
+comparison.  It lowers to an ANCHORED position test on every backend
+(`strpos(col, $p) = 1`, JPQL `locate(:p, col) = 1`, EF Core's one-argument
+`StartsWith`) rather than `col LIKE $p || '%'`: the argument is a value, so a
+`%` or `_` inside it matches literally.
 
 These are Loom's OWN spellings, translated per target — `s.toUpper()` is
 `toUpperCase()` in JavaScript, `.ToUpper()` in C#, `String.upcase/1` in
@@ -42,7 +50,7 @@ Flutter page bodies do not translate them yet.
 | `toUpper` | `(): string` | yes |
 | `toLower` | `(): string` | yes |
 | `substring` | `(start: int, len?: int): string` | no |
-| `startsWith` | `(s: string): bool` | no |
+| `startsWith` | `(s: string): bool` | yes |
 | `endsWith` | `(s: string): bool` | no |
 | `contains` | `(s: string): bool` | no |
 | `replace` | `(find: string, repl: string): string` | no |

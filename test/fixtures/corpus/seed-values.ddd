@@ -1,0 +1,110 @@
+// Seed data READ BACK — the runtime half of `seed` that only a collection read
+// can see (database-seeding.md).  Sibling of `seeding.ddd`, which owns the
+// dataset SHAPES (default / demo / wired-raw) and the CRUD/FK/404 round-trip on
+// all five backends; this one owns the assertions about the rows the seeder
+// actually wrote.
+//
+// WHY TWO FIXTURES.  The two halves have different backend sets, and one file
+// cannot express that:
+//
+//   - `seeding.ddd` runs everywhere.  Its assertions are seed-INDEPENDENT (by-id
+//     reads of rows the test itself creates), so a leg whose tables start empty
+//     is still fully exercised — CRUD, the enum column written through the
+//     request path, the cross-aggregate `Widget id` FK, the FK-ordered destroys,
+//     the 404 problem bodies.
+//   - this file reads a COLLECTION, which is the only route class that can see
+//     seed rows at all — and because the wire golden compares whole bodies, any
+//     leg whose table starts differently diverges on it.  `elixir` is that leg
+//     today: it emits no seeder whatsoever (B19; mission M-T6.37), so it is held
+//     off THIS case only, via `BEHAVIOURAL_SKIP` in test/behavioral/cases.mjs.
+//
+// So the skip covers exactly the gap, and deleting it re-arms exactly what the
+// gap was hiding.  Keep the two files' seed datasets IDENTICAL in shape (default
+// = 2 rows, demo + wired opt-in) so a reader can compare them line for line.
+//
+// The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
+system SeedValues {
+  subdomain Catalog {
+    context Catalog {
+      enum Tier { Free, Pro }
+      // Deliberately NOT named `Widget`: this is a separate system, and reusing
+      // the sibling's aggregate names would make the two fixtures' emitted
+      // projects (and their census cases) easy to confuse.
+      aggregate Part with crudish {
+        name: string
+        size: int
+        tier: Tier
+        invariant size >= 0
+      }
+      repository Parts for Part { }
+      // `default` always runs at first boot; the other two are opt-in via
+      // LOOM_SEED, and asserting their ABSENCE is what proves the dataset gate
+      // rather than just the insert.
+      seed default {
+        Part { name: "Alpha", size: 1, tier: Free }
+        Part { name: "Beta", size: 2, tier: Pro }
+      }
+      seed demo { Part { name: "Gamma", size: 3, tier: Pro } }
+      seed wired raw {
+        Part { id: "33333333-3333-3333-3333-333333333333", name: "Anchor", size: 4, tier: Free }
+      }
+    }
+  }
+  api CatalogApi from Catalog
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    port: 4000
+  }
+
+  // Every route on `Part` is driven here, so this case needs no census pins: the
+  // create/read/update/destroy path is what puts a KNOWN row beside the seeded
+  // ones, which is how the list assertions below can be about the seeder rather
+  // than about whatever the test just wrote.
+  test e2e "the first-boot seeder's rows read back, and the opt-in datasets stay out" against d {
+    let p = api.parts.create({ name: "Delta", size: 9, tier: "Free" })
+    let read = api.parts.getById(p)
+    expect(read.name).toBe("Delta")
+
+    // THE READ THIS FIXTURE EXISTS FOR.  `sort`/`dir` are explicit because the
+    // page carries more than one row and the wire golden diffs item ORDER as its
+    // own divergence kind.  The seeded rows are asserted by VALUE, not counted:
+    // `size`/`tier` are the int and enum columns the seeder writes through the
+    // domain `create` path, and until this read nothing anywhere had read a
+    // seeded row back on any backend.
+    let all = api.parts.all({ sort: "name", dir: "asc" })
+    expect(all.total).toBe(3)
+    expect(all.items.length).toBe(3)
+    let alpha = all.items.where(x => x.name == "Alpha").first()
+    expect(alpha.size).toBe(1)
+    expect(alpha.tier).toBe("Free")
+    let beta = all.items.where(x => x.name == "Beta").first()
+    expect(beta.size).toBe(2)
+    expect(beta.tier).toBe("Pro")
+    // The dataset GATE: `demo` and `wired raw` are opt-in (LOOM_SEED), so their
+    // rows must NOT be here.  A seeder that ran every dataset looks identical to
+    // one that ran the right one until something counts.
+    expect(all.items.where(x => x.name == "Gamma").length).toBe(0)
+    expect(all.items.where(x => x.name == "Anchor").length).toBe(0)
+
+    // The enum column through the REQUEST path, over a row that shares its table
+    // with seeded rows — the seeder wrote `tier` at first boot, this writes it
+    // again, and declared casing (`"Pro"`) has to survive both.
+    api.parts.update(p, { name: "Delta-2", size: 10, tier: "Pro" })
+    let updated = api.parts.getById(p)
+    expect(updated.tier).toBe("Pro")
+    expect(updated.size).toBe(10)
+
+    // …and the seeded rows survive a delete of the created one: a destroy that
+    // took the whole table with it would satisfy every assertion above.
+    api.parts.destroy(p)
+    expect(api.parts.getById(p)).toThrow(404)
+    let afterDelete = api.parts.all({ sort: "name", dir: "asc" })
+    expect(afterDelete.total).toBe(2)
+    expect(afterDelete.items.first().name).toBe("Alpha")
+  }
+}

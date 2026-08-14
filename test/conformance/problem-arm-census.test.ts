@@ -170,4 +170,134 @@ describe("M-T9.25 — the 7807 arm census", () => {
         "siblings and silently not these",
     ).toEqual([]);
   });
+
+  // ── M-T6.28: the per-FILE ladder COVERAGE claim ───────────────────────
+  // The census above asks whether each router honours an override.  This asks
+  // the prior question: does each router have the rung AT ALL?  node installs no
+  // single app-global handler — `http/index.ts` mounts five sub-apps and each
+  // carries its own copy of the ladder — so the answer differed per file:
+  //
+  //   * `projections.ts` (built on a bare `new OpenAPIHono()`) and `realtime.ts`
+  //     declared NO ladder, so a domain fault raised there fell to the root
+  //     handler, which carried only the FRAMEWORK arms: a missing projection row
+  //     answered **500** where the other four backends answered 404.
+  //   * `a-routes.ts` (the extern-handler WRITE path — `POST /api/place`) and
+  //     `workflows.ts` declared a ladder whose `problem` signature was literally
+  //     typed `400 | 403 | 404 | 422 | 500`, so **no 409 was expressible**, and
+  //     neither file imported `DisallowedError` or `ConcurrencyError`.  A saga
+  //     step or extern handler that lost an optimistic-lock race, or tripped a
+  //     `unique (…)` index, answered `500 / "internal"` — the same wire concept
+  //     the aggregate router next door answers 409.
+  //
+  // Asserted per FILE, and that is the whole point: `toContain` over the joined
+  // output is satisfied by `item.routes.ts` alone, which is why four releases of
+  // ladder work never saw this.  The fixture is built so EVERY conflict rung is
+  // live — `versioned` (ConcurrencyError), `unique (name)` (SQLSTATE 23505) —
+  // and so all four router families are emitted at once.
+  const LADDER_SOURCE = `
+system LadderCensus {
+  subdomain S {
+    context S {
+      aggregate Item with crudish, versioned {
+        name: string
+        qty: int
+        unique (name)
+        operation bump() { qty := qty + 1 }
+      }
+      repository Items for Item { }
+      event ItemBumped { item: Item id }
+      channel Lifecycle {
+        carries: ItemBumped
+        delivery: broadcast
+        retention: ephemeral
+      }
+      workflow Restock {
+        item: Item id
+        attempts: int
+        create(e: ItemBumped) by e.item { attempts := 1 }
+      }
+      extern commandHandler PlaceItem(name: string): Item id;
+    }
+  }
+  api A from S {
+    route POST "/place" -> S.PlaceItem
+  }
+  storage pg { type: postgres }
+  resource st { for: S, kind: state, use: pg }
+  deployable api {
+    platform: node
+    contexts: [S]
+    dataSources: [st]
+    serves: A
+    port: 8080
+  }
+}
+`;
+
+  it("intra-backend: every node router that declares a ladder can express 409", async () => {
+    const files = await generateSystemFiles(LADDER_SOURCE);
+    const routers = [...files.keys()].filter(
+      (k) => /http\/.*\.ts$/.test(k) && !k.endsWith("problem-details.ts"),
+    );
+    // The fixture must really produce the several router families this claim is
+    // about — otherwise the assertion below is vacuous.
+    for (const expected of ["a-routes.ts", "workflows.ts", "item.routes.ts", "index.ts"]) {
+      expect(
+        routers.some((k) => k.endsWith(expected)),
+        `fixture no longer emits http/${expected} — this census stopped covering it`,
+      ).toBe(true);
+    }
+    // A file that declares `app.onError` owns its own ladder, so ITS `problem`
+    // signature must admit 409.  A file that declares none inherits the root's,
+    // which is checked separately below.
+    const missing409 = routers.filter((k) => {
+      const src = files.get(k)!;
+      if (!src.includes("app.onError(")) return false;
+      const sig = /const problem = \(status: ([^,]+),/.exec(src);
+      return !sig || !sig[1]!.split("|").some((s) => s.trim() === "409");
+    });
+    expect(
+      missing409,
+      "router(s) declare a 7807 ladder whose `problem` type cannot express 409 — a " +
+        "conflict raised on those routes answers 500 while the same conflict on a " +
+        "sibling router answers 409",
+    ).toEqual([]);
+  });
+
+  it("intra-backend: the ladder-less node routers are covered by the root floor", async () => {
+    const files = await generateSystemFiles(LADDER_SOURCE);
+    const root = files.get([...files.keys()].find((k) => k.endsWith("http/index.ts"))!)!;
+    const ladderless = [...files.keys()].filter(
+      (k) =>
+        /http\/.*\.ts$/.test(k) &&
+        !k.endsWith("index.ts") &&
+        !k.endsWith("problem-details.ts") &&
+        !files.get(k)!.includes("app.onError("),
+    );
+    // The premise: such routers exist (realtime, and folded projections in a
+    // projection-bearing system).  If they ever all grow their own handler this
+    // claim is moot — and should be re-read, not silently pass.
+    expect(
+      ladderless.length,
+      "no ladder-less router emitted — the fixture stopped covering the inheritance case",
+    ).toBeGreaterThan(0);
+    // …so the ROOT must carry every domain rung, not just the framework ones.
+    for (const rung of [
+      "if (err instanceof ForbiddenError) {",
+      "if (err instanceof DisallowedError) {",
+      "if (err instanceof DomainError) {",
+      "if (err instanceof AggregateNotFoundError) {",
+      "if (err instanceof ConcurrencyError) {",
+      "if (err instanceof HTTPException) {",
+    ]) {
+      expect(
+        root,
+        `http/index.ts is the FLOOR for ${ladderless.join(", ")} and carries no ${rung} arm`,
+      ).toContain(rung);
+    }
+    // And the floor answers each with the same status its per-router siblings do.
+    expect(root).toContain('return problem(404, "Not Found", err.message);');
+    expect(root).toContain('return problem(409, "Disallowed", err.message);');
+    expect(root).toContain('return problem(409, "Conflict", err.message);');
+  });
 });

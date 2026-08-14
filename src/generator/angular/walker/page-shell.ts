@@ -13,7 +13,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
-import { usesDecimalBinding } from "../../_expr/js-intrinsics.js";
+import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { unwrapOpt } from "../../_frontend/form-helpers.js";
 import { FORMAT_CALL_HELPERS } from "../../_frontend/format-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
@@ -228,7 +228,7 @@ function arrayElementTs(t: TypeIR): string | undefined {
  *  state/params — literals cover the realistic surface.) */
 function renderStateInit(field: StateFieldIR): string {
   const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
-  return lit ?? angularTarget.defaultInitFor(field.type);
+  return coerceMoneyStateInit(field.type, lit ?? angularTarget.defaultInitFor(field.type));
 }
 
 /** A `File`-typed `state {}` field (optional-unwrapped).  Its signal is typed
@@ -621,6 +621,14 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push(`  protected readonly String = String;`);
   }
 
+  // `Number(…)` needs the identical lift, and for the identical reason.  The
+  // walker emits it wherever a value must be coerced numerically in a binding —
+  // a `Chart`'s series projection is the first caller (a `money` field parses
+  // into a `Decimal`, which nothing can plot).
+  if (result.tsx.includes("Number(")) {
+    members.push(`  protected readonly Number = Number;`);
+  }
+
   // decimal.js's `Decimal`, hoisted for the SAME reason as `Math` and `String`
   // above — an Angular template resolves identifiers against the component
   // instance, never module scope, so an `import Decimal from "decimal.js"`
@@ -637,6 +645,15 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (usesDecimalBinding(result.tsx)) {
     imports.push(`import Decimal from "decimal.js";`);
     members.push(`  protected readonly Decimal = Decimal;`);
+  }
+
+  // The chart component (`Chart`, M-T1.3 Phase 4) — a standalone component used
+  // BY TAG, so it takes one import line and one `imports: []` entry, exactly
+  // like a hoisted `DataGrid` child.  Marker-keyed off the emitted tag so the
+  // file and its registration cannot dangle apart.
+  if (result.tsx.includes("<loom-chart")) {
+    imports.push(`import { LoomChart } from "../components/loom-chart.component";`);
+    componentImports.add("LoomChart");
   }
 
   // Extern frontend functions the walked body / action bodies call — import

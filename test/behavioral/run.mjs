@@ -68,7 +68,7 @@ function findNodeDeployable(genDir) {
 }
 
 /** Synthesise the per-case boot+run entry (bundled by esbuild). */
-function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken, authzLadder }) {
+function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken, authzLadder, seedFile }) {
   const J = JSON.stringify;
   // When the deployable is `auth: required` the generated boot module
   // (index.ts) registers a verifier before serving — but we boot via
@@ -115,6 +115,19 @@ function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerT
       : authMode === "devstub"
         ? { "x-loom-dev-claims": Buffer.from(DEV_CLAIMS_UNAUTHORIZED).toString("base64") }
         : null;
+  // FIRST-BOOT SEEDS.  The generated entrypoint (index.ts) runs
+  // `migrate` → `runSeeds` → `createApp`; booting via `createApp` skipped the
+  // middle step, so a system carrying `seed` datasets started with EMPTY tables
+  // here and with the `default` dataset's rows on the four cross-backend legs
+  // (which boot the real entrypoint).  That divergence made every collection
+  // read on a seeded aggregate unassertable — the wire golden compares whole
+  // bodies, so one `all()` would have recorded the harness gap as a four-way
+  // wire divergence (`R.unseededListRead` in test/ir/api-caller-census-pins.ts).
+  // Running the EMITTED seeder — not a re-implementation — is what makes the
+  // oracle leg start from the same table as the others; it also gives `seed`
+  // datasets their first runtime coverage on this leg at all.
+  const seedImport = seedFile ? `import { runSeeds } from ${J(seedFile)};` : "";
+  const seedRun = seedFile ? "await runSeeds(db);" : "";
   return `
 ${recorderPreamble()}
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};
@@ -124,6 +137,7 @@ import { computeVerification } from ${J(join(REPO, "src/verify/verification.ts")
 import { createApp } from ${J(join(deplDir, "http/index.ts"))};
 import * as schema from ${J(join(deplDir, "db/schema.ts"))};
 ${authImport}
+${seedImport}
 import { drizzle } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import { is, Table } from "drizzle-orm";
@@ -144,6 +158,7 @@ export async function run() {
   const pglite = new PGlite();
   await pglite.exec(synthDDL(schema, { is, Table, getTableConfig }));
   const db = drizzle(pglite, { schema });
+  ${seedRun}
   ${authRegister}
   const app = createApp(db);
 
@@ -243,11 +258,17 @@ async function runCase(c) {
         : "none";
     const bearerToken = authMode === "oidc" ? oidc?.token ?? null : null;
     const unauthorizedToken = authMode === "oidc" ? oidc?.unauthorizedToken ?? null : null;
+    // `db/seed.ts` exists iff the system declares `seed` datasets — same
+    // derived-from-the-file-map rule as the tiers above, so a system without
+    // seeds boots byte-identically to before.
+    const seedPath = join(deplDir, "db", "seed.ts");
+    const seedFile = existsSync(seedPath) ? seedPath : null;
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
     writeFileSync(entry, entrySource({
       deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken,
       authzLadder: AUTHZ_LADDERS[c.name] ?? null,
+      seedFile,
     }));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);

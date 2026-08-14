@@ -143,41 +143,16 @@
     },
     {
       "seq": 12,
-      "method": "POST",
-      "path": "/api/tickets",
-      "status": 201,
-      "body": {
-        "id": "<volatile:key>"
-      }
-    },
-    {
-      "seq": 13,
-      "method": "POST",
-      "path": "/api/tickets/{id}/close",
+      "method": "GET",
+      "path": "/api/auth/me",
       "status": 401,
       "body": {
-        "error": "unauthorized"
-      }
-    },
-    {
-      "seq": 14,
-      "method": "POST",
-      "path": "/api/tickets/{id}/close",
-      "status": 403,
-      "body": {
-        "detail": "Forbidden: currentUser.role == \"agent\"",
-        "instance": "/api/tickets/{id}/close",
-        "status": 403,
-        "title": "Forbidden",
+        "detail": "no valid credentials for GET /api/auth/me",
+        "instance": "/api/auth/me",
+        "status": 401,
+        "title": "Unauthorized",
         "type": "about:blank"
       }
-    },
-    {
-      "seq": 15,
-      "method": "POST",
-      "path": "/api/tickets/{id}/close",
-      "status": 204,
-      "body": ""
     }
   ]
 }

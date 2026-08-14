@@ -75,6 +75,9 @@ import {
 } from "../../../ir/util/api-surface.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import {
+  lifecycleGates,
+  lifecycleGatesReadRow,
+  lifecycleGatesUseCurrentUser,
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
@@ -765,12 +768,18 @@ export function buildRoutesFile(
       (f) => f.default !== undefined && isServerSourcedDefault(f.default),
     );
     // A `currentUser.*` default needs the ambient principal bound (a bare
-    // `now()` does not) — the same accessor the `/prepare` route uses.
-    if (serverDefaulted.some((f) => !(f.default!.kind === "literal" && f.default!.lit === "now"))) {
-      lines.push(
-        `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
-      );
+    // `now()` does not) — the same accessor the `/prepare` route uses; so does
+    // the canonical create's `requires` gate, and ONE binding serves both.
+    if (
+      serverDefaulted.some((f) => !(f.default!.kind === "literal" && f.default!.lit === "now")) ||
+      lifecycleGatesUseCurrentUser(agg.canonicalCreate)
+    ) {
+      lines.push(currentUserBindLine("      "));
     }
+    // The gate runs BEFORE the factory — a create guard has no `this` to read,
+    // and denying after construction would already have run the invariants and
+    // (on an audited create) staged a row.
+    lines.push(...lifecycleGateLines(agg.canonicalCreate, "      "));
     // Wrap each wire-shape field into the typed factory argument (brand
     // ids, instantiate value objects).  Avoids `as never` and lets
     // strict tsc catch shape drift between Zod and the domain class.
@@ -990,7 +999,32 @@ export function buildRoutesFile(
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const { id } = c.req.valid("param");`);
-    if (!auditDestroy) {
+    const destroyGates = lifecycleGates(agg.canonicalDestroy);
+    if (destroyGates.length > 0) {
+      // GUARDED destroy — the row loads FIRST (a destroy guard may read `this`,
+      // and the route loads anyway for the 404 probe), then the gate, then the
+      // delete.  The order is the security property: 404 (unreachable) wins
+      // over 403 (unauthorized), and the deny precedes both the delete and —
+      // on an audited destroy — the audit row it would otherwise have staged.
+      // The load is BOUND here even on the audited path, which re-loads inside
+      // its transaction: the gate must not run inside the audit tx, or a denial
+      // rolls back work it should never have started.
+      // A principal-only gate reads no field of the row, so the load is not
+      // BOUND there — it still runs (it is the 404 probe), it just has no
+      // receiver to name.
+      const readsRow = lifecycleGatesReadRow(agg.canonicalDestroy);
+      lines.push(
+        readsRow
+          ? `      const __loaded = await repo.getById(Ids.${agg.name}Id(id));`
+          : `      await repo.getById(Ids.${agg.name}Id(id));`,
+      );
+      if (lifecycleGatesUseCurrentUser(agg.canonicalDestroy)) {
+        lines.push(currentUserBindLine("      "));
+      }
+      lines.push(
+        ...lifecycleGateLines(agg.canonicalDestroy, "      ", readsRow ? "__loaded" : undefined),
+      );
+    } else if (!auditDestroy) {
       // Non-audited: the not-found probe stays OUTSIDE the FK-violation
       // try, byte-identical to the pre-audit baseline.  getById throws
       // AggregateNotFoundError (→ 404) when absent.
@@ -1324,6 +1358,41 @@ function requiresGateLines(
       `Forbidden: ${g.source}`,
     )});`;
   });
+}
+
+/** The canonical `create` / `destroy` authorization gate, in the ROUTE.
+ *
+ *  Same shape as `requiresGateLines` above — the same `requires` statements,
+ *  the same `ForbiddenError` (→ 403 via this file's `onError`), the same
+ *  `Forbidden: <source>` detail — because it IS the same gate; only the
+ *  receiver differs:
+ *
+ *    create  — no receiver.  The gate runs BEFORE the factory (there is no
+ *              instance yet), so it reads the principal only, which
+ *              `loom.lifecycle-guard-unreadable` enforces.
+ *    destroy — `__loaded`.  The gate runs AFTER the by-id load the route
+ *              already performs for its 404 probe, so an unreachable id still
+ *              answers 404 rather than 403, matching the operation routes. */
+function lifecycleGateLines(
+  action: OperationIR | null | undefined,
+  pad: string,
+  thisName?: string,
+): string[] {
+  return lifecycleGates(action).map((g) => {
+    const pred = renderTsExpr(g.expr, thisName ? { thisName } : undefined);
+    return `${pad}if (!(${pred})) throw new ForbiddenError(${JSON.stringify(
+      `Forbidden: ${g.source}`,
+    )});`;
+  });
+}
+
+/** The `currentUser` binding line the route uses for a lifecycle gate — the
+ *  same untyped-key bridge the `currentUser.*` create default and the
+ *  `/prepare` route use.  Bound at most ONCE per handler: a second
+ *  `const currentUser` is a redeclaration (TS2451) on an aggregate that has
+ *  both a principal default and a principal gate. */
+function currentUserBindLine(pad: string): string {
+  return `${pad}const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`;
 }
 
 function whenGateLine(agg: AggregateIR, op: OperationIR, pad: string): string[] {
@@ -2120,6 +2189,23 @@ function wireDefaultLiteral(type: TypeIR, d: ExprIR): string {
   const inner = peelNullable(peelCollection(type));
   if (inner.kind === "enum" && d.kind === "ref" && d.refKind === "enum-value") {
     return JSON.stringify(d.name);
+  }
+  // A VALUE-OBJECT default: `.default(...)` feeds a zod schema whose output is
+  // the WIRE object, so the literal must be that object — not the domain class
+  // `renderTsExpr` would produce.  This one COMPILES either way, because TS is
+  // structural and the emitted class happens to carry matching public fields,
+  // which is exactly why it went unnoticed while python (`mypy --strict`) and
+  // .NET (CS0246) could not build the same source at all.  A value object whose
+  // class shape diverges from its wire shape — a private field, a getter, a
+  // renamed property — would break here silently.
+  if (d.kind === "call" && d.callKind === "value-object-ctor") {
+    const entries = d.args
+      .map((a, i) => {
+        const slot = d.argNames?.[i];
+        return slot ? `${slot}: ${renderTsExpr(a)}` : renderTsExpr(a);
+      })
+      .join(", ");
+    return `{ ${entries} }`;
   }
   return renderTsExpr(d);
 }

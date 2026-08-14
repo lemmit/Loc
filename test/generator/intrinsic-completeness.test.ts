@@ -8,15 +8,24 @@
 // fails CI until each backend is filled in (the walker-stdlib-completeness
 // pattern applied to the expression stdlib).
 //
-// .NET is exempt from the SQL-table requirement by design: its where-path
-// feeds the SAME C# expression (`renderCsExpr` → LINQ lambda) to EF Core,
-// which translates the in-memory form to SQL — there is no second .NET
-// renderer to drift.  Its in-memory table (CS_INTRINSIC_RENDERERS) is the
-// single seam and IS required.  Java carries an extra table for the
-// Criteria/Specification path (reified criteria), which renders through
-// `cb.*` calls rather than JPQL strings.
+// .NET's EF CORE adapter is exempt from the SQL-table requirement by design:
+// its where-path feeds the SAME C# expression (`renderCsExpr` → LINQ lambda) to
+// EF Core, which translates the in-memory form to SQL — there is no second
+// renderer to drift.  Its in-memory table (CS_INTRINSIC_RENDERERS) is the single
+// seam and IS required.
+//
+// The two emitters that write a predicate as raw SQL TEXT — .NET's Dapper
+// repository and Java's Hibernate `@SQLRestriction` — share ONE table
+// (`PG_INTRINSIC_SQL`), so it appears once below.  Neither had any intrinsic arm
+// until M-T3.6, while `DAPPER_SUBSET` declared the Dapper adapter
+// fully-lowerable anyway, so every queryable intrinsic in a find/filter CRASHED
+// codegen on both paths.  Listing the shared table here is what keeps that from
+// coming back.  Java carries a further table for the Criteria/Specification path
+// (reified criteria), which renders through `cb.*` calls rather than JPQL
+// strings.
 
 import { describe, expect, it } from "vitest";
+import { PG_INTRINSIC_SQL } from "../../src/generator/_expr/pg-intrinsics.js";
 import { CS_INTRINSIC_RENDERERS } from "../../src/generator/dotnet/render-expr.js";
 import {
   ECTO_INTRINSIC_FRAGMENTS,
@@ -41,6 +50,7 @@ const IN_MEMORY_TABLES: Record<string, Record<string, unknown>> = {
 
 const SQL_TABLES: Record<string, Record<string, unknown>> = {
   "typescript/drizzle (DRIZZLE_INTRINSIC_SQL)": DRIZZLE_INTRINSIC_SQL,
+  "postgres text — dapper + @SQLRestriction (PG_INTRINSIC_SQL)": PG_INTRINSIC_SQL,
   "java/jpql (JPQL_INTRINSIC_SQL)": JPQL_INTRINSIC_SQL,
   "java/criteria (JAVA_CRITERIA_INTRINSICS)": JAVA_CRITERIA_INTRINSICS,
   "python/sqlalchemy (SQLALCHEMY_INTRINSIC_SQL)": SQLALCHEMY_INTRINSIC_SQL,

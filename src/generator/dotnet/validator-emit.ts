@@ -18,6 +18,7 @@ import {
 import { messageCode } from "../../util/message-code.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import { collectCsExprUsings } from "./render-expr.js";
+import { isNullableWireDefault } from "./wire-default.js";
 
 // ---------------------------------------------------------------------------
 // Per-command FluentValidation `AbstractValidator<TCommand>` emission.
@@ -255,16 +256,24 @@ export function voHasWireRules(vo: ValueObjectIR): boolean {
  *  wire rules — empty when none, which is the signal to emit no request
  *  validator (and inject no controller call). */
 function voRequestFields(
-  params: { name: string; type: TypeIR }[],
+  params: { name: string; type: TypeIR; default?: ExprIR }[],
   voByName: ReadonlyMap<string, ValueObjectIR>,
-): { field: string; voClass: string; each: boolean }[] {
-  const out: { field: string; voClass: string; each: boolean }[] = [];
+): { field: string; voClass: string; each: boolean; nullable: boolean }[] {
+  const out: { field: string; voClass: string; each: boolean; nullable: boolean }[] = [];
   for (const p of params) {
     const borne = voBorne(p.type);
     if (!borne) continue;
     const vo = voByName.get(borne.name);
     if (!vo || !voHasWireRules(vo)) continue;
-    out.push({ field: p.name, voClass: `${borne.name}RequestValidator`, each: borne.each });
+    out.push({
+      field: p.name,
+      voClass: `${borne.name}RequestValidator`,
+      each: borne.each,
+      // A VO-typed field carrying a VO default is emitted NULLABLE on the
+      // request record (`wire-default.ts`), and `IValidator<T>` is not
+      // `IValidator<T?>` — CS8620.  The rule has to narrow and skip.
+      nullable: isNullableWireDefault(p.default),
+    });
   }
   return out;
 }
@@ -273,12 +282,16 @@ function voRequestFields(
  *  probes for VO detection.  Mirrors the command/validator param derivation. */
 function requestParamSets(
   agg: AggregateIR,
-): { name: string; params: { name: string; type: TypeIR }[] }[] {
-  const sets: { name: string; params: { name: string; type: TypeIR }[] }[] = [];
+): { name: string; params: { name: string; type: TypeIR; default?: ExprIR }[] }[] {
+  const sets: { name: string; params: { name: string; type: TypeIR; default?: ExprIR }[] }[] = [];
   if (agg.persistedAs !== "eventLog") {
     sets.push({
       name: `Create${agg.name}Request`,
-      params: forCreateInput(agg.fields).map((f) => ({ name: f.name, type: f.type })),
+      params: forCreateInput(agg.fields).map((f) => ({
+        name: f.name,
+        type: f.type,
+        default: f.default,
+      })),
     });
   }
   for (const op of agg.operations) {
@@ -333,11 +346,21 @@ export function renderRequestValidators(
   for (const set of requestParamSets(agg)) {
     const fields = voRequestFields(set.params, voByName);
     if (fields.length === 0) continue;
-    const rules = fields.map((f) =>
-      f.each
-        ? `        RuleForEach(x => x.${upperFirst(f.field)}).SetValidator(new ${f.voClass}());`
-        : `        RuleFor(x => x.${upperFirst(f.field)}).SetValidator(new ${f.voClass}());`,
-    );
+    const rules = fields.map((f) => {
+      const prop = upperFirst(f.field);
+      if (f.each) return `        RuleForEach(x => x.${prop}).SetValidator(new ${f.voClass}());`;
+      // A nullable VO field narrows (`x.<P>!`) and guards (`.When(… is not
+      // null)`): the request omitted it, so the controller's coalesce supplies
+      // the declared default — a value the author wrote, not client input, and
+      // therefore not the validator's business.
+      if (f.nullable) {
+        return (
+          `        RuleFor(x => x.${prop}!).SetValidator(new ${f.voClass}())` +
+          `.When(x => x.${prop} is not null);`
+        );
+      }
+      return `        RuleFor(x => x.${prop}).SetValidator(new ${f.voClass}());`;
+    });
     classes.push(
       `public sealed class ${set.name}Validator : AbstractValidator<${set.name}>\n` +
         `{\n    public ${set.name}Validator()\n    {\n${rules.join("\n")}\n    }\n}`,

@@ -3,9 +3,10 @@
 // The MikroORM adapter reached full parity with drizzle on the PERSISTENCE axis
 // (M-T6.9), but five NON-persistence features stayed gated `&& !usingMikro` in
 // the Hono emitter: query-time projections, realtime SSE, the transactional
-// outbox, timers, and broker channel drivers.  FOUR are still gated — the
-// outbox EMITTER landed (slice 1), so its clause is deleted and its case here
-// asserts emission instead of rejection.  Each one used to generate a
+// outbox, timers, and broker channel drivers.  TWO are still gated — the outbox
+// (slice 1), the broker channel driver (slice 2) and the timer scheduler
+// (slice 3) EMITTERS landed, so their clauses are deleted and their cases here
+// assert emission instead of rejection.  Each one used to generate a
 // project with the feature SILENTLY absent — the model validated clean, the CLI
 // reported success, and the emitted tree simply had no `scheduler.ts` /
 // `http/channels.ts` / `http/realtime.ts` / `http/query-projections.ts` / outbox
@@ -91,7 +92,7 @@ async function drizzleErrorCodes(body: string, systemTail = "", depTail = ""): P
     .map((d) => d.code ?? "");
 }
 
-// --- The five feature bodies (one now CLOSED — see the outbox case) ---------
+// --- The five feature bodies (three CLOSED — outbox, broker, timers) --------
 
 /** Query-time projection (`from … select …`) — `http/query-projections.ts`. */
 const QUERY_TIME_PROJECTION = `
@@ -122,12 +123,14 @@ const DURABLE_WITH_REACTOR = `
 const DURABLE_NO_REACTOR = `
       channel Work { carries: OrderPlaced  delivery: queue  retention: work }`;
 
-/** A `timerSource` — `scheduler.ts`. */
+/** A `timerSource` — `scheduler.ts`.  CLOSED by M-T6.23 slice 3 (kept here as
+ *  the ratchet). */
 const TIMER_EVENT = `
       event SweepTick { at: datetime }`;
 const TIMER_TAIL = `  timerSource sweep { for: SweepTick, cron: "0 3 * * *" }`;
 
-/** A broker-bound `channelSource` — `http/channels.ts`. */
+/** A broker-bound `channelSource` — `http/channels.ts`.  CLOSED by M-T6.23
+ *  slice 2 (kept here as the ratchet). */
 const BROKER_CHANNEL = `
       channel Bus { carries: OrderPlaced  delivery: queue  retention: work }`;
 const BROKER_TAIL = `  storage bus { type: rabbitmq }
@@ -174,21 +177,22 @@ describe("persistence: mikroorm — feature gates are honest, not silent", () =>
     expect(await mikroDiags(DURABLE_WITH_REACTOR, "", "", "warning")).toEqual([]);
   });
 
-  it("rejects an owned timerSource (scheduler.ts was never written)", async () => {
-    const msgs = await mikroDiags(TIMER_EVENT, TIMER_TAIL);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("timerSource 'sweep'");
-    expect(msgs[0]).toContain("scheduler.ts");
+  it("CLOSED (slice 3): an owned timerSource generates — scheduler.ts emits", async () => {
+    // `scheduler.ts` emits on the adapter now: pg-boss for `cron:`, setInterval
+    // + a transaction-scoped advisory lock for `every:`, with the
+    // `loom_timer_runs` watermark and the lock query on the EntityManager.
+    // Emitter pins live in `test/adapters/node-mikroorm-timers.test.ts`.
+    expect(await mikroDiags(TIMER_EVENT, TIMER_TAIL)).toEqual([]);
+    expect(await mikroDiags(TIMER_EVENT, TIMER_TAIL, "", "warning")).toEqual([]);
   });
 
-  it("rejects a broker-bound channelSource (compose started a broker nothing used)", async () => {
-    const msgs = await mikroDiags(BROKER_CHANNEL, BROKER_TAIL, BROKER_DEP_TAIL);
-    // The broker DRIVER is the only remaining omission for this shape — the
-    // `queue/work` channel's outbox half now emits (slice 1), so this is the one
-    // diagnostic left.
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("channelSource 'lifecycleBus'");
-    expect(msgs[0]).toContain("http/channels.ts");
+  it("CLOSED (slice 2): a broker-bound channelSource generates — the driver emits", async () => {
+    // Both halves of this shape now emit on the adapter: `http/channels.ts`
+    // (driver + producer tee + consumer loop, slice 2) and the outbox relay its
+    // durable events ride (slice 1).  Emitter pins live in
+    // `test/adapters/node-mikroorm-channels.test.ts`; this is the ratchet.
+    expect(await mikroDiags(BROKER_CHANNEL, BROKER_TAIL, BROKER_DEP_TAIL)).toEqual([]);
+    expect(await mikroDiags(BROKER_CHANNEL, BROKER_TAIL, BROKER_DEP_TAIL, "warning")).toEqual([]);
   });
 
   it("does NOT fire for a durable channel with no subscriber (identical on both adapters)", async () => {

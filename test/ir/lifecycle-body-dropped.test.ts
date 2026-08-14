@@ -1,16 +1,19 @@
-// The canonical `create` / `destroy` body is lowered and then ignored.
+// The canonical `create` / `destroy` body is lowered and then MOSTLY ignored.
 //
 // `canonicalCreate.statements` / `canonicalDestroy.statements` carry the full
-// body — guards included — and no backend reads either.  `canonicalCreate` is
-// consumed as a MARKER (its existence gates `POST /<aggs>` and the `static
-// create` factory) plus `params`/`audited`; the factory body is synthesized
-// from the field set.  So whatever the author wrote in the braces never reaches
-// an emitter.
+// body.  `canonicalCreate` is otherwise consumed as a MARKER (its existence
+// gates `POST /<aggs>` and the `static create` factory) plus `params`/`audited`;
+// the factory body is synthesized from the field set.  So a `precondition`, an
+// `emit`, a computed `assign` in the braces still never reaches an emitter, and
+// a named error beats a silent drop.
 //
-// That makes a `requires` in a create silently NON-ENFORCING — it parses clean,
-// emits no guard, and leaves an authorization-gated create open.  Until the
-// bodies are actually rendered (the real fix: the IR is already correct, five
-// emitters just don't read it), a named error beats a silent drop.
+// The ONE statement that IS rendered now is `requires` (M-T3.16 step 5): every
+// backend evaluates a lifecycle gate at its own chokepoint and denies with 403,
+// so it must NOT be reported as dropped — the emitted gate would be unreachable
+// from any valid source.  What it may READ is enforced separately
+// (`loom.lifecycle-guard-unreadable`), and an EVENT-SOURCED lifecycle guard is
+// refused outright (`loom.lifecycle-guard-event-sourced`) because it would
+// render into a domain `_init` with no principal in scope.
 //
 // The negative cases matter as much as the positive ones.  A diagnostic that
 // fires where nothing is lost trains readers to ignore it — which is how the
@@ -45,7 +48,11 @@ async function codesFor(agg: string): Promise<string[]> {
 }
 
 describe("validator — the lifecycle body no backend renders", () => {
-  it("rejects a `requires` in a state-based create — it would leave the route OPEN", async () => {
+  it("ACCEPTS a `requires` in a state-based create — the gate is emitted now", async () => {
+    // The inverse of what this test asserted before M-T3.16 step 5.  Keeping the
+    // drop-report would make the emitted gate unreachable from any valid source,
+    // which is the same "the source and the runtime disagree" failure in the
+    // other direction.
     const codes = await codesFor(`
       aggregate Order {
         code: string
@@ -54,7 +61,20 @@ describe("validator — the lifecycle body no backend renders", () => {
           code := code
         }
       }`);
-    expect(codes).toContain(CODE);
+    expect(codes).not.toContain(CODE);
+    expect(codes).toEqual([]);
+  });
+
+  it("ACCEPTS a `requires` in a destroy that reads the loaded row", async () => {
+    // The destroy gate runs after the by-id load every backend already performs,
+    // so `this` IS a legitimate receiver there (unlike in a create).
+    const codes = await codesFor(`
+      aggregate Order {
+        code: string
+        status: string
+        destroy() { requires currentUser.role == "admin" && status == "draft" }
+      }`);
+    expect(codes).toEqual([]);
   });
 
   it("names the consequence, not just the fact", async () => {
@@ -64,20 +84,20 @@ describe("validator — the lifecycle body no backend renders", () => {
       aggregate Order {
         code: string
         create(code: string) {
-          requires currentUser.role == "admin"
+          precondition code.length > 0
           code := code
         }
       }`),
       ),
     );
     const d = diags.find((x) => x.code === CODE);
-    // An author who reaches this needs to know the gate is not merely
-    // undeclared (the find-403 case) but not RUNNING.
-    expect(d?.message).toMatch(/OPEN/);
+    // An author who reaches this needs to know the guard is not merely
+    // undeclared but not RUNNING.
+    expect(d?.message).toMatch(/unchecked/);
     expect(d?.message).toMatch(/operation/);
   });
 
-  it("rejects a `precondition` in a create and a `requires` in a destroy", async () => {
+  it("still rejects a `precondition` in a create — that one is NOT rendered", async () => {
     const codes = await codesFor(`
       aggregate Order {
         code: string
@@ -88,8 +108,27 @@ describe("validator — the lifecycle body no backend renders", () => {
         }
         destroy() { requires currentUser.role == "admin" }
       }`);
-    // Two distinct sites, both dropped.
-    expect(codes.filter((c) => c === CODE).length).toBe(2);
+    // Exactly ONE drop: the `precondition`.  The destroy's `requires` is a
+    // rendered gate — a count of 2 here is the regression this pins.
+    expect(codes.filter((c) => c === CODE).length).toBe(1);
+  });
+
+  it("refuses an EVENT-SOURCED lifecycle guard by its own name", async () => {
+    // Its body renders into the domain `_init`, which has no principal in
+    // scope: `currentUser` is a free identifier there, so the guard does not
+    // deny — it does not compile.  Naming it keeps the state-based emission
+    // from resting on a false premise about the ES path.
+    const codes = await codesFor(`
+      event Opened { order: Order id }
+      aggregate Order persistedAs: eventLog {
+        code: string
+        create(code: string) {
+          requires currentUser.role == "admin"
+          emit Opened { order: id }
+        }
+        apply(e: Opened) { }
+      }`);
+    expect(codes).toContain("loom.lifecycle-guard-event-sourced");
   });
 
   it("rejects a literal default written in the body with no matching field default", async () => {

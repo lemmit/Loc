@@ -170,6 +170,27 @@ const QUERYABLE: { name: string; e: ExprIR }[] = [
     },
   },
   {
+    // The BOOL-returning queryable intrinsic (M-T3.6) — a whole predicate
+    // standing alone, not a comparison operand, which is a position no other
+    // queryable row reaches.  Its swapped-receiver twin is the drift case
+    // asserted below.
+    name: "this.col.startsWith(param) (bool-returning intrinsic as the whole predicate)",
+    e: {
+      kind: "method-call",
+      receiver: {
+        kind: "member",
+        receiver: thisExpr,
+        member: "path",
+        receiverType: STR,
+        memberType: STR,
+      },
+      member: "startsWith",
+      args: [{ kind: "ref", name: "p", refKind: "param", type: STR }],
+      receiverType: STR,
+      isCollectionOp: false,
+    },
+  },
+  {
     name: "this.col.toUpper() == literal (second queryable intrinsic, data-only row)",
     e: {
       kind: "binary",
@@ -376,6 +397,35 @@ describe("queryable-subset parity — validator admits ⊆ Drizzle lowers", () =
       ).not.toBeNull();
     });
   }
+
+  it("rejects a bool-returning intrinsic on a VALUE receiver in BOTH places (no drift)", () => {
+    // `p.startsWith(this.path)` — the ancestor mirror of the subtree read, with
+    // the operands SWAPPED so the receiver is a param and the column is the
+    // argument.  It is the shape that made this invariant bite for real: when
+    // `startsWith` became `queryable` (M-T3.6) the gate's intrinsic arm admitted
+    // it (a queryable intrinsic whose receiver and args are themselves
+    // queryable — a `param` ref is), while drizzle's `renderColumnRef` returned
+    // null for the value receiver, so `buildFindWhereClause` threw its
+    // "internal: … the validator should have caught this. Please file a bug."
+    // Java's Criteria arm threw `unsupported` on the same source and Python
+    // emitted the HOST `p.startswith(<column attr>)` — three outcomes, no
+    // diagnostic.  The gate now requires a COLUMN receiver for a bool-returning
+    // queryable intrinsic, so all five backends reject it identically.
+    //
+    // This sample is the regression pin: revert that gate arm and this fails.
+    const swappedPrefix: ExprIR = {
+      kind: "method-call",
+      receiver: { kind: "ref", name: "p", refKind: "param", type: STR },
+      member: "startsWith",
+      args: [
+        { kind: "member", receiver: thisExpr, member: "path", receiverType: STR, memberType: STR },
+      ],
+      receiverType: STR,
+      isCollectionOp: false,
+    };
+    expect(firstNonQueryableNode(swappedPrefix)).toContain("non-column receiver");
+    expect(lowerToDrizzle(swappedPrefix, "things", ctx)).toBeNull();
+  });
 
   it("rejects the un-lowerable bare this-vo-prop ref in BOTH places (no drift)", () => {
     // A bare VO sub-property ref: only its sub-name, no parent VO field —

@@ -1,8 +1,11 @@
 # M-T9.27 — The `*-unsupported` register: enumerate the gaps before draining them (design)
 
-> **Status: SLICE 1 LANDED** — `src/diagnostics/unsupported-register.ts` + its
-> gate `test/system/unsupported-register.test.ts` (mutation-proven, see §Gate).
-> Slices 2–4 open.
+> **Status: SLICES 1–3 LANDED** (#2444, #2488) — the register + its gate, the
+> 19 non-gaps renamed out of the suffix, and every gap owned by a mission.
+> **Slice 4 open.** First drain landed too: M-T6.33 (#2506) took
+> `MAX_OPEN_GAPS` 42 → 37 by re-classification.
+> `src/diagnostics/unsupported-register.ts` is the machine-checked truth; the
+> counts in the body below are as-of slice 1 unless a section says otherwise.
 > Sources: language-size review 2026-08-04/05. `src/diagnostics/unsupported-register.ts`
 > is the machine-checked truth; this doc is the planning view over it.
 > Relates to M-T9.8 (allowlist ratchet — the same discipline, one register over),
@@ -82,8 +85,9 @@ where one exists, and `verified` (classification confirmed against the site).
 2. every registered code is still emitted — **a drained gap deletes its row in
    the same PR**, so the register ratchets down instead of becoming a graveyard;
 3. no duplicate rows;
-4. the open-gap count is pinned at `MAX_OPEN_GAPS` (42), asserted both `<=` and
-   `===` so draining without lowering the pin fails loudly.
+4. the open-gap count is pinned at `MAX_OPEN_GAPS` — **42** at slice 1, **37**
+   since M-T6.33 — asserted both `<=` and `===` so draining without lowering the
+   pin fails loudly.
 
 **Mutation-proven** (CLAUDE.md — a green first run proves nothing):
 
@@ -101,7 +105,7 @@ M-T5.21 §Symptom 1.)
 
 | # | unit | codes | owner |
 |---|---|---:|---|
-| 1 | **Lifecycle stamps** — principal stamp without auth / stamp on event-sourced. One shared check body (`STAMP_BACKENDS`, `system-checks.ts:1682`) already; only the code identity is forked five ways | 5 | — |
+| 1 | ~~**Lifecycle stamps**~~ — **DRAINED (M-T6.33)**, and not as expected: both arms re-verified as permanent refusals, so the five codes were renamed out rather than emitted. `MAX_OPEN_GAPS` 42 → 37 | ~~5~~ 0 | M-T6.33 `done` |
 | 2 | **Projections** — groupby, query-time, projection-source, workflow-source, whole-table aggregation, Java field shapes | 6 | M-T4.2 |
 | 3 | **Persistence adapters** — dapper, mikroorm, unlowerable find predicates, persistence-mode, saving-shape | 5 | M-T6.23 |
 | 4 | **Frontend primitives** — Chart, DataGrid, Flutter renderers, frontend collection ops, Feliz async effects | 5 | M-T1.1 / M-T1.3 |
@@ -115,8 +119,11 @@ M-T5.21 §Symptom 1.)
 **Sizing.** Ten units, of which four (1, 9, 10, and most of 7) are single
 features × backends and three (2, 3, 5) are genuine multi-week tracks. That is
 a plausible sprint-and-a-half, not a quarter — which is only knowable *because*
-the enumeration exists. Units 1, 6, and 9 have no owning mission at all; those
-need one before they can be claimed.
+the enumeration exists.
+
+**Since slice 1:** unit 1 is drained (see below) and every remaining unit has an
+owning mission — slice 3 minted the six that were missing, so the "units 1, 6, 9
+have no owner" hole this table originally recorded is closed.
 
 ## Slice 2 — rename the 19 non-gaps out of the suffix (LANDED)
 
@@ -166,12 +173,44 @@ turning the mapping into `X-invalid → X-invalid`. Prose that documents a renam
 is data the rename script will happily eat. Check the doc that describes the
 change, not just the code.
 
-## Open slices
+## Slice 3 — mission every orphaned gap (LANDED)
 
-**Slice 3 — mission every orphaned gap.** Units 1, 6, 9 have no owner. Mint the
-missions (or fold them into an existing track) so every `gap` row has a
-`mission` field. The register's `mission?` being optional is the measurement;
-the target is that it is always present.
+23 of the 42 gaps had no owner. Six missions minted, grouped by the shape of the
+work rather than by code name: **M-T6.32** capability emission, **M-T6.33**
+lifecycle stamps, **M-T6.34** event-sourced storage, **M-T6.35** persistence
+adapters, **M-T6.36** Java emitter shapes, **M-T1.20** frontend surface.
+
+Two invariants make the ownership stick, both mutation-proven: every `gap` cites
+a mission, and **every cited id resolves to exactly one `## M-Tx.y` heading** in
+`docs/new-plan/`. The second was not decoration — T6 carried three duplicate
+mission ids (`M-T6.25` ×3, `M-T6.26` ×3) from two separate renumbering attempts
+that had each collided again, so the field would have pointed at ambiguity.
+Renumbered to M-T6.29/30/31 in the same change.
+
+### First drain (M-T6.33, 2026-08-11)
+
+The lifecycle-stamp unit re-verified as **not gaps at all** — its five codes were
+one shared body whose two arms read only the model (`dep.auth`, `sys.user`,
+`agg.persistedAs`), never a backend capability. Renamed to
+`loom.stamp-principal-without-auth` and `loom.stamp-on-event-sourced-invalid`;
+five validators collapsed to one; five register rows removed. **`MAX_OPEN_GAPS`
+42 → 37.**
+
+Note how that number moved: **by re-classification, not by emitting anything.**
+Two of the remaining five units (M-T6.32, M-T6.35) carry the same verify-first
+flag for the same reason, so expect it to move that way again —
+`loom.filter-bypass-unsupported` ("`ignoring` … has no effect") in particular
+reads like the `-no-effect` rows slice 2 renamed out.
+
+That mission also surfaced a gate hole worth remembering: the five old sites
+were **invisible to `diagnostic-catalog.test.ts`**, because its scanner only
+records a site whose `code:` is a *string literal* and the old sites emitted
+`code: backend.code` — a property access off the table row. Collapsing the table
+made them literals, which is what exposed them. Indirection at the emission site
+can hide a diagnostic from a gate that claims to cover the whole surface; the
+rest of the scanned surface was surveyed and is clean.
+
+## Open slices
 
 **Slice 4 — the full 419-code registry.** Extend beyond the suffixed subset to
 every `loom.*` code, with `kind: "rule" | "gap"`, a docs anchor, and a

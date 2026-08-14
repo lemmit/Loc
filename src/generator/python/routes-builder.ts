@@ -37,6 +37,9 @@ import {
 import { maskedHistoryFields } from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import {
+  lifecycleGates,
+  lifecycleGatesReadRow,
+  lifecycleGatesUseCurrentUser,
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
@@ -50,6 +53,7 @@ import {
   opGetById,
   opOperation,
 } from "../../ir/util/openapi-ids.js";
+import { listReadFind } from "../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import {
@@ -59,7 +63,7 @@ import {
   resolveErrorStatus,
 } from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
-import { isServerSourcedDefault } from "../_frontend/server-default.js";
+import { isServerSourcedDefault, isValueObjectDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { pyHistoryMapperName, renderPyHistoryMapper } from "./emit/audit-history.js";
 import { requestPyType, responsePyType } from "./emit/http-models.js";
@@ -293,6 +297,16 @@ export function buildPyRoutesFile(
       emittableFinds(repo).some(findUsesCurrentUser) ||
       // A find `requires` gate that reads currentUser binds `current_user: User`.
       emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
+      // …and so does a canonical `create` / `destroy` gate that reads it.
+      lifecycleGatesUseCurrentUser(agg.canonicalCreate) ||
+      lifecycleGatesUseCurrentUser(agg.canonicalDestroy) ||
+      // …including the LIST read's gate, which `emittableFinds` excludes (the
+      // list endpoint has its own route shape).  Its route binds the same
+      // `current_user: User`, so it needs the same import.
+      (() => {
+        const g = listReadFind(repo)?.requires;
+        return !!g && exprUsesCurrentUser(g);
+      })() ||
       (hasCreateFactory(agg) && stampUsesUser(agg, "create")) ||
       (publicOps.length > 0 && stampUsesUser(agg, "update")) ||
       // A `currentUser.*` create-field default binds `current_user: User` in
@@ -660,6 +674,22 @@ export function requestFieldDecl(
   if (defaultExpr && isServerSourcedDefault(defaultExpr)) {
     return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
   }
+  // A VALUE-OBJECT default constructs the DOMAIN class, but this field is
+  // typed as the WIRE model (`requestPyType` maps a VO to `<VO>Model`), so
+  // `renderPyExpr` would put `Money(...)` in a `MoneyModel` slot — a
+  // `mypy --strict` incompatible-assignment.  Re-render it in the wire shape.
+  // Pydantic evaluates a field default per model instantiation, so unlike the
+  // server-sourced case there is nothing frozen at import and no coalesce
+  // needed — the default can simply BE the wire value.
+  if (defaultExpr && isValueObjectDefault(defaultExpr) && defaultExpr.kind === "call") {
+    const args = defaultExpr.args
+      .map((a, i) => {
+        const slot = defaultExpr.argNames?.[i];
+        return `${slot ? `${slot}=` : ""}${renderPyExpr(a)}`;
+      })
+      .join(", ");
+    return `${base} = ${defaultExpr.name}Model(${args})`;
+  }
   if (defaultExpr) return `${base} = ${renderPyExpr(defaultExpr)}`;
   const isOpt = optional || t.kind === "optional";
   if (isOpt) return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
@@ -794,15 +824,24 @@ function createRoute(
       !(f.default.kind === "literal" && f.default.lit === "now"),
   );
   const stampUsesPrincipal = stampUsesUser(agg, "create") || defaultUsesPrincipal;
+  // The canonical create's `requires` gate needs the same request-scoped
+  // principal the stamps and `currentUser.*` defaults do — one binding serves
+  // all three (a second `current_user: User = …` would be a redefinition ruff
+  // flags).
+  const gateUsesPrincipal = lifecycleGatesUseCurrentUser(agg.canonicalCreate);
+  const bindPrincipal = stampUsesPrincipal || gateUsesPrincipal;
   const sig = [
     `body: Create${agg.name}Request`,
-    ...(stampUsesPrincipal ? ["request: Request"] : []),
+    ...(bindPrincipal ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   return lines(
     `@router.post("${relativeOpPath(apiOp)}", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
-    stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
+    bindPrincipal ? "    current_user: User = request.state.current_user" : null,
+    // BEFORE the factory: a denied create must construct nothing (and, when
+    // audited, stage nothing).
+    ...lifecycleGate(agg.canonicalCreate),
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
     auditCreate ? "    repo = _repo(session)" : null,
@@ -825,8 +864,28 @@ function allRoute(
   // every other backend.  A non-paged findAll keeps the bare-array list.
   const autoAll = repo?.finds.find((f) => f.name === "all" && f.params.length === 0 && !f.filter);
   const paged = autoAll ? pagedReturn(autoAll.returnType) : null;
+  // The LIST read's authorization gate.  The list endpoint is emitted here
+  // rather than in the named-find loop (`emittableFinds` filters `all` out — it
+  // has a bespoke paged shape), which is exactly how its `requires` came to be
+  // dropped while every named find's was honoured.  Same 403-before-query
+  // contract as `findRoute` below, down to the message and the negated-guard
+  // rendering (`x not in y`, ruff E713).
+  const listRead = listReadFind(repo);
+  const gate = listRead?.requires;
+  const gateUsesUser = !!gate && exprUsesCurrentUser(gate);
+  const userParam = gateUsesUser ? ["request: Request"] : [];
+  const gateLines: LinesPart = gate
+    ? [
+        gateUsesUser ? "    current_user: User = request.state.current_user" : null,
+        `    if ${renderPyNegatedGuard(gate)}:`,
+        `        raise ForbiddenError(${JSON.stringify(`Forbidden: find ${listRead!.name}`)})`,
+      ]
+    : null;
   if (paged) {
+    // `request` (when the gate needs it) precedes the defaulted params — Python
+    // forbids a non-default parameter after a defaulted one.
     const sig = [
+      ...userParam,
       "session: SessionDep",
       `page: int = ${PAGED_DEFAULT_PAGE}`,
       `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
@@ -836,6 +895,7 @@ function allRoute(
     return lines(
       `@router.get("${relativeOpPath(apiOp)}", response_model=${paged.name}, operation_id="all${agg.name}"${derivedResponsesKwarg(apiOp)})`,
       `async def all_${snake(plural(agg.name))}(${sig}) -> dict[str, object]:`,
+      gateLines,
       "    repo = _repo(session)",
       "    result = await repo.all(page, pageSize, sort, dir)",
       "    return {",
@@ -849,7 +909,8 @@ function allRoute(
   }
   return lines(
     `@router.get("${relativeOpPath(apiOp)}", response_model=${agg.name}ListResponse, operation_id="all${agg.name}"${derivedResponsesKwarg(apiOp)})`,
-    `async def all_${snake(plural(agg.name))}(session: SessionDep) -> list[dict[str, object]]:`,
+    `async def all_${snake(plural(agg.name))}(${[...userParam, "session: SessionDep"].join(", ")}) -> list[dict[str, object]]:`,
+    gateLines,
     "    repo = _repo(session)",
     `    return [${wireResp(agg, "root")} for root in await repo.all()]`,
   );
@@ -917,13 +978,22 @@ function destroyRoute(
         "    )",
       ]
     : [];
+  // The canonical destroy's `requires` gate runs AFTER the load (it may read
+  // the row) and BEFORE the audit row is staged, so a denied delete records
+  // nothing.  A principal-only gate reads no field, so it needs no receiver —
+  // the load still runs as the 404 probe but is not bound (ruff F841).
+  const destroyGateReadsRow = lifecycleGatesReadRow(agg.canonicalDestroy);
+  const destroyGateUsesUser = lifecycleGatesUseCurrentUser(agg.canonicalDestroy);
+  const bindLoaded = auditDestroy || destroyGateReadsRow;
   return lines(
     `@router.delete("${relativeOpPath(apiOp)}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
-    auditDestroy
+    bindLoaded
       ? `    __loaded = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`
       : `    await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
+    destroyGateUsesUser ? "    current_user: User = request.state.current_user" : null,
+    ...lifecycleGate(agg.canonicalDestroy, destroyGateReadsRow ? "__loaded" : undefined),
     auditDestroy ? "    __before = repo.to_wire(__loaded)" : null,
     ...destroyAuditCall,
     "    try:",
@@ -968,6 +1038,23 @@ function requiresGate(op: OperationIR, ctx: BoundedContextIR): string[] {
       `        raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
     ];
   });
+}
+
+/** The canonical `create` / `destroy` authorization gate, in the ROUTE.
+ *
+ *  The same statements, the same `renderPyNegatedGuard` spelling and the same
+ *  `ForbiddenError` (→ 403) as `requiresGate` above — the lifecycle gate is the
+ *  operation gate with a different receiver:
+ *
+ *    create  — none.  It runs BEFORE the factory, so it reads the principal
+ *              only (`loom.lifecycle-guard-unreadable` enforces that).
+ *    destroy — `__loaded`, the row the route already loaded for its 404 probe,
+ *              so an unreachable id answers 404 before 403. */
+function lifecycleGate(action: OperationIR | null | undefined, thisName?: string): string[] {
+  return lifecycleGates(action).flatMap((g) => [
+    `    if ${renderPyNegatedGuard(g.expr, thisName ? { thisName } : undefined)}:`,
+    `        raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
+  ]);
 }
 
 function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {

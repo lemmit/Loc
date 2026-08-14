@@ -230,22 +230,42 @@ const BEHAVIOURAL_SKIP = {
   // The DAPPER adapter of the .NET backend (`run-dapper.mjs` forces this exact
   // clause, and looks the skip set up by it).
   "dotnet { persistence: dapper }": {
-    // A SILENT gap, unlike mikroorm's: `src/generator/dotnet/query-projection-emit.ts`
-    // contains no `dapper` branch at all — it hard-codes `using
-    // Microsoft.EntityFrameworkCore;` and `private readonly AppDbContext _db;`,
-    // neither of which exists on the Dapper adapter, so the generated project
-    // does not COMPILE (CS0234 / CS0246) and nothing warned at generate time.
-    // Found by these two fixtures' first runtime callers (#2468).  The proper
-    // fix is either a Dapper query-projection emitter or — at minimum — an
-    // honest `loom.dapper-unsupported` gate like the MikroORM one, so the
-    // failure is a diagnostic instead of a broken build.  Delete these when
-    // either lands.
+    // Was a SILENT gap — `src/generator/dotnet/query-projection-emit.ts` has no
+    // `dapper` branch at all, so it hard-coded `using
+    // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;` and
+    // the generated project simply did not COMPILE (CS0234 / CS0246), with
+    // nothing said at generate time.  Found by these two fixtures' first runtime
+    // callers (#2468); now an HONEST `loom.dapper-unsupported` error, so forcing
+    // the case here fails validation instead of the C# build.  Same shape as the
+    // MikroORM feature gates.  Delete both entries when a Dapper
+    // query-projection emitter lands (raw SQL — a query-time projection IS a SQL
+    // aggregate, so the port is smaller than the gate implies).
     "projection-aggregation":
-      "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
+      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
     "projection-groupby":
-      "dapper emits EF-shaped query-projection handlers (AppDbContext) that do not compile — silent gap, see query-projection-emit.ts",
+      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
   },
   elixir: {
+    // B19 — a SILENT gap the first collection read over seed data found (#2517):
+    // the Elixir backend emits NO seeder at all.  `priv/repo/seeds.exs` is listed
+    // in the Phoenix file map (docs/generators.md) and reserved as a layout slot
+    // (`elixir/adapters/by-feature-layout.ts` → "seeds"), but no emitter ever
+    // writes it, so every `seed` dataset is dropped and the tables start empty —
+    // while node/python/java/dotnet all seed at boot.  Invisible until something
+    // read a seeded row back: the fixtures compile green on all five backends.
+    //
+    // Scoped to `seed-values`, NOT to `seeding`, and the difference is the whole
+    // point: keying this by fixture id removes the WHOLE case from this leg, so
+    // pointing it at `seeding` would also have taken away that fixture's CRUD
+    // round-trip, enum write-back, cross-aggregate `Widget id` FK, FK-ORDERED
+    // DESTROYS (B10's exact class — an elixir bug fixed once already), 404 problem
+    // bodies and its wire-golden comparison.  `seed-values` carries only the
+    // collection reads that cannot pass without a seeder, so the skip now covers
+    // exactly the gap and deleting it re-arms exactly what was missing.
+    //
+    // Delete this entry when the Elixir seeder lands — M-T6.37 owns it.
+    "seed-values":
+      "elixir emits no seed runner — `seed` datasets are silently dropped, so the seeded rows this fixture reads back never exist (B19; `seeding`'s CRUD half stays armed here)",
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
     // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
     // now mints a valid PascalCase module alias; openapi-emit.ts.)

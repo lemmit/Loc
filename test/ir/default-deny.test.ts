@@ -165,6 +165,75 @@ system Helpdesk {
 `;
     expect(await denyErrors(src)).toEqual([]);
   });
+
+  // --- Projections (the last read surface default-deny walked past) ---
+
+  /** A system with one FOLDED and one QUERY-TIME projection, each gated by the
+   *  matching argument (a `requires …` clause, or "" for ungated). */
+  function projectionSys(foldedGate: string, queryGate: string): string {
+    return `
+system Helpdesk {
+  user { id: string role: string }
+  auth { enforcement: denyByDefault }
+  subdomain S {
+    context Tickets {
+      aggregate Ticket { subject: string  open: bool }
+      repository Tickets for Ticket { }
+      event Opened { ticket: Ticket id  subject: string }
+      projection TicketBook keyed by ticket ${foldedGate}{
+        ticket: Ticket id
+        subject: string
+        on(e: Opened) { ticket := e.ticket  subject := e.subject }
+      }
+      projection OpenTickets ${queryGate}{
+        subject: string
+        from Ticket as t
+        where t.open == true
+        select subject = t.subject
+      }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Tickets, kind: state, use: primary }
+  api SupportApi from S
+  deployable api { platform: node contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
+}
+`;
+  }
+
+  const PROJ_GATE = 'requires currentUser.role == "agent" ';
+
+  it("rejects an ungated FOLDED projection under denyByDefault", async () => {
+    // `/projections/ticket_book` and `/projections/ticket_book/{key}` publish
+    // the read model's rows to any caller — the same hole as an ungated find,
+    // and the one default-deny could not close until a folded projection could
+    // both spell and enforce a gate.
+    const errs = await denyErrors(projectionSys("", PROJ_GATE));
+    expect(errs.some((m) => m.includes("projection 'TicketBook'"))).toBe(true);
+    expect(errs.some((m) => m.includes("OpenTickets"))).toBe(false);
+  });
+
+  it("rejects an ungated QUERY-TIME projection under denyByDefault", async () => {
+    const errs = await denyErrors(projectionSys(PROJ_GATE, ""));
+    expect(errs.some((m) => m.includes("projection 'OpenTickets'"))).toBe(true);
+    expect(errs.some((m) => m.includes("TicketBook"))).toBe(false);
+  });
+
+  it("accepts both projection kinds once gated", async () => {
+    expect(await denyErrors(projectionSys(PROJ_GATE, PROJ_GATE))).toEqual([]);
+  });
+
+  it("`requires true` is the intentionally-public escape for a projection too", async () => {
+    expect(await denyErrors(projectionSys("requires true ", "requires true "))).toEqual([]);
+  });
+
+  it("does not enforce projections under `enforcement: opt`", async () => {
+    const opt = projectionSys("", "").replace(
+      "auth { enforcement: denyByDefault }",
+      "auth { enforcement: opt }",
+    );
+    expect(await denyErrors(opt)).toEqual([]);
+  });
 });
 
 // An explicit `commandHandler` / `queryHandler` bound through an

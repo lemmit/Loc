@@ -75,7 +75,13 @@ describe("java workflow instance read endpoints", () => {
       "public ResponseEntity<OrderFulfillmentInstanceResponse> getOrderFulfillmentInstanceById(@PathVariable UUID id) {",
     );
     expect(ctrl).toContain("orderFulfillmentStateRepository.findById(new OrderId(id))");
-    expect(ctrl).toContain(".orElse(ResponseEntity.notFound().build());");
+    // M-T6.31 — was `.orElse(ResponseEntity.notFound().build())`: Spring's own
+    // 404 with an EMPTY body, which never reaches `ApiExceptionAdvice.onNotFound`
+    // and so answered a different shape from every other 404 in the app.
+    expect(ctrl).toContain(
+      '.orElseThrow(() -> new AggregateNotFoundException("OrderFulfillment " + id + " not found"));',
+    );
+    expect(ctrl).not.toContain("ResponseEntity.notFound().build()");
     expect(ctrl).toContain("import java.util.UUID;");
   });
 
@@ -158,7 +164,12 @@ describe("java event-sourced workflow instance read endpoints", () => {
       "public ResponseEntity<TallyInstanceResponse> getTallyInstanceById(@PathVariable UUID id) {",
     );
     expect(ctrl).toContain("var __sid = String.valueOf(id);");
-    expect(ctrl).toContain("if (__rows.isEmpty()) return ResponseEntity.notFound().build();");
+    // M-T6.31 — an empty stream is an absent instance: throw the shared carrier
+    // so the one advice arm renders the envelope.
+    expect(ctrl).toContain(
+      'if (__rows.isEmpty()) throw new AggregateNotFoundException("Tally " + id + " not found");',
+    );
+    expect(ctrl).not.toContain("ResponseEntity.notFound().build()");
     expect(ctrl).toContain("var x = TallyState._fromEvents(new OrderId(id), __loaded);");
   });
 

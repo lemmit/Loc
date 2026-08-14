@@ -37,7 +37,9 @@ import {
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
+import { lifecycleGates } from "../../../ir/util/op-gates.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { listReadFind } from "../../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
@@ -354,21 +356,50 @@ function renderController(
   // helper find-controller emits — always present now that every non-abstract
   // controller pages) and returns the `%{items, …}` envelope.  A read-only
   // abstract-base controller keeps the plain unpaged list (honest gate).
-  const listAllFind = (ctx.repositories ?? [])
-    .find((r) => r.aggregateName === agg.name)
-    ?.finds?.find((f) => f.name === "all");
+  const listAllFind = listReadFind(
+    (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name),
+  );
   const indexPaged = !readOnly && (listAllFind ? !!pagedReturn(listAllFind.returnType) : false);
   const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
-  const indexAction = indexPaged
-    ? `  def index(conn, params) do
-${cuBind}    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
+  // The LIST read's authorization gate — 403 before the query, the same
+  // contract `renderFindActions` gives every NAMED find.  `index` is emitted
+  // here, outside that loop (the list endpoint has its own paged shape), which
+  // is how its `requires` came to be dropped on this backend while every named
+  // find's was honoured.
+  const indexGate = listAllFind?.requires;
+  const indexGateUsesUser = !!indexGate && exprUsesCurrentUser(indexGate);
+  // `current_user` may already be bound by `cuBind` (principal-scoped reads);
+  // bind it here only when the gate is the sole reason it's needed.
+  const indexCuBind =
+    indexGateUsesUser && !principal
+      ? "    current_user = Map.get(conn.assigns, :current_user)\n"
+      : "";
+  const indexBody = indexPaged
+    ? `    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+    end`
+    : `    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
+      json(conn, Enum.map(records, &serialize/1))
+    end`;
+  // Unchanged by the gate: the guard sits inside the function body, so the
+  // paged arm still binds `params` and the unpaged one still underscore-prefixes
+  // it for the unused-variable check.
+  const indexParamArg = indexPaged ? "params" : "_params";
+  const indexAction = indexGate
+    ? `  def index(conn, ${indexParamArg}) do
+${cuBind}${indexCuBind}    if not (${renderElixirExpr(indexGate, { thisName: "record", contextModule: facadeMod, foundation: "vanilla" })}) do
+      ${denialResponse(
+        "forbidden",
+        JSON.stringify(`Forbidden: find ${listAllFind!.name}`),
+        denialOverrides(ctx),
+        `${appModule}Web.ProblemDetails`,
+      )}
+    else
+${indexBody}
     end
   end`
-    : `  def index(conn, _params) do
-${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
-      json(conn, Enum.map(records, &serialize/1))
-    end
+    : `  def index(conn, ${indexParamArg}) do
+${cuBind}${indexBody}
   end`;
   // Command-load context fn a MUTATION action loads through (authorization
   // Phase 3 P3.1): `get_<agg>_for_write` when the aggregate's write scope is
@@ -406,11 +437,35 @@ ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) d
   // The create action has no read-filter `cuBind`, so bind `current_user` there
   // when a principal stamp OR a `currentUser.*` field default needs it.  The
   // params coalesce runs after the bind (it may read `current_user`).
+  // The canonical create's authorization gate lives in the CONTEXT on this
+  // backend (the LiveView calls the context directly, around any controller
+  // gate — see the header note in context-emit.ts), so the controller's job is
+  // to THREAD the principal and answer the typed denial.  `create_<agg>/2`
+  // takes it whether or not a stamp does, so the arg is unconditional once the
+  // create is gated.
+  const createGated = lifecycleGates(agg.canonicalCreate).length > 0;
+  const destroyGated = lifecycleGates(agg.canonicalDestroy).length > 0;
   const createCuBind =
-    stampPrincipal || defaultUsesPrincipal
+    stampPrincipal || defaultUsesPrincipal || createGated
       ? `    current_user = Map.get(conn.assigns, :current_user)\n${createParamDefaults}`
       : createParamDefaults;
-  const createActor = stampPrincipal ? ", current_user" : "";
+  const createActor = stampPrincipal || createGated ? ", current_user" : "";
+  // `delete_<agg>/2` takes the principal once the destroy is gated.  `cuBind`
+  // already binds `current_user` for a principal-filtered read; bind it here
+  // when only the gate needs it (a double bind is a compile error).
+  const destroyActor = destroyGated ? ", current_user" : "";
+  const destroyCuBind =
+    destroyGated && !principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+  // The `{:error, {:forbidden, detail}}` arm the gated create / destroy needs —
+  // the same 403 ProblemDetails clause the operation paths answer with, built
+  // from the shared denial ladder so a `httpStatus Forbidden -> …` override
+  // moves all of them together.
+  const forbiddenArm = (indent: string): string =>
+    `\n\n${indent}{:error, {:forbidden, detail}} ->\n${indent}  ${denialResponse(
+      "forbidden",
+      "detail",
+      denialOverrides(ctx),
+    )}`;
   // The update action already binds `current_user` when the aggregate has a
   // principal READ filter; bind it here too when only a principal stamp needs
   // it (avoid a double bind when both apply).
@@ -569,7 +624,14 @@ ${auditRecordCall({
             record
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            ${appModule}.Repo.rollback(changeset)
+            ${appModule}.Repo.rollback(changeset)${
+              createGated
+                ? `
+
+          {:error, {:forbidden, detail}} ->
+            ${appModule}.Repo.rollback({:forbidden, detail})`
+                : ""
+            }
         end
       end)
 
@@ -586,7 +648,7 @@ ${auditRecordCall({
         |> json(%{"id" => record.id})
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${createGated ? forbiddenArm("      ") : ""}
     end
   end`
       : `  def create(conn, params) do
@@ -603,7 +665,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
         |> json(%{"id" => record.id})
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${createGated ? forbiddenArm("      ") : ""}
     end
   end`;
 
@@ -641,7 +703,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
     ? ""
     : auditDestroy
       ? `  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
+${cuBind}${destroyCuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _} <-
            ${appModule}.Repo.transaction(fn ->
 ${auditRecordCall({
@@ -655,9 +717,14 @@ ${auditRecordCall({
   indent: "             ",
 })}
 
-             case ${ctxModule}.delete_${aggSnake}(record) do
+             case ${ctxModule}.delete_${aggSnake}(record${destroyActor}) do
                {:ok, deleted} -> deleted
-               {:error, %Ecto.Changeset{} = changeset} -> ${appModule}.Repo.rollback(changeset)
+               {:error, %Ecto.Changeset{} = changeset} -> ${appModule}.Repo.rollback(changeset)${
+                 destroyGated
+                   ? `
+               {:error, {:forbidden, detail}} -> ${appModule}.Repo.rollback({:forbidden, detail})`
+                   : ""
+}
              end
            end) do
       send_resp(conn, 204, "")
@@ -666,19 +733,19 @@ ${auditRecordCall({
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${destroyGated ? forbiddenArm("      ") : ""}
     end${fkRestrictRescue}
   end`
       : `  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
-         {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
+${cuBind}${destroyCuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
+         {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record${destroyActor}) do
       send_resp(conn, 204, "")
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${destroyGated ? forbiddenArm("      ") : ""}
     end${fkRestrictRescue}
   end`;
 

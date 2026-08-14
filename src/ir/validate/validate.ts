@@ -26,6 +26,7 @@ import {
   validateFunctionBlockBodies,
   validateGenericInstancesUnimplemented,
   validateLifecycleBodyDropped,
+  validateNamedLifecycleDropped,
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateReservedStructuralErrorNames,
@@ -61,6 +62,7 @@ import {
   validateFindPredicateAdapterSupport,
   validateFlutterPrimitiveSupport,
   validateGroupedProjectionBackend,
+  validateGuardPrincipalWithoutAuth,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
   validateMikroOrmSupport,
@@ -158,6 +160,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateFilterBypassSupport(sys, diags);
     validateJavaReadModelShapes(sys, diags);
     validateStampSupport(sys, diags);
+    validateGuardPrincipalWithoutAuth(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
@@ -250,6 +253,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateLifecycleBodyDropped(c, diags);
+    validateNamedLifecycleDropped(c, diags);
     validateWhenGateSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,

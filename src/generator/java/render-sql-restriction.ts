@@ -1,5 +1,7 @@
 import type { ExprIR } from "../../ir/types/loom-ir.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { snake } from "../../util/naming.js";
+import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
 
 // ---------------------------------------------------------------------------
 // Capability-filter predicate → the static SQL fragment behind
@@ -58,6 +60,26 @@ export function renderSqlRestriction(e: ExprIR): string {
       const op = SQL_OP[e.op];
       if (!op) throw unsupported(`binary '${e.op}'`);
       return `${renderSqlRestriction(e.left)} ${op} ${renderSqlRestriction(e.right)}`;
+    }
+    case "method-call": {
+      // Queryable scalar intrinsic (src/util/intrinsics.ts) over a candidate
+      // path — `filter this.dataKey.startsWith("root")`, `filter
+      // this.code.trim() == "x"`.  The static path admits it because every
+      // operand here is a literal or a column: no parameter binding is needed,
+      // which is the only thing `@SQLRestriction` cannot express.  Shares the
+      // Postgres text table with the Dapper repository emitter.
+      if (e.receiverType.kind === "primitive") {
+        const snippet = intrinsicFor(e.receiverType.name, e.member)?.queryable
+          ? PG_INTRINSIC_SQL[intrinsicKey(e.receiverType.name, e.member)]
+          : undefined;
+        if (snippet) {
+          return snippet(
+            renderSqlRestriction(e.receiver),
+            e.args.map((a) => renderSqlRestriction(a)),
+          );
+        }
+      }
+      throw unsupported(`method call '${e.member}'`);
     }
     case "ref":
       if (e.refKind === "this-prop" || e.refKind === "this-vo-prop") return snake(e.name);

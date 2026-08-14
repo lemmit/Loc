@@ -133,7 +133,15 @@ describe(".NET projection runtime", () => {
     expect(ctrl).toContain('[HttpGet("order_book/{key}")]');
     expect(ctrl).toContain("public async Task<IActionResult> GetOrderBook(Guid key)");
     expect(ctrl).toContain("var __key = new OrderId(key);");
-    expect(ctrl).toContain("if (x is null) return NotFound();");
+    // M-T6.31 — the absent-key arm RAISES the shared carrier instead of
+    // answering ASP.NET's own 404: `NotFound()` never reaches
+    // `DomainExceptionFilter`, so this one route answered a different envelope
+    // (rfc9110 `type`, null `detail`/`instance`, an injected `traceId`) from
+    // every other 404 in the same service.
+    expect(ctrl).toMatch(
+      /if \(x is null\) throw new global::\w+\.Domain\.Common\.AggregateNotFoundException\(\$"OrderBook \{key\} not found"\);/,
+    );
+    expect(ctrl).not.toContain("NotFound()");
 
     const dto = file(files, "Application/Workflows/OrderBookResponse.cs");
     // key required + non-key nullable (partial read model)
