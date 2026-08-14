@@ -1,4 +1,5 @@
-// Nested control flow inside vanilla (plain Ecto/Phoenix) workflow bodies.
+// Nested control flow (and the non-flat statement kinds) inside vanilla (plain
+// Ecto/Phoenix) workflow bodies.
 // Before this, the vanilla emitter lowered a `for-each` body / `if-let` branch
 // over a FLAT statement set only, dropping nested `for-each` / `if-let` /
 // `repo-run` / `repo-let` as `# TODO: lower ... statement kind` — uncompilable
@@ -18,6 +19,9 @@ system Shop {
       }
       repository Orders for Order { }
       retrieval PendingQ(d: bool) of Order { where: this.open == d }
+      domainService Adjust {
+        operation run(target: Order) { target.confirm() }
+      }
 
       // (1) if-let nested inside a for-each body.
       workflow ifLetInForEach {
@@ -56,6 +60,24 @@ system Shop {
           for x in xs {
             let ys = Orders.run(PendingQ(d))
             for y in ys { y.confirm() }
+          }
+        }
+      }
+
+      // (5) a `mutating` domain-service call as an if-let BRANCH statement.
+      //     The flat branch renderer used to drop this kind (and `assign`) as
+      //     `# TODO: lower if-let branch statement kind '<kind>'` — an ELIXIR
+      //     COMMENT, so `mix compile --warnings-as-errors` accepted the
+      //     mutilated output and the call vanished at runtime.  It now inlines
+      //     the same context mutating-fn call the loop-body arm emits.
+      //     (`assign` is the sibling arm; it has no compiled case here because a
+      //     COMMAND workflow's `run/1` binds no `state` var at all — a separate,
+      //     pre-existing gap that the top-level and loop-body `assign` arms share.
+      //     It is covered by test/generator/elixir/workflow-if-let-branch-stmts.test.ts.)
+      workflow serviceInIfLet {
+        create(d: bool) {
+          if let o = Orders.find(Pending(d)) {
+            Adjust.run(o)
           }
         }
       }
