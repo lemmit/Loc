@@ -22,6 +22,7 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { lineCount, type SourceMapRecorder } from "../_trace/sourcemap.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
 import type { ElixirChannelsCfg } from "./channels-emit.js";
+import { internalCreateFn } from "./lifecycle-seam.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 import { denialTerm } from "./vanilla/denial.js";
 import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
@@ -915,7 +916,12 @@ function renderStmt(
       const fields = st.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
-      const call = `${contextModule}.create_${snake(st.aggName)}(%{${fields}})`;
+      // The IN-PROCESS entry: an event dispatcher has no request principal, so it
+      // takes the ungated seam (see `./lifecycle-seam.ts`).
+      const call = `${contextModule}.${internalCreateFn(
+        st.aggName,
+        ctx.aggregates.find((a) => a.name === st.aggName),
+      )}(%{${fields}})`;
       return [
         {
           kind: "with-clause",

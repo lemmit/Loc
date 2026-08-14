@@ -3,8 +3,11 @@ import type {
   AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  OperationIR,
 } from "../../../ir/types/loom-ir.js";
 import {
+  lifecycleGates,
+  lifecycleGatesUseCurrentUser,
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
@@ -13,7 +16,7 @@ import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { maskNamer, projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
-import { renderCsExpr, renderCsType } from "../render-expr.js";
+import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
 
 /** The `when` canCommand gate (criterion.md use site 2): evaluate the
@@ -52,6 +55,56 @@ function requiresGate(op: AggregateIR["operations"][number]): string {
       .join("")
   );
 }
+
+/**
+ * The canonical `create` / `destroy` authorization gate, rendered into the
+ * command HANDLER — .NET's controller is a thin Mediator dispatch, so the
+ * handler is the first place holding both the principal
+ * (`ICurrentUserAccessor`) and, for a destroy, the loaded aggregate.  Denial
+ * throws `ForbiddenException`, which `DomainExceptionFilter` maps to the 403
+ * ProblemDetails `errorStatuses(<kind>, true)` declares.
+ *
+ * `thisName` is undefined for a create (there is no instance yet — the guard
+ * reads the principal only) and the loaded local for a destroy.
+ */
+function lifecycleGate(
+  action: OperationIR | null | undefined,
+  /** Project root namespace — the gate's `ICurrentUserAccessor` lives in
+   *  `<ns>.Auth`. */
+  ns: string,
+  thisName?: string,
+): { readonly body: string; readonly deps: DepList; readonly usings: string[] } {
+  const gates = lifecycleGates(action);
+  if (gates.length === 0) return { body: "", deps: [], usings: [] };
+  const usesUser = lifecycleGatesUseCurrentUser(action);
+  const usings = new Set<string>();
+  for (const g of gates) collectCsExprUsings(g.expr, usings);
+  // `ICurrentUserAccessor` lives in `<ns>.Auth`, which the base handler usings
+  // do NOT carry — the operation handler adds it the same way.  Without it the
+  // emitted handler is CS0246, which no tsc-level test can see.
+  if (usesUser) usings.add(`${ns}.Auth`);
+  const bind = usesUser ? "        var currentUser = _currentUser.User;\n" : "";
+  const body =
+    bind +
+    gates
+      .map(
+        (g) =>
+          `        if (!(${renderCsExpr(g.expr, thisName ? { thisName } : undefined)}))\n` +
+          `        {\n` +
+          `            throw new ForbiddenException(${JSON.stringify(`Forbidden: ${g.source}`)});\n` +
+          `        }\n`,
+      )
+      .join("");
+  return {
+    body,
+    // Only a principal-reading gate needs the accessor injected; a row-only
+    // gate reads the local the handler already loaded.
+    deps: usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
+    usings: [...usings],
+  };
+}
+
+type DepList = readonly { readonly type: string; readonly field: string }[];
 
 function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): string {
   if (!op.when) return "";
@@ -142,6 +195,9 @@ export function emitCreateCommandAndHandler(
         { type: `ILogger<Create${agg.name}Handler>`, field: "_log" },
       ]
     : [];
+  // The canonical create's authorization gate (no receiver — the guard reads
+  // the principal only, there being no instance yet).
+  const createGate = lifecycleGate(agg.canonicalCreate, ns);
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
   const createAuditUsings = auditCreate
@@ -160,9 +216,12 @@ export function emitCreateCommandAndHandler(
       handlerName: `Create${agg.name}Handler`,
       commandName: `Create${agg.name}Command`,
       returnType: idClass,
-      extraDeps: createAuditDeps,
-      extraUsings: createAuditUsings,
+      extraDeps: [...createAuditDeps, ...createGate.deps],
+      extraUsings: [...createAuditUsings, ...createGate.usings],
       body:
+        // The gate runs BEFORE the factory: a denied create constructs nothing
+        // and stages no audit row.
+        createGate.body +
         // NAMED arguments, not positional: the factory now trails its
         // defaultable parameters (C# CS1737 requires optional params last), so
         // its signature order no longer matches the declared field order this
@@ -254,6 +313,8 @@ export function emitDestroyCommandAndHandler(
     : [];
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
+  // The canonical destroy's gate reads the row the handler just loaded.
+  const destroyGate = lifecycleGate(agg.canonicalDestroy, ns, "aggregate");
   const destroyAuditUsings = auditDestroy
     ? [
         `${ns}.Application.Common`,
@@ -269,11 +330,16 @@ export function emitDestroyCommandAndHandler(
       aggName: agg.name,
       handlerName: `Destroy${agg.name}Handler`,
       commandName: `Destroy${agg.name}Command`,
-      extraDeps: destroyAuditDeps,
-      extraUsings: destroyAuditUsings,
+      extraDeps: [...destroyAuditDeps, ...destroyGate.deps],
+      extraUsings: [...destroyAuditUsings, ...destroyGate.usings],
       body:
         `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
         `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        // AFTER the load (so an unreachable id is a 404, not a 403) and BEFORE
+        // the audit stage AND the delete.  The ordering is the security
+        // property: #2450's gate passed a mutation that moved this line below
+        // `DeleteAsync`, which denies a delete that already happened.
+        destroyGate.body +
         destroyAuditStage +
         `        await _repo.DeleteAsync(aggregate, cancellationToken);\n` +
         `        return Unit.Value;\n`,

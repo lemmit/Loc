@@ -1,0 +1,98 @@
+// The canonical `create` / `destroy` AUTHORIZATION GATE on the Phoenix backend,
+// with the LiveView second front door present.
+//
+// Why this fixture exists and the corpus one does not cover it: on Phoenix the
+// gate lives in the CONTEXT, not the controller, because the scaffolded LiveView
+// calls the context directly —
+//
+//     the `new` page's CreateForm submit → <Ctx>.create_<agg>(params, current_user)
+//     the detail page's DestroyForm      → <Ctx>.destroy_<agg>!(id, current_user)
+//
+// — neither of which passes through a controller.  A controller-level gate would
+// leave both of those wide open.  `test/fixtures/corpus/lifecycle-guard.ddd` has
+// no `ui` (it is shared across five backends, four of which cannot mount one),
+// which is exactly why the bypass was invisible there.
+//
+// So this compiles the SECOND caller of each gated seam:
+//   * the LiveView passes its OWN principal (`socket.assigns.current_user`) — a
+//     LiveView is a separate process from the HTTP request, so the plug's assign
+//     is not reachable and an ambient-principal gate would deny every LiveView
+//     write;
+//   * `mix compile --warnings-as-errors` is the oracle for the arities and for
+//     the unused-binding class (a principal-only destroy guard leaves the loaded
+//     `record` unread — hence `Crate`).
+system LifecycleGuardUi {
+  user {
+    id: string
+    role: string
+  }
+
+  subdomain Ops {
+    context Warehouse {
+      aggregate Shipment {
+        reference: string
+        quantity: int = 0
+
+        create(reference: string) {
+          requires currentUser.role == "manager"
+        }
+
+        // Principal AND row — the loaded record is the receiver.
+        destroy {
+          requires currentUser.role == "manager" && quantity == 0
+        }
+      }
+
+      // Principal-ONLY guards: neither gate reads the row, so the emitted
+      // `destroy_crate!/2` must not bind a record it never reads.
+      aggregate Crate {
+        label: string
+
+        create(label: string) {
+          requires currentUser.role == "manager"
+        }
+
+        destroy {
+          requires currentUser.role == "manager"
+        }
+      }
+    }
+  }
+
+  api WarehouseApi from Ops
+  storage primary { type: postgres }
+  resource warehouseState { for: Warehouse, kind: state, use: primary }
+
+  // `with scaffold` synthesises the list / detail / new pages — so the
+  // CreateForm and DestroyForm callers of the gated context seams are the
+  // DEFAULT-generated ones, not hand-written stand-ins.
+  // …and the two hand-written pages carry a `DestroyForm`, the OTHER LiveView
+  // caller (the scaffolded detail page has no delete button, so scaffold alone
+  // does not reach `destroy_<agg>!`).
+  ui Console with scaffold(subdomains: [Ops]) {
+    page ShipmentAdmin(id: Shipment id) {
+      route: "/shipment-admin/:id"
+      body: Stack {
+        Heading { "Shipment" },
+        DestroyForm(of: Shipment)
+      }
+    }
+    page CrateAdmin(id: Crate id) {
+      route: "/crate-admin/:id"
+      body: Stack {
+        Heading { "Crate" },
+        DestroyForm(of: Crate)
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Warehouse]
+    dataSources: [warehouseState]
+    serves: WarehouseApi
+    ui: Console
+    port: 4000
+    auth: required
+  }
+}

@@ -37,6 +37,9 @@ import {
 import { maskedHistoryFields } from "../../ir/util/audit-history.js";
 import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import {
+  lifecycleGates,
+  lifecycleGatesReadRow,
+  lifecycleGatesUseCurrentUser,
   operationBodyUsesCurrentUser,
   operationGates,
   operationGatesUseCurrentUser,
@@ -294,6 +297,9 @@ export function buildPyRoutesFile(
       emittableFinds(repo).some(findUsesCurrentUser) ||
       // A find `requires` gate that reads currentUser binds `current_user: User`.
       emittableFinds(repo).some((f) => !!f.requires && exprUsesCurrentUser(f.requires)) ||
+      // …and so does a canonical `create` / `destroy` gate that reads it.
+      lifecycleGatesUseCurrentUser(agg.canonicalCreate) ||
+      lifecycleGatesUseCurrentUser(agg.canonicalDestroy) ||
       // …including the LIST read's gate, which `emittableFinds` excludes (the
       // list endpoint has its own route shape).  Its route binds the same
       // `current_user: User`, so it needs the same import.
@@ -818,15 +824,24 @@ function createRoute(
       !(f.default.kind === "literal" && f.default.lit === "now"),
   );
   const stampUsesPrincipal = stampUsesUser(agg, "create") || defaultUsesPrincipal;
+  // The canonical create's `requires` gate needs the same request-scoped
+  // principal the stamps and `currentUser.*` defaults do — one binding serves
+  // all three (a second `current_user: User = …` would be a redefinition ruff
+  // flags).
+  const gateUsesPrincipal = lifecycleGatesUseCurrentUser(agg.canonicalCreate);
+  const bindPrincipal = stampUsesPrincipal || gateUsesPrincipal;
   const sig = [
     `body: Create${agg.name}Request`,
-    ...(stampUsesPrincipal ? ["request: Request"] : []),
+    ...(bindPrincipal ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   return lines(
     `@router.post("${relativeOpPath(apiOp)}", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
-    stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
+    bindPrincipal ? "    current_user: User = request.state.current_user" : null,
+    // BEFORE the factory: a denied create must construct nothing (and, when
+    // audited, stage nothing).
+    ...lifecycleGate(agg.canonicalCreate),
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
     auditCreate ? "    repo = _repo(session)" : null,
@@ -963,13 +978,22 @@ function destroyRoute(
         "    )",
       ]
     : [];
+  // The canonical destroy's `requires` gate runs AFTER the load (it may read
+  // the row) and BEFORE the audit row is staged, so a denied delete records
+  // nothing.  A principal-only gate reads no field, so it needs no receiver —
+  // the load still runs as the 404 probe but is not bound (ruff F841).
+  const destroyGateReadsRow = lifecycleGatesReadRow(agg.canonicalDestroy);
+  const destroyGateUsesUser = lifecycleGatesUseCurrentUser(agg.canonicalDestroy);
+  const bindLoaded = auditDestroy || destroyGateReadsRow;
   return lines(
     `@router.delete("${relativeOpPath(apiOp)}", status_code=204, operation_id="${camelId(opDestroy(agg.name))}"${derivedResponsesKwarg(apiOp)})`,
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
-    auditDestroy
+    bindLoaded
       ? `    __loaded = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`
       : `    await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
+    destroyGateUsesUser ? "    current_user: User = request.state.current_user" : null,
+    ...lifecycleGate(agg.canonicalDestroy, destroyGateReadsRow ? "__loaded" : undefined),
     auditDestroy ? "    __before = repo.to_wire(__loaded)" : null,
     ...destroyAuditCall,
     "    try:",
@@ -1014,6 +1038,23 @@ function requiresGate(op: OperationIR, ctx: BoundedContextIR): string[] {
       `        raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
     ];
   });
+}
+
+/** The canonical `create` / `destroy` authorization gate, in the ROUTE.
+ *
+ *  The same statements, the same `renderPyNegatedGuard` spelling and the same
+ *  `ForbiddenError` (→ 403) as `requiresGate` above — the lifecycle gate is the
+ *  operation gate with a different receiver:
+ *
+ *    create  — none.  It runs BEFORE the factory, so it reads the principal
+ *              only (`loom.lifecycle-guard-unreadable` enforces that).
+ *    destroy — `__loaded`, the row the route already loaded for its 404 probe,
+ *              so an unreachable id answers 404 before 403. */
+function lifecycleGate(action: OperationIR | null | undefined, thisName?: string): string[] {
+  return lifecycleGates(action).flatMap((g) => [
+    `    if ${renderPyNegatedGuard(g.expr, thisName ? { thisName } : undefined)}:`,
+    `        raise ForbiddenError(${JSON.stringify(`Forbidden: ${g.source}`)})`,
+  ]);
 }
 
 function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
