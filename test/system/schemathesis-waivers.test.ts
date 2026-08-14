@@ -45,6 +45,18 @@ const registerFindings = new Set(
   [...register.matchAll(/^### (F\d+)\b/gm)].map((m) => m[1] as string),
 );
 
+/** The findings the register marks `**Status: FIXED`.  A fixed entry KEEPS its
+ *  heading — the register is an audit record, and deleting the repro erases
+ *  exactly the history that makes it worth having — but it must no longer be
+ *  waived: the runner fails a rule that stops reproducing, so a rule still
+ *  claiming a fixed finding is a stale rule waiting to break the nightly.
+ *  The two halves below check that in both directions. */
+const fixedFindings = new Set(
+  [...register.matchAll(/^### (F\d+)\b[\s\S]*?(?=^### |Z)/gm)]
+    .filter((m) => /\*\*Status: FIXED/.test(m[0]))
+    .map((m) => m[1] as string),
+);
+
 describe("schemathesis waivers ↔ findings register", () => {
   it("the register was actually read", () => {
     // Guards the whole file against a rename silently emptying every set below.
@@ -80,15 +92,37 @@ describe("schemathesis waivers ↔ findings register", () => {
     });
   }
 
-  it("every finding in the register is covered by a waiver rule", () => {
+  it("every OPEN finding in the register is covered by a waiver rule", () => {
     const cited = new Set(waiverDoc.waivers.flatMap((w) => w.findings));
-    const uncovered = [...registerFindings].filter((f) => !cited.has(f));
+    const uncovered = [...registerFindings].filter((f) => !cited.has(f) && !fixedFindings.has(f));
     expect(
       uncovered,
       "these findings are documented but no waiver rule claims them, so the gate " +
-        "would report them as unwaived (or, worse, they were fixed and the register " +
-        "entry was never struck): " +
+        "would report them as unwaived (mark the entry `**Status: FIXED` if it " +
+        "was actually fixed): " +
         uncovered.join(", "),
     ).toEqual([]);
+  });
+
+  it("no waiver rule still claims a finding the register marks FIXED", () => {
+    // The other half of the ratchet.  Leaving the rule behind does not fail the
+    // nightly loudly — it fails it as a STALE waiver, which reads like a flake
+    // rather than "someone forgot to delete this".  Catch it here instead.
+    const stale = waiverDoc.waivers
+      .filter((w) => w.findings.some((f) => fixedFindings.has(f)))
+      .map((w) => `${w.id} → ${w.findings.filter((f) => fixedFindings.has(f)).join("/")}`);
+    expect(
+      stale,
+      "these rules waive a finding the register marks FIXED; delete (or narrow) " +
+        "them in the PR that fixed it: " +
+        stale.join(", "),
+    ).toEqual([]);
+  });
+
+  it("the register still records at least one fixed finding", () => {
+    // Guards the `**Status: FIXED` regex above: if the marker is ever reworded,
+    // `fixedFindings` silently empties and the exemption above turns back into
+    // the old unconditional check without anyone noticing.
+    expect(fixedFindings.size).toBeGreaterThan(0);
   });
 });
