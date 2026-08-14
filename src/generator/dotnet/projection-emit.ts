@@ -16,6 +16,7 @@ import {
   projectToResponse,
   wireType,
 } from "./dto-mapping.js";
+import { dotnetNotFoundThrow } from "./emit/common.js";
 import { dapperProjectionColumns } from "./emit/dapper-workflow.js";
 import {
   projectionRowClass,
@@ -287,7 +288,10 @@ function renderProjectionsController(
       byIdBody =
         `        await using var conn = await _db.OpenConnectionAsync();\n` +
         `        var __row = await conn.QuerySingleOrDefaultAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table} WHERE ${pkCol} = @key", new { key }));\n` +
-        `        if (__row is null) return NotFound();\n` +
+        // M-T6.31 — raise the shared carrier instead of `NotFound()`, so the app's
+        // one 404 producer (`DomainExceptionFilter`) renders the envelope.  See
+        // `dotnetNotFoundThrow`.
+        `        if (__row is null) ${dotnetNotFoundThrow(ns, T, "key")}\n` +
         `        var x = ${mapFn}(__row);\n` +
         `        return Ok(new ${T}Response(${proj_("x")}));\n`;
     } else {
@@ -297,7 +301,7 @@ function renderProjectionsController(
       byIdBody =
         `        var __key = new ${targetName}Id(key);\n` +
         `        var x = await _db.${dbSet}.AsNoTracking().FirstOrDefaultAsync(r => r.${corrName} == __key);\n` +
-        `        if (x is null) return NotFound();\n` +
+        `        if (x is null) ${dotnetNotFoundThrow(ns, T, "key")}\n` +
         `        return Ok(new ${T}Response(${proj_("x")}));\n`;
     }
     // Authorization gate (authorization.md) — the folded read model's twin of

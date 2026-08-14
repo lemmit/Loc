@@ -302,6 +302,7 @@ const __frameworkProbes = async (dispatch) => {
   }
   await dispatch({ method: "GET", url: origin + "/__loom_no_such_path", headers: { ...__authHeaders } });
   await dispatch({ method: "POST", url: origin + collection.pathname, headers: json, body: "{not json" });
+  await __absentReadProbes(dispatch);
   // The AUTH arm, which no recording ever reached: an emitted suite always
   // authenticates successfully, which is how all five backends came to answer
   // 401 outside the RFC 7807 contract, two of them in text/plain, and none of
@@ -335,6 +336,47 @@ const __frameworkProbes = async (dispatch) => {
   const authed = Object.keys(__authHeaders).some((k) => /^authorization$/i.test(k));
   if (authed) {
     await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
+  }
+};
+
+
+// ── absent-read probes (M-T6.31) ────────────────────────────────────────────
+// The aggregate by-id 404 is the one error body several goldens already record
+// (an emitted suite deletes a row and reads it back).  The OTHER by-key reads —
+// the projection show and the workflow-instance show — no suite ever misses,
+// because the \`test e2e\` DSL has no verb for "read this key that does not
+// exist".  So those two routes shipped THREE different envelopes across the five
+// backends (.NET's \`ProblemDetailsFactory\` shape, java's empty body, and a
+// detail sentence elixir spelled differently) with every golden green.
+//
+// The probe is derived from what the tier ALREADY requested: for each distinct
+// projection-show / instance-show URL it hit, re-request the same route with a
+// key of the same SHAPE that cannot exist.  Two consequences worth stating:
+//   * it is backend-agnostic (the HTTP runners have only a base URL — there is
+//     no router to introspect), exactly like the framework probes above;
+//   * a case that reads neither route is skipped rather than guessed at, so only
+//     projection/instance-bearing goldens grow entries.
+// Appended AFTER the framework probes so no existing ordinal moves.
+const __absentKey = (seg) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)
+    ? "00000000-0000-0000-0000-000000000000"
+    : /^\\d+$/.test(seg)
+      // Max int32: absent on every backend, and parses under an \`int\`/\`long\`
+      // path binding (a larger value would measure the BINDING, not the miss).
+      ? "2147483647"
+      : "__loom_absent";
+const __absentReadProbes = async (dispatch) => {
+  const seen = new Set();
+  for (const raw of __urls) {
+    let u;
+    try { u = new URL(raw); } catch { continue; }
+    // \`/api/projections/<slug>/<key>\` and \`/api/workflows/<slug>/instances/<id>\`.
+    const m = /^(\\/api\\/projections\\/[^/]+|\\/api\\/workflows\\/[^/]+\\/instances)\\/([^/]+)$/.exec(u.pathname);
+    if (!m) continue;
+    const target = m[1] + "/" + __absentKey(m[2]);
+    if (seen.has(target)) continue;
+    seen.add(target);
+    await dispatch({ method: "GET", url: u.origin + target, headers: { ...__authHeaders } });
   }
 };
 

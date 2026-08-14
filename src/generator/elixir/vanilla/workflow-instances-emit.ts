@@ -16,6 +16,15 @@
 //     id returns an RFC-7807 404 via the vanilla `ProblemDetails` module
 //     (slice 4).
 //
+// The 404 `detail` names the WORKFLOW (`"<Wf> <id> not found"`), not
+// `"<Wf> instance <id> not found"` as it did until M-T6.31.  Elixir was the only
+// backend spelling it that way; node and python already emitted the workflow
+// name, on the reviewed RS-27 extension recorded in the Hono emitter ("a
+// workflow INSTANCE read is addressed by id, so its 404 carries the same
+// sentence the aggregate getById route does"), and .NET/java joined it in the
+// same change.  A `detail` that differs per backend is exactly what RS-28
+// closed on the aggregate read.
+//
 // This is the read-side analogue the visibility proposal promised.
 // ---------------------------------------------------------------------------
 
@@ -112,7 +121,7 @@ function renderInstanceActions(contextModule: string, appModule: string, wf: Wor
   def ${slug}_instance(conn, %{"id" => id}) do
     case ${streamMod}.instance_by_id(id) do
       nil ->
-        ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)} instance", id)
+        ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)}", id)
 
       row ->
         json(conn, %{${mapFields}})
@@ -130,7 +139,7 @@ function renderInstanceActions(contextModule: string, appModule: string, wf: Wor
   def ${slug}_instance(conn, %{"id" => id}) do
     case ${appModule}.Repo.get(${stateMod}, id) do
       nil ->
-        ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)} instance", id)
+        ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)}", id)
 
       row ->
         json(conn, %{${mapFields}})
