@@ -315,3 +315,34 @@ public sealed class InProcessDomainEventDispatcher : IDomainEventDispatcher
 export function dotnetFindAbsenceThrow(ns: string): string {
   return `throw new global::${ns}.Domain.Common.AggregateNotFoundException("not_found");`;
 }
+
+/**
+ * The `throw new AggregateNotFoundException(...)` an ABSENT BY-KEY READ raises,
+ * carrying the RS-27 sentence `"<Resource> <key> not found"`.
+ *
+ * The by-id aggregate read builds this inline in `emit/api.ts`; this is the same
+ * throw for the read sites that are NOT the aggregate — the projection show
+ * (`GET /api/projections/<p>/{key}`) and the workflow-instance show
+ * (`…/instances/{id}`).  Those five arms (2 projection + 4 workflow-instance,
+ * across the EF and Dapper adapters) still answered `return NotFound();` after
+ * RS-27 and the caller-census drain had converted every other one — M-T6.31, an
+ * INTRA-backend split: the same service answered the identical wire concept two
+ * ways depending on which route you asked.
+ *
+ * `NotFound()` never reaches `DomainExceptionFilter`; ASP.NET's
+ * `ProblemDetailsFactory` renders it instead, which gets FOUR members wrong at
+ * once — `type` = the rfc9110 §15.5.5 URI rather than `about:blank`, `detail` =
+ * null, `instance` = null, plus an injected `traceId` extension no other backend
+ * sends.  Throwing routes the arm back through the one hand-built handler, whose
+ * `Problem(context, 404, "Not Found", nf.Message, …)` supplies exactly the
+ * envelope node / python / elixir emit.
+ *
+ * `resource` is the emitter-side name (`upperFirst(proj.name)` /
+ * `upperFirst(wf.name)`), and `keyExpr` is the C# expression holding the
+ * requested key — interpolated, so the sentence carries the value the caller
+ * asked for.  Both spellings render the bare id value (the id records override
+ * `ToString()`), so the bytes match the other four backends.
+ */
+export function dotnetNotFoundThrow(ns: string, resource: string, keyExpr: string): string {
+  return `throw new global::${ns}.Domain.Common.AggregateNotFoundException($"${resource} {${keyExpr}} not found");`;
+}

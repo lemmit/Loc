@@ -23,6 +23,7 @@ import type {
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, plural, snake, upperFirst } from "../../../util/naming.js";
+import { internalCreateFn } from "../lifecycle-seam.js";
 import { type Env, renderExpect, vtExpr } from "./tests-emit.js";
 
 const BUILTIN_READS = new Set(["findById", "getById", "findAll"]);
@@ -90,8 +91,13 @@ function renderStmt(s: TestStmtIR, ctx: BoundedContextIR, ctxMod: string, env: E
     case "let": {
       const createAgg = createAggOf(s.expr, ctx);
       if (createAgg && s.expr.kind === "method-call") {
+        // The emitted integration test creates its own fixtures in-process, with
+        // no request and no principal, so it targets the ungated seam (see
+        // `../lifecycle-seam.ts`).  The GATE's runtime proof is not this tier's
+        // job — it needs an authenticated-but-unauthorized principal, which the
+        // OIDC negative-authz legs mint and this harness does not.
         return [
-          `{:ok, ${snake(s.name)}} = ${ctxMod}.create_${snake(createAgg.name)}(${attrsMap(s.expr.args[0], env)})`,
+          `{:ok, ${snake(s.name)}} = ${ctxMod}.${internalCreateFn(createAgg.name, createAgg)}(${attrsMap(s.expr.args[0], env)})`,
         ];
       }
       const find = findBinding(s.expr, ctx, ctxMod, snake(s.name), env);

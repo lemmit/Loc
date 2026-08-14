@@ -14,7 +14,15 @@ system FulfillmentSys {
 
       aggregate Order {
         status: string
-        create place() {
+        // `Order` is STATE-BASED (only the workflow below is event-sourced), so
+        // a `create` body reaches no backend — neither named (no route, no
+        // factory) nor canonical (the body is lowered but never rendered).  The
+        // `OrderPlaced` that starts the saga therefore has to be emitted from an
+        // `operation`, which does emit its statements on every backend.
+        // Was `create place() { … }` until `loom.lifecycle-body-dropped` caught
+        // that the body — and so the saga's trigger — was silently dropped.
+        create() { }
+        operation place() {
           status := "Placed"
           emit OrderPlaced { order: id, at: now() }
         }

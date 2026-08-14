@@ -176,6 +176,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `aggregate '${p.agg}': the \`create\` guard reads ${p.refs}, which the gate cannot see. A \`create\` guard may read \`currentUser\` only — there is no instance until the factory runs, and the emitted POST takes the field-derived create input, not the declared parameter list, so a parameter has no wire slot either. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
   "loom.lifecycle-guard-unreadable#destroy": (p: { agg: unknown; refs: unknown }) =>
     `aggregate '${p.agg}': the \`destroy\` guard reads ${p.refs}, which the gate cannot see. A \`destroy\` guard may read \`currentUser\` and \`this\` (the route already loads the row), but not a parameter — a DELETE carries no body. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
+  // An EVENT-SOURCED lifecycle guard.  Not a "not yet" gap: the ES create body
+  // renders into the domain `_init`, which has no principal in scope, so the
+  // guard cannot be evaluated there at all.
+  "loom.lifecycle-guard-event-sourced": (p: { agg: unknown }) =>
+    `aggregate '${p.agg}': a \`requires\` in an event-sourced \`create\` cannot be enforced. The create body renders into the domain \`_init\`, which has no principal in scope — \`currentUser\` is a free identifier there, so the guard does not compile rather than deny. Gate the caller instead: put the \`requires\` on the named \`operation\` (or \`workflow\`) that issues the create, where the request principal is bound.`,
   // The canonical `create` / `destroy` body no backend renders.  `reason` is
   // computed at the call site (it varies by statement kind AND by action), so
   // the catalog owns the frame and the site owns the clause.
@@ -187,6 +192,15 @@ export const DIAGNOSTIC_MESSAGES = {
     plural: unknown;
   }) =>
     `aggregate '${p.agg}': the \`${p.label}\` body's \`${p.kind}\` is not emitted on a state-based aggregate, so ${p.reason}. The body is lowered into the IR but no backend renders it (an event-sourced \`create\` is the exception — that path does run). Move the logic to a named \`operation\`, which emits its guards and statements on every backend, or drop the clause.`,
+  // The sibling of the above, one level up: the whole ACTION is dropped, not
+  // just its body.  Kept separate because the remedy differs — the canonical
+  // case keeps its route and loses the braces, this one has no route to keep.
+  "loom.named-lifecycle-dropped": (p: { agg: unknown; label: unknown; name: unknown }) =>
+    `aggregate '${p.agg}': the named \`${p.label} ${p.name}\` reaches no backend — it drives no route and no factory, so nothing in its body runs (guards included). ` +
+    (p.label === "create"
+      ? "Only the canonical (unnamed) `create` is emitted — on an event-sourced aggregate, its single `create`, named or not."
+      : "Only the canonical (unnamed) `destroy` is emitted.") +
+    ` Drop the name to make it canonical, or model it as an \`operation\`, which emits on every backend.`,
   "loom.criterion-unsupported-target": (p: { name: unknown }) =>
     `criterion '${p.name}' has an unsupported candidate type. v1 supports 'of <Aggregate>' (a predicate over that aggregate) or 'of bool' (a pure ambient predicate); predicates over primitives / value objects / enums are reserved for the forthcoming 'from <Criterion>(args)' parameter-binding surface.`,
   "loom.criterion-impure#member-call": (p: { name: unknown; member: unknown }) =>
@@ -1597,6 +1611,22 @@ export const DIAGNOSTIC_MESSAGES = {
   // INVISIBLE to this catalog gate until M-T6.33 — the five old per-backend
   // codes were emitted as `code: backend.code` (a property access), and the
   // scanner only records sites whose `code:` is a string literal.
+  // The guard sibling of the filter/stamp principal-without-auth pair.  Its
+  // consequence is sharper than theirs — the gate is EMITTED, as a free
+  // identifier, so the generated project does not compile (TS2304 / CS0103 /
+  // `cannot find symbol` / an unbound name in the FastAPI route).
+  "loom.guard-principal-without-auth": (p: {
+    dep: unknown;
+    family: unknown;
+    ctxName: unknown;
+    site: unknown;
+    principalNoun: unknown;
+  }) =>
+    `Deployable '${p.dep}' (platform ${p.family}) hosts '${p.ctxName}.${p.site}' with a ` +
+    `\`requires\` gate that references currentUser, but the deployable has no auth — there is ` +
+    `no request-scoped ${p.principalNoun} to evaluate it against, so the gate is emitted as an ` +
+    `unbound identifier and the generated project does not compile. Add 'auth: required' (and a ` +
+    `system 'user {}' block), or drop the principal reference from the gate.`,
   "loom.stamp-principal-without-auth": (p: {
     dep: unknown;
     family: unknown;

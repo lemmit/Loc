@@ -26,6 +26,8 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { stmtUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../../ir/util/op-gates.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
@@ -36,10 +38,12 @@ import type { ElixirChannelsCfg } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
+import { unguardedName } from "../lifecycle-seam.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { aggregateHasResidualInvariants } from "./changeset-invariant-emit.js";
+import { denialTerm } from "./denial.js";
 import {
   isVanillaDocAgg,
   renderDocNamedOpFunction,
@@ -73,6 +77,60 @@ import { customFindsOf } from "./repository-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
 import { usesRelationalContainments } from "./schema-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
+
+// ---------------------------------------------------------------------------
+// The canonical `create` / `destroy` authorization gate — IN THE CONTEXT.
+//
+// Every other backend gates at its own request-side chokepoint (route, Mediator
+// handler, service).  Phoenix cannot: it is the ONE backend whose frontend runs
+// IN-PROCESS, so a controller-level gate has a second front door and the
+// scaffolded LiveView walks straight through it —
+//
+//     new-form submit      → <Ctx>.create_<agg>(params)
+//     DestroyForm button   → <Ctx>.destroy_<agg>!(id)
+//
+// — neither of which passes through a controller.  The context function is the
+// narrowest point ALL callers share, so gating there makes Phoenix's placement
+// converge with the other four rather than diverge from them: each backend gates
+// at its own chokepoint.
+//
+// The principal is threaded as an EXPLICIT argument, not read ambiently.  The
+// REST plug assigns `conn.assigns.current_user` in the HTTP request process; a
+// LiveView is a SEPARATE socket process with its own `socket.assigns
+// .current_user`, so `Process.get(:loom_current_user)` is nil there — an
+// ambient-principal gate would fail closed on every LiveView write, silently
+// breaking the default-scaffolded UI.  An explicit `current_user \\ nil` arg is
+// also the local precedent (principal-filtered reads already carry one).
+//
+// A nil principal DENIES (`not is_nil(current_user) and (<pred>)`) instead of
+// raising BadMapError on `nil.<claim>` — an internal caller with no principal
+// (a workflow create step, a seed) then gets the typed `{:error, {:forbidden,
+// …}}` its `with` chain already handles, rather than a 500.
+// ---------------------------------------------------------------------------
+
+/** The `ensure(...)` with-clauses for one lifecycle action's gates, in
+ *  declaration order.  Same `ensure/2` + `denialTerm` protocol as the operation
+ *  guard chain, so a denial is the same `{:error, {:forbidden, msg}}` term every
+ *  controller / LiveView clause already knows. */
+function lifecycleEnsureClauses(
+  action: OperationIR | null | undefined,
+  rc: RenderCtx,
+): readonly string[] {
+  return lifecycleGates(action).map((g) => {
+    const pred = renderExpr(g.expr, rc);
+    const guarded = stmtUsesCurrentUser(g) ? `not is_nil(current_user) and (${pred})` : `(${pred})`;
+    return `:ok <- ensure(${guarded}, ${denialTerm(g)})`;
+  });
+}
+
+/** The `current_user` parameter a guarded lifecycle function takes.  Underscored
+ *  when nothing in the emitted body reads it — an unused binding is a `mix
+ *  compile --warnings-as-errors` failure (C1 of the M-T3.16 plan), and a
+ *  principal-only gate on one aggregate sits beside a row-only gate on the next,
+ *  so this cannot be answered once per context. */
+function principalParam(used: boolean): string {
+  return used ? "current_user \\\\ nil" : "_current_user \\\\ nil";
+}
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
  *  defdelegates emitted above (list/get/create/update/delete).  Skipped
@@ -331,12 +389,41 @@ function renderContextModule(
     // `destroy` action.
     const hasDestroy = (agg.destroys ?? []).length > 0;
     const getArgs = principal ? "id, current_user" : "id";
+    // The canonical destroy's authorization gate, evaluated against the row this
+    // seam just loaded — so the DestroyForm path is gated exactly like the REST
+    // one.  A bang function's contract is "raise on failure" (this one already
+    // raises `Ecto.NoResultsError` for an absent row), so a denial raises too:
+    // fail-closed, and the LiveView's own error handling is unchanged.
+    const destroyGateRc: RenderCtx = {
+      thisName: "record",
+      contextModule: facadeMod,
+      foundation: "vanilla",
+      agg: agg as EnrichedAggregateIR,
+    };
+    const destroyClauses = lifecycleEnsureClauses(agg.canonicalDestroy, destroyGateRc);
+    // `destroy_<agg>!` takes the principal when the gate reads it.  On a
+    // principal (tenancy-filtered) aggregate the getter already carries one, and
+    // that same binding feeds the gate — no second parameter.
+    const destroyBangArgs =
+      destroyClauses.length === 0 || principal
+        ? getArgs
+        : `id, ${principalParam(lifecycleGatesUseCurrentUser(agg.canonicalDestroy))}`;
+    const destroyBangBody =
+      destroyClauses.length === 0
+        ? `      {:ok, record} -> ${appModule}.Repo.delete!(record)`
+        : `      {:ok, record} ->
+        with ${destroyClauses.join(",\n             ")} do
+          ${appModule}.Repo.delete!(record)
+        else
+          {:error, {:forbidden, detail}} -> raise detail
+        end
+`;
     const destroyFacade = hasDestroy
       ? `\n
   @doc "Hard-delete a ${aggPascal} by id (DestroyForm seam) — raises if not found."
-  def destroy_${aggSnake}!(${getArgs}) do
+  def destroy_${aggSnake}!(${destroyBangArgs}) do
     case get_${aggSnake}(${getArgs}) do
-      {:ok, record} -> ${appModule}.Repo.delete!(record)
+${destroyBangBody}
       {:error, _} -> raise Ecto.NoResultsError, queryable: ${facadeMod}.${aggPascal}
     end
   end`
@@ -432,9 +519,58 @@ ${body}
     // route reached (audit: dead hard-`delete`).  The `destroy_<agg>!` LiveView
     // bang seam above is the SEPARATE `DestroyForm` path (its own `hasDestroy`
     // gate), so a detail-page destroy button is unaffected.
-    const deleteDelegate = emitsRestDelete(agg)
-      ? `\n  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete`
-      : "";
+    // GUARDED write seams.  A gated create / destroy stops being a bare
+    // `defdelegate` and becomes a real function that evaluates the gate first,
+    // then delegates — so EVERY caller (REST controller, LiveView form,
+    // DestroyForm) passes the gate, not just the ones that go through a
+    // controller.  Ungated aggregates keep the delegate byte-identical.
+    const createClauses = lifecycleEnsureClauses(agg.canonicalCreate, {
+      thisName: "record",
+      contextModule: facadeMod,
+      foundation: "vanilla",
+      agg: agg as EnrichedAggregateIR,
+    });
+    const createStampsActor = stampUsesPrincipal(agg);
+    // The GUARDED seam keeps the plain name, and the authorization-free entry the
+    // in-process callers use is named `_unguarded` — see
+    // `../lifecycle-seam.ts` for why that direction and not the other:
+    // a caller that guesses `create_<agg>` gets the gate, and bypassing it is
+    // something a call site has to SAY.  A workflow step / event dispatch /
+    // emitted integration test has no request and no principal, and every other
+    // backend's workflow body calls the domain factory directly — so routing
+    // those through the guarded seam would 403 (or MatchError) a workflow whose
+    // own caller does hold the permission, on this backend only.
+    const createDelegate =
+      createClauses.length === 0
+        ? `  defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert`
+        : `  @doc "Create a ${aggPascal} — the canonical \`create\`'s \`requires\` gate runs HERE, so the REST and LiveView callers are gated alike."
+  def create_${aggSnake}(attrs, ${principalParam(
+    lifecycleGatesUseCurrentUser(agg.canonicalCreate) || createStampsActor,
+  )}) do
+    with ${createClauses.join(",\n         ")} do
+      ${unguardedName("create", agg.name)}(attrs${createStampsActor ? ", current_user" : ""})
+    end
+  end
+
+  @doc "Create a ${aggPascal} with NO authorization gate — the in-process entry (workflow step, event dispatch, emitted integration test), which carries no request principal.  Request-side callers use \`create_${aggSnake}/2\`."
+  defdelegate ${unguardedName("create", agg.name)}(attrs${stampActorArg}), to: ${repoMod}, as: :insert`;
+    const deleteClauses = lifecycleEnsureClauses(agg.canonicalDestroy, destroyGateRc);
+    const deleteDelegate = !emitsRestDelete(agg)
+      ? ""
+      : deleteClauses.length === 0
+        ? `\n  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete`
+        : `\n
+  @doc "Delete a ${aggPascal} — the canonical \`destroy\`'s \`requires\` gate runs HERE, against the loaded row."
+  def delete_${aggSnake}(record, ${principalParam(
+    lifecycleGatesUseCurrentUser(agg.canonicalDestroy),
+  )}) do
+    with ${deleteClauses.join(",\n         ")} do
+      ${unguardedName("delete", agg.name)}(record)
+    end
+  end
+
+  @doc "Delete a ${aggPascal} with NO authorization gate — the in-process entry (a workflow \`destroy\` step holds the row already and has no request principal).  Request-side callers use \`delete_${aggSnake}/2\`."
+  defdelegate ${unguardedName("delete", agg.name)}(record), to: ${repoMod}, as: :delete`;
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${listDelegateArgs}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id${
@@ -442,7 +578,7 @@ ${body}
       ? `\n  defdelegate get_${aggSnake}_for_write(id${actorArg}), to: ${repoMod}, as: :find_by_id_for_write`
       : ""
   }
-  defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
+${createDelegate}
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update${deleteDelegate}${changeFacade}${destroyFacade}${opBangFacade}${canFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });
@@ -563,6 +699,17 @@ ${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCo
 function contextNeedsGuardEnsure(ctx: BoundedContextIR): boolean {
   return ctx.aggregates.some((agg) => {
     if (isEventSourced(agg)) return false;
+    // A canonical create/destroy gate hoists into `create_<agg>` /
+    // `delete_<agg>` / `destroy_<agg>!` through the same `ensure/2`, so it needs
+    // the helper too — and an aggregate whose ONLY guard is a lifecycle one is
+    // exactly the shape that would otherwise emit `ensure(...)` calls with no
+    // `ensure/2` defined (undefined function, not a warning).
+    if (
+      lifecycleGates(agg.canonicalCreate).length > 0 ||
+      lifecycleGates(agg.canonicalDestroy).length > 0
+    ) {
+      return true;
+    }
     return (agg.operations ?? []).some(
       (op) => !CRUD_RESERVED_NAMES.has(op.name) && (opHasGuards(op) || opHasWhenGate(op)),
     );

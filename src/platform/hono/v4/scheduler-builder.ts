@@ -97,9 +97,122 @@ export function anyTimerUsesCron(timers: readonly TimerSourceIR[]): boolean {
   return timers.some((ts) => ts.cadence.kind === "cron");
 }
 
+/** The raw-SQL seam between the two node persistence adapters (M-T6.23 slice 3).
+ *
+ *  `scheduler.ts` is the one emitted module whose database access is NOT domain
+ *  persistence: a self-owned `loom_timer_runs` watermark table and a
+ *  transaction-scoped advisory lock, both plain SQL.  Drizzle spells that
+ *  `db.execute(sql`…`)` returning `{ rows }`; MikroORM spells it
+ *  `em.getConnection().execute(sql, params)` returning the rows directly (the
+ *  same idiom `emitMikroSeeds` uses).  Only these five call sites diverge, so
+ *  they are a leaf table rather than a duplicated builder. */
+interface TimerStore {
+  /** The `db` parameter's TypeScript type. */
+  readonly dbType: string;
+  /** Imports the store needs (adapter-specific). */
+  readonly imports: readonly string[];
+  /** `CREATE TABLE IF NOT EXISTS loom_timer_runs …`, at `  ` indent. */
+  readonly createWatermark: readonly string[];
+  /** Upsert the watermark to `now()` for `queue`. */
+  upsertWatermark(indent: string, conflict: "update" | "nothing"): readonly string[];
+  /** Read the watermark into `const last: Date | undefined` for `queue`. */
+  readWatermark(indent: string): readonly string[];
+  /** Run `body` inside a transaction whose ambient connection holds the
+   *  advisory lock, binding `const locked: boolean`.  The lock is
+   *  `pg_try_advisory_xact_lock`, so it MUST share the transaction's connection
+   *  — on a fresh connection it would be released immediately and every replica
+   *  would fire. */
+  lockedTransaction(indent: string, body: readonly string[]): readonly string[];
+}
+
+const DRIZZLE_TIMER_STORE: TimerStore = {
+  dbType: "NodePgDatabase<typeof schema>",
+  imports: [
+    `import { sql } from "drizzle-orm";`,
+    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    `import type * as schema from "./db/schema";`,
+  ],
+  createWatermark: [
+    "  await db.execute(",
+    "    sql`CREATE TABLE IF NOT EXISTS loom_timer_runs (timer text PRIMARY KEY," +
+      " last_fired_at timestamptz NOT NULL DEFAULT now())`,",
+    "  );",
+  ],
+  upsertWatermark: (indent, conflict) => [
+    `${indent}await db.execute(`,
+    `${indent}  sql\`INSERT INTO loom_timer_runs (timer, last_fired_at) VALUES (\${queue}, now())` +
+      (conflict === "update"
+        ? " ON CONFLICT (timer) DO UPDATE SET last_fired_at = now()`,"
+        : " ON CONFLICT (timer) DO NOTHING`,"),
+    `${indent});`,
+  ],
+  readWatermark: (indent) => [
+    `${indent}const seen = await db.execute(sql\`SELECT last_fired_at FROM loom_timer_runs WHERE timer = \${queue}\`);`,
+    `${indent}// node-postgres returns timestamptz as a string — coerce before compare.`,
+    `${indent}const raw = (seen.rows[0] as { last_fired_at: string | Date } | undefined)?.last_fired_at;`,
+    `${indent}const last = raw != null ? new Date(raw) : undefined;`,
+  ],
+  lockedTransaction: (indent, body) => [
+    `${indent}await db.transaction(async (tx) => {`,
+    `${indent}  const lock = await tx.execute(sql\`SELECT pg_try_advisory_xact_lock(\${lockKey}) AS locked\`);`,
+    `${indent}  const locked = (lock.rows[0] as { locked: boolean } | undefined)?.locked ?? false;`,
+    ...body,
+    `${indent}});`,
+  ],
+};
+
+const MIKRO_TIMER_STORE: TimerStore = {
+  dbType: "EntityManager",
+  imports: [`import { EntityManager } from "@mikro-orm/postgresql";`],
+  createWatermark: [
+    "  await db.getConnection().execute(",
+    '    "CREATE TABLE IF NOT EXISTS loom_timer_runs (timer text PRIMARY KEY,' +
+      ' last_fired_at timestamptz NOT NULL DEFAULT now())",',
+    "  );",
+  ],
+  upsertWatermark: (indent, conflict) => [
+    `${indent}await db.getConnection().execute(`,
+    `${indent}  "INSERT INTO loom_timer_runs (timer, last_fired_at) VALUES (?, now())` +
+      (conflict === "update"
+        ? ' ON CONFLICT (timer) DO UPDATE SET last_fired_at = now()",'
+        : ' ON CONFLICT (timer) DO NOTHING",'),
+    `${indent}  [queue],`,
+    `${indent});`,
+  ],
+  readWatermark: (indent) => [
+    `${indent}const seen = (await db.getConnection().execute(`,
+    `${indent}  "SELECT last_fired_at FROM loom_timer_runs WHERE timer = ?",`,
+    `${indent}  [queue],`,
+    `${indent})) as { last_fired_at: string | Date }[];`,
+    `${indent}// the pg driver returns timestamptz as a string — coerce before compare.`,
+    `${indent}const raw = seen[0]?.last_fired_at;`,
+    `${indent}const last = raw != null ? new Date(raw) : undefined;`,
+  ],
+  lockedTransaction: (indent, body) => [
+    // `em.transactional` opens the transaction; the raw lock query is bound to
+    // it explicitly through `getTransactionContext()` — without that context
+    // the driver would take a pooled connection, the xact lock would end with
+    // that statement, and single-fire across replicas would silently be lost.
+    `${indent}await db.transactional(async (tem) => {`,
+    `${indent}  const lock = (await tem.getConnection().execute(`,
+    `${indent}    "SELECT pg_try_advisory_xact_lock(?) AS locked",`,
+    `${indent}    [lockKey],`,
+    `${indent}    "all",`,
+    `${indent}    tem.getTransactionContext(),`,
+    `${indent}  )) as { locked: boolean }[];`,
+    `${indent}  const locked = lock[0]?.locked ?? false;`,
+    ...body,
+    `${indent}});`,
+  ],
+};
+
 /** The pg-boss durable block for the `cron:` timers (one queue + worker +
  *  schedule + coalesce-once catch-up per timer). */
-function cronBlock(timers: readonly TimerSourceIR[], eventByName: Map<string, EventIR>): string[] {
+function cronBlock(
+  timers: readonly TimerSourceIR[],
+  eventByName: Map<string, EventIR>,
+  store: TimerStore,
+): string[] {
   const jobs = timers.flatMap((ts) => {
     if (ts.cadence.kind !== "cron") return [];
     const event = eventByName.get(ts.event);
@@ -115,10 +228,7 @@ function cronBlock(timers: readonly TimerSourceIR[], eventByName: Map<string, Ev
         `    await boss.createQueue(queue);`,
         `    await boss.work(queue, async () => {`,
         `      await events.dispatch(${struct});`,
-        `      await db.execute(`,
-        "        sql`INSERT INTO loom_timer_runs (timer, last_fired_at) VALUES (${queue}, now())" +
-          " ON CONFLICT (timer) DO UPDATE SET last_fired_at = now()`,",
-        `      );`,
+        ...store.upsertWatermark("      ", "update"),
         `      baseLogger.info({ event: "timer_fired", timer: ${nameLit} });`,
         `    });`,
         `    // Durable schedule: single-fire across replicas + retry with backoff.`,
@@ -132,15 +242,9 @@ function cronBlock(timers: readonly TimerSourceIR[], eventByName: Map<string, Ev
         `    {`,
         `      const prev = CronExpressionParser.parse(${cronLit}, { currentDate: new Date() }).prev().toDate();`,
         `      const ageSec = (Date.now() - prev.getTime()) / 1000;`,
-        "      const seen = await db.execute(sql`SELECT last_fired_at FROM loom_timer_runs WHERE timer = ${queue}`);",
-        `      // node-postgres returns timestamptz as a string — coerce before compare.`,
-        `      const raw = (seen.rows[0] as { last_fired_at: string | Date } | undefined)?.last_fired_at;`,
-        `      const last = raw != null ? new Date(raw) : undefined;`,
+        ...store.readWatermark("      "),
         `      if (!last) {`,
-        "        await db.execute(",
-        "          sql`INSERT INTO loom_timer_runs (timer, last_fired_at) VALUES (${queue}, now())" +
-          " ON CONFLICT (timer) DO NOTHING`,",
-        "        );",
+        ...store.upsertWatermark("        ", "nothing"),
         `      } else if (ageSec >= 60 && last.getTime() < prev.getTime()) {`,
         `        await boss.send(queue, {}, { singletonKey: prev.toISOString() });`,
         `        baseLogger.info({ event: "timer_catchup", timer: ${nameLit}, boundary: prev.toISOString() });`,
@@ -162,10 +266,7 @@ function cronBlock(timers: readonly TimerSourceIR[], eventByName: Map<string, Ev
     "  // Watermark for the coalesce-once catch-up (pg-boss has no missed-window",
     "  // back-fill).  Self-owned — created here like pg-boss creates its own",
     "  // schema, so it never enters the domain MigrationsIR.",
-    "  await db.execute(",
-    "    sql`CREATE TABLE IF NOT EXISTS loom_timer_runs (timer text PRIMARY KEY," +
-      " last_fired_at timestamptz NOT NULL DEFAULT now())`,",
-    "  );",
+    ...store.createWatermark,
     "  disposers.push(async () => {",
     "    await boss.stop();",
     "  });",
@@ -179,6 +280,7 @@ function cronBlock(timers: readonly TimerSourceIR[], eventByName: Map<string, Ev
 function intervalBlock(
   timers: readonly TimerSourceIR[],
   eventByName: Map<string, EventIR>,
+  store: TimerStore,
 ): string[] {
   const jobs = timers.flatMap((ts) => {
     if (ts.cadence.kind !== "every") return [];
@@ -208,16 +310,14 @@ function intervalBlock(
     "      }",
     "      running = true;",
     "      try {",
-    "        await db.transaction(async (tx) => {",
-    "          const lock = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(${lockKey}) AS locked`);",
-    "          const locked = (lock.rows[0] as { locked: boolean } | undefined)?.locked ?? false;",
-    "          if (!locked) {",
-    '            baseLogger.debug({ event: "timer_lock_contended", timer: name });',
-    "            return;",
-    "          }",
-    "          await events.dispatch(build());",
-    '          baseLogger.info({ event: "timer_fired", timer: name });',
-    "        });",
+    ...store.lockedTransaction("        ", [
+      "          if (!locked) {",
+      '            baseLogger.debug({ event: "timer_lock_contended", timer: name });',
+      "            return;",
+      "          }",
+      "          await events.dispatch(build());",
+      '          baseLogger.info({ event: "timer_fired", timer: name });',
+    ]),
     "      } catch (err) {",
     "        baseLogger.error({",
     '          event: "timer_emit_failed",',
@@ -241,9 +341,14 @@ function intervalBlock(
 export function renderTimerScheduler(
   timers: readonly TimerSourceIR[],
   eventByName: Map<string, EventIR>,
+  /** `persistence: mikroorm` — run the watermark + advisory lock on the
+   *  EntityManager instead of Drizzle (M-T6.23 slice 3).  Default false keeps
+   *  the Drizzle output byte-identical. */
+  usingMikro = false,
 ): string {
   const { cron, interval } = partitionByCadence(timers);
   const usesIds = anyTickUsesId(timers, eventByName);
+  const store = usingMikro ? MIKRO_TIMER_STORE : DRIZZLE_TIMER_STORE;
 
   return lines(
     "// Auto-generated — durable timer scheduler (scheduling.md Phase 2).",
@@ -251,12 +356,15 @@ export function renderTimerScheduler(
     "// Emitted only when this deployable owns timerSources.",
     cron.length > 0 ? `import { PgBoss } from "pg-boss";` : false,
     cron.length > 0 ? `import { CronExpressionParser } from "cron-parser";` : false,
-    `import { sql } from "drizzle-orm";`,
-    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    // The persistence-adapter store's own imports.  Ordered as the drizzle path
+    // emitted them (sql, NodePgDatabase, … then `schema` after the domain
+    // imports) so the default output is byte-identical; the mikro store has a
+    // single import and no `schema` module to reference.
+    ...store.imports.filter((i) => !i.includes("./db/schema")),
     usesIds ? `import * as Ids from "./domain/ids";` : false,
     `import type * as Events from "./domain/events";`,
     `import type { DomainEventDispatcher } from "./domain/events";`,
-    `import type * as schema from "./db/schema";`,
+    ...store.imports.filter((i) => i.includes("./db/schema")),
     `import { baseLogger } from "./obs/log";`,
     "",
     interval.length > 0
@@ -277,14 +385,14 @@ export function renderTimerScheduler(
     "// Starts every owned timer.  Async: pg-boss boot is async, and the returned",
     "// disposer awaits a clean pg-boss shutdown.",
     "export async function startTimerScheduler(",
-    "  db: NodePgDatabase<typeof schema>,",
+    `  db: ${store.dbType},`,
     "  events: DomainEventDispatcher,",
     "): Promise<() => Promise<void>> {",
     "  const disposers: Array<() => void | Promise<void>> = [];",
     "",
-    ...(cron.length > 0 ? cronBlock(cron, eventByName) : []),
+    ...(cron.length > 0 ? cronBlock(cron, eventByName, store) : []),
     cron.length > 0 && interval.length > 0 ? "" : false,
-    ...(interval.length > 0 ? intervalBlock(interval, eventByName) : []),
+    ...(interval.length > 0 ? intervalBlock(interval, eventByName, store) : []),
     "",
     "  return async () => {",
     "    for (const dispose of disposers) await dispose();",

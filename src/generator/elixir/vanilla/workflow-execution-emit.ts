@@ -71,6 +71,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  type AggregateIR,
   type BoundedContextIR,
   type ExprIR,
   type IsolationLevel,
@@ -91,9 +92,18 @@ import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
+import { internalCreateFn, internalDeleteFn } from "../lifecycle-seam.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { denialOverrides, denialTerm, respondErrorTail } from "./denial.js";
 import { renderFunctionBodyLines } from "./function-emit.js";
+
+/** The aggregate a workflow step targets, for the lifecycle-seam decision (which
+ *  context function an IN-PROCESS caller may use).  `undefined` when the step
+ *  names an aggregate in another context — then the seam falls back to the plain
+ *  name, which is what a cross-context create already emits today. */
+function aggOf(ctx: BoundedContextIR | undefined, aggName: string): AggregateIR | undefined {
+  return ctx?.aggregates.find((a) => a.name === aggName);
+}
 
 export interface VanillaWorkflowExecResult {
   routes: ApiRoute[];
@@ -498,7 +508,7 @@ function lowerStatement(
       // `{:ok, struct} | {:error, changeset}`.  Discard the returned struct
       // (mirrors the op-call `{:ok, _}` shape); a failure threads `{:error, _}`
       // up the with-chain so a transactional workflow rolls back.
-      const action = `delete_${snake(st.aggName)}`;
+      const action = internalDeleteFn(st.aggName, aggOf(ctx, st.aggName));
       const call = `${contextModule}.${action}(${renderExpr(st.entity, renderCtx)})`;
       return [
         {
@@ -585,7 +595,7 @@ function lowerStatement(
                 .join(", ");
               const bind = bindUsedLater(inner.name, rest) ? snake(inner.name) : "_";
               clauses.push(
-                `{:ok, ${bind}} <- ${contextModule}.create_${snake(inner.aggName)}(%{${fields}})`,
+                `{:ok, ${bind}} <- ${contextModule}.${internalCreateFn(inner.aggName, aggOf(ctx, inner.aggName))}(%{${fields}})`,
               );
             } else if (inner.kind === "expr-let") {
               const bind = bindUsedLater(inner.name, rest) ? snake(inner.name) : "_";
@@ -848,7 +858,7 @@ function renderLoopBody(
         lastBind = snake(inner.name);
         const bind = bindUsedLater(inner.name, rest) ? lastBind : "_";
         clauses.push(
-          `{:ok, ${bind}} <- ${contextModule}.create_${snake(inner.aggName)}(%{${fields}})`,
+          `{:ok, ${bind}} <- ${contextModule}.${internalCreateFn(inner.aggName, aggOf(ctx, inner.aggName))}(%{${fields}})`,
         );
         if (bind === "_") lastBind = "nil";
         break;
@@ -1093,7 +1103,9 @@ function renderBranchStmt(
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
       const bind = bindUsedLater(st.name, rest) ? snake(st.name) : "_";
-      return [`{:ok, ${bind}} = ${contextModule}.create_${snake(st.aggName)}(%{${fields}})`];
+      return [
+        `{:ok, ${bind}} = ${contextModule}.${internalCreateFn(st.aggName, aggOf(ctx, st.aggName))}(%{${fields}})`,
+      ];
     }
     case "emit": {
       const fields = st.fields
