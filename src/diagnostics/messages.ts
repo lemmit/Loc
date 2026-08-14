@@ -1602,6 +1602,22 @@ export const DIAGNOSTIC_MESSAGES = {
   // INVISIBLE to this catalog gate until M-T6.33 — the five old per-backend
   // codes were emitted as `code: backend.code` (a property access), and the
   // scanner only records sites whose `code:` is a string literal.
+  // The guard sibling of the filter/stamp principal-without-auth pair.  Its
+  // consequence is sharper than theirs — the gate is EMITTED, as a free
+  // identifier, so the generated project does not compile (TS2304 / CS0103 /
+  // `cannot find symbol` / an unbound name in the FastAPI route).
+  "loom.guard-principal-without-auth": (p: {
+    dep: unknown;
+    family: unknown;
+    ctxName: unknown;
+    site: unknown;
+    principalNoun: unknown;
+  }) =>
+    `Deployable '${p.dep}' (platform ${p.family}) hosts '${p.ctxName}.${p.site}' with a ` +
+    `\`requires\` gate that references currentUser, but the deployable has no auth — there is ` +
+    `no request-scoped ${p.principalNoun} to evaluate it against, so the gate is emitted as an ` +
+    `unbound identifier and the generated project does not compile. Add 'auth: required' (and a ` +
+    `system 'user {}' block), or drop the principal reference from the gate.`,
   "loom.stamp-principal-without-auth": (p: {
     dep: unknown;
     family: unknown;

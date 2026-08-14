@@ -61,6 +61,7 @@ import {
   validateFindPredicateAdapterSupport,
   validateFlutterPrimitiveSupport,
   validateGroupedProjectionBackend,
+  validateGuardPrincipalWithoutAuth,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
   validateMikroOrmSupport,
@@ -158,6 +159,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateFilterBypassSupport(sys, diags);
     validateJavaReadModelShapes(sys, diags);
     validateStampSupport(sys, diags);
+    validateGuardPrincipalWithoutAuth(sys, diags);
     validateDapperSupport(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
