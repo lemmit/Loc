@@ -30,7 +30,12 @@ additionally requires a system-level `tenancy by` declaration — see
 field. Every backend's save path emits a guarded write
 (`UPDATE … WHERE id = $1 AND version = $2`, bumping `version`) and returns HTTP
 **409 Conflict** when zero rows match — a lost-update guard with no explicit
-version handling in the domain body:
+version handling in the domain body. The counter counts **persisted commands**,
+not changed columns: a command that only mutates a `contains` child, or that
+re-assigns a value the row already holds, still bumps it (RS-20,
+[`conformance-semantics.md`](conformance-semantics.md)) — which is why java maps
+the column plainly and drives the bump itself rather than delegating to JPA
+`@Version`:
 
 ```ddd
 aggregate Order with versioned { subject: string }
