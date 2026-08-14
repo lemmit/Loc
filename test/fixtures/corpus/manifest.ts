@@ -96,6 +96,13 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
   { id: "extern-handlers", title: "extern commandHandler / queryHandler — bodyless, scaffold-once user impl", backends: ALL },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },
+  {
+    id: "seed-values",
+    title: "seed data read back — the seeder's rows through a collection read, and the opt-in dataset gate",
+    doc: "language",
+    backends: ALL,
+    note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it is held off the elixir behavioural leg — which emits no seeder at all (B19 / M-T6.37) — via BEHAVIOURAL_SKIP, while `seeding` keeps its CRUD/FK/404 round-trip armed on all five. `backends` stays ALL because GENERATION (what this field gates) is clean everywhere, including elixir; only the boot lacks rows.",
+  },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
   {
     id: "api-call",

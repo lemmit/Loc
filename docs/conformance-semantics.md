@@ -913,6 +913,26 @@ the conforming backends, and the fix that established it.
   > the two that never hand-rolled a find 404 — were right from the start, which
   > is the rule restated: the arms that were wrong are exactly the arms that
   > answered locally instead of reaching the producer.
+  >
+  > **And a fifth discovery, at the two read sites nobody had counted
+  > (2026-08-11, M-T6.31 / [#2520](https://github.com/lemmit/Loc/pull/2520)).**
+  > The four corrections above all concern the aggregate's own routes. Two more
+  > by-KEY reads exist — the **projection show**
+  > (`GET /api/projections/<p>/{key}`) and the **workflow-instance show**
+  > (`…/instances/{id}`) — and on those, .NET was still `return NotFound();` at
+  > six arms (projection EF + Dapper, instance ES/state × EF/Dapper) and java
+  > still `ResponseEntity.notFound().build()` at three. Same bug, same
+  > "correct sibling arm in the same file" shape, one route class further out;
+  > **RS-22 listed both backends as conforming the whole time**, because no
+  > golden reached those routes either. Elixir added a third variant of its own:
+  > its instance 404 said `"<Wf> instance <id> not found"` where node and python
+  > said `"<Wf> <id> not found"`. All nine arms now raise the shared carrier and
+  > the sentence is byte-identical on all five. Gated statically per SITE
+  > (`test/conformance/absent-read-envelope-parity.test.ts`) and at runtime by an
+  > **absent-read probe** appended to the wire-golden dispatch — the structural
+  > cause of the whole five-part story is that the emitted `test e2e` DSL has no
+  > verb for "read a key that isn't there", so the probe manufactures one from
+  > the URLs each tier already requested.
 - **The real rule: don't hand-roll a 404.** This was not five backends inventing
   five strings. **Two agreed out of the box**, because on each the message comes
   from one shared producer — the repository's `getById`

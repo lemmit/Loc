@@ -302,10 +302,21 @@ field and tenancy stance — so a gated surface with no probe fails the gate.
 Per case: `generate system` → locate the one node deployable → esbuild
 bundles a tiny boot entry (its `createApp` + `schema` + drizzle/pglite +
 the repo's `synthDDL`/runners) → PGlite → `exec(synthDDL)` →
-`drizzle(pglite,{schema})` → `createApp(db)` → run the emitted suites
+`drizzle(pglite,{schema})` → **`runSeeds(db)`** (only when the system
+emitted `db/seed.ts`) → `createApp(db)` → run the emitted suites
 against `app.fetch`. All third-party deps stay external (resolved from
 this dir's `node_modules`), so there is one drizzle instance and PGlite's
 wasm assets load normally.
+
+The seeder step is the EMITTED one, imported not re-implemented, and it sits
+exactly where the generated entrypoint puts it (`migrate` → `runSeeds` →
+`createApp`). Before it existed, this leg — the wire-golden **oracle** — was the
+one leg that never applied first-boot `seed` datasets, so a seeded table started
+populated on the four cross-backend legs and empty here, and no collection read
+on a seeded aggregate could be asserted anywhere without recording that gap as a
+four-way wire divergence (`R.unseededListRead` in
+`test/ir/api-caller-census-pins.ts`, now drained). Non-default datasets stay
+opt-in via `LOOM_SEED`, as at runtime.
 
 ### Booting a real server (`proc.mjs`)
 

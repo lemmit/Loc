@@ -1,0 +1,68 @@
+// The LIST read's `requires` gate, on the LiveView seam, COMPILED.
+//
+// The gate is emitted into `handle_params`, into the Table sort/page control
+// clauses, and into the realtime refetch — three separate `handle_*` bodies in
+// one module, each binding `current_user` from the socket assigns.  Nothing in
+// this repo's Elixir corpus previously paired a gated `find all` with a `ui`,
+// so none of that emitted code had ever reached `mix compile`, and the failure
+// modes it can produce are precisely the ones only a compiler sees:
+//
+//   * `current_user` bound but unused (or used but unbound) in any one of the
+//     three clauses — `--warnings-as-errors` turns the first into a build
+//     failure and the second into a CompileError;
+//   * a gate rendered with the wrong receiver, which parses as a call on an
+//     undefined variable rather than a field read;
+//   * a rebinding across clauses that Elixir warns about.
+//
+// The page deliberately carries a Table with SORT and PAGE controls: those are
+// what make the emitter produce the reload clauses, so a fixture with a plain
+// list would compile while leaving two of the three gated seams unbuilt.
+system Sales {
+  user {
+    id: string
+    role: string
+  }
+
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        code: string
+        total: money
+        derived display: string = code
+      }
+      repository Orders for Order {
+        // Author-declared `find all` wins over the enrichment-injected one,
+        // gate included — the shape the LiveView must honour.  Declared
+        // `paged` to match what the scaffolded list page calls: a NON-paged
+        // author `find all()` emits `list_orders/0` while the scaffolded
+        // LiveView calls `list_orders/4`, and the generated project does not
+        // compile.  That mismatch is independent of this gate (it reproduces
+        // with the `requires` removed) and is NOT what this fixture pins.
+        find all(): Order paged requires currentUser.role == "clerk"
+      }
+    }
+  }
+
+  api SalesApi from Sales
+
+  // `scaffold` synthesises the paged list page — the sortable headers and the
+  // pager — which is what makes the emitter produce the Table-control reload
+  // clauses.  A hand-written Table with no controls compiles the first-load
+  // seam only, leaving the reload seams unbuilt.
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
+    api Sales: SalesApi
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: SalesAdmin { Sales: phoenixApp }
+    port: 4000
+    auth: required
+  }
+}

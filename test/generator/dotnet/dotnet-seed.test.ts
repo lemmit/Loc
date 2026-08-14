@@ -149,4 +149,32 @@ describe("dotnet seeding — raw explicit-id path", () => {
     expect(seed).toContain('INSERT INTO ""orders"" (""id"", ""customer_id"", ""status"")');
     expect(seed).not.toContain("Customer.Create(");
   });
+
+  // With a dataSource binding, EF maps the entity to `ToTable("customers",
+  // "sales")` and the migration creates `"sales"."customers"` — but the raw
+  // INSERT was built unqualified, so a `default` dataset carrying raw rows
+  // failed at first boot (`relation "customers" does not exist`).  python and
+  // java qualified theirs from the start; the .NET and node halves are fixed
+  // together in #2517.  The no-binding fixture above still emits unqualified
+  // SQL, which is correct there: those tables are unqualified too.
+  const RAW_WITH_SCHEMA = `system S {
+    subdomain Sales { context Sales {
+      aggregate Customer with crudish { name: string }
+      repository Customers for Customer { }
+      seed default raw {
+        Customer { id: "11111111-1111-1111-1111-111111111111", name: "Acme" }
+      }
+    } }
+    api A from Sales
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api { platform: dotnet contexts: [Sales] dataSources: [salesState] serves: A port: 8080 }
+  }`;
+
+  it("qualifies the raw INSERT with the aggregate's dataSource schema", async () => {
+    const files = await build(RAW_WITH_SCHEMA);
+    expect(find(files, /Seed\.cs$/)).toContain('INSERT INTO ""sales"".""customers""');
+    // The EF mapping for the same table, so the two agree.
+    expect(find(files, /CustomerConfiguration\.cs$/)).toContain('ToTable("customers", "sales")');
+  });
 });

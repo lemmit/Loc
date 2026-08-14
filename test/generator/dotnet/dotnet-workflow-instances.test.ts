@@ -65,7 +65,12 @@ describe(".NET workflow instance read endpoints", () => {
     expect(ctrl).toContain('[HttpGet("order_fulfillment/instances/{id}")]');
     expect(ctrl).toMatch(/var __key = new OrderId\(id\);/);
     expect(ctrl).toMatch(/FirstOrDefaultAsync\(r => r\.OrderId == __key\)/);
-    expect(ctrl).toContain("if (x is null) return NotFound();");
+    // M-T6.31 — the instance show is a by-id read, so it raises the shared 404
+    // carrier rather than ASP.NET's own bare 404.
+    expect(ctrl).toMatch(
+      /if \(x is null\) throw new global::\w+\.Domain\.Common\.AggregateNotFoundException\(\$"OrderFulfillment \{id\} not found"\);/,
+    );
+    expect(ctrl).not.toContain("NotFound()");
   });
 
   it("emits no instance controller for a workflow without a correlation field", async () => {

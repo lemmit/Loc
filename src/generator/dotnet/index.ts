@@ -995,7 +995,19 @@ function emitProjectFromContexts(
   // dataset (D-SEED-IDEMPOTENCY).  Program.cs gets `hasSeeds` below so it
   // adds the `Seed.RunSeeds(...)` startup call after `Database.Migrate()`.
   if (merged.seeds.length > 0) {
-    emitDotnetSeeds(merged, ns, out, usingDapper);
+    // RAW seed rows are hand-built SQL, so they need the same dataSource schema
+    // the EF model routes the tables into (the DOMAIN path is qualified by the
+    // model mapping itself).
+    emitDotnetSeeds(merged, ns, out, usingDapper, (aggName) => {
+      // Resolve through the aggregate's OWNING context, not `merged`: the
+      // dataSource bindings name the real contexts, so a merged pseudo-context
+      // resolves to nothing and the qualifier would silently go missing again.
+      const owning = contexts.find((c) => c.aggregates.some((a) => a.name === aggName));
+      const agg = owning?.aggregates.find((a) => a.name === aggName);
+      return agg && owning && system?.sys
+        ? resolveDataSourceConfig(agg, owning, system.sys)?.schema
+        : undefined;
+    });
   }
   const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
   // Resource client classes (objectStore / queue / api) + their NuGet

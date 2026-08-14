@@ -103,4 +103,101 @@ system PolicyDeny {
     port: 4000
     auth: required
   }
+
+  // The compile tier proves the always-false fragment RENDERS and BUILDS.  It
+  // cannot tell whether it renders into the right query — a sentinel dropped
+  // from the count query but kept on the rows query, or applied to the read
+  // seam of a WRITE-deny, compiles identically on every backend.  Deny's whole
+  // job is a negative: nothing comes back.  So the caller below drives all four
+  // stances side by side and asserts what each one must and must not answer.
+  //
+  // Read as a matrix: `Secret`/`Note` (read-denied, with and without a tenant
+  // floor) must answer NOTHING through every read route AND refuse every
+  // mutation (the write command-load reuses the read filter); `Account`
+  // (write-denied) must answer NORMALLY through every read route and refuse
+  // every mutation; `Ledger` (no rule) must round-trip completely.  A backend
+  // that renders the sentinel into too few sites shows up as a leak on the
+  // first two, one that renders it into too many as a 404 on the last two.
+  test e2e "deny hides the read-denied aggregates, freezes the write-denied one, and leaves the control alone" against d {
+    // ── READ-DENIED, tenant-owned ────────────────────────────────────────────
+    // The create still succeeds: a create loads nothing, so no read filter
+    // applies to it — the row is really in the table, which is what makes every
+    // empty read below a statement about the FILTER rather than about the data.
+    let s = api.secrets.create({ code: "S-1" })
+    // By-id read: 404, not 403 — deny hides existence rather than announcing it.
+    expect(api.secrets.getById(s)).toThrow(404)
+    // The root list: `total` is a SECOND query, so assert it as well as the
+    // rows.  A sentinel that reached the rows query and not the count answers
+    // an empty page with `total: 1` — an existence leak no `items` assertion
+    // sees.
+    let listed = api.secrets.all()
+    expect(listed.items.length).toBe(0)
+    expect(listed.total).toBe(0)
+    // The DECLARED find — the site where the deny term has to be AND-ed into
+    // the author's own `where this.code == c` rather than replacing it.  The
+    // row matches that `where` exactly, so a backend that only filtered the
+    // auto findAll returns it here.
+    let found = api.secrets.byCode({ c: "S-1" })
+    expect(found.length).toBe(0)
+    // The WRITE half of a READ deny: both mutations load before they write, and
+    // that load goes through the read filter, so both must 404 on a row that
+    // demonstrably exists.
+    expect(api.secrets.update(s, { code: "S-2" })).toThrow(404)
+    expect(api.secrets.destroy(s)).toThrow(404)
+
+    // ── READ-DENIED, crossTenant (the sentinel stands ALONE) ─────────────────
+    // `Note` opts out of the tenant floor, so the always-false term is the only
+    // predicate on the query — the shape where a backend that drops a lone
+    // filter (rather than one term of an AND) leaks everything.
+    let n = api.notes.create({ text: "N-1" })
+    expect(api.notes.getById(n)).toThrow(404)
+    let notes = api.notes.all()
+    expect(notes.items.length).toBe(0)
+    expect(notes.total).toBe(0)
+    expect(api.notes.update(n, { text: "N-2" })).toThrow(404)
+    expect(api.notes.destroy(n)).toThrow(404)
+
+    // ── WRITE-DENIED (`deny write on Account`) ───────────────────────────────
+    // The mirror image: the sentinel is the WRITE scope, so every read stays
+    // open and only the command load matches nothing.  A backend that reused
+    // the write scope as a read filter turns these three reads into 404/empty.
+    let a = api.accounts.create({ balance: 100 })
+    let readAccount = api.accounts.getById(a)
+    expect(readAccount.balance).toBe(100)
+    let accounts = api.accounts.all()
+    expect(accounts.items.length).toBe(1)
+    expect(accounts.total).toBe(1)
+    // …and the writes are refused, on a row the reads above just returned.
+    expect(api.accounts.update(a, { balance: 999 })).toThrow(404)
+    expect(api.accounts.destroy(a)).toThrow(404)
+    // The refusal must be a REFUSAL, not a half-applied write: read the row
+    // back and prove the balance never moved and the row is still there.
+    let stillThere = api.accounts.getById(a)
+    expect(stillThere.balance).toBe(100)
+
+    // ── THE CONTROL (no rule at all) ─────────────────────────────────────────
+    // Same shape, same tenant floor, no deny: everything works.  This is what
+    // makes the empty reads above evidence about `deny` and not about the
+    // harness, the tenancy filter, or the fixture.
+    let l = api.ledgers.create({ label: "L-1" })
+    let readLedger = api.ledgers.getById(l)
+    expect(readLedger.label).toBe("L-1")
+    let ledgers = api.ledgers.all()
+    expect(ledgers.items.length).toBe(1)
+    expect(ledgers.total).toBe(1)
+    api.ledgers.update(l, { label: "L-2" })
+    let updatedLedger = api.ledgers.getById(l)
+    expect(updatedLedger.label).toBe("L-2")
+    api.ledgers.destroy(l)
+    expect(api.ledgers.getById(l)).toThrow(404)
+    let noLedgers = api.ledgers.all()
+    expect(noLedgers.total).toBe(0)
+
+    // NO `api.orgs.*` calls, and that absence is a finding rather than an
+    // omission: `Org` is this system's TENANT REGISTRY, so enrichment appends
+    // the self-scope filter `this.id == currentUser.tenantId` to every read,
+    // and the behavioural principal's claim is not a row id — see
+    // `R.tenantRegistryRow` in `test/ir/api-caller-census-pins.ts`, where all
+    // five of its routes are pinned with the two other registry fixtures.
+  }
 }

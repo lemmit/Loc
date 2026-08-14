@@ -134,7 +134,11 @@ describe("dotnet event-sourced workflow instance reads", () => {
     expect(ctrl).toContain(
       'var __rows = await _db.OEvents.AsNoTracking().Where(e => e.StreamType == "Tally" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();',
     );
-    expect(ctrl).toContain("if (__rows.Count == 0) return NotFound();");
+    // M-T6.31 — an empty stream is an absent instance: raise the shared carrier.
+    expect(ctrl).toMatch(
+      /if \(__rows\.Count == 0\) throw new global::\w+\.Domain\.Common\.AggregateNotFoundException\(\$"Tally \{id\} not found"\);/,
+    );
+    expect(ctrl).not.toContain("NotFound()");
     expect(ctrl).toContain(
       "var x = TallyState._FromEvents(new OrderId(id), __rows.Select(TallyState.RowToEvent).ToList());",
     );
