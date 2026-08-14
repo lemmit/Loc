@@ -53,6 +53,8 @@ import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-b
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
 import type {
@@ -218,8 +220,10 @@ function emitPagedRunHandler(
   }
   const queryFields = [
     ...queryParams.map((p) => `${p.name}: ${zodFor(p.type, "query")}`),
-    `page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE})`,
-    `pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE})`,
+    // Declared upper bounds — see the sibling paged-find schema in
+    // routes-builder.ts (schemathesis F4).
+    `page: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE}).default(${PAGED_DEFAULT_PAGE})`,
+    `pageSize: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE_SIZE}).default(${PAGED_DEFAULT_PAGE_SIZE})`,
     `sort: z.string().default("id")`,
     `dir: z.string().default("asc")`,
   ];

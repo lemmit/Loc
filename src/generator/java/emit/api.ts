@@ -30,7 +30,7 @@ import {
   renderJavaType,
 } from "../render-expr.js";
 import { javaAuditApiPkg, javaHistoryFind, renderJavaHistoryRoute } from "./audit-history.js";
-import { JAVA_FIND_ABSENCE_THROW } from "./common.js";
+import { JAVA_FIND_ABSENCE_THROW, JAVA_PAGED_QUERY_PARAMS } from "./common.js";
 import { declaredFinds, isPagedAutoAll, isPagedFind } from "./repository.js";
 import { returnUnionSpec, unionWireCtorArgs } from "./unions.js";
 import { javaCommandValidatorNames } from "./validator.js";
@@ -374,13 +374,7 @@ export function renderJavaController(
         ];
       }
       if (isPagedFind(f)) {
-        const pagedParams = [
-          ...declared,
-          `@RequestParam(defaultValue = "1") int page`,
-          `@RequestParam(defaultValue = "20") int pageSize`,
-          `@RequestParam(defaultValue = "id") String sort`,
-          `@RequestParam(defaultValue = "asc") String dir`,
-        ].join(", ");
+        const pagedParams = [...declared, ...JAVA_PAGED_QUERY_PARAMS].join(", ");
         const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
         return [
           `    @GetMapping("${relativeOpPath(entry)}")`,
@@ -470,7 +464,7 @@ export function renderJavaController(
     ...(pagedAutoAll
       ? [
           `    @GetMapping`,
-          `    public ${agg.name}Paged all${agg.name}(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {`,
+          `    public ${agg.name}Paged all${agg.name}(${JAVA_PAGED_QUERY_PARAMS.join(", ")}) {`,
           ...(listReadGated ? findGateLines(listReadGated) : []),
           `        var result = service.all${agg.name}(page, pageSize, sort, dir);`,
           `        return new ${agg.name}Paged(result.items(), result.page(), result.pageSize(), result.total(), result.totalPages());`,

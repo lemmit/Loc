@@ -3,27 +3,11 @@
   "waivers": [
     {
       "id": "W1",
-      "findings": ["F1", "F2"],
+      "findings": ["F1"],
       "check": "not_a_server_error",
       "operations": "^POST /api/",
       "kind": "bug",
-      "reason": "Two root causes share this surface. F1: a request whose Content-Type is not application/json skips the zod body validator entirely, so the handler dereferences an undefined body and 500s (with the right Content-Type, an absent or malformed body correctly 400s). F2: an `X id` reference field lowers to a bare z.string() with no uuid check, so a non-UUID value reaches Postgres and the driver's `invalid input syntax for type uuid` escapes as a 500 — while the SAME id in a path parameter IS uuid-validated and 422s, so the backend disagrees with itself."
-    },
-    {
-      "id": "W2",
-      "findings": ["F3"],
-      "check": "not_a_server_error",
-      "operations": "^GET /api/[a-z_]+/[a-z_]+$",
-      "kind": "bug",
-      "reason": "F3 — the query-parameter twin of F2: a find-by-reference route (`?owner=`) validates its `X id` parameter as a bare string, so an empty/non-UUID value reaches Postgres and 500s instead of 422."
-    },
-    {
-      "id": "W3",
-      "findings": ["F4"],
-      "check": "not_a_server_error",
-      "operations": "^GET /api/[a-z_]+$",
-      "kind": "bug",
-      "reason": "F4 — the paged collection read computes `offset = (page - 1) * pageSize` with `minimum: 1` and no maximum declared on either, so a large-but-in-contract page × pageSize overflows Postgres's bigint OFFSET and 500s."
+      "reason": "F1: a request whose Content-Type is not application/json skips the zod body validator entirely, so the handler dereferences an undefined body and 500s (with the right Content-Type, an absent or malformed body correctly 400s). (F2 — the non-UUID reference field — was the other root cause on this surface and is FIXED: `zodFor`'s id arm now emits `z.string().uuid()`, so the answer is 422 and this rule no longer absorbs it.)"
     },
     {
       "id": "W4",
@@ -35,11 +19,11 @@
     },
     {
       "id": "W5",
-      "findings": ["F1", "F2", "F4"],
+      "findings": ["F1"],
       "check": "status_code_conformance",
       "operations": "^POST ",
       "kind": "bug",
-      "reason": "The consequence half of W1: a 500 is not a declared response on any route, so every server error also trips status_code_conformance. These clear when F1/F2 clear — they are not an independent defect."
+      "reason": "The consequence half of W1: a 500 is not a declared response on any route, so every server error also trips status_code_conformance. F2 and F4 no longer reach here (both are fixed — a non-UUID reference now 422s and the paged controls carry declared bounds), so this rule is down to F1's Content-Type 500 alone and clears with it."
     },
     {
       "id": "W6",

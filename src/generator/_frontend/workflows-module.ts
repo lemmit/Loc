@@ -288,7 +288,9 @@ function zodForRequest(t: TypeIR): string {
           throw new Error("internal: 'duration' is expression-only and never reaches a request");
       }
     case "id":
-      return "z.string()";
+      // Same reference-is-a-uuid rule the aggregate request schemas use — see
+      // `zodForRequest` in ./zod-schemas.ts (schemathesis F2).
+      return t.valueType === "guid" ? "z.string().uuid()" : "z.string()";
     case "enum":
       return `${t.name}Schema`;
     case "valueobject":

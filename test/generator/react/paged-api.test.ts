@@ -43,8 +43,8 @@ describe("react api-builder — paged finds (P3b)", () => {
     const api = await apiModule();
     // RecentQuery exists (paged find with no domain params still gets a query).
     expect(api).toContain("export const RecentQuery = z.object({");
-    expect(api).toContain("page: z.coerce.number().int().min(1).default(1),");
-    expect(api).toContain("pageSize: z.coerce.number().int().min(1).default(20),");
+    expect(api).toContain("page: z.coerce.number().int().min(1).max(1000000).default(1),");
+    expect(api).toContain("pageSize: z.coerce.number().int().min(1).max(500).default(20),");
     // The domain param survives alongside the paging controls.
     expect(api).toMatch(/export const InRegionQuery = z\.object\(\{[\s\S]*region:/);
   });

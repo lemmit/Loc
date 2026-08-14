@@ -35,6 +35,8 @@ import {
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName, variantTag } from "../../../ir/stdlib/unions.js";
@@ -616,9 +618,16 @@ export function buildRoutesFile(
         // empty = unsorted); the repository whitelists the column server-side
         // (`sortColumns[sort] ?? id`), so an enum boundary is unnecessary — and
         // would reject the empty initial sort the scaffold list sends.
+        //
+        // Both carry a DECLARED upper bound (`PAGED_MAX_PAGE` /
+        // `PAGED_MAX_PAGE_SIZE`).  With only `.min(1)` the published contract
+        // permitted a `page × pageSize` product that overflows the SQL
+        // `OFFSET` — a 500 the caller reached by obeying the spec
+        // (schemathesis F4).  The bound is part of the contract, so the same
+        // numbers are declared by all five backends.
         lines.push(
-          `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
-          `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          `  page: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE}).default(${PAGED_DEFAULT_PAGE}),`,
+          `  pageSize: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE_SIZE}).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
           `  sort: z.string().default("id"),`,
           `  dir: z.string().default("asc"),`,
         );
@@ -2112,7 +2121,23 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       }
       return REQUEST_PRIMITIVE[info.primitive!];
     case "id":
-      return "z.string()";
+      // A REFERENCE (`Customer id`) is a uuid on the wire and a `UUID` column
+      // in Postgres, so the wire validator says so: a bare `z.string()` let a
+      // non-uuid through to the driver, whose `invalid input syntax for type
+      // uuid` escaped as a 500 — while the SAME id in a PATH parameter was
+      // already `z.string().uuid()`, so the backend disagreed with itself
+      // (schemathesis F2/F3).  `.uuid()` answers the standard 422 instead and
+      // publishes `format: uuid` through zod-openapi, matching .NET's `Guid`,
+      // Java's `UUID` and Phoenix's `format: :uuid`.
+      //
+      // `context` is deliberately ignored: the same rule holds for a body
+      // field and for a `?owner=` query parameter (F3 is F2 through the query
+      // string), and both funnel through this one arm.
+      //
+      // Gated on the declared id VALUE type — an `int`/`long`/`string`-keyed
+      // aggregate is not a uuid, and the pre-existing wire treatment (every id
+      // as a string) stays untouched for those.
+      return info.idValueType === "guid" ? "z.string().uuid()" : "z.string()";
     case "enum":
     case "valueObject":
       return `${info.base}Schema`;

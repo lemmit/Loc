@@ -34,7 +34,7 @@ import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
-import { responsePyType } from "./emit/http-models.js";
+import { responsePyType, wireModelImport } from "./emit/http-models.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
   type PyRenderContext,
@@ -254,9 +254,7 @@ export function buildPyWorkflowsFile(
     // them by name from app.domain.services.* (domain-services.md).
     ...domainServiceImportLinesForWorkflow(wfs.flatMap((wf) => wf.statements)),
     refersTo("ProblemDetails") ? "from app.http.problem import ProblemDetails" : null,
-    voModelImports.length > 0
-      ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
-      : null,
+    wireModelImport(voModelImports, refersTo),
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",

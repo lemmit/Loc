@@ -92,7 +92,7 @@ describe(".NET generator — paged finds (P3b)", () => {
     const ctrl = (await files()).get("Api/OrdersController.cs")!;
     expect(ctrl).toContain("[ProducesResponseType(typeof(Paged<OrderResponse>), 200)]");
     expect(ctrl).toContain(
-      'public async Task<ActionResult<Paged<OrderResponse>>> RecentOrder([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")',
+      'public async Task<ActionResult<Paged<OrderResponse>>> RecentOrder([FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 1000000)] int page = 1, [FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 500)] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")',
     );
     expect(ctrl).toContain(
       "var result = await _mediator.Send(new RecentQuery(page, pageSize, sort, dir));",
