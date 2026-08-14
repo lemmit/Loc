@@ -3000,6 +3000,26 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
+        // (4) HIERARCHICAL tenancy scope.  `emitMikroContextFilters` lowers each
+        // capability filter through `whereToMikroFilter`, whose FilterQuery
+        // subset cannot express the descendant-or-self subtree predicate — and
+        // it CATCHES that failure and leaves the filter unapplied rather than
+        // throwing.  For a `deep`/`global` scope that is not a degraded read:
+        // it is NO tenant predicate at all, so every tenant's rows become
+        // readable on every read of this aggregate.  The adapter's own comment
+        // assumed the shape was unreachable here ("not generated on the mikro
+        // adapter today") — a belief, not a gate.  A `tenancy … of <Registry>`
+        // system with `persistence: mikroorm` validates, generates and compiles
+        // clean today and silently serves cross-tenant rows.  Refuse it until
+        // the subtree predicate is expressible (M-T6.23's remaining half).
+        if ((a.contextFilters ?? []).some((f) => isDeepScopeFilter(f))) {
+          rejectFeature(
+            `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
+            `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
+              `cannot express it, and an unlowerable principal filter is dropped ` +
+              `silently) — leaving every tenant's rows readable`,
+          );
+        }
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,

@@ -400,11 +400,20 @@ function deepScopeCriteria(
     f.anchorClaim.kind === "member"
       ? (f.anchorClaim as { member: string }).member
       : ORG_PATH_CLAIM_FIELD;
-  const orgPattern = `(currentUser == null ? null : currentUser.${orgMember}() + "${DATA_KEY_PATH_DELIMITER}%")`;
+  // Descendant test as an ANCHORED POSITION, not `cb.like(path, org + ".%")`.
+  // The anchor is a principal CLAIM, so `_`/`%` inside it are LIKE wildcards:
+  // an org named `acme_corp` yields `acme_corp.%`, which matches `acmeXcorp.…`
+  // — a cross-tenant read with no attacker, just an underscore in a name.
+  // `cb.locate(x, pattern) = 1` has no pattern language; the needle is lifted
+  // with `cb.literal` because `locate` takes Expressions, and it stays
+  // null-safe for an absent principal exactly as the old pattern did (a null
+  // needle yields a null predicate operand → no rows, fail-closed).
+  const orgNeedle = `cb.literal((currentUser == null ? null : currentUser.${orgMember}() + "${DATA_KEY_PATH_DELIMITER}"))`;
+  const descendant = `cb.equal(cb.locate(${dataKeyPath}, ${orgNeedle}), 1)`;
   return (
     `cb.or(` +
     `cb.and(cb.isNotNull(${dataKeyPath}), ` +
-    `cb.or(cb.equal(${dataKeyPath}, ${orgVal}), cb.like(${dataKeyPath}, ${orgPattern}))), ` +
+    `cb.or(cb.equal(${dataKeyPath}, ${orgVal}), ${descendant})), ` +
     `cb.and(cb.isNull(${dataKeyPath}), cb.equal(${tenantIdPath}, ${tenantVal})))`
   );
 }
