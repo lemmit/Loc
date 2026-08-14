@@ -81,6 +81,21 @@ ${body}
   } }
 }`;
 
+/** A deployable-bearing system — needed by the checks that read the deployment
+ *  side (auth wiring, persistence mode) rather than the declaration alone. */
+const deployed = (agg: string) => `
+system P {
+  subdomain D {
+    context Orders {
+${agg}
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] port: 3000 }
+}`;
+
 /**
  * code → the `.ddd` source that must raise it.
  *
@@ -126,6 +141,26 @@ const FIRING_FIXTURES: Record<string, string> = {
   "loom.macro-arg-duplicate": uiWith("scaffoldAggregate(of: Thing, of: Thing)"),
   "loom.macro-arg-kind-mismatch": uiWith(`scaffoldAggregate(of: "Thing")`),
   "loom.capability-host-invalid": uiWith("auditable"),
+
+  // --- lifecycle gates (M-T3.16) ------------------------------------------
+  // These three arrived on `main` AFTER the 2026-08-13 census and were caught
+  // by this gate on the very next run, with no firing proof between them —
+  // which is the whole reason it exists.
+  "loom.guard-principal-without-auth": deployed(`      aggregate Order {
+        code: string
+        create(code: string) { requires currentUser.role == "admin"  code := code }
+      }`),
+  "loom.named-lifecycle-dropped": deployed(`      aggregate Order {
+        code: string
+        create(code: string) { code := code }
+        create draft(code: string) { code := code }
+      }`),
+  "loom.lifecycle-guard-event-sourced": deployed(`      event Made { order: Order id, code: string }
+      aggregate Order persistedAs: eventLog {
+        code: string
+        create(code: string) { requires 1 == 1  emit Made { order: id, code: code } }
+        apply(e: Made) { code := e.code }
+      }`),
 };
 
 /**

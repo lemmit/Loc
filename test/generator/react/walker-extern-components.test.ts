@@ -107,7 +107,7 @@ describe("extern components — action params (Tier 2)", () => {
         }
       }
       deployable api { platform: node, contexts: [C], port: 3000 }
-      deployable web { platform: static, targets: api, ui: WebApp { C: api }, port: 3001 }
+      deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
   `;
 
