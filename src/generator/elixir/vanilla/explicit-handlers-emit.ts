@@ -33,6 +33,8 @@
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
 import type {
@@ -524,8 +526,8 @@ export function emitExplicitRoutesController(
       );
       const callArgs = [
         ...critArgs,
-        `page_param(params, "page", ${PAGED_DEFAULT_PAGE})`,
-        `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE})`,
+        `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE})`,
+        `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE})`,
         `Map.get(params, "sort", "id")`,
         `Map.get(params, "dir", "asc")`,
       ];
@@ -621,12 +623,12 @@ ${serializeBlock.clauses}${
   # 1-based page coercion for a paged-run queryHandler route (Phoenix delivers
   # query params as strings; a missing/blank/non-integer value falls back to the
   # shared default).
-  defp page_param(params, key, default) do
+  defp page_param(params, key, default, limit) do
     case params[key] do
-      v when is_integer(v) -> v
+      v when is_integer(v) and v >= 1 -> min(v, limit)
       v when is_binary(v) ->
         case Integer.parse(v) do
-          {n, _} when n >= 1 -> n
+          {n, _} when n >= 1 -> min(n, limit)
           _ -> default
         end
 

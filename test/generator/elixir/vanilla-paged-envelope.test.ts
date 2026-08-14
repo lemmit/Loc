@@ -88,12 +88,12 @@ describe("vanilla `paged` wire envelope (§1)", () => {
   it("the controller reads page/pageSize params and serialises the envelope items", async () => {
     const ctrl = file(await generateSystemFiles(SOURCE), "/controllers/order_controller.ex");
 
-    expect(ctrl).toContain('page_param(params, "page", 1)');
-    expect(ctrl).toContain('page_param(params, "pageSize", 20)');
+    expect(ctrl).toContain('page_param(params, "page", 1, 1000000)');
+    expect(ctrl).toContain('page_param(params, "pageSize", 20, 500)');
     // only items are per-record serialised; the scalar counters pass through.
     expect(ctrl).toContain("json(conn, %{result | items: Enum.map(result.items, &serialize/1)})");
     // the page_param/3 coercion helper is emitted once.
-    expect(ctrl).toContain("defp page_param(params, key, default) do");
+    expect(ctrl).toContain("defp page_param(params, key, default, limit) do");
     expect((ctrl.match(/defp page_param\(/g) ?? []).length).toBe(1);
   });
 

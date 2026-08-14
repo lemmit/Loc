@@ -77,7 +77,7 @@ describe("python — explicit commandHandler/queryHandler → FastAPI", () => {
       '@router.post("/orders/{order_id}/cancellations", operation_id="cancelOrder")',
     );
     expect(ctrl).toContain(
-      "async def cancel_order_route(order_id: str, session: SessionDep) -> dict[str, object]:",
+      "async def cancel_order_route(order_id: UuidStr, session: SessionDep) -> dict[str, object]:",
     );
     expect(ctrl).toContain("result = await cancel_order(session, OrderId(order_id))");
     expect(ctrl).toContain('return {"result": result}');
@@ -177,7 +177,7 @@ describe("python — explicit handler body params → single request model", () 
     // Route signature: real path param stays a `str` path param; the rest ride
     // in the single `body: DiscountBody`.
     expect(ctrl).toContain(
-      "async def discount_route(order_id: str, body: DiscountBody, session: SessionDep) -> dict[str, object]:",
+      "async def discount_route(order_id: UuidStr, body: DiscountBody, session: SessionDep) -> dict[str, object]:",
     );
     // Call args stay in declared order; body params read off `body.<snake>`,
     // then coerce to the DOMAIN class (Money(...) constructed from body fields).
@@ -371,7 +371,7 @@ describe("python — paged-run queryHandler over run(criterion)", () => {
     const routes = fileEndingWith(m, "app/http/a_routes.py");
     expect(routes).toContain('@router.get("/orders/projections/in_region"');
     expect(routes).toMatch(
-      /rgn: str, session: SessionDep, page: int = 1, pageSize: int = 20, sort: str = "id", dir: str = "asc"/,
+      /rgn: str, session: SessionDep, page: Annotated\[int, Query\(ge=1, le=1000000\)\] = 1, pageSize: Annotated\[int, Query\(ge=1, le=500\)\] = 20, sort: str = "id", dir: str = "asc"/,
     );
     expect(routes).toContain(
       "return await list_in_region(session, rgn, page, pageSize, sort, dir)",

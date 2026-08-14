@@ -91,7 +91,7 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
     const ctrl = file(await gen(), "/controllers/account_controller.ex");
     expect(ctrl).toContain("current_user = Map.get(conn.assigns, :current_user)");
     expect(ctrl).toContain(
-      'Ledger.list_accounts(page_param(params, "page", 1), page_param(params, "pageSize", 20), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"), current_user)',
+      'Ledger.list_accounts(page_param(params, "page", 1, 1000000), page_param(params, "pageSize", 20, 500), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"), current_user)',
     );
     expect(ctrl).toContain("Ledger.get_account(id, current_user)");
   });

@@ -13,7 +13,7 @@ export const CreateOrderRequest = z.object({
 export type CreateOrderRequest = z.infer<typeof CreateOrderRequest>;
 
 export const AddLineOrderRequest = z.object({
-  productId: z.string(),
+  productId: z.string().uuid(),
   qty: z.number().int().min(1),
 });
 export type AddLineOrderRequest = z.infer<typeof AddLineOrderRequest>;
@@ -28,8 +28,8 @@ export const UpdateOrderRequest = z.object({
 export type UpdateOrderRequest = z.infer<typeof UpdateOrderRequest>;
 
 export const AllQuery = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).default(20),
+  page: z.coerce.number().int().min(1).max(1000000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(20),
   sort: z.string().default("id"),
   dir: z.string().default("asc"),
 });

@@ -26,6 +26,7 @@ import {
   wireType,
 } from "../dto-mapping.js";
 import type { ControllerShape } from "../emit/api.js";
+import { CS_PAGED_QUERY_PARAMS } from "../emit/common.js";
 import { renderController } from "../emit.js";
 import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
 import { requestVoValidatorName } from "../validator-emit.js";
@@ -326,14 +327,7 @@ export function emitController(
             }),
             // Paged finds auto-gain 1-based page/pageSize + sort/dir query
             // params with defaults (P3b / M-T2.6), mirroring the Hono contract.
-            ...(paged
-              ? [
-                  "[FromQuery] int page = 1",
-                  "[FromQuery] int pageSize = 20",
-                  '[FromQuery] string sort = "id"',
-                  '[FromQuery] string dir = "asc"',
-                ]
-              : []),
+            ...(paged ? CS_PAGED_QUERY_PARAMS : []),
           ].join(", "),
           queryConstructorArgs: [
             ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),

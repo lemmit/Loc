@@ -7,6 +7,8 @@ import {
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
 import { unionInstanceName, unionReturn, variantTag } from "../../ir/stdlib/unions.js";
@@ -226,8 +228,11 @@ export function buildApiModule(
       // boundary needs no enum — an enum here would reject the empty initial sort.
       if (pagedReturn(find.returnType)) {
         lines.push(
-          `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
-          `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          // The declared bounds mirror the server's paged query schema so the
+          // client cannot compose a request its own contract rejects
+          // (schemathesis F4).
+          `  page: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE}).default(${PAGED_DEFAULT_PAGE}),`,
+          `  pageSize: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE_SIZE}).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
           `  sort: z.string().default("id"),`,
           `  dir: z.string().default("asc"),`,
         );
@@ -806,7 +811,12 @@ function zodForRequest(t: TypeIR): string {
     case "primitive":
       return REQUEST_PRIMITIVE[info.primitive!];
     case "id":
-      return "z.string()";
+      // Mirrors the server's request-side rule (`zodFor` in the Hono
+      // routes-builder): a reference is a uuid on the wire, so the FORM
+      // validator says so too and the caller is told at the field instead of
+      // by a server error.  Gated on the declared id value type — an
+      // `int`/`long`/`string`-keyed aggregate is not a uuid (schemathesis F2).
+      return info.idValueType === "guid" ? "z.string().uuid()" : "z.string()";
     case "enum":
     case "valueObject":
       return `${info.base}Schema`;
