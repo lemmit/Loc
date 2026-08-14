@@ -165,14 +165,22 @@ const REGISTERED: Ratchet[] = [
     max: 38,
   },
   // The MikroORM behavioural leg's skip register.  It was NOT registered here
-  // until a fourth entry had to be added (`projection-join`, a query-time
-  // projection the adapter refuses) — so it had been growing unwatched, which
-  // is precisely the silent-growth this ratchet exists to stop.  It carries its
-  // own STALE-key check inside the runner (a key naming no corpus fixture fails
-  // the leg), but nothing bounded its SIZE.  Three of the four are one boundary
-  // (no query-time projection reads) and drain together when the mikroorm read
-  // routes land in M-T6.23; the fourth is the declared `MIKROORM_SUBSET`
-  // predicate narrowing.
+  // until `projection-join` (a query-time projection the adapter refuses) had to
+  // be added — so it had been growing unwatched, which is precisely the
+  // silent-growth this ratchet exists to stop.  It carries its own STALE-key
+  // check inside the runner (a key naming no corpus fixture fails the leg), but
+  // nothing bounded its SIZE.
+  //
+  // 5 entries, TWO boundaries and two separate authors — which is itself the
+  // argument for pinning it:
+  //   - `projection-aggregation` / `-groupby` / `-join`: one boundary (the
+  //     adapter emits no query-time projection reads), draining together when
+  //     the read routes land in M-T6.23.
+  //   - `prefix-filter`: the declared `MIKROORM_SUBSET` predicate narrowing.
+  //   - `policy-deny`: added on `main` independently, by the read-deny work.
+  //     It arrived while this pin said 4, so the very first thing the new
+  //     registration did was catch a concurrent grower — with no pin, that
+  //     entry would have landed unnoticed exactly like the others had.
   //
   // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
   // why it has no per-adapter ORACLE like the dapper maps just gained — the
@@ -181,7 +189,7 @@ const REGISTERED: Ratchet[] = [
     file: "test/behavioral/run-mikroorm.mjs",
     name: "MIKRO_SKIP",
     kind: "record",
-    max: 4,
+    max: 5,
   },
 ];
 
