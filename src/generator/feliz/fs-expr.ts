@@ -86,7 +86,53 @@ export const FS_LEAVES = {
   lambda(param: string, body: string | undefined): string {
     return `(fun ${param} -> ${body ?? "()"})`;
   },
+  /** `days(7)` — a `System.TimeSpan`, the .NET duration type, NOT the bare
+   *  millisecond number the JS frontends use: `System.DateTime` has no
+   *  `+ int`, so a number here is a type error the moment it meets a datetime.
+   *  The SPAN still comes from `DURATION_UNIT_MS`, so `7 days` is the same
+   *  length of time here as on the wire and on every backend.
+   *
+   *  The multiplication is done in `float`, not `int`: F#'s `int` is 32-bit and
+   *  `30 days` in milliseconds (2_592_000_000) overflows it. */
+  duration(unit: keyof typeof DURATION_UNIT_MS, amount: string): string {
+    return `(System.TimeSpan.FromMilliseconds(float (${amount}) * ${DURATION_UNIT_MS[unit]}.0))`;
+  },
 };
+
+/** The datetime-involving `+`/`-` arms, or `null` to fall through to the plain
+ *  operator leaf.  Dispatch is type-driven off the lowering's
+ *  `leftType`/`resultType` stamps, exactly as the TypeScript backend's
+ *  `renderTemporalBinary` does:
+ *
+ *    datetime ± duration → datetime   ⇒ `((l).Add(r))` / `((l).Subtract(r))`
+ *    duration + datetime → datetime   ⇒ `((r).Add(l))`   (commuted form)
+ *    datetime − datetime → duration   ⇒ falls through — F#'s `-` on two
+ *                                       `System.DateTime`s already yields the
+ *                                       `System.TimeSpan` a duration is.
+ *
+ *  Shared by both feliz paths: the view walker reaches it through
+ *  `felizTarget.exprTemporalBinary`, the MVU update path through
+ *  `renderFsExpr`'s binary arm. */
+export function fsTemporalBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: TypeIR | undefined): string | undefined =>
+    t?.kind === "primitive" ? t.name : undefined;
+  const lt = prim(e.leftType);
+  const rt = prim(e.rightType);
+  if (lt === "datetime" && rt === "duration") {
+    return `((${left}).${e.op === "+" ? "Add" : "Subtract"}(${right}))`;
+  }
+  // `duration + datetime` — the commuted form (`duration - datetime` never
+  // types), so the receiver is the RIGHT operand.
+  if (lt === "duration" && rt === "datetime" && e.op === "+") {
+    return `((${right}).Add(${left}))`;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Scalar-intrinsic snippet table for F# / Fable — the Feliz sibling of
@@ -338,8 +384,13 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       if (ctx.locals.has(e.name)) return e.name;
       if (ctx.stateNames.has(e.name)) return `model.${upperFirst(e.name)}`;
       return e.name;
-    case "binary":
-      return FS_LEAVES.binary(r(e.left), r(e.right), e.op);
+    case "binary": {
+      const left = r(e.left);
+      const right = r(e.right);
+      // Datetime arithmetic is a method call in .NET, not an operator — the
+      // same seam the view path consults through `felizTarget`.
+      return fsTemporalBinary(left, right, e) ?? FS_LEAVES.binary(left, right, e.op);
+    }
     case "unary":
       return FS_LEAVES.unary(e.op, r(e.operand));
     case "ternary":
@@ -361,11 +412,11 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // the ctx carries whatever spelling IS in scope there.
       return ctx.routeId ?? NO_ROUTE_ID;
     case "duration":
-      // `7 days` — the same fixed-width millisecond translation the VIEW path
-      // emits (walker-core, off `DURATION_UNIT_MS`) and every backend agrees on,
-      // so a duration means the same number on both sides of the wire and on
-      // both feliz paths.
-      return `((${r(e.amount)}) * ${DURATION_UNIT_MS[e.unit]})`;
+      // `7 days` — the SAME `System.TimeSpan` the VIEW path emits (through the
+      // `exprDuration` walker seam), off the same `DURATION_UNIT_MS` span every
+      // backend agrees on, so a duration means the same length of time on both
+      // sides of the wire and on both feliz paths.
+      return FS_LEAVES.duration(e.unit, r(e.amount));
     case "new":
       // Part construction (`Shipment { … }`).  A part is a plain record on the
       // wire exactly as a value object is, so it renders as the F# anonymous
