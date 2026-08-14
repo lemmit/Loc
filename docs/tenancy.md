@@ -360,6 +360,22 @@ Generated `deep` filter, one line per backend (for `allow deep on Account`):
    so a flat model keeps the fail-closed floor. It never leaks past the tenant
    root.
 
+**The ladder is still a compiler-owned sentinel, not `startsWith` (yet).** Both
+levels lower to an `authz-filter { kind: "scope" }` node that each backend
+renders natively — see `buildDeepScopeFilter` / `buildGlobalScopeFilter` in
+[`src/ir/util/tenant-stance.ts`](../src/ir/util/tenant-stance.ts). The reconciled
+surface ([tenancy-authorization-final-surface](old/proposals/tenancy-authorization-final-surface.md)
+decision 2) retires that sentinel in favour of an ordinary `filter` written in
+the language, and its **prefix operator now ships**: `startsWith` is queryable
+on every backend ([`stdlib.md`](stdlib.md) → `string`), lowering to an anchored
+`strpos(col, $p) = 1` rather than a `LIKE` so a `%`/`_` in the prefix VALUE
+matches literally. What the swap still needs is two more queryable shapes the
+sublanguage lacks — string concatenation (`currentUser.orgPath + "."`) and
+`!= null` on the internal `dataKey` column — because the sentinel's
+NULL-`dataKey` OR-fallback (decision 1 below) is load-bearing and must survive
+it. Until then the operator is available to authors and the ladder keeps its
+sentinel.
+
 **Validation (fail closed).** `deep`/`global` need a `tenantRegistry` hierarchy
 (`loom.policy-level-requires-hierarchy`); the target must be a tenant-owned
 aggregate in the same context (`loom.policy-unknown-aggregate`,

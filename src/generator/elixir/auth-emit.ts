@@ -459,9 +459,19 @@ ${extractTokenDef}
   # Sends a proper 401 body + halts — without send_resp/3 the underlying
   # adapter raises Plug.Conn.NotSentError and the response surfaces as a 500.
   defp send_unauthorized(conn) do
+    body =
+      Jason.encode!(%{
+        type: "about:blank",
+        title: "Unauthorized",
+        status: 401,
+        detail: "no valid credentials for #{conn.method} #{conn.request_path}",
+        instance: conn.request_path
+      })
+
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(401, ~s({"error":"unauthorized"}))
+    |> put_resp_content_type("application/problem+json")
+    |> put_resp_header("www-authenticate", ~s(Bearer realm="api", error="invalid_token"))
+    |> send_resp(401, body)
     |> halt()
   end
 ${devUserFn}${sessionUserFn}

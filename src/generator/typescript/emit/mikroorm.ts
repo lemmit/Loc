@@ -51,6 +51,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoneyDeep,
+  aggregateUsesPrincipalContextFilter,
   exprUsesCurrentUser,
   findUsesCurrentUser,
   isMaterializedProjection,
@@ -2369,10 +2370,17 @@ export function renderMikroDocumentRepository(
       ? `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc, ${rowVar}.version)`
       : `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc)`;
   // In-app capability predicate over a rehydrated aggregate (soft-delete /
-  // non-principal tenancy).  Principal filters are validator-rejected on Hono,
-  // so no `requireCurrentUser()` bind is reachable here.
+  // tenancy).  On `shape: document` the filter CANNOT be pushed into the query
+  // — the row is one opaque jsonb blob — so it is evaluated over the
+  // rehydrated record, and a PRINCIPAL-referencing filter therefore needs
+  // `currentUser` bound in each read's scope, exactly as the drizzle document
+  // builder does (`principalBind`).  Pairwise F5: this bind was missing here,
+  // so every read named a free `currentUser` (TS2304).
   const capRec = documentCapabilityBody(agg, "rec");
   const capX = documentCapabilityBody(agg, "x");
+  const principalBind = aggregateUsesPrincipalContextFilter(agg)
+    ? `    const currentUser = requireCurrentUser();`
+    : null;
 
   // Finds evaluate in-memory over the rehydrated read model (the read already
   // deserialises every row), narrowed first by the capability filter then by
@@ -2393,8 +2401,13 @@ export function renderMikroDocumentRepository(
         ? `${allExpr}.find(${pred ?? "() => true"}) ?? null`
         : `${allExpr}.find(${pred ?? "() => true"})!`;
     const rowsExpr = isArray ? "result.length" : "result == null ? 0 : 1";
+    // A find that already takes a `currentUser: User` param reuses it; any
+    // other find under a principal filter binds the ambient accessor
+    // (fail-closed), matching `documentFindMethod` on the drizzle side.
+    const needsPrincipalBind = principalBind !== null && !findUsesCurrentUser(f);
     return lines(
       `  async ${f.name}(${params}): Promise<${ret}> {`,
+      ...(needsPrincipalBind ? [principalBind] : []),
       `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const rows = await em.find(${row}, {});`,
       `    const all = rows.map((r) => ${fromDocOf("r")});`,
@@ -2452,6 +2465,7 @@ export function renderMikroDocumentRepository(
     `    if (row === null) return null;`,
     ...(capRec
       ? [
+          ...(principalBind ? [principalBind] : []),
           `    const rec = ${fromDocOf("row")};`,
           `    if (!(${capRec})) return null;`,
           `    return rec;`,
@@ -2467,6 +2481,7 @@ export function renderMikroDocumentRepository(
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
+    ...(principalBind && capX ? [principalBind] : []),
     `    const em = this.em.fork({ keepTransactionContext: true });`,
     `    const rows = await em.find(${row}, { id: { $in: ids as string[] } });`,
     `    return rows.map((r) => ${fromDocOf("r")})${capX ? `.filter((x) => ${capX})` : ""};`,

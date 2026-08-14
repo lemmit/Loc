@@ -168,6 +168,14 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.criterion-alias-collision": (p: { name: unknown; alias: unknown }) =>
     `criterion '${p.name}' binds the candidate alias '${p.alias}', but a parameter of the same name already exists — rename one so a bare '${p.alias}' is unambiguous.`,
+  // What a lifecycle `requires` may READ.  Two arms rather than one message
+  // with a conditional clause: the reason `create` is narrower than `destroy`
+  // is a different fact in each case, and an author hitting one should not have
+  // to read past the other.
+  "loom.lifecycle-guard-unreadable#create": (p: { agg: unknown; refs: unknown }) =>
+    `aggregate '${p.agg}': the \`create\` guard reads ${p.refs}, which the gate cannot see. A \`create\` guard may read \`currentUser\` only — there is no instance until the factory runs, and the emitted POST takes the field-derived create input, not the declared parameter list, so a parameter has no wire slot either. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
+  "loom.lifecycle-guard-unreadable#destroy": (p: { agg: unknown; refs: unknown }) =>
+    `aggregate '${p.agg}': the \`destroy\` guard reads ${p.refs}, which the gate cannot see. A \`destroy\` guard may read \`currentUser\` and \`this\` (the route already loads the row), but not a parameter — a DELETE carries no body. \`requires\` answers "may this caller"; a value check belongs in a \`precondition\` on a named \`operation\`.`,
   // The canonical `create` / `destroy` body no backend renders.  `reason` is
   // computed at the call site (it varies by statement kind AND by action), so
   // the catalog owns the frame and the site owns the clause.
@@ -1191,9 +1199,6 @@ export const DIAGNOSTIC_MESSAGES = {
     `exists yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` ` +
     "is not available here. Use `where` to scope which rows return; use `requires` to " +
     "allow / deny the caller.",
-  "loom.projection-gate-without-source": (p: { name: unknown }) =>
-    `projection '${p.name}': a \`requires\` gate guards a query-time read, but this ` +
-    "projection declares no `from` source. Add a `from <Aggregate>` clause, or drop the gate.",
   "loom.projection-gate-not-current-user": (p: { name: unknown; offending: unknown }) =>
     `projection '${p.name}': a \`requires\` gate runs before the query (no row exists ` +
     `yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` is not ` +
@@ -1306,9 +1311,10 @@ export const DIAGNOSTIC_MESSAGES = {
     `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
   "loom.chart-unsupported-target": (p: { what: unknown; name: unknown; uiFramework: unknown }) =>
     `${p.what} uses 'Chart', which deployable '${p.name}' can't render ` +
-    `(frontend '${p.uiFramework}'). Chart ships on react (on every react design pack) and on ` +
-    `phoenixLiveView (server-rendered inline SVG). Host this ui on one of those, or bind the ` +
-    `grouped projection to 'Table' — it renders the same rows on every frontend.`,
+    `(frontend '${p.uiFramework}'). Chart ships on every shipping frontend — react, vue, ` +
+    `svelte, angular, feliz, flutter and phoenixLiveView — so this names a frontend the ` +
+    `chart renderer has not been written for yet. Bind the grouped projection to 'Table' ` +
+    `meanwhile: it renders the same rows on every frontend.`,
   "loom.ui-projection-read-unsupported#frontend-has-no-client": (p: {
     what: unknown;
     name: unknown;
@@ -1355,6 +1361,8 @@ export const DIAGNOSTIC_MESSAGES = {
     findName: unknown;
   }) =>
     `denyByDefault: find '${p.name}.${p.findName}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-projection": (p: { name: unknown }) =>
+    `denyByDefault: projection '${p.name}' is served as a read endpoint on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` after its declaration header (use \`requires true\` to allow anonymous access).`,
   "loom.default-deny-ungated#denybydefault-handler": (p: {
     kind: unknown;
     ctx: unknown;
@@ -1627,6 +1635,16 @@ export const DIAGNOSTIC_MESSAGES = {
     `The Dapper adapter renders capability filters as raw SQL and cannot bind the ` +
     `principal claims a hierarchical scope predicate reads — use 'persistence: efcore' ` +
     `on this deployable, or flatten the tenancy to a non-hierarchical registry.`,
+  "loom.dapper-unsupported#feature": (p: {
+    name: unknown;
+    ctxName: unknown;
+    projection: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
+    `the query-time projection '${p.projection}', which the Dapper adapter does not emit — the ` +
+    `generated project would reference EF Core's AppDbContext and fail to compile. Drop the ` +
+    `'persistence: dapper' clause to use the default (EF Core) adapter, which emits it, or host ` +
+    `the projection on a different deployable.`,
   "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +

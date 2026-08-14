@@ -24,6 +24,34 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const ENABLED = process.env.LOOM_CHANNELS_E2E_RABBIT === "1";
 
+// Persistence-adapter variant (M-T6.23 slice 2, widened after an owner review).
+// `LOOM_CHANNELS_PERSISTENCE` forces a `persistence:` clause onto both node
+// deployables — the `run-dapper.mjs` pattern (same harness, clause forced)
+// rather than a duplicated suite.
+//
+// THIS is the leg that boots the durable path, and it is why the knob belongs
+// here as well as on the redis suite.  The channel below is `queue`/`work`, the
+// only shipped durable broker combo (SHIPPED_COMBOS.redis is
+// `broadcast/ephemeral` only), so on the producer `durableBrokerEvents` is
+// non-empty ⇒ `outboxRelay` is TRUE ⇒ the emitted `index.ts` really does wire
+//
+//   createApp(db, channelPublishTee(t, createOutboxDispatcher(db, inProcess)))
+//   startOutboxRelay(db, channelPublishTee(t, inProcess, { fromRelay: true }))
+//
+// so the capture → drain → BROKER-publish hop executes.  Two failure modes the
+// transport-only redis leg cannot see are covered here: a payload spread into
+// the CloudEvents `data` wrongly (the consumer's `Shipment.create` would get a
+// junk `orderRef`, caught by the per-order assertions) and a `nativeUpdate`
+// mark that never lands on the relay's fresh fork (an infinite re-publish,
+// caught by the exact-count assertions plus the explicit outbox check below).
+const PERSISTENCE = process.env.LOOM_CHANNELS_PERSISTENCE;
+const PLATFORM = PERSISTENCE ? `node { persistence: ${PERSISTENCE} }` : "node";
+const LEG = PERSISTENCE ?? "drizzle";
+// Ports / container names shift for a variant leg so it can run beside the
+// default one locally without squatting its ports.
+const PORT_SHIFT = PERSISTENCE ? 20 : 0;
+const NAME_SUFFIX = PERSISTENCE ? `-${PERSISTENCE}` : "";
+
 const FIXTURE = `
 system Acme {
   subdomain Sales {
@@ -66,20 +94,37 @@ system Acme {
   resource ordersState { for: Orders, kind: state, use: primary }
   resource shippingState { for: Shipping, kind: state, use: primary }
   channelSource lifecycleBus { for: Lifecycle, use: bus }
-  deployable salesApi { platform: node contexts: [Orders] dataSources: [ordersState] channels: [lifecycleBus] port: 3000 }
-  deployable shipApi  { platform: node contexts: [Shipping] dataSources: [shippingState] channels: [lifecycleBus] port: 3001 }
+  deployable salesApi { platform: ${PLATFORM} contexts: [Orders] dataSources: [ordersState] channels: [lifecycleBus] port: 3000 }
+  deployable shipApi  { platform: ${PLATFORM} contexts: [Shipping] dataSources: [shippingState] channels: [lifecycleBus] port: 3001 }
 }
 `;
 
-const SALES_PORT = 3187;
-const REPLICA_PORTS = [3188, 3189, 3190];
-const PG_PORT = 55435;
-const AMQP_PORT = 55672;
+const SALES_PORT = 3187 + PORT_SHIFT;
+const REPLICA_PORTS = [3188 + PORT_SHIFT, 3189 + PORT_SHIFT, 3190 + PORT_SHIFT];
+const PG_PORT = 55435 + PORT_SHIFT;
+const AMQP_PORT = 55672 + PORT_SHIFT;
+const PG_NAME = `loom-channels-rb-pg${NAME_SUFFIX}`;
+const MQ_NAME = `loom-channels-rb-mq${NAME_SUFFIX}`;
 const ORDERS = 6;
 const ADDRESS = "loom.Orders.Lifecycle";
 
 const sh = (cmd: string, cwd?: string): string =>
   execSync(cmd, { cwd, stdio: ["ignore", "pipe", "pipe"], timeout: 420_000 }).toString();
+
+/** One-row-one-column `psql` against a per-deployable database, whichever way
+ *  Postgres was provided: the suite's own docker sidecar locally, or the
+ *  `services:` container CI points at with `LOOM_CHANNELS_PG_URL`.  Used to read
+ *  the producer's `__loom_outbox` directly — the relay's bookkeeping has no HTTP
+ *  surface, and asserting it is the difference between "the event arrived" and
+ *  "the event arrived THROUGH the outbox, exactly once". */
+function psqlScalar(db: string, sql: string): string {
+  const override = process.env.LOOM_CHANNELS_PG_URL;
+  const q = sql.replace(/"/g, '\\"');
+  const cmd = override
+    ? `psql "${override.replace(/\/[^/]*$/, "")}/${db}" -tAc "${q}"`
+    : `docker exec ${PG_NAME} psql -U postgres -d ${db} -tAc "${q}"`;
+  return sh(cmd).trim();
+}
 
 async function waitFor(probe: () => Promise<boolean>, ms: number, label: string): Promise<void> {
   const deadline = Date.now() + ms;
@@ -93,7 +138,7 @@ async function waitFor(probe: () => Promise<boolean>, ms: number, label: string)
 const ready = (port: number) => async (): Promise<boolean> =>
   (await fetch(`http://localhost:${port}/ready`)).ok;
 
-describe.skipIf(!ENABLED)("rabbitmq queue semantics (channels-e2e, M-T4.4 slice 3)", () => {
+describe.skipIf(!ENABLED)(`rabbitmq queue semantics (channels-e2e, M-T4.4 slice 3, ${LEG})`, () => {
   let dir: string;
   const apps: ChildProcess[] = [];
   const dockerNames: string[] = [];
@@ -124,7 +169,7 @@ describe.skipIf(!ENABLED)("rabbitmq queue semantics (channels-e2e, M-T4.4 slice 
   };
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), "loom-channels-e2e-rb-"));
+    dir = mkdtempSync(join(tmpdir(), `loom-channels-e2e-rb${NAME_SUFFIX}-`));
     writeFileSync(join(dir, "sys.ddd"), FIXTURE);
     sh(`node ${join(process.cwd(), "bin/cli.js")} generate system sys.ddd -o out`, dir);
 
@@ -134,14 +179,14 @@ describe.skipIf(!ENABLED)("rabbitmq queue semantics (channels-e2e, M-T4.4 slice 
       pgUrl = (db) => `${pgOverride.replace(/\/[^/]*$/, "")}/${db}`;
     } else {
       sh(
-        `docker run -d --rm --name loom-channels-rb-pg -e POSTGRES_PASSWORD=postgres -p ${PG_PORT}:5432 postgres:18-alpine`,
+        `docker run -d --rm --name ${PG_NAME} -e POSTGRES_PASSWORD=postgres -p ${PG_PORT}:5432 postgres:18-alpine`,
       );
-      dockerNames.push("loom-channels-rb-pg");
+      dockerNames.push(PG_NAME);
       pgUrl = (db) => `postgres://postgres:postgres@localhost:${PG_PORT}/${db}`;
       await waitFor(
         async () => {
           sh(
-            `docker exec loom-channels-rb-pg psql -U postgres -c "CREATE DATABASE sales_api;" -c "CREATE DATABASE ship_api;"`,
+            `docker exec ${PG_NAME} psql -U postgres -c "CREATE DATABASE sales_api;" -c "CREATE DATABASE ship_api;"`,
           );
           return true;
         },
@@ -157,15 +202,15 @@ describe.skipIf(!ENABLED)("rabbitmq queue semantics (channels-e2e, M-T4.4 slice 
       // crash-loops on eacces — seed it with the right owner before the
       // stock entrypoint runs.  Harmless where the stock boot already works.
       sh(
-        `docker run -d --name loom-channels-rb-mq -p ${AMQP_PORT}:5672 --entrypoint sh rabbitmq:4-management-alpine ` +
+        `docker run -d --name ${MQ_NAME} -p ${AMQP_PORT}:5672 --entrypoint sh rabbitmq:4-management-alpine ` +
           `-c 'mkdir -p /var/lib/rabbitmq && echo loomcookie > /var/lib/rabbitmq/.erlang.cookie && chown -R rabbitmq:rabbitmq /var/lib/rabbitmq && chmod 600 /var/lib/rabbitmq/.erlang.cookie && exec docker-entrypoint.sh rabbitmq-server'`,
       );
-      dockerNames.push("loom-channels-rb-mq");
+      dockerNames.push(MQ_NAME);
       amqpUrl = `amqp://guest:guest@localhost:${AMQP_PORT}`;
       dlqProbe = true;
       await waitFor(
         async () => {
-          sh(`docker exec loom-channels-rb-mq rabbitmq-diagnostics -q ping`);
+          sh(`docker exec ${MQ_NAME} rabbitmq-diagnostics -q ping`);
           return true;
         },
         120_000,
@@ -266,17 +311,47 @@ describe.skipIf(!ENABLED)("rabbitmq queue semantics (channels-e2e, M-T4.4 slice 
       return (log.match(/channel_consumed/g) ?? []).length;
     });
     expect(consumedPerReplica.reduce((a, b) => a + b, 0)).toBe(ORDERS);
-  }, 120_000);
+
+    // ── the outbox itself: capture → drain → mark, once each ────────────────
+    // The assertions above prove the event ARRIVED; these prove it arrived
+    // THROUGH the outbox and that the relay's bookkeeping landed.  Without the
+    // mark the relay re-selects the same row every tick and re-publishes
+    // forever — which is invisible in a "did it arrive" assertion and is exactly
+    // the failure mode an owner review named for the mikroorm port (the
+    // `nativeUpdate` running on a fresh fork).
+    expect(psqlScalar("sales_api", "select count(*) from __loom_outbox")).toBe(String(ORDERS));
+    expect(
+      psqlScalar("sales_api", "select count(*) from __loom_outbox where dispatched_at is null"),
+    ).toBe("0");
+    // No retry storm either: a drained row that threw would carry attempts > 0.
+    expect(psqlScalar("sales_api", "select coalesce(max(attempts), 0) from __loom_outbox")).toBe(
+      "0",
+    );
+    // And the relay is still running — give it several more ticks (500ms each)
+    // and the counts must not move.  A re-publish would raise both the consumed
+    // total and the shipment count.
+    await new Promise((r) => setTimeout(r, 2_500));
+    expect(psqlScalar("sales_api", "select count(*) from __loom_outbox")).toBe(String(ORDERS));
+    const after = (await (
+      await fetch(`http://localhost:${REPLICA_PORTS[0]}/api/shipments?pageSize=50`)
+    ).json()) as { total: number };
+    expect(after.total).toBe(ORDERS);
+    const consumedAfter = REPLICA_PORTS.map((p) => {
+      const log = readFileSync(join(dir, `ship_api-${p}.log`), "utf8");
+      return (log.match(/channel_consumed/g) ?? []).length;
+    }).reduce((a, b) => a + b, 0);
+    expect(consumedAfter).toBe(ORDERS);
+  }, 150_000);
 
   it("parks a poisoned message in the DLQ instead of losing it", async () => {
     if (!dlqProbe) return; // AMQP override: no container to drive rabbitmqadmin in
     sh(
-      `docker exec loom-channels-rb-mq rabbitmqadmin publish message --exchange ${ADDRESS} --payload 'not-json{{'`,
+      `docker exec ${MQ_NAME} rabbitmqadmin publish message --exchange ${ADDRESS} --payload 'not-json{{'`,
     );
     await waitFor(
       async () => {
         const out = sh(
-          `docker exec loom-channels-rb-mq rabbitmqadmin get messages --queue loom.dlq.${ADDRESS}`,
+          `docker exec ${MQ_NAME} rabbitmqadmin get messages --queue loom.dlq.${ADDRESS}`,
         );
         return out.includes("not-json{{");
       },

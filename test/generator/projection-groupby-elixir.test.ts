@@ -41,11 +41,10 @@ const SRC = `system Shop {
         group by o.status, o.code
         select status = o.status, code = o.code, orders = count()
       }
-      projection AdminSalesByStatus {
+      projection AdminSalesByStatus requires currentUser.role == "admin" {
         status: OrderStatus
         orders: int
         from Order as o
-        requires currentUser.role == "admin"
         group by o.status
         select status = o.status, orders = count()
       }

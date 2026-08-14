@@ -11,7 +11,6 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
-import { SHIPPED_COMBOS } from "../../../util/channels.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import {
@@ -379,10 +378,27 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
  *  chart renderer and would render an unsupported-primitive comment, so they
  *  stay honest gaps.
  *
- *  NOTE for the sibling ports: this one-line Set is edited by every frontend's
- *  chart PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
- *  already present plus yours — never by taking one side wholesale. */
-const CHART_FRAMEWORKS = new Set(["react", "phoenixLiveView", "feliz", "flutter", "vue", "svelte"]);
+ *  NOTE for the sibling ports: this Set is edited by every frontend's chart PR,
+ *  so it conflicts on rebase.  Resolve by keeping EVERY framework already
+ *  present plus yours — never by taking one side wholesale.
+ *
+ *  With the last frontend ported the Set names every shipping framework, so the
+ *  gate no longer fires for anything that exists — it is the seam a NEW frontend
+ *  gates on until it ports, not dead code.  EXPORTED so its own test can prove
+ *  it still bites: with nothing left to gate, "the check works" and "the check
+ *  is unreachable" are indistinguishable from the outside, and the only honest
+ *  way to tell them apart is to remove a framework and watch the diagnostic
+ *  come back (`ui-chart-gates.test.ts`) — the same discipline
+ *  `PROJECTION_READ_FRAMEWORKS` already uses one gate over. */
+export const CHART_FRAMEWORKS = new Set([
+  "react",
+  "phoenixLiveView",
+  "feliz",
+  "flutter",
+  "vue",
+  "svelte",
+  "angular",
+]);
 
 export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const d of sys.deployables) {
@@ -766,6 +782,28 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             source: `find/${repo.name}.history`,
           });
         }
+      }
+      // Projections.  Every projection — folded or query-time — is served as a
+      // GET endpoint (`/projections/<name>`, plus `/{key}` for a keyed folded
+      // one), so under denyByDefault an ungated one publishes its rows to any
+      // caller exactly as an ungated find publishes an aggregate's.
+      //
+      // This was the last read surface default-deny walked past.  It could not
+      // have been enforced before: a folded projection was unable to SPELL a
+      // gate (the keyword lived in the query-clause fragment) and no backend
+      // emitted one, so demanding a gate would have been demanding the
+      // impossible.  Both halves are fixed, so the requirement is now
+      // satisfiable and the exemption has no reason left.
+      for (const proj of c.projections) {
+        if (proj.query?.requires) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-projection", {
+            name: proj.name,
+          }),
+          source: `projection/${proj.name}`,
+        });
       }
     }
   }
@@ -2431,6 +2469,36 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
+      // QUERY-TIME PROJECTIONS are the one FEATURE gap on this adapter, and it
+      // was SILENT in the worst way: `query-projection-emit.ts` has no dapper
+      // branch at all, so it emits the EF shape unconditionally — `using
+      // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;`,
+      // neither of which exists here.  The generated project does not COMPILE
+      // (CS0234 "namespace 'EntityFrameworkCore' does not exist" / CS0246
+      // "'AppDbContext' could not be found"), and nothing said so at generate
+      // time: the author gets a C# build error naming a type they never wrote.
+      // Found when `projection-aggregation`/`projection-groupby` got their first
+      // runtime callers (#2468) and the dapper behavioral leg failed to boot.
+      //
+      // Honest error until a Dapper query-projection emitter lands — the same
+      // interim-gate/principled-emitter split the MikroORM feature gate uses
+      // below.  Dapper is raw SQL and a query-time projection IS a SQL
+      // aggregate, so the port is a smaller job here than the gate implies;
+      // deleting this clause is what closes it.
+      for (const p of ctx.projections ?? []) {
+        if (isQueryTimeProjection(p)) {
+          diags.push({
+            severity: "error",
+            message: diagMessage("loom.dapper-unsupported#feature", {
+              name: dep.name,
+              ctxName,
+              projection: p.name,
+            }),
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.dapper-unsupported",
+          });
+        }
+      }
       // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
@@ -2829,33 +2897,12 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         `'scheduler.ts' — the cadence would never fire`,
       );
     }
-    // (5) Broker-bound channels: `channelBindings` is computed as `[]` for a
-    // mikroorm deployable (`emit.ts`), so `http/channels.ts` — the driver,
-    // producer tee and consumer loop — is never emitted, while system compose
-    // still provisions the broker sidecar and injects its URL.  The result is a
-    // stack that boots with a live broker nothing publishes to or reads from.
-    // Re-derived here at the IR level rather than calling the generator's
-    // `brokerChannelBindings` (that would be a validate → generator backward
-    // edge); `SHIPPED_COMBOS` lives in `src/util/channels.ts` precisely so a
-    // validator can reason about broker wiring without importing downward.
-    const storageType = new Map(sys.storages.map((s) => [s.name, s.type] as const));
-    for (const csName of dep.channelSourceNames ?? []) {
-      const cs = sys.channelSources.find((c) => c.name === csName);
-      if (!cs) continue;
-      const type = storageType.get(cs.storageName);
-      if (type !== "redis" && type !== "rabbitmq" && type !== "kafka") continue;
-      const ch = sys.subdomains
-        .flatMap((s) => s.contexts)
-        .flatMap((c) => c.channels ?? [])
-        .find((c) => c.name === cs.channelName);
-      if (!ch) continue;
-      if (!SHIPPED_COMBOS[type].has(`${ch.delivery}/${ch.retention}`)) continue;
-      rejectFeature(
-        `it wires the channelSource '${cs.name}' to the ${type} broker '${cs.storageName}'`,
-        `'http/channels.ts' (the broker driver, producer tee and consumer loop) — ` +
-          `compose would still start the broker with nothing publishing to it`,
-      );
-    }
+    // (5) Broker-bound channels: CLOSED by M-T6.23 slice 2 — `channelBindings` is
+    // no longer emptied for a mikroorm deployable, so `http/channels.ts` (the
+    // driver, producer tee and consumer loop) and the boot-time transport /
+    // consumer wiring emit here exactly as on drizzle.  The module reads no
+    // `db`, and the outbox relay it publishes drained rows through landed in
+    // slice 1 — nothing left to gate.
   }
 }
 

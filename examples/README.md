@@ -15,7 +15,7 @@ not edit them for demo or marketing reasons.
 | `banking.ddd` | generator tests |
 | `inventory.ddd` | generator tests |
 | `roster.ddd` | `generated-build` (TS tsc + tsup); minimal fixture covering `Id<X>[]` join tables and `this.<refColl>.contains(...)` queries |
-| `sales-ui.ddd` | `docs/page-metamodel.md` |
+| `sales-ui.ddd` | `docs/page-metamodel.md` &mdash; **historical prototype, does not parse** (target syntax for the discussion; see its header) |
 | `provenance.ddd` | `docs/language.md` |
 
 **Showcase / playground examples live elsewhere** — under

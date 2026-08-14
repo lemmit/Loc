@@ -132,7 +132,7 @@ State is an Angular signal: `readonly draftName = signal("")`; reads call `draft
 
 > **Pack vs. framework.** The four tabs above mix two axes. The next section isolates the *pack* axis — same framework (React), two design systems — so you can see the difference the `design:` pin alone makes.
 
-## `Chart` — grouped-projection series (react, Phoenix/HEEx, Feliz, Flutter)
+## `Chart` — grouped-projection series (every frontend)
 
 A `Chart` renders a GROUPED query-time projection (`group by`, M-T4.2) as a line or bar series. `kind:` is `"line"` or `"bar"` (kind-discriminated — there is no separate `LineChart`), `of:` names a grouped projection through an api handle, and `x:`/`y:` are accessor lambdas over the projection's declared row:
 
@@ -180,7 +180,9 @@ LoomChart(isBar: true, label: "Bar chart of SalesByStatus: revenue by status",
 
 All four carry the same a11y contract — `role="img"` (`Semantics(image: true)` on Flutter) plus the derived accessible name.
 
-The `of:` projection must be **grouped** — a singleton (whole-table aggregation) has one row and nothing to chart (`loom.chart-of-not-grouped`); `x:`/`y:` must be plain accessors to declared row fields (`loom.chart-accessor-not-field`). On the tsx side `Chart` ships on **every react design pack** — the eight tsx packs all emit a `primitive-chart` template, so it is part of `REQUIRED_PRIMITIVES.tsx.core`. Each pack binds its own charting library, and the dependency enters the generated `package.json` only when a page actually uses a Chart: `@mantine/charts` (mantine v7/v9), `@mui/x-charts` (mui v5/v7), and recharts directly (shadcn v3/v4, chakra v2/v3, which ship no chart component of their own). The remaining frontends — vue, svelte and angular — are rejected honestly (`loom.chart-unsupported-target`); a `Table` over the same projection is the fallback there.
+The `of:` projection must be **grouped** — a singleton (whole-table aggregation) has one row and nothing to chart (`loom.chart-of-not-grouped`); `x:`/`y:` must be plain accessors to declared row fields (`loom.chart-accessor-not-field`). On the tsx side `Chart` ships on **every react design pack** — the eight tsx packs all emit a `primitive-chart` template, so it is part of `REQUIRED_PRIMITIVES.tsx.core`. Each pack binds its own charting library, and the dependency enters the generated `package.json` only when a page actually uses a Chart: `@mantine/charts` (mantine v7/v9), `@mui/x-charts` (mui v5/v7), and recharts directly (shadcn v3/v4, chakra v2/v3, which ship no chart component of their own). **Vue, Svelte and Angular render it the same dependency-free way**, each through a generated `LoomChart` component (an SFC, a rune component, a standalone Angular component) fed by one `primitive-chart.hbs` in that framework's SHARED template layer — so a single file serves every pack of the framework, and a pack that wants its own charting component can override `primitive-chart` by name.
+
+`Chart` now ships on **every shipping frontend**. `loom.chart-unsupported-target` remains as the seam a NEW frontend gates on until it ports.
 
 ## Design-pack divergence (`pack`)
 

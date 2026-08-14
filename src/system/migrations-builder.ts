@@ -2223,7 +2223,15 @@ function stampReshapeMetadata(
 function tableForAggregate(
   agg: AggregateIR,
   ownerModule: string,
-  voLookup: VoLookup = new Map(),
+  // REQUIRED — not `= new Map()`.  A `voLookup` that silently defaults to empty
+  // collapses every value-object field to a single `json` column instead of
+  // flattening it, which the relational ORMs (EF/Drizzle/Ecto, all flattened)
+  // then mismatch — a plausible-but-wrong schema with no type error.  Every
+  // caller (`schemaFromModule`) already threads the real lookup, so making it
+  // required removes the silent-degradation path at zero output cost.  Part of
+  // the optional-context-parameter sweep; pinned by
+  // `optional-context-param-sweep.test.ts`.
+  voLookup: VoLookup,
 ): TableShape {
   const tableName = plural(snake(agg.name));
   const columns: ColumnShape[] = [
@@ -2286,7 +2294,9 @@ function tphTableForAggregate(
   base: AggregateIR,
   pool: readonly AggregateIR[],
   ownerModule: string,
-  voLookup: VoLookup = new Map(),
+  // REQUIRED — see `tableForAggregate` for why a defaulted-empty `voLookup`
+  // silently misshapes value-object columns.
+  voLookup: VoLookup,
 ): TableShape {
   const tableName = plural(snake(base.name));
   const kindField: FieldIR = {
@@ -2332,7 +2342,9 @@ function tableForPart(
   part: EntityPartIR,
   parent: AggregateIR,
   ownerModule: string,
-  voLookup: VoLookup = new Map(),
+  // REQUIRED — see `tableForAggregate` for why a defaulted-empty `voLookup`
+  // silently misshapes value-object columns.
+  voLookup: VoLookup,
   // The aggregate that physically owns the parent table.  For a plain
   // aggregate this is `parent.name`; for a TPH concrete it's the shared base
   // table (the concrete has no table of its own), so the part's FK targets the

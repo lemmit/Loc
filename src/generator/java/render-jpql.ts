@@ -52,6 +52,11 @@ export const JPQL_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) =
   "string.trim": (recv) => `trim(${recv})`,
   "string.toUpper": (recv) => `upper(${recv})`,
   "string.toLower": (recv) => `lower(${recv})`,
+  // Prefix match (tenancy-authorization-final-surface decision 2).  HQL's
+  // `locate(search, source)` is the portable anchored position test (→ Postgres
+  // `position(search in source)`), so the argument needs no LIKE-escaping — see
+  // the note in `src/util/intrinsics.ts`.
+  "string.startsWith": (recv, args) => `locate(${args[0]}, ${recv}) = 1`,
   // ---- numerics (A3 math batch) — Hibernate 6+ HQL: abs/round/floor are
   // standard; `ceil` is spelled CEILING; two-value min/max are the HQL-native
   // least()/greatest() (NOT the aggregate min/max).  Postgres round(numeric, n)

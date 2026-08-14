@@ -9,6 +9,14 @@
 > Grew out of the `requires`-placement work ([#2443](https://github.com/lemmit/Loc/pull/2443),
 > M-T3.2 item 3): once the gate stopped living in the domain entity, the question
 > "so what secures the READS?" had no coherent answer.
+>
+> **Landed since (#2523):** the gate moved to the projection declaration header;
+> folded projections gained an ENFORCED gate on both read-model routes across all
+> five backends (`loom.projection-gate-without-source` deleted); the list read's
+> gate (`find all(): T[] requires …`) now enforces on java/python/elixir too
+> (**D5**); and `validateDefaultDeny` enumerates both projection kinds. The
+> "ungated, and ungateable" read in root cause A is gone, and B0's two amplifiers
+> with it — B0's launder itself is still open.
 
 ---
 
@@ -19,13 +27,17 @@ Four root causes. Everything else in this doc is a symptom of one of them.
 - **A — Loom has no construct for SYSTEM READS.** Every read that isn't aggregate
   CRUD is hand-rolled: its own route shape, its own gate story (or none), its own
   default-deny status. There are FOUR of them today and they have four
-  different answers — one of which is "ungated, and ungateable".
+  different answers. (One used to be "ungated, and ungateable" — the folded
+  projection; #2523 fixed that one, leaving workflow instances as the ungated
+  member.)
 - **B — the two read surfaces cannot compose, and the mask is launderable.**
   Gated projections and `mask unless` are mutually exclusive by validator
   (`loom.field-mask-projection-source`), and the diagnostic's own remedy points
   authors back at the *ungated* CRUD routes. Worse, **§B0**: a masked value can be
   `emit`ted into an event, folded into a materialized projection, and served in
-  cleartext on a route that cannot be gated at all — verified end-to-end.
+  cleartext — verified end-to-end. That route can be gated now (#2523), but the
+  projection's gate is a different predicate from the field's `mask unless`, so
+  the launder is unfixed.
 - **C — the generated default is the unsecured surface.** The scaffold binds
   `.all`, not a projection, so the no-code path lands on reads `denyByDefault`
   cannot see.
@@ -49,8 +61,8 @@ a class with no construct behind it:
 | audit history | `/<agg>/{id}/history` | **borrowed** from `find all`'s `requires` (`enrich/enrichments.ts` `ensureHistoryFind`) | yes (`loom.audit-history-ungated`) |
 | workflow instances | `/workflows/<wf>/instances`, `/instances/{id}` | **none** | **no** |
 | provenance | — | n/a | n/a — write substrate only, **no read endpoint exists** |
-| query-time projections | `/projections/<name>` | first-class `requires` | **no** — `validateDefaultDeny` never walks projections, despite `auth.md` claiming it does |
-| **materialized projections** | `/projections/<name>`, `/<name>/{key}` | **none, and none possible** — `requires` on a folded projection is rejected by `loom.projection-gate-without-source` | **no** |
+| query-time projections | `/projections/<name>` | first-class `requires` | **yes** — ✅ CLOSED (#2523) |
+| materialized projections | `/projections/<name>`, `/<name>/{key}` | first-class `requires`, enforced on both routes, all five backends | **yes** — ✅ CLOSED (#2523) |
 
 Four reads, four different answers. Provenance is
 exactly where audit was before #2378: a table nothing can read. It will hit this
@@ -115,21 +127,22 @@ check on `emit`, none on a projection fold, and no mask marker on a projection
 state field**: the mask is a property of the aggregate's *wire projection*, not a
 taint on the value.
 
-Two compounding facts:
-- **A materialized projection cannot be gated at all.** `requires` on a folded
-  projection is rejected by `loom.projection-gate-without-source` ("a `requires`
-  gate guards a query-time read, but this projection declares no `from` source").
-  So its read routes are ungated *by construction*, with no author surface — a
-  **fourth** member of the §1 system-read class, and the only one that is an
-  author-declared construct.
-- **`validateDefaultDeny` does not enumerate projections at all** (despite
-  `auth.md` listing query-time projections as covered). Confirmed by reading it.
+Two compounding facts made this strictly worse than a mask bug. **Both are now
+fixed (#2523)**, which does not close B0 but removes its amplifiers:
+- ~~**A materialized projection cannot be gated at all.**~~ **FIXED.** The gate
+  moved to the projection declaration header, all five backends emit it on both
+  read-model routes, and `loom.projection-gate-without-source` is deleted.
+- ~~**`validateDefaultDeny` does not enumerate projections at all.**~~ **FIXED.**
+  Both projection kinds are enumerated; an ungated one under `denyByDefault` is
+  `loom.default-deny-ungated`.
 
-Fixing this is a design fork, not a patch — the candidates are (a) reject
-`emit <Event>(f: this.<maskedField>)` as the narrowest honest gate, or (b)
-propagate a taint onto projection state fields. **(a) is far smaller** and
-catches it at the single entry point, but it forbids a legal-looking `emit`, so
-it wants sign-off. Either way a folded projection needs *some* gate surface.
+What remains of B0 is the launder itself: a masked value can still reach a
+projection row through `emit`, and the projection's own gate is a *different*
+predicate from the field's `mask unless`. Fixing that is a design fork, not a
+patch — the candidates are (a) reject `emit <Event>(f: this.<maskedField>)` as
+the narrowest honest gate, or (b) propagate a taint onto projection state
+fields. **(a) is far smaller** and catches it at the single entry point, but it
+forbids a legal-looking `emit`, so it wants sign-off.
 
 ### ~~B2 — SQL-pushdown aggregation leak~~ — **RETRACTED, not real**
 I recorded this as a live leak; it is not. The `from`/`join` rule fires on the
@@ -198,23 +211,31 @@ query port). **Breaking; needs sign-off.**
 86 named finds across corpus/examples/journey, **0** of them gated — so zero
 fixture churn once D3 lands.
 
-### D5 — interim risk while D3/D4 are pending
-`find all(): T[] requires <expr>` is **enforced on node and .NET, silently dropped
-on Java, Python, and Elixir.** Root cause: `isAutoAllFind` (`java/emit/repository.ts`,
-and the identical predicate in the python emitter) tests
-`name === "all" && params.length === 0 && !filter` — it never looks at `requires`,
-so an author-declared *gate-only* `all` is misclassified as the compiler-synthesized
-one and dropped, gate included. Adding a `where` clause makes it work; declaring
-only a gate — the form `auth.md` documents — does not.
+### ~~D5 — interim risk while D3/D4 are pending~~ — ✅ **FIXED (#2523)**
+`find all(): T[] requires <expr>` was **enforced on node and .NET, silently
+dropped on Java, Python, and Elixir.** Node and .NET emit a route per repository
+find, so `all` was just another entry and picked the gate up for free. The other
+three each special-case `all` OUT of their named-find loop — the list endpoint
+has a bespoke shape (paging controls, the `<Agg>Paged` envelope, Phoenix's
+`index`) — and each then emitted that bespoke route without ever reading the
+find's `requires`. Same `.ddd`, 403 on two backends and wide open on three, with
+every compile tier green.
 
-**Not being fixed**, because D4 deletes the syntax. But the workaround is
-*documented* in `auth.md` and `T3`, and it is broken on three of five backends —
-so if D3/D4 are more than a release away, either fix it or mark it broken in the
-docs. **Do not leave it advertised and non-functional.**
+Fixed exactly where this document said it belonged — at the list-route emitter,
+not by flipping `isAutoAllFind` (which on Java would have routed the gated `all`
+to a second `GET /all` endpoint instead of gating `GET /`). "The list read" is
+now one shared derivation, `src/ir/util/read-gates.ts` (`listReadFind` /
+`listReadGate`), that all five consult, so a backend that forgets it is visibly
+missing a call rather than invisibly missing a field read.
 
-> Note the fix would NOT be to flip `isAutoAllFind`: on Java that would route the
-> gated `all` to `GET /all` as a second endpoint instead of gating `GET /`. The
-> fix belongs at the list-route emitter, matching what node and .NET already do.
+Pinned by `test/generator/list-read-gate.test.ts` — all five backends × both list
+shapes (bare `T[]` and `paged`) plus the ungated control. Mutation-proven: with
+the three fixes reverted exactly the six java/python/elixir assertions fail while
+node/.NET and the five ungated controls stay green.
+
+This does not decide D3/D4 either way — if the syntax is later deleted, this
+deletes with it. It does mean the form `auth.md` documents is no longer
+advertised-and-non-functional.
 
 ---
 

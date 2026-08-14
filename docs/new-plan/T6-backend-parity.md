@@ -100,14 +100,14 @@ A workflow `let x = <expr>` whose bound `x` is **never referenced downstream** (
 
 Sources: found 2026-07-20 while draining the compose `parity` gate (the .NET `global::` / Phoenix `def/3` / Python indent+`/metrics` chain). Related pattern: M-T6.15 (Feliz unused-binder → `_`).
 
-## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; 1 of 5 emitters done) · **M–L** · P2 ⭐ was silent
+## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; 2 of 5 emitters done) · **M–L** · P2 ⭐ was silent
 M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persistence** axis, and the validator's comment block said so without qualification. But **five non-persistence features are gated `&& !usingMikro` in the Hono emitter** and emitted *nothing*, with no diagnostic — a valid model generated a project with the feature simply absent and the CLI reported success:
 
 | feature | file drizzle writes | mikroorm | now |
 |---|---|---|---|
 | query-time `projection` (`from … select …`) | `http/query-projections.ts` | — | error |
 | `timerSource` | `scheduler.ts` | — | error |
-| broker `channelSource` | `http/channels.ts` | — (compose still starts the broker) | error |
+| broker `channelSource` | `http/channels.ts` | **EMITS** (slice 2, PR #2524) | — |
 | durable channel + local reactor | outbox + relay wiring | **EMITS** (slice 1, PR #2516) | — |
 | realtime (`delivery: broadcast`) | `http/realtime.ts` | — | error / warning (below) |
 
@@ -115,13 +115,19 @@ M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persist
 
 **The realtime severity split** is the load-bearing design call: a `broadcast` channel does double duty, and its *routing* half (what makes a projection fold or saga subscribe) works fine on this adapter. A frontend targeting the backend emits `src/api/realtime.ts` off the target's **platform**, not its persistence, so its EventSource would poll a 404 → **error**. With no such frontend the wire is unobserved and the fold/saga path is intact → **warning**. Without that split the gate rejects working models (it broke 4 `test/adapters/` suites and 3 corpus features before the split).
 
-**Open (the principled fix):** port the remaining four emitters to the EntityManager — a projection read-model query path, a `scheduler.ts` on the mikro connection, the broker driver/tee/consumer, and the SSE wire. Each closes by **deleting its clause** here; the gate is the interim, not the answer. Remaining sequence by blast radius: broker → timers → query-time projection → realtime.
+**Open (the principled fix):** port the remaining three emitters to the EntityManager — a `scheduler.ts` on the mikro connection, a projection read-model query path, and the SSE wire. Each closes by **deleting its clause** here; the gate is the interim, not the answer. Remaining sequence by blast radius: timers → query-time projection → realtime.
 
 **Slice 1 — outbox: DONE (PR #2516).** The adapter emits a `LoomOutboxRow` EntitySchema (`__loom_outbox`, `src/generator/typescript/emit/mikroorm.ts`) plus `createOutboxDispatcher` / `startOutboxRelay` over the EntityManager (`src/platform/hono/v4/workflow-builder.ts` — capture on a `fork({ keepTransactionContext: true }).insert`, drain on a fresh fork with `find` + `nativeUpdate`), and the `wireOutbox` / boot-relay / `index.ts`-import gates lost their `!usingMikro`. The validator clause is **deleted**; its `mikroorm-feature-gates` case flips to asserting the model generates, and emitter pins live in `test/adapters/node-mikroorm-outbox.test.ts`.
 
 Two things the port surfaced that the gate hid. (1) The mikro **saga Row had no `lastEventId`** — the drizzle table adds it under a durable channel and the reactor preamble reads it, so the adapter could not have compiled this shape even with an outbox; it is emitted now, and the allocate literal spells `lastEventId: null` (the mikro state type is the Row CLASS, where a nullable property is still required — drizzle's `$inferInsert` makes it optional). (2) `em.nativeInsert` does not exist in MikroORM v6 (`em.insert` is the native insert); `tsc` on the generated project caught it — the compile tier, not a test.
 
 *Evidence.* `tsc --noEmit` clean on the generated mikro project; **booted** against a real Postgres: `POST /orders` → `POST /orders/{id}/place` leaves exactly one `__loom_outbox` row (`type=OrderPlaced`, so capture replaced inline dispatch), the relay drains it (`dispatched_at` set, `attempts=0`), and the saga row lands with `last_event_id` = that row's id; forcing `dispatched_at = null` re-drains and the saga stays at one row (the idempotent-consumer marker no-ops the redelivery). Mutation-proved four ways: re-gating `wireOutbox`, dropping the outbox entity, dropping the `lastEventId` column, and re-adding the validator clause each turn the suites red (the last one reddens all 13 cases across both files).
+
+**Slice 2 — broker channels: DONE (PR #2524, stacked on slice 1).** `emit.ts` computed `channelBindings` as `[]` for a mikroorm deployable, so `http/channels.ts` (driver + producer tee + consumer loop), the broker dependency and the boot-time transport wiring were all absent while compose still started the broker. Both gates deleted (`channelBindings`, `hasChannels`) plus the validator clause. The port was **almost free by construction, and that is the finding**: `src/generator/typescript/emit/channels.ts` reads no `db` at all — the transport is persistence-independent — and the two genuinely adapter-shaped pieces had already landed in slice 1 (the outbox the durable producer publishes through, and the hoisted shared `index.ts` import block). A gap that cost two deleted booleans had been an ERROR for two weeks; the lesson is that an adapter gate written from "the emitter is `&& !usingMikro`-gated" says nothing about how much work the port is.
+
+*Evidence.* `tsc --noEmit` + `tsup` clean on the generated mikro project (rabbitmq producer fixture); `test/adapters/node-mikroorm-channels.test.ts` pins the module, the deps, the boot wiring, the durable-relay-in-RELAY-mode composition, and byte-equality of the transport module across adapters; **runtime** via a new `npm run test:channels-mikroorm` leg (the redis `channels-e2e` harness parametrized by `LOOM_CHANNELS_PERSISTENCE`, the `run-dapper.mjs` pattern) — the generated producer publishes a CloudEvents envelope to valkey, the consumer's loop receives it, spawns the correlated workflow instance and persists the Shipment **in a database the producer never touches**, all on `persistence: mikroorm`. Mutation-proved three ways (re-gate `hasChannels` → 5 cases fail; re-empty `channelBindings` → the same 5; re-add the validator clause → 7 across both files).
+
+*Two CI facts fixed alongside.* (1) `channels-e2e.yml` had no `src/platform/**` in its `paths:`, so the file that owns the whole channel-transport wiring (`src/platform/hono/v4/emit.ts`) could not trigger the gate that tests it — added. (2) The new leg is a cell in the existing redis matrix (`backend: node-mikroorm`), not a new workflow, so no `local-run-mapping` row was needed; `docs/testing.md`'s channels row names the script anyway.
 
 **Hollow-cell note (feeds M-T9.8), corrected 2026-08-11.** The 2026-07-30 note claimed `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg with the feature absent. They were not passing — they were never **collected**: neither corpus fixture carries a `test e2e` block, so `featureCases` skips both on every backend, and the `MIKRO_SKIP` entries were silently **inert** (a register entry claiming a checked gap that nothing checks — hollower than the original diagnosis). `run-mikroorm.mjs` now ratchets its own register: a key naming no fixture fails the run, and a key whose fixture has no behavioural block prints `INERT` so the claim is visible. Giving `outbox.ddd` / `channels-broker.ddd` real `test e2e` blocks is its own mission-sized change (it arms five backend legs + the wire golden at once, like #2468) — **not** folded into slice 1, whose runtime proof is the booted check above.
 
@@ -417,36 +423,14 @@ RS-28 made every backend's 404 `detail` name its resource. That is necessary and
 
 Sources: M-T9.25 census sweep 3 (casing/absence). Relates to RS-28 (the string half, already fixed), M-T6.25 (the same "one backend, two envelope shapes" defect on elixir's 500), M-T9.11 (blind here for the coverage reason above).
 
-## M-T6.27 — Elixir's named-operation path has no optimistic lock — `in-flight` (PR #2505) · **M** · P1 ⭐ silent lost update, not a wire-string divergence
-**#2505 lands the fix:** the op changeset rides `optimistic_lock(:version)` on all three write paths (context named-op, returning-op ×7 sites, document op ×3 sites — the manual bump stays only for the unversioned document column); `persist_change/1` gains the `Ecto.StaleEntryError -> {:error, :conflict}` rescue + `| :conflict` spec on both repo shapes (its document `@doc` claimed "unused on the document path" — false, the doc op sites call it); the op controller action and the returning-op result mapper gain the gated `{:error, :conflict}` → `conflict_response/1` arm. The lock supplies the same +1 the plain bump did, so RS-14's wire values are unchanged. Static gate `test/generator/elixir/vanilla-named-op-optimistic-lock.test.ts`, mutation-proven (4/4 red with the fix stashed). **Deliberately out of scope, recorded:** a raced op invoked from a WORKFLOW/explicit-handler `respond/2` now answers the sanitized 500 tail instead of 409 (strictly better than the silent loss; same ladder-width class as M-T6.28's node routers) — and the two-writer behavioural case remains the honest runtime gate this mission's text calls for.
-Found 2026-08-02 by the M-T9.25 409/500 census sweep. **The most severe finding of the three sweeps, and the only one that is a data-correctness bug rather than a contract one.**
+## M-T6.27 — Elixir's named-operation path has no optimistic lock — `done` (PR #2505, merged 2026-08-11) · **M** · P1
+All three op write paths (context named-op, returning-op, document op) now ride `Ecto.Changeset.optimistic_lock(:version)`; `persist_change/1` rescues `Ecto.StaleEntryError -> {:error, :conflict}`; the op controller + returning-op mapper answer 409 via `conflict_response/1` (gated on `versioned`). Same +1 bump, so RS-14's wire values unchanged — no golden moved. Gate: `test/generator/elixir/vanilla-named-op-optimistic-lock.test.ts`, mutation-proven 4/4; real `mix compile --warnings-as-errors` on the three affected corpus shapes. Deliberately out of scope (recorded in #2505): a raced op behind a workflow/explicit-handler `respond/2` answers the sanitized 500 tail, the ladder-width class M-T6.28 tracks; the two-writer behavioural case remains the honest runtime gate (M-T9.3).
+Sources: M-T9.25 census sweep 3 (409/500); PR #2505.
 
-On a `versioned` aggregate, four backends answer **409** when two writers race a named operation:
-
-| backend | mechanism |
-|---|---|
-| node | guarded `UPDATE … WHERE version = <expected>` |
-| python | `repo.save(expected_version=…)` |
-| java | `ifMatch` check + Hibernate `@Version` |
-| dotnet | EF concurrency token |
-| **elixir** | **none — the write lands** |
-
-`src/generator/elixir/vanilla/changeset-emit.ts` attaches `optimistic_lock(:version)` only to `update_changeset`, the generic `PUT` seam. The named-operation path does `Ecto.Changeset.change(%{version: record.version + 1})` and calls `persist_change/1`, a bare `Repo.update` with **no `optimistic_lock` and no `StaleEntryError` rescue** — and `src/generator/elixir/vanilla/context-emit.ts` comments this deliberately ("a plain bump, not `optimistic_lock/2`").
-
-So `POST /orders/{id}/cancel` under contention is a **silent lost update** on elixir, where the other four 409. It is also an intra-backend split: the *same aggregate* CAS-guards on `PUT /orders/{id}` and does not on its own operation route.
-
-**Why no gate sees it.** Every existing gate compares emitted *strings* or single-writer responses. A lost update needs two concurrent writers, which no tier runs — the behavioural runners drive one client serially. `conformance-parity` compares declared responses, and elixir declares a 409 it cannot produce, which makes the spec-diff green and is arguably worse than not declaring it.
-
-**The work.** Route the named-operation persist through `optimistic_lock(:version)` and rescue `Ecto.StaleEntryError` into the existing `conflict_response/1`. Read the deliberate comment in `context-emit.ts` first — it may be guarding an ordering constraint the fix has to preserve.
-
-**Verification.** A two-writer concurrency case in the behavioural tier is the only honest gate (fetch version, fire two operation calls, assert exactly one 409). Until that exists, a static assertion that the operation persist path carries `optimistic_lock` on a `versioned` aggregate is the cheap stand-in.
-
-Sources: M-T9.25 census sweep 3 (409/500). Relates to RS-20 (`$.version` on the wire, already waived on java) and M-T9.3 (per-PR runtime boot gates — a concurrency case belongs there).
-
-## M-T6.28 — Node's error ladder reaches three of its five sub-apps — `open` · **M** · P2 ⭐ the node twin of M-T6.25
+## M-T6.28 — Node's error ladder: the root floor exists now; two routers still can't say 409 — `partial` (re-verified in code 2026-08-10) · **M** · P2 ⭐ the node twin of M-T6.29
 Found 2026-08-02 by the M-T9.25 409/500 census sweep.
 
-Node does not install an app-global handler. `api/http/index.ts` mounts five sub-apps with `app.route(...)` and defines **no `onError`**; each router carries its own copy of the ladder. Three consequences, all in one generated app:
+Originally: node installed no app-global handler — `api/http/index.ts` mounted five sub-apps with no `onError`, each router carrying its own copy of the ladder. **The root `onError`/`notFound` RFC-7807 floor has since landed** (see the heading's re-verify), so the remainder is the two routers whose typed ladder cannot express 409 (in flight: #2520). The original three consequences, kept for the record:
 
 1. **Two sub-apps have no ladder at all** — `projections.ts` (built on a bare `new OpenAPIHono()`, not `newApp()`) and `realtime.ts`. A fault there escapes to hono's default handler: **`500`, `content-type: text/plain`, body `Internal Server Error`** — not 7807, wrong content type. A missing projection row therefore answers **500 where the other four answer 404**.
 2. **The two ladders that exist are not the same ladder.** `order.routes.ts` carries eight rungs; `a-routes.ts` (the api-route/extern-handler router — a **write** path, `POST /place`) and `workflows.ts` carry five, and their `problem` signature is literally typed `400 | 403 | 404 | 422 | 500`, so **no 409 is expressible**. They don't even import `DisallowedError` / `ConcurrencyError`. An extern `commandHandler` that saves a versioned aggregate, trips a `unique (…)` index, or invokes a `when`-gated operation answers **`500 / "internal"`** on `/api/place` and **`409`** on `/api/orders/…` — same wire concept, same app, two answers. Reachable exactly as `docs/extern.md` describes the surface.
@@ -487,3 +471,52 @@ Sources: M-T9.27 register rows. Relates to M-T6.23 (mikroorm) and M-T6.25 (dappe
 ## M-T6.36 — Java emitter shape gaps — `open` · **S** · P3
 Two narrow Java-only rejections: `loom.java-projection-field-unsupported` (projection field shapes the emitter does not handle) and `loom.java-workflow-instance-field-unsupported` (workflow instance field shapes). Both name Java in the code identity, which M-T5.21 §Symptom 1 argues against — fold the target into the message when the shapes land.
 Sources: M-T9.27 register rows.
+
+## M-T6.38 — A `when` state gate is not enforced off the aggregate route — `open` · **M** · P1 ⭐ silent gate bypass, not a wire divergence
+Found 2026-08-11 while landing M-T6.28 ([#2520](https://github.com/lemmit/Loc/pull/2520)), by **disproving that mission's own premise.** M-T6.28 claimed an extern `commandHandler` that "invokes a `when`-gated operation answers `500 / "internal"`". It does not. **It succeeds.**
+
+The `when` predicate (criterion.md use site 2 — the canCommand state gate) is emitted at the **route/handler layer only**:
+
+| backend | where the gate lives | what a workflow step / extern handler calls |
+|---|---|---|
+| node | `routes-builder.ts` `whenGateLine` — inside the aggregate route handler | the DOMAIN method (`ship.markTracked()`), which carries no gate |
+| dotnet | `Application/<Agg>/Commands/<Op>Handler.cs` | the ENTITY method (`ship.MarkTracked()`) — verified in the emitted `…OnShipmentRequestedHandler.cs` |
+| java, python, elixir | `<Agg>Service.java` / `<agg>_routes.py` / the context module `<ctx>.ex` | **unverified — re-verify before building** |
+
+So on node and .NET a state-gated operation invoked from a workflow step, a saga cascade, or an extern handler **runs with the gate unevaluated**: no `DisallowedError`, no 409, the write lands. Verified empirically on both (generate a `when`-gated `markTracked()`, invoke it from an `on(e)` workflow step, read the emitted files: the gate appears in the route/handler and nowhere the workflow reaches).
+
+**Why this is worse than the envelope defects around it.** M-T6.25/6.28/6.31 are contract bugs — the right refusal in the wrong shape. This is the *absence of the refusal*: a rule the model declares, the validator accepts, and the docs describe as enforced, which silently does not run on the paths that reach the aggregate from inside the system. It is the silent-governance class (cf. M-T6.32, M-T3.2), applied to state rather than authorization — and `requires` gates deserve the same question asked of them on these paths.
+
+**Why no gate saw it.** Every `when` test drives the ROUTE (which is correct). No fixture invokes a gated operation from a workflow step or extern handler, so nothing has ever asked the question; and the wire goldens cannot see it, because the request that should have been refused *succeeds* — there is no error body to diff.
+
+**The design decision is NOT made, and this mission must not make it.** Two coherent answers, and they differ in blast radius:
+1. **Domain-layer gate** — the `when` predicate moves into (or is also asserted by) the aggregate's own method, so every caller is gated. Correct-by-construction, but it changes the emitted domain classes on five backends and makes the gate a domain invariant, which needs an owner call on whether `when` is part of the model's meaning or part of its HTTP surface.
+2. **Route-layer by design** — `when` stays an API-edge gate, and the language says so explicitly (docs + a validator note), leaving in-system callers deliberately ungated because the workflow *is* the authority. Cheap, but it must be written down, and `docs/criterion.md` currently reads as if the gate is unconditional.
+
+**First step: no code.** (a) finish the per-backend verification table above; (b) get the owner decision on 1 vs 2 (D-tag it in `docs/decisions.md`); (c) only then size the work. Sized M as a placeholder for (a)+(b) plus one backend of whichever answer wins — expect a re-size.
+
+**Verification when built.** A behavioral case, not a static pin: the golden cannot express "the request that should have been refused succeeded", so the fixture must drive a gated operation through a workflow step and assert the state did NOT change (the shape M-T6.27's two-writer case wants). A static per-backend pin that the gate appears on the path the workflow calls is the cheap companion.
+
+Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) (M-T6.31 + M-T6.28); the corrected premise is recorded in M-T6.28's body. Relates to M-T6.32 (silent-governance class) and M-T3.2 (the same class on authorization).
+
+> **ID note.** Minted as M-T6.37, renumbered to M-T6.38 before merge: [#2517](https://github.com/lemmit/Loc/pull/2517) (the M-T9.13 drain) had claimed M-T6.37 for the Elixir-seeder gap in the same hour, and neither PR could see the other's ID on `main`. First claim wins. The next-free-ID check has to span open PR branches, not just `main` — which is [M-T9.32](./T9-toolchain-health.md)'s job (dup-claim automation, minted by #2495); this is a live instance of what it exists to prevent.
+
+## M-T6.39 — The `/files/{key}` absent-object 404 is a fourth envelope, on zero backends — `open` · **S–M** · P2
+Found 2026-08-11 by the M-T6.31 drain, at the one absent-read site outside that mission's five.
+
+`GET /files/{key}` (the root file-download route over the bound `objectStore` — M-T1.2) answers a missing object in **two shapes, neither of them RFC 7807**:
+
+| backends | body | content-type |
+|---|---|---|
+| node, python, elixir | `{"error":"not found"}` | `application/json` |
+| dotnet, java | *empty* | none |
+
+Emission sites: `src/generator/typescript/emit/routes.ts` (the `app.get("/files/:key", …)` block), `src/generator/python/files-routes-builder.ts`, `src/generator/elixir/vanilla/files-controller-emit.ts`, and `emit/program.ts` on both dotnet (`Results.NotFound()`) and java (`ResponseEntity.notFound().build()`).
+
+**This is not the same fix as M-T6.31.** There, the correct envelope already existed in each app and the read sites merely had to reach it; here **no backend emits one on this route at all**, so it is a genuine wire change on the three that currently send `{"error":"not found"}` — a client parsing that key is broken by the fix. That is why it was deliberately left out of #2520 rather than folded in: it wants its own claim and its own reviewed golden diff.
+
+Two sub-decisions to settle in the PR, neither hard: (a) the `detail` sentence — `"file <key> not found"` is the RS-27-shaped answer, but the resource is an object key, not an aggregate id; (b) whether the route joins each backend's shared 404 producer (the M-T6.31 answer, and the reason those arms can't drift again) or hand-builds the body — on dotnet/java it is a **minimal-API / plain-controller** route, so `DomainExceptionFilter` / `ApiExceptionAdvice` do **not** apply to it as-is, which is the actual work.
+
+**Verification.** The absent-read wire-golden probe #2520 added (`test/behavioral/wire-differential.mjs`) is the natural home — extend it to `/files/<absent-key>` for any case that uploads a file, and the envelope is gated on all seven legs. A static five-backend site pin (the `absent-read-envelope-parity.test.ts` shape) is the fast companion. Note the corpus gap first: `resources.ddd` exercises the object store but no committed golden reaches the download route.
+
+Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) while draining M-T6.31; recorded in that mission's body as the remaining site. Relates to RS-22 (the envelope's membership) and M-T6.31 (the same class, the aggregate/projection/instance sites).
