@@ -530,6 +530,24 @@ const INT = (prop: string): MikroColumn => ({
  *  workflow builder's mikro outbox machinery references the same symbol. */
 export const MIKRO_OUTBOX_ROW_CLASS = "LoomOutboxRow";
 
+/** Row-entity class name for the timer-scheduler watermark table. */
+export const MIKRO_TIMER_RUNS_ROW_CLASS = "LoomTimerRunsRow";
+
+/** Timer-scheduler watermark Row (`loom_timer_runs`).  The scheduler creates this
+ *  table itself with `CREATE TABLE IF NOT EXISTS` (it is self-owned
+ *  infrastructure, deliberately outside the domain MigrationsIR), and on drizzle
+ *  that is the end of the story.  On MikroORM it must ALSO be an entity: a table
+ *  absent from the entity metadata is diffed as removed by `updateSchema()`, and
+ *  `safe: true` alone would spare it without making it part of the model.  With
+ *  the entity, `updateSchema()` creates it on boot 1 and the raw
+ *  `CREATE TABLE IF NOT EXISTS` becomes the no-op it reads as. */
+function timerRunsRowEntity(): { block: string; schemaName: string } {
+  return renderRecordRowEntity(MIKRO_TIMER_RUNS_ROW_CLASS, "loom_timer_runs", [
+    TEXT("timer", { primary: true }),
+    TIMESTAMPTZ("lastFiredAt"),
+  ]);
+}
+
 /** Transactional outbox Row (`__loom_outbox`) — the MikroORM edition of the
  *  drizzle `loomOutbox` pgTable (dispatch-delivery-semantics.md).  Column
  *  divergence from drizzle is deliberate on two properties, because MikroORM
@@ -646,7 +664,7 @@ export function renderMikroEntities(
   ctx: EnrichedBoundedContextIR,
   shapeOf: (agg: EnrichedAggregateIR) => "relational" | "embedded" | "document" = (a) =>
     (a.savingShape as "relational" | "embedded" | "document" | undefined) ?? "relational",
-  opts: { audit?: boolean; provenance?: boolean; outbox?: boolean } = {},
+  opts: { audit?: boolean; provenance?: boolean; outbox?: boolean; timerRuns?: boolean } = {},
 ): string {
   const blocks: string[] = [];
   const schemaNames: string[] = [];
@@ -755,7 +773,17 @@ export function renderMikroEntities(
     blocks.push(
       lines(
         `export class ${cls} {`,
-        "  seq!: number;",
+        // OPTIONAL, unlike every other column: `seq` is a DB-generated
+        // `bigserial` (see the property below), so every append omits it — and
+        // MikroORM derives `RequiredEntityData` from the CLASS, not from the
+        // `autoincrement` flag.  Declared required, `em.insert(<Ctx>EventRow, {…})`
+        // fails `tsc` with "Property 'seq' is missing" on every event-sourced
+        // append.  Found by M-T6.23 slice 3's compile proof: no gate hid this
+        // one, the tsc TIERS did — the corpus tsc gates run drizzle only, and the
+        // mikro behavioural leg builds with esbuild (no typecheck), so an
+        // event-sourced aggregate or workflow on `persistence: mikroorm` has
+        // never actually been type-checked.
+        "  seq?: number;",
         "  streamType!: string;",
         "  streamId!: string;",
         "  version!: number;",
@@ -845,6 +873,13 @@ export function renderMikroEntities(
     schemaNames.push(schemaName);
     blocks.push(block);
   }
+  // Timer-scheduler watermark Row — only for a deployable that OWNS a timer
+  // (the same condition that emits `scheduler.ts`).
+  if (opts.timerRuns) {
+    const { block, schemaName } = timerRunsRowEntity();
+    schemaNames.push(schemaName);
+    blocks.push(block);
+  }
   return (
     lines(
       "// Auto-generated.  Do not edit by hand.",
@@ -897,7 +932,21 @@ export function mikroConnectionSetup(): readonly string[] {
     `// metadata on boot.  System-mode compose isolates each deployable to its`,
     `// own database, so this runs cleanly.  Replace with 'mikro-orm migration:up'`,
     `// for production.`,
-    `await orm.schema.updateSchema();`,
+    `//`,
+    `// \`safe: true\` is NOT cosmetic.  \`updateSchema()\` defaults to`,
+    `// \`dropTables: true\` over an UNPRUNED introspection, so every table the`,
+    `// entity metadata does not describe is diffed as removed and dropped — on`,
+    `// the SECOND boot onward.  That reaches real infrastructure this backend`,
+    `// creates outside the model: the timer scheduler's \`loom_timer_runs\``,
+    `// watermark, pg-boss's entire \`pgboss\` schema (jobs included), and the`,
+    `// first-boot seed marker \`__loom_seed\`.  Losing the watermark silently`,
+    `// disables the cron coalesce-once catch-up (a fresh baseline is written`,
+    `// instead of replaying the missed boundary), and losing \`pgboss\` destroys`,
+    `// queued jobs — with two replicas, the later boot drops the schema out from`,
+    `// under the running one.  Safe mode still creates missing tables and adds`,
+    `// columns; it only refuses to destroy.  (Drizzle has no equivalent:`,
+    `// \`drizzle-kit migrate\` never drops unknown tables.)`,
+    `await orm.schema.updateSchema({ safe: true });`,
     `const db = orm.em;`,
   ];
 }

@@ -29,9 +29,11 @@ import type {
   UiNotificationIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../ir/util/op-gates.js";
 import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
+import { listReadGate } from "../../ir/util/read-gates.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   E2E_FIXTURES_TS,
@@ -142,6 +144,9 @@ export function emitLiveViewPages(args: {
   // "PhoenixApp.Sales" — used by the LiveView mount stub to build the
   // `change_<agg>(%PhoenixApp.Sales.Customer{})` create-form changeset.
   const contextModuleByAggName = new Map<string, string>();
+  /** Aggregate → the rendered list-read authorization gate, for aggregates
+   *  whose repository declares `find all(...) requires <expr>`. */
+  const listReadGateByAggName = new Map<string, ListReadGate>();
   // Workspace-wide enum registry — threaded into the walker so
   // `CreateForm(of: Agg)` with enum-typed fields renders `<.input
   // type="select" options={...}>` instead of the legacy text input.
@@ -187,6 +192,25 @@ export function emitLiveViewPages(args: {
       contextByAggName.set(agg.name, ctx);
       contextModuleByAggName.set(agg.name, ctxModule);
       for (const part of agg.parts) partContextModule.set(part.name, ctxModule);
+      // The LIST read's `requires` gate — the same one `index` evaluates in
+      // `api-emit.ts`.  A LiveView reads the collection through the context
+      // facade (`list_<agg>s/…`), which is a bare `defdelegate` to the repo and
+      // carries no gate of its own, so a page mounted on the same deployable
+      // rendered every row the HTTP route 403s.  One read, authorized on one
+      // seam only — exactly what the projection gate above exists to prevent.
+      const listGate = listReadGate(
+        (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name),
+      );
+      if (listGate) {
+        listReadGateByAggName.set(agg.name, {
+          expr: renderDomainExpr(listGate, {
+            thisName: "record",
+            contextModule: ctxModule,
+            foundation: "vanilla",
+          }),
+          usesUser: exprUsesCurrentUser(listGate),
+        });
+      }
     }
     for (const en of ctx.enums) enumsByName.set(en.name, en);
     for (const vo of ctx.valueObjects) valueObjectsByName.set(vo.name, vo);
@@ -266,6 +290,7 @@ export function emitLiveViewPages(args: {
       valueObjectsByName,
       contextModuleByAggName,
       projectionReads,
+      listReadGateByAggName,
       partContextModule,
       componentInfo,
       authEnabled,
@@ -367,6 +392,10 @@ interface RenderArgs {
    *  `run/1` module (and any `requires` gate) a `QueryView { of:
    *  <api>.<Projection> }` load resolves to. */
   projectionReads: ReadonlyMap<string, ProjectionRead>;
+  /** Aggregate → its list-read `requires` gate, for the aggregates whose
+   *  repository declares one.  Every seam that loads the collection consults
+   *  this, so the LiveView cannot serve rows the HTTP `index` 403s. */
+  listReadGateByAggName: ReadonlyMap<string, ListReadGate>;
   /** Module-qualified context keyed by entity-part name — qualifies a
    *  page-body `new Part { … }` struct literal (`%<Ctx>.<Part>{…}`). */
   partContextModule: ReadonlyMap<string, string>;
@@ -596,6 +625,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     walked.formBindings,
     contextModuleByAggName,
     a.projectionReads,
+    a.listReadGateByAggName,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   // Hoist `Action(...)` handlers from the page body + every component
@@ -623,7 +653,12 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
       aggregatesByName,
     ) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName) +
-    renderTableControlClauses(walked.tableControls, walked.queryBindings, contextModuleByAggName);
+    renderTableControlClauses(
+      walked.tableControls,
+      walked.queryBindings,
+      contextModuleByAggName,
+      a.listReadGateByAggName,
+    );
   // Realtime `handle_info` clauses — one per subscribed event type, each
   // rendering the handler's `toast(…)` as `put_flash(:info, …)` and re-loading
   // any `refetch(<Agg>)` target the page displays.  Empty when the ui declares
@@ -633,6 +668,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     walked.queryBindings,
     appModule,
     contextModuleByAggName,
+    a.listReadGateByAggName,
   );
 
   // `FileUpload` progress consumers — one `handle_<field>_progress/3` per
@@ -697,6 +733,7 @@ function renderTableControlClauses(
   tableControls: readonly TableControlBinding[],
   queryBindings: readonly QueryBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
+  listReadGateByAggName: ReadonlyMap<string, ListReadGate>,
 ): string {
   // Aggregate list reads only — a query-time projection has no page/sort
   // surface to re-run (its `run/1` takes no arguments).
@@ -717,7 +754,9 @@ function renderTableControlClauses(
   const reload = listBindings
     .map((qb) => {
       const ctxModule = contextModuleByAggName.get(qb.aggregate);
-      return ctxModule ? renderQueryLoadBlock(qb, ctxModule, []) : null;
+      return ctxModule
+        ? renderQueryLoadBlock(qb, ctxModule, [], listReadGateByAggName.get(qb.aggregate))
+        : null;
     })
     .filter((b): b is string => b !== null)
     .join("\n\n");
@@ -784,6 +823,7 @@ function renderRealtimeHandleInfo(
   queryBindings: import("./heex-walker.js").QueryBinding[],
   appModule: string,
   contextModuleByAggName: ReadonlyMap<string, string>,
+  listReadGateByAggName: ReadonlyMap<string, ListReadGate>,
 ): string {
   const notifications = ui.notifications ?? [];
   if (notifications.length === 0) return "";
@@ -834,7 +874,7 @@ function renderRealtimeHandleInfo(
       const qb = qbByAgg.get(agg);
       const ctxModule = contextModuleByAggName.get(agg);
       if (!qb || !ctxModule) continue; // page doesn't load it → no-op reload
-      body.push(renderQueryLoadBlock(qb, ctxModule, []));
+      body.push(renderQueryLoadBlock(qb, ctxModule, [], listReadGateByAggName.get(agg)));
     }
     // Toasts → chained put_flash(:info, …).
     const flashes = toastExprs.map((e) => `put_flash(:info, ${renderMessageExprElixir(e, bind)})`);
@@ -971,10 +1011,19 @@ ${assigns.join("\n")}
  *  forms in the `{:ok, record}` arm (single loads only) — `handle_params`
  *  passes the page's operation form bindings, the realtime reload passes `[]`
  *  (data reload only, forms untouched). */
+/** A list read's rendered authorization gate — the Elixir predicate plus
+ *  whether it reads the principal (which decides if `current_user` has to be
+ *  bound, since an unused binding fails `--warnings-as-errors`). */
+interface ListReadGate {
+  expr: string;
+  usesUser: boolean;
+}
+
 function renderQueryLoadBlock(
   qb: import("./heex-walker.js").QueryBinding,
   ctxModule: string,
   opFbs: import("./heex-walker.js").FormBinding[],
+  listGate?: ListReadGate,
 ): string {
   const aggSnake = snake(qb.aggregate);
   if (qb.kind === "single") {
@@ -1009,10 +1058,25 @@ ${okArm}
   // `{:error, _}` arm maps to the `:error` sentinel the list `cond` renders as
   // the error slot.
   const listArgs = (qb.listArgs ?? []).join(", ");
-  return `    socket =
-      case ${ctxModule}.list_${aggSnake}s(${listArgs}) do
+  const read = `      case ${ctxModule}.list_${aggSnake}s(${listArgs}) do
         {:ok, items} -> assign(socket, :${qb.assign}, items)
         _ -> assign(socket, :${qb.assign}, :error)
+      end`;
+  if (!listGate) return `    socket =\n${read}`;
+  // Gated list read — denial takes the same `:error` sentinel the projection
+  // loader uses, so the page renders its error slot instead of the rows.  The
+  // gate is evaluated BEFORE the query, matching the `index` action's contract:
+  // a denied caller never reaches the repository.  Every caller of this block
+  // is gated (first load, sort/page control, realtime refetch) — a reload path
+  // that skipped it would be the bypass all over again.
+  const cuBind = listGate.usesUser
+    ? "    current_user = Map.get(socket.assigns, :current_user)\n"
+    : "";
+  return `${cuBind}    socket =
+      if ${listGate.expr} do
+${read.replace(/^ {6}/gm, "        ")}
+      else
+        assign(socket, :${qb.assign}, :error)
       end`;
 }
 
@@ -1096,6 +1160,7 @@ function renderHandleParams(
   formBindings: import("./heex-walker.js").FormBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
   projectionReads: ReadonlyMap<string, ProjectionRead>,
+  listReadGateByAggName: ReadonlyMap<string, ListReadGate>,
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
@@ -1127,7 +1192,9 @@ function renderHandleParams(
     // Operation forms for this aggregate bind to the loaded record —
     // re-seeded (single loads only) in the `{:ok, record}` arm.
     const opFbs = formBindings.filter((fb) => fb.kind === "operation" && fb.name === qb.aggregate);
-    loadBlocks.push(renderQueryLoadBlock(qb, ctxModule, opFbs));
+    loadBlocks.push(
+      renderQueryLoadBlock(qb, ctxModule, opFbs, listReadGateByAggName.get(qb.aggregate)),
+    );
   }
 
   const hasParams = paramAssigns.length > 0;

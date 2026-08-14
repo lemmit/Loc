@@ -46,6 +46,12 @@ export function emitDotnetSeeds(
    *  persistence-agnostic and identical; only the marker table / raw-insert /
    *  idempotency plumbing swaps to raw Npgsql. */
   dapper = false,
+  /** Postgres schema an aggregate's table lives in (its dataSource's).  The
+   *  DOMAIN path is qualified by EF's own model mapping; the RAW path builds
+   *  SQL by hand, so it has to be told — unqualified, `INSERT INTO "widgets"`
+   *  cannot see a table created as `"catalog"."widgets"` and every `seed raw`
+   *  row failed at first boot (python/java qualified theirs from the start). */
+  schemaFor: (aggName: string) => string | undefined = () => undefined,
 ): void {
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return;
@@ -60,7 +66,7 @@ export function emitDotnetSeeds(
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => aggByName.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName, dapper));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName, dapper, schemaFor));
     callLines.push(
       `        await Seed${upperFirst(ds.name)}(db, sp, requested, cancellationToken);`,
     );
@@ -80,6 +86,7 @@ function renderDatasetFn(
   entries: Entry[],
   aggByName: Map<string, EnrichedAggregateIR>,
   dapper: boolean,
+  schemaFor: (aggName: string) => string | undefined,
 ): string {
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
   const repoDecls = domainAggs.map(
@@ -88,10 +95,12 @@ function renderDatasetFn(
   const hasRaw = entries.some((e) => e.raw);
   const saveLines = entries.map((e) => {
     if (e.raw) {
-      // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
+      // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns,
+      // qualified with the aggregate's dataSource schema (see `schemaFor`).
+      const insert = renderSeedRowInsert(e.row.aggregate, e.row.fields, schemaFor(e.row.aggregate));
       return dapper
-        ? `        await conn.ExecuteAsync(new CommandDefinition(${csVerbatim(renderSeedRowInsert(e.row.aggregate, e.row.fields))}, cancellationToken: cancellationToken));`
-        : `        await db.Database.ExecuteSqlRawAsync(${csVerbatim(renderSeedRowInsert(e.row.aggregate, e.row.fields))}, cancellationToken);`;
+        ? `        await conn.ExecuteAsync(new CommandDefinition(${csVerbatim(insert)}, cancellationToken: cancellationToken));`
+        : `        await db.Database.ExecuteSqlRawAsync(${csVerbatim(insert)}, cancellationToken);`;
     }
     const agg = aggByName.get(e.row.aggregate)!;
     return `        await ${repoVar(e.row.aggregate)}.SaveAsync(${e.row.aggregate}.Create(${renderArgs(e.row, agg)}), cancellationToken);`;

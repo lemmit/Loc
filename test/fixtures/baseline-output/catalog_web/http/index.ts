@@ -8,7 +8,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { frameworkProblemBody } from "./problem-details";
 import { sql } from "drizzle-orm";
 import { requestIdMiddleware } from "../obs/request-id";
-import { registry } from "../obs/metrics";
+import { recordDomainFault, registry } from "../obs/metrics";
+import { AggregateNotFoundError, ConcurrencyError, DisallowedError, DomainError, ExternHandlerError, ForbiddenError } from "../domain/errors";
 import { baseLogger } from "../obs/log";
 import { productRoutes } from "./product.routes";
 import { ProductRepository } from "../db/repositories/product-repository";
@@ -135,6 +136,37 @@ export function createApp(
     return frameworkProblem(c, 404, `no route for ${c.req.method} ${c.req.path}`);
   });
   app.onError((err, c) => {
+    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
+    const problem = (status: 403 | 404 | 409 | 422 | 500, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });
+    if (err instanceof ForbiddenError) {
+      baseLogger.warn({ event: "forbidden", message: err.message, status: 403 });
+      recordDomainFault("forbidden");
+      return problem(403, "Forbidden", err.message);
+    }
+    if (err instanceof DisallowedError) {
+      baseLogger.warn({ event: "disallowed", message: err.message, status: 409 });
+      recordDomainFault("disallowed");
+      return problem(409, "Disallowed", err.message);
+    }
+    if (err instanceof DomainError) {
+      baseLogger.warn({ event: "domain_error", message: err.message, status: 422 });
+      recordDomainFault("domain_error");
+      return problem(422, "Unprocessable Entity", err.message);
+    }
+    if (err instanceof AggregateNotFoundError) {
+      baseLogger.warn({ event: "not_found", status: 404 });
+      recordDomainFault("not_found");
+      return problem(404, "Not Found", err.message);
+    }
+    if (err instanceof ConcurrencyError) {
+      baseLogger.warn({ event: "conflict", message: err.message, status: 409 });
+      recordDomainFault("conflict");
+      return problem(409, "Conflict", err.message);
+    }
+    if (err instanceof ExternHandlerError) {
+      baseLogger.error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
+      return problem(500, "Internal Server Error", "internal");
+    }
     if (err instanceof HTTPException) {
       return frameworkProblem(c, err.status as ContentfulStatusCode, err.message);
     }
