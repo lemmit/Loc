@@ -17,7 +17,15 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { fsString } from "./fs-expr.js";
 
-type Ctx = Record<string, string | number | boolean | undefined>;
+type Ctx = Record<string, string | number | boolean | readonly string[] | undefined>;
+
+/** The card's body children, already walked, as separate F# elements.  Falls
+ *  back to the joined `contentJsx` for any caller that only sets that. */
+function cardContentChildren(c: Ctx): string[] {
+  const kids = c.contentChildren;
+  const list = Array.isArray(kids) ? kids : [String(c.contentJsx ?? "")];
+  return list.map((k) => asElement(String(k)));
+}
 
 /** A walked branch that came back as the missing-arg sentinel `"null"` (JS)
  *  must become `Html.none` — F# has no bare `null` element. */
@@ -449,14 +457,20 @@ function primitiveText(c: Ctx): string {
 }
 
 function primitiveCard(c: Ctx): string {
-  // Card("title", content) — a daisyUI card: an optional `card-title` heading +
-  // a single content element, both inside the `card-body`.
+  // Card("title", ...content) — a daisyUI card: an optional `card-title`
+  // heading + every body child, all inside the `card-body`.
+  //
+  // The body children arrive UNJOINED (`contentChildren`): the walker's
+  // `contentJsx` joins them with a bare newline, which inside this
+  // `prop.children [ … ]` list reads as function application, not a second
+  // element (§24 — "This value is not a function and cannot be applied").
+  // `;` is the list separator F# needs here.
   const kids: string[] = [];
   if (c.hasTitle)
     kids.push(
       `Html.h3 [ prop.className "card-title"; prop.children [ ${asChild(String(c.titleText ?? ""))} ] ]`,
     );
-  if (c.hasContent) kids.push(String(c.contentJsx ?? ""));
+  if (c.hasContent) kids.push(...cardContentChildren(c));
   const body =
     kids.length > 0
       ? `; prop.children [ Html.div [ prop.className "card-body"; prop.children [ ${kids.join("; ")} ] ] ]`

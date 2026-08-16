@@ -300,14 +300,19 @@ export function emitToolbar(
 }
 
 export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  // Card("title", content) — first positional title (anything not
-  // a call counts as title); second positional is the body.
+  // Card("title", ...children) — first positional title (anything not
+  // a call counts as title); EVERY remaining positional is a body child.
   // `Card(child)` (single non-text-like positional)
   // renders a card with no heading.
+  //
+  // The body used to be `positionals[1]` alone, so `Card { "T", Text { … },
+  // Slot { } }` rendered the `Text` and dropped the `Slot` — and every
+  // sibling after the first — without a word.  Card is a container like
+  // `Stack`/`Section`; it joins its children the same way they do.
   const positionals = positionalArgs(call);
   const titleArg = positionals[0];
   const titleIsTextLike = titleArg !== undefined && titleArg.kind !== "call";
-  const contentExpr: ExprIR | undefined = titleIsTextLike ? positionals[1] : positionals[0];
+  const contentExprs: ExprIR[] = titleIsTextLike ? positionals.slice(1) : positionals;
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   // The card title is a user-visible text slot (positional 0, only when the
@@ -318,9 +323,13 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // `Card` is a `nesting: true` container in the a11y contract — its body
   // `Heading`s derive one rank deeper (accessibility.md Phase 2).  The card
   // title itself is not a `Heading` primitive, so it is unaffected.
-  const contentJsx = contentExpr
-    ? withHeadingNesting(ctx, () => walk(contentExpr, ctx, depth + 1))
-    : undefined;
+  const contentParts = withHeadingNesting(ctx, () =>
+    contentExprs.map((e) => walk(e, ctx, depth + 1)),
+  );
+  const contentJsx =
+    contentParts.length > 0
+      ? contentParts.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`)
+      : undefined;
   // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`
   // picks the card's elevation idiom per pack.  `shadow: "sm" | "md"
   // | "lg" | "none"` overrides the variant's default shadow level.
@@ -331,6 +340,12 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     titleText,
     hasContent: contentJsx !== undefined,
     contentJsx,
+    // The same children UNJOINED, for the two packs that emit a programming
+    // language rather than markup: Feliz splices them into one offside-
+    // sensitive F# `prop.children [ … ]` list (`;`-separated, one line) and
+    // Flutter into a Dart `<Widget>[ … ]` literal.  A `\n`-joined
+    // `contentJsx` is a syntax hazard in both, so they join it themselves.
+    contentChildren: contentParts,
     indent,
     closeIndent,
     variant,
