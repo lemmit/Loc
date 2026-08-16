@@ -82,7 +82,9 @@ describe("python VO invariant → 422 at the wire", () => {
       }
     `);
     const wm = generateSystems(model).files.get("d/app/http/wire_models.py")!;
-    expect(wm).toContain("from pydantic import BaseModel\n");
+    // `StringConstraints`/`WithJsonSchema` ride the always-emitted `UuidStr`
+    // alias (schemathesis F2); the VO-driven names stay demand-gated.
+    expect(wm).toContain("from pydantic import BaseModel, StringConstraints, WithJsonSchema\n");
     expect(wm).not.toContain("Field");
     expect(wm).not.toContain("model_validator");
     expect(wm).toContain("class Plain(BaseModel):\n    a: int\n    b: str");

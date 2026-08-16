@@ -1355,6 +1355,40 @@ export interface WalkerTarget {
   /** Object literal — JS `{ n: v }` vs F# anonymous record `{| n = v |}`. */
   exprObject(fields: ReadonlyArray<{ name: string; value: string }>): string;
 
+  /** Duration literal (`days(7)` / `hours(2)` / `minutes(30)`) — the frontend
+   *  twin of the backend `ExprTarget.duration` leaf, and for the same reason:
+   *  a duration has no universal REPRESENTATION.  The four JS frontends spell
+   *  it as the TypeScript backend does — a plain millisecond `number` — so the
+   *  walker's own fallback (`((amount) * DURATION_UNIT_MS[unit])`) is already
+   *  their answer and they leave this seam undefined.  A target whose
+   *  `datetime` is NOT a JS `Date` needs its own type (`System.TimeSpan` on
+   *  Feliz, `Duration` on Flutter): a bare millisecond number there is a type
+   *  error the moment it meets a datetime.
+   *
+   *  Every implementation MUST derive its value from `DURATION_UNIT_MS`
+   *  (`src/util/temporal.ts`) so `7 days` means the same span on every target
+   *  and on both sides of the wire. */
+  exprDuration?(unit: "days" | "hours" | "minutes", amount: string): string;
+
+  /** Datetime-involving `+`/`-` (`until + days(7)`) — the frontend twin of the
+   *  TypeScript backend's `renderTemporalBinary`.  `exprBinary` sees only two
+   *  already-rendered strings and an operator, which is enough where the host
+   *  language's `+` accepts the pair (JS: `Date` and a millisecond number are
+   *  both numeric-ish) and wrong where it does not (F# `System.DateTime` +
+   *  `System.TimeSpan` is `.Add`; Dart's `DateTime` has no `+` at all).
+   *
+   *  Consulted by `emitExpr` BEFORE `exprBinary`, only for `+`/`-`, with the
+   *  lowered node's `leftType`/`rightType`/`resultType` stamps for the
+   *  dispatch.  Return `null` for a pair this target has no special form for
+   *  and the walker falls through to `exprBinary` — so a target may implement
+   *  it partially, and a target that omits it keeps today's behaviour
+   *  byte-for-byte. */
+  exprTemporalBinary?(
+    left: string,
+    right: string,
+    e: Extract<ExprIR, { kind: "binary" }>,
+  ): string | null;
+
   /** Scalar-intrinsic renderer (`src/util/intrinsics.ts` — `s.toUpper()`,
    *  `n.abs()`, `d.round(2)`, …).  Loom's intrinsic SPELLING is its own; every
    *  backend translates it through a per-language snippet table, and a target

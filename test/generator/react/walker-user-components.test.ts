@@ -52,7 +52,7 @@ describe("user-defined components", () => {
         subdomain M { context C { } }
         ui WebApp {
           component WelcomeBox(name: string) {
-            body: Card { "Hi, " + name, Text { "welcome" } }
+            body: Card { \`Hi, {name}\`, Text { "welcome" } }
           }
           page Home {
             route: "/"
@@ -81,7 +81,7 @@ describe("user-defined components", () => {
         subdomain M { context C { } }
         ui WebApp {
           component CounterBadge(n: int) {
-            body: Badge { "Count: " + n }
+            body: Badge { \`Count: {n}\` }
           }
           page Home {
             route: "/"

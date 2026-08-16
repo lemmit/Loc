@@ -26,7 +26,7 @@ system Shop {
       repository Orders for Order { }
       workflow placeOrder {
         create(sha: string) {
-          let o = Order { commitSha: sha, buildState: "new" }
+          let o = Order.create({ commitSha: sha, buildState: "new" })
         }
       }
     }
@@ -78,7 +78,7 @@ system Shop {
       repository Orders for Order { }
       workflow placeOrder {
         create(sha: string) {
-          let o = Order { commitSha: sha, buildState: "new" }
+          let o = Order.create({ commitSha: sha, buildState: "new" })
         }
       }
     }

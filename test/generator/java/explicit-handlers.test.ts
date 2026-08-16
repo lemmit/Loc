@@ -370,7 +370,9 @@ describe("java — paged-run queryHandler over run(criterion)", () => {
   it("the controller action exposes page/pageSize/sort/dir and returns the projected envelope", async () => {
     const ctrl = fileEndingWith(await generateSystemFiles(PAGED_SRC), "ARoutesController.java");
     expect(ctrl).toContain('@GetMapping("/orders/projections/in_region")');
-    expect(ctrl).toContain('@RequestParam(defaultValue = "1") int page');
+    expect(ctrl).toContain(
+      '@RequestParam(defaultValue = "1") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(1000000) int page',
+    );
     expect(ctrl).toContain(
       "var result = listInRegionHandler.handle(rgn, page, pageSize, sort, dir);",
     );

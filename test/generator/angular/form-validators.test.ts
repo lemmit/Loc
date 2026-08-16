@@ -28,6 +28,7 @@ const SOURCE = `
         repository Products for Product { }
       }
     }
+    api CatalogApi from Sales
     ui WebApp {
       api Sales: CatalogApi
       page ProductNew {
@@ -36,7 +37,7 @@ const SOURCE = `
       }
     }
     storage primary { type: postgres }
-    resource productsState { for: Products, kind: state, use: primary }
+    resource productsState { for: Catalog, kind: state, use: primary }
     deployable api {
       platform: node
       contexts: [Catalog]

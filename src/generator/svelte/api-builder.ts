@@ -2,6 +2,8 @@ import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
 import { unionReturn } from "../../ir/stdlib/unions.js";
@@ -120,8 +122,11 @@ export function buildSvelteApiModule(
       // sort/dir are plain strings (the repository whitelists the column).
       if (pagedReturn(find.returnType)) {
         lines.push(
-          `  page: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE}),`,
-          `  pageSize: z.coerce.number().int().min(1).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
+          // The declared bounds mirror the server's paged query schema so the
+          // client cannot compose a request its own contract rejects
+          // (schemathesis F4).
+          `  page: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE}).default(${PAGED_DEFAULT_PAGE}),`,
+          `  pageSize: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE_SIZE}).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
           `  sort: z.string().default("id"),`,
           `  dir: z.string().default("asc"),`,
         );

@@ -48,8 +48,8 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/list.tsx")!;
@@ -84,8 +84,8 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/new.tsx")!;
@@ -115,8 +115,8 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/detail.tsx")!;
@@ -148,8 +148,8 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/detail.tsx")!;
@@ -181,8 +181,8 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
@@ -218,8 +218,8 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
@@ -249,8 +249,8 @@ describe("api binding + walker hook injection", () => {
             body: Text { Sales.Customer.byEmail(email).isLoading }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
     const content = files.get("web/src/pages/lookup.tsx")!;

@@ -82,7 +82,10 @@ describe("python", () => {
   it("coerces to the declared row type", async () => {
     const routes = await fileEndingWith("python", "http/query_projections_routes.py");
     expect(routes).toContain('"orders": int(row[0] or 0),');
-    expect(routes).toContain('"revenue": str(row[1] or "0"),');
+    // money goes through `money_str`, not a bare `str` — the aggregate comes
+    // back at the scale its rows were stored at, and the wire scale is fixed
+    // (RS-12 / #2549).  See `projection-aggregate-money-scale.test.ts`.
+    expect(routes).toContain('"revenue": money_str(Decimal(row[1] or 0)),');
     expect(routes).toContain('"avgLines": float(row[2] or 0),');
   });
 });
@@ -118,7 +121,9 @@ describe("dotnet", () => {
     // the real compiler, not by a unit test.
     const handler = await fileEndingWith("dotnet", "Projections/SalesTotalsQpHandler.cs");
     expect(handler).toContain("(decimal)(agg?.AvgLines ?? 0)");
-    expect(handler).toContain("(agg?.Revenue ?? 0m).ToString(CultureInfo.InvariantCulture)");
+    // money formats at the FIXED wire scale rather than echoing the aggregate's
+    // own (RS-12 / #2549) — `"F4"`, not a bare `ToString`.
+    expect(handler).toContain('(agg?.Revenue ?? 0m).ToString("F4", CultureInfo.InvariantCulture)');
   });
 });
 
@@ -151,7 +156,12 @@ describe("java", () => {
     // different provider.
     const svc = await fileEndingWith("java", "OrdersQueryProjections.java");
     expect(svc).toContain("((Number) r[0]).intValue()");
-    expect(svc).toContain('r[1] == null ? "0" : r[1].toString()');
+    // Still `toString()` on the provider's own type rather than a cast — but
+    // money is then pinned to the fixed wire scale, and its empty-table zero is
+    // `"0.0000"` (RS-12 / #2549), where a plain decimal keeps `BigDecimal.ZERO`.
+    expect(svc).toContain(
+      'r[1] == null ? "0.0000" : new java.math.BigDecimal(r[1].toString()).setScale(4, java.math.RoundingMode.HALF_UP).toPlainString()',
+    );
     expect(svc).toContain("r[2] == null ? BigDecimal.ZERO : new BigDecimal(r[2].toString())");
   });
 
@@ -226,7 +236,10 @@ describe("elixir", () => {
     // wants and what a plain `decimal` must NOT be: the other four backends
     // ship it as a number.
     const mod = await fileEndingWith("elixir", "query_projections/sales_totals.ex");
-    expect(mod).toContain("revenue: to_string(row.revenue || 0)");
+    // money rides the wire as a string — now at the FIXED scale rather than
+    // whatever the aggregate returned (RS-12 / #2549) — while a plain decimal
+    // is still floated into a JSON number.
+    expect(mod).toContain("revenue: __money_wire(row.revenue || 0)");
     expect(mod).toContain("Decimal.to_float(");
   });
 });

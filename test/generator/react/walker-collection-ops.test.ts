@@ -66,7 +66,7 @@ async function sveltePage(body: string): Promise<string> {
 describe("walker — inline collection-op lambdas in expression position", () => {
   it("renders a `filter` callback inside a For each: (no unsupported stub)", async () => {
     const tsx = await reactPage(
-      `Stack { For { each: [1, 2, 3].filter(n => n > 1), n => Heading { "row " + n } } }`,
+      `Stack { For { each: [1, 2, 3].filter(n => n > 1), n => Heading { \`row {n}\` } } }`,
     );
     expect(tsx).toContain("[1, 2, 3].filter((n) => (n > 1))");
     expect(tsx).not.toContain("unsupported expr");

@@ -30,7 +30,9 @@ const phoenixSystem = (route: string, uiBody: string): string => `
     subdomain M {
       context C {
         aggregate Doc with crudish { name: string  derived display: string = name }
-        repository Docs for Doc { }
+        repository Docs for Doc {
+          find named(name: string): Doc[] where this.name == name
+        }
       }
     }
     api DemoApi from M

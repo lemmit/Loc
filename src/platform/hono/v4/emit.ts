@@ -81,13 +81,11 @@ import {
   type DeployableIR,
   type EnrichedBoundedContextIR,
   type EventIR,
-  type FieldIR,
   isMaterializedProjection,
   isQueryTimeProjection,
   type RepositoryIR,
   type SystemIR,
   type TimerSourceIR,
-  type TypeIR,
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
@@ -1534,12 +1532,12 @@ function renderProjectIndexTs(
     ? ""
     : oidc
       ? `import { registerOidcVerifier } from "./auth/oidc";\n`
-      : `import { registerUserVerifier } from "./auth/verifier";\n`;
+      : `import { registerDevStubVerifier } from "./auth/dev-stub";\n`;
   const authStubCall = !userShape
     ? ""
     : oidc
       ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
-      : `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterUserVerifier((req) => {\n  const base = ${indentContinuation(renderStubUserLiteral(userShape), "  ")};\n  const injected = req.headers.get("x-loom-dev-claims");\n  if (!injected) return base;\n  try {\n    return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };\n  } catch {\n    return base;\n  }\n});\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
+      : `\n// Dev-stub verifier (auth/dev-stub.ts) — accepts every request as a\n// built-in identity filling every field the \`user { … }\` block declares.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterDevStubVerifier();\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
   // Tenant-registry orgPath resolver (multi-tenancy P2.2) — wired only on the
   // drizzle path (mikroorm hierarchy falls back to the claim via the
   // unregistered-resolver path).  The auth middleware calls it per request;
@@ -1721,65 +1719,6 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
-}
-
-/** Re-indent a multi-line snippet for embedding at a deeper nesting:
- *  every line after the first gets `pad` prepended (blank lines stay
- *  blank).  Keeps an interpolated object literal Biome-clean inside a
- *  nested function body. */
-function indentContinuation(s: string, pad: string): string {
-  return s
-    .split("\n")
-    .map((line, i) => (i === 0 || line.length === 0 ? line : pad + line))
-    .join("\n");
-}
-
-/** Build a TS object literal matching the system's `user {}` shape, with
- *  sensible defaults per primitive type — used as the body of the dev-stub
- *  user verifier so a generated app boots without the caller having to wire
- *  a JWT decoder. */
-function renderStubUserLiteral(userShape: UserIR): string {
-  const entries = userShape.fields.map((f) => `  ${snakeToCamel(f.name)}: ${stubValueFor(f)}`);
-  return `{\n${entries.join(",\n")},\n}`;
-}
-
-function stubValueFor(f: FieldIR): string {
-  if (f.optional) return "null";
-  return stubValueForType(f.type);
-}
-
-function stubValueForType(t: TypeIR): string {
-  switch (t.kind) {
-    case "primitive":
-      switch (t.name) {
-        case "string":
-          return `"admin"`;
-        case "int":
-        case "long":
-          return "0";
-        case "decimal":
-        case "money":
-          return `"0"`;
-        case "bool":
-          return "false";
-        case "datetime":
-          return `new Date(0)`;
-        case "guid":
-          return `"00000000-0000-0000-0000-000000000000"`;
-        default:
-          return `""`;
-      }
-    case "id":
-      return `"00000000-0000-0000-0000-000000000000"`;
-    case "array":
-      return "[]";
-    default:
-      return "null";
-  }
-}
-
-function snakeToCamel(name: string): string {
-  return name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
 // Multi-stage Dockerfile: build stage installs all deps and compiles

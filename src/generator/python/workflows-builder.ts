@@ -2,6 +2,7 @@ import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
   type ExprIR,
+  exprUsesCurrentUser,
   type OperationIR,
   type SystemIR,
   type WireField,
@@ -27,14 +28,15 @@ import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
-import { lines } from "../../util/code-builder.js";
+import { type LinesPart, lines } from "../../util/code-builder.js";
+import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import { LogEvents } from "../_obs/log-events.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
-import { responsePyType } from "./emit/http-models.js";
+import { responsePyType, wireModelImport } from "./emit/http-models.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
   type PyRenderContext,
@@ -139,7 +141,7 @@ export function buildPyWorkflowsFile(
 
   const routeBlocks = [
     ...wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr, sys, opFragments)),
-    ...obsWfs.map((wf) => instanceRoutes(wf)),
+    ...obsWfs.map((wf) => instanceRoutes(wf, ctx)),
   ];
   const routes = routeBlocks.join("\n\n\n");
   // Workflow `function` helpers — module-scoped `def`s, namespaced by workflow
@@ -254,9 +256,7 @@ export function buildPyWorkflowsFile(
     // them by name from app.domain.services.* (domain-services.md).
     ...domainServiceImportLinesForWorkflow(wfs.flatMap((wf) => wf.statements)),
     refersTo("ProblemDetails") ? "from app.http.problem import ProblemDetails" : null,
-    voModelImports.length > 0
-      ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
-      : null,
+    wireModelImport(voModelImports, refersTo),
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",
@@ -693,8 +693,27 @@ function instanceResponseModels(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): 
  *  `instanceWireShape` (camelCase wire key ← snake column), datetimes ISO-coded
  *  exactly as the aggregate `to_wire`.  `session.get` keys on the PK (the
  *  correlation field). */
-function instanceRoutes(wf: WorkflowIR): string {
+function instanceRoutes(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   const T = upperFirst(wf.name);
+  // The instance-READ gate (`workflow X requires <expr>`) — 403 before the
+  // store is touched, on BOTH routes.  Declared through the shared status
+  // table so a remapped `Forbidden` rung moves the handler and the published
+  // response set together.
+  const gate = wf.instanceReadGate;
+  const gateUsesUser = !!gate && exprUsesCurrentUser(gate);
+  const userParam = gateUsesUser ? "request: Request, " : "";
+  const gateLines: LinesPart = gate
+    ? [
+        gateUsesUser ? "    current_user: User = request.state.current_user" : null,
+        `    if ${renderPyNegatedGuard(gate)}:`,
+        `        raise ForbiddenError(${JSON.stringify(`Forbidden: workflow ${wf.name} instances`)})`,
+      ]
+    : null;
+  const resolve = (name: string): number => resolveErrorStatus(name, ctx.structuralErrorStatuses);
+  const listKwarg = errorResponsesKwarg("findList", !!gate, [], resolve);
+  const byIdKwarg = gate
+    ? errorResponsesKwarg("findOptional", true, [], resolve)
+    : errorResponsesKwarg("getById");
   const slug = snake(wf.name);
   const row = `${wf.name}Row`;
   const shape = wf.instanceWireShape ?? [];
@@ -719,21 +738,24 @@ function instanceRoutes(wf: WorkflowIR): string {
   const idAsKey = corrVt === "int" || corrVt === "long" ? "str(id)" : "id";
   const list = wf.eventSourced
     ? lines(
-        `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
-        `async def ${slug}_instances(session: SessionDep) -> list[dict[str, object]]:`,
+        `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}"${listKwarg})`,
+        `async def ${slug}_instances(${userParam}session: SessionDep) -> list[dict[str, object]]:`,
+        gateLines,
         `    rows = await ${fns.loadAll}(session)`,
         `    return [{${proj("row")}} for row in rows]`,
       )
     : lines(
-        `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
-        `async def ${slug}_instances(session: SessionDep) -> list[dict[str, object]]:`,
+        `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}"${listKwarg})`,
+        `async def ${slug}_instances(${userParam}session: SessionDep) -> list[dict[str, object]]:`,
+        gateLines,
         `    rows = (await session.execute(select(${row}))).scalars().all()`,
         `    return [{${proj("row")}} for row in rows]`,
       );
   const byId = wf.eventSourced
     ? lines(
-        `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-        `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
+        `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${byIdKwarg})`,
+        `async def ${slug}_instance(${idParam}, ${userParam}session: SessionDep) -> dict[str, object]:`,
+        gateLines,
         `    __stream = await ${fns.load}(session, ${idAsKey})`,
         "    if not __stream:",
         `        raise AggregateNotFoundError(f"${T} {id} not found")`,
@@ -741,8 +763,9 @@ function instanceRoutes(wf: WorkflowIR): string {
         `    return {${proj("row")}}`,
       )
     : lines(
-        `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-        `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
+        `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${byIdKwarg})`,
+        `async def ${slug}_instance(${idParam}, ${userParam}session: SessionDep) -> dict[str, object]:`,
+        gateLines,
         `    row = await session.get(${row}, id)`,
         "    if row is None:",
         `        raise AggregateNotFoundError(f"${T} {id} not found")`,

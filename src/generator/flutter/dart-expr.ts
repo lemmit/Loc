@@ -11,8 +11,15 @@
 // Flutter is structurally a Feliz clone (a non-JSX, function-call-tree target),
 // so the shape mirrors `FS_LEAVES` exactly; only the syntax is Dart, not F#.
 
-import type { LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
+import { DURATION_UNIT_MS } from "../../util/temporal.js";
+
+/** The constructor parameter a component widget's `Slot { }` reads, and the one
+ *  a call site fills with the children it passed.  `child` is Flutter's own name
+ *  for a single-widget slot (`Card(child: …)`), so the generated widget reads
+ *  the way a hand-written one would. */
+export const FLUTTER_CHILD_PARAM = "child";
 
 /** Dart single-quoted string literal.  Escapes the backslash, the quote, and
  *  `$` (Dart's string-interpolation sigil), plus the two structural whitespace
@@ -26,6 +33,15 @@ export function dartString(value: string): string {
     .replace(/\t/g, "\\t")}'`;
 }
 
+/** Dart spelling of the `now()` literal — the current instant on the UTC clock.
+ *  `DateTime.now()` alone is a LOCAL-time value, so `.toUtc()` normalizes it to
+ *  the same clock the wire carries: `dart-types.ts` decodes a `datetime` with
+ *  `DateTime.parse(...)`, and the datetime intrinsics (`dart-expr.ts`'s
+ *  `datetime.startOfDay`) likewise `.toUtc()` before reading fields rather than
+ *  trusting the parsed value's Kind.  Matches Feliz's `System.DateTime.UtcNow`
+ *  and the .NET backend's spelling of the same literal. */
+export const DART_NOW = "DateTime.now().toUtc()";
+
 /** Pure Dart leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `flutterTarget` can forward straight to these. */
@@ -34,7 +50,12 @@ export const DART_LEAVES = {
     if (lit === "string") return dartString(value);
     if (lit === "bool") return value; // true / false spelled identically
     if (lit === "null") return "null";
-    // int / long / decimal / money / now → numeric literal verbatim.
+    // `now()` is a LITERAL kind whose `value` is the word "now", not a number,
+    // so the numeric-verbatim fallthrough below emitted a bare `now` — an
+    // unbound Dart identifier, and the only literal kind on this target that is
+    // not already valid Dart text.
+    if (lit === "now") return DART_NOW;
+    // int / long / decimal / money → numeric literal verbatim.
     return value;
   },
   binary(left: string, right: string, op: string): string {
@@ -67,7 +88,50 @@ export const DART_LEAVES = {
     // model classes are Track A's concern; a bare object here is a `Map`).
     return `{${fields.map((f) => `${dartString(f.name)}: ${f.value}`).join(", ")}}`;
   },
+  /** `days(7)` — a Dart `Duration`, NOT the bare millisecond number the JS
+   *  frontends use: Dart's `DateTime` has no `+` operator at all, so a number
+   *  here does not even parse as datetime arithmetic.  The SPAN still comes
+   *  from `DURATION_UNIT_MS`, so `7 days` is the same length of time here as
+   *  on the wire and on every backend.  (Dart's `int` is 64-bit, so the
+   *  millisecond product needs no widening.) */
+  duration(unit: keyof typeof DURATION_UNIT_MS, amount: string): string {
+    return `Duration(milliseconds: ((${amount}) * ${DURATION_UNIT_MS[unit]}))`;
+  },
 };
+
+/** The datetime-involving `+`/`-` arms, or `null` to fall through to the plain
+ *  operator leaf.  Dart's `DateTime` defines NO arithmetic operators, so every
+ *  arm here is a method call — without them `until + days(7)` emits an
+ *  `operator +` that does not exist:
+ *
+ *    datetime + duration → datetime   ⇒ `(l).add(r)`
+ *    datetime − duration → datetime   ⇒ `(l).subtract(r)`
+ *    duration + datetime → datetime   ⇒ `(r).add(l)`        (commuted form)
+ *    datetime − datetime → duration   ⇒ `(l).difference(r)`
+ *
+ *  Dispatch is type-driven off the lowering's `leftType`/`rightType` stamps,
+ *  exactly as the TypeScript backend's `renderTemporalBinary` does. */
+export function dartTemporalBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: TypeIR | undefined): string | undefined =>
+    t?.kind === "primitive" ? t.name : undefined;
+  const lt = prim(e.leftType);
+  const rt = prim(e.rightType);
+  if (lt === "datetime" && rt === "duration") {
+    return `(${left}).${e.op === "+" ? "add" : "subtract"}(${right})`;
+  }
+  if (lt === "duration" && rt === "datetime" && e.op === "+") {
+    return `(${right}).add(${left})`;
+  }
+  if (lt === "datetime" && rt === "datetime" && e.op === "-") {
+    return `(${left}).difference(${right})`;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Scalar-intrinsic snippet table for Dart / Flutter — the sibling of

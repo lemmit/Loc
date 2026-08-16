@@ -14,8 +14,9 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
 const sys = (plat: string, state: string, handler: string): string => `
+  valueobject Address { city: string  zip: string }
   system S {
-    subdomain M { context C { valueobject Address { city: string  zip: string } } }
+    subdomain M { context C { aggregate Thing with crudish { name: string } repository Things for Thing { } } }
     ui WebApp {
       page Form {
         route: "/form"

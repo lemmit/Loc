@@ -13,7 +13,7 @@ async function phoenixLive(uiBody: string): Promise<string> {
   const files = await generateSystemFiles(`
     system Demo {
       subdomain S { context C { aggregate Customer { name: string } } }
-      api CApi from C
+      api CApi from S
       ui Web {
         api C: CApi
         ${uiBody}

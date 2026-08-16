@@ -375,7 +375,7 @@ the RELATIONAL repository emitter only — on **both** adapters. A `shape: docum
 declare a method neither `repository.ts` nor `dapper.ts` implements. No fixture reaches it;
 worth a mission if one ever does.
 
-## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
+## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `done` (2026-08-16) · **M** · P2 ⭐ two shapes silent
 
 Four of the five query-time projection handler shapes inject `AppDbContext` and
 run EF LINQ, so a `persistence: dapper` deployable that declares one does not
@@ -450,6 +450,38 @@ projection-sourced shapes first, so their port has a gate. `dotnet build
 Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
 explicitly, with a comment pointing here — deliberately NOT worked around in the
 compiler.
+
+### Outcome (2026-08-16)
+
+All four direct-table arms are raw Npgsql; `DAPPER_UNSUPPORTED` went **5 → 1**
+(`tenancy-hierarchy`, the only remaining boundary with a witness) and
+`DAPPER_COMPILE_SKIP` stayed at its 0 floor with the debt behind it paid.
+`read-gates`, `projection-aggregation`, `projection-groupby` and
+`projection-join` all generate, compile `/warnaserror`, and — verified by
+running the emitted SQL against a real Postgres — return the values their
+`test e2e` blocks assert.
+
+**One design decision changed.** Decision 1 above nominated
+`src/generator/sql-pg-expr.ts` as the predicate renderer to widen. The
+implementation uses **`whereToSql` (`emit/dapper.ts`)** instead, for the same
+"don't write a second one" reason pointed at a different existing renderer:
+`sql-pg-expr.ts` is the MIGRATION-BACKFILL renderer, which nothing on the Dapper
+runtime path uses, whereas `whereToSql` is the lowering every Dapper find,
+retrieval and capability filter already goes through. Reusing it means a
+projection `where` and a find `where` over the same predicate emit byte-identical
+SQL — which is the property decision 1 was actually after. Decision 2 (reject
+out-of-subset at validate time, never an in-memory fallback) stands, and is
+carried by the pre-existing `DAPPER_SUBSET` descriptor plus the narrowed
+`dapperQueryProjectionGap`.
+
+The workflow-sourced and projection-sourced arms were ported without first
+minting the corpus fixtures the scoping note asked for — they are pinned by
+`test/generator/dotnet/dapper-query-projection-emission.test.ts` and by the fact
+that both read a store this adapter itself emits (so their columns are known),
+but a runtime witness for each is still owed and belongs with M-T9.x.
+
+**Found while landing it:** M-T6.41 below — the Dapper adapter emits UNQUOTED
+identifiers, so a reserved-word column name makes its DDL a syntax error.
 
 ## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
 Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
@@ -554,6 +586,49 @@ Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 ## M-T6.34 — Event-sourced storage exists on one backend of five — `open` · **L** · P2
 `persistedAs: eventLog` emits storage on Hono only (`loom.event-sourcing-backend-unsupported`), and **event-sourced workflow storage — a per-correlation event stream folded into workflow state — exists nowhere** (`loom.event-sourced-workflow-unsupported`, rejected on all five). The aggregate half is a four-backend port of a shipped design; the workflow half is unbuilt everywhere and should be scoped before it is started. Sized L because the two halves are not the same work and the second may want its own mission once scoped.
 Sources: M-T9.27 register rows.
+
+## M-T6.41 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `open` · **M** · P1 ⭐ boots red, compiles green
+
+A `.ddd` field named `order` / `user` / `group` / `end` — any of Postgres'
+~100 reserved words — makes the Dapper adapter's emitted schema a **syntax
+error**:
+
+```
+CREATE TABLE IF NOT EXISTS order_books (
+    order uuid primary key,     -- ERROR: syntax error at or near "order"
+    code text
+);
+```
+
+Reproduced 2026-08-16 by `psql -f`-ing `test/fixtures/corpus/read-gates.ddd`'s
+emitted `DbSchema.cs` (its folded projection is `keyed by order`).
+
+**Every gate is blind to it.** The C# compiles — the SQL is a string literal, so
+`dotnet build /warnaserror` passes. `schema-load.yml` loads the MIGRATION chain,
+which the Dapper adapter does not use (`hasMigrations = !usingDapper`; it
+provisions itself through `DbSchema.EnsureAsync`). It surfaces only at BOOT.
+
+**The rest of the toolchain already decided this question.** `sql-pg.ts` quotes
+identifiers ALWAYS, and says why in its own comment: "safe for reserved words
+(`order`, `user`, `end`)". The Dapper adapter never picked the rule up.
+
+**Why it is its own mission and not a one-liner.** The identifier appears in ~43
+`new CommandDefinition("…")` sites across `emit/dapper.ts`,
+`emit/dapper-workflow.ts` and `projection-emit.ts`, and those SQL strings live
+in TWO different C# escaping contexts — regular literals (need `\"`) and the
+verbatim `@"…"` in `DbSchema.cs` (needs `""`). Quoting the identifier without
+fixing the escaping at each site produces C# that does not compile. A partial
+fix is worse than none: quoting only the DDL makes the schema load and then the
+queries fail.
+
+**Verification when it lands.** A corpus fixture with a reserved-word column
+(`read-gates` is already one, via `keyed by order`), plus extending the
+`schema-load` gate to `psql -f` the Dapper `DbSchema.Sql` — the oracle that
+would have caught this from the start, and the reason the class stayed invisible.
+
+**Sources:** found while landing M-T6.25 (the port that first let `read-gates`
+generate under this adapter). Sibling of M-T6.35 — a persistence-ADAPTER gap,
+the axis the "five backends" framing hides.
 
 ## M-T6.35 — Persistence-adapter capability gaps — `open` · **M** · P2
 The non-default persistence adapters reject shapes their EF/Ecto siblings accept: `loom.dapper-unsupported` (features Dapper does not emit), `loom.find-predicate-unsupported` (a find predicate the active adapter cannot lower), `loom.persistence-mode-unsupported` (a `persistedAs`/`shape` pair the adapter cannot store), `loom.saving-shape-unsupported` (a `shape(...)` the hosting backend cannot persist), `loom.vanilla-document-unsupported` (`shape: document` only partly emitted on Elixir). The adapter axis is where "all targets support the whole surface" costs the most, because each adapter multiplies the matrix again — worth confirming per row whether the adapter *cannot* express the shape (a permanent limit, so a rename) or merely *does not yet* (a gap).

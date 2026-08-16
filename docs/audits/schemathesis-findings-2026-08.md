@@ -24,6 +24,11 @@ hand with `curl` against a booted server, not read off the fuzzer's summary.
 > waivers in `test/behavioral/schemathesis-waivers.json` ratchet, so a fix must
 > delete its rule and strike its entry here in the same PR.
 
+**Fixed since:** F2, F3 and F4 landed on all five backends in PR #2555
+(2026-08-14) — reference fields are uuid-validated and publish `format: uuid`,
+and the paged `page`/`pageSize` controls carry declared, enforced upper bounds.
+Their waivers (W2, W3) are deleted and W1/W5 are narrowed to F1.
+
 ---
 
 ## Class: server error (500)
@@ -59,7 +64,15 @@ added to the emitted OpenAPI responses on every backend, or `status_code_conform
 simply trades one finding for another.
 
 ### F2 — a non-UUID `X id` reference in a request body reaches Postgres and 500s
-**Waiver:** W1 · **Severity: high**
+**Status: FIXED (2026-08-14, PR #2555).** `zodFor`'s `id` arm in the Hono
+routes-builder now emits `z.string().uuid()` for a guid-valued reference (the
+`int`/`long`/`string`-keyed forms keep the bare string), so a malformed
+reference gets the backend's standard 422 and the emitted spec carries
+`format: uuid`. The Python sibling emits a shared `UuidStr`
+(`StringConstraints` + `WithJsonSchema({type: string, format: uuid})`) → 422.
+.NET (`Guid`), Java (`UUID`) and Phoenix (`:binary_id` cast) already
+type-validated and already published `format: uuid`, so the change lands the
+same contract on all five. Waiver W1 narrowed to F1.
 
 ```
 curl -X POST -H 'Content-Type: application/json' \
@@ -83,7 +96,10 @@ the emitted spec, on all five backends at once (the spec half is diffed by
 `conformance-parity`).
 
 ### F3 — the query-parameter twin of F2: a find-by-reference route 500s on a non-UUID
-**Waiver:** W2 · **Severity: high**
+**Status: FIXED (2026-08-14, PR #2555).** Falls out of the F2 fix on node — the
+same `zodFor` renders body fields and query parameters — and on Python, where
+`requestPyType` annotates find parameters with the same `UuidStr`. Waiver W2
+deleted.
 
 ```
 curl 'http://host/api/wallets/by_owner?owner='        → 500
@@ -96,7 +112,15 @@ uuid`, no runtime check. This is the #2442 shape (malformed claim → 500 instea
 of a clean empty/4xx result).
 
 ### F4 — `page × pageSize` overflows the SQL `OFFSET` and 500s
-**Waiver:** W3 (`not_a_server_error`), W5 (`status_code_conformance`) · **Severity: medium**
+**Status: FIXED (2026-08-14, PR #2555).** `PAGED_MAX_PAGE` (1 000 000) and
+`PAGED_MAX_PAGE_SIZE` (500) join the existing `PAGED_DEFAULT_*` pair in
+`src/ir/stdlib/generics.ts` and are declared AND enforced by all five paged-read
+param builders: zod `.max(...)` (node), FastAPI `Query(ge=1, le=…)` (python),
+`[Range(1, …)]` (.NET), `@Min`/`@Max` (Java — Spring 6.1+ method validation
+applies them without a class-level `@Validated`), and `page_param/4` +
+`minimum`/`maximum` on the OpenApiSpex parameter (Phoenix). The pair is chosen
+so the derived offset stays inside a 32-bit int on the backends that compute it
+in `int`. Waiver W3 deleted; W5 narrowed to F1.
 
 ```
 curl 'http://host/api/products?pageSize=1075098&page=9272203203533'  → 500

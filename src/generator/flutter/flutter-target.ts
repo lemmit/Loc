@@ -36,8 +36,15 @@ import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/lo
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
-import { emitExpr } from "../_walker/walker-core.js";
-import { DART_LEAVES, dartString, dartZeroValue, renderDartIntrinsic } from "./dart-expr.js";
+import { emitExpr, walk } from "../_walker/walker-core.js";
+import {
+  DART_LEAVES,
+  dartString,
+  dartTemporalBinary,
+  dartZeroValue,
+  FLUTTER_CHILD_PARAM,
+  renderDartIntrinsic,
+} from "./dart-expr.js";
 import {
   createFormWidgetName,
   destroyFormWidgetName,
@@ -642,6 +649,7 @@ export const flutterTarget: WalkerTarget = {
     const argNames = call.argNames ?? [];
     const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
     const entries: string[] = [];
+    const children: ExprIR[] = [];
     let cursor = 0;
     for (let i = 0; i < call.args.length; i++) {
       const arg = call.args[i]!;
@@ -654,11 +662,39 @@ export const flutterTarget: WalkerTarget = {
         paramName = params[cursor]?.name;
         if (paramName !== undefined) cursor += 1;
       }
-      if (paramName === undefined) continue;
+      if (paramName === undefined) {
+        // Past the declared params — a positional arg here is a CHILD, exactly
+        // as it is on the JSX path (`emitUserComponent` wraps the extras between
+        // the tags).  These were silently DROPPED: the widget rendered its
+        // `Slot { }` and the caller's markup never arrived.
+        children.push(arg);
+        continue;
+      }
       entries.push(`${paramName}: ${emitExpr(arg, ctx)}`);
+    }
+    if (children.length > 0) {
+      // Children are MARKUP, so they walk (not `emitExpr`), in the CALLER's
+      // scope.  The constructor takes ONE `Widget? child`, so several children
+      // fold into a min-height Column — the same container the walker gives a
+      // `Stack`, sized to its contents so it can sit anywhere the single child
+      // could.
+      const walked = children.map((c) => walk(c, ctx, 0).trim());
+      const value =
+        walked.length === 1
+          ? walked[0]!
+          : `Column(mainAxisSize: MainAxisSize.min, children: <Widget>[${walked.join(", ")}])`;
+      entries.push(`${FLUTTER_CHILD_PARAM}: ${value}`);
     }
     return `${call.name}(${entries.join(", ")})`;
   },
+
+  /** A component body's `Slot { }` → the widget's optional `child` constructor
+   *  param (`component-emit.ts` declares it when the walk reports
+   *  `usesChildren`), with a zero-size fallback for a call site that passed
+   *  none.  The JSX `{children}` default is a Dart SET literal over an unbound
+   *  name — it does not compile, and inside a `<Widget>[…]` list it is not even
+   *  the right type. */
+  renderChildrenSlot: () => `(${FLUTTER_CHILD_PARAM} ?? const SizedBox.shrink())`,
 
   // --- Type-default seam ---------------------------------------------------
   defaultInitFor: (type) => dartZeroValue(type),
@@ -744,6 +780,12 @@ export const flutterTarget: WalkerTarget = {
   exprConvert: (value, target, from) => DART_LEAVES.convert(value, target, from),
   exprList: (elements) => DART_LEAVES.list(elements),
   exprObject: (fields) => DART_LEAVES.object(fields),
+  // A duration is a Dart `Duration`, not the JS frontends' millisecond number —
+  // and Dart's `DateTime` has no arithmetic operators, so `until + days(7)` is
+  // `.add(...)`.  Both are the same shared table `riverpod-emit.ts`'s Notifier
+  // bodies reach, since Flutter has ONE dispatcher (the shared `emitExpr`).
+  exprDuration: (unit, amount) => DART_LEAVES.duration(unit, amount),
+  exprTemporalBinary: (left, right, e) => dartTemporalBinary(left, right, e),
 
   // Scalar intrinsics — the ONE table both the page-view walk and the
   // Notifier/action-body walk consume (both route through the shared

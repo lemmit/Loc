@@ -37,7 +37,7 @@ system EmbedAngular {
     contexts: [Orders]
     dataSources: [ordersState]
     serves: SalesApi
-    ui: WebApp
+    ui: WebApp { Sales: app }
     port: 8080
     design: angularMaterial
   }

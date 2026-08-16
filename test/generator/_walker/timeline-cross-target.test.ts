@@ -45,9 +45,17 @@ const timelineSystem = (frontend: string): string => `
     storage primary { type: postgres }
     resource orderingState { for: Ordering, kind: state, use: primary }
     deployable api {
-      platform: node, contexts: [Ordering], dataSources: [orderingState], port: 3000
+      platform: ${frontend === "elixir" ? "elixir" : "node"}, contexts: [Ordering], dataSources: [orderingState], port: 3000
+      ${frontend === "elixir" ? "ui: Web" : ""}
     }
-    deployable web { platform: ${frontend}, targets: api, ui: Web, port: 3001 }
+    ${
+      frontend === "elixir"
+        ? // Phoenix SELF-HOSTS its ui: it owns the contexts directly and
+          // `targets:` is a validator error on it (the same spa-vs-self split
+          // `render-degradation.test.ts` documents).
+          ""
+        : `deployable web { platform: ${frontend}, targets: api, ui: Web, port: 3001 }`
+    }
   }
 `;
 

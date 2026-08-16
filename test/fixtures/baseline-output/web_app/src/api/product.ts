@@ -21,8 +21,8 @@ export const UpdateProductRequest = z.object({
 export type UpdateProductRequest = z.infer<typeof UpdateProductRequest>;
 
 export const AllQuery = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).default(20),
+  page: z.coerce.number().int().min(1).max(1000000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(20),
   sort: z.string().default("id"),
   dir: z.string().default("asc"),
 });

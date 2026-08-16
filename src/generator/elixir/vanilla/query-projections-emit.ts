@@ -52,6 +52,7 @@ import {
 } from "../../../ir/util/projection-aggregate.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
+import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import type { ApiRoute } from "../api-emit.js";
 import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { ECTO_INTRINSIC_FRAGMENTS, type RenderCtx, renderExpr } from "../render-expr.js";
@@ -283,7 +284,7 @@ ${
     do: ndt |> DateTime.from_naive!("Etc/UTC") |> DateTime.truncate(:second)
 `
     : ""
-}end
+}${moneyWireHelper(grouped.aggregates)}end
 `;
   }
 
@@ -324,7 +325,7 @@ defmodule ${moduleName} do
   def run(current_user \\\\ nil) do
 ${lines.filter((l) => l !== "").join("\n")}
   end
-end
+${moneyWireHelper(aggregates)}end
 `;
   }
 
@@ -410,6 +411,27 @@ end
 `;
 }
 
+/** The `__money_wire/1` helper `ectoCoerce`'s money arm calls, or `""` when no
+ *  aggregate in this projection is money.  Emitting the CALL without the helper
+ *  is a compile error under `--warnings-as-errors`, so the two are derived from
+ *  the same list at the one call site below.
+ *
+ *  `Decimal.round/2` defaults to `:half_up` (matching node/.NET/Java/Python)
+ *  and sets the exponent to `-scale`, so trailing zeros survive
+ *  (`Decimal.round(Decimal.new("40.00"), 4)` → `"40.0000"`).  The non-Decimal
+ *  clause catches the `|| 0` zero-default a non-optional field applies over an
+ *  empty table, which must read `"0.0000"` and not a bare `"0"`. */
+function moneyWireHelper(aggregates: readonly AggregateSelect[]): string {
+  if (!aggregates.some((a) => aggregateCoercion(a).isMoney)) return "";
+  return `
+  # RS-12 money scale: a SQL aggregate echoes the scale its rows were STORED
+  # at, so pin the wire value to the canonical scale every other read uses.
+  defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()
+
+  defp __money_wire(value), do: value |> Decimal.new() |> __money_wire()
+`;
+}
+
 /** The Ecto aggregate call for one `select`.  `count` counts ROWS (Ecto needs a
  *  column, so it counts the primary key — equivalent to `COUNT(*)` for a table
  *  whose id is non-null); the rest take the aggregated column off `record`. */
@@ -436,6 +458,15 @@ function ectoCoerce(s: AggregateSelect, read: string): string {
   const c = aggregateCoercion(s);
   const inner = s.type.kind === "optional" ? s.type.inner : s.type;
   if (c.isCount) return `${read} || 0`;
+  // money pins the FIXED wire scale (RS-12) instead of echoing the aggregate's
+  // own: `sum`/`max`/`min` come back at the scale the rows were STORED at, so a
+  // `money("10.00")` write read back through a projection shipped `"40.00"`
+  // where this same aggregate's `serialize/1` sends `"40.0000"` (#2549).
+  if (c.isMoney) {
+    return c.optional
+      ? `if(is_nil(${read}), do: nil, else: __money_wire(${read}))`
+      : `__money_wire(${read} || 0)`;
+  }
   if (c.asString) {
     return c.optional
       ? `if(is_nil(${read}), do: nil, else: to_string(${read}))`

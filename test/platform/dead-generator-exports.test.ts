@@ -40,12 +40,36 @@ const testDir = path.join(repoRoot, "test");
  *  documented, reviewed exception; keyed by "<repo-rel-file> :: <name>". */
 const ALLOW = new Set<string>([]);
 
+/** Re-export shims that may stay with no in-repo importer.  Keyed by
+ *  repo-relative path.  The 16 the 2026-08-13 import-graph census found were
+ *  deleted rather than pinned; what remains is the one case the rule cannot
+ *  distinguish — a PUBLISHED barrel, whose consumers are outside this repo. */
+const ALLOW_SHIMS = new Set<string>([
+  // The MCP server core's public surface, re-exported by the publish wrapper
+  // `packages/ddd-mcp/` (which resolves the built `out/mcp/`, not this path).
+  // A package entry point is unreferenced in-tree BY DESIGN.
+  "src/mcp/index.ts",
+]);
+
 function tsFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...tsFiles(full));
     else if (entry.isFile() && full.endsWith(".ts")) out.push(full);
+  }
+  return out;
+}
+
+/** Every `.ts`/`.tsx` under `dir` — the shim check's importer population, which
+ *  spans the playground too (it imports the toolchain straight from `../src`). */
+function allSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...allSourceFiles(full));
+    else if (entry.isFile() && (full.endsWith(".ts") || full.endsWith(".tsx"))) out.push(full);
   }
   return out;
 }
@@ -108,6 +132,68 @@ describe("dead generator exports (M-T9.8)", () => {
       "Dead generator export(s) — exported but referenced by no other file. " +
         "Delete it if unused, or drop `export` if it is only used in-file. " +
         "See M-T9.8.\n" +
+        dead.join("\n"),
+    ).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // The blind spot the check above structurally has: it matches export NAMES,
+  // and a bare `export * from "…"` re-export shim declares none.  Moving a
+  // module into `_walker/` / `_frontend/` and leaving a shim behind "so the old
+  // import path keeps working" is the repo's normal migration step — and when
+  // the last importer is migrated too, the shim becomes a file whose entire
+  // content is a forward to somewhere else, referenced by nobody, invisible to
+  // every gate.  The 2026-08-13 import-graph census found SIXTEEN of them
+  // (`scripts/unimported-census.mjs`); they are deleted, and this keeps the
+  // count at zero.
+  //
+  // A shim is: a file whose every non-comment line is an `export * from`/
+  // `export { … } from`.  Dead is: no file under src/, test/ or web/src/
+  // imports it.  Specifiers must be RESOLVED, not suffix-matched: a sibling
+  // imports `"./heex-walker.js"`, which contains none of its own directory, so
+  // a substring test reports live shims as dead.  (It did, on the first run
+  // here — nine false positives, caught only because the shims it named were
+  // hand-checked against `grep`.  Left as a comment rather than a lesson
+  // learned twice.)
+  // -------------------------------------------------------------------------
+  it("no re-export shim survives its last importer", () => {
+    const importerRoots = [srcDir, testDir, path.join(repoRoot, "web", "src")].filter((d) =>
+      fs.existsSync(d),
+    );
+
+    /** Every module path imported anywhere, resolved to an absolute `.ts`. */
+    const imported = new Set<string>();
+    for (const importer of importerRoots.flatMap(allSourceFiles)) {
+      const src = fs.readFileSync(importer, "utf8");
+      for (const m of src.matchAll(/\bfrom\s+["'](\.[^"']+)["']/g)) {
+        const resolved = path
+          .resolve(path.dirname(importer), m[1]!)
+          .replace(/\.js$/, ".ts")
+          .replace(/\.jsx$/, ".tsx");
+        imported.add(resolved);
+        // A directory import resolves to that directory's index module.
+        imported.add(path.join(resolved.replace(/\.tsx?$/, ""), "index.ts"));
+      }
+    }
+
+    const dead: string[] = [];
+    for (const f of tsFiles(srcDir)) {
+      const rel = path.relative(repoRoot, f);
+      if (ALLOW_SHIMS.has(rel)) continue;
+      const body = fs
+        .readFileSync(f, "utf8")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
+      if (body.length === 0 || !body.every((l) => /^export\s+(\*|\{)/.test(l))) continue;
+      if (!imported.has(f)) dead.push(rel);
+    }
+
+    expect(
+      dead,
+      "Re-export shim(s) with no importer left — the module moved, every caller " +
+        "followed it, and only the forwarding stub remains.  Delete them (that is " +
+        "what the move was for), or pin in ALLOW_SHIMS with the reason:\n" +
         dead.join("\n"),
     ).toEqual([]);
   });

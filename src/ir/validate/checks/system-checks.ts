@@ -59,6 +59,7 @@ import {
 } from "../../util/find-predicate-capability.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
+import { dapperQueryProjectionGap } from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -899,6 +900,31 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             name: proj.name,
           }),
           source: `projection/${proj.name}`,
+        });
+      }
+      // Workflow INSTANCE reads (`/workflows/<wf>/instances[/{id}]`).  An
+      // observable workflow — one with a correlation field, hence an
+      // `instanceWireShape` — publishes every instance's correlation id and
+      // state on two GET routes, so under denyByDefault it needs a gate for
+      // the same reason an ungated find or projection does.
+      //
+      // It could not be required before: the routes are compiler-derived and a
+      // workflow had no surface to declare a read gate on, so demanding one
+      // would have demanded the impossible — the identical situation the folded
+      // projection was in.  The header `requires` clause is that surface, so
+      // the exemption has no reason left.
+      //
+      // Keyed on `instanceWireShape`: a stateless workflow (no correlation
+      // field) serves no instance routes, so there is nothing to gate.
+      for (const wf of c.workflows) {
+        if (!wf.instanceWireShape || wf.instanceReadGate) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-workflow-instances", {
+            name: wf.name,
+          }),
+          source: `workflow/${wf.name}`,
         });
       }
     }
@@ -2684,30 +2710,35 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // QUERY-TIME PROJECTIONS are the one FEATURE gap on this adapter, and it
-      // was SILENT in the worst way: `query-projection-emit.ts` has no dapper
-      // branch at all, so it emits the EF shape unconditionally — `using
-      // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;`,
-      // neither of which exists here.  The generated project does not COMPILE
-      // (CS0234 "namespace 'EntityFrameworkCore' does not exist" / CS0246
-      // "'AppDbContext' could not be found"), and nothing said so at generate
-      // time: the author gets a C# build error naming a type they never wrote.
-      // Found when `projection-aggregation`/`projection-groupby` got their first
-      // runtime callers (#2468) and the dapper behavioral leg failed to boot.
+      // QUERY-TIME PROJECTIONS used to be refused WHOLESALE here:
+      // `query-projection-emit.ts` had no dapper branch at all, so it emitted
+      // the EF shape unconditionally — `using Microsoft.EntityFrameworkCore;` +
+      // `private readonly AppDbContext _db;`, neither of which exists on this
+      // adapter — and the generated project did not COMPILE (CS0234 / CS0246).
+      // M-T6.25 ported the four direct-table arms to raw Npgsql (the same
+      // `NpgsqlDataSource` + private row DTO + `Map` shape the FOLDED read
+      // controller already used), so the feature EMITS here now and the blanket
+      // refusal is gone.
       //
-      // Honest error until a Dapper query-projection emitter lands — the same
-      // interim-gate/principled-emitter split the MikroORM feature gate uses
-      // below.  Dapper is raw SQL and a query-time projection IS a SQL
-      // aggregate, so the port is a smaller job here than the gate implies;
-      // deleting this clause is what closes it.
+      // What survives is the ONE thing raw SQL genuinely cannot reach: the two
+      // arms that AGGREGATE (`select total = count()` / `group by`) name
+      // COLUMNS on the source aggregate's table, and an aggregate whose fields
+      // are not columns — a `shape: document` jsonb blob, an event-sourced
+      // stream with no state table — has nothing for `sum(total)` to name.  EF
+      // Core hides that behind its own JSON translation; Dapper cannot.  The
+      // condition is computed by `dapperQueryProjectionGap`, which the emitter
+      // reads too, so the gate and the emission arm cannot drift.
       for (const p of ctx.projections ?? []) {
-        if (isQueryTimeProjection(p)) {
+        if (!isQueryTimeProjection(p)) continue;
+        const gap = dapperQueryProjectionGap(p, ctx, sys);
+        if (gap) {
           diags.push({
             severity: "error",
             message: diagMessage("loom.dapper-unsupported#feature", {
               name: dep.name,
               ctxName,
               projection: p.name,
+              reason: gap,
             }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.dapper-unsupported",
@@ -2960,6 +2991,26 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
+        // (4) HIERARCHICAL tenancy scope.  `emitMikroContextFilters` lowers each
+        // capability filter through `whereToMikroFilter`, whose FilterQuery
+        // subset cannot express the descendant-or-self subtree predicate — and
+        // it CATCHES that failure and leaves the filter unapplied rather than
+        // throwing.  For a `deep`/`global` scope that is not a degraded read:
+        // it is NO tenant predicate at all, so every tenant's rows become
+        // readable on every read of this aggregate.  The adapter's own comment
+        // assumed the shape was unreachable here ("not generated on the mikro
+        // adapter today") — a belief, not a gate.  A `tenancy … of <Registry>`
+        // system with `persistence: mikroorm` validates, generates and compiles
+        // clean today and silently serves cross-tenant rows.  Refuse it until
+        // the subtree predicate is expressible (M-T6.23's remaining half).
+        if ((a.contextFilters ?? []).some((f) => isDeepScopeFilter(f))) {
+          rejectFeature(
+            `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
+            `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
+              `cannot express it, and an unlowerable principal filter is dropped ` +
+              `silently) — leaving every tenant's rows readable`,
+          );
+        }
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
