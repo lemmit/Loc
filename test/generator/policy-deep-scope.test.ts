@@ -49,14 +49,18 @@ async function allText(platform: string, level: string): Promise<string> {
 describe("policy deep — node (Hono/Drizzle)", () => {
   it("emits the descendant-or-self prefix + NULL fallback into the repository", async () => {
     const text = await allText("node", "deep");
-    expect(text).toContain('.orgPath + ".%"');
+    expect(text).toContain('.orgPath + "."');
+    expect(text).toContain("strpos(");
     expect(text).toContain("isNotNull(");
     expect(text).toContain("isNull(");
   });
 
   it("`local` keeps the flat tenantId floor (no path prefix)", async () => {
     const text = await allText("node", "local");
-    expect(text).not.toContain('.orgPath + ".%"');
+    // Asserted against the ANCHORED spelling: the old `.%` pattern is gone
+    // repo-wide, so pinning its absence here would pass vacuously.
+    expect(text).not.toContain("strpos(");
+    expect(text).not.toContain('.orgPath + "."');
   });
 });
 
@@ -70,27 +74,27 @@ describe("policy deep — .NET (EF Core)", () => {
 });
 
 describe("policy deep — Python (FastAPI/SQLAlchemy)", () => {
-  it("emits a startswith prefix + is_/isnot NULL fallback", async () => {
+  it("emits an anchored strpos prefix + is_/isnot NULL fallback", async () => {
     const text = await allText("python", "deep");
-    expect(text).toContain(".startswith(");
+    expect(text).toContain("func.strpos(");
     expect(text).toContain(".org_path");
     expect(text).toContain(".isnot(None)");
   });
 });
 
 describe("policy deep — Java (Spring/JPA)", () => {
-  it("emits the JPQL prefix (like concat) with the NULL fallback", async () => {
+  it("emits the JPQL prefix (locate/concat) with the NULL fallback", async () => {
     const text = await allText("java", "deep");
-    expect(text).toContain("like concat(");
+    expect(text).toContain("locate(concat(");
     expect(text).toContain("dataKey is not null");
   });
 });
 
 describe("policy deep — Elixir (plain Ecto/Phoenix)", () => {
-  it("emits the fail-closed LIKE fragment with the NULL fallback", async () => {
+  it("emits the fail-closed anchored fragment with the NULL fallback", async () => {
     const text = await allText("elixir", "deep");
     expect(text).toContain("fragment(");
-    expect(text).toContain("LIKE ? || '.%'");
+    expect(text).toContain("strpos(?, ? || '.') = 1");
   });
 });
 
@@ -102,8 +106,10 @@ describe("policy deep — Elixir (plain Ecto/Phoenix)", () => {
 describe("policy global — node (Hono/Drizzle)", () => {
   it("emits the root-subtree prefix anchored at rootOrg (not orgPath)", async () => {
     const text = await allText("node", "global");
-    expect(text).toContain('.rootOrg + ".%"');
-    expect(text).not.toContain('.orgPath + ".%"');
+    expect(text).toContain('.rootOrg + "."');
+    expect(text).toContain("strpos(");
+    // Same vacuity trap: compare against the anchored spelling, not `.%`.
+    expect(text).not.toContain('.orgPath + "."');
     expect(text).toContain("isNotNull(");
     expect(text).toContain("isNull(");
   });
@@ -119,9 +125,9 @@ describe("policy global — .NET (EF Core)", () => {
 });
 
 describe("policy global — Python (FastAPI/SQLAlchemy)", () => {
-  it("emits the startswith prefix anchored at root_org + is_/isnot NULL fallback", async () => {
+  it("emits the anchored strpos prefix at root_org + is_/isnot NULL fallback", async () => {
     const text = await allText("python", "global");
-    expect(text).toContain(".startswith(");
+    expect(text).toContain("func.strpos(");
     expect(text).toContain(".root_org");
     expect(text).toContain(".isnot(None)");
   });
@@ -130,7 +136,7 @@ describe("policy global — Python (FastAPI/SQLAlchemy)", () => {
 describe("policy global — Java (Spring/JPA)", () => {
   it("emits the JPQL prefix anchored at rootOrg() with the NULL fallback", async () => {
     const text = await allText("java", "global");
-    expect(text).toContain("like concat(");
+    expect(text).toContain("locate(concat(");
     expect(text).toContain("rootOrg()");
     expect(text).toContain("dataKey is not null");
   });
@@ -140,7 +146,7 @@ describe("policy global — Elixir (plain Ecto/Phoenix)", () => {
   it("emits the fail-closed LIKE fragment anchored at root_org", async () => {
     const text = await allText("elixir", "global");
     expect(text).toContain("fragment(");
-    expect(text).toContain("LIKE ? || '.%'");
+    expect(text).toContain("strpos(?, ? || '.') = 1");
     expect(text).toContain("current_user.root_org");
   });
 });

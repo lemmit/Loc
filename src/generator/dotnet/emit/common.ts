@@ -4,6 +4,13 @@
 // templates — pure string concatenation.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
+} from "../../../ir/stdlib/generics.js";
+
 export function renderCommon(
   ns: string,
   opts: { concurrencyException?: boolean; file?: boolean } = {},
@@ -346,3 +353,24 @@ export function dotnetFindAbsenceThrow(ns: string): string {
 export function dotnetNotFoundThrow(ns: string, resource: string, keyExpr: string): string {
   return `throw new global::${ns}.Domain.Common.AggregateNotFoundException($"${resource} {${keyExpr}} not found");`;
 }
+
+/**
+ * The four pagination query parameters of a paged read, as C# action-parameter
+ * declarations.  Shared by the auto-derived controller (`cqrs/controller.ts`)
+ * and the explicit-route emitter so the two cannot drift.
+ *
+ * `page` / `pageSize` carry a DECLARED range.  Only a lower bound was implied
+ * before, so a large-but-in-contract `page × pageSize` overflowed the SQL
+ * `OFFSET` (and, computed in `int`, could wrap negative) and the read 500s —
+ * a server error reached by obeying the published schema (schemathesis F4).
+ * `[Range]` is picked up by `[ApiController]`'s automatic model validation
+ * (400 ValidationProblemDetails, the backend's standard invalid-parameter
+ * answer) AND by Swashbuckle, which publishes `minimum`/`maximum`.  The
+ * attribute is fully qualified so no `using` is added under /warnaserror.
+ */
+export const CS_PAGED_QUERY_PARAMS: readonly string[] = [
+  `[FromQuery] [System.ComponentModel.DataAnnotations.Range(1, ${PAGED_MAX_PAGE})] int page = ${PAGED_DEFAULT_PAGE}`,
+  `[FromQuery] [System.ComponentModel.DataAnnotations.Range(1, ${PAGED_MAX_PAGE_SIZE})] int pageSize = ${PAGED_DEFAULT_PAGE_SIZE}`,
+  '[FromQuery] string sort = "id"',
+  '[FromQuery] string dir = "asc"',
+];

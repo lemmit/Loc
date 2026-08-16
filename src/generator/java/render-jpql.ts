@@ -139,9 +139,17 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           const tenantCol = `${ctx.alias}.${TENANT_OWNED_TENANT_ID_FIELD}`;
           const org = render(e.filter.anchorClaim, ctx);
           const tenant = render(e.filter.tenantClaim, ctx);
-          const like = `${col} like concat(${org}, '${DATA_KEY_PATH_DELIMITER}%')`;
+          // Descendant test as an ANCHORED POSITION, not `like concat(org,
+          // '.%')`.  The anchor is a principal CLAIM, so `_`/`%` inside it are
+          // LIKE wildcards: an org named `acme_corp` yields `acme_corp.%`,
+          // matching `acmeXcorp.…` — a cross-tenant read with no attacker, just
+          // an underscore in a name.  HQL's `locate(search, source)` is the
+          // portable anchored position test (→ Postgres `position(search in
+          // source)`) and has no pattern language, matching how
+          // `string.startsWith` lowers in JPQL_INTRINSICS.
+          const descendant = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
           return (
-            `(${col} is not null and (${col} = ${org} or ${like})) ` +
+            `(${col} is not null and (${col} = ${org} or ${descendant})) ` +
             `or (${col} is null and ${tenantCol} = ${tenant})`
           );
         }

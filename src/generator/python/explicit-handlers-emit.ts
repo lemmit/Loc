@@ -36,11 +36,7 @@
 // raw SQLAlchemy row.  Id / scalar / void returns are unchanged.
 // ---------------------------------------------------------------------------
 
-import {
-  PAGED_DEFAULT_PAGE,
-  PAGED_DEFAULT_PAGE_SIZE,
-  pagedReturn,
-} from "../../ir/stdlib/generics.js";
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -57,10 +53,10 @@ import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
-import { requestPyType } from "./emit/http-models.js";
+import { requestPyType, wireModelImport } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr, renderPyType } from "./render-expr.js";
 import { aggHasFieldMask } from "./repository-builder.js";
-import { pyWireToDomain } from "./routes-builder.js";
+import { PY_PAGED_CONTROLS, pyWireToDomain } from "./routes-builder.js";
 import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 type Handler = CommandHandlerIR | QueryHandlerIR;
@@ -556,8 +552,7 @@ function emitPagedRunRoute(r: RouteIR, h: Handler, ctx: EnrichedBoundedContextIR
     ...pathParams.map((p) => `${snake(p.name)}: ${requestPyType(p.type, ctx)}`),
     ...queryParams.map((p) => `${snake(p.name)}: ${requestPyType(p.type, ctx)}`),
     "session: SessionDep",
-    `page: int = ${PAGED_DEFAULT_PAGE}`,
-    `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+    ...PY_PAGED_CONTROLS,
     `sort: str = "id"`,
     `dir: str = "asc"`,
   ].join(", ");
@@ -726,6 +721,7 @@ export function emitPyExplicitRouteRouter(
     `from fastapi import ${[
       "APIRouter",
       "Depends",
+      refersTo("Query") ? "Query" : null,
       usesRequest ? "Request" : null,
       usesResponse ? "Response" : null,
     ]
@@ -742,9 +738,7 @@ export function emitPyExplicitRouteRouter(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
-    voModelImports.length > 0
-      ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
-      : null,
+    wireModelImport(voModelImports, refersTo),
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",

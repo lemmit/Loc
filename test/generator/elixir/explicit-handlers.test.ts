@@ -341,9 +341,9 @@ describe("elixir — paged-run queryHandler over run(criterion)", () => {
     const ctrl = fileEndingWith(m, "lib/d_web/controllers/a_routes_controller.ex");
     expect(ctrl).toContain("def list_in_region(conn, params) do");
     expect(ctrl).toContain("D.Orders.find_all_by_in_region_order(");
-    expect(ctrl).toContain('page_param(params, "page", 1)');
+    expect(ctrl).toContain('page_param(params, "page", 1, 1000000)');
     expect(ctrl).toContain("json(conn, %{result | items: Enum.map(result.items, &serialize/1)})");
-    expect(ctrl).toContain("defp page_param(params, key, default) do");
+    expect(ctrl).toContain("defp page_param(params, key, default, limit) do");
   });
 
   it("emits no run/1 handler module for the paged queryHandler", async () => {

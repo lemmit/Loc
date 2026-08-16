@@ -94,6 +94,7 @@ import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { internalCreateFn, internalDeleteFn } from "../lifecycle-seam.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { renderControllerSerialize } from "./controller-serialize.js";
 import { denialOverrides, denialTerm, respondErrorTail } from "./denial.js";
 import { renderFunctionBodyLines } from "./function-emit.js";
 
@@ -195,12 +196,13 @@ export function emitVanillaWorkflowsController(
   appModule: string,
   groups: WorkflowControllerGroup[],
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   const nonEmpty = groups.filter((g) => g.workflows.length > 0);
   if (nonEmpty.length === 0) return;
   out.set(
     `lib/${appName}_web/controllers/workflows_controller.ex`,
-    renderWorkflowsController(appModule, nonEmpty),
+    renderWorkflowsController(appModule, nonEmpty, sys),
   );
 }
 
@@ -1086,8 +1088,9 @@ function collectWorkflowStmtParamRefsAll(st: WorkflowStmtIR, acc: Set<string>): 
  *  `{:ok, _} <-` clause threads through the with-chain.  Branch statements run
  *  sequentially with `=` binds (a raised error rolls the transaction back),
  *  covering the full statement set the validator admits inside an if-let
- *  branch: op-call / factory-let / emit / expr-let / resource-call (guards
- *  ride the with-chain path in `renderBranch`). */
+ *  branch: op-call / factory-let / emit / expr-let / resource-call / assign /
+ *  domain-service-call (guards + nested control flow ride the with-chain path
+ *  in `renderBranch`). */
 function renderBranchStmt(
   st: WorkflowStmtIR,
   renderCtx: RenderCtx,
@@ -1122,12 +1125,45 @@ function renderBranchStmt(
     }
     case "resource-call":
       return [`_ = ${renderExpr(st.call, renderCtx)}`];
-    default:
-      // Defence-in-depth: `renderBranch` routes guards + nested control flow
-      // (`for-each` / `if-let` / `repo-run` / `repo-let`) through the with-chain
-      // path, so the flat path only ever sees the kinds handled above.  A future
-      // kind reaching here surfaces as a visible TODO rather than silent-wrong.
-      return [`# TODO: lower if-let branch statement kind '${st.kind}'`];
+    case "assign":
+      // `field := value` — own-state mutation inside a branch.  Rebind the
+      // immutable workflow `state` struct via a struct update, the same shape
+      // the loop-body (`renderLoopBody`) and top-level (`lowerStatement`) arms
+      // emit.
+      return [
+        `state = %{state | ${snake(st.target.segments[0]!)}: ${renderExpr(st.value, renderCtx)}}`,
+      ];
+    case "domain-service-call": {
+      // A `mutating` domain-service call inside a branch — inline the same
+      // context mutating-fn calls the loop-body arm emits, so each mutated arg
+      // persists.  `resolveInlinedServiceClauses` returns `<-` with-clause text;
+      // the flat branch path binds sequentially, so strip the arrow into an `=`.
+      const inlined = resolveInlinedServiceClauses(st, renderCtx, contextModule, ctx);
+      if (inlined.length === 0) return [`_ = ${renderExpr(st.call, renderCtx)}`];
+      return inlined.map((c) => c.text.replace(" <- ", " = "));
+    }
+    case "precondition":
+    case "requires":
+    case "for-each":
+    case "if-let":
+    case "repo-run":
+    case "repo-delete":
+    case "repo-let":
+      // `renderBranch` routes guards + nested control flow / repo binds through
+      // the with-chain path (they must short-circuit to `{:error, _}`), so the
+      // flat path never sees them.  If that routing ever changes, fail loudly
+      // here — an Elixir `# TODO` comment compiles, so the old fallthrough
+      // shipped mutilated output that `mix compile` accepted.
+      throw new Error(
+        `internal: if-let branch statement kind '${st.kind}' must lower through the ` +
+          "with-chain path, not the flat branch renderer. Please file a bug.",
+      );
+    default: {
+      // Exhaustive over `WorkflowStmtIR` — a new kind is a compile error here.
+      const _never: never = st;
+      void _never;
+      throw new Error("internal: unhandled if-let branch statement kind. Please file a bug.");
+    }
   }
 }
 
@@ -1581,7 +1617,11 @@ end
   return { content, statementRegions };
 }
 
-function renderWorkflowsController(appModule: string, groups: WorkflowControllerGroup[]): string {
+function renderWorkflowsController(
+  appModule: string,
+  groups: WorkflowControllerGroup[],
+  sys?: SystemIR,
+): string {
   const webModule = `${appModule}Web`;
 
   // One action per command workflow across ALL hosted contexts.  Each action
@@ -1613,6 +1653,16 @@ function renderWorkflowsController(appModule: string, groups: WorkflowController
     .join("\n\n");
 
   const ctxList = groups.map((g) => upperFirst(g.ctx.name)).join(", ");
+  // A workflow's `{:ok, result}` is frequently a saved aggregate struct — project
+  // it through that aggregate's `wireShape` (camelCase keys, no `inserted_at`),
+  // the same wire the aggregate's own REST controller serves.  The raw-struct
+  // `%_{}` clause stays behind them for a non-aggregate struct.
+  const ser = renderControllerSerialize(
+    appModule,
+    groups.map((g) => g.ctx),
+    [],
+    sys,
+  );
 
   return `# Auto-generated.
 defmodule ${webModule}.WorkflowsController do
@@ -1642,8 +1692,7 @@ ${actions}
 
 ${respondErrorTail("respond", "  ", groups[0] ? denialOverrides(groups[0].ctx) : undefined)}
 
-  defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
-  defp serialize(other), do: other
+${ser.clauses}${ser.helpers}
 end
 `;
 }

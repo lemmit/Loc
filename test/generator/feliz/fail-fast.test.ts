@@ -17,14 +17,13 @@ import type { ActionIR, ExprIR, StateFieldIR } from "../../../src/ir/types/loom-
 
 describe("feliz fail-fast (M-T6.15)", () => {
   it("throws on an unsupported expression kind instead of emitting `(* unsupported *) ()`", () => {
-    // `new` is a real ExprIR kind the F# update/expr path does not render.
-    const expr = {
-      kind: "new",
-      typeName: "Money",
-      args: [],
-    } as unknown as ExprIR;
+    // `this` — a domain-body receiver.  A page has no aggregate instance, so the
+    // frontend pipeline never produces it; it is one of the three kinds left at
+    // the `default` now that `id` / `duration` / `new` render (see
+    // `update-expr-arms.test.ts`, which pins those arms).
+    const expr = { kind: "this" } as unknown as ExprIR;
     expect(() => renderFsExpr(expr, { stateNames: new Set(), locals: new Set() })).toThrow(
-      /unsupported expression 'new'/,
+      /unsupported expression 'this'/,
     );
   });
 

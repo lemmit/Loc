@@ -14,7 +14,13 @@ import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.j
 import { emitExpr } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
 import { FELIZ_GRID_ROW_VAR, renderFelizDataGridChild } from "./data-grid-child.js";
-import { FS_LEAVES, fsString, renderFsIntrinsic, storeModelField } from "./fs-expr.js";
+import {
+  FS_LEAVES,
+  fsString,
+  fsTemporalBinary,
+  renderFsIntrinsic,
+  storeModelField,
+} from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
 import {
   byIdFieldName,
@@ -915,6 +921,13 @@ export const felizTarget: WalkerTarget = {
   exprConvert: (value, target, from) => FS_LEAVES.convert(value, target as never, from as never),
   exprList: (elements) => FS_LEAVES.list(elements),
   exprObject: (fields) => FS_LEAVES.object([...fields]),
+  // A duration is a `System.TimeSpan` here, not the JS frontends' millisecond
+  // number — and datetime arithmetic is `.Add`/`.Subtract`, not `+`/`-`.  Both
+  // seams forward to the SAME shared table the MVU update path uses, so
+  // `until + days(7)` cannot mean one thing in a page body and another in an
+  // action body.
+  exprDuration: (unit, amount) => FS_LEAVES.duration(unit, amount),
+  exprTemporalBinary: (left, right, e) => fsTemporalBinary(left, right, e),
 
   // Scalar intrinsics — the SAME F# table the MVU update path uses
   // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a

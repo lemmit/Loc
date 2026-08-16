@@ -138,6 +138,18 @@ export function genericInstanceName(ctor: GenericCtorName, arg: TypeIR): string 
 export const PAGED_DEFAULT_PAGE = 1;
 export const PAGED_DEFAULT_PAGE_SIZE = 20;
 
+/** Declared UPPER bounds on the same two controls.  Without them the
+ *  contract says `minimum: 1` and nothing else, so an in-contract
+ *  `page × pageSize` overflows the SQL `OFFSET` (bigint) and the read 500s
+ *  — a server error the caller reached by obeying the published schema
+ *  (schemathesis F4, `docs/audits/schemathesis-findings-2026-08.md`).
+ *
+ *  The pair is chosen so the derived offset stays inside a 32-bit int on
+ *  every backend that computes it in `int` arithmetic (.NET / Java):
+ *  `(PAGED_MAX_PAGE - 1) * PAGED_MAX_PAGE_SIZE` ≈ 5·10⁸ < 2³¹. */
+export const PAGED_MAX_PAGE = 1_000_000;
+export const PAGED_MAX_PAGE_SIZE = 500;
+
 /** If `t` is a top-level `paged(arg)` instantiation, return its carrier `arg`
  *  and the monomorphized payload `name`; otherwise null.  Used by every
  *  backend's find emitter to recognise a paginated return and wire the

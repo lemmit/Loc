@@ -53,6 +53,7 @@ import { plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { projectEntityExpr, projectToResponse } from "./dto-mapping.js";
+import { CS_PAGED_QUERY_PARAMS } from "./emit/common.js";
 import { renderCsType } from "./render-expr.js";
 import { csWorkflowStmtTarget, renderExprWithCmdParams } from "./workflow-emit.js";
 
@@ -641,10 +642,7 @@ export function emitExplicitRouteController(
       );
       const actionParams = [
         ...h.params.map((p) => bind.get(p.name)!.actionParam),
-        "[FromQuery] int page = 1",
-        "[FromQuery] int pageSize = 20",
-        '[FromQuery] string sort = "id"',
-        '[FromQuery] string dir = "asc"',
+        ...CS_PAGED_QUERY_PARAMS,
       ].join(", ");
       const queryArgs = [
         ...h.params.map((p) => bind.get(p.name)!.commandArg),

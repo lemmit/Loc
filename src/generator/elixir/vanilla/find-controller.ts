@@ -14,6 +14,8 @@
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
 import { variantTag } from "../../../ir/stdlib/unions.js";
@@ -205,8 +207,8 @@ export function renderFindActions(
       // shared cross-backend defaults.
       ...(paged
         ? [
-            `page_param(params, "page", ${PAGED_DEFAULT_PAGE})`,
-            `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE})`,
+            `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE})`,
+            `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE})`,
             // Sort controls (M-T2.6) — strings passed through; the repo whitelists.
             `Map.get(params, "sort", "id")`,
             `Map.get(params, "dir", "asc")`,
@@ -329,12 +331,12 @@ ${absentArm}
   const hasPaged = indexPaged || httpFindsOf(ctx, agg).some((f) => pagedReturn(f.returnType));
   const pageParamHelper = hasPaged
     ? `
-  defp page_param(params, key, default) do
+  defp page_param(params, key, default, limit) do
     case params[key] do
-      v when is_integer(v) -> v
+      v when is_integer(v) and v >= 1 -> min(v, limit)
       v when is_binary(v) ->
         case Integer.parse(v) do
-          {n, _} when n >= 1 -> n
+          {n, _} when n >= 1 -> min(n, limit)
           _ -> default
         end
 

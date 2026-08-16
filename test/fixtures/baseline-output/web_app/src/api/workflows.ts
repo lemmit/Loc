@@ -5,7 +5,7 @@ import { api } from "./client";
 
 export const PlaceOrderRequest = z.object({
   customerId: z.string(),
-  productId: z.string(),
+  productId: z.string().uuid(),
   quantity: z.number().int(),
 });
 export type PlaceOrderRequest = z.infer<typeof PlaceOrderRequest>;

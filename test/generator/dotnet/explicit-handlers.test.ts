@@ -383,7 +383,9 @@ describe("dotnet — paged-run queryHandler over run(criterion)", () => {
   it("the controller action exposes [FromQuery] page/pageSize/sort/dir and dispatches the Query", async () => {
     const ctrl = fileEndingWith(await generateSystemFiles(PAGED_SRC), "Api/ARoutesController.cs");
     expect(ctrl).toContain('[HttpGet("/orders/projections/in_region")]');
-    expect(ctrl).toContain("[FromQuery] int page = 1");
+    expect(ctrl).toContain(
+      "[FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 1000000)] int page = 1",
+    );
     expect(ctrl).toContain(
       "await _mediator.Send(new ListInRegionQuery(rgn, page, pageSize, sort, dir))",
     );

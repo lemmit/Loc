@@ -444,35 +444,41 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   },
   {
     id: "RS-20",
-    title: "`version` counts persisted mutations, not entity-graph dirtiness — OPEN (java)",
+    title: "`version` counts persisted mutations, not entity-graph dirtiness",
     trigger:
-      "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), or whose create also writes a value-object collection",
+      "a `versioned` aggregate whose mutation touches only a CHILD (a single `contains`), whose create also writes a value-object collection, or whose command re-assigns a value the row already holds",
     observable:
-      "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14). Java diverges in BOTH directions: a `ship` op mutating a single containment reads back 1 where the canonical value is 2 (the bump is missed), and a create carrying a value-object collection reads back 2 where the canonical value is 1 (an extra bump).",
-    // Root cause is one mechanism, not two bugs: java maps `version` to JPA
-    // `@Version`, and Hibernate bumps it from the dirtiness of the ROOT entity's
-    // own state.  A change confined to a child/collection does not mark the root
-    // dirty (no bump); a second flush that writes the collection during create
+      "`version` is 1 at create and +1 per persisted mutation, independent of WHICH part of the aggregate graph changed (RS-11 + RS-14) and of whether any column value actually differs. Java diverged in BOTH directions: a `ship` op mutating a single containment read back 1 where the canonical value is 2 (the bump is missed), a create carrying a value-object collection read back 2 where the canonical value is 1 (an extra bump), and an idempotent command read back 2 where the canonical value is 3.",
+    // Root cause was one mechanism, not three bugs: java mapped `version` to JPA
+    // `@Version`, and Hibernate bumps that from the dirtiness of the ROOT
+    // entity's own state.  A change confined to a child/collection does not mark
+    // the root dirty (no bump); a re-assignment of an unchanged value does not
+    // either (no bump); a second flush that writes the collection during create
     // does (extra bump).  The other four backends set the counter explicitly at
     // the persist site, so they count MUTATIONS the way the capability declares.
     //
     // This is RS-14's family — "the version increment is shape-dependent and
-    // inverted between backends" — in two shapes RS-14's fixture set never
-    // reached.  RS-14 lists java as conforming; that holds for the shapes it
-    // measured (document/embedded) and not for these.  Rather than edit RS-14's
-    // history, this rule names the shapes it missed.
+    // inverted between backends" — in shapes RS-14's fixture set never reached.
+    // RS-14 lists java as conforming; that holds for the shapes it measured
+    // (document/embedded) and not for these.  Rather than edit RS-14's history,
+    // this rule names the shapes it missed.
     //
-    // Left OPEN deliberately: the fix is Hibernate-semantics work (forcing an
-    // optimistic increment on child-only mutations without double-bumping the
-    // collection write), it needs a container build + boot per iteration, and it
-    // is a different unit from the golden-coverage expansion that found it.  The
-    // two divergences are WAIVED in test/_helpers/wire-waivers.ts, which
-    // ratchets: the waivers go stale and fail the moment java is fixed.
-    conforms: ["node", "dotnet", "python", "elixir"],
+    // Closed by dropping `@Version` from the java entity emitter and driving the
+    // counter from the repository save instead: a `@Modifying` JPQL
+    // `update <Agg> e set e.version = e.version + 1 where e.id = :id and
+    // e.version = :expected` (one row == the command bumped; zero rows on an
+    // existing row == another writer won the race → the same
+    // ObjectOptimisticLockingFailureException the If-Match guard raises → 409),
+    // with the new value reflected onto the live instance.  A create matches no
+    // row and keeps the factory's `1`.  Same idiom as the node
+    // `eq(version, expected)` guarded update and the elixir `optimistic_lock`.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: [
       "found 2026-07-30 by the M-T9.11 golden gate on the newly-minted `single-containment` and `value-collections` cases (java leg)",
       "single-containment #2 GET /api/orders/{id} $.version — golden 2 vs java 1",
       "value-collections #1 GET /api/invoices/{id} $.version — golden 1 vs java 2",
+      "third face found later on `saga` (an IDEMPOTENT command): golden 3 vs java 2",
+      "fixed (java): @Version dropped from src/generator/java/emit/entity.ts (flat + TPH/TPC base arms); the counter is bumped by a guarded `bumpVersion` JPQL update from the repository save, src/generator/java/emit/repository.ts",
     ],
     tier: "behavioral",
   },

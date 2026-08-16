@@ -1105,8 +1105,15 @@ function predicateEntry(e: ExprIR): string {
 }
 
 /** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
- *  columns and unary `!` are lowered via `predicateEntry`. */
-function whereToMikroFilter(e: ExprIR): string {
+ *  columns and unary `!` are lowered via `predicateEntry`.
+ *
+ *  Exported for the query-time projection routes (M-T6.23 slice 4): an
+ *  aggregation reads the source table directly through the QueryBuilder, and its
+ *  `where` must lower through the SAME subset a find predicate does — a second
+ *  lowering would be a second set of bugs.  Throws on a predicate outside the
+ *  FilterQuery subset, which the caller turns into the adapter's usual
+ *  runtime-throwing stub. */
+export function whereToMikroFilter(e: ExprIR): string {
   const inner = e.kind === "paren" ? e.inner : e;
   if (inner.kind === "binary" && inner.op === "&&") {
     const entries = flattenAnd(inner).map((c) => predicateEntry(c));

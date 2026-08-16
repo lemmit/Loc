@@ -11,8 +11,9 @@
 // Flutter is structurally a Feliz clone (a non-JSX, function-call-tree target),
 // so the shape mirrors `FS_LEAVES` exactly; only the syntax is Dart, not F#.
 
-import type { LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
+import { DURATION_UNIT_MS } from "../../util/temporal.js";
 
 /** Dart single-quoted string literal.  Escapes the backslash, the quote, and
  *  `$` (Dart's string-interpolation sigil), plus the two structural whitespace
@@ -67,7 +68,50 @@ export const DART_LEAVES = {
     // model classes are Track A's concern; a bare object here is a `Map`).
     return `{${fields.map((f) => `${dartString(f.name)}: ${f.value}`).join(", ")}}`;
   },
+  /** `days(7)` — a Dart `Duration`, NOT the bare millisecond number the JS
+   *  frontends use: Dart's `DateTime` has no `+` operator at all, so a number
+   *  here does not even parse as datetime arithmetic.  The SPAN still comes
+   *  from `DURATION_UNIT_MS`, so `7 days` is the same length of time here as
+   *  on the wire and on every backend.  (Dart's `int` is 64-bit, so the
+   *  millisecond product needs no widening.) */
+  duration(unit: keyof typeof DURATION_UNIT_MS, amount: string): string {
+    return `Duration(milliseconds: ((${amount}) * ${DURATION_UNIT_MS[unit]}))`;
+  },
 };
+
+/** The datetime-involving `+`/`-` arms, or `null` to fall through to the plain
+ *  operator leaf.  Dart's `DateTime` defines NO arithmetic operators, so every
+ *  arm here is a method call — without them `until + days(7)` emits an
+ *  `operator +` that does not exist:
+ *
+ *    datetime + duration → datetime   ⇒ `(l).add(r)`
+ *    datetime − duration → datetime   ⇒ `(l).subtract(r)`
+ *    duration + datetime → datetime   ⇒ `(r).add(l)`        (commuted form)
+ *    datetime − datetime → duration   ⇒ `(l).difference(r)`
+ *
+ *  Dispatch is type-driven off the lowering's `leftType`/`rightType` stamps,
+ *  exactly as the TypeScript backend's `renderTemporalBinary` does. */
+export function dartTemporalBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: TypeIR | undefined): string | undefined =>
+    t?.kind === "primitive" ? t.name : undefined;
+  const lt = prim(e.leftType);
+  const rt = prim(e.rightType);
+  if (lt === "datetime" && rt === "duration") {
+    return `(${left}).${e.op === "+" ? "add" : "subtract"}(${right})`;
+  }
+  if (lt === "duration" && rt === "datetime" && e.op === "+") {
+    return `(${right}).add(${left})`;
+  }
+  if (lt === "datetime" && rt === "datetime" && e.op === "-") {
+    return `(${left}).difference(${right})`;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Scalar-intrinsic snippet table for Dart / Flutter — the sibling of

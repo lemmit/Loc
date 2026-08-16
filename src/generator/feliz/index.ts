@@ -55,9 +55,11 @@ import { felizTarget } from "./feliz-target.js";
 import {
   type FsExprCtx,
   fsString,
+  ROUTE_ID_FN,
   renderFsExpr,
   storeModelField,
   storeMsgCase,
+  usesRouteIdFn,
 } from "./fs-expr.js";
 import { FELIZ_INTL_MESSAGEFORMAT, felizI18nEnabled, renderFelizI18nModule } from "./i18n.js";
 import { felizPack } from "./pack.js";
@@ -188,7 +190,7 @@ function dispatchWrappers(
   const stateNames = new Set(page.state.map((s) => s.name));
   // Args are rendered in the VIEW's scope — a state read resolves to
   // `model.<Field>`; the route `id` is a bound local of the detail-page view fn.
-  const argCtx: FsExprCtx = { stateNames, locals: new Set(["id"]) };
+  const argCtx: FsExprCtx = { stateNames, locals: new Set(["id"]), routeId: "id" };
   return page.actions
     .filter((a) => used.has(a.name))
     .map((a) => {
@@ -440,8 +442,17 @@ function routePattern(route: string | undefined): string {
  *  to the first PARAMLESS page (a valid nullary ctor).  When every page carries a
  *  route param (a degenerate single-detail app), the fallback ctor takes an empty
  *  id (`ProductDetail ""`) so the match still returns a `Page`, not a partially-
- *  applied `string -> Page`. */
-function renderRouting(pages: readonly PageIR[], nameCtx: PageNameCtx): string {
+ *  applied `string -> Page`.
+ *
+ *  `withRouteId` additionally emits the `routeId` accessor — the route param of
+ *  the active page — which the MVU paths use to resolve an `id` read from
+ *  OUTSIDE a page view fn (`update`/`init` take no `id` parameter).  Emitted
+ *  only where referenced, so a ui whose bodies never read `id` is unchanged. */
+function renderRouting(
+  pages: readonly PageIR[],
+  nameCtx: PageNameCtx,
+  withRouteId = false,
+): string {
   const caseDecl = (p: PageIR): string =>
     hasRouteParam(p) ? `  | ${pageCase(p, nameCtx)} of string` : `  | ${pageCase(p, nameCtx)}`;
   const ctor = (p: PageIR): string =>
@@ -455,7 +466,16 @@ function renderRouting(pages: readonly PageIR[], nameCtx: PageNameCtx): string {
   const parse =
     `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
     `${arms.join("\n")}\n  | _ -> ${fallbackCtor}`;
-  return `${union}\n\n${parse}`;
+  if (!withRouteId) return `${union}\n\n${parse}`;
+  // One arm per param-carrying case; the wildcard covers the paramless ones and
+  // is OMITTED when every case binds an id (F# would flag it as a rule that can
+  // never match).
+  const idArms = pages.filter(hasRouteParam).map((p) => `  | ${pageCase(p, nameCtx)} id -> id`);
+  const wildcard = pages.every(hasRouteParam) ? [] : ['  | _ -> ""'];
+  const accessor =
+    `let ${ROUTE_ID_FN} (page: Page) : string =\n  match page with\n` +
+    [...idArms, ...wildcard].join("\n");
+  return `${union}\n\n${parse}\n\n${accessor}`;
 }
 
 /** The root routing `view` — a `React.router` that dispatches `UrlChanged` and
@@ -1307,7 +1327,7 @@ function renderAppFs(
       renderViewModule(reads, hasIdSelect, hasFieldErrors, usesChart),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
     routed && "",
-    routed && renderRouting(pages, nameCtx),
+    routed && renderRouting(pages, nameCtx, usesRouteIdFn(update, init)),
     "",
     model,
     "",

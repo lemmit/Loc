@@ -1,4 +1,5 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
+import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   DRIZZLE_INTRINSIC_SQL,
@@ -49,7 +50,50 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // (`loom.projection-query-time-unsupported`); node is the first.
 // ---------------------------------------------------------------------------
 
-export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string {
+// ---------------------------------------------------------------------------
+// The persistence-adapter seam (M-T6.23 slice 4).
+//
+// Three of the four query-projection shapes read the SOURCE TABLE directly
+// rather than through a repository — a whole-table aggregation, a grouped
+// aggregation, and a raw-table (`from <Workflow>` / `from <Projection>`) source
+// — because the whole point of an aggregation is that it pushes DOWN to SQL and
+// materialises no rows.  Those three are the only adapter-divergent part:
+//
+//   drizzle   db.select({...}).from(schema.orders).where(<drizzle expr>)
+//             …aggregates via drizzle's count()/sum(); rows come back keyed by
+//             the select alias, numerics as strings.
+//   mikroorm  db.createQueryBuilder(OrderRow, "o").select([raw("…")]).where(
+//             <FilterQuery>) — the aggregate/grouping expressions are SQL
+//             fragments, and the WHERE reuses `whereToMikroFilter` (the same
+//             lowering every mikro find uses) rather than growing a second
+//             predicate→SQL renderer.
+//
+// The FOURTH shape (repository-sourced: `repo.<projName>()` + `findManyByIds`
+// joins + `toWire`) is adapter-neutral already — the mikro repository emitter
+// synthesises the very same projection find (`synthProjectionFinds`), so those
+// route bodies are byte-identical between adapters and are not part of the seam.
+//
+// All four are ported.  The raw-table arm was missing in the first version of
+// this slice while its gate was already deleted, so the shape fell through to
+// the drizzle branch and emitted `db.select().from(schema.…)` into an
+// EntityManager file with no `schema` import (an owner review caught it).  If a
+// FIFTH shape is ever added, add its mikro arm in the same change as the emit —
+// a fall-through here is a generate-then-broken-build, which is worse than the
+// gate that used to stand in its place.
+//
+// One MikroORM constraint shapes the emission: a `raw()` fragment is
+// SINGLE-USE per query ("Trying to modify a raw query fragment that was already
+// used"), so a computed grouping key that appears in SELECT, GROUP BY and ORDER
+// BY is emitted as three separate `raw()` calls of the same SQL text.
+// ---------------------------------------------------------------------------
+
+export function buildQueryProjectionsFile(
+  ctx: EnrichedBoundedContextIR,
+  /** `persistence: mikroorm` — read the direct-table shapes through the
+   *  EntityManager's QueryBuilder instead of Drizzle (M-T6.23 slice 4).  Default
+   *  false keeps the Drizzle output byte-identical. */
+  usingMikro = false,
+): string {
   const projections = (ctx.projections ?? []).filter(isQueryTimeProjection);
   if (projections.length === 0) return "";
 
@@ -124,6 +168,16 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
       aggWheres.set(p.name, undefined);
     }
   }
+  // MikroORM WHERE lowering for the same direct-table shapes: a FilterQuery
+  // object built by the shared `whereToMikroFilter` (the lowering every mikro
+  // find already uses), keyed per projection.  `undefined` = no filter.
+  const mikroWheres = new Map<string, string | undefined>();
+  if (usingMikro) {
+    for (const p of projections) {
+      const f = p.query?.filter;
+      mikroWheres.set(p.name, f ? mikroFilterFor(f) : undefined);
+    }
+  }
   const allAggs = new Set([...sourceAggs, ...followAggs]);
   const usesEvents =
     projections.some((p) => (p.query?.auxiliaries.length ?? 0) > 0) || sourceAggs.size > 0;
@@ -140,7 +194,13 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
     `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
   lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
-  lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+  if (usingMikro) {
+    // The direct-table shapes need the Row entity classes + `raw`; the
+    // repository-sourced shape needs neither.  Both are body-scan-gated below.
+    lines.push(`import { EntityManager } from "@mikro-orm/postgresql";`);
+  } else {
+    lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
+  }
   // `schema` is normally needed only for `NodePgDatabase<typeof schema>` — a
   // TYPE position — but the two paths that query a table DIRECTLY (a raw-table
   // source, and a whole-table aggregation) name `schema.<table>` as a VALUE.
@@ -149,13 +209,15 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   // A value import satisfies the type position too, so this is a widening;
   // projections that need neither keep the type-only import byte-for-byte.
   const schemaAsValue = rawReads.size > 0 || aggWheres.size > 0;
-  lines.push(
-    schemaAsValue
-      ? `import * as schema from "../db/schema";`
-      : `import type * as schema from "../db/schema";`,
-  );
-  if (rawDrizzleOps.size > 0) {
-    lines.push(`import { ${[...rawDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
+  if (!usingMikro) {
+    lines.push(
+      schemaAsValue
+        ? `import * as schema from "../db/schema";`
+        : `import type * as schema from "../db/schema";`,
+    );
+    if (rawDrizzleOps.size > 0) {
+      lines.push(`import { ${[...rawDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
+    }
   }
   if (needsIds) lines.push(`import * as Ids from "../domain/ids";`);
   for (const aggName of [...allAggs].sort()) {
@@ -194,7 +256,7 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push("");
 
   lines.push(`export function queryProjectionsRoutes(`);
-  lines.push(`  db: NodePgDatabase<typeof schema>,`);
+  lines.push(`  db: ${usingMikro ? "EntityManager" : "NodePgDatabase<typeof schema>"},`);
   lines.push(`  ${usesEvents ? "events" : "_events"}: DomainEventDispatcher,`);
   lines.push(`): OpenAPIHono {`);
   lines.push(`  const app = newApp();`);
@@ -202,9 +264,12 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
 
   for (const p of projections) {
     lines.push(
-      ...emitQueryProjectionRoute(p, rawReads.get(p.name), aggWheres.get(p.name)).map(
-        (l) => `  ${l}`,
-      ),
+      ...emitQueryProjectionRoute(
+        p,
+        rawReads.get(p.name),
+        aggWheres.get(p.name),
+        usingMikro ? { where: mikroWheres.get(p.name) } : undefined,
+      ).map((l) => `  ${l}`),
     );
     lines.push("");
   }
@@ -259,7 +324,28 @@ export function buildQueryProjectionsFile(ctx: EnrichedBoundedContextIR): string
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
-  return `${lines.join("\n")}\n`;
+  const file = lines.join("\n");
+  if (!usingMikro) return `${file}\n`;
+  // Body-scan the emitted routes for the mikro-only names: `raw` (the SQL
+  // fragments) and each Row entity class a direct-table shape reads.  A
+  // repository-sourced-only file references neither, so it stays free of both
+  // imports — and of any dependency on the entity module.
+  const rowClasses = [
+    ...new Set(
+      projections
+        .filter((p) => p.query?.source)
+        .map((p) => mikroRowClassFor(p, p.query!.source!))
+        .filter((cls) => new RegExp(`\\b${cls}\\b`).test(file)),
+    ),
+  ].sort();
+  const extra: string[] = [];
+  if (/(?<!\.)\braw\(/.test(file)) extra.push(`import { raw } from "@mikro-orm/core";`);
+  if (rowClasses.length > 0)
+    extra.push(`import { ${rowClasses.join(", ")} } from "../db/entities";`);
+  if (extra.length === 0) return `${file}\n`;
+  // Splice after the EntityManager import, keeping the import block contiguous.
+  const marker = `import { EntityManager } from "@mikro-orm/postgresql";`;
+  return `${file.replace(marker, [marker, ...extra].join("\n"))}\n`;
 }
 
 /** One query-time projection route: `GET /<projName>` under `/projections`.
@@ -271,6 +357,11 @@ function emitQueryProjectionRoute(
   p: ProjectionIR,
   rawRead?: { table: string; where?: string },
   aggregateWhere?: string,
+  /** Present ⇒ `persistence: mikroorm`: `where` is a MikroORM FilterQuery
+   *  literal (or undefined for an unfiltered read).  The direct-table shapes
+   *  below branch on it; the repository-sourced shape ignores it, being
+   *  adapter-neutral. */
+  mikro?: { where?: string },
 ): string[] {
   const T = upperFirst(p.name);
   const source = p.query!.source!;
@@ -310,6 +401,83 @@ function emitQueryProjectionRoute(
   // is the LIST shape (an array of the declared row), so the read GROUPs BY —
   // and ORDERs BY, for a deterministic cross-backend read — exactly the
   // grouping columns, in one query.
+  if (grouped && mikro) {
+    const rowClass = mikroRowClassFor(p, source);
+    const alias = "src";
+    // SELECT: one raw fragment per grouping key + per aggregate, each aliased to
+    // the projection field so the row comes back keyed like the drizzle one.
+    const selects = [
+      ...grouped.keys.map(
+        (k) =>
+          `raw(${JSON.stringify(`${mikroGroupKeySql(k.expr, alias)} as "${snake(k.field)}"`)})`,
+      ),
+      ...grouped.aggregates.map(
+        (sel) =>
+          `raw(${JSON.stringify(`${mikroAggregateSql(sel.aggregate, alias)} as "${snake(sel.field)}"`)})`,
+      ),
+    ];
+    // GROUP BY / ORDER BY repeat the key expressions — each as its OWN `raw()`
+    // call, because a raw fragment is single-use per query.
+    const groupSql = grouped.groupBy.map((e) => mikroGroupKeySql(e, alias));
+    out.push(`    const qb = db.createQueryBuilder(${rowClass}, ${JSON.stringify(alias)});`);
+    out.push(`    qb.select([${selects.join(", ")}]);`);
+    if (mikro.where) out.push(`    qb.where(${mikro.where});`);
+    out.push(`    qb.groupBy([${groupSql.map((g) => `raw(${JSON.stringify(g)})`).join(", ")}]);`);
+    out.push(
+      `    qb.orderBy([${groupSql.map((g) => `{ [raw(${JSON.stringify(g)})]: "asc" }`).join(", ")}]);`,
+    );
+    const rowType = [
+      ...grouped.keys.map((k) => `${snake(k.field)}: unknown`),
+      ...grouped.aggregates.map((sel) => `${snake(sel.field)}: unknown`),
+    ].join("; ");
+    // `mapResults: false`.  MikroORM's default result mapping renames DB columns
+    // back to ENTITY PROPERTY names, which silently rewrites any select alias
+    // that happens to be a real column: a `customer_id` grouping key came back
+    // as `customerId`, so reading `r.customer_id` yielded undefined and the wire
+    // carried the string "undefined" (M-T6.23 slice 4 — found by the
+    // `projection-groupby` behavioural case; the aggregate aliases were
+    // unaffected precisely because `avg_lines` is not a column).  Verbatim
+    // aliases keep the read keyed by what the SELECT actually asked for.
+    out.push(`    const rows = await qb.execute<{ ${rowType} }[]>("all", false);`);
+    out.push(`    const projected = rows.map((r) => ({`);
+    for (const k of grouped.keys) {
+      out.push(
+        `      ${k.field}: ${coerceGroupKey(k, `r.${snake(k.field)}`, groupKeyOrThrow(k.expr), true)},`,
+      );
+    }
+    for (const sel of grouped.aggregates) {
+      out.push(`      ${sel.field}: ${coerceAggregate(sel, `r.${snake(sel.field)}`)},`);
+    }
+    out.push(`    }));`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
+  }
+  // WHOLE-TABLE aggregation, mikro edition: the same push-down, one row out.
+  if (aggregates && mikro) {
+    const rowClass = mikroRowClassFor(p, source);
+    const alias = "src";
+    const selects = aggregates.map(
+      (sel) =>
+        `raw(${JSON.stringify(`${mikroAggregateSql(sel.aggregate, alias)} as "${snake(sel.field)}"`)})`,
+    );
+    out.push(`    const qb = db.createQueryBuilder(${rowClass}, ${JSON.stringify(alias)});`);
+    out.push(`    qb.select([${selects.join(", ")}]);`);
+    if (mikro.where) out.push(`    qb.where(${mikro.where});`);
+    const rowType = aggregates.map((sel) => `${snake(sel.field)}: unknown`).join("; ");
+    // `mapResults: false` — see the grouped branch above.
+    out.push(`    const [row] = await qb.execute<{ ${rowType} }[]>("all", false);`);
+    out.push(`    const projected = {`);
+    for (const sel of aggregates) {
+      out.push(`      ${sel.field}: ${coerceAggregate(sel, `row?.${snake(sel.field)}`)},`);
+    }
+    out.push(`    };`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
+  }
   if (grouped) {
     const sourceTable = `schema.${lowerFirst(plural(source))}`;
     const groupCols = grouped.groupBy.map((e) => groupKeyExpr(e, sourceTable)).join(", ");
@@ -365,6 +533,31 @@ function emitQueryProjectionRoute(
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
   const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
+  // RAW-TABLE source on the mikro adapter (M-T6.23 slice 4, completed after an
+  // owner review): a WORKFLOW source reads its saga-state Row, a PROJECTION
+  // source the folded read-model Row.  `em.find` hands back ENTITIES whose
+  // property names are exactly what the shared `select` projection reads off
+  // `r`, so only the READ differs from drizzle — the projection body below is
+  // untouched.
+  //
+  // This arm existed on drizzle only; without it the mikro path fell through to
+  // the drizzle branch and emitted `db.select().from(schema.…)` into a file with
+  // no `schema` import — a generate-then-`tsc`-fail, which is the exact silent
+  // class M-T6.23 exists to kill.  No corpus fixture carries this shape, which
+  // is why the runtime leg stayed green; `node-mikroorm-query-projections.test.ts`
+  // now pins it.
+  if (mikro && rawRead) {
+    const rowClass = mikroRowClassFor(p, source);
+    out.push(`    const rows = await db.find(${rowClass}, ${mikro.where ?? "{}"});`);
+    const projectedFields = (p.query!.selects ?? [])
+      .map((sel) => `      ${sel.field}: ${renderProjectionSelect(sel.expr, aliasMap)}`)
+      .join(",\n");
+    out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
+  }
   if (rawRead) {
     // RAW-TABLE source (WORKFLOW saga-state table or a folded PROJECTION's
     // `<Proj>Row` read-model table): read the table directly (no repository, no
@@ -423,6 +616,74 @@ function emitQueryProjectionRoute(
   out.push(`);`);
   return out;
 }
+
+/** The MikroORM Row entity class a direct-table projection shape reads.  Mirrors
+ *  the three source kinds the drizzle path names a table for: an AGGREGATE
+ *  source reads `<Agg>Row`, a WORKFLOW source its saga-state Row, a PROJECTION
+ *  source the folded read-model Row — the same three classes `renderMikroEntities`
+ *  emits, so the names cannot drift. */
+function mikroRowClassFor(p: ProjectionIR, source: string): string {
+  const kind = p.query?.sourceKind;
+  if (kind === "workflow") return `${upperFirst(source)}Row`;
+  if (kind === "projection") return `${upperFirst(source)}Row`;
+  return `${source}Row`;
+}
+
+/** A projection `where` as a MikroORM FilterQuery literal.
+ *
+ *  Throws on a predicate outside the adapter's subset, and that is deliberate:
+ *  `validateFindPredicateAdapterSupport` now walks query-time projection filters
+ *  too (`loom.find-predicate-unsupported`), so reaching here with an unlowerable
+ *  predicate is an internal contradiction, exactly like `aggregateColumn`'s
+ *  non-column argument.  Swallowing it would drop the filter and answer a
+ *  plausible WRONG number. */
+function mikroFilterFor(filter: ExprIR): string {
+  return whereToMikroFilter(filter);
+}
+
+/** The SQL aggregate expression for one `select`, aliased column-qualified so it
+ *  is unambiguous inside the QueryBuilder's own FROM alias. */
+function mikroAggregateSql(agg: ProjectionAggregateIR, alias: string): string {
+  if (agg.op === "count" || !agg.arg) return "count(*)";
+  return `${agg.op}(${mikroAggregateColumn(agg.arg, alias)})`;
+}
+
+/** The column an aggregation reads, as `<alias>."<snake_column>"`.  Mirrors
+ *  `aggregateColumn`: the argument is a source-row member access, and the mikro
+ *  Row's DB column is the snake_cased property (MikroORM's underscored naming
+ *  strategy, which is what every raw statement this adapter emits assumes). */
+function mikroAggregateColumn(arg: ExprIR, alias: string): string {
+  if (arg.kind === "member") return `${alias}."${snake(arg.member)}"`;
+  throw new Error("internal: a whole-table aggregation argument must be a source column reference");
+}
+
+/** The SQL for one grouping key — the mikro twin of `groupKeyExpr`.  A BARE key
+ *  is the qualified column; a COMPUTED key is the same Postgres function the
+ *  drizzle intrinsic snippet emits (`date_trunc('day', …)`), spelled directly so
+ *  the SELECT, GROUP BY and ORDER BY carry byte-identical text — which is what
+ *  makes Postgres accept the grouped select. */
+function mikroGroupKeySql(e: ExprIR, alias: string): string {
+  const key = groupKeyOrThrow(e);
+  const col = `${alias}."${snake(key.column)}"`;
+  if (!key.transform) return col;
+  const fn = MIKRO_GROUP_KEY_TRANSFORM_SQL[key.transform];
+  if (!fn) {
+    throw new Error(
+      `internal: no SQL for grouping transform '${key.transform}' on the mikroorm adapter — the transform table and this one disagree`,
+    );
+  }
+  return fn(col);
+}
+
+/** Postgres SQL per supported grouping transform.  Deliberately the SAME
+ *  function the drizzle `DRIZZLE_INTRINSIC_SQL["datetime.startOfDay"]` snippet
+ *  builds, so a bucketed key groups identically on both adapters. */
+const MIKRO_GROUP_KEY_TRANSFORM_SQL: Record<
+  GroupKey["transform"] & string,
+  (col: string) => string
+> = {
+  startOfDay: (col) => `date_trunc('day', ${col})`,
+};
 
 /** The Drizzle aggregate call for one `select`.  `count` counts ROWS (no
  *  column); the rest take the aggregated column, which is source-row-rooted so
@@ -516,12 +777,36 @@ const GROUP_KEY_TRANSFORM_TS_TYPE: Record<GroupKey["transform"] & string, string
  *  number, uuid/text → string — those pass through untouched — but `numeric`
  *  (money/decimal) is a STRING through the driver and `timestamp` a `Date`,
  *  so the numeric family and datetime rewrap to match the row schema. */
-function coerceGroupKey(sel: GroupKeySelect, expr: string, key: GroupKey): string {
+function coerceGroupKey(
+  sel: GroupKeySelect,
+  expr: string,
+  key: GroupKey,
+  /** `persistence: mikroorm` — a transformed key needs DECODING, not a cast
+   *  (see below). */
+  usingMikro = false,
+): string {
   const optional = sel.type.kind === "optional";
   const inner = sel.type.kind === "optional" ? sel.type.inner : sel.type;
-  // A TRANSFORMED key is selected as a raw `sql` expression, which Drizzle
-  // types `unknown` — re-assert the driver's runtime type before coercing.
-  const read = key.transform ? `(${expr} as ${GROUP_KEY_TRANSFORM_TS_TYPE[key.transform]})` : expr;
+  // A TRANSFORMED key is selected as a raw SQL expression, which neither adapter
+  // types — but the two differ in what the DRIVER hands back, and that is a
+  // runtime difference a cast cannot paper over:
+  //
+  //   drizzle   `.mapWith(<column>)` in the select reuses that column's own
+  //             `mapFromDriverValue`, so a bucketed timestamp arrives as a
+  //             `Date` and only needs its type re-asserted.
+  //   mikroorm  a raw QueryBuilder select has no per-column decoder at all, so
+  //             `date_trunc(...)` arrives as the wire STRING
+  //             ("2026-08-01 00:00:00+00").  `as Date` compiles and then
+  //             `.toISOString()` throws `is not a function` at runtime — which
+  //             is exactly how this was found (M-T6.23 slice 4, the
+  //             `projection-groupby` behavioural case 500'd on the computed
+  //             `startOfDay` key while every other shape passed).
+  const tsType = key.transform ? GROUP_KEY_TRANSFORM_TS_TYPE[key.transform] : undefined;
+  const read = !key.transform
+    ? expr
+    : usingMikro && tsType === "Date"
+      ? `new Date(${expr} as string)`
+      : `(${expr} as ${tsType})`;
   const coerced = groupKeyWireExpr(inner, read);
   if (coerced === read) return read;
   return optional ? `${expr} == null ? null : ${coerced}` : coerced;
