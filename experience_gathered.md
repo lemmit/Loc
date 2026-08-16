@@ -4930,3 +4930,59 @@ a clean single-purpose working tree is the worst case, not the safest one.
 **Rule, restated so it is mechanical:** never `git checkout --` a file you have
 edited this session. To drop instrumentation, either `cp` it back from the copy
 you took before mutating, or delete the debug lines by hand.
+
+## 86. A test harness that hand-copies generated code is an oracle for fiction (2026-08-14)
+
+#2548 filed a cross-backend divergence in the dev stub's `/api/auth/me`
+principal: node answered `{id, tenantId}` for a system whose `user { … }` block
+declares `{ id, role }`. That body is not derivable from the source, and no
+emitter produces it — which was the tell, and it took a `console.error` on the
+recorded response to notice, because the golden's normalizer had rewritten the
+values (`tenantId` matches the `Id$` volatile-key rule) into `<volatile:key>`
+and the *keys* were the only surviving evidence.
+
+The cause: `test/behavioral/run.mjs` boots `createApp` rather than the generated
+`index.ts`, so it has to re-register a verifier — and it did that by inlining
+**its own copy** of the dev stub, frozen as a literal
+`{ id: "000…", tenantId: "admin" }`. The generated stub builds its identity from
+the DECLARED user shape. So the node leg — *the wire-golden oracle for the other
+four backends* — recorded a principal that exists nowhere in the product. The
+comment above it read "re-register the SAME verifier the generated boot module
+would". It said what the author intended, not what the code did, for as long as
+nobody diffed the two.
+
+The OIDC arm sitting three lines above had no such problem: it does
+`import { registerOidcVerifier } from "<gen>/auth/oidc.ts"; registerOidcVerifier()`.
+The difference is not care, it's ADDRESSABILITY — the OIDC verifier is an
+exported module, the dev stub was an anonymous literal inlined into `index.ts`,
+so "import it" was not on the menu and "retype it" was. The fix was to emit
+`auth/dev-stub.ts` with a `registerDevStubVerifier()` registrar; the harness
+then imports the same module `index.ts` calls.
+
+**Rule:** a harness that has to re-do a boot step must IMPORT it, never restate
+it. If it cannot import it, that is a defect in the emitter's factoring — make
+the thing an exported module — not a licence to copy. Copies of generated code
+inside a test harness age into confident lies, and they are worst exactly where
+the harness is an oracle for other backends.
+
+### The same session, a second silent gate: a `skip` that switched the gate off
+
+`makeWireGate().check()` refused to compare when `results?.some(r => r.status
+!== "pass")` — reasonable when the alternative to "pass" is "fail". Then #2515
+added an authz ladder that reports **`skip`** for an arm a system's auth flavour
+cannot express (a dev-stub system has no anonymous caller). From that merge on,
+`auth-simple` printed
+
+```
+  ⟐ wire: skipped — the tier did not pass, so its recording is not comparable
+```
+
+on every backend, and its ENTIRE 12-entry golden — the CRUD round-trip, the 405,
+the 404, the 400 — was compared nowhere. The line reads like a deliberate skip,
+so it survived review and daily runs. `LOOM_WIRE_UPDATE=1` could not even
+rebaseline the case, which is how one notices if one is looking.
+
+**Rule:** gate predicates name the DISQUALIFYING states (`fail`, `error`), never
+"everything that isn't the good one". A third outcome added later then arrives
+as a compile-or-review question instead of silently disabling the check — and a
+new status must be classified deliberately, which is the whole point.

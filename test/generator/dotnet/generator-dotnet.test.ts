@@ -1353,8 +1353,13 @@ describe(".NET generator", () => {
     // principal first).  Parity with the Hono backend.
     it("maps GET /auth/me when `auth: required`, and not otherwise", async () => {
       const program = (await emitForAuthSystem(SRC_AUTH_REQUIRED)).get("Program.cs")!;
-      expect(program).toContain(
-        'app.MapGet("/api/auth/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();',
+      // The body is the DECLARED `user { … }` shape, by declared name, and
+      // nothing else (#2548) — serialising the record itself also shipped its
+      // derived tenancy members, which no other backend sends.
+      expect(program.replace(/\s+/g, " ")).toContain(
+        'app.MapGet("/api/auth/me", (ICurrentUserAccessor accessor) => ' +
+          'Results.Json( new Dictionary<string, object?> { ["id"] = accessor.User.Id, ' +
+          '["role"] = accessor.User.Role, })).ExcludeFromDescription();',
       );
       const noAuth = (await emitForAuthSystem(SRC_NO_AUTH)).get("Program.cs")!;
       expect(noAuth).not.toContain("/api/auth/me");
