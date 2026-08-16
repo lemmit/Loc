@@ -155,6 +155,27 @@ const FIRING_FIXTURES: Record<string, string> = {
         create(code: string) { code := code }
         create draft(code: string) { code := code }
       }`),
+  // A frontend deployable whose ui READS `currentUser` while the ui is not
+  // served under auth (`auth: ui` absent) — arrived on `main` mid-PR, same as
+  // the three above.
+  "loom.current-user-needs-auth-ui": `
+system S {
+  user { id: guid  role: string }
+  auth { oidc { issuer: "https://idp.example.com"  clientId: "app" } }
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    api C: Api
+    page Home { route: "/" body: Text { currentUser.role } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 auth: required }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
   "loom.lifecycle-guard-event-sourced": deployed(`      event Made { order: Order id, code: string }
       aggregate Order persistedAs: eventLog {
         code: string
