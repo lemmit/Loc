@@ -33,6 +33,15 @@ export function dartString(value: string): string {
     .replace(/\t/g, "\\t")}'`;
 }
 
+/** Dart spelling of the `now()` literal — the current instant on the UTC clock.
+ *  `DateTime.now()` alone is a LOCAL-time value, so `.toUtc()` normalizes it to
+ *  the same clock the wire carries: `dart-types.ts` decodes a `datetime` with
+ *  `DateTime.parse(...)`, and the datetime intrinsics (`dart-expr.ts`'s
+ *  `datetime.startOfDay`) likewise `.toUtc()` before reading fields rather than
+ *  trusting the parsed value's Kind.  Matches Feliz's `System.DateTime.UtcNow`
+ *  and the .NET backend's spelling of the same literal. */
+export const DART_NOW = "DateTime.now().toUtc()";
+
 /** Pure Dart leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `flutterTarget` can forward straight to these. */
@@ -41,7 +50,12 @@ export const DART_LEAVES = {
     if (lit === "string") return dartString(value);
     if (lit === "bool") return value; // true / false spelled identically
     if (lit === "null") return "null";
-    // int / long / decimal / money / now → numeric literal verbatim.
+    // `now()` is a LITERAL kind whose `value` is the word "now", not a number,
+    // so the numeric-verbatim fallthrough below emitted a bare `now` — an
+    // unbound Dart identifier, and the only literal kind on this target that is
+    // not already valid Dart text.
+    if (lit === "now") return DART_NOW;
+    // int / long / decimal / money → numeric literal verbatim.
     return value;
   },
   binary(left: string, right: string, op: string): string {
