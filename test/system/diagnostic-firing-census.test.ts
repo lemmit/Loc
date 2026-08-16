@@ -155,6 +155,36 @@ const FIRING_FIXTURES: Record<string, string> = {
         create(code: string) { code := code }
         create draft(code: string) { code := code }
       }`),
+  // --- workflow instance-read gate (M-T3.15 §A2) --------------------------
+  // The header gate runs BEFORE any instance is loaded, so only `currentUser`
+  // is in scope; `stage` is a workflow STATE field and has no value to read.
+  // It is lowered in the bare context env precisely so such a reference cannot
+  // silently resolve — this turns that into a diagnostic.
+  "loom.workflow-gate-not-current-user": `
+system S {
+  user { id: guid  role: string }
+  subdomain Sales { context Orders {
+    aggregate Order { code: string }
+    repository Orders for Order { }
+    workflow Fulfilment requires stage == "started" {
+      orderId: Order id
+      stage: string
+      create start(order: Order id) { orderId := order  stage := "started" }
+    }
+  } }
+  api Api from Sales
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d {
+    platform: node
+    contexts: [Orders]
+    dataSources: [st]
+    serves: Api
+    port: 3000
+    auth: required
+  }
+}`,
+
   // A frontend deployable whose ui READS `currentUser` while the ui is not
   // served under auth (`auth: ui` absent) — arrived on `main` mid-PR, same as
   // the three above.
