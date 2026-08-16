@@ -1,30 +1,27 @@
 // `persistence: dapper` FEATURE gate — query-time projections.
 //
-// The Dapper adapter reached full parity with EF Core on the PERSISTENCE axis
-// (M-T6.9), and its remaining `loom.dapper-unsupported` clauses reject genuinely
-// unmappable SHAPES.  Query-time projections are a different kind of gap and a
-// worse one: `src/generator/dotnet/query-projection-emit.ts` has no dapper
-// branch at all, so it emits the EF shape unconditionally — `using
-// Microsoft.EntityFrameworkCore;` and `private readonly AppDbContext _db;`,
-// neither of which exists on this adapter.
+// HISTORY, because the assertions in this file INVERTED and the reason matters.
 //
-// The result was not a silently-missing feature (the MikroORM shape) but a
-// project that DOES NOT COMPILE: `CS0234: the namespace 'EntityFrameworkCore'
-// does not exist` / `CS0246: 'AppDbContext' could not be found`, with nothing
-// said at generate time.  The author gets a C# build error naming a type they
-// never wrote, one layer away from anything they can act on.
+// `query-projection-emit.ts` used to have no dapper branch at all, so it emitted
+// the EF shape unconditionally — `using Microsoft.EntityFrameworkCore;` and
+// `private readonly AppDbContext _db;`, neither of which exists on this adapter.
+// The result was not a silently-missing feature but a project that DOES NOT
+// COMPILE (`CS0234` / `CS0246`), with nothing said at generate time.  #2498 made
+// that honest with a BLANKET `loom.dapper-unsupported` over every query-time
+// projection, and this file pinned the refusal.
 //
-// Found when `projection-aggregation` / `projection-groupby` got their first
-// runtime callers (#2468): the dapper behavioral leg failed to BOOT, and the
-// compile tiers had never covered the combination because no corpus fixture
-// forces `persistence: dapper` onto a projection-bearing context.
+// M-T6.25 paid the debt the refusal was standing in for: the four arms that read
+// a table directly (whole-table aggregation, grouped, workflow-sourced,
+// projection-sourced) are raw Npgsql now, and the per-row arm never touched EF —
+// it reads through the aggregate's repository, which this adapter has always
+// emitted.  So the blanket clause is gone and the cases below now assert the
+// OPPOSITE: both shapes validate.
 //
-// Pins BOTH directions, like the MikroORM gate beside it: dapper is rejected
-// with an honest diagnostic, and the SAME model on the default EF Core adapter
-// stays clean — so the gate keys on the ADAPTER, not on the feature.  Deleting
-// the clause is how the gap closes for real; Dapper is raw SQL and a query-time
-// projection IS a SQL aggregate, so that port is a smaller job than the gate's
-// existence suggests.
+// What the file still pins is the discipline, unchanged: the gate keys on the
+// ADAPTER, both directions, and the boundary that SURVIVED still fires.  That
+// last one is the load-bearing case — narrowing a refusal is only honest if the
+// narrowed form still refuses something, or "we fixed it" has quietly become
+// "we deleted the check".
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -34,11 +31,15 @@ import { parseString } from "../_helpers/parse.js";
 
 /** One system whose `platform:` clause is the only variable between the two
  *  legs — the adapter is the independent variable, the model is not. */
-const SYS = (platformClause: string, body: string): string => `
+const SYS = (
+  platformClause: string,
+  body: string,
+  aggHeader = "aggregate Order with crudish",
+): string => `
 system Shop {
   subdomain Orders {
     context Orders {
-      aggregate Order with crudish {
+      ${aggHeader} {
         code: string
         total: money
       }
@@ -58,12 +59,14 @@ ${body}
   }
 }`;
 
-async function diagsFor(platformClause: string, body: string) {
-  const { model } = await parseString(SYS(platformClause, body), { validate: false });
+async function diagsFor(platformClause: string, body: string, aggHeader?: string) {
+  const { model } = await parseString(SYS(platformClause, body, aggHeader), { validate: false });
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
-/** The per-row query-time read model — `select` over a source, no fold. */
+/** The per-row query-time read model — `select` over a source, no fold.  Rides
+ *  the aggregate's repository, so it was persistence-neutral all along; the
+ *  blanket refusal took it down anyway. */
 const PER_ROW_PROJECTION = `
       projection Board {
         rowId: Order id
@@ -73,7 +76,8 @@ const PER_ROW_PROJECTION = `
       }`;
 
 /** The SINGLETON whole-table aggregation — the shape `projection-aggregation`
- *  drives, and the one whose emitted handler names `AppDbContext`. */
+ *  drives, and the one whose handler used to name `AppDbContext`.  Now one raw
+ *  `SELECT count(*), sum(total) …`. */
 const AGGREGATION_PROJECTION = `
       projection Totals {
         orders: int
@@ -82,23 +86,16 @@ const AGGREGATION_PROJECTION = `
         select orders = count(), revenue = sum(o.total)
       }`;
 
-describe("`persistence: dapper` — query-time projections are gated, not mis-emitted", () => {
+describe("`persistence: dapper` — query-time projections emit, and the narrow boundary still refuses", () => {
   for (const [name, body] of [
     ["per-row", PER_ROW_PROJECTION],
     ["whole-table aggregation", AGGREGATION_PROJECTION],
   ] as const) {
-    it(`rejects a ${name} query-time projection on the dapper adapter`, async () => {
-      const diags = await diagsFor("dotnet { persistence: dapper }", body);
-      const gate = diags.filter(
-        (d) => d.severity === "error" && d.code === "loom.dapper-unsupported",
+    it(`accepts a ${name} query-time projection on the dapper adapter (M-T6.25)`, async () => {
+      const errors = (await diagsFor("dotnet { persistence: dapper }", body)).filter(
+        (d) => d.severity === "error",
       );
-      expect(gate.length).toBeGreaterThan(0);
-      // The message has to name what the author must change — the adapter and
-      // the projection — not just that something is unsupported.
-      expect(gate[0]?.message).toContain("persistence: dapper");
-      expect(gate[0]?.message).toMatch(/'(Board|Totals)'/);
-      // …and the way out, since the same model generates on the default adapter.
-      expect(gate[0]?.message).toContain("EF Core");
+      expect(errors.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
     });
 
     it(`emits the same ${name} projection cleanly on the default (EF Core) adapter`, async () => {
@@ -106,6 +103,47 @@ describe("`persistence: dapper` — query-time projections are gated, not mis-em
       expect(errors.map((d) => d.code)).toEqual([]);
     });
   }
+
+  // THE SURVIVING BOUNDARY.  An aggregation names COLUMNS, and a `shape:
+  // document` aggregate keeps its fields inside one jsonb blob — `sum(total)`
+  // has no `total` to name.  EF Core hides the difference behind its own JSON
+  // translation; raw SQL cannot, so this stays an honest refusal.  No corpus
+  // fixture pairs the two shapes, which makes this the boundary's only witness.
+  it("still refuses an aggregation whose source keeps its fields in a jsonb blob", async () => {
+    const diags = await diagsFor(
+      "dotnet { persistence: dapper }",
+      AGGREGATION_PROJECTION,
+      "aggregate Order shape: document, with crudish",
+    );
+    const gate = diags.filter(
+      (d) => d.severity === "error" && d.code === "loom.dapper-unsupported",
+    );
+    expect(gate.length).toBeGreaterThan(0);
+    // The message has to name what the author must change — the adapter, the
+    // projection, and WHY this source cannot be aggregated in SQL.
+    expect(gate[0]?.message).toContain("persistence: dapper");
+    expect(gate[0]?.message).toContain("'Totals'");
+    expect(gate[0]?.message).toContain(
+      "'shape: document' aggregate 'Order', whose fields live inside one jsonb blob",
+    );
+    // …and the way out, since the same model generates on the default adapter.
+    expect(gate[0]?.message).toContain("EF Core");
+  });
+
+  it("the per-row arm over that same document source is NOT refused", async () => {
+    // The narrowing has to be arm-shaped, not source-shaped: a per-row read of a
+    // document aggregate goes through the repository, which hydrates the blob
+    // perfectly well.  Refusing it too would be the old blanket gate wearing a
+    // narrower name.
+    const errors = (
+      await diagsFor(
+        "dotnet { persistence: dapper }",
+        PER_ROW_PROJECTION,
+        "aggregate Order shape: document, with crudish",
+      )
+    ).filter((d) => d.severity === "error" && d.code === "loom.dapper-unsupported");
+    expect(errors.map((d) => d.message)).toEqual([]);
+  });
 
   it("leaves a projection-free dapper deployable alone", async () => {
     // The gate must key on the projection's presence, not on the adapter alone —

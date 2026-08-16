@@ -59,7 +59,7 @@ a class with no construct behind it:
 | compiler-owned read | route | gate today | seen by `denyByDefault` |
 |---|---|---|---|
 | audit history | `/<agg>/{id}/history` | **borrowed** from `find all`'s `requires` (`enrich/enrichments.ts` `ensureHistoryFind`) | yes (`loom.audit-history-ungated`) |
-| workflow instances | `/workflows/<wf>/instances`, `/instances/{id}` | **none** | **no** |
+| workflow instances | `/workflows/<wf>/instances`, `/instances/{id}` | header `requires` on the `workflow` declaration, enforced on both routes, all five backends | **yes** — ✅ CLOSED (#2570) |
 | provenance | — | n/a | n/a — write substrate only, **no read endpoint exists** |
 | query-time projections | `/projections/<name>` | first-class `requires` | **yes** — ✅ CLOSED (#2523) |
 | materialized projections | `/projections/<name>`, `/<name>/{key}` | first-class `requires`, enforced on both routes, all five backends | **yes** — ✅ CLOSED (#2523) |
@@ -74,10 +74,32 @@ Covers audit history, workflow instances, and provenance behind one surface: one
 gate, one masking hook, one entry in `validateDefaultDeny`. This is the item that
 makes A2/A3 and the D2 repoint cheap instead of repetitive. **Size: L.**
 
-### A2 — gate workflow-instance reads
-`GET /workflows/<wf>/instances` exposes correlation state, command params, and
-saga progress to any authenticated caller, and `validateDefaultDeny` does not
-enumerate it. Standalone security fix that does not wait on A1. **Size: S.**
+### ~~A2 — gate workflow-instance reads~~ — ✅ **DONE (#2570)**
+`GET /workflows/<wf>/instances` exposed correlation state, command params, and
+saga progress to any authenticated caller, and `validateDefaultDeny` did not
+enumerate it.
+
+It was not merely ungated but **ungateable** — the routes are compiler-derived
+and a workflow had no author surface to declare a read gate on, the identical
+situation the folded projection was in before #2523. Fixed by giving the
+`workflow` declaration a header `requires` clause, in the position every other
+gate in the language uses:
+
+    workflow Fulfilment requires currentUser.role == "supervisor" { … }
+
+It gates the READS only; command entries keep their body gates, since the two
+audiences are independent. `currentUser`-only
+(`loom.workflow-gate-not-current-user`) because the gate runs before any
+instance is loaded. Enforced on all five backends, on both routes, ahead of the
+store read; `denyByDefault` now demands it, the exemption's stated reason
+("compiler-synthesized, no author source line") having evaporated with the new
+surface.
+
+Considered and rejected: a dedicated `instances requires …` member (a new
+keyword for a case the header covers), and deriving the read gate from the
+command gates the way `ensureHistoryFind` copies `find all`'s (free for existing
+systems, but "who may start" ≠ "who may read", and a workflow with several
+command entries has no single gate to inherit).
 
 ### A3 — give provenance a read endpoint, *through* A1
 Not as another bespoke route. **Size: M**, blocked on A1.

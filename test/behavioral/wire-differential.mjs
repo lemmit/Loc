@@ -63,15 +63,43 @@ export function loadWireCore(workDir) {
   return corePromise;
 }
 
-/** The cases that MUST carry a golden: the shared `systems/*.ddd`, which every
- *  backend runs (`sharedSystemCases`).  DERIVED from the directory, not a
+/** The shared `systems/*.ddd` cases, DERIVED from the directory rather than a
  *  hand-list — a new shared system is gated the moment it lands, and a golden
  *  can't be deleted to dodge the gate. */
-export function requiredGoldenCases() {
+export function sharedSystemGoldenCases() {
   return readdirSync(SYSTEMS_DIR)
     .filter((f) => f.endsWith(".ddd"))
     .map((f) => f.replace(/\.ddd$/, ""))
     .sort();
+}
+
+/**
+ * Cases deliberately allowed to run with NO golden.
+ *
+ * EMPTY, and meant to stay that way.  Every case the tier records is compared;
+ * an entry here is a signed decision to leave one uncompared, and it needs the
+ * same thing a wire waiver needs — a reason and a named exit.
+ *
+ * This list exists because the alternative is what `main` did until this
+ * change: a missing golden was only a failure for the shared systems, and for
+ * every FEATURE case it returned `none` — no comparison, no message.  Four
+ * cases (`field-mask`, `policy-deny`, `seed-values`, `vo-field-default`) had
+ * been running that way on every backend leg, two of them authorization-shaped.
+ * Nothing was wrong with them; nothing was checking them either.
+ *
+ * That is the failure mode the skip-outcome comment below already names — "a
+ * silently-off gate is worse than an absent one" — so the missing-golden branch
+ * now holds to the same standard: a new fixture fails with the capture command
+ * until someone decides, rather than joining the tier ungated by default.
+ *
+ * @type {ReadonlyArray<{case: string, reason: string}>}
+ */
+export const GOLDEN_OPT_OUT = [];
+
+/** Every case that must carry a golden: all of them, minus the signed opt-outs. */
+export function requiredGoldenCases() {
+  const optedOut = new Set(GOLDEN_OPT_OUT.map((o) => o.case));
+  return { optedOut, shared: sharedSystemGoldenCases() };
 }
 
 export const goldenPath = (caseName) => join(GOLDEN_DIR, `${caseName}.json`);
@@ -114,19 +142,19 @@ export async function gateWireRecording({ backend, caseName, entries, workDir })
 
   const golden = readGolden(caseName);
   if (!golden) {
-    if (requiredGoldenCases().includes(caseName)) {
-      return {
-        gating: [{ seq: -1, request: "(recording)", kind: "request-count", path: "$", golden: undefined, actual: entries.length }],
-        waived: [],
-        usedWaivers: new Set(),
-        skipped: false,
-        report:
-          `  ✗ wire: no golden for shared system "${caseName}" — every systems/*.ddd case must be\n` +
-          "      gated. Capture one with:  LOOM_WIRE_UPDATE=1 node run.mjs " +
-          caseName,
-      };
-    }
-    return none;
+    const { optedOut, shared } = requiredGoldenCases();
+    if (optedOut.has(caseName)) return none;
+    const kindOfCase = shared.includes(caseName) ? `shared system "${caseName}"` : `case "${caseName}"`;
+    return {
+      gating: [{ seq: -1, request: "(recording)", kind: "request-count", path: "$", golden: undefined, actual: entries.length }],
+      waived: [],
+      usedWaivers: new Set(),
+      skipped: false,
+      report:
+        `  ✗ wire: no golden for ${kindOfCase} — every case the tier records is\n` +
+        `      compared.  Capture one with:  LOOM_WIRE_UPDATE=1 node run.mjs ${caseName}\n` +
+        "      (or add a signed entry to GOLDEN_OPT_OUT in wire-differential.mjs).",
+    };
   }
 
   const divergences = core.diffRecording(golden.entries, entries);
@@ -230,10 +258,26 @@ export function makeWireGate(backend, workDir) {
         workDir,
       });
       if (report) process.stdout.write(`${report}\n`);
-      const bad = gating + stale.length;
+      // The same ratchet, one level up: an opt-out whose case now HAS a golden
+      // (or no longer runs) is excusing nothing, and a list that only grows
+      // stops meaning anything — exactly the failure the waiver registry guards
+      // against.
+      const staleOptOuts = GOLDEN_OPT_OUT.filter(
+        (o) => !ranCases.includes(o.case) || existsSync(goldenPath(o.case)),
+      );
+      if (staleOptOuts.length) {
+        process.stdout.write(
+          `\n✗ wire: ${staleOptOuts.length} STALE golden opt-out(s) — the case now has a\n` +
+            "  golden, or no longer runs. Delete them from GOLDEN_OPT_OUT in\n" +
+            "  test/behavioral/wire-differential.mjs:\n" +
+            `${staleOptOuts.map((o) => `    - ${o.case} — ${o.reason}`).join("\n")}\n`,
+        );
+      }
+      const bad = gating + stale.length + staleOptOuts.length;
       process.stdout.write(
         `\nwire differential (${backend}): ${ranCases.length} case(s) compared to golden, ` +
-          `${gating} divergence(s)${stale.length ? `, ${stale.length} stale waiver(s)` : ""}\n`,
+          `${gating} divergence(s)${stale.length ? `, ${stale.length} stale waiver(s)` : ""}` +
+          `${staleOptOuts.length ? `, ${staleOptOuts.length} stale opt-out(s)` : ""}\n`,
       );
       return bad;
     },
@@ -415,8 +459,8 @@ const __absentReadProbes = async (dispatch) => {
 // The behavioural tier used to hold ONE identity, so the only authz statement it
 // could make was "the satisfying principal gets through".  A \`requires\` emitted
 // as a no-op passes that identically — which is exactly how #2446 shipped a
-// guarded create with an OPEN route.  This walks the full ladder over ONE gated
-// surface instead:
+// guarded create with an OPEN route.  This walks the full ladder over each
+// declared gated surface instead:
 //
 //   unauthenticated              → 401   (authn precedes authz)
 //   authenticated-but-UNauthORIZED → 403 (the gate actually denies)
@@ -447,40 +491,71 @@ const __authzLadder = async (spec, creds) => {
   const json = (h) => ({ ...h, "content-type": "application/json" });
   const out = [];
   const push = (name, status, error) => out.push({ tier: "authz", name, status, error });
+  // A gated READ surface is a GET, and fetch refuses a body on GET/HEAD — so the
+  // body is conditional on the method, not on the spec declaring one.
+  const withBody = (m, b) => (m === "GET" || m === "HEAD" ? {} : { body: JSON.stringify(b ?? {}) });
 
   // Seed with the AUTHORIZED principal so the gated surface addresses a real
   // row.  Several backends load the aggregate BEFORE evaluating the guard, so a
   // made-up id would answer 404 and the ladder would measure not-found instead
-  // of denial.
-  const seeded = await dispatch({
-    method: "POST",
-    url: origin + spec.seed.path,
-    headers: json(creds.authorized),
-    body: JSON.stringify(spec.seed.body ?? {}),
-  });
+  // of denial.  A spec may declare SEVERAL seed steps (a create, then the
+  // operation whose emitted event a folded read model needs) — they run in
+  // order under the authorized principal, and the first id any of them returns
+  // is the one \`{id}\` substitutes.
+  const seedSteps = Array.isArray(spec.seed) ? spec.seed : [spec.seed];
   let id = null;
-  try {
-    id = JSON.parse(seeded?.response?.body ?? "{}")?.id ?? null;
-  } catch { /* handled by the null check below */ }
+  for (const step of seedSteps) {
+    const r = await dispatch({
+      method: step.method ?? "POST",
+      url: origin + step.path.replace("{id}", id ?? ""),
+      headers: json(creds.authorized),
+      ...withBody(step.method ?? "POST", step.body),
+    });
+    const st = r?.response?.status;
+    if (!(st >= 200 && st < 300)) {
+      push("authz ladder: seed", "fail", \`seed \${step.method ?? "POST"} \${step.path} → \${st}: \${String(r?.response?.body ?? "").slice(0, 200)}\`);
+      return out;
+    }
+    if (id === null) {
+      try {
+        id = JSON.parse(r?.response?.body ?? "{}")?.id ?? null;
+      } catch { /* handled by the null check below */ }
+    }
+  }
   if (!id) {
-    push("authz ladder: seed", "fail", \`seed POST \${spec.seed.path} → \${seeded?.response?.status}: no id in body\`);
+    push("authz ladder: seed", "fail", \`seed \${seedSteps[0].path}: no id in any seed response body\`);
     return out;
   }
 
-  const arm = async (label, headers, expected) => {
+  // ONE spec may gate SEVERAL surfaces — the read side alone has three distinct
+  // emission sites (gated list read, folded projection, query-time projection)
+  // behind a single system, and booting a fixture per surface would pay a whole
+  // generate+migrate+boot for each.  \`gated\` is therefore normalised to a list;
+  // a surface may carry its own \`arms\`, otherwise the spec-level arms apply to
+  // all of them.
+  const surfaces = (Array.isArray(spec.gated) ? spec.gated : [spec.gated]).map((g) => ({
+    method: g.method,
+    path: g.path,
+    body: g.body,
+    label: g.label ?? null,
+    arms: g.arms ?? spec.arms,
+  }));
+
+  const arm = async (surface, rung, headers, expected) => {
+    const where = surface.label ? \`\${surface.label} — \` : "";
     if (expected === null || expected === undefined) {
-      push(\`authz ladder: \${label} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
+      push(\`authz ladder: \${where}\${rung} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
       return;
     }
     const r = await dispatch({
-      method: spec.gated.method,
-      url: origin + spec.gated.path.replace("{id}", id),
+      method: surface.method,
+      url: origin + surface.path.replace("{id}", id),
       headers: json(headers),
-      body: JSON.stringify(spec.gated.body ?? {}),
+      ...withBody(surface.method, surface.body),
     });
     const got = r?.response?.status;
     push(
-      \`authz ladder: \${label} → \${expected}\`,
+      \`authz ladder: \${where}\${rung} → \${expected}\`,
       got === expected ? "pass" : "fail",
       got === expected ? undefined : \`expected \${expected}, got \${got}: \${String(r?.response?.body ?? "").slice(0, 200)}\`,
     );
@@ -489,10 +564,14 @@ const __authzLadder = async (spec, creds) => {
   // Order matters: the two DENIED arms run first, so the surface is still in its
   // pre-operation state when they run and a 403 cannot be an artefact of the
   // operation having already been applied.  The authorized arm mutates, so it
-  // goes last.
-  await arm("unauthenticated", {}, spec.arms.anonymous);
-  await arm("authenticated-but-unauthorized", creds.unauthorized, spec.arms.unauthorized);
-  await arm("authorized", creds.authorized, spec.arms.authorized);
+  // goes last.  With several surfaces that ordering is kept PER SURFACE — the
+  // walk is surface-major, not rung-major — so a mutating surface's authorized
+  // arm cannot disturb the next surface's denial arms.
+  for (const s of surfaces) {
+    await arm(s, "unauthenticated", {}, s.arms.anonymous);
+    await arm(s, "authenticated-but-unauthorized", creds.unauthorized, s.arms.unauthorized);
+    await arm(s, "authorized", creds.authorized, s.arms.authorized);
+  }
   return out;
 };`;
 }

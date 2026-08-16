@@ -1,5 +1,6 @@
-// Read-side `requires` gates (auth.md) — the three read surfaces that carry one
-// and the compile proof that every backend emits it.
+// Read-side `requires` gates (auth.md) — the three read surfaces that carry one,
+// the compile proof that every backend emits it, and the runtime proof that the
+// emitted guard DENIES.
 //
 // A gate on a WRITE (`operation … requires`) is covered by `auth-simple.ddd`.
 // The read side has three distinct emission sites, each with its own route
@@ -16,12 +17,24 @@
 //   3. a QUERY-TIME projection's gate — `GET /projections/<p>`, the
 //      comprehension evaluated per read.
 //
-// What this fixture buys that a unit test cannot: the emitted guard has to
-// COMPILE. That is where the gate's principal binding, its error type, and its
-// imports live — a `Objects.equals(...)` with no `java.util.Objects` import, a
-// `ForbiddenError` python never imported, an unused `current_user` that trips
-// `mix compile --warnings-as-errors`. Every one of those is invisible to a
-// string assertion over the generated text and fatal to the generated project.
+// What this fixture buys that a unit test cannot, in two tiers:
+//
+//   COMPILE — the emitted guard has to compile.  That is where the gate's
+//   principal binding, its error type, and its imports live: a
+//   `Objects.equals(...)` with no `java.util.Objects` import, a `ForbiddenError`
+//   python never imported, an unused `current_user` that trips
+//   `mix compile --warnings-as-errors`.  All invisible to a string assertion
+//   over the generated text and fatal to the generated project.
+//
+//   RUNTIME — the `test e2e` below drives every gated surface with the
+//   AUTHORIZED principal (`role: "agent"`, cases.mjs `DEV_CLAIMS`), and the
+//   authz ladder (cases.mjs `AUTHZ_LADDERS["read-gates"]`) drives the SAME
+//   three surfaces with the authenticated-but-UNAUTHORIZED one and demands 403.
+//   Neither half is sufficient alone: a gate emitted as a no-op passes the e2e
+//   identically, and a route that 403s everything passes the ladder's denial
+//   arms identically.  The gates below therefore accept exactly the principal
+//   the e2e authenticates as — do not change `"agent"` to a value
+//   `DEV_CLAIMS_UNAUTHORIZED` also carries, or both halves stop measuring.
 system ReadGates {
   user { id: guid  role: string }
   subdomain Sales {
@@ -30,24 +43,50 @@ system ReadGates {
         code: string
         total: money
         open: bool
+        // Emits the event the folded projection subscribes to, so the ladder's
+        // gated read addresses a read model with a row in it rather than an
+        // empty table — a 403 on an empty collection would be indistinguishable
+        // from a 403 on a missing one.
+        operation place() {
+          open := false
+          emit OrderPlaced { orderRef: id, code: code }
+        }
       }
       repository Orders for Order {
         // (1) The LIST read, gated.  An author-declared `find all` wins over
         // the enrichment-injected one, gate included.
-        find all(): Order[] requires currentUser.role == "clerk"
+        find all(): Order[] requires currentUser.role == "agent"
       }
-      event OrderPlaced { order: Order id  code: string }
+      // NB: the correlation column is `orderRef`, not `order` — `order` is a
+      // reserved SQL word and identifier quoting in the projection read-model
+      // DDL/DML is not uniform across backends (see projection.ddd).  That is
+      // orthogonal to the gate this fixture proves, and it only matters now
+      // that the fixture BOOTS.
+      event OrderPlaced { orderRef: Order id  code: string }
+
+      // The fold subscribes THROUGH a channel: `deriveEventSubscriptions`
+      // (enrichments.ts) resolves each `on(e: E)` handler to the channel
+      // carrying `E`, and an event no channel carries produces no
+      // subscription — so without this the read model below is never written
+      // on python/java/dotnet/elixir.  (Hono folds it anyway, which is a
+      // cross-backend divergence in its own right, not this fixture's
+      // subject.)
+      channel Lifecycle {
+        carries: OrderPlaced
+        delivery: broadcast
+        retention: ephemeral
+      }
 
       // (2) FOLDED — no `from`, so it has no query-clause tail; the gate rides
       // the declaration header, which is the only reason it can be spelled.
-      projection OrderBook keyed by order requires currentUser.role == "clerk" {
-        order: Order id
+      projection OrderBook keyed by orderRef requires currentUser.role == "agent" {
+        orderRef: Order id
         code: string
-        on(e: OrderPlaced) { order := e.order  code := e.code }
+        on(e: OrderPlaced) { orderRef := e.orderRef  code := e.code }
       }
 
       // (3) QUERY-TIME — computed per read, gated in the same position.
-      projection OpenOrders requires currentUser.role == "clerk" {
+      projection OpenOrders requires currentUser.role == "agent" {
         code: string
         from Order as o
         where o.open == true
@@ -67,9 +106,43 @@ system ReadGates {
     auth: required
   }
 
-  // The behavioural harness authenticates as the canonical principal
-  // (`role: "clerk"` is NOT it — see cases.mjs DEV_CLAIMS), so this fixture
-  // deliberately declares no `test e2e` block: its job is the COMPILE tier.
-  // Asserting the runtime 403 needs an authenticated-but-unauthorized
-  // principal, which is M-T9.28's multi-principal harness.
+  // The AUTHORIZED half of the proof.  Every surface the ladder denies is read
+  // here by the principal the gate names, so a backend that emitted the guard
+  // as always-deny fails HERE while a backend that emitted it as a no-op fails
+  // in the ladder.  Together they pin the guard to the predicate.
+  test e2e "the gated read surfaces are reachable by the principal the gate names" against d {
+    let a = api.orders.create({ code: "O-1", total: money("10.00"), open: true })
+    let b = api.orders.create({ code: "O-2", total: money("30.00"), open: true })
+    api.orders.place(b)
+
+    // (1) the gated LIST read
+    let listed = api.orders.all()
+    expect(listed.length).toBe(2)
+
+    // (2) the gated FOLDED projection — `place()` folded exactly one row
+    let folded = api.orderBook.byKey(b)
+    expect(folded.code).toBe("O-2")
+
+    // (3) the gated QUERY-TIME projection — `place()` closed O-2, so only the
+    // untouched O-1 is still open
+    let open = api.openOrders.list()
+    expect(open.length).toBe(1)
+    api.orders.place(a)
+    let none = api.openOrders.list()
+    expect(none.length).toBe(0)
+
+    // The UNGATED crudish routes beside them.  None carries a `requires`, so
+    // the same principal must reach all three — the control that says the
+    // three 403s the ladder asserts come from the declared gates and not from
+    // a guard applied aggregate-wide.
+    let read = api.orders.getById(a)
+    expect(read.code).toBe("O-1")
+    api.orders.update(a, { code: "O-1b", total: money("10.00"), open: true })
+    let updated = api.orders.getById(a)
+    expect(updated.code).toBe("O-1b")
+    api.orders.destroy(a)
+    expect(api.orders.getById(a)).toThrow(404)
+    let remaining = api.orders.all()
+    expect(remaining.length).toBe(1)
+  }
 }

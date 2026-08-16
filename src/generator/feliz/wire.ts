@@ -1929,6 +1929,27 @@ export function renderAsyncOutcomeTypes(effects: readonly FelizAsyncEffect[]): s
 // Domain records + Thoth decoders (off wireShape)
 // ---------------------------------------------------------------------------
 
+/** Guard the wire path against a `duration`-typed field.
+ *
+ *  `typeToFs` spells a duration `System.TimeSpan` (the type `FS_LEAVES.duration`
+ *  builds and the temporal binary arms consume), but `decoderExprFor` has no
+ *  `Decode.timespan` — Thoth ships none, and no backend puts a duration on the
+ *  wire to decode: `duration` is EXPRESSION-ONLY, with no spelling in the
+ *  grammar's `PrimitiveType` rule, so no declared property, `derived <name>:
+ *  <TypeRef>`, or action param can be duration-typed and `wireShape` (built from
+ *  declared types alone) can never carry one.  Rather than let the record field
+ *  say `System.TimeSpan` while its decoder falls through to `Decode.string` — a
+ *  Fable type error in the emitted `App.fs`, and the reason an earlier attempt at
+ *  the `typeToFs` arm was reverted — the pair fails loudly at GENERATE time here.
+ *  Same stance the node backend takes for its column mapper
+ *  (`typescript/emit/schema.ts`).  Delete this guard only together with a real
+ *  wire representation + matching decoder/encoder arms. */
+function assertNotDurationWireField(t: TypeIR): void {
+  if (t.kind === "primitive" && t.name === "duration") {
+    throw new Error("internal: 'duration' is expression-only and never reaches a wire field");
+  }
+}
+
 /** F# type spelling of a wire field's declared type, honouring the wire
  *  contract: an enum value arrives as its string name, so it decodes to a
  *  plain `string` (a proper DU decoder is a follow-up). */
@@ -1936,6 +1957,7 @@ export function wireFieldType(t: TypeIR): string {
   // A `File` wire field is the fixed `FileRef` record (`renderFileRefType`),
   // not a scalar — decoded via `fileRefDecoder`.
   if (t.kind === "primitive" && t.name === "File") return "FileRef";
+  assertNotDurationWireField(t);
   switch (t.kind) {
     case "enum":
       return "string";
@@ -1950,6 +1972,7 @@ export function wireFieldType(t: TypeIR): string {
 
 /** Thoth decoder expression for a wire field's declared type. */
 export function decoderExprFor(t: TypeIR): string {
+  assertNotDurationWireField(t);
   switch (t.kind) {
     case "primitive":
       switch (t.name) {

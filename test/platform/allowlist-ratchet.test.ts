@@ -92,19 +92,22 @@ const REGISTERED: Ratchet[] = [
     max: 0,
   },
   { file: "test/e2e/corpus-tsc-build.test.ts", name: "TS_COMPILE_SKIP", kind: "record", max: 0 },
-  // The .NET Dapper adapter's compile tier.  Both remaining entries are the
-  // SAME bug — query-time projection handlers are EF-LINQ over `AppDbContext`
-  // (M-T6.25) — and the folded read controller already has the raw-Npgsql port
-  // they need, so that pair is a port with a precedent, not an open design
-  // question.  Lowered 3 -> 2 by M-T6.29, which drained `policy-deny`: the
-  // `deny` authz sentinel now has its `whereToSql` arm (`1 = 0`, ANDed into
-  // every read SELECT) and `dapper.ts` reads `writeScopeFilter` to emit the
-  // `GetByIdForWriteAsync` the shared command layer has always dispatched to.
+  // The .NET Dapper adapter's compile tier.  Lowered 3 -> 2 by M-T6.29, which
+  // drained `policy-deny`: the `deny` authz sentinel got its `whereToSql` arm
+  // (`1 = 0`, ANDed into every read SELECT) and `dapper.ts` reads
+  // `writeScopeFilter` to emit the `GetByIdForWriteAsync` the shared command
+  // layer has always dispatched to.
+  //
+  // 2 -> 0 by M-T6.25.  Both remaining entries were the SAME bug — query-time
+  // projection handlers were EF-LINQ over `AppDbContext` — and the folded read
+  // controller's raw-Npgsql port was the precedent they needed.  That port is
+  // written: the four direct-table arms read through `NpgsqlDataSource` now, so
+  // this map is DRAINED, not reclassified.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 2,
+    max: 0,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
   // not gaps — these never reach the compiler.
@@ -112,10 +115,15 @@ const REGISTERED: Ratchet[] = [
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_UNSUPPORTED",
     kind: "record",
-    // 1 -> 2 (2026-08-13): `read-gates` (#2523) carries a query-time projection,
-    // which dapper honestly refuses until M-T6.25 lands its QP emitters — the
-    // entry cites that mission and deleting it is M-T6.25's acceptance ratchet.
-    max: 2,
+    // 2 -> 1, M-T6.25 — the acceptance ratchet `read-gates`' entry named.  It
+    // was here for one reason: the fixture carries a query-time projection
+    // (`OpenOrders`), and this adapter emitted none.  The port removed that
+    // boundary, so the fixture is back to covering all three of its read-gate
+    // kinds here rather than losing the find gate and the folded-projection
+    // gate as per-fixture collateral.
+    //
+    // 1 = `tenancy-hierarchy`, the one boundary left with a real witness.
+    max: 1,
   },
   // Primitives exempt from the pack testid contract.
   {
