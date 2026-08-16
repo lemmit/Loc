@@ -435,6 +435,10 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
   // The by-id-follow join's read — same `notLifted` class, third shape.
   "corpus/projection-join": ["api.orderWithCustomer.list (no such aggregate)"],
   "corpus/projection-groupby": [
+    // All four are projection READS — the not-yet-lifted route class this map
+    // exists for, not a call that fails to find its operation.  `ordersByTotal`
+    // joined them with the money-grouping-key witness (#2549 follow-up).
+    "api.ordersByTotal.list (no such aggregate)",
     "api.revenueByDay.list (no such aggregate)",
     "api.salesByStatus.list (no such aggregate)",
     "api.volumeByCustomerAndStatus.list (no such aggregate)",
