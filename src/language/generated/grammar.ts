@@ -10853,6 +10853,28 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "cardinality": "?"
           },
           {
+            "$type": "Group",
+            "elements": [
+              {
+                "$type": "Keyword",
+                "value": "requires"
+              },
+              {
+                "$type": "Assignment",
+                "feature": "gate",
+                "operator": "=",
+                "terminal": {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@200"
+                  },
+                  "arguments": []
+                }
+              }
+            ],
+            "cardinality": "?"
+          },
+          {
             "$type": "Keyword",
             "value": "{"
           },

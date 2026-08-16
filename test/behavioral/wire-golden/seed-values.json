@@ -1,0 +1,170 @@
+{
+  "case": "seed-values",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/parts",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/parts/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "name": "Delta",
+        "size": 9,
+        "tier": "Free",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/parts?dir=asc&sort=name",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "name": "Alpha",
+            "size": 1,
+            "tier": "Free",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "name": "Beta",
+            "size": 2,
+            "tier": "Pro",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "name": "Delta",
+            "size": 9,
+            "tier": "Free",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 3,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/parts/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/parts/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "name": "Delta-2",
+        "size": 10,
+        "tier": "Pro",
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "DELETE",
+      "path": "/api/parts/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/parts/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Part {id} not found",
+        "instance": "/api/parts/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/parts?dir=asc&sort=name",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "name": "Alpha",
+            "size": 1,
+            "tier": "Free",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "name": "Beta",
+            "size": 2,
+            "tier": "Pro",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 8,
+      "method": "PATCH",
+      "path": "/api/parts",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/parts",
+        "instance": "/api/parts",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/api/parts",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/parts",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

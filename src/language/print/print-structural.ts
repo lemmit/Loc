@@ -965,6 +965,9 @@ function printWorkflow(node: Workflow): string {
   if (node.transactional) {
     head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
   }
+  // The instance-read gate rides the header, after the modifiers and before the
+  // body — the same position `projection … requires` prints in.
+  if (node.gate) head += ` requires ${printExpr(node.gate)}`;
   return declBlock(head, () =>
     node.members.map((m) =>
       m.$type === "WorkflowCreateDecl"

@@ -65,6 +65,47 @@ escape — else `loom.default-deny-ungated` fires.  Covered:
   lived inside the query-clause fragment, which a folded projection has none
   of, and `loom.projection-gate-without-source` rejected the combination.  Both
   halves are fixed and that diagnostic is gone.
+- **workflow INSTANCE reads** — `GET /workflows/<wf>/instances` and
+  `.../instances/{id}` publish every instance's correlation id and state, so an
+  observable workflow (one with a correlation field) carries the same optional
+  gate on its declaration header:
+
+  ```ddd
+  workflow Fulfilment requires currentUser.role == "supervisor" {
+    orderId: Order id
+    stage: string
+    create start(order: Order id) {
+      requires currentUser.role == "clerk"
+      …
+    }
+  }
+  ```
+
+  The header gate guards the **reads only** — command entries keep their own
+  body gates, because "who may start this workflow" and "who may read its
+  state" are different questions (this example authorizes them to different
+  roles deliberately).  It is `currentUser`-only for the same reason the find
+  and projection gates are: it runs before any instance is loaded, so there is
+  no instance to reference (`loom.workflow-gate-not-current-user`).  Enforced
+  on all five backends, on both routes, ahead of the store read — so a denied
+  caller cannot tell an existing correlation id from an absent one.
+
+  Like the folded projection before it, this read was previously **ungateable**
+  rather than merely ungated: the routes are compiler-derived and a workflow had
+  no surface to declare a gate on.
+
+**These gates are proven to DENY, not just to compile.** A guard emitted as a
+no-op passes every compile tier and every single-principal e2e identically —
+that is how each of the read gates above shipped open on some subset of
+backends.  `test/fixtures/corpus/read-gates.ddd` closes that with two halves
+that only mean something together: its `test e2e` drives all three read
+surfaces with the principal the gate *names* (so an always-deny guard fails),
+and the authorization ladder (`AUTHZ_LADDERS` in `test/behavioral/cases.mjs`)
+drives the same surfaces with an authenticated-but-**un**authorized principal
+and demands 403 (so a no-op guard fails).  Both run per-PR on **all five**
+backend legs — which is the point, since the list-read drop was a
+java/python/elixir defect that a node-only probe could not have seen.  See
+`test/behavioral/README.md` § "Principals — and the authorization ladder".
 
 What's intentionally **not** here yet:
 

@@ -40,24 +40,29 @@ const CASE = process.env.LOOM_CORPUS_DAPPER_CASE;
 // Each entry is a precise, reproducible bug report; widen the gate by FIXING
 // the emitter and dropping the entry.  Ratcheted by `allowlist-ratchet.test.ts`
 // so this map can only shrink.
-const DAPPER_COMPILE_SKIP: Record<string, string> = {
-  "projection-aggregation":
-    "query-time projection handlers are EF-LINQ over AppDbContext (CS0234: no Microsoft.EntityFrameworkCore under dapper) — needs the raw-Npgsql port the FOLDED read controller already got",
-  "projection-groupby":
-    "same as projection-aggregation — the grouped QP handler is EF-LINQ over AppDbContext",
-};
+// EMPTY, and DRAINED rather than reclassified.  Both entries were the same bug —
+// query-time projection handlers were EF-LINQ over `AppDbContext`, so a
+// `persistence: dapper` project referenced a type it did not have — and M-T6.25
+// ported those handlers to raw Npgsql, so both fixtures now generate, compile
+// and answer correctly on this adapter.
+const DAPPER_COMPILE_SKIP: Record<string, string> = {};
 
 // Features the IR validator HONESTLY rejects under dapper — not a gap, a
 // documented capability boundary (`loom.dapper-unsupported`).  These never
 // reach the compiler, so they are excluded rather than skipped.
+//
+// 2 -> 1 (M-T6.25).  `read-gates` was here for ONE reason — it carries a
+// query-time projection (`OpenOrders`), and "the Dapper adapter does not emit
+// query-time projections" — and that boundary is gone: the four direct-table
+// arms (whole-table aggregation, grouped, workflow-sourced, projection-sourced)
+// are raw Npgsql now, and the per-row arm never touched EF at all (it reads
+// through the aggregate's repository, which this adapter has always emitted).
+// So the fixture is back to covering all three of its read-gate kinds here, not
+// two-thirds dropped as collateral.  What survives of the gate is narrow enough
+// to have no corpus witness: an aggregation whose source aggregate keeps its
+// fields somewhere other than columns (`shape: document`, event-sourced) — see
+// `dapperQueryProjectionGap`.
 const DAPPER_UNSUPPORTED: Record<string, string> = {
-  "read-gates":
-    "the fixture carries a query-time projection (`OpenOrders`) so its read-gate coverage spans " +
-    "all three gated read surfaces — and the Dapper adapter does not emit query-time projections " +
-    "(M-T6.25, the open half #2498's witnesses ratchet).  `loom.dapper-unsupported` refuses at " +
-    "generation, naming the projection and the fix.  Entered 2026-08-13: #2523 added the fixture " +
-    "and its dapper cell went red on main — the refusal predates it; the fixture merely walked in.  " +
-    "Delete this entry when M-T6.25 lands the Dapper query-time projection emitters.",
   "tenancy-hierarchy":
     "hierarchical tenancy's capability filter is outside the Dapper SQL subset; the validator " +
     "says so with loom.dapper-unsupported.  NOTE: that claim was FALSE until M-T6.29 — the " +

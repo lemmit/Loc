@@ -12,22 +12,42 @@ import {
   type AggregateSelect,
   aggregateCoercion,
   GROUP_KEY_TRANSFORM_INTRINSIC,
+  type GroupKeySelect,
   groupedAggregates,
   groupKeyOf,
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
+import { queryProjectionArm } from "../../ir/util/query-projection-arm.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
-import { projectionRowDbSet } from "./projection-state-emit.js";
+import {
+  collectFilterPrincipalRefs,
+  type DapperColumn,
+  dapperAggregateTable,
+  fieldColumn,
+  principalFields,
+  whereToSql,
+} from "./emit/dapper.js";
+import { dapperProjectionColumns, dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
+import {
+  projectionRowClass,
+  projectionRowDbSet,
+  projectionRowTable,
+} from "./projection-state-emit.js";
 import {
   CS_INTRINSIC_QUERY_RENDERERS,
   CS_INTRINSIC_RENDERERS,
   collectCsExprUsings,
   renderCsExpr,
 } from "./render-expr.js";
-import { workflowStateDbSet } from "./workflow-state-emit.js";
+import {
+  workflowStateClass,
+  workflowStateDbSet,
+  workflowStateTable,
+} from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET query-time projection emission (read-path-architecture.md rev.13).
@@ -56,11 +76,12 @@ export function emitQueryProjections(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string; sourcemap?: SourceMapRecorder },
+  options?: { routePrefix?: string; sourcemap?: SourceMapRecorder; usingDapper?: boolean },
 ): void {
   const projections = (ctx.projections ?? []).filter(isQueryTimeProjection);
   if (projections.length === 0) return;
   const sourcemap = options?.sourcemap;
+  const usingDapper = options?.usingDapper ?? false;
   for (const proj of projections) {
     const construct = `${ctx.name}.${proj.name}`;
     const rowPath = `Application/Projections/${upperFirst(proj.name)}Row.cs`;
@@ -74,7 +95,7 @@ export function emitQueryProjections(
     sourcemap?.file(queryPath, queryContent, proj.origin, construct);
 
     const handlerPath = `Application/Projections/${upperFirst(proj.name)}QpHandler.cs`;
-    const handlerContent = renderHandler(proj, ctx, ns);
+    const handlerContent = renderHandler(proj, ctx, ns, usingDapper);
     out.set(handlerPath, handlerContent);
     sourcemap?.file(handlerPath, handlerContent, proj.origin, construct);
   }
@@ -121,33 +142,38 @@ interface JoinMap {
   keyExpr: string;
 }
 
-function renderHandler(proj: ProjectionIR, ctx: EnrichedBoundedContextIR, ns: string): string {
-  // A workflow-sourced projection (`from <Workflow>`) reads the workflow's
-  // persisted saga-state DbSet (workflows have no aggregate repository), applies
-  // the `where` filter, and projects instance fields via `select`.  Validation
-  // guarantees a non-event-sourced observable workflow with no `join`/`ignoring`.
-  // GROUPED AGGREGATION (`group by`, M-T4.2) takes precedence over every other
-  // shape — a grouped projection mixes per-row key selects with aggregates, so
-  // letting it fall through would hand the per-row arm an unresolved aggregate.
-  if (groupedAggregates(proj)) {
-    return renderGroupedHandler(proj, ctx, ns);
-  }
-  // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) takes precedence over every other
-  // shape: it queries the table directly through the DbContext, never through a
-  // repository, because the point of the shape is to materialise no rows.
-  if (wholeTableAggregates(proj)) {
-    return renderAggregateHandler(proj, ctx, ns);
-  }
-  if (proj.query!.sourceKind === "workflow") {
-    return renderWorkflowHandler(proj, ctx, ns);
-  }
-  // A projection-sourced projection (`from <OtherProjection>`) reads the SOURCE
-  // folded projection's persisted `<Proj>Row` read-model DbSet (a materialized
-  // projection has no aggregate repository), applies the `where` filter EF-side,
-  // and projects the source row fields via `select`.  Validation guarantees a
-  // materialized source with no `join`/`ignoring`.
-  if (proj.query!.sourceKind === "projection") {
-    return renderProjectionSourceHandler(proj, ctx, ns);
+function renderHandler(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  usingDapper: boolean,
+): string {
+  // The arm classification is SHARED with the Dapper capability gate
+  // (`src/ir/util/query-projection-arm.ts`): the validator decides which
+  // projections it may refuse from the same reading that decides which handler
+  // is emitted, so a gate narrowed for one arm cannot silently apply to
+  // another.  The ordering it encodes:
+  //   - GROUPED (`group by`, M-T4.2) first — a grouped projection mixes per-row
+  //     key selects with aggregates, so falling through would hand the per-row
+  //     arm an unresolved aggregate;
+  //   - then the WHOLE-TABLE aggregation (M-T1.3 Phase 0), which queries the
+  //     table directly rather than through a repository, because the point of
+  //     the shape is to materialise no rows;
+  //   - then the workflow / folded-projection sources, which have no aggregate
+  //     repository to read through (validation guarantees a non-event-sourced
+  //     observable workflow / a materialized source, with no `join`/`ignoring`);
+  //   - else the per-row arm below, which rides the aggregate's repository.
+  switch (queryProjectionArm(proj)) {
+    case "grouped":
+      return renderGroupedHandler(proj, ctx, ns, usingDapper);
+    case "singleton":
+      return renderAggregateHandler(proj, ctx, ns, usingDapper);
+    case "workflow":
+      return renderWorkflowHandler(proj, ctx, ns, usingDapper);
+    case "projection":
+      return renderProjectionSourceHandler(proj, ctx, ns, usingDapper);
+    default:
+      break;
   }
   const source = proj.query!.source!;
   const rowName = `${upperFirst(proj.name)}Row`;
@@ -284,6 +310,146 @@ ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Se
 `;
 }
 
+// ---------------------------------------------------------------------------
+// The raw-Npgsql arms (`persistence: dapper`) — M-T6.25.
+//
+// Four of the five emission shapes read a TABLE rather than a repository, and
+// those four were EF-LINQ over the concrete `AppDbContext`: under
+// `persistence: dapper` neither the type nor the EF namespace exists, so the
+// generated project did not compile and the IR validator refused the whole
+// feature (`loom.dapper-unsupported`) rather than emit it.
+//
+// The port follows the FOLDED read controller's precedent exactly
+// (`projection-emit.ts` → `renderProjectionsController`'s `usingDapper`
+// branch): inject `NpgsqlDataSource`, open a connection, `QueryAsync<TDbRow>`
+// a raw SELECT into a private row class whose properties are the snake column
+// names, and map to the same values the EF path produced — so `csCoerce` /
+// `projectToResponse` / the `<P>Row` construction are shared verbatim and the
+// two adapters cannot drift on the wire shape.
+//
+// The predicate is lowered by `whereToSql`, the ONE predicate→SQL lowering
+// this adapter has (finds, retrievals and capability filters all go through
+// it).  Writing a second one here is how two dialects start disagreeing.
+// ---------------------------------------------------------------------------
+
+/** The persistence `using`s a direct-table handler needs. */
+function qpPersistenceUsings(usingDapper: boolean): string {
+  return usingDapper ? "using Dapper;\nusing Npgsql;" : "using Microsoft.EntityFrameworkCore;";
+}
+
+/** The `currentUser.<claim>` bindings a Dapper-rendered `where` needs.
+ *
+ *  `whereToSql` lowers `currentUser.<claim>` to the named parameter
+ *  `@__cu_<claim>` and leaves BINDING it to the caller — the repository binds
+ *  it from the ambient principal on every SELECT.  A handler that emitted the
+ *  parameter without binding it would fail at RUNTIME ("parameter not
+ *  supplied"), which is strictly worse than the EF path's failure for the same
+ *  predicate (an unbound `currentUser` identifier, a C# compile error), so the
+ *  binding is emitted here rather than gated away. */
+function dapperFilterSeam(
+  usingDapper: boolean,
+  filter: ExprIR | undefined,
+  ns: string,
+  usings: Set<string>,
+): { needsPrincipal: boolean; paramArg: string } {
+  if (!usingDapper || !filter) return { needsPrincipal: false, paramArg: "" };
+  const refs = collectFilterPrincipalRefs([filter]);
+  if (refs.length === 0) return { needsPrincipal: false, paramArg: "" };
+  usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+  return {
+    needsPrincipal: true,
+    paramArg: `, new { ${principalFields(refs, "currentUser").join(", ")} }`,
+  };
+}
+
+/** The Postgres aggregate call for one `select` — the raw-SQL twin of
+ *  `csAggregate`.  `count` counts ROWS (no column) and casts to `int` so it
+ *  lands on the same CLR type EF's `g.Count()` produces; every other operator
+ *  casts to `numeric`, which is what `csCoerce` then converts to the row's
+ *  DECLARED wire type (`money` → an InvariantCulture string, `decimal`/`int`
+ *  → a cast).  Casting uniformly is what keeps `avg` over an `int` column off
+ *  the `double`-vs-`decimal` mismatch EF needed the same cast for. */
+function sqlAggregate(agg: ProjectionAggregateIR): string {
+  if (agg.op === "count" || !agg.arg) return "count(*)::int";
+  const arg = agg.arg;
+  if (arg.kind !== "member") {
+    throw new Error(
+      "internal: a whole-table aggregation argument must be a source column reference",
+    );
+  }
+  return `${agg.op}(${snake(arg.member)})::numeric`;
+}
+
+/** The CLR type the aggregate's aliased column lands on. `count` is never
+ *  NULL (0 rows counts 0); every other aggregate is NULL over no rows, which
+ *  `csCoerce` turns into the declared field's zero (or keeps as null for an
+ *  optional field). */
+function sqlAggregateRowCs(agg: ProjectionAggregateIR): string {
+  return agg.op === "count" || !agg.arg ? "int" : "decimal?";
+}
+
+/** One grouping key as raw Postgres SQL — the column, or the catalogued
+ *  transform applied to it.  The SAME snippet table `whereToSql` uses for a
+ *  `where`-position intrinsic (`PG_INTRINSIC_SQL`), so the SELECT, GROUP BY and
+ *  ORDER BY renderings are byte-identical to each other and to a predicate that
+ *  names the same bucket. */
+function sqlGroupKeyExpr(e: ExprIR, projName: string): string {
+  const key = groupKeyOf(e);
+  if (!key) {
+    throw new Error(
+      `internal: projection ${projName}: a group-by column must be a bare source column`,
+    );
+  }
+  const col = snake(key.column);
+  if (key.transform === undefined) return col;
+  const snippet = PG_INTRINSIC_SQL[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
+  if (!snippet) {
+    throw new Error(
+      `internal: no Postgres rendering for grouping-key transform '${key.transform}'`,
+    );
+  }
+  return snippet(col, []);
+}
+
+/** The row-DTO / SELECT-alias name for one grouping key.  Encodes the
+ *  transform exactly as the EF anonymous member does (`placedAtStartOfDay`), so
+ *  the same column grouped raw and grouped-by-day stay distinct members. */
+function sqlGroupKeyAlias(e: ExprIR, projName: string): string {
+  const key = groupKeyOf(e);
+  if (!key) {
+    throw new Error(
+      `internal: projection ${projName}: a group-by column must be a bare source column`,
+    );
+  }
+  return key.transform === undefined ? key.column : `${key.column}${upperFirst(key.transform)}`;
+}
+
+/** A private `<Name>` row class over the given Dapper columns — the raw-SELECT
+ *  DTO, snake-named so Dapper's column→property match is exact.  The same
+ *  shape the folded read controller and every Dapper repository emit. */
+function dapperRowClass(name: string, cols: readonly DapperColumn[]): string {
+  const props = cols
+    .map(
+      (c) => `        public ${c.rowCs} ${c.col} { get; set; }${c.nullable ? "" : " = default!;"}`,
+    )
+    .join("\n");
+  return `    private sealed class ${name}\n    {\n${props}\n    }`;
+}
+
+/** A `Map` from the raw row DTO to the POCO the EF path materialises, so the
+ *  projection expressions downstream are byte-identical across adapters.  Each
+ *  column's `hydrate` already reads `r.<col>`, which is why the parameter is
+ *  named `r`. */
+function dapperRowMap(
+  fnName: string,
+  rowCls: string,
+  pocoFqn: string,
+  cols: readonly DapperColumn[],
+): string {
+  const inits = cols.map((c) => `        ${c.stateProp} = ${c.hydrate},`).join("\n");
+  return `    private static ${pocoFqn} ${fnName}(${rowCls} r) => new()\n    {\n${inits}\n    };`;
+}
+
 /** Render the handler for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0).
  *
  *  ONE SQL query, no rows materialised — the shape exists precisely to avoid
@@ -301,6 +467,7 @@ function renderAggregateHandler(
   proj: ProjectionIR,
   ctx: EnrichedBoundedContextIR,
   ns: string,
+  usingDapper: boolean,
 ): string {
   const aggregates = wholeTableAggregates(proj)!;
   const rowName = `${upperFirst(proj.name)}Row`;
@@ -311,8 +478,16 @@ function renderAggregateHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter ? renderCsExpr(filter, { thisName: "o", efQuery: true }) : undefined;
-  if (filter) collectCsExprUsings(filter, usings);
+  // EF hands the SAME C# predicate to its own translator; Dapper writes the
+  // SQL itself, through the one predicate→SQL lowering this adapter already
+  // has (`whereToSql`, shared with every Dapper find / retrieval / capability
+  // filter).  A second lowering here would be a second dialect to keep true.
+  const where = filter
+    ? usingDapper
+      ? whereToSql(filter)
+      : renderCsExpr(filter, { thisName: "o", efQuery: true })
+    : undefined;
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
 
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
@@ -321,18 +496,24 @@ function renderAggregateHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
 
-  const fields: string[] = [`    private readonly AppDbContext _db;`];
-  const ctorParams: string[] = [`AppDbContext db`];
+  const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
+  const fields: string[] = [`    private readonly ${dbType} _db;`];
+  const ctorParams: string[] = [`${dbType} db`];
   const ctorAssigns: string[] = [`_db = db`];
   if (requires && gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  } else if (seam.needsPrincipal) {
     fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
     ctorParams.push(`ICurrentUserAccessor currentUser`);
     ctorAssigns.push(`_currentUser = currentUser`);
   }
   const ctor =
     ctorParams.length === 1
-      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      ? `    public ${handlerName}(${dbType} db) => _db = db;`
       : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
 
   let gate = "";
@@ -342,15 +523,52 @@ function renderAggregateHandler(
       `Forbidden: projection ${proj.name}`,
     )});\n`;
   }
+  if (seam.needsPrincipal && !gateUsesUser)
+    gate += `        var currentUser = _currentUser.User;\n`;
 
-  // The anonymous projection the grouped query selects; each member is named
-  // after its wire field so the row construction below reads plainly.
-  const members = aggregates
-    .map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`)
-    .join(", ");
-  const args = aggregates.map((s) => csCoerce(s, `agg`, ctx)).join(", ");
   const anyMoney = aggregates.some((s) => aggregateCoercion(s).asString);
   if (anyMoney) usings.add("System.Globalization");
+
+  let members: string;
+  let body: string;
+  if (usingDapper) {
+    // ONE `SELECT count(*), sum(…) …` with no GROUP BY, so Postgres always
+    // returns exactly one row (count 0 / NULL sums over an empty table) —
+    // `QuerySingleAsync`, not `…OrDefault`.  Each aggregate is aliased to its
+    // wire field's snake name, which is also the row property name, so Dapper's
+    // column→property match is exact.
+    const cols = aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${snake(s.field)}`);
+    members = aggregates
+      .map(
+        (s) => `        public ${sqlAggregateRowCs(s.aggregate)} ${snake(s.field)} { get; set; }`,
+      )
+      .join("\n");
+    const sql = `SELECT ${cols.join(", ")} FROM ${dapperAggregateTable(source)}${
+      where ? ` WHERE ${where}` : ""
+    }`;
+    const args = aggregates.map((s) => csCoerce(s, `agg`, ctx, snake(s.field))).join(", ");
+    body =
+      `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+      `        var agg = await conn.QuerySingleAsync<AggRow>(new CommandDefinition(${JSON.stringify(sql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        return new ${rowName}(${args});\n`;
+  } else {
+    // The anonymous projection the grouped query selects; each member is named
+    // after its wire field so the row construction below reads plainly.
+    const anon = aggregates
+      .map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`)
+      .join(", ");
+    const args = aggregates.map((s) => csCoerce(s, `agg`, ctx)).join(", ");
+    members = "";
+    body =
+      `        var agg = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
+      `            .GroupBy(_ => 1)\n` +
+      `            .Select(g => new { ${anon} })\n` +
+      `            .FirstOrDefaultAsync(cancellationToken);\n` +
+      `        return new ${rowName}(${args});\n`;
+  }
+  const rowDecl = usingDapper
+    ? `    private sealed class AggRow\n    {\n${members}\n    }\n\n`
+    : "";
 
   const extraUsings = [...usings]
     .sort()
@@ -360,7 +578,7 @@ function renderAggregateHandler(
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
-using Microsoft.EntityFrameworkCore;
+${qpPersistenceUsings(usingDapper)}
 using Mediator;
 using ${ns}.Domain.${plural(source)};
 using ${ns}.Domain.Ids;
@@ -375,14 +593,9 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, ${rowName}>
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<${rowName}> Handle(${queryName} query, CancellationToken cancellationToken)
+${rowDecl}    public async ValueTask<${rowName}> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-${gate}        var agg = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}
-            .GroupBy(_ => 1)
-            .Select(g => new { ${members} })
-            .FirstOrDefaultAsync(cancellationToken);
-        return new ${rowName}(${args});
-    }
+${gate}${body}    }
 }
 `;
 }
@@ -408,6 +621,7 @@ function renderGroupedHandler(
   proj: ProjectionIR,
   ctx: EnrichedBoundedContextIR,
   ns: string,
+  usingDapper: boolean,
 ): string {
   const grouped = groupedAggregates(proj)!;
   const rowName = `${upperFirst(proj.name)}Row`;
@@ -454,8 +668,12 @@ function renderGroupedHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter ? renderCsExpr(filter, { thisName: "o", efQuery: true }) : undefined;
-  if (filter) collectCsExprUsings(filter, usings);
+  const where = filter
+    ? usingDapper
+      ? whereToSql(filter)
+      : renderCsExpr(filter, { thisName: "o", efQuery: true })
+    : undefined;
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
 
   // Authorization gate (default-deny) — same shape as the singleton arm.
   const requires = proj.query!.requires;
@@ -465,18 +683,20 @@ function renderGroupedHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
 
-  const fields: string[] = [`    private readonly AppDbContext _db;`];
-  const ctorParams: string[] = [`AppDbContext db`];
+  const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
+  const fields: string[] = [`    private readonly ${dbType} _db;`];
+  const ctorParams: string[] = [`${dbType} db`];
   const ctorAssigns: string[] = [`_db = db`];
-  if (requires && gateUsesUser) {
+  if ((requires && gateUsesUser) || seam.needsPrincipal) {
     fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
     ctorParams.push(`ICurrentUserAccessor currentUser`);
     ctorAssigns.push(`_currentUser = currentUser`);
   }
   const ctor =
     ctorParams.length === 1
-      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      ? `    public ${handlerName}(${dbType} db) => _db = db;`
       : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
 
   let gate = "";
@@ -486,6 +706,8 @@ function renderGroupedHandler(
       `Forbidden: projection ${proj.name}`,
     )});\n`;
   }
+  if (seam.needsPrincipal && !gateUsesUser)
+    gate += `        var currentUser = _currentUser.User;\n`;
 
   // The anonymous projection: every grouping column (whether selected or not,
   // so the ORDER BY below can reach it), then one member per aggregate select
@@ -501,19 +723,81 @@ function renderGroupedHandler(
   // Map each raw group to the declared row, in wire-shape order.
   const keyByField = new Map(grouped.keys.map((k) => [k.field, k] as const));
   const aggByField = new Map(grouped.aggregates.map((a) => [a.field, a] as const));
+  // The Dapper row DTO's column per SELECTED key — `fieldColumn` off the key's
+  // DECLARED type, named for the SQL alias, so its `rowCs`/`hydrate` are the
+  // same pair every Dapper reader uses (a `text` enum column parses back to the
+  // enum, an id column re-wraps into `<Target>Id`) and `projectToResponse` then
+  // sees exactly what EF's `x.Status` handed it.
+  const keyDbCol = (k: GroupKeySelect): DapperColumn =>
+    fieldColumn({ name: sqlGroupKeyAlias(k.expr, proj.name), type: k.type, optional: false });
   const args = (proj.wireShape ?? []).map((f) => {
     const key = keyByField.get(f.name);
     if (key) {
-      // Reads the SAME anonymous member the GroupBy declared — so a computed
-      // key's select and its grouping can't drift apart.
-      return projectToResponse(`x.${groupCol(key.expr).member}`, key.type, ctx);
+      // Reads the SAME member the GROUP BY declared — so a computed key's
+      // select and its grouping can't drift apart.
+      return projectToResponse(
+        usingDapper ? keyDbCol(key).hydrate : `x.${groupCol(key.expr).member}`,
+        key.type,
+        ctx,
+      );
     }
     const agg = aggByField.get(f.name);
-    if (agg) return csCoerce(agg, "x", ctx);
+    if (agg)
+      return csCoerce(
+        agg,
+        usingDapper ? "r" : "x",
+        ctx,
+        usingDapper ? snake(agg.field) : undefined,
+      );
     return "default!";
   });
   const anyMoney = grouped.aggregates.some((s) => aggregateCoercion(s).asString);
   if (anyMoney) usings.add("System.Globalization");
+
+  // The raw-SQL grouped query: SELECT the keys that are projected plus every
+  // aggregate, GROUP BY / ORDER BY the grouping EXPRESSIONS themselves (not the
+  // aliases — a grouping column may be grouped without being selected, and
+  // Postgres matches a grouped select against the GROUP BY expression
+  // syntactically, which is what makes the computed `date_trunc` bucket agree
+  // in all three clause positions).
+  const groupExprs = [...new Set(grouped.groupBy.map((e) => sqlGroupKeyExpr(e, proj.name)))];
+  const selectSql = [
+    ...grouped.keys.map((k) => {
+      const alias = snake(sqlGroupKeyAlias(k.expr, proj.name));
+      const expr = sqlGroupKeyExpr(k.expr, proj.name);
+      return expr === alias ? alias : `${expr} AS ${alias}`;
+    }),
+    ...grouped.aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${snake(s.field)}`),
+  ].join(", ");
+  const groupSql =
+    `SELECT ${selectSql} FROM ${dapperAggregateTable(source)}` +
+    `${where ? ` WHERE ${where}` : ""}` +
+    ` GROUP BY ${groupExprs.join(", ")} ORDER BY ${groupExprs.join(", ")}`;
+  const groupRowDecl = usingDapper
+    ? `${dapperRowClass("GroupRow", [
+        ...grouped.keys.map(keyDbCol),
+        ...grouped.aggregates.map((s) => ({
+          col: snake(s.field),
+          sql: "",
+          nullable: true,
+          rowCs: sqlAggregateRowCs(s.aggregate),
+          cast: "",
+          save: "",
+          stateProp: "",
+          hydrate: "",
+        })),
+      ])}\n\n`
+    : "";
+  const groupBody = usingDapper
+    ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+      `        var groups = await conn.QueryAsync<GroupRow>(new CommandDefinition(${JSON.stringify(groupSql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        return groups.Select(r => new ${rowName}(${args.join(", ")})).ToList();\n`
+    : `        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
+      `            .GroupBy(o => new { ${cols.map((c) => c.decl).join(", ")} })\n` +
+      `            .Select(g => new { ${members} })\n` +
+      `            ${orderBy}\n` +
+      `            .ToListAsync(cancellationToken);\n` +
+      `        return groups.Select(x => new ${rowName}(${args.join(", ")})).ToList();\n`;
 
   const extraUsings = [...usings]
     .sort()
@@ -523,7 +807,7 @@ function renderGroupedHandler(
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
-using Microsoft.EntityFrameworkCore;
+${qpPersistenceUsings(usingDapper)}
 using Mediator;
 using ${ns}.Domain.${plural(source)};
 using ${ns}.Domain.Ids;
@@ -538,15 +822,9 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<$
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
+${groupRowDecl}    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-${gate}        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}
-            .GroupBy(o => new { ${cols.map((c) => c.decl).join(", ")} })
-            .Select(g => new { ${members} })
-            ${orderBy}
-            .ToListAsync(cancellationToken);
-        return groups.Select(x => new ${rowName}(${args.join(", ")})).ToList();
-    }
+${gate}${groupBody}    }
 }
 `;
 }
@@ -572,9 +850,17 @@ function csAggregate(agg: ProjectionAggregateIR): string {
  *  an empty table.  `money` rides the .NET wire as a STRING (see the aggregate
  *  Response records), so a decimal sum is formatted with InvariantCulture — a
  *  locale's comma-vs-dot would otherwise change the wire value. */
-function csCoerce(s: AggregateSelect, aggVar: string, ctx: EnrichedBoundedContextIR): string {
+function csCoerce(
+  s: AggregateSelect,
+  aggVar: string,
+  ctx: EnrichedBoundedContextIR,
+  /** The member the aggregate landed on.  EF names its anonymous-type member
+   *  after the wire field (`Orders`); the Dapper row DTO is snake-named after
+   *  the SQL alias (`orders`).  Same coercion either way. */
+  member: string = upperFirst(s.field),
+): string {
   const c = aggregateCoercion(s);
-  const read = `${aggVar}?.${upperFirst(s.field)}`;
+  const read = `${aggVar}?.${member}`;
   if (c.isCount) return `${read} ?? 0`;
   // money pins the FIXED wire scale (RS-12) instead of echoing the aggregate's
   // own: `Sum`/`Max`/`Min` come back at the scale the rows were STORED at, so a
@@ -609,6 +895,7 @@ function renderWorkflowHandler(
   proj: ProjectionIR,
   ctx: EnrichedBoundedContextIR,
   ns: string,
+  usingDapper: boolean,
 ): string {
   const rowName = `${upperFirst(proj.name)}Row`;
   const queryName = `${upperFirst(proj.name)}QpQuery`;
@@ -624,8 +911,12 @@ function renderWorkflowHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter ? renderCsExpr(filter, { thisName: "r", efQuery: true }) : undefined;
-  if (filter) collectCsExprUsings(filter, usings);
+  const where = filter
+    ? usingDapper
+      ? whereToSql(filter)
+      : renderCsExpr(filter, { thisName: "r", efQuery: true })
+    : undefined;
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
   for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
 
   // Authorization gate (default-deny) — same shape as the aggregate handler.
@@ -636,6 +927,7 @@ function renderWorkflowHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
 
   // Project each state row through the `select` expressions, keyed by wire field.
   // A source-alias read (`f.orderId`) lowers to a member off the current row, so
@@ -648,19 +940,20 @@ function renderWorkflowHandler(
   });
   const projection = `new ${rowName}(${args.join(", ")})`;
 
-  // Ctor injects AppDbContext (not an aggregate repo), plus the request principal
-  // when a `currentUser` gate is present.
-  const fields: string[] = [`    private readonly AppDbContext _db;`];
-  const ctorParams: string[] = [`AppDbContext db`];
+  // Ctor injects the persistence handle (not an aggregate repo), plus the
+  // request principal when a `currentUser` gate is present.
+  const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
+  const fields: string[] = [`    private readonly ${dbType} _db;`];
+  const ctorParams: string[] = [`${dbType} db`];
   const ctorAssigns: string[] = [`_db = db`];
-  if (requires && gateUsesUser) {
+  if ((requires && gateUsesUser) || seam.needsPrincipal) {
     fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
     ctorParams.push(`ICurrentUserAccessor currentUser`);
     ctorAssigns.push(`_currentUser = currentUser`);
   }
   const ctor =
     ctorParams.length === 1
-      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      ? `    public ${handlerName}(${dbType} db) => _db = db;`
       : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
 
   let gate = "";
@@ -670,6 +963,27 @@ function renderWorkflowHandler(
       `Forbidden: projection ${proj.name}`,
     )});\n`;
   }
+  if (seam.needsPrincipal && !gateUsesUser)
+    gate += `        var currentUser = _currentUser.User;\n`;
+
+  // Dapper reads the SAME saga-state table the store writes, SELECTing every
+  // state column into a private row DTO and mapping it back to the state POCO
+  // through each column's `hydrate` — so the `select` projections above (which
+  // read domain-typed members off `r`) are byte-identical across adapters.
+  const stateCols = dapperWorkflowStateColumns(wf, false);
+  const pocoFqn = `global::${ns}.Application.Workflows.${workflowStateClass(wf)}`;
+  const rowDecl = usingDapper
+    ? `${dapperRowClass("StateDbRow", stateCols)}\n${dapperRowMap("MapState", "StateDbRow", pocoFqn, stateCols)}\n\n`
+    : "";
+  const stateSql = `SELECT ${stateCols.map((c) => c.col).join(", ")} FROM ${workflowStateTable(wf)}${
+    where ? ` WHERE ${where}` : ""
+  }`;
+  const body = usingDapper
+    ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+      `        var __rows = await conn.QueryAsync<StateDbRow>(new CommandDefinition(${JSON.stringify(stateSql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        return __rows.Select(MapState).Select(r => ${projection}).ToList();\n`
+    : `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
+      `        return rows.Select(r => ${projection}).ToList();\n`;
 
   const extraUsings = [...usings]
     .sort()
@@ -679,7 +993,7 @@ function renderWorkflowHandler(
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
-using Microsoft.EntityFrameworkCore;
+${qpPersistenceUsings(usingDapper)}
 using Mediator;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
@@ -693,11 +1007,9 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<$
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
+${rowDecl}    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-${gate}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
-        return rows.Select(r => ${projection}).ToList();
-    }
+${gate}${body}    }
 }
 `;
 }
@@ -719,6 +1031,7 @@ function renderProjectionSourceHandler(
   proj: ProjectionIR,
   ctx: EnrichedBoundedContextIR,
   ns: string,
+  usingDapper: boolean,
 ): string {
   const rowName = `${upperFirst(proj.name)}Row`;
   const queryName = `${upperFirst(proj.name)}QpQuery`;
@@ -734,8 +1047,12 @@ function renderProjectionSourceHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter ? renderCsExpr(filter, { thisName: "r", efQuery: true }) : undefined;
-  if (filter) collectCsExprUsings(filter, usings);
+  const where = filter
+    ? usingDapper
+      ? whereToSql(filter)
+      : renderCsExpr(filter, { thisName: "r", efQuery: true })
+    : undefined;
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
   for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
 
   // Authorization gate (default-deny) — same shape as the aggregate/workflow handler.
@@ -746,6 +1063,7 @@ function renderProjectionSourceHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
 
   // Project each source row through the `select` expressions, keyed by wire field.
   // A source-row read (`t.total`) lowers to a member off the current row, so
@@ -758,19 +1076,20 @@ function renderProjectionSourceHandler(
   });
   const projection = `new ${rowName}(${args.join(", ")})`;
 
-  // Ctor injects AppDbContext (not an aggregate repo), plus the request principal
-  // when a `currentUser` gate is present.
-  const fields: string[] = [`    private readonly AppDbContext _db;`];
-  const ctorParams: string[] = [`AppDbContext db`];
+  // Ctor injects the persistence handle (not an aggregate repo), plus the
+  // request principal when a `currentUser` gate is present.
+  const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
+  const fields: string[] = [`    private readonly ${dbType} _db;`];
+  const ctorParams: string[] = [`${dbType} db`];
   const ctorAssigns: string[] = [`_db = db`];
-  if (requires && gateUsesUser) {
+  if ((requires && gateUsesUser) || seam.needsPrincipal) {
     fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
     ctorParams.push(`ICurrentUserAccessor currentUser`);
     ctorAssigns.push(`_currentUser = currentUser`);
   }
   const ctor =
     ctorParams.length === 1
-      ? `    public ${handlerName}(AppDbContext db) => _db = db;`
+      ? `    public ${handlerName}(${dbType} db) => _db = db;`
       : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
 
   let gate = "";
@@ -780,6 +1099,27 @@ function renderProjectionSourceHandler(
       `Forbidden: projection ${proj.name}`,
     )});\n`;
   }
+  if (seam.needsPrincipal && !gateUsesUser)
+    gate += `        var currentUser = _currentUser.User;\n`;
+
+  // Dapper reads the SAME read-model table the fold store upserts, SELECTing
+  // every column into a private row DTO and mapping it back to the `<Proj>Row`
+  // POCO — so `projectSourceRowArg`'s nullable unwrapping (which reasons about
+  // the POCO's nullable columns) is shared verbatim with the EF path.
+  const srcCols = dapperProjectionColumns(src);
+  const pocoFqn = `global::${ns}.Infrastructure.Persistence.Projections.${projectionRowClass(src)}`;
+  const rowDecl = usingDapper
+    ? `${dapperRowClass("SourceDbRow", srcCols)}\n${dapperRowMap("MapSource", "SourceDbRow", pocoFqn, srcCols)}\n\n`
+    : "";
+  const srcSql = `SELECT ${srcCols.map((c) => c.col).join(", ")} FROM ${projectionRowTable(src)}${
+    where ? ` WHERE ${where}` : ""
+  }`;
+  const body = usingDapper
+    ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
+      `        var __rows = await conn.QueryAsync<SourceDbRow>(new CommandDefinition(${JSON.stringify(srcSql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        return __rows.Select(MapSource).Select(r => ${projection}).ToList();\n`
+    : `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
+      `        return rows.Select(r => ${projection}).ToList();\n`;
 
   const extraUsings = [...usings]
     .sort()
@@ -789,7 +1129,7 @@ function renderProjectionSourceHandler(
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
-using Microsoft.EntityFrameworkCore;
+${qpPersistenceUsings(usingDapper)}
 using Mediator;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
@@ -803,11 +1143,9 @@ public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<$
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
+${rowDecl}    public async ValueTask<IReadOnlyList<${rowName}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-${gate}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
-        return rows.Select(r => ${projection}).ToList();
-    }
+${gate}${body}    }
 }
 `;
 }
