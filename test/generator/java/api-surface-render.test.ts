@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoundedContextIR, LoomModel } from "../../../src/ir/types/loom-ir.js";
 import { deriveContextOperations } from "../../../src/ir/util/api-surface.js";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 
 const SOURCE = `
@@ -152,7 +152,7 @@ system P {
       aggregate Order {
         code: string
         status: string
-        create(code: string) { code := code }
+        create(code: string) { }
         destroy archive() { status := "archived" }
       }
       repository Orders for Order { }
@@ -163,7 +163,16 @@ system P {
   deployable d { platform: java contexts: [Orders] dataSources: [st] port: 3000 }
 }
 `;
-    const files = await generateSystemFiles(src);
+    // Deliberately invalid: a named-only destroy is refused outright by
+    // `loom.named-lifecycle-dropped` (it reaches no backend).  That refusal IS
+    // the premise here — this pins that the emitter ALSO stops mounting a
+    // generic DELETE for it, so the two halves agree instead of one shipping a
+    // route the other says cannot exist.
+    const files = await generateSystemFilesUnchecked(
+      src,
+      "a named-only destroy is refused by loom.named-lifecycle-dropped; the " +
+        "emitter's behaviour under that refusal is exactly what this pins",
+    );
     const mounted = scrapeControllerRoutes(files).map(key);
     expect(mounted.some((k) => k.startsWith("delete "))).toBe(false);
     const published = [...scrapeCustomizerRoutes(files).keys()];

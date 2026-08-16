@@ -30,7 +30,7 @@ const DOMAIN = `
         qty: int
         invariant name.length >= 2 && name.length <= 120 message "Name must be 2-120 characters"
         invariant qty >= 0
-        create(n: string, s: string, q: int) { name := n  sku := s  qty := q }
+        create(name: string, sku: string, qty: int) { }
         operation restock(amount: int) {
           precondition amount >= 1 message "Amount must be positive"
           qty := qty + amount
@@ -60,7 +60,7 @@ const NO_MESSAGES = `
         name: string
         qty: int
         invariant qty >= 0
-        create(n: string, q: int) { name := n  qty := q }
+        create(name: string, qty: int) { }
       }
       repository Products for Product { }
 `;

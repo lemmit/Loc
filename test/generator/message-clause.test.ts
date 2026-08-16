@@ -18,7 +18,11 @@ const SOURCE = `
           name: string
           invariant name.length >= 2 && name.length <= 120 message "Name must be 2-120 characters"
           invariant sku.length > 0
-          create(n: string, s: string) { name := n  sku := s }
+          // Empty body on purpose: on a state-based aggregate the canonical
+          // create's assignments are DROPPED (loom.lifecycle-body-dropped) —
+          // each field takes its value from the request body.  The declaration
+          // is still what makes the aggregate constructible.
+          create(name: string, sku: string) { }
           operation restock(amount: int) {
             precondition amount >= 1 message "Amount must be positive"
             name := name

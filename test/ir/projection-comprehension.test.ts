@@ -27,7 +27,7 @@ system Shop {
       aggregate Customer { name: string  region: string }
       aggregate Order {
         status: OrderStatus  placedAt: datetime  customerId: Customer id  lineCount: int  total: money
-        create place(customer: Customer id) {}
+        create(customer: Customer id) {}
       }
       repository Orders for Order {}
       repository Customers for Customer {}
@@ -142,7 +142,7 @@ system S {
       enum OrderStatus { Draft Confirmed Closed }
       aggregate Customer { name: string }
       aggregate Order { status: OrderStatus  customerId: Customer id  lineCount: int
-        create place(customer: Customer id) {} }
+        create(customer: Customer id) {} }
       repository Orders for Order { }
       repository Customers for Customer { }
       criterion IsConfirmed of Order = status == Confirmed
