@@ -49,7 +49,7 @@ export function emitPyAuthFiles(
   );
   // /auth/me is emitted whenever a backend has auth — the frontend `auth: ui`
   // guard probes it, and it works for both the OIDC verifier and the dev stub.
-  out.set("app/auth/routes.py", ROUTES_PY);
+  out.set("app/auth/routes.py", renderRoutesPy(user));
   if (auth) {
     out.set("app/auth/oidc.py", renderOidcModule(user, auth));
   }
@@ -453,14 +453,29 @@ function renderAuthMiddleware(
 // routes — the frontend probes `${API_BASE_URL}/auth/me`.
 // ---------------------------------------------------------------------------
 
+/** `app/auth/routes.py` — the `/auth/me` session probe.
+ *
+ *  The body is the DECLARED `user { … }` shape, BY DECLARED NAME (#2548).  It
+ *  used to be `asdict(user)`, which spells every field the way the dataclass
+ *  does — `tenantId` reached the wire as `tenant_id`, while the other four
+ *  backends answered the declared name.  `/auth/me` is the one endpoint the
+ *  frontends' `auth: ui` guard reads, so its keys are a wire contract like any
+ *  other; the per-request derived members (`org_path` / `root_org`) stay off it
+ *  for the same reason they do on the other backends — they are scoping state,
+ *  not part of the declared principal. */
+function renderRoutesPy(user: UserIR): string {
+  const projection = user.fields
+    .map((f) => `            ${JSON.stringify(f.name)}: user.${snake(f.name)},`)
+    .join("\n");
+  return ROUTES_PY.replace("__PROJECTION__", projection);
+}
+
 const ROUTES_PY = `"""Auth session-probe route.  Auto-generated.
 
 GET /api/auth/me echoes the verified current_user (the \`auth: ui\` frontend
 guard reads it).  Runs through AuthMiddleware, so the principal is verified (or
 the request 401'd) before this handler sees it.
 """
-
-from dataclasses import asdict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -476,7 +491,16 @@ router = APIRouter(prefix="${AUTH_BASE_PATH}", tags=["auth"])
 @router.get("/me", include_in_schema=False)
 async def me(request: Request) -> JSONResponse:
     user: User | None = getattr(request.state, "current_user", None)
-    return JSONResponse(asdict(user) if user is not None else None)
+    if user is None:
+        return JSONResponse(None)
+    # The declared \`user { … }\` shape, by DECLARED name — the dataclass spells
+    # its attributes snake_case, the wire spells them as the source declared
+    # them (the other four backends agree on this).
+    return JSONResponse(
+        {
+__PROJECTION__
+        }
+    )
 `;
 
 // ---------------------------------------------------------------------------

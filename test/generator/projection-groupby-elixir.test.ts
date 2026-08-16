@@ -103,7 +103,9 @@ describe("elixir grouped projection — coercions follow the DECLARED row type",
     expect(mod).toContain("orders: row.orders || 0,");
     // Jason encodes a bare %Decimal{} as a JSON string — what money wants and
     // what a plain decimal must NOT be (the other four backends ship a number).
-    expect(mod).toContain("revenue: to_string(row.revenue || 0),");
+    // money pins the fixed wire scale (RS-12 / #2549) through the emitted
+    // `__money_wire/1`, rather than stringifying the aggregate as it arrived.
+    expect(mod).toContain("revenue: __money_wire(row.revenue || 0),");
     expect(mod).toContain("Decimal.to_float(");
   });
 });

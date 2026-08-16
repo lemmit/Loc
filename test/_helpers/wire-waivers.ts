@@ -113,15 +113,29 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     reason:
       "M-T6.20 — elixir's precondition denial puts the authored message in detail (the domain-floor shape) instead of the wire-validation sentence",
   },
-  // M-T9.11 (4xx wire goldens) — the bare-text-401 waivers that lived here for
-  // dotnet/dapper and java are GONE, and their own exit condition is why.  They
-  // read "ratchets stale the moment #2500 (or any 401 reshape) makes these
-  // backends match"; #2500 landed (`a4235ac`), so neither emitter writes a
-  // bare-text `unauthorized` any more — `WriteAsync("unauthorized")` and
-  // `getWriter().write("unauthorized")` no longer appear in
-  // `src/generator/{dotnet,java}/` — and node's golden was rebaselined onto the
-  // RFC 9110 problem document.  All five now answer the same shape, so the
-  // divergence the waivers excused does not reproduce and the ratchet fails the
-  // run until they are deleted.  This is the intended end state, not a
-  // regression: a fix deletes its waiver in the same PR.
+  // #2563 — a wire `decimal` is a float64 on four backends and a
+  // `System.Decimal` on .NET, so a value needing more than ~15 significant
+  // digits truncates.  `avg(o.lineCount)` over lineCounts 2/4/1 is 7/3:
+  // node/python/java/elixir all send the double's shortest round-trip
+  // spelling `2.3333333333333335`, .NET sends `2.33333333333333`.
+  //
+  // Found while fixing the money-scale divergence on this same path (#2549)
+  // and NOT folded into it: that was `money` losing its fixed wire SCALE and
+  // was fixable in each projection emitter's coercion, which is why all 22 of
+  // those divergences are gone and this one is not.  This is the numeric TYPE
+  // backing a wire `decimal` on .NET — the value cannot be recovered inside a
+  // `System.Decimal`, so closing it means deciding that representation
+  // globally (response records + OpenAPI schema), which is its own unit.
+  //
+  // Scoped to the one case and field that can reach it: `sum`/`min`/`max` over
+  // a decimal stay exact, and the singleton case's own `avgLines` is (2+4)/2 =
+  // 3, which both representations spell identically.
+  {
+    backends: ["dotnet"],
+    cases: ["projection-groupby"],
+    path: "$[*].avgLines",
+    kinds: ["value"],
+    reason:
+      "#2563 — .NET backs a wire `decimal` with System.Decimal, truncating a projection `avg` to ~15 significant digits where the other four send the float64 (RS-24 fixes the JSON type, not the precision)",
+  },
 ];

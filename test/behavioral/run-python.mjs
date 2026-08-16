@@ -125,7 +125,7 @@ function runPytestUnit(deplDir) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted FastAPI server. */
-function entrySource(e2eFile, bearerToken, authzLadder, unauthorizedCreds) {
+function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
@@ -162,7 +162,7 @@ export async function run() {
   const results = await runTests(cases);
   // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
   // golden aligns on, and so a failing tier is diagnosed on its own requests.
-  await __frameworkProbes(dispatch);
+  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)} });
   // M-T9.11 / M-T9.28 — the authorization ladder, RECORDED, so this backend's
   // 401/403/2xx are diffed against the node-oracle golden per-PR.
   ${authzLadderTail("results")}
@@ -191,6 +191,10 @@ async function runCase(c) {
     // Detect from the SOURCE (backend-agnostic) — the emitted verifier path
     // differs per backend (app/auth/oidc.py, src/…/Oidc.cs, …).
     const isOidc = /\n\s*auth\s*\{/.test(c.source);
+    // Does this case's backend deployable enforce auth (either flavour —
+    // dev stub or OIDC)?  A frontend's `auth: ui` rides its target's.
+    // Drives the anonymous `/api/auth/me` probe — see __frameworkProbes.
+    const hasAuth = /\n\s*auth:\s*required\b/.test(c.source);
     // NO_PROXY: the mock issuer is on loopback; without it the backend's JWKS
     // fetch would be routed through any ambient HTTP(S)_PROXY and fail.
     const oidcEnv =
@@ -254,7 +258,7 @@ async function runCase(c) {
 
       const entry = join(workDir, "entry.mts");
       const bundle = join(workDir, "bundle.mjs");
-      writeFileSync(entry, entrySource(e2eFile, bearerToken, authzLadder, unauthorizedCreds));
+      writeFileSync(entry, entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds));
       await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
       const { run } = await import(pathToFileURL(bundle).href);
       const api = await run();

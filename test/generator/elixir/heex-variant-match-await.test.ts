@@ -22,7 +22,7 @@ const SOURCE = `
         operation confirm(): Order or Failed { return Failed { reason: code } }
       }
     } }
-    api CApi from C
+    api CApi from S
     ui Web {
       api C: CApi
       page Detail {
@@ -89,7 +89,7 @@ describe("HEEx `match await` (Stage 2) — server-side variant-match", () => {
             operation confirm(): Order or Failed or Declined { return Failed { reason: code } }
           }
         } }
-        api CApi from C
+        api CApi from S
         ui Web {
           api C: CApi
           page Detail {

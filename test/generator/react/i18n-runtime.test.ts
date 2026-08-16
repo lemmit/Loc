@@ -32,7 +32,7 @@ const SYSTEM = (body: string) => `
       serves: SalesApi
       port: 3000
     }
-    deployable web { platform: react targets: api ui: Web port: 3100 }
+    deployable web { platform: react targets: api ui: Web { Sales: api } port: 3100 }
   }
 `;
 
@@ -264,8 +264,8 @@ describe("React i18n runtime", () => {
     for (const design of ["chakra", `"chakra@v2"`]) {
       const files = await generateSystemFiles(
         SYSTEM(`Divider { label: "Section break" }`).replace(
-          "ui: Web port: 3100",
-          `ui: Web port: 3100 design: ${design}`,
+          "ui: Web { Sales: api } port: 3100",
+          `ui: Web { Sales: api } port: 3100 design: ${design}`,
         ),
       );
       const home = await pageOf(files);

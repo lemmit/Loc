@@ -32,8 +32,8 @@ const FIXTURE = `
         }
       }
     }
-    deployable api { platform: node, contexts: [Ops], port: 3000 }
-    deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+    deployable api { platform: node, contexts: [Ops], serves: OpsApi, port: 3000 }
+    deployable web { platform: static, targets: api, ui: WebApp { Ops: api }, port: 3001 }
   }
 `;
 

@@ -181,17 +181,25 @@ export function makeWireGate(backend, workDir) {
      * suite makes fewer requests, which the differ would faithfully report as a
      * `request-count` divergence — technically true, but it restates a failure
      * the runner is already gating on and buries the real error. So a failed
-     * tier is noted and skipped, never re-diagnosed.  A `skip` outcome is NOT a
-     * failure — the authz ladder's anonymous arm is skipped on dev-stub systems
-     * and makes no request, so it neither shortens the recording nor blocks the
-     * comparison; only a genuine `fail` does.
+     * tier is noted and skipped, never re-diagnosed.
+     *
+     * A `skip` is NOT such a failure and must not disable the gate.  It used to:
+     * the predicate was `status !== "pass"`, and #2515's authz ladder reports
+     * `skip` for an arm the case's auth flavour cannot express (a dev-stub
+     * system has no anonymous caller).  From that day every `auth-simple` run on
+     * every backend printed "the tier did not pass" and compared NOTHING — the
+     * whole golden, not just the ladder — while reading like a deliberate skip.
+     * A silently-off gate is worse than an absent one, so the predicate names
+     * the failing statuses instead of everything that isn't a pass: a new
+     * outcome has to be classified deliberately rather than turning the gate off
+     * by default.
      */
     async check(caseName, entries, results) {
       if (WIRE_OFF) return 0;
       // No recording at all ⇒ the api tier never ran (a boot/infra failure the
       // runner has ALREADY counted as an errored case).
       if (entries == null) return 0;
-      if (results?.some((r) => r.status !== "pass" && r.status !== "skip")) {
+      if (results?.some((r) => r.status === "fail" || r.status === "error")) {
         process.stdout.write(
           "  ⟐ wire: skipped — the tier did not pass, so its recording is not comparable\n",
         );
@@ -283,7 +291,13 @@ const __record = (dispatch) => {
 // dependent on the fixture.  If the tier DID use PATCH on that path (an
 // explicit \`route PATCH …\` api), the probe steps aside rather than assert a
 // mismatch that isn't one.
-const __frameworkProbes = async (dispatch) => {
+// \`opts.auth\` — whether this case's deployable declares \`auth: required\` at
+// all.  Passed in by the runner (which knows) rather than sniffed from the
+// recorded headers (which cannot tell): the emitted suite forwards
+// \`x-loom-dev-claims\` on EVERY case, inert where nothing reads it, so a header
+// test would probe \`/api/auth/me\` on the ~35 auth-less cases too and freeze a
+// 404 that \`/__loom_no_such_path\` already pins in every one of their goldens.
+const __frameworkProbes = async (dispatch, opts = {}) => {
   const paths = __urls.map((u) => { try { return new URL(u); } catch { return null; } }).filter(Boolean);
   const collection = paths.find((u) => /^\\/api\\/[^/]+$/.test(u.pathname));
   if (!collection) return;
@@ -316,18 +330,32 @@ const __frameworkProbes = async (dispatch) => {
   // ArgumentError and answered 500 for an id its type could not parse, which
   // is a real defect but not this probe's subject.
   //
-  // Only where the tier itself carried a credential.  A dev-stub \`auth {}\`
-  // system (no \`oidc\` block) fabricates a principal for ANY caller, so it has
-  // no unauthenticated arm to reach — the probe would answer 200 and record
-  // the stub's User instead, which is a third thing this probe does not
-  // assert.  (It diverges: node serialises \`{id, tenantId}\`, phoenix
-  // \`{id, role, tenantId}\` with the opposite two populated.  Real, and filed
-  // separately — the dev stub's principal shape is not the RS-9 error
-  // contract.)  A no-auth system is skipped for free and loses nothing: its
+  // Only on an \`auth: required\` deployable — but on EITHER flavour now, not
+  // only OIDC (#2548).  What the anonymous probe records differs by flavour,
+  // and both answers are wire contracts worth freezing:
+  //
+  //   oidc  -> 401 + the RFC 7807 body above
+  //   stub  -> 200 + the dev stub's BUILT-IN principal
+  //
+  // The stub arm was excluded while it was undecided what that 200 should say:
+  // a dev-stub \`auth {}\` system (no \`oidc\` block) fabricates a principal for
+  // ANY caller, and the answer diverged — phoenix's identity was a fixed
+  // \`%{"id","role","permissions"}\` claim map read by declared field name, so it
+  // filled a field NAMED \`role\` and nulled every other one the other four
+  // backends filled from the declared \`user { … }\` shape.  That is now decided
+  // (the stub serialises the declared shape, one type-shaped value per declared
+  // field) and this probe is what holds it: the identity is exactly what a
+  // frontend's \`auth: ui\` guard reads, and nothing else in the tier ever
+  // requests it.
+  //
+  // Deliberately WITHOUT the tier's credentials, on both arms: the header would
+  // hand the stub an override (\`DEV_CLAIMS\`) and record that instead of the
+  // built-in identity, which is the half that had nothing pinning it.
+  //
+  // A no-auth system is still skipped for free and loses nothing: its
   // \`/api/auth/me\` 404 is the same framework miss \`/__loom_no_such_path\`
   // already pins.
-  const authed = Object.keys(__authHeaders).some((k) => /^authorization$/i.test(k));
-  if (authed) {
+  if (opts.auth) {
     await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
   }
 };

@@ -89,17 +89,18 @@ function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerT
     authImport = `import { registerOidcVerifier } from ${J(join(deplDir, "auth", "oidc.ts"))};`;
     authRegister = "registerOidcVerifier();";
   } else if (authMode === "devstub") {
-    authImport = `import { registerUserVerifier } from ${J(join(deplDir, "auth", "verifier.ts"))};`;
-    authRegister = `registerUserVerifier((req) => {
-    const base = { id: "00000000-0000-0000-0000-000000000000", tenantId: "admin" };
-    const injected = req.headers.get("x-loom-dev-claims");
-    if (!injected) return base;
-    try {
-      return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };
-    } catch {
-      return base;
-    }
-  });`;
+    // The GENERATED registrar, not a copy of it (#2548).  This used to inline
+    // its own verifier whose identity was a fixed
+    // `{ id, tenantId: "admin" }` — a principal no backend produces: the
+    // generated stub fills the DECLARED `user { … }` shape, so on `auth-simple`
+    // (`user { id  role }`) the harness answered `tenantId` and dropped `role`.
+    // Every `/api/auth/me` this leg records is the oracle for the other four,
+    // so a hand-copied identity means the answer key is fiction.  Importing
+    // `auth/dev-stub.ts` — the module `index.ts` itself calls — makes the boot
+    // path the harness takes and the boot path a real deployment takes register
+    // the same thing, the way the OIDC arm above already does.
+    authImport = `import { registerDevStubVerifier } from ${J(join(deplDir, "auth", "dev-stub.ts"))};`;
+    authRegister = "registerDevStubVerifier();";
   }
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   // The authenticated-but-unauthorized credential, in this system's auth
@@ -177,7 +178,7 @@ export async function run() {
     for (const r of await runTests(cases)) out.push({ tier: "api", ...r });
     // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
     // golden aligns on, and so a failing tier is diagnosed on its own requests.
-    await __frameworkProbes(dispatch);
+    await __frameworkProbes(dispatch, { auth: ${J(authMode !== "none")} });
     // M-T9.28 / M-T9.11 — the authorization ladder, on the cases that declare
     // one.  RECORDED through the same dispatch, so its 401/403/2xx enter the wire
     // golden; runs last, after the framework probes, so it only appends trailing

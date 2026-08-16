@@ -97,6 +97,21 @@ import {
 import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "../repository-wire-builder.js";
 import { aggregateIsAudited, insertStampEntries, updateStampEntries } from "./audit-stamp.js";
 
+/**
+ * The `User` type-only import a `mask unless` aggregate's repository needs.
+ *
+ * Every MikroORM repository variant emits `toWireMaskedMethod(agg)` when the
+ * aggregate carries a `mask unless` field, and that method's signature is
+ * `toWireMasked(root: T, currentUser: User | null)` — so the file names `User`
+ * and must import it.  All four variants emitted the method without the import,
+ * which made `mask unless` × `persistence: mikroorm` fail `tsc` with TS2304
+ * (M-T9.29 finding F3; the drizzle relational builder has always applied this
+ * rule — `typescript/repository-builder.ts`).  One helper rather than four
+ * inline conditions, so the next variant cannot forget it independently.
+ */
+const maskUserImport = (agg: EnrichedAggregateIR): string | false =>
+  aggHasFieldMask(agg) && `import type { User } from "../../auth/user-types";`;
+
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
 const tableOf = (aggName: string): string => plural(snake(aggName));
 
@@ -2046,6 +2061,7 @@ export function renderMikroRepository(
       repoPortImportLine(agg.name),
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
+      maskUserImport(agg),
       // The aggregate Row + every `Id[]` association's pivot Row entity + each
       // contained entity part's child Row entity.
       `import { ${[
@@ -2368,6 +2384,7 @@ export function renderMikroEmbeddedRepository(
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
+      maskUserImport(agg),
       audited && `import { stampInsert${versioned ? ", stampUpdate" : ""} } from "../audit-stamp";`,
       `import { ${[agg.name, ...agg.parts.map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
@@ -2595,6 +2612,7 @@ export function renderMikroDocumentRepository(
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
+      maskUserImport(agg),
       `import { ${[agg.name, ...agg.parts.map((p) => p.name)].join(", ")} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
@@ -2696,7 +2714,15 @@ export function renderMikroEventSourcedRepository(
     );
   });
 
-  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+  // A find that threads `currentUser`, OR a `mask unless` field — whose
+  // `toWireMasked(root, currentUser: User | null)` names `User` in its
+  // signature — needs the `User` import.  The `aggHasFieldMask` half was
+  // missing on every MikroORM repository variant while all four emitted
+  // `toWireMaskedMethod`, so `mask unless` under `persistence: mikroorm`
+  // produced TS2304 "Cannot find name 'User'" (M-T9.29, finding F3).  The
+  // relational drizzle builder has always spelled the rule this way —
+  // `typescript/repository-builder.ts`.
+  const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
 
   const body = lines(
     `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,

@@ -186,9 +186,12 @@ describe("MikroORM query-time projections", () => {
     expect(src).toContain(
       'await qb.execute<{ orders: unknown; revenue: unknown; avg_lines: unknown }[]>("all", false);',
     );
-    // One row out, coerced per declared wire type (numeric → string).
+    // One row out, coerced per declared wire type (numeric → string).  money
+    // is additionally pinned to the FIXED wire scale (RS-12 / #2549) — the
+    // mikro arm shares `coerceAggregate` with the drizzle one, so it gets the
+    // same formatting rather than shipping the scale SQL happened to return.
     expect(src).toContain("orders: Number(row?.orders ?? 0),");
-    expect(src).toContain('revenue: String(row?.revenue ?? "0"),');
+    expect(src).toContain("revenue: new Decimal(row?.revenue ?? 0).toFixed(4),");
     expect(src).toContain("avgLines: Number(row?.avg_lines ?? 0),");
   });
 

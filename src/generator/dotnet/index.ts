@@ -1062,6 +1062,7 @@ function emitProjectFromContexts(
       kafka: channelBindings.some((b) => b.transport === "kafka"),
     },
     authRequired,
+    userFields: (userFields ?? []).map((f) => f.name),
     actorIdProp,
     usesValidators,
     usesStamping,
@@ -1790,6 +1791,9 @@ function emitProject(
   out: Map<string, string>,
   options?: {
     authRequired?: boolean;
+    /** Declared `user { … }` field names in declaration order — the shape
+     *  `/auth/me` projects (#2548).  Empty without auth. */
+    userFields?: string[];
     usesValidators?: boolean;
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
@@ -1885,6 +1889,7 @@ function emitProject(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
+      userFields: options?.userFields ?? [],
       usesValidators,
       usesStamping,
       hasEmbeddedSpa,

@@ -37,7 +37,7 @@ const SRC = (design: string) => `
       page Home { route: "/" body: Text { "hi" } }
     }
     deployable api { platform: node contexts: [Sales] serves: SalesApi port: 3000 }
-    deployable web { platform: vue targets: api ui: WebApp design: "${design}" port: 3001 }
+    deployable web { platform: vue targets: api ui: WebApp { Sales: api } design: "${design}" port: 3001 }
   }
 `;
 

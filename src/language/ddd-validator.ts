@@ -223,9 +223,13 @@ export class DddValidator {
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
     guard("file-upload-binding", model, () => checkFileUploadBinding(model, accept));
-    // i18n: string `+` in a user-visible page slot won't translate — warn and
-    // nudge toward template interpolation (i18n-strings.md). Warning, not error,
-    // until the template→ICU runtime makes interpolation first-class everywhere.
+    // i18n: string `+` in a user-visible page slot won't translate — reject and
+    // nudge toward template interpolation (i18n-strings.md).  ERROR, not warning:
+    // the comment here said "warning until the template→ICU runtime makes
+    // interpolation first-class" long after that runtime landed (M-T1.11 item 8,
+    // which is what let the ban flip), and `checkUserVisibleConcat` has raised
+    // "error" since.  Found by the phase-④ drain (#2558), where 9 of the 53
+    // fixtures were tripping a rule the comment beside it said was advisory.
     guard("user-visible-concat", model, () => checkUserVisibleConcat(model, accept));
     // Accessibility: an `Image`/`Avatar` rendering an image needs a text
     // alternative (`alt:` or `decorative: true`).  Alt text is human content
