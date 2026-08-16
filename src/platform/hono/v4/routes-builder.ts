@@ -124,6 +124,11 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // catch drift.
 // ---------------------------------------------------------------------------
 
+/** Marker line standing in for the `./problem-details` import until the router
+ *  body is assembled — the named list depends on what the body references (see
+ *  the patch at the bottom of `renderAggregateRoutes`). */
+const PROBLEM_IMPORT_PLACEHOLDER = "/* __LOOM_PROBLEM_IMPORT__ */";
+
 /** Transaction wrapper for the audit / provenance history flush.  drizzle:
  *  `db.transaction`; mikroorm: the EntityManager's `db.transactional` (which
  *  opens a real DB transaction and threads its async context to the forked
@@ -348,7 +353,12 @@ export function buildRoutesFile(
     lines.push(`import { moneySchema } from "../lib/schemas";`);
   }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import { ProblemDetails, frameworkProblemBody, newApp } from "./problem-details";`);
+  // Deferred: `requireJsonContentType` joins the named imports only when this
+  // router actually emits a body-carrying route (an aggregate with neither a
+  // canonical create nor a public operation emits none, and an unused import
+  // trips Biome's `noUnusedImports` on the emitted project).  Patched from the
+  // assembled body at the bottom of this function, like the VO import.
+  lines.push(PROBLEM_IMPORT_PLACEHOLDER);
   lines.push(`import { HTTPException } from "hono/http-exception";`);
   // Domain metrics (M-T7.1): per-operation + per-fault counters, recorded at
   // the same seams as the operation_invoked / fault log lines below.
@@ -766,6 +776,10 @@ export function buildRoutesFile(
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
+    // Media-type gate FIRST — hono skips (rather than fails) the zod body
+    // validator on a foreign Content-Type, so without this `body` is
+    // `undefined` and the wrapping below 500s (schemathesis F1).
+    lines.push(`      requireJsonContentType(c);`);
     lines.push(`      const body = c.req.valid("json");`);
     // A server-sourced default (`now()` / `currentUser.*`) is applied
     // per-request HERE, not as a frozen wire `.default(...)`: the field is
@@ -1301,10 +1315,23 @@ export function buildRoutesFile(
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
+  // Patch the deferred `./problem-details` import (see the placeholder push
+  // above) — `requireJsonContentType` only when a body-carrying handler calls
+  // it.  Names stay in the pre-existing ASCII order Biome's import sorter
+  // expects (`ProblemDetails` < `frameworkProblemBody` < `newApp` <
+  // `requireJsonContentType`).
+  const problemNamed = ["ProblemDetails", "frameworkProblemBody", "newApp"];
+  if (/\brequireJsonContentType\(/.test(lines.join("\n")))
+    problemNamed.push("requireJsonContentType");
+  const assembled = lines
+    .join("\n")
+    .replace(
+      PROBLEM_IMPORT_PLACEHOLDER,
+      `import { ${problemNamed.join(", ")} } from "./problem-details";`,
+    );
   // Patch the deferred VO import: keep only names the body actually
   // references; tag each as `type` unless the body constructs it via
   // `new <Vo>(`.
-  const assembled = lines.join("\n");
   if (usedVOs.length > 0) {
     const usedNames = usedVOs.map((v) => v.name);
     // Strip string-literal contents before scanning so `.openapi("Quantity")`
@@ -1506,6 +1533,9 @@ function emitOperationRoute(
   out.push(`  }),`);
   out.push(`  async (c) => {`);
   out.push(`    const { id } = c.req.valid("param");`);
+  // See the create route: a foreign Content-Type SKIPS the zod body validator,
+  // so the refusal has to be explicit (schemathesis F1).
+  out.push(`    requireJsonContentType(c);`);
   out.push(`    const body = c.req.valid("json");`);
   if (emitTrace) {
     // wire_in (trace) — the validated body's structural shape (keys only;
@@ -1674,27 +1704,15 @@ function isErrorVariant(v: TypeIR, ctx: BoundedContextIR): boolean {
   return ctx.payloads.some((p) => p.name === v.name && p.kind === "error");
 }
 
-/** RFC reason phrase for the HTTP statuses an exception-less route can emit —
- *  used for the OpenAPI response `description`. */
-function httpStatusText(status: number): string {
-  const TEXT: Readonly<Record<number, string>> = {
-    400: "Bad Request",
-    402: "Payment Required",
-    403: "Forbidden",
-    404: "Not Found",
-    409: "Conflict",
-    422: "Unprocessable Entity",
-    // Codes a `httpStatus <StructuralConflict> -> <Code>` override may retarget a
-    // conflict to (M-T3.4a) — so the OpenAPI `description` stays a real reason
-    // phrase, not a generic fallback.
-    423: "Locked",
-    428: "Precondition Required",
-    429: "Too Many Requests",
-    500: "Internal Server Error",
-    502: "Bad Gateway",
-  };
-  return TEXT[status] ?? "Error";
-}
+/** RFC reason phrase for the HTTP statuses a route can emit — used for the
+ *  OpenAPI response `description`.
+ *
+ *  This was a SECOND copy of the shared `problemTitle` table (identical entry
+ *  for entry, same `"Error"` fallback), so a status added to the shared one
+ *  silently described itself as `"Error"` here — which is how the newly
+ *  declared 415 first surfaced.  Delegating removes the drift: one table, five
+ *  backends, and Hono's own routes agreeing with it. */
+const httpStatusText = problemTitle;
 
 /** The exception-less operation route (`operation foo(): X or NotFound`).  Calls
  *  the aggregate method (which now returns its tagged `or`-union), saves, then
@@ -1751,6 +1769,9 @@ function emitReturningOperationRoute(
   out.push(`  }),`);
   out.push(`  async (c) => {`);
   out.push(`    const { id } = c.req.valid("param");`);
+  // See the create route: a foreign Content-Type SKIPS the zod body validator,
+  // so the refusal has to be explicit (schemathesis F1).
+  out.push(`    requireJsonContentType(c);`);
   out.push(`    const body = c.req.valid("json");`);
   if (emitTrace) {
     out.push(
@@ -2040,17 +2061,48 @@ function emitResponseDtoSchema(
 // ---------------------------------------------------------------------------
 // zod helpers
 //
-// Two primitive-to-Zod tables — `request` uses `z.coerce.*` because
-// inbound JSON arrives as strings/numbers from the wire and Zod handles
-// the coercion; `response` uses the strict equivalents because the
-// server serialises into the declared shape.  Money crosses as
-// `moneySchema` on the request side (a parse chain producing decimal.js
-// Decimal) and as `z.string()` on the response side (Decimal's
-// canonical JSON form).  Datetime: `z.coerce.date()` inbound, ISO
-// `z.string()` outbound.
+// THREE primitive-to-Zod tables, split by where the value comes from:
+//
+//   * `QUERY_PRIMITIVE` — a query-string value is ALWAYS a string, so the
+//     coercion is the parse: `?qty=3` has to become the number 3.
+//   * `BODY_PRIMITIVE` — a JSON body carries REAL types, so there is nothing
+//     to coerce and coercing is actively wrong: `z.coerce.number()` is
+//     `Number(input)`, which accepts `false` (→ 0) and `"12"` (→ 12) for a
+//     field the spec declares `{"type":"number"}`, and `z.coerce.date()`
+//     accepts `false` (→ the epoch) for `{"type":"string","format":"date-time"}`.
+//     The server then honours its declared BOUNDS while ignoring its declared
+//     TYPE (schemathesis F7).  Coercion also leaks into the published spec:
+//     zod-to-openapi marks every coerced field `nullable: true`, because a
+//     coercing schema does accept `null`.
+//   * `RESPONSE_PRIMITIVE` — the strict equivalents; the server serialises
+//     into the declared shape.
+//
+// Money crosses as `moneySchema` on the request side (a parse chain producing
+// a decimal.js Decimal) and as `z.string()` on the response side (Decimal's
+// canonical JSON form).  Datetime: an ISO-8601 string in BOTH directions —
+// inbound it is `.transform`ed to the `Date` the domain layer expects, so the
+// handler code is unchanged from the `z.coerce.date()` era.
 // ---------------------------------------------------------------------------
 
-const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
+/** An ISO-8601 datetime STRING parsed into a `Date`.  Published as
+ *  `{"type":"string","format":"date-time"}` — the same declaration
+ *  `z.coerce.date()` produced, minus its spurious `nullable: true` — while
+ *  rejecting the booleans/numbers the coercion accepted.  It also fixes the
+ *  coercion artefact message (`"Invalid input: expected date, received Date"`,
+ *  which reached users through the validation catalog); this reads
+ *  `"Invalid ISO datetime"`.
+ *
+ *  BOTH flags are load-bearing, and each names a real caller: `offset` keeps
+ *  `+02:00` forms legal, and `local` keeps the UNQUALIFIED form legal because
+ *  that is what the generated FRONTENDS send — a datetime field renders as a
+ *  native `<input type="datetime-local">`, whose value is `2024-01-01T00:00`
+ *  (no seconds, no zone) and crosses the wire as that plain string (see
+ *  `_frontend/form-helpers.ts`).  Dropping `local` would 422 every datetime
+ *  form submission in the emitted UI. */
+const BODY_DATETIME =
+  "z.string().datetime({ offset: true, local: true }).transform((s: string) => new Date(s))";
+
+const QUERY_PRIMITIVE: Record<WirePrimitive, string> = {
   int: "z.coerce.number().int()",
   long: "z.coerce.number().int()",
   decimal: "z.coerce.number()",
@@ -2058,6 +2110,19 @@ const REQUEST_PRIMITIVE: Record<WirePrimitive, string> = {
   string: "z.string()",
   bool: "z.coerce.boolean()",
   datetime: "z.coerce.date()",
+  guid: "z.string()",
+  json: "z.unknown()",
+  File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
+};
+
+const BODY_PRIMITIVE: Record<WirePrimitive, string> = {
+  int: "z.number().int()",
+  long: "z.number().int()",
+  decimal: "z.number()",
+  money: "moneySchema",
+  string: "z.string()",
+  bool: "z.boolean()",
+  datetime: BODY_DATETIME,
   guid: "z.string()",
   json: "z.unknown()",
   File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
@@ -2115,11 +2180,15 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       // `schema.isOptional()`, i.e. "does it accept `undefined`", and a
       // coerced bool does (`required-only-dotnet=[onCall]` in the 5-way
       // parity diff).  JSON carries real booleans, so there is nothing to
-      // coerce in a body anyway.
-      if (info.primitive === "bool" && context !== "query") {
-        return context === "create-body" ? "z.boolean().default(false)" : "z.boolean()";
+      // coerce in a body anyway — which is the argument `BODY_PRIMITIVE` now
+      // generalises to every other primitive (F7); this arm survives only for
+      // the create-body `.default(false)` half.
+      if (info.primitive === "bool" && context === "create-body") {
+        return "z.boolean().default(false)";
       }
-      return REQUEST_PRIMITIVE[info.primitive!];
+      return context === "query"
+        ? QUERY_PRIMITIVE[info.primitive!]
+        : BODY_PRIMITIVE[info.primitive!];
     case "id":
       // A REFERENCE (`Customer id`) is a uuid on the wire and a `UUID` column
       // in Postgres, so the wire validator says so: a bare `z.string()` let a

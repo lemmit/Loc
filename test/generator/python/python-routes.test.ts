@@ -113,7 +113,7 @@ describe("python routes", () => {
     expect(order).not.toContain("from app.domain.order import Order\n");
     // Customer is — full create route.
     expect(customer).toContain(
-      '@router.post("", status_code=201, response_model=CreateCustomerResponse, operation_id="createCustomer", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
+      '@router.post("", status_code=201, response_model=CreateCustomerResponse, operation_id="createCustomer", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 415: {"model": ProblemDetails, "description": "Unsupported Media Type"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     expect(customer).toContain(
       "created = Customer.create(name=body.name, is_deleted=body.isDeleted)",
@@ -125,7 +125,7 @@ describe("python routes", () => {
     const files = await build("domain.ddd");
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain(
-      '@router.post("/{id}/add_line", status_code=204, operation_id="addLineOrder", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 404: {"model": ProblemDetails, "description": "Not Found"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
+      '@router.post("/{id}/add_line", status_code=204, operation_id="addLineOrder", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 404: {"model": ProblemDetails, "description": "Not Found"}, 415: {"model": ProblemDetails, "description": "Unsupported Media Type"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     expect(routes).toContain("found = await repo.get_by_id(OrderId(id))");
     expect(routes).toContain(

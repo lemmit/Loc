@@ -421,6 +421,7 @@ export function buildWorkflowsFile(
     /\bframeworkProblemBody\b/.test(bodyStr) ? "frameworkProblemBody" : null,
     /(?<!\.)\bProblemDetails\b/.test(bodyStr) ? "ProblemDetails" : null,
     "newApp",
+    /\brequireJsonContentType\(/.test(bodyStr) ? "requireJsonContentType" : null,
   ].filter((n): n is string => n !== null);
   imports.push(`import { ${problemNamed.join(", ")} } from "./problem-details";`);
   if (/\bHTTPException\b/.test(bodyStr))
@@ -673,6 +674,13 @@ function emitWorkflowRoute(
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // 415 — the media-type refusal the handler's `requireJsonContentType` throws.
+  // Hand-rolled here (this route predates `errorStatuses("workflow")`, which
+  // the other four backends render) so the declared workflow set stays equal
+  // across all five; keep the two in step.
+  out.push(
+    `      415: { description: ${JSON.stringify(problemTitle(415))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
   out.push(
     `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
@@ -696,6 +704,10 @@ function emitWorkflowRoute(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
+  // A foreign Content-Type SKIPS hono's zod body validator, leaving `body`
+  // undefined for the param bindings below — refuse it explicitly with the
+  // declared 415 instead (schemathesis F1).
+  out.push(`    requireJsonContentType(httpCtx);`);
   out.push(`    const body = httpCtx.req.valid("json");`);
   // Workflow narrative — `workflow_started` at the command-route entry; the
   // shared catalog identity (field `workflow`) means a dashboard pivots on one

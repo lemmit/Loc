@@ -28,3 +28,7 @@ docs/_site/
 .claude/settings.local.json
 .claude/worktrees/
 scratchpad/
+
+# Schemathesis writes a per-run cache dir into the repo root when the
+# contract-fuzzing leg (`npm run test:schemathesis`) runs locally.
+.schemathesis/
