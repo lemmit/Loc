@@ -5026,7 +5026,7 @@ Three things made it survivable, and all three are the actual lesson:
 command that mutates it, with no error suppression — then `git status` before
 believing the proof.
 
-## 87. The emitter is more permissive than the validator — so a test can pin behaviour the language refuses (2026-08-13)
+## 88. The emitter is more permissive than the validator — so a test can pin behaviour the language refuses (2026-08-13)
 
 Making `generateSystemFiles` assert phase ④ turned 51 test files red at once. The
 interesting part is not the count, it is what the fixtures were pinning.
