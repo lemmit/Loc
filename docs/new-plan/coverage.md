@@ -259,6 +259,7 @@
 | pack-equivalence-audit.md | reference — per-pack equivalence; open pack work → M-T9.5 / M-T1.x |
 | frontend-test-parity.md | reference — superseded by the behavioural UI tier (M-T9.3) |
 | test-parity-generated-backends.md | reference — superseded by the per-backend behavioural legs (M-T9.3) |
+| pairwise-corpus-findings-2026-08.md | F1 (`shape: document` × `policy` codegen crash) → #2527; F2/F5 (`mask`/principal filters on non-relational repo builders) → #2528; F3 (`mask` × mikroorm) fixed in-PR; F4 (soft-keyword field swallow) → #2529; the harness itself → M-T9.29 |
 
 ## Known unmapped items (deliberate)
 
