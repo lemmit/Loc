@@ -275,8 +275,10 @@ the conforming backends, and the fix that established it.
   decimal places on every backend's wire — the canonical `NUMERIC(19,4)` money
   storage scale (`MONEY_WIRE_SCALE`, `src/generator/money-scale.ts`). `12.5`,
   `12.50`, and `12` all read back as `"12.5000"`, `"12.5000"`, `"12.0000"`.
-- **Trigger.** A money field on the wire — stored (`subtotal`) OR derived
-  (`derived floor: money = money("0.00")` → `"0.0000"`).
+- **Trigger.** A money field on the wire — stored (`subtotal`), derived
+  (`derived floor: money = money("0.00")` → `"0.0000"`), OR **aggregated**
+  (a query-time projection's `sum`/`max`/`min` over a money column, and the
+  zero it reads over an empty table → `"0.0000"`, not `"0"`).
 - **Observable / decision.** Owner decision (2026-07-27, refined 2026-07-28
   from a live 5-backend probe): **fixed scale 4**, not "preserve the submitted
   scale." The backends could not agree on a value scale — node's decimal.js
@@ -296,6 +298,17 @@ the conforming backends, and the fix that established it.
   and derived money both read back at 4 dp; elixir verified by emission.)
 - **Provenance.** M-T9.11 differential (run 30277275068, PR #2220); owner
   decision. Fixed by M-T6.11. Tier: **behavioral**.
+- **Later gap (#2549).** "Every wire context" did not hold on the PROJECTION
+  path: a projection's SQL aggregate was serialized as it came back, so money
+  echoed the scale its rows were STORED at (`"40.00"`) — while the same
+  declared field read through its aggregate's own route sent `"40.0000"`. It
+  reached elixir, java AND .NET; node and python passed only incidentally,
+  because each writes money at 4dp and so read its own scale back. The
+  empty-table zero was a bare `"0"` on all five, oracle included. Each backend
+  now formats a money aggregate through the same renderer listed above; pinned
+  at runtime by the `projection-aggregation` / `projection-groupby` wire
+  goldens and structurally by
+  `test/generator/projection-aggregate-money-scale.test.ts`.
 
 ### RS-13 · A create `POST` returns the id envelope, not the whole aggregate
 - **Guarantee.** A create `POST /api/<plural>` answers `201` with the id

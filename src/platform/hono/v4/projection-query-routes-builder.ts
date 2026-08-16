@@ -1,4 +1,5 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
+import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
@@ -219,6 +220,7 @@ export function buildQueryProjectionsFile(
       lines.push(`import { ${[...rawDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
     }
   }
+  if (anyMoneyAggregate(projections)) lines.push(`import Decimal from "decimal.js";`);
   if (needsIds) lines.push(`import * as Ids from "../domain/ids";`);
   for (const aggName of [...allAggs].sort()) {
     lines.push(
@@ -718,8 +720,29 @@ function aggregateColumn(arg: ExprIR, sourceTable: string): string {
 function coerceAggregate(sel: AggregateSelect, expr: string): string {
   const c = aggregateCoercion(sel);
   if (c.isCount) return `Number(${expr} ?? 0)`;
+  // money pins the FIXED wire scale (RS-12) rather than echoing the scale the
+  // driver hands back: `sum`/`max`/`min` return the STORED scale (2dp for a
+  // `money("10.00")` write) and the empty-table default would ship a bare
+  // `"0"`, where this aggregate's own read route sends `.toFixed(4)` (#2549).
+  // `Decimal` (not `Number`) because money can exceed float64's exact range.
+  if (c.isMoney) {
+    return c.optional
+      ? `${expr} == null ? null : new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`
+      : `new Decimal(${expr} ?? 0).toFixed(${MONEY_WIRE_SCALE})`;
+  }
   if (c.optional) return `${expr} == null ? null : ${c.asString ? "String" : "Number"}(${expr})`;
   return c.asString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
+}
+
+/** Whether any projection here aggregates a `money` column — the gate for the
+ *  `decimal.js` import `coerceAggregate` emits calls into.  Emitting the call
+ *  without the import is a `TS2304`, so the flag and the import stay adjacent
+ *  (the same discipline the elixir emitter applies to `__money_round/1`). */
+function anyMoneyAggregate(projections: readonly ProjectionIR[]): boolean {
+  return projections.some((p) => {
+    const aggs = groupedAggregates(p)?.aggregates ?? wholeTableAggregates(p) ?? [];
+    return aggs.some((a) => aggregateCoercion(a).isMoney);
+  });
 }
 
 /** The validated grouping key an expression names.  The validator pins every

@@ -18,6 +18,7 @@ import {
 } from "../../ir/util/projection-aggregate.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
 import { projectionRowDbSet } from "./projection-state-emit.js";
 import {
@@ -575,6 +576,17 @@ function csCoerce(s: AggregateSelect, aggVar: string, ctx: EnrichedBoundedContex
   const c = aggregateCoercion(s);
   const read = `${aggVar}?.${upperFirst(s.field)}`;
   if (c.isCount) return `${read} ?? 0`;
+  // money pins the FIXED wire scale (RS-12) instead of echoing the aggregate's
+  // own: `Sum`/`Max`/`Min` come back at the scale the rows were STORED at, so a
+  // `money("10.00")` write read back through a projection shipped `"40.00"`
+  // where `projectToResponse` sends `"40.0000"` for the same declared field
+  // (#2549).  `"F4"` also carries the empty-table `0m` default to `"0.0000"`.
+  if (c.isMoney) {
+    const scaled = `ToString("F${MONEY_WIRE_SCALE}", CultureInfo.InvariantCulture)`;
+    return c.optional
+      ? `${read} is null ? null : ${read}!.Value.${scaled}`
+      : `(${read} ?? 0m).${scaled}`;
+  }
   if (c.asString) {
     return c.optional
       ? `${read} is null ? null : ${read}!.Value.ToString(CultureInfo.InvariantCulture)`

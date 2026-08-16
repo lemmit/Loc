@@ -95,6 +95,7 @@ describe("hono grouped aggregation with a computed date key", () => {
   it("coerces the datetime key to an ISO string, re-asserting the Date the raw sql select types `unknown`", async () => {
     const p = await routes();
     expect(p).toContain("      day: (r.day as Date).toISOString(),");
-    expect(p).toContain('      revenue: String(r.revenue ?? "0"),');
+    // money pins the fixed wire scale (RS-12 / #2549).
+    expect(p).toContain("      revenue: new Decimal(r.revenue ?? 0).toFixed(4),");
   });
 });
