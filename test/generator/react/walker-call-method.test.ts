@@ -22,7 +22,7 @@
 //     → <Text>{("doubled: " + double(count))}</Text>
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
@@ -32,9 +32,11 @@ describe("function + method calls in walker bodies", () => {
       system S {
         subdomain M { context C { } }
         ui WebApp {
+          function saveOrder(): string extern from "./helpers/save-order"
           page X {
             route: "/x"
-            body:  Button { "Save", onClick: e => { saveOrder() } }
+            action save() { saveOrder() }
+            body:  Button { "Save", onClick: save }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -47,9 +49,8 @@ describe("function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ saveOrder\(\); \}\}>\{t\("[^"]*", "Save"\)\}<\/Button>/,
-    );
+    expect(content).toMatch(/const save = \(\) => \{ saveOrder\(\); \};/);
+    expect(content).toMatch(/<Button onClick=\{save\}>\{t\("[^"]*", "Save"\)\}<\/Button>/);
   });
 
   it("function-call expression in let RHS emits inline", async () => {
@@ -57,13 +58,15 @@ describe("function + method calls in walker bodies", () => {
       system S {
         subdomain M { context C { } }
         ui WebApp {
+          function inc(n: int): int extern from "./helpers/inc"
           page X {
             route: "/x"
             state { count: int = 0 }
-            body:  Button {"Bump", onClick: e => {
+            action bump() {
               let n = inc(count)
               count := n
-            }}
+            }
+            body:  Button {"Bump", onClick: bump}
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -76,9 +79,8 @@ describe("function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ const n = inc\(count\); setCount\(n\); \}\}>\{t\("[^"]*", "Bump"\)\}<\/Button>/,
-    );
+    expect(content).toMatch(/const bump = \(\) => \{ const n = inc\(count\); setCount\(n\); \};/);
+    expect(content).toMatch(/<Button onClick=\{bump\}>\{t\("[^"]*", "Bump"\)\}<\/Button>/);
   });
 
   it("method call against an unresolved receiver emits a placeholder, not broken code", async () => {
@@ -88,7 +90,8 @@ describe("function + method calls in walker bodies", () => {
     // placeholder (the previous behaviour produced runtime-broken
     // `undefined.create(draft)` code; this test pins the honest
     // shape).
-    const files = await buildAndGenerate(`
+    const files = await generateSystemFilesUnchecked(
+      `
       system S {
         subdomain M { context C { } }
         ui WebApp {
@@ -106,7 +109,10 @@ describe("function + method calls in walker bodies", () => {
           port: 3001
         }
       }
-    `);
+    `,
+      "an UNRESOLVED method-call receiver is the subject — the walker must emit " +
+        "a visible TODO placeholder rather than runtime-broken code",
+    );
     const content = files.get("web/src/pages/x.tsx")!;
     // Placeholder comment, NOT broken `undefined.create(...)` code.
     expect(content).toMatch(/TODO: method-call Orders\.create\(draft\)/);
@@ -118,6 +124,7 @@ describe("function + method calls in walker bodies", () => {
       system S {
         subdomain M { context C { } }
         ui WebApp {
+          function double(n: int): int extern from "./helpers/double"
           page X {
             route: "/x"
             state { count: int = 0 }
@@ -141,7 +148,8 @@ describe("function + method calls in walker bodies", () => {
   });
 
   it("method call with multiple args + state ref still emits placeholder", async () => {
-    const files = await buildAndGenerate(`
+    const files = await generateSystemFilesUnchecked(
+      `
       system S {
         subdomain M { context C { } }
         ui WebApp {
@@ -162,7 +170,10 @@ describe("function + method calls in walker bodies", () => {
           port: 3001
         }
       }
-    `);
+    `,
+      "an UNRESOLVED method-call receiver is the subject — same degradation " +
+        "path as the Orders.create case above, with multiple args",
+    );
     const content = files.get("web/src/pages/x.tsx")!;
     expect(content).toMatch(/TODO: method-call mixer\.combine\(a, b, "extra"\)/);
     expect(content).not.toMatch(/undefined\.combine\(/);

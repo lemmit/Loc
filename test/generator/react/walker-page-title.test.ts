@@ -72,7 +72,8 @@ describe("page title via useEffect(document.title)", () => {
             route: "/c"
             state { count: int = 0 }
             title: "Count: " + count
-            body:  Button { "+", onClick: e => { count += 1 } }
+            action bump() { count += 1 }
+            body:  Button { "+", onClick: bump }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }

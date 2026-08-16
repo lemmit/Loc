@@ -22,7 +22,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-const ordersTableBody = (tableBody: string) => `
+const ordersTableBody = (tableBody: string, actions = "") => `
   system S {
     api SalesApi from Sales
     subdomain Sales {
@@ -37,7 +37,7 @@ const ordersTableBody = (tableBody: string) => `
     }
     ui WebApp {
       api Sales: SalesApi
-      page OrdersList { route: "/orders"  body: ${tableBody} }
+      page OrdersList { route: "/orders"  ${actions}  body: ${tableBody} }
     }
     storage loomDb { type: postgres }
     resource cState { for: C, kind: state, use: loomDb }
@@ -107,9 +107,10 @@ describe("Table polish props", () => {
         `Table {
           rows: Sales.Order.all,
           rowTestid: r => "orders-row-" + r.id,
-          onRowClick: r => navigate("/orders"),
+          onRowClick: openRow,
           Column { "ID", o => o.id }
         }`,
+        `action openRow(o: Order) { navigate("/orders") }`,
       ),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
