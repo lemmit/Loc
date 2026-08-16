@@ -1844,6 +1844,13 @@ export const DIAGNOSTIC_MESSAGES = {
     `\`extern\` function, so the frontend renders nothing for it — in a text slot the ` +
     `content is silently DROPPED (\`Text(${p.name}(…))\` emits an empty element).  Check the ` +
     `spelling, declare a \`component ${p.name}(…)\`, or import it as an \`extern\` function.`,
+  "loom.slot-outside-component": (p: { where: unknown }) =>
+    `${p.where}: \`Slot { }\` renders the children a CALLER passed in, so it only means ` +
+    `something inside a \`component\` body.  A page has no caller and no children ` +
+    `parameter, so this emits an unbound children reference on every frontend — a ` +
+    `compile error on React and Feliz, and nothing at all on Vue / Svelte / Angular / ` +
+    `Flutter.  Move the shared markup into a \`component … { body: … Slot { } }\` and ` +
+    `have the page call it with the content as extra positional arguments.`,
   "loom.frontend-collection-op-unsupported": (p: { where: unknown; op: unknown }) =>
     `${p.where}: uses the collection op \`.${p.op}\` on a collection in a page/component ` +
     `expression, but the frontend walker has no renderer for it — it emits verbatim ` +
