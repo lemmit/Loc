@@ -196,8 +196,15 @@ function lower(
         // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).
-        // `Column.startswith(v)` lowers to `LIKE v || '%'` (SQLAlchemy
-        // auto-escapes `%`/`_` in `v`).
+        // Descendant test as an ANCHORED POSITION, not `Column.startswith`.
+        // SQLAlchemy's `startswith(v)` does NOT auto-escape by default — it
+        // compiles to `col LIKE v || '%'` verbatim (escaping needs
+        // `autoescape=True`, which rewrites to `'a/_c.' … ESCAPE '/'`).  The
+        // anchor here is a principal CLAIM, so `_`/`%` inside it are live
+        // wildcards: an org named `acme_corp` yields `acme_corp.%`, matching
+        // `acmeXcorp.…` — a cross-tenant read with no attacker, just an
+        // underscore in a name.  `strpos(col, needle) = 1` has no pattern
+        // language, matching how `string.startsWith` lowers above.
         case "scope": {
           const col = `${row}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
           const tenantCol = `${row}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
@@ -206,9 +213,10 @@ function lower(
           const tenant = `${principalAccessor}.${snake(deepScopeTenantClaim(e))}`;
           ops.add("or_");
           ops.add("and_");
+          ops.add("func");
           return (
             `or_(and_(${col}.isnot(None), or_(${col} == ${org}, ` +
-            `${col}.startswith(${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}))), ` +
+            `(func.strpos(${col}, ${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}) == 1))), ` +
             `and_(${col}.is_(None), ${tenantCol} == ${tenant}))`
           );
         }

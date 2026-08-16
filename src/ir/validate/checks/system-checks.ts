@@ -2946,19 +2946,16 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
       // --- Feature gates (M-T6.23) -----------------------------------------
-      // (1) Query-time projections: `emit.ts` gates `http/query-projections.ts`
-      // on `!usingMikro`, so the read model's routes vanish entirely.  FOLDED
-      // projections are supported (read-model EntitySchema + `em.upsert` fold —
-      // see `projection-persistence-gate.test.ts`); only the query-time
-      // comprehension is missing.
-      for (const p of ctx.projections ?? []) {
-        if (isQueryTimeProjection(p)) {
-          rejectFeature(
-            `context '${ctxName}' declares the query-time projection '${p.name}'`,
-            `its '/projections/${snake(p.name)}' read routes`,
-          );
-        }
-      }
+      // (1) Query-time projections: CLOSED by M-T6.23 slice 4 — the routes emit
+      // on this adapter.  The aggregation shapes (whole-table and grouped) push
+      // down through the mikro QueryBuilder with `raw()` SQL fragments and a
+      // `whereToMikroFilter` WHERE; the raw-table (`from <Workflow>` /
+      // `from <Projection>`) shape reads its Row entity the same way; and the
+      // repository-sourced shape was adapter-neutral already, since the mikro
+      // repository synthesises the same `repo.<projName>()` find.  A `where`
+      // outside the FilterQuery subset is refused by
+      // `validateFindPredicateAdapterSupport` (which now walks projection
+      // filters), so an aggregation can never silently drop its filter.
       // (2) Realtime SSE: `http/realtime.ts` and the index.ts realtime tee are
       // both `!usingMikro`-gated, so a `delivery: broadcast` channel loses the
       // browser-observable wire.
@@ -3003,6 +3000,26 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
+        // (4) HIERARCHICAL tenancy scope.  `emitMikroContextFilters` lowers each
+        // capability filter through `whereToMikroFilter`, whose FilterQuery
+        // subset cannot express the descendant-or-self subtree predicate — and
+        // it CATCHES that failure and leaves the filter unapplied rather than
+        // throwing.  For a `deep`/`global` scope that is not a degraded read:
+        // it is NO tenant predicate at all, so every tenant's rows become
+        // readable on every read of this aggregate.  The adapter's own comment
+        // assumed the shape was unreachable here ("not generated on the mikro
+        // adapter today") — a belief, not a gate.  A `tenancy … of <Registry>`
+        // system with `persistence: mikroorm` validates, generates and compiles
+        // clean today and silently serves cross-tenant rows.  Refuse it until
+        // the subtree predicate is expressible (M-T6.23's remaining half).
+        if ((a.contextFilters ?? []).some((f) => isDeepScopeFilter(f))) {
+          rejectFeature(
+            `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
+            `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
+              `cannot express it, and an unlowerable principal filter is dropped ` +
+              `silently) — leaving every tenant's rows readable`,
+          );
+        }
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
@@ -3167,6 +3184,18 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
       }
       for (const r of ctx.retrievals) {
         check(r.where, `retrieval '${r.name}'`);
+      }
+      // A QUERY-TIME projection's `where` lowers into a relational SELECT too —
+      // through the synthesised `repo.<projName>()` find for the row-sourced
+      // shape, and directly into the aggregation query for the pushed-down ones.
+      // It was the one predicate position this gate did not walk, which mattered
+      // as of M-T6.23 slice 4: on the MikroORM adapter an aggregation whose
+      // filter fell outside the FilterQuery subset would otherwise answer a
+      // plausible WRONG NUMBER (the filter silently dropped) instead of being
+      // refused. Adapter-generic, like every other position here.
+      for (const proj of ctx.projections ?? []) {
+        if (!isQueryTimeProjection(proj)) continue;
+        check(proj.query?.filter, `query-time projection '${proj.name}'`);
       }
       // Capability `filter` predicates also lower into every SELECT.  The
       // Dapper / MikroORM capability gates already handle principal-

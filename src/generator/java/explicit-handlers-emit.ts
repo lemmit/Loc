@@ -53,6 +53,7 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { collectUnionFindLets, renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
+import { JAVA_PAGED_QUERY_PARAMS } from "./emit/common.js";
 import { domainToWire } from "./emit/wire.js";
 import { javaWorkflowStmtTarget, repoField } from "./emit/workflow.js";
 import {
@@ -581,10 +582,7 @@ function emitPagedRunAction(
   );
   const actionParams = [
     ...h.params.map((p) => bind.get(p.name)!.actionParam),
-    `@RequestParam(defaultValue = "1") int page`,
-    `@RequestParam(defaultValue = "20") int pageSize`,
-    `@RequestParam(defaultValue = "id") String sort`,
-    `@RequestParam(defaultValue = "asc") String dir`,
+    ...JAVA_PAGED_QUERY_PARAMS,
   ].join(", ");
   const callArgs = [
     ...h.params.map((p) => bind.get(p.name)!.callArg),

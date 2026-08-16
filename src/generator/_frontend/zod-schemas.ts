@@ -260,7 +260,12 @@ export function zodForRequest(t: TypeIR): string {
     case "primitive":
       return REQUEST_PRIMITIVE[info.primitive!];
     case "id":
-      return "z.string()";
+      // Mirrors the server's request-side rule (`zodFor` in the Hono
+      // routes-builder): a reference is a uuid on the wire, so the FORM
+      // validator says so too and the caller is told at the field instead of
+      // by a server error.  Gated on the declared id value type — an
+      // `int`/`long`/`string`-keyed aggregate is not a uuid (schemathesis F2).
+      return info.idValueType === "guid" ? "z.string().uuid()" : "z.string()";
     case "enum":
     case "valueObject":
       return `${info.base}Schema`;

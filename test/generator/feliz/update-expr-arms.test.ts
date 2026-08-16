@@ -109,7 +109,7 @@ describe("feliz update path — the route `id`", () => {
 });
 
 describe("feliz update path — `duration`", () => {
-  it("renders `days(7)` as the same millisecond constant the view path uses", async () => {
+  it("renders `days(7)` as the same TimeSpan the view path uses", async () => {
     const fs = await app(`
     page Sched {
       route: "/s"
@@ -117,10 +117,17 @@ describe("feliz update path — `duration`", () => {
       action push() { until := now() + days(7) }
       body: Button("go", onClick: push)
     }`);
-    // `walker-core` renders a duration as `((<amount>) * DURATION_UNIT_MS[unit])`;
-    // the update path must agree, or `7 days` would mean two different numbers
-    // inside one generated app.
-    expect(fs).toContain(`((7) * ${DURATION_UNIT_MS.days})`);
+    // A duration is a `System.TimeSpan` on this target (the `exprDuration`
+    // walker seam → `FS_LEAVES.duration`), spanning the same
+    // `DURATION_UNIT_MS` milliseconds every backend agrees on; the update path
+    // must agree with the view path, or `7 days` would mean two different
+    // things inside one generated app.
+    expect(fs).toContain(
+      `(System.TimeSpan.FromMilliseconds(float (7) * ${DURATION_UNIT_MS.days}.0))`,
+    );
+    // ...and the datetime it is added to takes `.Add`, not `+` (F#'s
+    // `System.DateTime` has no `+ TimeSpan` the walker could spell inline).
+    expect(fs).toContain("(System.DateTime.UtcNow).Add(");
   });
 });
 

@@ -105,12 +105,32 @@ A workflow `let x = <expr>` whose bound `x` is **never referenced downstream** (
 
 Sources: found 2026-07-20 while draining the compose `parity` gate (the .NET `global::` / Phoenix `def/3` / Python indent+`/metrics` chain). Related pattern: M-T6.15 (Feliz unused-binder → `_`).
 
-## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; 3 of 5 emitters done) · **M–L** · P2 ⭐ was silent
+## M-T6.40 — a direct-table aggregation applies NO capability `contextFilters` — on BOTH adapters · `todo` · **M** · P2 ⭐ silent wrong answer
+
+Found 2026-08-12 by an owner review of M-T6.23 slice 4 (PR #2533), and it is **not** a mikroorm bug — the default drizzle path has it too, which is why no adapter-parity gate could see it.
+
+A query-time projection whose `select` is an aggregation reads the source table **directly** (that is the point of the shape — it pushes down to SQL and materialises no rows). Both adapters build that query from the projection's own `where` alone:
+
+- drizzle — `db.select({…}).from(schema.orders).where(<the projection's filter>)`
+- mikroorm — `createQueryBuilder(OrderRow, "src").select([raw(…)]).where(<the projection's filter>)`
+
+Neither one ANDs in the aggregate's capability `contextFilters` — the predicates that `softDeletable` / `tenantOwned` / any `filter` capability contributes to *every other* read of that table (`findById`, `findManyByIds`, `findAll`, named finds, retrievals all get them). So:
+
+- a `softDeletable` source counts **soft-deleted rows** in its totals;
+- a `tenantOwned` source counts **every tenant's rows** — a cross-tenant read, in the same class as the .NET document-shape hole fixed in #2530, and reachable by any dashboard `count`.
+
+It is a **silent wrong answer**, not a crash: the number looks plausible. The row-sourced shapes are unaffected (they read through the repository, which applies the filters), which is exactly why this hid — the aggregation is the one read path that bypasses the repository.
+
+*Scope.* AND the applicable `contextFilters` into both direct-table paths (drizzle `where` and the mikro FilterQuery), honouring `ignoring <Cap>` bypasses the way the find path does (`mikroContextFilters(agg, bypass)` already takes the bypass set; drizzle has the equivalent). Gate it on a fixture with a `softDeletable` + `tenantOwned` source: a soft-deleted row and a foreign-tenant row must not be counted, and `ignoring` must still bypass. Runtime proof belongs on the tenancy leg (a count that includes another tenant's rows is exactly what `tenancy-e2e` exists to catch) — a generator pin alone would not prove the predicate BINDS.
+
+Sources: review thread on PR #2533; `src/platform/hono/v4/projection-query-routes-builder.ts` (`aggWheres` / the two `mikro` aggregation branches), `mikroContextFilters` in `src/generator/typescript/emit/mikroorm.ts`. Sibling of #2530 (dotnet document-shape tenant filter) — same class, different bypass.
+
+## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; 4 of 5 emitters done) · **M–L** · P2 ⭐ was silent
 M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persistence** axis, and the validator's comment block said so without qualification. But **five non-persistence features are gated `&& !usingMikro` in the Hono emitter** and emitted *nothing*, with no diagnostic — a valid model generated a project with the feature simply absent and the CLI reported success:
 
 | feature | file drizzle writes | mikroorm | now |
 |---|---|---|---|
-| query-time `projection` (`from … select …`) | `http/query-projections.ts` | — | error |
+| query-time `projection` (`from … select …`) | `http/query-projections.ts` | **EMITS** (slice 4, PR #2533) | — |
 | `timerSource` | `scheduler.ts` | **EMITS** (slice 3, PR #2525) | — |
 | broker `channelSource` | `http/channels.ts` | **EMITS** (slice 2, PR #2524) | — |
 | durable channel + local reactor | outbox + relay wiring | **EMITS** (slice 1, PR #2516) | — |
@@ -120,7 +140,7 @@ M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persist
 
 **The realtime severity split** is the load-bearing design call: a `broadcast` channel does double duty, and its *routing* half (what makes a projection fold or saga subscribe) works fine on this adapter. A frontend targeting the backend emits `src/api/realtime.ts` off the target's **platform**, not its persistence, so its EventSource would poll a 404 → **error**. With no such frontend the wire is unobserved and the fold/saga path is intact → **warning**. Without that split the gate rejects working models (it broke 4 `test/adapters/` suites and 3 corpus features before the split).
 
-**Open (the principled fix):** port the remaining two emitters to the EntityManager — a projection read-model query path and the SSE wire. Each closes by **deleting its clause** here; the gate is the interim, not the answer. Remaining sequence by blast radius: query-time projection → realtime.
+**Open (the principled fix):** one emitter left — the realtime SSE wire. It closes by **deleting its clause** here; the gate is the interim, not the answer.
 
 **Slice 1 — outbox: DONE (PR #2516).** The adapter emits a `LoomOutboxRow` EntitySchema (`__loom_outbox`, `src/generator/typescript/emit/mikroorm.ts`) plus `createOutboxDispatcher` / `startOutboxRelay` over the EntityManager (`src/platform/hono/v4/workflow-builder.ts` — capture on a `fork({ keepTransactionContext: true }).insert`, drain on a fresh fork with `find` + `nativeUpdate`), and the `wireOutbox` / boot-relay / `index.ts`-import gates lost their `!usingMikro`. The validator clause is **deleted**; its `mikroorm-feature-gates` case flips to asserting the model generates, and emitter pins live in `test/adapters/node-mikroorm-outbox.test.ts`.
 
@@ -158,6 +178,18 @@ Each half independently prevents the loss, which is why both stay: the entity ma
 *A two-replica differential worth recording.* Both adapters were booted twice against one database: `every:` fires from **both** replicas (16/16 on drizzle, 13/10 on mikroorm, offsets ~0.4s, zero errors) — exact parity, and evidence that the emitter comment's "single-fire across replicas" over-claims for the `every:` path. `pg_try_advisory_xact_lock` only prevents a *concurrent* double-fire; two staggered ticks never contend. This is pre-existing and identical on both adapters (so not a slice-3 regression), but the wording should either change or the design should move to a leased/watermark check. Filed here rather than silently fixed, since it is a semantics decision.
 
 *A tsc-tier hole found by this slice's compile proof (fixed here).* `persistence: mikroorm` + **any event-sourced** aggregate or workflow did not type-check: the generated `<Ctx>EventRow` declared `seq!: number` while every append omits it (it is a DB-generated `bigserial`), and MikroORM derives `RequiredEntityData` from the class — so `em.insert(…)` failed with "Property 'seq' is missing". **No gate hid this; the tiers did** — the corpus tsc gates run drizzle only, and the mikro behavioural leg builds with esbuild (no typecheck), so the `event-sourcing` / `eventsourced-workflow` corpus cases have been passing that leg while never being type-checked. `seq` is now optional; the runtime append is proven above. The structural hole (a mikro leg in the corpus tsc gate) is not closed here.
+
+**Slice 4 — query-time projections: DONE (PR #2533, stacked on slice 3).** This was R1, the only one of the five already on record. Four shapes: the two aggregations push down through a mikro `createQueryBuilder` with `raw()` SQL fragments and a WHERE that reuses `whereToMikroFilter` (the same lowering every mikro find uses, rather than a second predicate→SQL renderer); the raw-table source (`from <Workflow>` / `from <Projection>`) reads its Row entity with `em.find(<Row>, <FilterQuery>)`; the repository-sourced one needed **nothing**, since `synthProjectionFinds` already synthesises the same `repo.<projName>()` find.
+
+**A review caught the first version deleting the gate for all four shapes while porting only three.** The raw-table shape fell through to the drizzle arm and emitted `db.select().from(schema.…)` into an EntityManager file with no `schema` import — `TS2304`, a generate-then-broken-build, i.e. the *exact* silent class this mission exists to kill, reintroduced by the change that was closing it. No corpus fixture carries a workflow-/projection-sourced query projection, so the runtime leg stayed green. **The lesson is the ordering rule:** delete a feature gate in the same change that ports *every* shape the gate covered, and enumerate the shapes from the emitter's branches rather than from the ones the fixtures happen to exercise.
+
+*Three runtime bugs the compile tier could not see, all found by booting.* (1) A computed grouping key (`startOfDay`) came back as the wire STRING, not a `Date` — drizzle gets a decoder from `.mapWith(<column>)`, a raw QueryBuilder select has none, so `(r.day as Date).toISOString()` compiled and threw `is not a function`; the mikro path now DECODES (`new Date(r.day as string)`). (2) MikroORM's default result mapping renames DB columns back to entity property names, silently rewriting any select alias that IS a column: a `customer_id` grouping key arrived as `customerId`, so the read of `r.customer_id` was undefined and the wire carried the string `"undefined"` — fixed with `execute("all", false)`. (3) Aggregate aliases were unaffected by (2) precisely because `avg_lines` is not a column, which is what made the bug look shape-specific rather than systemic.
+
+*A gate that had to come WITH the emitter.* `validateFindPredicateAdapterSupport` walked repository finds, retrievals and capability filters — but never a query-time projection's `where`. On this adapter that mattered: a filter outside the FilterQuery subset would have made the aggregation run UNFILTERED and answer a plausible **wrong number**. It now walks projection filters for every adapter (`loom.find-predicate-unsupported`, naming the projection), which is what lets the emitter treat an unlowerable predicate as an internal contradiction instead of swallowing it.
+
+*Evidence.* `tsc --noEmit` clean on both generated mikro projects (`projection-aggregation`, `projection-groupby`); booted against real Postgres, the filtered singleton answers `{orders:2, revenue:"42.5000", avgLines:3, biggest:"32.5000", smallest:"10.0000"}` over three rows of which one is excluded by the criterion, and both grouped routes answer correct buckets; `run-mikroorm.mjs projection-aggregation projection-groupby` — **both api-tier cases pass** (they were the two `MIKRO_SKIP` entries, now deleted). Mutation-proved five ways: re-gating the emit (4 cases), reverting the `mapResults` fix (1), reverting the key decode (1), removing the projection-filter gate (1), re-adding the feature clause (6 across both files).
+
+*Coverage note, deliberately NOT acted on.* Neither `projection-aggregation` nor `projection-groupby` has a committed wire golden, so the cross-backend VALUE differential does not cover either feature on ANY backend — the mikro leg reports "0 cases compared". Capturing one from the node oracle would newly gate both features on the python/dotnet/java/elixir legs too, whose agreement I cannot verify from here; that is a wire-contract change for a reviewer to take deliberately, not a side effect of this slice. Both of this slice's bugs were caught by the api-tier assertions regardless.
 
 **Hollow-cell note (feeds M-T9.8), corrected 2026-08-11.** The 2026-07-30 note claimed `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg with the feature absent. They were not passing — they were never **collected**: neither corpus fixture carries a `test e2e` block, so `featureCases` skips both on every backend, and the `MIKRO_SKIP` entries were silently **inert** (a register entry claiming a checked gap that nothing checks — hollower than the original diagnosis). `run-mikroorm.mjs` now ratchets its own register: a key naming no fixture fails the run, and a key whose fixture has no behavioural block prints `INERT` so the claim is visible. Giving `outbox.ddd` / `channels-broker.ddd` real `test e2e` blocks is its own mission-sized change (it arms five backend legs + the wire golden at once, like #2468) — **not** folded into slice 1, whose runtime proof is the booted check above.
 

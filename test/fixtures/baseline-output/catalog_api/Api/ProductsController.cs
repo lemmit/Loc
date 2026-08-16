@@ -92,7 +92,7 @@ public sealed class ProductsController : ControllerBase
 
     [HttpGet]
     [ProducesResponseType(typeof(Paged<ProductResponse>), 200)]
-    public async Task<ActionResult<Paged<ProductResponse>>> AllProduct([FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")
+    public async Task<ActionResult<Paged<ProductResponse>>> AllProduct([FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 1000000)] int page = 1, [FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 500)] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")
     {
         var result = await _mediator.Send(new AllQuery(page, pageSize, sort, dir));
         return Ok(result);

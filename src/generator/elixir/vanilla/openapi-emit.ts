@@ -4,7 +4,7 @@ import {
   wireCreateDefault,
   wireFieldsFor,
 } from "../../../ir/enrich/wire-projection.js";
-import { pagedReturn } from "../../../ir/stdlib/generics.js";
+import { PAGED_MAX_PAGE, PAGED_MAX_PAGE_SIZE, pagedReturn } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
@@ -1212,11 +1212,17 @@ function pagedFindName(ctx: EnrichedBoundedContextIR, agg: EnrichedAggregateIR):
 /** The four shared paging query controls (`page`/`pageSize`/`sort`/`dir`) as
  *  OpenApiSpex parameter literals — the Phoenix analogue of the Hono
  *  `AllQuery` schema.  All optional (defaulted server-side); the parity
- *  normalizer compares name + type + required only. */
+ *  normalizer compares name + type + required only.
+ *
+ *  `page` / `pageSize` publish the same declared `minimum` / `maximum` the
+ *  other four backends do (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`); the
+ *  controller's `page_param/4` clamps to the same ceiling, so an unbounded
+ *  `page * pageSize` can no longer overflow the SQL `OFFSET` (schemathesis
+ *  F4). */
 function pagingQueryParams(): string {
   return [
-    "            %OpenApiSpex.Parameter{name: :page, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer}}",
-    "            %OpenApiSpex.Parameter{name: :pageSize, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer}}",
+    `            %OpenApiSpex.Parameter{name: :page, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE}}}`,
+    `            %OpenApiSpex.Parameter{name: :pageSize, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE_SIZE}}}`,
     "            %OpenApiSpex.Parameter{name: :sort, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :string}}",
     "            %OpenApiSpex.Parameter{name: :dir, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :string}}",
   ].join(",\n");

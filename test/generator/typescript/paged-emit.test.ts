@@ -76,8 +76,8 @@ describe("typescript generator — paged finds (P3b)", () => {
     // strings (the scaffold list sends an empty initial sortKey, which an enum
     // would reject) and whitelisted server-side by the repo's `sortColumns`
     // map (`sortColumns[sort] ?? id`).
-    expect(routes).toContain("page: z.coerce.number().int().min(1).default(1),");
-    expect(routes).toContain("pageSize: z.coerce.number().int().min(1).default(20),");
+    expect(routes).toContain("page: z.coerce.number().int().min(1).max(1000000).default(1),");
+    expect(routes).toContain("pageSize: z.coerce.number().int().min(1).max(500).default(20),");
     expect(routes).toContain('sort: z.string().default("id"),');
     expect(routes).toContain('dir: z.string().default("asc"),');
     // Handler passes the controls through and maps page items via toWire.

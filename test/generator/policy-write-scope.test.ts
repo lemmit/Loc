@@ -64,14 +64,15 @@ describe("policy write scope — node (Hono/Drizzle)", () => {
     expect(text).toContain("const inScope = await this.db");
     expect(text).toContain("eq(schema.accounts.tenantId, requireCurrentUser().tenantId)");
     // Reads still widen to the deep orgPath prefix.
-    expect(text).toContain('.orgPath + ".%"');
+    expect(text).toContain('.orgPath + "."');
+    expect(text).toContain("strpos(");
   });
 
   it("write deep under a global read: guard on orgPath, reads on rootOrg", async () => {
     const text = await allText("node", GLOBAL_WRITE_DEEP);
     expect(text).toContain("const inScope = await this.db");
-    expect(text).toContain('requireCurrentUser().orgPath + ".%"'); // write guard
-    expect(text).toContain('.rootOrg + ".%"'); // read filter
+    expect(text).toContain('requireCurrentUser().orgPath + "."'); // write guard
+    expect(text).toContain('.rootOrg + "."'); // read filter
   });
 
   it("plain flat tenancy (no policy) leaves getById byte-identical (no guard)", async () => {

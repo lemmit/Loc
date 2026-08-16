@@ -3,7 +3,35 @@
 // class per file — Java's rule) + the DomainEvent marker interface.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
+} from "../../../ir/stdlib/generics.js";
 import { lines } from "../../../util/code-builder.js";
+
+/**
+ * The four pagination query parameters of a paged read, as Spring
+ * controller-parameter declarations.  Shared by the auto-derived controller
+ * (`emit/api.ts`) and the explicit-route emitter so the two cannot drift.
+ *
+ * `page` / `pageSize` carry a DECLARED range.  With only a defaulted `int` and
+ * no bound, a large-but-in-contract `page * pageSize` overflowed the SQL
+ * `OFFSET` (and, computed in `int`, could wrap negative) and the read 500s — a
+ * server error reached by obeying the published schema (schemathesis F4).
+ * Spring Framework 6.1+ applies method validation to constrained controller
+ * parameters without a class-level `@Validated`, so the bound is ENFORCED
+ * (`HandlerMethodValidationException` → the framework's standard 400) as well
+ * as PUBLISHED (springdoc reads `@Min`/`@Max` into `minimum`/`maximum`).  Both
+ * annotations are fully qualified so no import is added to any controller.
+ */
+export const JAVA_PAGED_QUERY_PARAMS: readonly string[] = [
+  `@RequestParam(defaultValue = "${PAGED_DEFAULT_PAGE}") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(${PAGED_MAX_PAGE}) int page`,
+  `@RequestParam(defaultValue = "${PAGED_DEFAULT_PAGE_SIZE}") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(${PAGED_MAX_PAGE_SIZE}) int pageSize`,
+  `@RequestParam(defaultValue = "id") String sort`,
+  `@RequestParam(defaultValue = "asc") String dir`,
+];
 
 export function renderDomainException(basePkg: string): string {
   return lines(

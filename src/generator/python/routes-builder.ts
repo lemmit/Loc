@@ -7,6 +7,8 @@ import {
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
@@ -66,7 +68,7 @@ import { plural, snake, upperFirst } from "../../util/naming.js";
 import { isServerSourcedDefault, isValueObjectDefault } from "../_frontend/server-default.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { pyHistoryMapperName, renderPyHistoryMapper } from "./emit/audit-history.js";
-import { requestPyType, responsePyType } from "./emit/http-models.js";
+import { requestPyType, responsePyType, wireModelImport } from "./emit/http-models.js";
 import { provColumn } from "./emit/provenance.js";
 import {
   createFieldConstraints,
@@ -276,7 +278,7 @@ export function buildPyRoutesFile(
       : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
-    `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
+    `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Query") ? "Query" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
     `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("ValidationError") ? "ValidationError" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,
     refersTo("PydanticCustomError")
@@ -351,9 +353,7 @@ export function buildPyRoutesFile(
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
       : null,
     problemImports(refersTo),
-    voModelImports.length > 0
-      ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
-      : null,
+    wireModelImport(voModelImports, refersTo),
     // The catalog `log(...)` facade — `aggregate_created` (create route) and
     // `operation_invoked` (operation routes) narrative lines.
     refersTo("log") ? "from app.obs.log import log" : null,
@@ -431,6 +431,18 @@ function derivedResponsesKwarg(op: ApiOperationIR): string {
 export function conflictResolver(ctx: EnrichedBoundedContextIR): (name: string) => number {
   return (name) => resolveErrorStatus(name, ctx.structuralErrorStatuses);
 }
+
+/** The two pagination controls of a paged read, as FastAPI parameter
+ *  declarations.  Both carry a DECLARED range: `ge=1` was already implied by
+ *  the emitted repository, but nothing bounded the top, so an in-contract
+ *  `page × pageSize` overflowed the SQL `OFFSET` and the read 500s
+ *  (schemathesis F4).  `Query(...)` publishes `minimum`/`maximum` into the
+ *  spec and turns an out-of-range value into FastAPI's standard 422 — the same
+ *  bounds all five backends declare (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`). */
+export const PY_PAGED_CONTROLS: readonly string[] = [
+  `page: Annotated[int, Query(ge=1, le=${PAGED_MAX_PAGE})] = ${PAGED_DEFAULT_PAGE}`,
+  `pageSize: Annotated[int, Query(ge=1, le=${PAGED_MAX_PAGE_SIZE})] = ${PAGED_DEFAULT_PAGE_SIZE}`,
+];
 
 /** `{id}` path-param annotation carrying the uuid format every backend
  *  declares (paramTypeDiffs parity).  Shared with the workflow-instance
@@ -887,8 +899,7 @@ function allRoute(
     const sig = [
       ...userParam,
       "session: SessionDep",
-      `page: int = ${PAGED_DEFAULT_PAGE}`,
-      `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+      ...PY_PAGED_CONTROLS,
       `sort: str = "id"`,
       `dir: str = "asc"`,
     ].join(", ");
@@ -1365,8 +1376,7 @@ function findRoute(
       ...params,
       ...(needsUser ? ["request: Request"] : []),
       "session: SessionDep",
-      `page: int = ${PAGED_DEFAULT_PAGE}`,
-      `pageSize: int = ${PAGED_DEFAULT_PAGE_SIZE}`,
+      ...PY_PAGED_CONTROLS,
       // Server-side sort controls (M-T2.6) — the repo whitelists `sort`.
       `sort: str = "id"`,
       `dir: str = "asc"`,

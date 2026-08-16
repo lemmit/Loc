@@ -26,8 +26,13 @@ import { buildLoomModel } from "../_helpers/index.js";
 
 const CODE = "loom.lifecycle-body-dropped";
 
+// #2536's `loom.guard-principal-without-auth` requires a principal-reading
+// guard to have the auth module that supplies `currentUser` — so the wrapper
+// carries the same minimal auth block that validator's own tests use.
 const wrap = (agg: string): string => `
 system P {
+  user { role: string }
+  auth { oidc { issuer: "https://idp.example.com"  clientId: "app" } }
   subdomain D {
     context Orders {
       enum Priority { low  high }
@@ -38,7 +43,7 @@ ${agg}
   }
   storage pg { type: postgres }
   resource st { for: Orders, kind: state, use: pg }
-  deployable d { platform: node contexts: [Orders] dataSources: [st] port: 3000 }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] auth: required port: 3000 }
 }
 `;
 
