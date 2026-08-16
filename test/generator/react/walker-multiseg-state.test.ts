@@ -15,8 +15,9 @@ const sys = (stateDecl: string, handler: string): string => `
       page Form {
         route: "/form"
         state { ${stateDecl} }
+        action go() { ${handler} }
         body: Stack {
-          Button { "Go", onClick: e => { ${handler} } }
+          Button { "Go", onClick: go }
         }
       }
     }

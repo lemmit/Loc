@@ -51,9 +51,10 @@ system Shop {
             route: "/welcome"
             title: "Welcome"
             state { count: int = 0 }
+            action bump() { count := count + 1 }
             body: Stack {
                 Heading { "Shop", level: 1 },
-                Button { "Bump", onClick: e => { count := count + 1 }, testid: "bump" }
+                Button { "Bump", onClick: bump, testid: "bump" }
             }
         }
     }

@@ -52,9 +52,10 @@ describe("expressions in text positions", () => {
           page Counter {
             route: "/c"
             state { count: int = 0 }
+            action bump() { count += 1 }
             body:  Stack {
               Text { count + 1 },
-              Button { "+", onClick: e => { count += 1 } }
+              Button { "+", onClick: bump }
             }
           }
         }
