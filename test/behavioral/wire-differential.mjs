@@ -63,15 +63,43 @@ export function loadWireCore(workDir) {
   return corePromise;
 }
 
-/** The cases that MUST carry a golden: the shared `systems/*.ddd`, which every
- *  backend runs (`sharedSystemCases`).  DERIVED from the directory, not a
+/** The shared `systems/*.ddd` cases, DERIVED from the directory rather than a
  *  hand-list — a new shared system is gated the moment it lands, and a golden
  *  can't be deleted to dodge the gate. */
-export function requiredGoldenCases() {
+export function sharedSystemGoldenCases() {
   return readdirSync(SYSTEMS_DIR)
     .filter((f) => f.endsWith(".ddd"))
     .map((f) => f.replace(/\.ddd$/, ""))
     .sort();
+}
+
+/**
+ * Cases deliberately allowed to run with NO golden.
+ *
+ * EMPTY, and meant to stay that way.  Every case the tier records is compared;
+ * an entry here is a signed decision to leave one uncompared, and it needs the
+ * same thing a wire waiver needs — a reason and a named exit.
+ *
+ * This list exists because the alternative is what `main` did until this
+ * change: a missing golden was only a failure for the shared systems, and for
+ * every FEATURE case it returned `none` — no comparison, no message.  Four
+ * cases (`field-mask`, `policy-deny`, `seed-values`, `vo-field-default`) had
+ * been running that way on every backend leg, two of them authorization-shaped.
+ * Nothing was wrong with them; nothing was checking them either.
+ *
+ * That is the failure mode the skip-outcome comment below already names — "a
+ * silently-off gate is worse than an absent one" — so the missing-golden branch
+ * now holds to the same standard: a new fixture fails with the capture command
+ * until someone decides, rather than joining the tier ungated by default.
+ *
+ * @type {ReadonlyArray<{case: string, reason: string}>}
+ */
+export const GOLDEN_OPT_OUT = [];
+
+/** Every case that must carry a golden: all of them, minus the signed opt-outs. */
+export function requiredGoldenCases() {
+  const optedOut = new Set(GOLDEN_OPT_OUT.map((o) => o.case));
+  return { optedOut, shared: sharedSystemGoldenCases() };
 }
 
 export const goldenPath = (caseName) => join(GOLDEN_DIR, `${caseName}.json`);
@@ -114,19 +142,19 @@ export async function gateWireRecording({ backend, caseName, entries, workDir })
 
   const golden = readGolden(caseName);
   if (!golden) {
-    if (requiredGoldenCases().includes(caseName)) {
-      return {
-        gating: [{ seq: -1, request: "(recording)", kind: "request-count", path: "$", golden: undefined, actual: entries.length }],
-        waived: [],
-        usedWaivers: new Set(),
-        skipped: false,
-        report:
-          `  ✗ wire: no golden for shared system "${caseName}" — every systems/*.ddd case must be\n` +
-          "      gated. Capture one with:  LOOM_WIRE_UPDATE=1 node run.mjs " +
-          caseName,
-      };
-    }
-    return none;
+    const { optedOut, shared } = requiredGoldenCases();
+    if (optedOut.has(caseName)) return none;
+    const kindOfCase = shared.includes(caseName) ? `shared system "${caseName}"` : `case "${caseName}"`;
+    return {
+      gating: [{ seq: -1, request: "(recording)", kind: "request-count", path: "$", golden: undefined, actual: entries.length }],
+      waived: [],
+      usedWaivers: new Set(),
+      skipped: false,
+      report:
+        `  ✗ wire: no golden for ${kindOfCase} — every case the tier records is\n` +
+        `      compared.  Capture one with:  LOOM_WIRE_UPDATE=1 node run.mjs ${caseName}\n` +
+        "      (or add a signed entry to GOLDEN_OPT_OUT in wire-differential.mjs).",
+    };
   }
 
   const divergences = core.diffRecording(golden.entries, entries);
@@ -230,10 +258,26 @@ export function makeWireGate(backend, workDir) {
         workDir,
       });
       if (report) process.stdout.write(`${report}\n`);
-      const bad = gating + stale.length;
+      // The same ratchet, one level up: an opt-out whose case now HAS a golden
+      // (or no longer runs) is excusing nothing, and a list that only grows
+      // stops meaning anything — exactly the failure the waiver registry guards
+      // against.
+      const staleOptOuts = GOLDEN_OPT_OUT.filter(
+        (o) => !ranCases.includes(o.case) || existsSync(goldenPath(o.case)),
+      );
+      if (staleOptOuts.length) {
+        process.stdout.write(
+          `\n✗ wire: ${staleOptOuts.length} STALE golden opt-out(s) — the case now has a\n` +
+            "  golden, or no longer runs. Delete them from GOLDEN_OPT_OUT in\n" +
+            "  test/behavioral/wire-differential.mjs:\n" +
+            `${staleOptOuts.map((o) => `    - ${o.case} — ${o.reason}`).join("\n")}\n`,
+        );
+      }
+      const bad = gating + stale.length + staleOptOuts.length;
       process.stdout.write(
         `\nwire differential (${backend}): ${ranCases.length} case(s) compared to golden, ` +
-          `${gating} divergence(s)${stale.length ? `, ${stale.length} stale waiver(s)` : ""}\n`,
+          `${gating} divergence(s)${stale.length ? `, ${stale.length} stale waiver(s)` : ""}` +
+          `${staleOptOuts.length ? `, ${staleOptOuts.length} stale opt-out(s)` : ""}\n`,
       );
       return bad;
     },
