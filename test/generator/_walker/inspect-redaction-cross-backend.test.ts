@@ -62,8 +62,8 @@ const REDACTION_SOURCE = `
     api PeopleApi from M
     storage primary { type: postgres }
     resource peopleState { for: People, kind: state, use: primary }
-    deployable honoApi { platform: node, contexts: [People], port: 3000 }
-    deployable dotnetApi { platform: dotnet, contexts: [People], port: 3001 }
+    deployable honoApi { platform: node, contexts: [People], dataSources: [peopleState], port: 3000 }
+    deployable dotnetApi { platform: dotnet, contexts: [People], dataSources: [peopleState], port: 3001 }
     deployable elixirApi {
       platform: elixir
       contexts: [People]

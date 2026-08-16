@@ -37,8 +37,10 @@ system NS {
     }
   }
   api A from D
-  deployable nodeApi { platform: node   contexts: [Shop] serves: A port: 4000 }
-  deployable pyApi   { platform: python contexts: [Shop] serves: A port: 8000 }
+  deployable nodeApi { platform: node   contexts: [Shop] dataSources: [shopState] serves: A port: 4000 }
+  storage loomDb { type: postgres }
+  resource shopState { for: Shop, kind: state, use: loomDb }
+  deployable pyApi   { platform: python contexts: [Shop] dataSources: [shopState] serves: A port: 8000 }
 }
 `;
 

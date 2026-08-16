@@ -122,7 +122,9 @@ system Plain {
   subdomain S { context C { aggregate A { n: string } repository As for A { } } }
   api PlainApi from S
   ui App { api P: PlainApi  page Home { route: "/"  body: Stack { Heading { "hi", level: 1 } } } }
-  deployable api { platform: node contexts: [C] serves: PlainApi port: 3000 }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable api { platform: node contexts: [C] dataSources: [cState] serves: PlainApi port: 3000 }
   deployable app { platform: flutter targets: api ui: App { P: api } port: 3006 }
 }`);
     expect(files.has("app/lib/stores.dart")).toBe(false);

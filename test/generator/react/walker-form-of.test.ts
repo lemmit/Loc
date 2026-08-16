@@ -48,7 +48,9 @@ const baseOrderSystem = (body: string) => `
         body:  ${body}
       }
     }
-    deployable api { platform: node, contexts: [C], port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
   }
 `;
@@ -92,7 +94,9 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -124,7 +128,9 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -164,7 +170,9 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
         ui WebApp {
           page CreateOrder { route: "/orders/new"  body: CreateForm { of: Order } }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -250,7 +258,9 @@ describe("CreateForm renders the create-input contract, not raw fields (S1b)", (
             body:  CreateForm { of: Order }
           }
         }
-        deployable api { platform: node, contexts: [C], port: 3000, auth: required }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000, auth: required }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -290,7 +300,9 @@ describe("CreateForm renders the create-input contract, not raw fields (S1b)", (
         ui WebApp {
           page CreateOrder { route: "/orders/new" body: CreateForm { of: Order } }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

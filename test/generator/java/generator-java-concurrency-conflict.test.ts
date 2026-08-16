@@ -139,7 +139,7 @@ describe("java generator — versioned optimistic-concurrency", () => {
         }
         api A from D
         storage primarySql { type: postgres }
-        resource st { for: C, kind: state, use: primarySql }
+        resource st { for: C, kind: eventLog, use: primarySql }
         deployable api {
           platform: java
           contexts: [C]

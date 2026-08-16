@@ -79,7 +79,8 @@ async function genBoth(expr: string, framework = "react", backendDerived = false
           body: Text(${expr})
         }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      resource ordersState { for: Orders, kind: state, use: pg }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
     }
   `);

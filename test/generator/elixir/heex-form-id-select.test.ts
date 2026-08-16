@@ -53,8 +53,10 @@ const phoenixSystem = (orderField: string): string => `
         body: CreateForm { of: Order }
       }
     }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -121,8 +123,10 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
         ui DemoUi {
           page NewOrder { route: "/orders/new" body: CreateForm { of: Order } }
         }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -159,8 +163,10 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
             body: CreateForm { of: Order }
           }
         }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
