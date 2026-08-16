@@ -415,8 +415,8 @@ const __absentReadProbes = async (dispatch) => {
 // The behavioural tier used to hold ONE identity, so the only authz statement it
 // could make was "the satisfying principal gets through".  A \`requires\` emitted
 // as a no-op passes that identically — which is exactly how #2446 shipped a
-// guarded create with an OPEN route.  This walks the full ladder over ONE gated
-// surface instead:
+// guarded create with an OPEN route.  This walks the full ladder over each
+// declared gated surface instead:
 //
 //   unauthenticated              → 401   (authn precedes authz)
 //   authenticated-but-UNauthORIZED → 403 (the gate actually denies)
@@ -447,40 +447,71 @@ const __authzLadder = async (spec, creds) => {
   const json = (h) => ({ ...h, "content-type": "application/json" });
   const out = [];
   const push = (name, status, error) => out.push({ tier: "authz", name, status, error });
+  // A gated READ surface is a GET, and fetch refuses a body on GET/HEAD — so the
+  // body is conditional on the method, not on the spec declaring one.
+  const withBody = (m, b) => (m === "GET" || m === "HEAD" ? {} : { body: JSON.stringify(b ?? {}) });
 
   // Seed with the AUTHORIZED principal so the gated surface addresses a real
   // row.  Several backends load the aggregate BEFORE evaluating the guard, so a
   // made-up id would answer 404 and the ladder would measure not-found instead
-  // of denial.
-  const seeded = await dispatch({
-    method: "POST",
-    url: origin + spec.seed.path,
-    headers: json(creds.authorized),
-    body: JSON.stringify(spec.seed.body ?? {}),
-  });
+  // of denial.  A spec may declare SEVERAL seed steps (a create, then the
+  // operation whose emitted event a folded read model needs) — they run in
+  // order under the authorized principal, and the first id any of them returns
+  // is the one \`{id}\` substitutes.
+  const seedSteps = Array.isArray(spec.seed) ? spec.seed : [spec.seed];
   let id = null;
-  try {
-    id = JSON.parse(seeded?.response?.body ?? "{}")?.id ?? null;
-  } catch { /* handled by the null check below */ }
+  for (const step of seedSteps) {
+    const r = await dispatch({
+      method: step.method ?? "POST",
+      url: origin + step.path.replace("{id}", id ?? ""),
+      headers: json(creds.authorized),
+      ...withBody(step.method ?? "POST", step.body),
+    });
+    const st = r?.response?.status;
+    if (!(st >= 200 && st < 300)) {
+      push("authz ladder: seed", "fail", \`seed \${step.method ?? "POST"} \${step.path} → \${st}: \${String(r?.response?.body ?? "").slice(0, 200)}\`);
+      return out;
+    }
+    if (id === null) {
+      try {
+        id = JSON.parse(r?.response?.body ?? "{}")?.id ?? null;
+      } catch { /* handled by the null check below */ }
+    }
+  }
   if (!id) {
-    push("authz ladder: seed", "fail", \`seed POST \${spec.seed.path} → \${seeded?.response?.status}: no id in body\`);
+    push("authz ladder: seed", "fail", \`seed \${seedSteps[0].path}: no id in any seed response body\`);
     return out;
   }
 
-  const arm = async (label, headers, expected) => {
+  // ONE spec may gate SEVERAL surfaces — the read side alone has three distinct
+  // emission sites (gated list read, folded projection, query-time projection)
+  // behind a single system, and booting a fixture per surface would pay a whole
+  // generate+migrate+boot for each.  \`gated\` is therefore normalised to a list;
+  // a surface may carry its own \`arms\`, otherwise the spec-level arms apply to
+  // all of them.
+  const surfaces = (Array.isArray(spec.gated) ? spec.gated : [spec.gated]).map((g) => ({
+    method: g.method,
+    path: g.path,
+    body: g.body,
+    label: g.label ?? null,
+    arms: g.arms ?? spec.arms,
+  }));
+
+  const arm = async (surface, rung, headers, expected) => {
+    const where = surface.label ? \`\${surface.label} — \` : "";
     if (expected === null || expected === undefined) {
-      push(\`authz ladder: \${label} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
+      push(\`authz ladder: \${where}\${rung} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
       return;
     }
     const r = await dispatch({
-      method: spec.gated.method,
-      url: origin + spec.gated.path.replace("{id}", id),
+      method: surface.method,
+      url: origin + surface.path.replace("{id}", id),
       headers: json(headers),
-      body: JSON.stringify(spec.gated.body ?? {}),
+      ...withBody(surface.method, surface.body),
     });
     const got = r?.response?.status;
     push(
-      \`authz ladder: \${label} → \${expected}\`,
+      \`authz ladder: \${where}\${rung} → \${expected}\`,
       got === expected ? "pass" : "fail",
       got === expected ? undefined : \`expected \${expected}, got \${got}: \${String(r?.response?.body ?? "").slice(0, 200)}\`,
     );
@@ -489,10 +520,14 @@ const __authzLadder = async (spec, creds) => {
   // Order matters: the two DENIED arms run first, so the surface is still in its
   // pre-operation state when they run and a 403 cannot be an artefact of the
   // operation having already been applied.  The authorized arm mutates, so it
-  // goes last.
-  await arm("unauthenticated", {}, spec.arms.anonymous);
-  await arm("authenticated-but-unauthorized", creds.unauthorized, spec.arms.unauthorized);
-  await arm("authorized", creds.authorized, spec.arms.authorized);
+  // goes last.  With several surfaces that ordering is kept PER SURFACE — the
+  // walk is surface-major, not rung-major — so a mutating surface's authorized
+  // arm cannot disturb the next surface's denial arms.
+  for (const s of surfaces) {
+    await arm(s, "unauthenticated", {}, s.arms.anonymous);
+    await arm(s, "authenticated-but-unauthorized", creds.unauthorized, s.arms.unauthorized);
+    await arm(s, "authorized", creds.authorized, s.arms.authorized);
+  }
   return out;
 };`;
 }
