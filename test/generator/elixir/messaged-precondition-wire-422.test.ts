@@ -87,6 +87,38 @@ system P {
 }
 `;
 
+// A workflow whose step CALLS the guarded operation.  The op's `{:error,
+// reason}` threads straight through the workflow controller's shared `respond/2`
+// dispatcher, so that tail needs the same arm — without it the denial would fall
+// to the sanitized 500 catch-all while the direct route answered 422.
+const WORKFLOW = `
+system W {
+  subdomain Sales {
+    context Cat {
+      aggregate Product {
+        name: string
+        quantity: int
+        operation restock(amount: int) {
+          precondition amount >= 1 message "Restock amount must be at least 1"
+          quantity := quantity + amount
+        }
+      }
+      repository Products for Product { }
+      workflow replenish {
+        create(n: string, amount: int) {
+          let p = Product.create({ name: n, quantity: 0 })
+          p.restock(amount)
+        }
+      }
+    }
+  }
+  api CatApi from Sales
+  storage db { type: postgres }
+  resource st { for: Cat, kind: state, use: db }
+  deployable api { platform: elixir contexts: [Cat] dataSources: [st] serves: CatApi port: 8080 }
+}
+`;
+
 function file(files: Map<string, string>, suffix: string): string {
   const key = [...files.keys()].find((k) => k.endsWith(suffix));
   expect(key, `${suffix} not emitted`).toBeDefined();
@@ -132,6 +164,18 @@ describe("elixir/vanilla — messaged precondition answers the wire-validation 4
     // The wire path localises the code through the SAME catalog lookup.
     expect(pd).toContain("def validation_errors_response(conn, errors) when is_list(errors) do");
     expect(pd).toContain("message: localize(code, message)");
+  });
+
+  it("the shared workflow respond/2 tail carries the arm, so an op-call denial keeps its 422", async () => {
+    const files = await generateSystemFiles(WORKFLOW);
+    const ctrl = file(files, "/controllers/workflows_controller.ex");
+    expect(ctrl).toContain("def respond(conn, {:error, {:validation_failed, errors}}),");
+    expect(ctrl).toContain("do: ProblemDetails.validation_errors_response(conn, errors)");
+    // Still ahead of the sanitized catch-all, which must stay LAST.
+    const wireIdx = ctrl.indexOf("{:error, {:validation_failed, errors}}");
+    const catchAllIdx = ctrl.indexOf("def respond(conn, {:error, _reason})");
+    expect(wireIdx).toBeGreaterThan(-1);
+    expect(catchAllIdx).toBeGreaterThan(wireIdx);
   });
 
   it("is gated: a project with no messaged param precondition emits no wire responder", async () => {

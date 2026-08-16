@@ -234,6 +234,26 @@ export function opHasWireDenial(op: {
   );
 }
 
+/** Does any aggregate operation across these contexts carry a wire-rung denial?
+ *  Gates the ProblemDetails responder AND the shared `respond/2` error tail —
+ *  a workflow `op-call` / explicit handler that invokes such an operation
+ *  propagates the term to its own dispatcher, which would otherwise fall to the
+ *  sanitized 500 catch-all.  False ⇒ every one of those seams is byte-identical. */
+export function contextsHaveWireDenials(
+  contexts: readonly {
+    aggregates: readonly {
+      operations?: readonly {
+        statements: readonly StmtIR[];
+        params: readonly { name: string }[];
+      }[];
+    }[];
+  }[],
+): boolean {
+  return contexts.some((c) =>
+    c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
+  );
+}
+
 /** The controller arm that answers a wire-rung denial with the §3.2 `errors[]`
  *  422 — the SAME body `ProblemDetails.validation_error_response/2` builds from
  *  a changeset, so both 422 rungs share one wire shape. */
@@ -288,6 +308,15 @@ export function respondErrorTail(
   fnName = "respond",
   indent = "  ",
   overrides?: ErrorStatusMap,
+  /** True when some aggregate operation reachable from this dispatcher denies at
+   *  the WIRE rung (M-T6.20).  A workflow `op-call` threads that operation's
+   *  `{:error, reason}` straight through here, so without the arm the denial
+   *  would fall to the sanitized 500 catch-all instead of the 422 the direct
+   *  controller answers.  Gated so a project without one keeps the exact tail it
+   *  had — and never references a `validation_errors_response/2` the
+   *  ProblemDetails module didn't emit (an undefined remote call is itself a
+   *  `--warnings-as-errors` failure). */
+  wireDenials = false,
 ): string {
   const clause = (head: string, body: string): string =>
     `${indent}${head},\n${indent}  do: ${body}`;
@@ -296,6 +325,14 @@ export function respondErrorTail(
       `def ${fnName}(conn, {:error, :not_found})`,
       denialResponse("notFound", '"Resource not found"', overrides),
     ),
+    ...(wireDenials
+      ? [
+          clause(
+            `def ${fnName}(conn, {:error, {:validation_failed, errors}})`,
+            wireValidationResponse(),
+          ),
+        ]
+      : []),
     denialResponders(fnName, indent, overrides),
     clause(`def ${fnName}(conn, {:error, _reason})`, internalFallbackResponse()),
   ].join("\n\n");
