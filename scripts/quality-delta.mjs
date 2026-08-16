@@ -302,7 +302,29 @@ export function staleDrafts(prs, { now, days }) {
 // exact "green number, blind instrument" failure §4.3 of the audit describes.)
 // ---------------------------------------------------------------------------
 
-const read = (rel) => readFileSync(path.join(repoRoot, rel), "utf8");
+/** Read a register file, either from the working tree or from a past commit.
+ *
+ *  Reading the PAST is what makes the week-over-week delta derivable instead of
+ *  stored: every register here is a file under version control, so last week's
+ *  value is `git show <then>:<path>` — no series file, no state to invalidate,
+ *  nothing to keep in sync (CLAUDE.md, "derive, don't stamp").
+ *
+ *  Returns `undefined` when the path does not exist at that commit, which is a
+ *  normal fact about the past (a register can be added, moved, or renamed), NOT
+ *  a broken reader.  The caller decides what that means — see `readRegisters`. */
+const read = (rel, atCommit) => {
+  if (!atCommit) return readFileSync(path.join(repoRoot, rel), "utf8");
+  try {
+    return execFileSync("git", ["show", `${atCommit}:${rel}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+};
 
 /** The slice of `src` from the line opening `marker` to the line closing the
  *  literal at column 0 (`];` or `};`).
@@ -314,6 +336,12 @@ const read = (rel) => readFileSync(path.join(repoRoot, rel), "utf8");
  *  that is genuinely absent returns `undefined` (and every caller throws on
  *  that, rather than reporting a comforting zero). */
 function literalBlock(src, marker) {
+  // A file that does not exist at the commit being read (`read` returns
+  // undefined) is indistinguishable, here, from a marker that is absent: both
+  // mean "no block". Funnelling it through the same `undefined` keeps every
+  // caller's existing throw — loud at HEAD, degraded to `n/a` for the past by
+  // `readRegisters` — instead of a TypeError from `undefined.indexOf`.
+  if (typeof src !== "string") return undefined;
   const start = src.indexOf(marker);
   if (start === -1) return undefined;
   const rest = src.slice(start);
@@ -382,16 +410,40 @@ const CORPUS_SKIP_FILES = {
   elixir: "test/e2e/corpus-elixir-build.test.ts",
 };
 
-/** Every register count, read off the working tree. */
-export function readRegisters() {
+/** Every register count, read off the working tree — or off a past commit.
+ *
+ *  STRICTNESS DIFFERS BY TENSE, deliberately.  At HEAD a reader that cannot
+ *  find its marker is a BUG, and every parser above throws rather than report a
+ *  comforting zero (§4.3's "green number, blind instrument").  At a past commit
+ *  the same failure is an ordinary fact — the file was added later, lived at
+ *  another path, or was formatted differently — so each register degrades on
+ *  its own to `null`, meaning **not comparable**, rendered `n/a`.
+ *
+ *  `null` is never `0`.  Collapsing "we cannot read last week" into "last week
+ *  was zero" would print a phantom regression on every rename, which is exactly
+ *  the false-alarm class this function exists to remove. */
+export function readRegisters(atCommit) {
+  const lenient = Boolean(atCommit);
+  // At HEAD, let the parser's own throw escape.  In the past, one unreadable
+  // register costs that ROW its comparison, never the whole report.
+  const maybe = (fn) => {
+    if (!lenient) return fn();
+    try {
+      return fn() ?? null;
+    } catch {
+      return null;
+    }
+  };
   const skipSrc = Object.fromEntries(
-    Object.entries(CORPUS_SKIP_FILES).map(([k, rel]) => [k, read(rel)]),
+    Object.entries(CORPUS_SKIP_FILES).map(([k, rel]) => [k, read(rel, atCommit)]),
   );
   return {
-    wireWaivers: countWireWaivers(read("test/_helpers/wire-waivers.ts")),
-    register: countOpenGaps(read("src/diagnostics/unsupported-register.ts")),
-    heexPins: countHeexPins(read("test/generator/elixir/heex-parity.test.ts")),
-    compileSkips: countCompileSkips(skipSrc),
+    wireWaivers: maybe(() => countWireWaivers(read("test/_helpers/wire-waivers.ts", atCommit))),
+    register: maybe(() => countOpenGaps(read("src/diagnostics/unsupported-register.ts", atCommit))),
+    heexPins: maybe(() =>
+      countHeexPins(read("test/generator/elixir/heex-parity.test.ts", atCommit)),
+    ),
+    compileSkips: maybe(() => countCompileSkips(skipSrc)),
   };
 }
 
@@ -416,17 +468,64 @@ export function parseLog(raw) {
     });
 }
 
-function gitLog(days) {
+/** Merges in a trailing window.  `skipDays` shifts the window back, so the
+ *  PREVIOUS period is the same reader with `{days: 7, skipDays: 7}` — that is
+ *  what makes the R11 comparison derivable rather than a frozen quotation. */
+function gitLog(days, skipDays = 0) {
   // The separators go to git as its OWN `%xNN` escapes, not as literal bytes:
   // `execFile` rejects an argv entry containing a NUL, so interpolating FIELD
   // here would throw before git ever ran.  git expands `%x00`/`%x1e` itself,
   // and the OUTPUT carries the real bytes `parseLog` splits on.
   const raw = execFileSync(
     "git",
-    ["log", "--first-parent", `--since=${days} days ago`, "--format=%H%x00%s%x00%b%x1e"],
+    [
+      "log",
+      "--first-parent",
+      `--since=${days + skipDays} days ago`,
+      ...(skipDays ? [`--until=${skipDays} days ago`] : []),
+      "--format=%H%x00%s%x00%b%x1e",
+    ],
     { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   return parseLog(raw);
+}
+
+/** The last commit on this branch at or before the window opened — the commit
+ *  whose tree carries last week's register values.
+ *
+ *  Returns `undefined` when history does not reach back that far, which is the
+ *  shallow-clone case: CI checks out with `fetch-depth: 0` precisely so this
+ *  resolves, but a local `--dry-run` in a shallow working copy must degrade to
+ *  "no comparison" rather than silently anchor on the graft commit and report a
+ *  fabricated delta. */
+function windowStartCommit(days) {
+  const before = new Date(Date.now() - days * 86_400_000).toISOString();
+  try {
+    const sha = execFileSync(
+      "git",
+      ["rev-list", "-1", "--first-parent", `--before=${before}`, "HEAD"],
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    if (!sha) return undefined;
+    // A shallow clone's boundary commit is the oldest thing it has; anchoring
+    // there would compare against whatever the graft happens to hold.
+    const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    }).trim();
+    if (shallow === "true") {
+      const oldest = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+      })
+        .trim()
+        .split("\n");
+      if (oldest.includes(sha)) return undefined;
+    }
+    return sha;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -558,18 +657,29 @@ export const BASELINE = {
   auditShare: 58, // deliberate audit / coverage exercise, §3
 };
 
-const arrow = (now, was, goodDown = true) => {
+/** The Δ cell.  `was === null | undefined` means the previous value could not be
+ *  read (no history, or the register did not exist / parse back then) — that is
+ *  "not comparable", never zero, so it must not render an arrow at all. */
+export const arrow = (now, was, goodDown = true) => {
+  if (was === null || was === undefined) return "n/a";
   if (now === was) return "→ flat";
   const better = goodDown ? now < was : now > was;
   return `${now > was ? "↑" : "↓"} ${now > was ? "+" : ""}${now - was} ${better ? "✅" : "⚠️"}`;
 };
 
+/** A previous-week register cell: the number, or `n/a` when unreadable. */
+const was = (v) => (v === null || v === undefined ? "n/a" : String(v));
+
 /** The markdown comment for one run.  Pure — takes everything it prints. */
-export function renderReport({ now, days, registers, stats, prs, runs, sha }) {
+export function renderReport({ now, days, registers, prev, prevStats, stats, prs, runs, sha }) {
   const end = new Date(now);
   const start = new Date(now - days * 86_400_000);
   const day = (d) => d.toISOString().slice(0, 10);
-  const skipTotal = Object.values(registers.compileSkips).reduce((n, l) => n + l.length, 0);
+  const total = (m) => (m ? Object.values(m).reduce((n, l) => n + l.length, 0) : null);
+  const skipTotal = total(registers.compileSkips);
+  const prevSkipTotal = total(prev?.compileSkips);
+  const prevWaivers = prev?.wireWaivers ?? null;
+  const prevPins = prev?.heexPins ? prev.heexPins.length : null;
   const dupes = duplicateHeads(prs);
   const stale = staleDrafts(prs, { now, days: STALE_DRAFT_DAYS });
 
@@ -578,28 +688,38 @@ export function renderReport({ now, days, registers, stats, prs, runs, sha }) {
   lines.push("");
   lines.push(
     `Window: \`${day(start)}\` → \`${day(end)}\` (${days}d) · registers read at \`${sha.slice(0, 8)}\`` +
-      ` · baseline = the ${BASELINE.date} audit.`,
+      (prev
+        ? ` · compared against \`${prev.sha.slice(0, 8)}\` (the tip when the window opened).`
+        : ` · **no previous-week comparison** — history does not reach ${day(start)}.`),
   );
   lines.push("");
 
   lines.push("### Ratchets (lower is better; each is a list that fails its gate when stale)");
   lines.push("");
-  lines.push("| register | now | baseline | Δ |");
+  lines.push("| register | now | week ago | Δ |");
   lines.push("|---|---:|---:|---|");
   lines.push(
-    `| wire-golden waivers | ${registers.wireWaivers} | ${BASELINE.wireWaivers} | ${arrow(registers.wireWaivers, BASELINE.wireWaivers)} |`,
+    `| wire-golden waivers | ${registers.wireWaivers} | ${was(prevWaivers)} | ${arrow(registers.wireWaivers, prevWaivers)} |`,
   );
   lines.push(
-    `| unsupported-register open gaps | ${registers.register.gaps} | — | ${registers.register.scope} \`scope\` rows (by design) |`,
+    `| unsupported-register open gaps | ${registers.register.gaps} | ${was(prev?.register?.gaps)} | ${arrow(registers.register.gaps, prev?.register?.gaps ?? null)} · ${registers.register.scope} \`scope\` rows (by design) |`,
   );
   lines.push(
-    `| HEEx parity pins | ${registers.heexPins.length} | ${BASELINE.heexPins} | ${arrow(registers.heexPins.length, BASELINE.heexPins)} |`,
+    `| HEEx parity pins | ${registers.heexPins.length} | ${was(prevPins)} | ${arrow(registers.heexPins.length, prevPins)} |`,
   );
   lines.push(
-    `| corpus COMPILE_SKIP (all backends) | ${skipTotal} | ${BASELINE.compileSkips} | ${arrow(skipTotal, BASELINE.compileSkips)} |`,
+    `| corpus COMPILE_SKIP (all backends) | ${skipTotal} | ${was(prevSkipTotal)} | ${arrow(skipTotal, prevSkipTotal)} |`,
   );
   lines.push("");
-  if (skipTotal > 0) {
+  lines.push(
+    `<sub>Δ is **week over week**, derived by reading these same files at \`${prev ? prev.sha.slice(0, 8) : "—"}\` — ` +
+      `no stored series, nothing to keep in sync. \`n/a\` means the register could not be read at that ` +
+      `commit (added or moved since), which is deliberately NOT rendered as zero: a rename must not ` +
+      `read as a regression. For the origin of the series, the ${BASELINE.date} audit measured ` +
+      `${BASELINE.wireWaivers} wire waivers · ${BASELINE.heexPins} HEEx pin · ${BASELINE.compileSkips} compile skips.</sub>`,
+  );
+  lines.push("");
+  if (skipTotal !== null && skipTotal > 0) {
     for (const [backend, ids] of Object.entries(registers.compileSkips)) {
       if (ids.length)
         lines.push(`- \`${backend}\` skips: ${ids.map((i) => `\`${i}\``).join(", ")}`);
@@ -613,22 +733,31 @@ export function renderReport({ now, days, registers, stats, prs, runs, sha }) {
 
   lines.push("### Landed work");
   lines.push("");
-  lines.push("| metric | value |");
-  lines.push("|---|---:|");
-  lines.push(`| merges | ${stats.merges} |`);
-  lines.push(`| fix-shaped merges | ${stats.fixes} (${stats.fixShare}%) |`);
+  lines.push("| metric | this window | previous |");
+  lines.push("|---|---:|---:|");
+  lines.push(`| merges | ${stats.merges} | ${prevStats ? prevStats.merges : "n/a"} |`);
+  lines.push(
+    `| fix-shaped merges | ${stats.fixes} (${stats.fixShare}%) | ` +
+      `${prevStats ? `${prevStats.fixes} (${prevStats.fixShare}%)` : "n/a"} |`,
+  );
   lines.push("");
 
   lines.push("### R11 — discovery vs prevention (the pinned success metric)");
   lines.push("");
-  lines.push("| discovered by | fixes | share of attributed |");
-  lines.push("|---|---:|---:|");
-  lines.push(`| **gate** (a check went red) | ${stats.gate} | ${stats.gateShare}% |`);
-  lines.push(`| **audit** (someone went looking) | ${stats.audit} | ${stats.auditShare}% |`);
-  lines.push(`| unattributed | ${stats.unattributed} | — |`);
+  lines.push("| discovered by | fixes | share of attributed | previous window |");
+  lines.push("|---|---:|---:|---:|");
+  lines.push(
+    `| **gate** (a check went red) | ${stats.gate} | ${stats.gateShare}% | ` +
+      `${prevStats?.attributed ? `${prevStats.gateShare}%` : "n/a"} |`,
+  );
+  lines.push(
+    `| **audit** (someone went looking) | ${stats.audit} | ${stats.auditShare}% | ` +
+      `${prevStats?.attributed ? `${prevStats.auditShare}%` : "n/a"} |`,
+  );
+  lines.push(`| unattributed | ${stats.unattributed} | — | — |`);
   lines.push("");
   lines.push(
-    `Baseline: gate ${BASELINE.gateShare}% · audit ${BASELINE.auditShare}%. ` +
+    `Origin (${BASELINE.date} audit): gate ${BASELINE.gateShare}% · audit ${BASELINE.auditShare}%. ` +
       `**Target: gate share overtakes audit share.** ` +
       (stats.attributed === 0
         ? "No attributed fixes this window — no verdict."
@@ -749,6 +878,13 @@ async function main() {
     encoding: "utf8",
   }).trim();
 
+  // Last week's numbers are DERIVED, not stored: the same registers read at the
+  // commit that was tip when the window opened, and the same classifier run
+  // over the preceding window.  Nothing is persisted, so nothing can go stale.
+  const prevSha = windowStartCommit(WINDOW_DAYS);
+  const prev = prevSha ? { ...readRegisters(prevSha), sha: prevSha } : undefined;
+  const prevStats = prevSha ? summarize(gitLog(WINDOW_DAYS, WINDOW_DAYS)) : undefined;
+
   let prs = [];
   let runs;
   if (token && repo) {
@@ -756,7 +892,17 @@ async function main() {
     runs = await fetchMainRuns(repo, token, new Date(now - WINDOW_DAYS * 86_400_000).toISOString());
   }
 
-  const body = renderReport({ now, days: WINDOW_DAYS, registers, stats, prs, runs, sha });
+  const body = renderReport({
+    now,
+    days: WINDOW_DAYS,
+    registers,
+    prev,
+    prevStats,
+    stats,
+    prs,
+    runs,
+    sha,
+  });
 
   if (dryRun) {
     console.log(body);

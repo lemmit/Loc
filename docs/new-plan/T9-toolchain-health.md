@@ -194,6 +194,53 @@ Design: [`M-T9.27-unsupported-register-design.md`](missions/M-T9.27-unsupported-
 
 Sources: language-size review 2026-08-04/05. Relates to M-T9.8 (allowlist ratchet — same discipline, one register over), M-T5.21 (callable unification — the other half of the same review; the six duplicate `loom.workflow-*` code pairs are that mission's symptom, not this one's).
 
+## M-T9.28 — Authorization-surface census: prove a gate DENIES, not just compiles — `partial` (slice 1 landed) · **M** · P1 ⭐
+> **ID note.** [`README.md`](./README.md)'s 2026-08-10 mint line describes M-T9.28 as "repo-wide `.ddd` + clause census". That description is **stale**: the `.ddd`/clause census shipped unlabelled in [#2498](https://github.com/lemmit/Loc/pull/2498) (`test/system/ddd-source-census.test.ts`), and the only claim on this ID in code is [#2515](https://github.com/lemmit/Loc/pull/2515), which uses it for the **authorization-surface census**. First claim wins (the rule the M-T6.37/38 collision established), so M-T9.28 is the authz census and the README line is the thing to correct.
+
+The behavioral tier held exactly ONE identity, so the only authorization statement it could make was "the satisfying principal gets through" — which a `requires` emitted as a **no-op passes identically**. That is precisely how [#2446](https://github.com/lemmit/Loc/pull/2446) shipped a guarded `create` with an open route: every gate was green because every gate was blind in the same direction.
+
+**Slice 1 landed (#2515)** — a second principal in both auth flavours: `DEV_CLAIMS_UNAUTHORIZED` (same shape and same tenancy claims as `DEV_CLAIMS`, so only the authorization predicate differs) and `oidc.unauthorizedToken` (same issuer and signing key, so it *verifies* and is then *refused* — the 403 path, not the 401 path). Three consumers were on record as blocked on it: this census, M-T9.25 round 2's 401/403 problem-arm sweep, and M-T9.11's 4xx wire goldens ([#2541](https://github.com/lemmit/Loc/pull/2541), open).
+
+**Open half:** the census itself — for every emitted authorization gate (`requires`, `policy` ladder rung, `mask unless`, tenancy predicate), a runtime caller that is authenticated-but-unauthorized and must be REFUSED. The negative direction is the whole point: an authz test that only ever asserts the allowed case cannot distinguish an enforced gate from an absent one.
+
+Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R3(a). Feeds M-T9.25 (round 2), M-T9.11 (4xx goldens). Related: M-T3.16 (the lifecycle write gate whose absence this class of blindness hid).
+
+## M-T9.29 — Driven-primitive / combination census — `partial` (slice 1 in flight; four findings already landed) · **M** · P2
+R5's other half. `test/ir/api-caller-census.test.ts` closed "every generated ROUTE has a runtime caller" (216 → 13 pins, #2448/#2468, residue owned by M-T9.13). The same question is unanswered one layer over: **which walker primitives, and which combinations of features, does any test actually drive?** Coverage is counted per-feature while holes live per-cell (audit §4.4) — bugs cluster at feature × backend × adapter × example intersections no single fixture crosses.
+
+**Slice 1 — the pairwise-combination corpus harness — is [#2512](https://github.com/lemmit/Loc/pull/2512), still open**, but it has already paid for itself: four of its findings merged ahead of the harness itself — [#2527](https://github.com/lemmit/Loc/pull/2527) (F1: `shape: document` × `policy` crashed codegen), [#2528](https://github.com/lemmit/Loc/pull/2528) (F2+F5: `mask unless` + principal filters never reached the non-relational repo builders), [#2529](https://github.com/lemmit/Loc/pull/2529) (F4: a line-leading soft keyword before `:` lexed as an identifier). Every one is a two-feature intersection that both features' own per-feature tests pass.
+
+**Open half:** the driven-primitive census proper — the ~55 walker primitives crossed against the six frontends and the design packs, with the undriven cells registered as a shrink-only ratchet rather than discovered one bug at a time.
+
+Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R5. Related: M-T9.13 (the route-caller residue), M-T9.22 (generative fuzzing — the unstructured sibling of this structured sweep).
+
+## M-T9.30 — Flake budget: per-leg pass-rate tracking — `done` (landed #2514; unexercised in the field so far) · **S/M** · P1
+`ci-red-alarm.yml` watches for a RED TRANSITION, which is the wrong shape for a flake: a flake's steady state is green, so it gets re-run, goes green, and is forgotten. It is equally blind to the **never-green** class — a leg that has never been green has no transition to alarm on (`api-call-e2e`, red on 100% of its main pushes for two days, #2434).
+
+`scripts/flake-budget.mjs` + `flake-budget.yml` are the other half: daily, each monitored leg's recent `main` run history is read through the Actions API and classified; every leg outside budget gets ONE claiming issue labelled `flaky-gate`, updated in place and closed when the leg recovers. A flake is a bug report with a probability attached — this is what files it. Pure core pinned by `test/system/flake-budget.test.ts` against `test/system/fixtures/flake-budget-runs.json`.
+
+Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R10. Sibling of `ci-red-alarm.yml` (M-T9.31 owns that alarm's recovery half).
+
+## M-T9.31 — Weekly quality delta, mechanically — `partial` (lane 1 landed; lane 2 in flight) · **S/M** · P1 ⭐ the pinned success metric
+§3 of the 2026-08 audit ("how the bugs are actually found") is its most important table and its most expensive: an afternoon of reading 235 commit bodies by hand, i.e. a snapshot nobody will redo, i.e. a ratio that **cannot be watched moving**. R11 pins the success metric explicitly — the share of bugs discovered by per-PR gates (~16% at baseline) should overtake the share discovered by episodic audits (~58%).
+
+**Lane 1 landed (#2513)** — `scripts/quality-delta.mjs` + a Monday cron appending one comment to one `quality-delta`-labelled issue: register counts read from the repo (wire waivers, unsupported-register open gaps, HEEx pins, corpus `COMPILE_SKIP`), merge stats over the trailing window, the R11 discovery split over ATTRIBUTED fixes only, R12 claim hygiene, and main-push failures from the Actions API. The classifier is pure and pinned by `test/system/quality-delta.test.ts`.
+
+**Lane 2 — the Δ was measured against the wrong thing.** `BASELINE` was a frozen constant dated 2026-08-02, so every run diffed against a fixed point rather than the previous week, and a ratchet drained *after* that date read as growth forever. The 2026-08-16 dry run printed `wire waivers 2 → 4 ↑ +2 ⚠️` and `COMPILE_SKIP 0 → 2 ↑ +2 ⚠️` — the first was moving DOWN week over week, the second had not moved at all. In a repo whose convention is "a stale waiver fails its gate", a false ⚠️ costs an agent a re-fix of something already fixed. Fixed by DERIVING the comparison: every register is a file under version control, so last week's value is the same reader at `git rev-list -1 --before=<window start>` — no stored series, nothing to invalidate ("derive, don't stamp"). An unreadable register renders `n/a`, never `0`, so a rename cannot read as a regression.
+
+**Open:** red-time. The report can count main-push failures but not how long `main` was broken — see M-T9.30's sibling note; the `ci-red-alarm` recovery half (landed with lane 2) is what makes the open→close span recordable.
+
+Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R11 §6.
+
+## M-T9.32 — Duplicate-claim hygiene — `partial` (detection ships; the ID half is open) · **S** · P2
+Parallel agents collide on claims. Two shapes are on record: #2349/#2351 were **the same branch open twice** (draft + ready), and M-T6.37 was claimed by two PRs in the same hour because **neither could see the other's ID** — it lives on an open branch, not on `main`, so a next-free-ID check that reads `main` cannot find it (the collision note is in [T6](./T6-backend-parity.md)).
+
+**Detection ships** inside the weekly report (`duplicateHeads` / `staleDrafts` in `scripts/quality-delta.mjs`, pinned by its test): open PRs sharing a head branch, and drafts on a head that has not moved in 10 days. Deliberately FLAG-ONLY — nothing closes anyone's PR.
+
+**Open:** the ID half — a next-free-mission-ID check that spans open PR branches, not just `main`. That is the one that would have prevented the M-T6.37 collision, and it is the one still unwritten.
+
+Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R12. Minted by [#2495](https://github.com/lemmit/Loc/pull/2495).
+
 ## M-T9.33 — Diagnostic FIRING census: prove every `loom.*` gate is reached — `partial` (gate landed; 38 of 49 still undrained) · **S/M** · P1 ⭐ retires a recurring manual sweep
 **M-T9.8's item (d) has been a recurring manual sweep for a month, reasoning from a number that is wrong by 2.7×.** A code-identity grep over `test/` reports 131 of 413 catalogue codes uncovered; a message-fragment grep says 111; an instrumented full-suite run — recording every code actually constructed through `diagMessage` — says **49**. The static forms fail in both directions: they miss split message assertions (`e.includes("self-hosted") && e.includes("issuer")` in `test/language/auth-block.test.ts`, which covers all five `auth.ts` codes), and they *credit* 23 of the 49 never-fired codes because a register table or a comment names them.
 
