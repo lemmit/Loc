@@ -5,7 +5,7 @@
 // The find behind it (`RepositoryIR.historyFind`) deliberately sits BESIDE
 // `finds` (docs/audit.md), so every read layer that discovers a page's queries
 // by walking `finds` — or by matching only the `all` / `byId` standard ops —
-// does not see it.  Three of the six frontends are in that position today:
+// does not see it.  Two of the six frontends are in that position today:
 //
 //   - **Feliz** collects page reads for `all` / `byId` only (`feliz/wire.ts`
 //     `collectPageReads`) and its `buildHookUse` maps every OTHER operation to
@@ -14,8 +14,14 @@
 //     of an Elmish `data:` lambda is not even an expression.
 //   - **Flutter** skips non-`all`/`byId` ops in `collectFlutterReads` while the
 //     walker still references `<agg>HistoryProvider`, i.e. an undefined name.
-//   - **Phoenix/HEEx** maps the read onto the aggregate's `list_<aggs>` context
-//     function, which is the LIST, not the trail.
+//
+// **Phoenix/HEEx used to be the third** — it mapped the read onto the
+// aggregate's `list_<aggs>` context function, which is the LIST, not the trail,
+// so the whole view was skipped.  It now serves the trail natively: the LiveView
+// hosts its contexts in the SAME OTP app, so the read is a page-private
+// `load_<agg>_history/2` calling `<App>.Audit.History.for_target/3` in-process
+// (the same three guards the `history` controller action applies) — see
+// `elixir/liveview-emit.ts`.  No api client, no fetch.
 //
 // None of those is a rendering gap the `Timeline` primitive's own comment
 // covers: the damage is in the READ the surrounding `QueryView` registers, one
@@ -42,6 +48,7 @@ export const HISTORY_CAPABLE_FRAMEWORKS: ReadonlySet<string> = new Set([
   "vue",
   "svelte",
   "angular",
+  "phoenixLiveView",
 ]);
 
 /** True when a `QueryView` `of:` expression is the derived entity-history read

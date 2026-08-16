@@ -708,6 +708,12 @@ export const flutterTarget: WalkerTarget = {
   // compilable, which is the whole point of a sentinel: it must survive to be
   // read.  (A scaffolded detail page hit exactly this and would not build.)
   renderComment: (text: string) => `const SizedBox.shrink() /* ${text} */`,
+  // A VISIBLE degradation notice.  `renderComment` above renders NOTHING on the
+  // page (a zero-size widget), which is right for a missing widget and wrong
+  // for a missing SECTION: the scaffolded History card keeps its frame and its
+  // heading, so the reader gets a labelled empty panel.  `Text(…)` is the same
+  // widget every other text node in this target emits.
+  renderNotice: (text: string) => `Text(${dartString(text)})`,
   // Child-position interpolation → a `Text(…)` widget.  A provably-string value
   // is passed straight; anything else is coerced via Dart string interpolation
   // (`Text('${expr}')`), which stringifies any type.

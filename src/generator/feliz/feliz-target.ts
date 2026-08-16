@@ -721,6 +721,12 @@ export const felizTarget: WalkerTarget = {
 
   // --- Markup seams — F# flavoured ---------------------------------------
   renderComment: (text: string) => `(* ${text} *)`,
+  // A VISIBLE degradation notice — an F# comment inside a `children` list is
+  // not an expression at all, so on this target the "honest skip" was neither
+  // honest (the reader saw an empty card) nor safe.  `Html.p` renders through
+  // the same Feliz DSL every other text node uses.
+  renderNotice: (text: string) =>
+    `Html.p [ prop.className "loom-unsupported"; prop.text "${text.replace(/"/g, '\\"')}" ]`,
   // Child-position interpolation → a text node.  `Html.text` takes a `string`,
   // so a non-string value is coerced with F#'s `string` function; a value the
   // call site knows is already a `string` (a string literal, a Yes/No ternary

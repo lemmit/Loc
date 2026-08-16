@@ -29,7 +29,10 @@ import type {
   UiNotificationIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  exprUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../ir/util/op-gates.js";
 import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
@@ -59,6 +62,13 @@ import { buildPlaywrightPageObject } from "./page-objects-emit.js";
 import { exprUsesBind, REALTIME_TOPIC, renderMessageExprElixir } from "./realtime-liveview.js";
 import { renderExpr as renderDomainExpr } from "./render-expr.js";
 import { renderStoreModule } from "./store-emit.js";
+import {
+  aggregateServesHistoryRoute,
+  renderVanillaHistoryMapper,
+  vanillaHistoryFind,
+  vanillaHistoryMapperName,
+  vanillaHistoryMapperTakesPrincipal,
+} from "./vanilla/audit-history-emit.js";
 
 /** One router entry the orchestrator splices into router.ex. */
 export interface LiveRoute {
@@ -78,6 +88,42 @@ interface ProjectionRead {
   /** The row's WIRE field names in `wireShape` order — the camelCase atom keys
    *  `run/1` returns, which the loader rekeys to snake_case. */
   fields: readonly string[];
+}
+
+/** Where a page-body entity-history read lands on the Phoenix leg
+ *  (docs/audit.md — `QueryView { of: <api>.<Agg>.history(id) }`).
+ *
+ *  The four SPA frontends fetch `GET /<plural>/{id}/history`; a LiveView hosts
+ *  the same contexts in the SAME OTP app, so the read is an in-process scan of
+ *  `audit_records` — no api client, exactly like the projection read above.
+ *  What it must NOT skip are the three guards the controller's `history` action
+ *  applies, in the same order, or the LiveView would serve a trail the HTTP
+ *  route 403s/404s: the find's gate, entity reachability, and the field mask. */
+interface HistoryRead {
+  /** `<App>.<Ctx>` — the context facade the reachability probe calls. */
+  ctxModule: string;
+  /** `<App>.Audit.History` — the shared query module. */
+  historyModule: string;
+  /** `<App>.Repo`. */
+  repoModule: string;
+  /** `target_type` of the audit rows: the aggregate's PascalCase name. */
+  targetType: string;
+  /** `get_<agg>` — the reachability probe (guard 2). */
+  getFn: string;
+  /** True when the aggregate's reads carry a principal capability filter, so
+   *  `get_<agg>` takes the actor as its trailing argument. */
+  principal: boolean;
+  /** The find's `requires` predicate rendered as Elixir (guard 1), or null. */
+  gate: string | null;
+  /** True when that predicate reads `current_user`. */
+  gateUsesUser: boolean;
+  /** `<agg>_audit_entry` — the row → wire-entry mapper (guard 3, the mask). */
+  mapperName: string;
+  /** The mapper source, spliced into the LiveView module as a `defp`. */
+  mapperSource: string;
+  /** True when the mapper takes the principal as its second argument (it has
+   *  at least one `mask unless` field). */
+  mapperTakesPrincipal: boolean;
 }
 
 export function emitLiveViewPages(args: {
@@ -168,6 +214,9 @@ export function emitLiveViewPages(args: {
   // what the SPA frontends fetch over `GET /projections/<slug>` is an
   // in-process `run/1` call here.
   const projectionReads = new Map<string, ProjectionRead>();
+  // Entity-history reads a page body may render (docs/audit.md), keyed by the
+  // audited aggregate's name — same in-process story as the projections above.
+  const historyReads = new Map<string, HistoryRead>();
   for (const ctx of contexts) {
     const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const proj of ctx.projections ?? []) {
@@ -210,6 +259,35 @@ export function emitLiveViewPages(args: {
             foundation: "vanilla",
           }),
           usesUser: exprUsesCurrentUser(listGate),
+        });
+      }
+      // Entity history — the READ side of the `audited` trail.  Gated on the
+      // SAME `aggregateServesHistoryRoute` predicate that mounts the controller
+      // route, so a page can never read a trail the REST surface does not
+      // serve (and the two can't drift into disagreeing about which aggregates
+      // have one).
+      if (aggregateServesHistoryRoute(ctx, agg)) {
+        const find = vanillaHistoryFind(ctx, agg)!;
+        historyReads.set(agg.name, {
+          ctxModule,
+          historyModule: `${appModule}.Audit.History`,
+          repoModule: `${appModule}.Repo`,
+          targetType: upperFirst(agg.name),
+          getFn: `get_${snake(agg.name)}`,
+          principal: aggregateUsesPrincipalContextFilter(agg),
+          gate: find.requires
+            ? renderDomainExpr(find.requires, {
+                thisName: "record",
+                contextModule: ctxModule,
+                foundation: "vanilla",
+              })
+            : null,
+          gateUsesUser: !!find.requires && exprUsesCurrentUser(find.requires),
+          mapperName: vanillaHistoryMapperName(agg),
+          // `principalSource: "param"` — a LiveView is its own process, so the
+          // controller's ambient `Process.get(:loom_current_user)` is nil here.
+          mapperSource: renderVanillaHistoryMapper(appModule, ctx, agg, "param"),
+          mapperTakesPrincipal: vanillaHistoryMapperTakesPrincipal(agg),
         });
       }
     }
@@ -292,6 +370,7 @@ export function emitLiveViewPages(args: {
       contextModuleByAggName,
       projectionReads,
       listReadGateByAggName,
+      historyReads,
       partContextModule,
       componentInfo,
       authEnabled,
@@ -397,6 +476,9 @@ interface RenderArgs {
    *  repository declares one.  Every seam that loads the collection consults
    *  this, so the LiveView cannot serve rows the HTTP `index` 403s. */
   listReadGateByAggName: ReadonlyMap<string, ListReadGate>;
+  /** Aggregate → its entity-history read (docs/audit.md), for the aggregates
+   *  whose repository carries the enrichment-derived `historyFind`. */
+  historyReads: ReadonlyMap<string, HistoryRead>;
   /** Module-qualified context keyed by entity-part name — qualifies a
    *  page-body `new Part { … }` struct literal (`%<Ctx>.<Part>{…}`). */
   partContextModule: ReadonlyMap<string, string>;
@@ -635,6 +717,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     contextModuleByAggName,
     a.projectionReads,
     a.listReadGateByAggName,
+    a.historyReads,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   // Hoist `Action(...)` handlers from the page body + every component
@@ -689,6 +772,10 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   // Phase 1) — the in-process `run/1` call plus the wire→snake rekey.
   const projectionLoaders = renderProjectionLoaders(walked.queryBindings, a.projectionReads);
 
+  // One `defp load_<agg>_history(socket, id)` + its `defp <agg>_audit_entry/…`
+  // mapper per audited aggregate whose trail this page renders (docs/audit.md).
+  const historyLoaders = renderHistoryLoaders(walked.queryBindings, a.historyReads);
+
   return {
     usesChart: walked.usesChart,
     source: `# Auto-generated.
@@ -698,7 +785,7 @@ ${aliasLines.length > 0 ? `\n${aliasLines}\n` : ""}
 ${mount}
 
 ${handleParams}
-${handleEventClauses}${uploadHandlers}${realtimeClauses}${projectionLoaders}
+${handleEventClauses}${uploadHandlers}${realtimeClauses}${projectionLoaders}${historyLoaders}
   @impl true
   def render(assigns) do
     ~H"""
@@ -1161,6 +1248,86 @@ ${guarded}
   return fns.length > 0 ? `\n${fns.join("\n\n")}\n` : "";
 }
 
+/** The page-private loader function name for one aggregate's history read. */
+function historyLoaderName(aggregate: string): string {
+  return `load_${snake(aggregate)}_history`;
+}
+
+/** The `handle_params` load line for a `QueryView { of: <api>.<Agg>.history(id) }`
+ *  — a call into the page-private loader below.
+ *
+ *  The id comes from the `of:` call's own argument (rendered handler-position by
+ *  the walker), not from `@id`: a hand-written `history(order.parentId)` must
+ *  load the trail it asked for, and the scaffolded page's `history(id)` renders
+ *  to `socket.assigns.id` anyway. */
+function renderHistoryLoadBlock(qb: import("./heex-walker.js").QueryBinding): string {
+  const id = qb.listArgs?.[0] ?? "socket.assigns.id";
+  return `    socket = assign(socket, :${qb.assign}, ${historyLoaderName(qb.aggregate)}(socket, ${id}))`;
+}
+
+/** The page-private loader + mapper for each entity trail a page reads
+ *  (docs/audit.md) — one `defp load_<agg>_history(socket, id)` plus the
+ *  aggregate's `defp <agg>_audit_entry/…` mapper, per DISTINCT aggregate.
+ *
+ *  It is a function rather than an inline `assign` for the same two reasons the
+ *  projection loader is:
+ *
+ *  1. THE READ.  `audit_records` lives in the same OTP app as the LiveView, so
+ *     what the four SPA frontends fetch over `GET /<plural>/{id}/history` is
+ *     one in-process `Audit.History.for_target/3` call here — no api client.
+ *  2. THE GUARDS.  All three the controller's `history` action applies, in the
+ *     same order, because each closes a different hole: the find's `requires`
+ *     gate (a denied caller must not even probe for the row), ENTITY
+ *     reachability (`audit_records` carries no tenant column — nothing for a
+ *     capability filter to scope — so scoping rides `get_<agg>`, which already
+ *     carries every predicate), and the field mask inside the mapper.  A
+ *     denial or a miss assigns the `:error` sentinel the view's error arm
+ *     renders — the LiveView shape of the route's 403/404, and the reason the
+ *     loader returns a value instead of assigning one itself. */
+function renderHistoryLoaders(
+  queryBindings: readonly QueryBinding[],
+  historyReads: ReadonlyMap<string, HistoryRead>,
+): string {
+  const seen = new Set<string>();
+  const fns: string[] = [];
+  for (const qb of queryBindings) {
+    if (qb.source !== "history" || seen.has(qb.aggregate)) continue;
+    const read = historyReads.get(qb.aggregate);
+    if (!read) continue;
+    seen.add(qb.aggregate);
+    // `current_user` is bound only when something reads it — an unused binding
+    // fails `--warnings-as-errors`.
+    const needsUser = read.principal || read.gateUsesUser || read.mapperTakesPrincipal;
+    const socketParam = needsUser ? "socket" : "_socket";
+    const cuBind = needsUser ? "    current_user = Map.get(socket.assigns, :current_user)\n\n" : "";
+    const getArgs = read.principal ? "id, current_user" : "id";
+    const mapper = read.mapperTakesPrincipal
+      ? `fn row -> ${read.mapperName}(row, current_user) end`
+      : `&${read.mapperName}/1`;
+    const inner = `    case ${read.ctxModule}.${read.getFn}(${getArgs}) do
+      {:ok, _record} ->
+        ${read.historyModule}.for_target(${read.repoModule}, ${JSON.stringify(read.targetType)}, id)
+        |> Enum.map(${mapper})
+
+      _ ->
+        :error
+    end`;
+    const body = read.gate
+      ? `    if ${read.gate} do
+${inner.replace(/^ {4}/gm, "      ")}
+    else
+      :error
+    end`
+      : inner;
+    fns.push(`  defp ${historyLoaderName(qb.aggregate)}(${socketParam}, id) do
+${cuBind}${body}
+  end
+
+${read.mapperSource}`);
+  }
+  return fns.length > 0 ? `\n${fns.join("\n\n")}\n` : "";
+}
+
 function renderHandleParams(
   page: PageIR,
   ui: UiIR,
@@ -1170,6 +1337,7 @@ function renderHandleParams(
   contextModuleByAggName: ReadonlyMap<string, string>,
   projectionReads: ReadonlyMap<string, ProjectionRead>,
   listReadGateByAggName: ReadonlyMap<string, ListReadGate>,
+  historyReads: ReadonlyMap<string, HistoryRead>,
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
@@ -1194,6 +1362,13 @@ function renderHandleParams(
         loadedProjections.add(qb.aggregate);
         loadBlocks.push(renderProjectionLoadBlock(qb));
       }
+      continue;
+    }
+    if (qb.source === "history") {
+      // The entity trail (docs/audit.md).  One call into the page-private
+      // loader below, which carries the three guards; a missing read means the
+      // aggregate serves no history, and the walker would not have tagged it.
+      if (historyReads.has(qb.aggregate)) loadBlocks.push(renderHistoryLoadBlock(qb));
       continue;
     }
     const ctxModule = contextModuleByAggName.get(qb.aggregate);

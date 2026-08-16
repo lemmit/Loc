@@ -191,8 +191,15 @@ export interface QueryBinding {
    *  `"projection"` → the query-time projection's `run/1`, an IN-PROCESS call:
    *  a LiveView deployable hosts its contexts in the SAME OTP app, so the
    *  Phoenix leg needs no HTTP client at all — the four SPA frontends' whole
-   *  `api/projections` module collapses to one function call here. */
-  source?: "aggregate" | "projection";
+   *  `api/projections` module collapses to one function call here.
+   *
+   *  `"history"` → the derived entity-history read (`<Agg>.history(id)`,
+   *  docs/audit.md), which is neither the aggregate's table nor a projection:
+   *  it scans `audit_records` for one target.  It gets its own source because
+   *  binding it as an ordinary aggregate read is precisely the misbinding this
+   *  tag prevents — `list_<aggs>` is the LIST, not the trail.  `aggregate`
+   *  carries the audited aggregate's name; `listArgs[0]` is the entity id. */
+  source?: "aggregate" | "projection" | "history";
   /** Arguments of the `of:` query call, rendered as HANDLER-position Elixir
    *  (state refs become `socket.assigns.<field>`, not `@<field>`) — the load
    *  block is a function body, not a template.

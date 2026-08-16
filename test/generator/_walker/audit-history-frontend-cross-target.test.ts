@@ -19,12 +19,15 @@
 //      `not.toContain`s, because "byte-identical" is the actual promise.
 //
 // The frontend support matrix is asserted too, and it is NOT the same as
-// `Timeline`'s: the primitive renders on five targets, but only the four
-// JS-family frontends COLLECT the derived read.  Feliz binds every non-`byId`
-// op to the `All<Plural>` Model field, Flutter skips it in `collectFlutterReads`
-// while still referencing a provider, and Phoenix maps it onto `list_<aggs>` —
-// all three would emit a dangling or plainly wrong read, so the whole view is
-// skipped with a visible comment (`_walker/history-read.ts`).
+// `Timeline`'s: the primitive renders on five targets, but a target must also
+// COLLECT the derived read.  Five do — the four JS-family frontends over the
+// api client, and Phoenix/HEEx over an in-process `audit_records` scan (a
+// LiveView hosts its contexts in the same OTP app, so it needs no client).
+// Feliz still binds every non-`byId` op to the `All<Plural>` Model field and
+// Flutter still skips it in `collectFlutterReads` while referencing a provider,
+// so on those two the whole view is skipped — now with a VISIBLE notice rather
+// than a source comment, because the section's frame renders either way
+// (`_walker/history-read.ts`).
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -112,7 +115,7 @@ const HISTORY_MARKERS = [
   "AuditFieldChange",
   "loom-timeline",
   "orders-detail-history",
-  "entity history not yet supported",
+  "History is not yet supported on",
 ];
 
 describe("api client — `history(id)` on the four JS-family frontends", () => {
@@ -234,29 +237,50 @@ describe("non-audited aggregate — nothing new reaches its frontend", () => {
 });
 
 describe("frontends that don't collect the read degrade honestly", () => {
-  // NOT the same set as `Timeline`'s: the primitive renders on HEEx too, but
-  // Phoenix's read layer maps `history(id)` onto `list_<aggs>` — the LIST.  The
-  // damage in all three cases is the READ the surrounding QueryView registers,
-  // one level up from the primitive, so the whole view is skipped.
+  // NOT the same set as `Timeline`'s: the primitive renders on HEEx too, and
+  // Phoenix now COLLECTS the read (its own in-process loader over
+  // `audit_records` — see the case below).  What remains is Feliz and Flutter,
+  // where the damage is the READ the surrounding QueryView registers, one level
+  // up from the primitive, so the whole view is skipped.
   it.each([
-    ["feliz", "feliz"],
-    ["flutter", "flutter"],
-  ])("%s: the view is skipped with a visible comment", async (frontend, label) => {
+    [
+      "feliz",
+      `Html.p [ prop.className "loom-unsupported"; prop.text "History is not yet supported on feliz" ]`,
+    ],
+    ["flutter", `Text('History is not yet supported on flutter')`],
+  ])("%s: the view is skipped and SAYS SO on the page", async (frontend, notice) => {
     const out = allFiles(await generateSystemFiles(scaffoldSystem(frontend, true)));
-    expect(out).toContain(`entity history not yet supported on ${label}`);
-    // The section's frame still renders (the reader sees the heading), but no
-    // read is registered — a dangling Model field / provider is what would
-    // fail `dotnet fable` / `flutter analyze`.
+    // The notice is a rendered widget, not a source comment.  The section's
+    // frame + heading render either way, so a comment left the reader a
+    // labelled EMPTY panel — indistinguishable from "never touched".
+    expect(out).toContain(notice);
     expect(out).toContain("orders-detail-history");
+    // Still no read registered: a dangling Model field / provider is what
+    // would fail `dotnet fable` / `flutter analyze`.
     expect(out).not.toContain("orderHistory");
+    // And the old invisible shapes are gone.
+    expect(out).not.toContain("(* entity history");
+    expect(out).not.toContain("/* entity history");
   });
 
-  it("phoenix/HEEx: the view is skipped rather than bound to `list_orders`", async () => {
+  it("phoenix/HEEx: serves the trail in-process rather than skipping it", async () => {
     const out = allFiles(await generateSystemFiles(heexSystem(true)));
-    expect(out).toContain("entity history not yet supported on phoenixLiveView");
+    expect(out).not.toContain("entity history not yet supported on phoenixLiveView");
     expect(out).toContain("orders-detail-history");
-    // The misbinding this gate exists to prevent: the trail is not the list.
-    expect(out).not.toContain("assign(socket, :entries");
+    // The trail is loaded by its own page-private loader over `audit_records`,
+    // NOT bound to the aggregate's list — the misbinding the skip existed to
+    // prevent, and the reason `source: "history"` is its own binding kind.
+    expect(out).toContain("defp load_order_history(_socket, id) do");
+    expect(out).toContain('Api.Audit.History.for_target(Api.Repo, "Order", id)');
+    expect(out).toContain("|> Enum.map(&order_audit_entry/1)");
+    // Guard 2 — reachability rides the ENTITY read, since `audit_records`
+    // carries no tenant column for a capability filter to scope.
+    expect(out).toContain("case Api.Ordering.get_order(id) do");
+    // And it renders through the same `Timeline` the JSX frontends use.
+    expect(out).toContain(
+      '<ol class="loom-timeline" data-testid="orders-detail-history-timeline">',
+    );
+    expect(out).toContain("<%= for e <- @order_history || [] do %>");
   });
 
   // The three cases above assert what today's three unported frontends DO.
@@ -283,7 +307,7 @@ describe("frontends that don't collect the read degrade honestly", () => {
 
     /** Frameworks whose read layer does NOT collect `history(id)` — see the
      *  module header of `_walker/history-read.ts` for what each does wrong. */
-    const SKIPPED = ["feliz", "flutter", "phoenixLiveView"];
+    const SKIPPED = ["feliz", "flutter"];
 
     expect([...declared].sort()).toEqual([...HISTORY_CAPABLE_FRAMEWORKS, ...SKIPPED].sort());
     // And the predicate agrees with the table, rather than merely coexisting
