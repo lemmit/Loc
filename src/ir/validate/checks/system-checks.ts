@@ -3004,7 +3004,7 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // clean today and silently serves cross-tenant rows.  Refuse it until
         // the subtree predicate is expressible (M-T6.23's remaining half).
         if ((a.contextFilters ?? []).some((f) => isDeepScopeFilter(f))) {
-          rejectFeature(
+          reject(
             `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
             `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
               `cannot express it, and an unlowerable principal filter is dropped ` +
