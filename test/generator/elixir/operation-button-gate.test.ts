@@ -15,7 +15,7 @@
 //   - A non-currentUser predicate (touching `this`/params) → ungated button.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 /** Phoenix LiveView app whose Detail page hosts two action buttons — `confirm`
  *  (carries a `requires`) and `cancel` (none) — rendered inline in a QueryView
@@ -67,7 +67,18 @@ ${deployAuth}  }
 
 /** The Detail page LiveView hosting the two action buttons. */
 async function detailLive(opts: { auth: boolean; gate?: string }): Promise<string> {
-  const files = await generateSystemFiles(system(opts));
+  // The `auth: false` leg is a DEGRADATION path, and deliberately invalid: a
+  // `requires currentUser…` gate on a deployable with no auth is exactly what
+  // `loom.guard-principal-without-auth` rejects.  That rejection IS this test's
+  // subject — "no auth → no gating, byte-identical output" — so it emits from a
+  // model the CLI refuses, on purpose.
+  const files = opts.auth
+    ? await generateSystemFiles(system(opts))
+    : await generateSystemFilesUnchecked(
+        system(opts),
+        "the no-auth leg pins that a currentUser gate degrades to NO gating — " +
+          "loom.guard-principal-without-auth firing is the premise, not a fixture bug",
+      );
   const src = files.get("phoenix_app/lib/phoenix_app_web/live/detail_live.ex");
   expect(src, "detail_live.ex not emitted").toBeDefined();
   return src!;

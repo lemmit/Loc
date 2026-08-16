@@ -44,6 +44,7 @@ system P {
       }
     }
   }
+  user { id: string  role: string }
   storage pg { type: postgres }
   resource st { for: Orders, kind: state, use: pg }
   deployable d {
@@ -51,6 +52,7 @@ system P {
     contexts: [Orders]
     dataSources: [st]
     port: 3000
+    auth: required
   }
 }
 `;

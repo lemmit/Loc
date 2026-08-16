@@ -83,10 +83,10 @@ system Demo2 {
     }
   }
   api SalesApi from Sales
-  deployable pyApi   { platform: python contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8000 }
+  deployable pyApi   { platform: python contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8000 auth: required }
   storage loomDb { type: postgres }
   resource ordersState { for: Orders, kind: state, use: loomDb }
-  deployable javaApi { platform: java   contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 }
+  deployable javaApi { platform: java   contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 auth: required }
 }
 `;
 
