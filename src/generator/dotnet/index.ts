@@ -481,7 +481,11 @@ function emitProjectFromContexts(
     });
     // Query-time projections (read-path-architecture.md rev.13) — a live read
     // (source find + join bulk-loads + select) with no folded read-model table.
-    emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
+    emitQueryProjections(ctx, ns, out, {
+      routePrefix,
+      sourcemap,
+      usingDapper: system?.deployable.persistence === "dapper",
+    });
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A1): one
   // ControllerBase per served api whose `route` list is non-empty, dispatching

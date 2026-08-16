@@ -59,6 +59,7 @@ import {
 } from "../../util/find-predicate-capability.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
+import { dapperQueryProjectionGap } from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -2684,30 +2685,35 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // QUERY-TIME PROJECTIONS are the one FEATURE gap on this adapter, and it
-      // was SILENT in the worst way: `query-projection-emit.ts` has no dapper
-      // branch at all, so it emits the EF shape unconditionally — `using
-      // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;`,
-      // neither of which exists here.  The generated project does not COMPILE
-      // (CS0234 "namespace 'EntityFrameworkCore' does not exist" / CS0246
-      // "'AppDbContext' could not be found"), and nothing said so at generate
-      // time: the author gets a C# build error naming a type they never wrote.
-      // Found when `projection-aggregation`/`projection-groupby` got their first
-      // runtime callers (#2468) and the dapper behavioral leg failed to boot.
+      // QUERY-TIME PROJECTIONS used to be refused WHOLESALE here:
+      // `query-projection-emit.ts` had no dapper branch at all, so it emitted
+      // the EF shape unconditionally — `using Microsoft.EntityFrameworkCore;` +
+      // `private readonly AppDbContext _db;`, neither of which exists on this
+      // adapter — and the generated project did not COMPILE (CS0234 / CS0246).
+      // M-T6.25 ported the four direct-table arms to raw Npgsql (the same
+      // `NpgsqlDataSource` + private row DTO + `Map` shape the FOLDED read
+      // controller already used), so the feature EMITS here now and the blanket
+      // refusal is gone.
       //
-      // Honest error until a Dapper query-projection emitter lands — the same
-      // interim-gate/principled-emitter split the MikroORM feature gate uses
-      // below.  Dapper is raw SQL and a query-time projection IS a SQL
-      // aggregate, so the port is a smaller job here than the gate implies;
-      // deleting this clause is what closes it.
+      // What survives is the ONE thing raw SQL genuinely cannot reach: the two
+      // arms that AGGREGATE (`select total = count()` / `group by`) name
+      // COLUMNS on the source aggregate's table, and an aggregate whose fields
+      // are not columns — a `shape: document` jsonb blob, an event-sourced
+      // stream with no state table — has nothing for `sum(total)` to name.  EF
+      // Core hides that behind its own JSON translation; Dapper cannot.  The
+      // condition is computed by `dapperQueryProjectionGap`, which the emitter
+      // reads too, so the gate and the emission arm cannot drift.
       for (const p of ctx.projections ?? []) {
-        if (isQueryTimeProjection(p)) {
+        if (!isQueryTimeProjection(p)) continue;
+        const gap = dapperQueryProjectionGap(p, ctx, sys);
+        if (gap) {
           diags.push({
             severity: "error",
             message: diagMessage("loom.dapper-unsupported#feature", {
               name: dep.name,
               ctxName,
               projection: p.name,
+              reason: gap,
             }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.dapper-unsupported",

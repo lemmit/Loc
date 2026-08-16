@@ -1675,12 +1675,13 @@ export const DIAGNOSTIC_MESSAGES = {
     name: unknown;
     ctxName: unknown;
     projection: unknown;
+    reason: unknown;
   }) =>
     `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
-    `the query-time projection '${p.projection}', which the Dapper adapter does not emit — the ` +
-    `generated project would reference EF Core's AppDbContext and fail to compile. Drop the ` +
-    `'persistence: dapper' clause to use the default (EF Core) adapter, which emits it, or host ` +
-    `the projection on a different deployable.`,
+    `the query-time projection '${p.projection}', which ${p.reason}. The Dapper adapter writes ` +
+    `its own SQL, so an aggregation can only name real columns. Drop the 'persistence: dapper' ` +
+    `clause to use the default (EF Core) adapter, which translates the aggregation itself, or ` +
+    `host the projection on a different deployable.`,
   "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
