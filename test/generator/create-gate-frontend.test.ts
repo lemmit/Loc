@@ -30,7 +30,9 @@ system Demo {
   } }
   api ShopApi from Shop
   ui Admin with scaffold(subdomains: [Shop]) { }
-  deployable api { platform: node, contexts: [Catalog], serves: ShopApi, port: 3000 }
+  storage loomDb { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: loomDb }
+  deployable api { platform: node, contexts: [Catalog], dataSources: [catalogState], serves: ShopApi, port: 3000 }
   deployable web { platform: react, targets: api, ui: Admin, port: 3001 }
 }`;
 
@@ -40,7 +42,9 @@ system Demo {
   } }
   api ShopApi from Shop
   ui Admin with scaffold(subdomains: [Shop]) { }
-  deployable app { platform: elixir, contexts: [Catalog], serves: ShopApi, ui: Admin, port: 4000 }
+  storage loomDb { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: loomDb }
+  deployable app { platform: elixir, contexts: [Catalog], dataSources: [catalogState], serves: ShopApi, ui: Admin, port: 4000 }
 }`;
 
 const has = (files: Map<string, string>, re: RegExp): boolean =>

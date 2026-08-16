@@ -30,7 +30,9 @@ function pageWithBody(body: string): string {
           body:  ${body}
         }
       }
-      deployable api { platform: node, contexts: [C], port: 3000 }
+      storage loomDb { type: postgres }
+      resource cState { for: C, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
       deployable web {
         platform: static
         targets: api
@@ -107,7 +109,9 @@ describe("formatter primitives", () => {
             body:  IdLink { customerId, of: Customer }
           }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -147,7 +151,9 @@ describe("formatter primitives", () => {
         ui WebApp with scaffold(aggregates: [Invoice]) {
           api Shop: ShopApi
         }
-        deployable api { platform: node, contexts: [Shop], serves: ShopApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource shopState { for: Shop, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Shop: api }, port: 3001 }
       }
     `);
@@ -180,7 +186,9 @@ describe("formatter primitives", () => {
             body:  IdLink { customerId, of: Customer, testid: "customer-link" }
           }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web {
           platform: static
           targets: api

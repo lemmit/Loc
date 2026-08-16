@@ -48,7 +48,9 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -84,7 +86,9 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -115,7 +119,9 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -148,7 +154,9 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -181,7 +189,9 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -218,7 +228,9 @@ describe("api binding + walker hook injection", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -249,7 +261,9 @@ describe("api binding + walker hook injection", () => {
             body: Text { Sales.Customer.byEmail(email).isLoading }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);

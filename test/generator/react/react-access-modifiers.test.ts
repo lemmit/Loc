@@ -28,7 +28,9 @@ system Demo {
   ui Web {
     page Home { body: Text("hi") }
   }
-  deployable api { platform: node, contexts: [Accounts], port: 3000 }
+  storage loomDb { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: loomDb }
+  deployable api { platform: node, contexts: [Accounts], dataSources: [accountsState], port: 3000 }
   deployable web { platform: react, contexts: [Accounts], targets: api, ui: Web, port: 3001 }
 }
 `;

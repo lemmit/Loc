@@ -207,7 +207,9 @@ describe("svelte generator — project shape", () => {
             body: QueryView { of: Sales.Item.byId(id), single: true, data: o => Text { o.name } }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: svelte, targets: api, ui: WebApp { Sales: api }, port: 3002 }
       }
     `);

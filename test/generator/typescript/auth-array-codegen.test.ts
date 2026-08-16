@@ -49,7 +49,9 @@ system AuthArray {
     }
   }
   api SApi from S
-  deployable api { platform: node contexts: [C] serves: SApi port: 3000 auth: required }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable api { platform: node contexts: [C] dataSources: [cState] serves: SApi port: 3000 auth: required }
 }
 `;
 

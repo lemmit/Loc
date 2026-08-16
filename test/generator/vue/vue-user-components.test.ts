@@ -26,7 +26,9 @@ const sys = (uiBody: string) => `
     ui WebApp {
 ${uiBody}
     }
-    deployable api { platform: node, contexts: [C], port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
   }
 `;
@@ -115,7 +117,9 @@ describe("user-defined components — Vue", () => {
           component OrderChart(order: Order, caption: string) extern from "widgets/order-chart"
           page Home { route: "/" body: Heading { "hi" } }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -168,7 +172,9 @@ describe("user-defined components — Vue", () => {
           }
           page Home { route: "/" body: Heading { "home" } }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: vue, targets: api, ui: WebApp, port: 3001 }
       }`);
     const comp = files.get("src/components/Panel.vue")!;
