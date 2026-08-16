@@ -48,6 +48,14 @@ export const FS_NOW = "System.DateTime.UtcNow";
  *  answer at all. */
 export const FELIZ_CHILDREN_FIELD = "children";
 
+/** The synthetic `userComponents` entry marking a component whose body reads a
+ *  Model field (an api read).  It is NOT a prop: `renderUserComponent` drops it
+ *  from the props record and emits the Model as a LEADING CURRIED argument
+ *  (`RecentOrders model {| … |}`), matching the `let RecentOrders (model: Model)
+ *  …` head `component-emit.ts` writes.  Spelled with a `__loom` prefix so it
+ *  cannot collide with a declared `component` param. */
+export const FELIZ_MODEL_PARAM = "__loomModel";
+
 /** Pure F# leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `felizTarget` can forward straight to these. */

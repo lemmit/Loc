@@ -10,8 +10,10 @@ import {
 } from "../../../src/generator/flutter/parity.js";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
-// A read-bearing component is deferred (not threaded into the walker), so its
-// invocation falls back to `/* unknown layout component: Live */`.
+// A read-bearing component that ALSO carries its own `state {}` is still
+// deferred (the `ConsumerWidget` path covers stateless read components; a
+// stateful+read one would need `ConsumerStatefulWidget`), so its invocation
+// falls back to `/* unknown layout component: Live */`.
 const WITH_FALLBACK = `
 system Par {
   api A from D
@@ -24,7 +26,7 @@ system Par {
   ui App {
     framework: flutter
     api Shop: A
-    component Live() { body: QueryView { of: Shop.Item.all, loading: Text { "…" }, error: Text { "e" }, empty: Text { "none" }, data: rows => Text { "n" } } }
+    component Live() { state { open: bool = false } body: QueryView { of: Shop.Item.all, loading: Text { "…" }, error: Text { "e" }, empty: Text { "none" }, data: rows => Text { "n" } } }
     page Home { route: "/" body: Stack { Heading { "H", level: 1 }, Live() } }
   }
   deployable api1 { platform: node contexts: [C] dataSources: [st] serves: A port: 8081 }
