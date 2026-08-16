@@ -1323,6 +1323,18 @@ export interface WorkflowIR {
    *  fold of the per-correlation `<wf>_events` stream).  Absent only for
    *  stateless workflows (no correlation field ⇒ no instance to read). */
   instanceWireShape?: WireField[];
+  /** The instance-READ authorization gate — the header `workflow X requires
+   *  <expr> { … }` clause.  Evaluated before `GET /workflows/<wf>/instances`
+   *  and `.../instances/{id}` run; failure → 403.
+   *
+   *  Distinct from the command entries' own `requires`, which gate the POSTs:
+   *  "who may start this workflow" and "who may read its state" are separate
+   *  questions, and conflating them is why the reads had no gate at all.
+   *
+   *  `currentUser`-only, like the projection and find read gates — the gate
+   *  runs before the query, so no instance row is bound yet
+   *  (`loom.workflow-gate-not-current-user`). */
+  instanceReadGate?: ExprIR;
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */

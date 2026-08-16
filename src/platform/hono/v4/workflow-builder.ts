@@ -17,6 +17,7 @@ import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
   type ExprIR,
+  exprUsesCurrentUser,
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
@@ -246,7 +247,13 @@ export function buildWorkflowsFile(
   // event-triggered-only saga still has instances to observe.
   for (const wf of ctx.workflows) {
     if (!wf.instanceWireShape) continue;
-    body.push(...emitInstanceRoutes(wf, usingMikro).map((l) => `  ${l}`));
+    body.push(
+      ...emitInstanceRoutes(
+        wf,
+        usingMikro,
+        resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses),
+      ).map((l) => `  ${l}`),
+    );
     body.push("");
   }
 
@@ -895,8 +902,35 @@ function emitInstanceResponseSchemas(wf: WorkflowIR): string[] {
  *  wire shape.  The route prefix nests under the already-mounted `/workflows`
  *  router, so `/<snake>/instances` does not collide with the bare-path POST
  *  command. */
-function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
+function emitInstanceRoutes(
+  wf: WorkflowIR,
+  usingMikro: boolean,
+  forbiddenStatus: number,
+): string[] {
   const T = upperFirst(wf.name);
+  // The instance-READ gate (`workflow X requires <expr>`).  Both routes below
+  // evaluate it before touching the store, and the router's existing `onError`
+  // already maps `ForbiddenError` to the resolved Forbidden rung — the same arm
+  // the COMMAND route's body gate uses.
+  const gate = wf.instanceReadGate;
+  const gateLines = (pad: string): string[] => {
+    if (!gate) return [];
+    const gl: string[] = [];
+    if (exprUsesCurrentUser(gate)) {
+      gl.push(
+        `${pad}const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+      );
+    }
+    gl.push(
+      `${pad}if (!(${renderTsExpr(gate)})) throw new ForbiddenError(${JSON.stringify(
+        `Forbidden: workflow ${wf.name} instances`,
+      )});`,
+    );
+    return gl;
+  };
+  const forbiddenResponse = `      ${forbiddenStatus}: { description: ${JSON.stringify(
+    problemTitle(forbiddenStatus),
+  )}, content: { "application/problem+json": { schema: ProblemDetails } } },`;
   const slug = snake(wf.name);
   const table = `schema.${lowerFirst(plural(wf.name))}`;
   const rowClass = mikroWorkflowRowClass(wf);
@@ -914,9 +948,11 @@ function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${T}InstanceListResponse } } },`,
   );
+  if (gate) out.push(forbiddenResponse);
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
+  out.push(...gateLines("    "));
   if (wf.eventSourced) {
     out.push(`    const rows = await ${helpers.loadAll}(db);`);
   } else if (usingMikro) {
@@ -954,6 +990,7 @@ function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${T}InstanceResponse } } },`,
   );
+  if (gate) out.push(forbiddenResponse);
   out.push(
     `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
@@ -961,6 +998,9 @@ function emitInstanceRoutes(wf: WorkflowIR, usingMikro = false): string[] {
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
   out.push(`    const { id } = httpCtx.req.valid("param");`);
+  // Gate BEFORE the lookup: a denied caller must not be able to tell an
+  // existing correlation id from an absent one.
+  out.push(...gateLines("    "));
   if (wf.eventSourced) {
     // Single-stream load + fold for the given correlation id; an empty stream
     // means no such instance.

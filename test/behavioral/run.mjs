@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, DEV_CLAIMS_UNAUTHORIZED, featureCases, sharedSystemCases } from "./cases.mjs";
+import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -104,18 +104,8 @@ function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerT
   }
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   // The authenticated-but-unauthorized credential, in this system's auth
-  // flavour (M-T9.28).  Dev-stub: the same `x-loom-dev-claims` channel the
-  // authorized principal rides, carrying the non-granting claims.  OIDC: a
-  // second mock-issuer token — same key and issuer, so it VERIFIES and only the
-  // authorization predicate separates it from the authorized one.
-  const unauthorizedCreds =
-    authMode === "oidc"
-      ? unauthorizedToken
-        ? { authorization: `Bearer ${unauthorizedToken}` }
-        : null
-      : authMode === "devstub"
-        ? { "x-loom-dev-claims": Buffer.from(DEV_CLAIMS_UNAUTHORIZED).toString("base64") }
-        : null;
+  // flavour (M-T9.28) — derived by the shared helper all five legs use.
+  const unauthorizedCreds = unauthorizedCredentials(authMode, unauthorizedToken);
   // FIRST-BOOT SEEDS.  The generated entrypoint (index.ts) runs
   // `migrate` → `runSeeds` → `createApp`; booting via `createApp` skipped the
   // middle step, so a system carrying `seed` datasets started with EMPTY tables

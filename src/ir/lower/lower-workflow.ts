@@ -173,6 +173,14 @@ export function lowerWorkflow(
     ...(appliers.length > 0 ? { appliers } : {}),
     ...(handlers.length > 0 ? { handlers } : {}),
     ...(functions.length > 0 ? { functions } : {}),
+    // The instance-read gate lowers in the BARE context env, not `paramEnv` —
+    // the same stance the projection gate takes.  `paramEnv` binds `this` to
+    // the workflow instance, and the gate runs BEFORE any instance is loaded,
+    // so resolving `this.<field>` here would type-check a reference that has
+    // no value at evaluation time.  The bare env leaves `currentUser` (and
+    // constants) as the only things in scope, which is exactly the contract
+    // `loom.workflow-gate-not-current-user` enforces.
+    ...(wf.gate ? { instanceReadGate: lowerExpr(wf.gate, env) } : {}),
     origin: originFor(wf),
   };
 }

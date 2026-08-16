@@ -902,6 +902,31 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
           source: `projection/${proj.name}`,
         });
       }
+      // Workflow INSTANCE reads (`/workflows/<wf>/instances[/{id}]`).  An
+      // observable workflow — one with a correlation field, hence an
+      // `instanceWireShape` — publishes every instance's correlation id and
+      // state on two GET routes, so under denyByDefault it needs a gate for
+      // the same reason an ungated find or projection does.
+      //
+      // It could not be required before: the routes are compiler-derived and a
+      // workflow had no surface to declare a read gate on, so demanding one
+      // would have demanded the impossible — the identical situation the folded
+      // projection was in.  The header `requires` clause is that surface, so
+      // the exemption has no reason left.
+      //
+      // Keyed on `instanceWireShape`: a stateless workflow (no correlation
+      // field) serves no instance routes, so there is nothing to gate.
+      for (const wf of c.workflows) {
+        if (!wf.instanceWireShape || wf.instanceReadGate) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-workflow-instances", {
+            name: wf.name,
+          }),
+          source: `workflow/${wf.name}`,
+        });
+      }
     }
   }
 
