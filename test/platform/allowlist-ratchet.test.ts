@@ -171,25 +171,30 @@ const REGISTERED: Ratchet[] = [
   // check inside the runner (a key naming no corpus fixture fails the leg), but
   // nothing bounded its SIZE.
   //
-  // 5 entries, TWO boundaries and two separate authors — which is itself the
-  // argument for pinning it:
-  //   - `projection-aggregation` / `-groupby` / `-join`: one boundary (the
-  //     adapter emits no query-time projection reads), draining together when
-  //     the read routes land in M-T6.23.
-  //   - `prefix-filter`: the declared `MIKROORM_SUBSET` predicate narrowing.
-  //   - `policy-deny`: added on `main` independently, by the read-deny work.
-  //     It arrived while this pin said 4, so the very first thing the new
-  //     registration did was catch a concurrent grower — with no pin, that
-  //     entry would have landed unnoticed exactly like the others had.
+  // The pin has now moved in BOTH directions inside one PR, which is the whole
+  // case for it existing:
+  //   4 -> 5  `policy-deny` was added on `main` by the read-deny work while
+  //           this pin said 4. The registration's first act was catching a
+  //           concurrent grower from another author.
+  //   5 -> 2  M-T6.23 slice 4 (#2533) landed the adapter's query-time
+  //           projection reads, retiring `projection-aggregation` /
+  //           `-groupby` / `-join` together — one boundary, three fixtures,
+  //           drained in one go. The `no stale slack` check is what forced
+  //           this line down; left at 5 the register could have re-grown by
+  //           three without anyone noticing.
+  //
+  // What remains is two INDEPENDENT gaps, so the next drain will not be
+  // wholesale: `prefix-filter` (the declared `MIKROORM_SUBSET` predicate
+  // narrowing) and `policy-deny` (the read-deny form outside that subset).
   //
   // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
-  // why it has no per-adapter ORACLE like the dapper maps just gained — the
-  // asymmetry is real and stated at the entry.
+  // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
+  // is real and stated at the entry.
   {
     file: "test/behavioral/run-mikroorm.mjs",
     name: "MIKRO_SKIP",
     kind: "record",
-    max: 5,
+    max: 2,
   },
 ];
 
