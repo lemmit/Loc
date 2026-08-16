@@ -46,6 +46,7 @@ system Acme {
     dataSources: [sState]
     serves: SalesApi
     port: 3001
+    auth: required
   }
 }
 `;

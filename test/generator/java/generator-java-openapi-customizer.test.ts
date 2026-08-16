@@ -62,6 +62,7 @@ system Shop {
     dataSources: [ordersState]
     serves: OrdersApi
     port: 8081
+    auth: required
   }
 }
 `;
