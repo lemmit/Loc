@@ -27,7 +27,11 @@ Sources: [platform-directory-layout](../old/proposals/platform-directory-layout.
 
 ## M-T9.6 — Doc & status hygiene — `recurring` · **S** · P2
 This consolidation replaces three drifting status tables with one. Keep it true: mission status lines update on completion (see README rule 5); the `status-refresh` skill audits `docs/` (not this plan's history); stale code comments flagged by audits (registry.ts HEEx-gap claims, `ashPhoenix` references) get scrubbed. One-time task: sweep the flagged stale comments now.
-Sources: weak-spots §5, old global-plan T1.4.
+**Open items queued here by the 2026-08-13 test-coverage audit (#2558):**
+- **M-T9.28 – M-T9.32 have no mission bodies.** `README.md` and `coverage.md` both record them as minted (the `.ddd` census, the driven-primitive census, the flake budget, the weekly quality delta, dup-claim automation), and `flake-budget.yml` + `quality-delta.yml` genuinely shipped — but no track file or `missions/` entry defines any of the five, so an agent picking work from the track files cannot see them. (#2512 notes the M-T9.29 body sits on an unmerged branch.) Write the bodies, or de-mint the IDs.
+- ~~The stale "warning, not error" comment beside `checkUserVisibleConcat`~~ — corrected in the same PR; the rule has raised `"error"` since M-T1.11 item 8 landed, and 9 of that PR's 53 fixture fixes were tripping it.
+
+Sources: weak-spots §5, old global-plan T1.4; test-coverage-audit-2026-08-13 §3.7.
 
 ## M-T9.7 — Repo-admin one-clicks — `blocked(admin)` · **S** · P3
 RST-4: add `behavioral-python` to branch-protection required checks. Anything else needing owner action collects here.
