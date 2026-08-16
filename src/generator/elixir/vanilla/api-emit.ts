@@ -21,6 +21,8 @@ import {
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
+  PAGED_MAX_PAGE,
+  PAGED_MAX_PAGE_SIZE,
   pagedReturn,
 } from "../../../ir/stdlib/generics.js";
 import type {
@@ -360,7 +362,7 @@ function renderController(
     (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name),
   );
   const indexPaged = !readOnly && (listAllFind ? !!pagedReturn(listAllFind.returnType) : false);
-  const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
+  const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
   // The LIST read's authorization gate — 403 before the query, the same
   // contract `renderFindActions` gives every NAMED find.  `index` is emitted
   // here, outside that loop (the list endpoint has its own paged shape), which

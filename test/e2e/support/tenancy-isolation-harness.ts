@@ -362,6 +362,19 @@ export async function assertHierarchyIsolation(base: string, pg: Postgres): Prom
   await setPath(orgAb, "org_ab");
   const orgZ = await createOrg("Z");
   await setPath(orgZ, "org_z");
+  // WILDCARD trap — a different failure from the delimiter trap above, and one
+  // `org_ab` cannot catch.  Every path here contains `_`, and `_` is a LIKE
+  // wildcard: while the descendant test was `dataKey LIKE <orgPath> || '.%'`,
+  // the caller at `org_a` searched with the pattern `org_a.%`, whose `_`
+  // matched ANY character.  So `orgXa.leak` — an unrelated root's child, no
+  // relation to `org_a` — satisfied it and leaked across tenants.  Binding the
+  // claim (every backend did) stops injection, not pattern semantics.
+  // `org_ab` misses this because the pattern's literal `.` still has to land:
+  // it is the DELIMITER that trap tests, not the wildcard.
+  const orgXa = await createOrg("Xa");
+  await setPath(orgXa, "orgXa");
+  const orgXaLeak = await createOrg("Xa.leak", orgXa);
+  await setPath(orgXaLeak, "orgXa.leak");
 
   const tree = [
     { id: orgA, key: "org_a" },
@@ -369,6 +382,8 @@ export async function assertHierarchyIsolation(base: string, pg: Postgres): Prom
     { id: orgABC, key: "org_a.b.c" },
     { id: orgAb, key: "org_ab" },
     { id: orgZ, key: "org_z" },
+    { id: orgXa, key: "orgXa" },
+    { id: orgXaLeak, key: "orgXa.leak" },
   ];
 
   // --- seed one row per org in each aggregate, AS that org (backend stamps
@@ -420,6 +435,16 @@ export async function assertHierarchyIsolation(base: string, pg: Postgres): Prom
   expect(await getStatus("accounts", orgAB, acctId.org_a)).toBe(404); // ancestor
   expect(await getStatus("accounts", orgAB, acctId.org_ab)).toBe(404); // delimiter trap
   expect(await getStatus("accounts", orgAB, acctId.org_z)).toBe(404); // unrelated
+  // The WILDCARD trap, stated outright.  `orgXa.leak` is under `orgXa`, an
+  // unrelated root; it is reachable from `org_a` ONLY if the `_` in the
+  // caller's own path is being treated as a pattern wildcard.  The exact-
+  // equality subtree assertions above already exclude it, but this names the
+  // failure so a regression reads as "cross-tenant leak" and not "list differs".
+  expect(await labels("accounts", orgXa)).toEqual(["orgXa", "orgXa.leak"]);
+  expect(await getStatus("accounts", orgA, acctId["orgXa.leak"])).toBe(404);
+  expect(await getStatus("accounts", orgAB, acctId["orgXa.leak"])).toBe(404);
+  // …and the reverse direction: the unrelated root must not see into org_a.
+  expect(await getStatus("accounts", orgXa, acctId.org_a)).toBe(404);
 
   // === LOCAL (Memo, the default): only own-org rows (flat tenant floor). ===
   expect(await labels("memos", orgAB)).toEqual(["org_a.b"]);

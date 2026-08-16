@@ -658,8 +658,11 @@ export function generateTypeScriptForContexts(
   // current read model of the query-time projection read.  Emitted to a distinct
   // file (`http/query-projections.ts`, mounted under `/projections`) since the
   // folded read model owns `http/projections.ts` with a different signature.
-  if (merged.projections.some(isQueryTimeProjection) && !usingMikro) {
-    out.set("http/query-projections.ts", buildQueryProjectionsFile(merged));
+  // Persistence-neutral since M-T6.23 slice 4: the aggregation / raw-table
+  // shapes read through the mikro QueryBuilder, and the repository-sourced shape
+  // was adapter-neutral already (`synthProjectionFinds` emits the same find).
+  if (merged.projections.some(isQueryTimeProjection)) {
+    out.set("http/query-projections.ts", buildQueryProjectionsFile(merged, usingMikro));
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A2): one router
   // file per served api whose `route <M> <p> -> <Ctx>.<Handler>` list resolves

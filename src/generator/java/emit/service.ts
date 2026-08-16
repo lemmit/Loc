@@ -409,10 +409,11 @@ export function renderJavaService(
   // Optimistic concurrency (`versioned`): every public mutation threads the
   // client's expected version from the `If-Match` request header (think-time
   // CAS).  When supplied and it disagrees with the freshly-loaded aggregate's
-  // `@Version`, we raise ObjectOptimisticLockingFailureException up-front — the
-  // same exception Hibernate raises for the load→save race (write-time CAS) — so
-  // both surface through the ApiExceptionAdvice 409 arm.  A non-versioned
-  // aggregate threads nothing and stays byte-identical.
+  // counter, we raise ObjectOptimisticLockingFailureException up-front — the
+  // same exception the repository's guarded version bump raises when it matches
+  // zero rows (write-time CAS, emit/repository.ts) — so both surface through the
+  // ApiExceptionAdvice 409 arm.  A non-versioned aggregate threads nothing and
+  // stays byte-identical.
   const versioned = aggregateIsVersioned(agg);
   const ifMatchParam = versioned ? ", Integer ifMatch" : "";
   const ifMatchGuard = versioned

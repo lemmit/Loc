@@ -9,6 +9,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import {
@@ -329,6 +330,13 @@ export function renderJavaRepositoryInterface(
   );
 }
 
+/** The `versioned` capability's synthetic counter field (`version: int token`).
+ *  Read off the aggregate rather than hard-coded so the JPQL bump, the entity
+ *  mutator and the impl's guard can never drift apart. */
+function versionFieldName(agg: EnrichedAggregateIR): string {
+  return agg.fields.find((f) => f.access === "token")?.name ?? "version";
+}
+
 export function renderJavaSpringDataRepository(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
@@ -461,10 +469,36 @@ export function renderJavaSpringDataRepository(
       ``,
     );
   }
+  // Optimistic concurrency (`versioned`): the guarded command-counter bump the
+  // impl's `save` drives.  `version` is NOT mapped as JPA `@Version` (RS-20 —
+  // Hibernate's counter tracks ROOT-entity dirtiness, so a command confined to a
+  // contained child or one that re-assigns an unchanged value never bumped it,
+  // and a create that also wrote a value-object collection bumped it twice).
+  // This is the java twin of the node `eq(version, expected)` guarded update and
+  // the elixir `optimistic_lock`: one UPDATE, one row, `+1` per persisted
+  // command, and zero rows == another writer moved the row (→ 409).
+  const versionBump: string[] = [];
+  if (aggregateIsVersioned(agg)) {
+    const vf = versionFieldName(agg);
+    imports.add("org.springframework.data.jpa.repository.Modifying");
+    imports.add("org.springframework.data.jpa.repository.Query");
+    imports.add("org.springframework.data.repository.query.Param");
+    versionBump.push(
+      // `flushAutomatically` writes the command's pending field/child changes
+      // BEFORE the bump (so they carry the pre-bump version, matching the row);
+      // `clearAutomatically = false` keeps the persistence context — the impl
+      // reflects the new counter onto the live instance right after.
+      `    @Modifying(flushAutomatically = true, clearAutomatically = false)`,
+      `    @Query("update ${agg.name} e set e.${vf} = e.${vf} + 1 where e.id = :id and e.${vf} = :expected")`,
+      `    int bumpVersion(@Param("id") ${idClass} id, @Param("expected") int expected);`,
+      ``,
+    );
+  }
   const allMethodLines = [
     ...principalOverrides,
     ...writeOverride,
     ...pagedAllLines,
+    ...versionBump,
     ...methodLines,
     ...retrievalLines,
   ];
@@ -514,6 +548,8 @@ export function renderJavaRepositoryImpl(
   const principalScoped = (agg.contextFilters ?? []).some(exprUsesCurrentUser);
   const injectAccessor = anyReified && principalScoped;
   const provenance = !!ctx.provenance;
+  const versioned = aggregateIsVersioned(agg);
+  const versionField = versionFieldName(agg);
   const tenantScopeAnd = injectAccessor
     ? `.and(${agg.name}Criteria.tenantScope(currentUserAccessor.user()))`
     : "";
@@ -684,7 +720,10 @@ export function renderJavaRepositoryImpl(
       : null,
     injectAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     provenance ? `import java.time.Instant;` : null,
-    provenance ? `import org.springframework.transaction.annotation.Transactional;` : null,
+    provenance || versioned
+      ? `import org.springframework.transaction.annotation.Transactional;`
+      : null,
+    versioned ? `import org.springframework.orm.ObjectOptimisticLockingFailureException;` : null,
     retrievals.length > 0 && ctx.persistencePkg && ctx.persistencePkg !== ctx.infraPkg
       ? `import ${ctx.persistencePkg}.OffsetLimitPageRequest;`
       : null,
@@ -710,9 +749,29 @@ export function renderJavaRepositoryImpl(
     ...ctorAssigns,
     `    }`,
     ``,
-    provenance ? `    @Transactional` : null,
+    provenance || versioned ? `    @Transactional` : null,
     `    @Override`,
     `    public ${agg.name} save(${agg.name} aggregate) {`,
+    // Optimistic concurrency (`versioned`): the counter is COMMAND-driven, not
+    // Hibernate-dirtiness-driven (RS-20).  Every persisted command bumps it
+    // exactly once — including one that only mutates a contained child, and one
+    // that re-assigns a value the row already holds — because the bump is an
+    // explicit guarded UPDATE, not a by-product of the flush.  Zero rows on an
+    // EXISTING row means another writer moved it inside our load→save window:
+    // the same ObjectOptimisticLockingFailureException the service's If-Match
+    // guard raises, so the 409 arm is unchanged.  Zero rows on a row that isn't
+    // there yet is a CREATE — the factory already seeded `1` and the insert
+    // below carries it.
+    ...(versioned
+      ? [
+          `        var __expectedVersion = aggregate.${versionField}();`,
+          `        if (jpa.bumpVersion(aggregate.id(), __expectedVersion) == 1) {`,
+          `            aggregate._applyVersion(__expectedVersion + 1);`,
+          `        } else if (jpa.existsById(aggregate.id())) {`,
+          `            throw new ObjectOptimisticLockingFailureException(${agg.name}.class, aggregate.id().value());`,
+          `        }`,
+        ]
+      : []),
     `        var saved = jpa.save(aggregate);`,
     // Provenance flush (provenance.md): drain the per-write lineage buffer and
     // persist one provenance_records row per write, BEFORE the @Transactional

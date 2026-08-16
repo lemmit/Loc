@@ -511,10 +511,13 @@ page/component references the store by **dotted name** — `Cart.lines` (a
 shell derives its store dependency from those resolved refs (derive-don't-
 stamp), imports `useCart`, and hoists one selector binding per used member
 (`const lines = useCart((s) => s.lines)`); the body / action handlers reference
-the bare local. v1 stores are **in-memory only** — the `persist:`/`sync:`
-lifetime ladder has no grammar surface yet (those words collide with common
-identifiers), though the IR + a `loom.store-lifetime-unsupported` gate carry it
-for the persistence follow-up. Validator gates: a store action can't call a
+the bare local. The `persist:` lifetime ladder **ships** — `store <Name> persist:
+memory|local|session|url { … }` is real grammar and every frontend honours it, so
+`loom.store-lifetime-unsupported` is retired (a bad value is rejected earlier as
+`loom.store-lifetime-invalid`). A `persist: url` store reflects its fields into
+query params, which carry only scalars, so an array / entity / value-object field
+there is rejected (`loom.store-url-field-invalid`). `sync:` remains reserved.
+Validator gates: a store action can't call a
 view-scoped effect (`navigate`/`toast` — `loom.store-action-view-effect`), a
 page can't write store state inline (`loom.store-state-inline-write`), and a
 store→store call cycle is rejected (`loom.store-action-cycle`).

@@ -214,7 +214,7 @@ describe("java generator — paged finds", () => {
     );
     const ctrl = f.get(`${ROOT}/features/orders/OrdersController.java`)!;
     expect(ctrl).toContain(
-      'public Paged<OrderResponse> recentOrder(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {',
+      'public Paged<OrderResponse> recentOrder(@RequestParam(defaultValue = "1") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(1000000) int page, @RequestParam(defaultValue = "20") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(500) int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {',
     );
   });
 });

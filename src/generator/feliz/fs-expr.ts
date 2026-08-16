@@ -18,6 +18,7 @@
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { upperFirst } from "../../util/naming.js";
+import { DURATION_UNIT_MS } from "../../util/temporal.js";
 
 /** F# spelling of a Loom binary operator. */
 function fsBinOp(op: BinOp): string {
@@ -36,6 +37,10 @@ export function fsString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
 }
 
+/** F# spelling of the `now()` literal — the current instant on the UTC clock.
+ *  Fully qualified because the generated `App.fs` opens no `System`. */
+export const FS_NOW = "System.DateTime.UtcNow";
+
 /** Pure F# leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `felizTarget` can forward straight to these. */
@@ -44,7 +49,15 @@ export const FS_LEAVES = {
     if (lit === "string") return fsString(value);
     if (lit === "bool") return value; // true/false spelled the same
     if (lit === "null") return "None"; // F# absence is the option None
-    // int / long / decimal / money / now → numeric literal verbatim
+    // `now()` is a LITERAL kind, not a number: its `value` is the word "now",
+    // so the numeric-verbatim fallthrough below emitted a bare `now` — an
+    // unbound identifier, and the only literal kind on this target that is not
+    // already valid F# text.  A Loom `datetime` is a `System.DateTime` here
+    // (`type-fs.ts`) decoded from the wire as UTC (`Decode.datetimeUtc`), so
+    // the current instant is `System.DateTime.UtcNow` — the same UTC-clock
+    // spelling the .NET backend emits for the same literal.
+    if (lit === "now") return FS_NOW;
+    // int / long / decimal / money → numeric literal verbatim
     return value;
   },
   binary(left: string, right: string, op: BinOp): string {
@@ -73,7 +86,53 @@ export const FS_LEAVES = {
   lambda(param: string, body: string | undefined): string {
     return `(fun ${param} -> ${body ?? "()"})`;
   },
+  /** `days(7)` — a `System.TimeSpan`, the .NET duration type, NOT the bare
+   *  millisecond number the JS frontends use: `System.DateTime` has no
+   *  `+ int`, so a number here is a type error the moment it meets a datetime.
+   *  The SPAN still comes from `DURATION_UNIT_MS`, so `7 days` is the same
+   *  length of time here as on the wire and on every backend.
+   *
+   *  The multiplication is done in `float`, not `int`: F#'s `int` is 32-bit and
+   *  `30 days` in milliseconds (2_592_000_000) overflows it. */
+  duration(unit: keyof typeof DURATION_UNIT_MS, amount: string): string {
+    return `(System.TimeSpan.FromMilliseconds(float (${amount}) * ${DURATION_UNIT_MS[unit]}.0))`;
+  },
 };
+
+/** The datetime-involving `+`/`-` arms, or `null` to fall through to the plain
+ *  operator leaf.  Dispatch is type-driven off the lowering's
+ *  `leftType`/`resultType` stamps, exactly as the TypeScript backend's
+ *  `renderTemporalBinary` does:
+ *
+ *    datetime ± duration → datetime   ⇒ `((l).Add(r))` / `((l).Subtract(r))`
+ *    duration + datetime → datetime   ⇒ `((r).Add(l))`   (commuted form)
+ *    datetime − datetime → duration   ⇒ falls through — F#'s `-` on two
+ *                                       `System.DateTime`s already yields the
+ *                                       `System.TimeSpan` a duration is.
+ *
+ *  Shared by both feliz paths: the view walker reaches it through
+ *  `felizTarget.exprTemporalBinary`, the MVU update path through
+ *  `renderFsExpr`'s binary arm. */
+export function fsTemporalBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: TypeIR | undefined): string | undefined =>
+    t?.kind === "primitive" ? t.name : undefined;
+  const lt = prim(e.leftType);
+  const rt = prim(e.rightType);
+  if (lt === "datetime" && rt === "duration") {
+    return `((${left}).${e.op === "+" ? "Add" : "Subtract"}(${right}))`;
+  }
+  // `duration + datetime` — the commuted form (`duration - datetime` never
+  // types), so the receiver is the RIGHT operand.
+  if (lt === "duration" && rt === "datetime" && e.op === "+") {
+    return `((${right}).Add(${left}))`;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Scalar-intrinsic snippet table for F# / Fable — the Feliz sibling of
@@ -208,6 +267,43 @@ export interface FsExprCtx {
    *  resolves to the namespaced Model field `model.<Store><Field>` (stores
    *  compose into the single Elmish Model).  Absent for page/component bodies. */
   storeScope?: { store: string; fields: ReadonlySet<string> };
+  /** The in-scope F# expression that yields the route `id` (an `ExprIR` of kind
+   *  `"id"` — `Order.byId(id)`, `sel := string(id)`).  Every consumer of this
+   *  renderer binds the route id DIFFERENTLY, which is why it is a context
+   *  field rather than a fixed spelling: the page VIEW fn takes it as a
+   *  parameter (`id`), while `update`/`init` run outside any view and have to
+   *  read it back off the parsed route (`routeId model.CurrentPage`, the helper
+   *  `renderRouting` emits beside `parseUrl`).  Absent on a NON-routed ui,
+   *  where no page carries a route param and an `id` read has no value to
+   *  resolve to — it renders as the empty string there, the F# analogue of
+   *  React's absent `useParams()` entry. */
+  routeId?: string;
+}
+
+/** The empty route id — what an `id` read resolves to on a ui with no routing
+ *  table at all (see `FsExprCtx.routeId`). */
+const NO_ROUTE_ID = '""';
+
+/** Name of the module-level accessor `renderRouting` emits beside `parseUrl`:
+ *  `let routeId (page: Page) : string`, the route param of the active page ("" when
+ *  it carries none).  It is what lets the MVU paths — which run outside any page
+ *  view fn — resolve an `id` read at all. */
+export const ROUTE_ID_FN = "routeId";
+
+/** The route id as read from the model, for an `update` arm (`CurrentPage` is
+ *  already the parsed route). */
+export const ROUTE_ID_FROM_MODEL = `(${ROUTE_ID_FN} model.CurrentPage)`;
+
+/** The route id for `init`, which runs BEFORE the model exists — parse the
+ *  current URL the same way `init` seeds `CurrentPage`. */
+export const ROUTE_ID_FROM_URL = `(${ROUTE_ID_FN} (parseUrl (Router.currentPath ())))`;
+
+/** True when rendered F# references the `routeId` accessor, so `renderRouting`
+ *  emits it only where it is actually used (a ui whose bodies never read the
+ *  route `id` keeps its `App.fs` byte-identical).  Asking the EMITTED text is
+ *  exact — no separate IR scan to drift from what the renderers did. */
+export function usesRouteIdFn(...emitted: readonly string[]): boolean {
+  return emitted.some((s) => s.includes(`(${ROUTE_ID_FN} `));
 }
 
 /** The single-program Elmish Model field a store field folds into
@@ -288,8 +384,13 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       if (ctx.locals.has(e.name)) return e.name;
       if (ctx.stateNames.has(e.name)) return `model.${upperFirst(e.name)}`;
       return e.name;
-    case "binary":
-      return FS_LEAVES.binary(r(e.left), r(e.right), e.op);
+    case "binary": {
+      const left = r(e.left);
+      const right = r(e.right);
+      // Datetime arithmetic is a method call in .NET, not an operator — the
+      // same seam the view path consults through `felizTarget`.
+      return fsTemporalBinary(left, right, e) ?? FS_LEAVES.binary(left, right, e.op);
+    }
     case "unary":
       return FS_LEAVES.unary(e.op, r(e.operand));
     case "ternary":
@@ -304,6 +405,24 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return FS_LEAVES.list(e.elements.map(r));
     case "object":
       return FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })));
+    case "id":
+      // The route `id` of a detail page (`/orders/:id`).  The VIEW path resolves
+      // it through `felizTarget.renderRouteId` to the view fn's `id` parameter;
+      // this path runs in `update`/`init`, where no such parameter exists — so
+      // the ctx carries whatever spelling IS in scope there.
+      return ctx.routeId ?? NO_ROUTE_ID;
+    case "duration":
+      // `7 days` — the SAME `System.TimeSpan` the VIEW path emits (through the
+      // `exprDuration` walker seam), off the same `DURATION_UNIT_MS` span every
+      // backend agrees on, so a duration means the same length of time on both
+      // sides of the wire and on both feliz paths.
+      return FS_LEAVES.duration(e.unit, r(e.amount));
+    case "new":
+      // Part construction (`Shipment { … }`).  A part is a plain record on the
+      // wire exactly as a value object is, so it renders as the F# anonymous
+      // record the VIEW path emits for it (walker-core's `new` arm → the
+      // `exprObject` seam → this same leaf).
+      return `(${FS_LEAVES.object(e.fields.map((f) => ({ name: f.name, value: r(f.value) })))})`;
     case "member":
       // Record-field access — the receiver is a wire record (an async-effect
       // success binding `p`, a read row) whose F# fields keep the EXACT lowercase
@@ -355,15 +474,20 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return `(${r(e.inner)})`;
     default:
       // Fail fast rather than silently substituting `(* unsupported *) ()`.
-      // The remaining kinds are backend-only or subsystem-gated in a frontend
-      // value position: `this`/`id` (domain-body receivers), `action-ref` (a
-      // handler reference, bound by the view walker, never a value here), and
-      // `new` (part/VO construction — a domain concern).  Unreachable on valid
-      // frontend `.ddd`; a defensive fail-fast, not a silent drop.
+      // Three kinds reach here, none of them authored in a page body:
+      // `this` (a domain-body receiver — a page has no aggregate instance),
+      // `action-ref` (a handler reference the view walker binds as a dispatch
+      // wrapper, never a value in an update arm), and `authz-filter` (a
+      // synthesized query-filter sentinel that lives only on an aggregate's
+      // `contextFilters`).  So this is a defensive fail-fast on an IR shape the
+      // frontend pipeline does not produce — NOT a claim that every expression
+      // a user can write is covered.  If it fires on real `.ddd`, the arm is
+      // missing: add it here rather than widening the throw.
       throw new Error(
         `feliz: unsupported expression '${e.kind}' in an F# action/update body — ` +
-          `it has no meaning in a frontend value position. Rework the ` +
-          `expression, or implement the '${e.kind}' arm in fs-expr.ts.`,
+          `no arm renders it on the MVU update path. If a valid page body reaches ` +
+          `this, implement the '${e.kind}' arm in fs-expr.ts (the view path's ` +
+          `treatment of the same kind is in _walker/walker-core.ts).`,
       );
   }
 }

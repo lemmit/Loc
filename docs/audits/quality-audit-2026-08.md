@@ -56,7 +56,7 @@ Each of these is documented as having actually shipped a bug (refs: `experience_
 - Compile-tier parity **drained**: all five corpus `COMPILE_SKIP` maps empty; 33 features × 5 backends compile per-PR.
 - The wire-golden differential (M-T9.11): five one-way per-PR runtime gates at zero new boot cost, with a reviewed oracle; found RS-13/RS-14 on its first run. **This is the pattern to extend.**
 - Hollow-work guards (`generated-output-sentinels`, `dead-generator-exports`, `allowlist-ratchet`) ride the fast suite.
-- Waiver registries ratchet (stale waivers fail); currently 2 wire waivers (both java RS-20), 1 HEEx pin (DataGrid, reasoned).
+- Waiver registries ratchet (stale waivers fail); the 2 java RS-20 wire waivers noted at audit time grew to 5 and were then **deleted with the fix** (java's `version` is now a command-driven guarded bump, not JPA `@Version`), leaving 4 wire waivers (1 elixir RS-18, 3 elixir M-T6.20) and 1 HEEx pin (DataGrid, reasoned).
 - The audit→gate ratchet culture itself; `workflow-lint` + `ci-red-alarm` closing the "never-green gate" class.
 - Mutation-proofing of new gates ("revert the fix, watch the gate fail") is appearing in recent PR bodies (#2342) — currently discipline, not policy.
 

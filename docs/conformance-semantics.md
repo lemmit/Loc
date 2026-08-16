@@ -256,8 +256,11 @@ the conforming backends, and the fix that established it.
   and the DB `DEFAULT 1` never fired. The fix seeds the field's `= 1` IR default
   in each domain `create` factory (`constructionSeededDefaults`,
   `src/generator/_frontend/server-default.ts`), which is persistence-agnostic —
-  every create path flows through the factory (EF/Dapper/document, JPA
-  `@Version` keeps the non-unsaved value, SQLAlchemy inserts `aggregate.version`).
+  every create path flows through the factory (EF/Dapper/document, JPA, SQLAlchemy
+  `aggregate.version`). Java's `version` was mapped `@Version` at the time, which
+  keeps the factory's non-unsaved value; RS-20 later made it a plain column driven
+  by an explicit guarded bump, and a create — matching no row — still carries the
+  factory's `1`.
   (A cautionary case: the differential found the *divergence*, but the oracle
   came from the spec — the `= 1` declaration — not the three-backend majority.)
 - **Conforms.** node, dotnet, java, python, elixir. (dotnet/java/python fixed +
@@ -351,17 +354,21 @@ the conforming backends, and the fix that established it.
   moved (`payments` credit card / bank account, `tph` car / truck: canonically
   `2`, java `1`). One cause, and it is not Hibernate semantics this time
   (unlike RS-20): the `version` token field is declared once, on the **base**,
-  and the concrete-entity emitter skips inherited fields — so `@Version` had to
-  be emitted by `renderAbstractBase`, which had no such arm. `renderEntity`'s
-  arm even carried the comment *"a TPH/TPC base carries it once"*, an intent
-  the base builder never implemented, so the annotation was emitted **nowhere**
-  and the column was a plain `@Column`. Beyond the wire value this left the
-  whole hierarchy's optimistic-concurrency guard **inert** — no `WHERE version
-  = ?` CAS, so a lost update between two writers was silent. **Fixed** (java
-  `emit/entity.ts`); gated structurally for TPH *and* TPC, with the negative
-  that the concrete must not redeclare it
-  (`generator-java-concurrency-conflict.test.ts`), and re-verified by booting
-  `payments` / `tph` / `inheritance` against Postgres in `gradle:9-jdk25`.
+  and the concrete-entity emitter skips inherited fields — so the counter's
+  mapping had to be emitted by `renderAbstractBase`, which had no such arm. At
+  the time that mapping was `@Version`; `renderEntity`'s arm even carried the
+  comment *"a TPH/TPC base carries it once"*, an intent the base builder never
+  implemented, so it was emitted **nowhere** and the column was a plain
+  `@Column`. Beyond the wire value this left the whole hierarchy's
+  optimistic-concurrency guard **inert** — no `WHERE version = ?` CAS, so a lost
+  update between two writers was silent. **Fixed** (java `emit/entity.ts`);
+  gated structurally for TPH *and* TPC, with the negative that the concrete must
+  not redeclare it (`generator-java-concurrency-conflict.test.ts`), and
+  re-verified by booting `payments` / `tph` / `inheritance` against Postgres in
+  `gradle:9-jdk25`. (RS-20 later removed `@Version` from java altogether — the
+  base now carries the plain column plus the `_applyVersion` mutator the
+  repository's guarded bump writes through, and the same structural gate covers
+  it.)
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found by the M-T9.11 slice-(c) per-PR wire-golden gate
   (`test/behavioral/wire-golden/shapes.json` seq #3, `GET /api/carts/{id}`);
@@ -556,41 +563,65 @@ the conforming backends, and the fix that established it.
   (2026-07-31), after the rule had already been recorded as all-five conforming.
   Both verified on booted apps. Tier: **behavioral**.
 
-### RS-20 · `version` counts persisted mutations, not entity-graph dirtiness — **OPEN (java)**
-- **Guarantee (pending fix).** `version` is `1` at create and `+1` per persisted
-  mutation, **independent of which part of the aggregate graph changed**
-  (RS-11 + RS-14).
+### RS-20 · `version` counts persisted mutations, not entity-graph dirtiness
+- **Guarantee.** `version` is `1` at create and `+1` per persisted mutation,
+  **independent of which part of the aggregate graph changed** (RS-11 + RS-14)
+  **and of whether any column value actually differs**. A command that ran and
+  was persisted bumps the counter; that is what "optimistic concurrency token"
+  means here.
 - **Trigger.** A `versioned` aggregate whose mutation touches only a **child**
-  (a single `contains`), or whose create also writes a **value-object
-  collection**.
-- **Observable — java diverges in both directions, from one cause.**
+  (a single `contains`), whose create also writes a **value-object collection**,
+  or whose command re-assigns a value the row already holds.
+- **Observable — java diverged in every direction, from one cause.**
 
-  | case | canonical | java |
+  | case | canonical | java (before) |
   |---|---|---|
   | `single-containment` — `ship` mutates the contained child | `2` | **`1`** (bump missed) |
   | `value-collections` — create writes a VO collection | `1` | **`2`** (extra bump) |
+  | `saga` — an idempotent `markTracked()` re-assign | `3` | **`2`** (bump missed) |
 
-  Java maps `version` to JPA `@Version`, and Hibernate bumps it from the
+  Java mapped `version` to JPA `@Version`, and Hibernate bumps that from the
   dirtiness of the **root entity's own state**. A change confined to a child or
-  collection doesn't mark the root dirty; a second flush that writes the
-  collection during create does. The other four backends set the counter
-  explicitly at the persist site, so they count *mutations* the way the
-  capability declares.
+  collection doesn't mark the root dirty; neither does re-assigning an unchanged
+  value; a second flush that writes the collection during create does. The other
+  four backends set the counter explicitly at the persist site, so they count
+  *commands* the way the capability declares.
 - **Relationship to RS-14.** This is RS-14's family — "the increment is
-  shape-dependent and inverted between backends" — in two shapes RS-14's fixture
-  set never reached. RS-14 lists java as conforming; that holds for the shapes it
+  shape-dependent and inverted between backends" — in shapes RS-14's fixture set
+  never reached. RS-14 lists java as conforming; that holds for the shapes it
   measured (document/embedded) and not for these. This rule names the gap rather
   than rewriting RS-14's history.
-- **Why still open.** The repair is Hibernate-semantics work (force an optimistic
-  increment on child-only mutations *without* double-bumping the collection
-  write), it needs a container build + boot per iteration, and it is a different
-  unit from the coverage expansion that found it. Both divergences are **waived**
-  in `test/_helpers/wire-waivers.ts`, scoped to the exact case + path so any
-  other `version` divergence still fails. The registry ratchets: the waivers go
-  stale and fail the gate the moment java is fixed.
-- **Conforms.** node, dotnet, python, elixir. **Targets:** java.
+- **Fix (java).** `@Version` is gone from both entity arms (flat and the TPH/TPC
+  abstract base) — `version` is a plain `@Column` — and the counter is driven
+  from the repository `save`, the same place node and elixir drive theirs:
+
+  ```java
+  @Modifying(flushAutomatically = true, clearAutomatically = false)
+  @Query("update Order e set e.version = e.version + 1 where e.id = :id and e.version = :expected")
+  int bumpVersion(@Param("id") OrderId id, @Param("expected") int expected);
+  ```
+  ```java
+  var __expectedVersion = aggregate.version();
+  if (jpa.bumpVersion(aggregate.id(), __expectedVersion) == 1) {
+      aggregate._applyVersion(__expectedVersion + 1);   // reflect it onto the live instance
+  } else if (jpa.existsById(aggregate.id())) {
+      throw new ObjectOptimisticLockingFailureException(Order.class, aggregate.id().value());
+  }
+  var saved = jpa.save(aggregate);
+  ```
+
+  One row affected == this command bumped, whatever it touched. **Zero** rows on
+  a row that exists == another writer moved it inside the load→save window —
+  the same `ObjectOptimisticLockingFailureException` the `If-Match` guard raises,
+  so the 409 semantics are unchanged (the write-time CAS is now this guard rather
+  than Hibernate's). Zero rows with no such row == a **create**: the factory
+  already seeded `1` and the insert carries it. The five RS-20 waivers were
+  deleted in the same change.
+- **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found 2026-07-30 by the M-T9.11 gate on the newly-minted
-  `single-containment` and `value-collections` goldens. Tier: **behavioral**.
+  `single-containment` and `value-collections` goldens; the idempotent-command
+  face surfaced later on `saga`. Fixed in java by the command-driven guarded
+  bump above. Tier: **behavioral**.
 
 ### RS-21 · A union response carries its `type` discriminator
 - **Guarantee.** An operation returning `T or <Error>` that selects a **success**

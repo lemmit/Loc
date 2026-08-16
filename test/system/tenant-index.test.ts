@@ -79,8 +79,14 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
       tenancySystem(`aggregate Invoice with tenantOwned { number: string }`),
     );
     const sql = sqlOf(files);
-    // The materialized-path prefix index — `text_pattern_ops` makes a
-    // `LIKE 'prefix.%'` (deep/global) scan index-usable under any locale.
+    // The materialized-path prefix index — `text_pattern_ops` is the opclass a
+    // prefix scan needs under any locale.  NOTE: the deep/global descendant
+    // test is now `strpos(data_key, anchor || '.') = 1` (the anchor is a
+    // principal claim, and a LIKE pattern built from it treated `_`/`%` as
+    // wildcards — see tenancy-subtree-prefix.test.ts).  That form is CORRECT
+    // but not sargable, so this index no longer serves it; restoring an
+    // index-usable spelling is M-T3.17.  The index is still derived (it serves
+    // equality and any future sargable form), so this stays pinned.
     expect(sql).toMatch(
       /CREATE INDEX "?invoices_data_key_idx"? ON \S+ \("?data_key"? text_pattern_ops\)/,
     );

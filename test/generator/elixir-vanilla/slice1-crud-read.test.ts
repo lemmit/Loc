@@ -93,7 +93,7 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     expect(ctl).toContain("def index(conn, params)");
     expect(ctl).toContain('def show(conn, %{"id" => id})');
     expect(ctl).toContain(
-      'with {:ok, result} <- Tracker.list_tasks(page_param(params, "page", 1), page_param(params, "pageSize", 20), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"))',
+      'with {:ok, result} <- Tracker.list_tasks(page_param(params, "page", 1, 1000000), page_param(params, "pageSize", 20, 500), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"))',
     );
     expect(ctl).toContain("case Tracker.get_task(id) do");
     expect(ctl).toContain("{:ok, record}");

@@ -64,9 +64,19 @@ export function lowerDeployable(d: Deployable): DeployableIR {
               ? "angular"
               : platform === "flutter"
                 ? "flutter"
-                : descriptorFor(platform).isFrontend || platform === "dotnet" || platform === "java"
-                  ? "react"
-                  : undefined
+                : // Feliz self-hosts (`hostableFrameworks: {feliz}`), so a bare
+                  // `platform: feliz` renders F#/Fable — NOT the react default
+                  // the fall-through used to hand it.  The wrong answer here is
+                  // not cosmetic: every per-framework validator gate keys on
+                  // `uiFramework`, so a feliz deployable was being measured
+                  // against react's capabilities.
+                  platform === "feliz"
+                  ? "feliz"
+                  : descriptorFor(platform).isFrontend ||
+                      platform === "dotnet" ||
+                      platform === "java"
+                    ? "react"
+                    : undefined
       : undefined);
   // Design pack default depends on what actually RENDERS — the ui's
   // `framework:`, not the host platform keyword.  A static-asset host serves

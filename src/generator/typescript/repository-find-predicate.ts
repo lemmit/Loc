@@ -176,10 +176,20 @@ export function lowerToDrizzle(
           // NOT the row column above, which only coincides when the author
           // happened to name the claim `tenantId`.
           const tenant = `${principal}.${deepScopeTenantClaim(e)}`;
-          for (const op of ["or", "and", "eq", "isNull", "isNotNull", "like"]) ops.add(op);
+          // Descendant test as an ANCHORED POSITION, not `LIKE <org> || '.%'`.
+          // The anchor is a principal CLAIM, so it is data, and `_`/`%` inside
+          // it are LIKE wildcards: an org legitimately named `acme_corp` gets
+          // the pattern `acme_corp.%`, which matches `acmeXcorp.…` — a
+          // cross-tenant read with no attacker involved, just an underscore in
+          // a name.  Binding the value (which Drizzle does) stops injection,
+          // not wildcard semantics.  `strpos(col, needle) = 1` has no pattern
+          // language at all, which is the same reason `string.startsWith`
+          // lowers this way in DRIZZLE_INTRINSIC_SQL above.
+          for (const op of ["or", "and", "eq", "isNull", "isNotNull", "sql"]) ops.add(op);
+          const descendant = `sql\`strpos(\${${col}}, \${${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}}) = 1\``;
           return (
             `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
-            `like(${col}, ${org} + ${JSON.stringify(`${DATA_KEY_PATH_DELIMITER}%`)}))), ` +
+            `${descendant})), ` +
             `and(isNull(${col}), eq(${tenantCol}, ${tenant})))`
           );
         }

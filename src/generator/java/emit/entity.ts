@@ -433,14 +433,15 @@ export function renderJavaEntity(
       continue;
     }
     // Optimistic concurrency (`versioned`): the synthetic `version` token field
-    // becomes the JPA `@Version` column — Hibernate adds `WHERE version = ?` to
-    // UPDATEs and increments it, raising ObjectOptimisticLockingFailureException
-    // on a stale write.  In the Java backend the domain aggregate class IS the
-    // JPA @Entity, so @Version lands beside the existing @Column (a TPH/TPC base
-    // carries it once; the concrete subclass skips inherited fields above).
-    if (persistence && isAgg(entity) && aggregateIsVersioned(entity) && f.access === "token") {
-      fieldLines.push(`    @Version`);
-    }
+    // maps as a PLAIN column — deliberately NOT JPA `@Version` (RS-20).  JPA's
+    // `@Version` counts ROW DIRTINESS: Hibernate bumps it only when the ROOT
+    // entity's own state changed, so a command confined to a `contains` child
+    // never bumped it, an idempotent re-assignment never bumped it, and a create
+    // that also wrote a value-object collection bumped it twice.  The capability
+    // declares a COMMAND counter (`version: int token = 1`, +1 per persisted
+    // mutation — see ir/util/versioned-capability.ts), which is what the other
+    // four backends emit, so the counter is driven explicitly from the
+    // repository save (guarded `where version = :expected`) instead.
     if (persistence) fieldLines.push(...jpaFieldAnnotations(f, entity, persistence));
     if (isRefCollection(f.type)) {
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name} = new ArrayList<>();`);
@@ -649,6 +650,27 @@ export function renderJavaEntity(
           `    /** Raise a domain event from a user-supplied extern handler. */`,
           `    public void _raiseEvent(DomainEvent ev) {`,
           `        _domainEvents.add(ev);`,
+          `    }`,
+          ``,
+        ]
+      : [];
+  // Optimistic concurrency (`versioned`): the repository's save path owns the
+  // counter (see emit/repository.ts) — it issues the guarded
+  // `update … set version = version + 1 where id = ? and version = ?` and then
+  // reflects the new value onto the in-memory aggregate through this mutator,
+  // so the response DTO and the row can never disagree.  Package-private is not
+  // enough: `directoryLayout` can put the repository impl in a different package
+  // from the entity.
+  const versionFieldName =
+    persistence && isAgg(entity) && aggregateIsVersioned(entity)
+      ? entity.fields.find((f) => f.access === "token" && !superType?.fieldNames.has(f.name))?.name
+      : undefined;
+  const applyVersionLines: string[] =
+    versionFieldName !== undefined
+      ? [
+          `    /** Internal: reflect the persisted command counter onto this instance. */`,
+          `    public void _applyVersion(int next) {`,
+          `        this.${versionFieldName} = next;`,
           `    }`,
           ``,
         ]
@@ -908,6 +930,7 @@ export function renderJavaEntity(
     ...opLines,
     ...claimStampHookLines,
     ...externHookLines,
+    ...applyVersionLines,
     ...pullEventsLines,
     ...drainProvLines,
     ...assertLines,
@@ -1071,18 +1094,6 @@ export function renderJavaAbstractBaseEntity(
       // subtype of `Object id()`), so the base compiles standalone.
       [`    public abstract Object id();`, ``];
   const fieldLines = base.fields.flatMap((f) => [
-    // Optimistic concurrency on an INHERITED aggregate.  The `version` token
-    // field is declared once, on the base — the concretes skip inherited fields
-    // — so `@Version` has to be emitted HERE or it is emitted nowhere.  It was
-    // emitted nowhere: `renderEntity`'s token arm carries the comment "a TPH/TPC
-    // base carries it once", but this builder never had the matching arm, so
-    // every subtype of an abstract aggregate mapped `version` as a plain
-    // `@Column`. Hibernate then never incremented it and never added the
-    // `WHERE version = ?` CAS — `version` froze at the create factory's 1 and
-    // the 409-conflict guard was inert on the whole hierarchy.  Found at runtime
-    // by the `payments` update caller (golden 2 ≠ java 1 on the by-id read after
-    // `POST /credit_cards/{id}/update`); RS-14 / RS-11 are the contract.
-    ...(persistence && aggregateIsVersioned(base) && f.access === "token" ? [`    @Version`] : []),
     // TPC bases are @MappedSuperclass — their column mappings flatten
     // into each concrete's own table (the schema merges base + own
     // fields per concrete).  TPH bases are real @Entity roots of the
@@ -1110,7 +1121,27 @@ export function renderJavaAbstractBaseEntity(
     `    }`,
     ``,
   ]);
-  const body = [...accessorLines, ...derivedLines];
+  // Optimistic concurrency on an INHERITED aggregate: the `version` token field
+  // is declared once, on the base — the concretes skip inherited fields — so the
+  // repository's counter mutator has to live HERE or it lives nowhere.  Same
+  // command-driven contract as the flat case (renderJavaEntity above); the base
+  // deliberately carries NO `@Version` (RS-20 — Hibernate's counter tracks row
+  // dirtiness, the capability declares persisted commands).
+  const baseVersionField =
+    persistence && aggregateIsVersioned(base)
+      ? base.fields.find((f) => f.access === "token")?.name
+      : undefined;
+  const applyVersionLines: string[] =
+    baseVersionField !== undefined
+      ? [
+          `    /** Internal: reflect the persisted command counter onto this instance. */`,
+          `    public void _applyVersion(int next) {`,
+          `        this.${baseVersionField} = next;`,
+          `    }`,
+          ``,
+        ]
+      : [];
+  const body = [...accessorLines, ...derivedLines, ...applyVersionLines];
   while (body.length > 0 && body[body.length - 1] === "") body.pop();
   return lines(
     `package ${pkg};`,
