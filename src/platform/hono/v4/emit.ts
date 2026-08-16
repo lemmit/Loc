@@ -303,35 +303,31 @@ export function newApp(): OpenAPIHono {
   return new OpenAPIHono({ defaultHook });
 }
 
-/** Reason phrases (RFC 9110 §15 / the IANA registry) for the statuses this
- *  framework layer raises.  These used to come from node's \`STATUS_CODES\`, on
- *  the reasoning that a hand-kept map would silently mistitle a status it
- *  missed — right for a node deployment, wrong everywhere else this backend
- *  runs.  The playground boots the SAME bundle in a browser worker, where
- *  \`node:http\` resolves to an empty module: \`STATUS_CODES[status]\` then threw
- *  inside the one helper whose job is turning a fault into a problem document,
- *  so every 404/422/500 took the worker down instead of answering.  The values
- *  are node's verbatim, so the wire is unchanged; \`?? "Error"\` still covers
- *  anything outside the table. */
+/** Reason phrases (RFC 9110 §15 / the IANA registry) for the statuses THIS
+ *  layer raises: 404 and 500 directly, plus the ones a hono \`HTTPException\`
+ *  carries through \`frameworkProblem\` (a malformed body, a method mismatch)
+ *  and the authz ladder's 401/403/409/422.
+ *
+ *  This used to read node's \`STATUS_CODES\`, on the reasoning that a hand-kept
+ *  map would silently mistitle a status it missed — right for a node
+ *  deployment, wrong everywhere else this backend runs.  The playground boots
+ *  the SAME bundle in a browser worker, where \`node:http\` resolves to an EMPTY
+ *  module: \`STATUS_CODES[status]\` then threw inside the one helper whose job is
+ *  turning a fault into a problem document, so every 404/422/500 took the worker
+ *  down instead of answering.
+ *
+ *  The values are node's verbatim, so the wire is unchanged.  A status outside
+ *  this set falls back to "Error" — exactly what the old read did for a code
+ *  node's own table didn't carry. */
 const REASON_PHRASES: Record<number, string> = {
   400: "Bad Request",
   401: "Unauthorized",
   403: "Forbidden",
   404: "Not Found",
   405: "Method Not Allowed",
-  406: "Not Acceptable",
   409: "Conflict",
-  410: "Gone",
-  412: "Precondition Failed",
-  413: "Payload Too Large",
-  415: "Unsupported Media Type",
   422: "Unprocessable Entity",
-  429: "Too Many Requests",
   500: "Internal Server Error",
-  501: "Not Implemented",
-  502: "Bad Gateway",
-  503: "Service Unavailable",
-  504: "Gateway Timeout",
 };
 
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class

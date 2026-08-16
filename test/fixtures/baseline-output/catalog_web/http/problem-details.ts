@@ -1,5 +1,4 @@
 // Auto-generated.  Do not edit by hand.
-import { STATUS_CODES } from "node:http";
 import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
@@ -80,6 +79,33 @@ export function newApp(): OpenAPIHono {
   return new OpenAPIHono({ defaultHook });
 }
 
+/** Reason phrases (RFC 9110 §15 / the IANA registry) for the statuses THIS
+ *  layer raises: 404 and 500 directly, plus the ones a hono `HTTPException`
+ *  carries through `frameworkProblem` (a malformed body, a method mismatch)
+ *  and the authz ladder's 401/403/409/422.
+ *
+ *  This used to read node's `STATUS_CODES`, on the reasoning that a hand-kept
+ *  map would silently mistitle a status it missed — right for a node
+ *  deployment, wrong everywhere else this backend runs.  The playground boots
+ *  the SAME bundle in a browser worker, where `node:http` resolves to an EMPTY
+ *  module: `STATUS_CODES[status]` then threw inside the one helper whose job is
+ *  turning a fault into a problem document, so every 404/422/500 took the worker
+ *  down instead of answering.
+ *
+ *  The values are node's verbatim, so the wire is unchanged.  A status outside
+ *  this set falls back to "Error" — exactly what the old read did for a code
+ *  node's own table didn't carry. */
+const REASON_PHRASES: Record<number, string> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  405: "Method Not Allowed",
+  409: "Conflict",
+  422: "Unprocessable Entity",
+  500: "Internal Server Error",
+};
+
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
  *  describes: an unmatched route, a body hono itself refused to parse, an
  *  aborted request.  Before this, such a fault left the wire two ways: never
@@ -89,9 +115,6 @@ export function newApp(): OpenAPIHono {
  *  already committed to `application/problem+json`.  Shared by http/index.ts's
  *  root handlers and every router's `HTTPException` arm so they can't drift. */
 export function frameworkProblemBody(status: number, detail: string, instance: string): string {
-  // Reason phrase from node's own table rather than a hand-kept map — the
-  // framework can raise any status, and a partial table would silently title
-  // the ones it missed.
-  const title = STATUS_CODES[status] ?? "Error";
+  const title = REASON_PHRASES[status] ?? "Error";
   return JSON.stringify({ type: "about:blank", title, status, detail, instance });
 }
