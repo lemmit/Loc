@@ -48,6 +48,19 @@ const SYSTEM = (platform: string) => `system MoneyAgg {
       group by o.status
       select status = o.status, revenue = sum(o.total)
     }
+
+    // A money grouping KEY — read off the STORED column, not computed by a SQL
+    // aggregate, so it takes a DIFFERENT coercion in every emitter.  Kept as
+    // its own projection with NO money aggregate, which also pins the
+    // import/helper gate: the formatter must be reachable when only a key
+    // needs it.
+    projection ByTotal {
+      total: money
+      orders: int
+      from Order as o
+      group by o.total
+      select total = o.total, orders = count()
+    }
   } }
   api SalesApi from Sales
   storage pg { type: postgres }
@@ -135,6 +148,37 @@ describe("money aggregate — the fixed wire scale, all five backends (#2549)", 
         `defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()`,
       );
     }
+  });
+
+  // A money grouping KEY is a separate coercion from the aggregate one, and it
+  // was left unformatted on three backends after #2549 fixed the aggregates —
+  // java and .NET already routed their key through the money renderer.
+  it("pins a money grouping KEY at the same scale on all five backends", async () => {
+    const node = file(await build("node"), "http/query-projections.ts");
+    expect(node).toContain(`total: new Decimal(r.total).toFixed(${MONEY_WIRE_SCALE})`);
+    expect(node).not.toContain("total: String(r.total)");
+
+    const py = file(await build("python"), "query_projections_routes.py");
+    expect(py).toContain('"total": money_str(r[0])');
+    expect(py).not.toContain('"total": str(r[0])');
+
+    const ex = file(await build("elixir"), "by_total.ex");
+    expect(ex).toContain("total: __money_wire(row.total)");
+    expect(ex).not.toContain("total: to_string(row.total)");
+    // The key alone must pull the helper in — this projection aggregates no
+    // money at all, so a gate that only looked at aggregates would emit the
+    // call and not the `defp` (a `--warnings-as-errors` failure).
+    expect(ex).toContain("defp __money_wire(");
+
+    const java = file(await build("java"), "OrdersQueryProjections.java");
+    expect(java).toMatch(
+      new RegExp(
+        `ByTotalRow\\(new (java\\.math\\.)?BigDecimal\\(r\\[0\\]\\.toString\\(\\)\\)\\.setScale\\(${MONEY_WIRE_SCALE}`,
+      ),
+    );
+
+    const cs = file(await build("dotnet"), "ByTotalQpHandler.cs");
+    expect(cs).toContain(`ToString("F${MONEY_WIRE_SCALE}"`);
   });
 
   it("leaves a non-money aggregate alone (the coercion is money-specific)", async () => {

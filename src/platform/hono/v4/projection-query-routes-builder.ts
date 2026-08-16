@@ -764,9 +764,21 @@ function coerceAggregate(sel: AggregateSelect, expr: string): string {
  *  without the import is a `TS2304`, so the flag and the import stay adjacent
  *  (the same discipline the elixir emitter applies to `__money_round/1`). */
 function anyMoneyAggregate(projections: readonly ProjectionIR[]): boolean {
+  const isMoneyType = (t: TypeIR): boolean => {
+    const inner = t.kind === "optional" ? t.inner : t;
+    return inner.kind === "primitive" && inner.name === "money";
+  };
   return projections.some((p) => {
-    const aggs = groupedAggregates(p)?.aggregates ?? wholeTableAggregates(p) ?? [];
-    return aggs.some((a) => aggregateCoercion(a).isMoney);
+    const grouped = groupedAggregates(p);
+    const aggs = grouped?.aggregates ?? wholeTableAggregates(p) ?? [];
+    // A money grouping KEY calls the same `Decimal` formatter the aggregates do
+    // (`groupKeyWireExpr`), so it must gate the import too — a projection that
+    // groups BY money without aggregating any would otherwise emit the call
+    // with no import (`TS2304`).
+    return (
+      aggs.some((a) => aggregateCoercion(a).isMoney) ||
+      (grouped?.keys ?? []).some((k) => isMoneyType(k.type))
+    );
   });
 }
 
@@ -872,9 +884,13 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
       // numbers, and `Number` keeps the three shapes on one rule.
       return `Number(${expr})`;
     case "money":
-      // Wire-carried as a string (`zodForRow`), exactly like the aggregate
-      // coercion's `asString` arm.
-      return `String(${expr})`;
+      // Wire-carried as a string (`zodForRow`) at the FIXED money scale — the
+      // same RS-12 pin the aggregate arm applies (#2549).  A grouping KEY reads
+      // the stored column rather than a SQL aggregate, so a bare `String(...)`
+      // shipped whatever scale the row was written at; java and .NET already
+      // routed their key through the money renderer, so this closes the last
+      // three.
+      return `new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`;
     case "datetime":
       return `${expr}.toISOString()`;
     default:
