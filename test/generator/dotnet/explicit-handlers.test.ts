@@ -300,7 +300,7 @@ system Shop {
       aggregate Order {
         code: string
         status: string
-        create(code: string) { code := code  status := "new" }
+        create(code: string) { }
         operation setNote(note: string) { status := note }
       }
       repository Orders for Order {
