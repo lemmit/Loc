@@ -22,6 +22,7 @@ import type { LogLine } from "../util/log-line.js";
 import type { BundleResult } from "../bundle/protocol.js";
 import {
   RUNTIME_VERSIONS,
+  devStubEntryFor,
   makeEntryStdin,
   schemaPathFor,
 } from "../bundle/plugin.js";
@@ -173,6 +174,10 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
       stdinContents: makeEntryStdin(
         input.honoEntry,
         schemaPathFor(input.honoEntry),
+        // Present only for an `auth: required` deployable without an
+        // `auth { oidc }` block — the entry then registers the emitted dev stub
+        // so `createApp`'s verifier assertion passes (#2571).
+        devStubEntryFor(generatedFiles, input.honoEntry),
       ),
       // Backend-only: the React run below never sets this.
       sourcemap: input.sourcemap,

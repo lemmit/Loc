@@ -1,0 +1,55 @@
+// Playground boot fixture: a `platform: node` deployable with `auth: required`
+// (#2571).
+//
+// The preview boots a generated backend through `createApp`, not through the
+// generated `index.ts` — and `createApp` asserts a verifier is registered when
+// the deployable is `auth: required`, a registration only `index.ts` performs.
+// So every auth-bearing system died at boot with "No user verifier is
+// registered" while the Auth panel advertised the opposite by sending
+// `x-loom-dev-claims` on every request.  Nothing caught it: the one playground
+// example with `auth: required` is `platform: dotnet` — files-only, never
+// booted.  This fixture is the boot that would have.
+//
+// Shaped like `sales-system.ddd`'s Product (sku + Money) so the smoke's
+// existing create/read round-trip applies unchanged; the only thing that
+// differs is the `user { … }` block and `auth: required`.
+
+system AuthSmoke {
+  user {
+    id: guid
+    role: string
+  }
+
+  subdomain Catalog {
+    context Sales {
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      aggregate Product with crudish {
+        sku: string
+        price: Money
+        invariant sku.length > 0
+      }
+
+      repository Products for Product { }
+    }
+  }
+
+  api SalesApi from Catalog
+
+  storage primarySql { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primarySql }
+
+  deployable api {
+    platform: node
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 3000
+    auth: required
+  }
+}

@@ -69,8 +69,36 @@ export interface TsconfigAliasEntry {
 // the virtual fs root (e.g. "http/index.ts", "db/schema.ts" for
 // legacy mode; "<slug>/http/index.ts" / "<slug>/db/schema.ts" for
 // system mode).
-export function makeEntryStdin(entryPath: string, schemaPath: string): string {
+//
+// `devStubPath` — the emitted `auth/dev-stub.ts`, when the deployable has one
+// (#2571).  We boot through `createApp` rather than the generated `index.ts`,
+// and `createApp` asserts a verifier is registered when the deployable is
+// `auth: required` — a registration only `index.ts` performs.  Without this the
+// preview died at boot with
+//
+//   createApp failed: No user verifier is registered.
+//
+// on every `auth: required` system, while the UI advertised the feature (the
+// Auth panel sends `x-loom-dev-claims` on every dispatched request).  Calling
+// the registrar at entry top-level runs it at module-evaluation time, i.e.
+// before the worker reaches `createApp` — the same order `index.ts` uses.
+//
+// An `auth { oidc }` system emits `auth/oidc.ts` instead and gets no
+// registration here: its verifier validates tokens against the IdP's JWKS, and
+// no IdP is reachable from the preview worker. That system still fails to boot,
+// deliberately and unchanged by this function.
+export function makeEntryStdin(
+  entryPath: string,
+  schemaPath: string,
+  devStubPath?: string,
+): string {
   return [
+    ...(devStubPath
+      ? [
+          `import { registerDevStubVerifier } from "./${devStubPath}";`,
+          "registerDevStubVerifier();",
+        ]
+      : []),
     `export { createApp } from "./${entryPath}";`,
     `export * as schema from "./${schemaPath}";`,
     `export { drizzle } from "drizzle-orm/pglite";`,
@@ -87,6 +115,26 @@ export function makeEntryStdin(entryPath: string, schemaPath: string): string {
 export function schemaPathFor(entryPath: string): string {
   const segs = entryPath.split("/");
   return [...segs.slice(0, -2), "db", "schema.ts"].join("/");
+}
+
+// The deployable's `auth/dev-stub.ts` — same replacement rule as
+// `schemaPathFor` — or `undefined` when the emitter produced none (an auth-less
+// deployable, or an `auth { oidc }` one, which emits `auth/oidc.ts` instead).
+//
+// The presence check lives HERE, with the derivation, because the two disagree
+// on spelling: the virtual fs is keyed by ABSOLUTE path ("/" + path, see the
+// engine's `generatedFiles` and `harvestDeps`) while the entry path handed to
+// `makeEntryStdin` is relative.  Split across the two call sites, a lookup with
+// the relative key answers "absent" for a file that is right there and the
+// registration silently never happens — the same shape of no-op this whole fix
+// exists to remove.
+export function devStubEntryFor(
+  files: ReadonlyMap<string, string | Uint8Array>,
+  entryPath: string,
+): string | undefined {
+  const segs = entryPath.split("/");
+  const path = [...segs.slice(0, -2), "auth", "dev-stub.ts"].join("/");
+  return files.has(`/${path}`) ? path : undefined;
 }
 
 // Read the entry's nearest `tsconfig.json` and extract any

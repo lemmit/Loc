@@ -211,7 +211,6 @@ export class ConcurrencyError extends Error {
  *  consumed by the frontend ACL's `applyServerErrors`). */
 function problemDetailsTs(localizeMessages: boolean): string {
   return `// Auto-generated.  Do not edit by hand.
-import { STATUS_CODES } from "node:http";
 import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
@@ -304,6 +303,37 @@ export function newApp(): OpenAPIHono {
   return new OpenAPIHono({ defaultHook });
 }
 
+/** Reason phrases (RFC 9110 §15 / the IANA registry) for the statuses this
+ *  framework layer raises.  These used to come from node's \`STATUS_CODES\`, on
+ *  the reasoning that a hand-kept map would silently mistitle a status it
+ *  missed — right for a node deployment, wrong everywhere else this backend
+ *  runs.  The playground boots the SAME bundle in a browser worker, where
+ *  \`node:http\` resolves to an empty module: \`STATUS_CODES[status]\` then threw
+ *  inside the one helper whose job is turning a fault into a problem document,
+ *  so every 404/422/500 took the worker down instead of answering.  The values
+ *  are node's verbatim, so the wire is unchanged; \`?? "Error"\` still covers
+ *  anything outside the table. */
+const REASON_PHRASES: Record<number, string> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  405: "Method Not Allowed",
+  406: "Not Acceptable",
+  409: "Conflict",
+  410: "Gone",
+  412: "Precondition Failed",
+  413: "Payload Too Large",
+  415: "Unsupported Media Type",
+  422: "Unprocessable Entity",
+  429: "Too Many Requests",
+  500: "Internal Server Error",
+  501: "Not Implemented",
+  502: "Bad Gateway",
+  503: "Service Unavailable",
+  504: "Gateway Timeout",
+};
+
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
  *  describes: an unmatched route, a body hono itself refused to parse, an
  *  aborted request.  Before this, such a fault left the wire two ways: never
@@ -313,10 +343,7 @@ export function newApp(): OpenAPIHono {
  *  already committed to \`application/problem+json\`.  Shared by http/index.ts's
  *  root handlers and every router's \`HTTPException\` arm so they can't drift. */
 export function frameworkProblemBody(status: number, detail: string, instance: string): string {
-  // Reason phrase from node's own table rather than a hand-kept map — the
-  // framework can raise any status, and a partial table would silently title
-  // the ones it missed.
-  const title = STATUS_CODES[status] ?? "Error";
+  const title = REASON_PHRASES[status] ?? "Error";
   return JSON.stringify({ type: "about:blank", title, status, detail, instance });
 }
 `;
