@@ -18,6 +18,7 @@ import {
   isWorkflow,
   isWorkflowCreateDecl,
 } from "../../../src/language/generated/ast.js";
+import { printStructural } from "../../../src/language/print/index.js";
 import { parseString } from "../../_helpers/index.js";
 
 function contextMembers(model: Model) {
@@ -119,5 +120,61 @@ describe("operation / workflow requires gate parsing", () => {
     const { model, errors } = await parseString(wrap("operation close() { open := false }"));
     expect(errors).toEqual([]);
     expect(firstHandle(model).gate).toBeDefined();
+  });
+
+  // The workflow HEADER gate (M-T3.15 A2) — distinct from the create/handle
+  // body gates above.  It guards the compiler-derived INSTANCE READS
+  // (`/workflows/<wf>/instances[/{id}]`), which had no author surface to gate
+  // until this clause existed; the command entries keep their own gates, so a
+  // workflow can (and this fixture does) authorize reads and writes to
+  // different audiences.
+  it("parses + round-trips the workflow header `requires` gate", async () => {
+    const src = `
+  context Sales {
+    aggregate Ticket { open: bool }
+    repository Tickets for Ticket { }
+    workflow Escalation requires currentUser.role == "supervisor" {
+      ticket: Ticket id
+      stage: string
+      create raise(t: Ticket id) requires currentUser.role == "agent" {
+        ticket := t
+        stage := "raised"
+      }
+    }
+  }
+`;
+    const { model, errors } = await parseString(src);
+    expect(errors).toEqual([]);
+    const wf = model.members
+      .flatMap((m) => ("members" in m ? m.members : []))
+      .find(
+        (m) => m.$type === "Workflow",
+      ) as import("../../../src/language/generated/ast.js").Workflow;
+    expect(wf.gate, "workflow header gate").toBeDefined();
+    // The starter keeps its OWN gate — the header one did not swallow it.
+    const create = wf.members.find((m) => m.$type === "WorkflowCreateDecl") as {
+      gate?: unknown;
+    };
+    expect(create.gate, "create starter gate").toBeDefined();
+
+    const printed = printStructural(wf);
+    expect(printed).toContain('workflow Escalation requires currentUser.role == "supervisor"');
+    // The header gate prints BEFORE the body, like every other header gate.
+    expect(printed.indexOf("requires ")).toBeLessThan(printed.indexOf("{"));
+    const { errors: reErrors } = await parseString(`context Sales {
+    aggregate Ticket { open: bool }
+    repository Tickets for Ticket { }
+${printed}
+  }`);
+    expect(reErrors).toEqual([]);
+  });
+
+  it("an ungated workflow has no header gate (back-compat)", async () => {
+    const { model, errors } = await parseString(wrap("operation close() { open := false }"));
+    expect(errors).toEqual([]);
+    const wf = model.members
+      .flatMap((m) => ("members" in m ? m.members : []))
+      .find((m) => m.$type === "Workflow") as { gate?: unknown } | undefined;
+    if (wf) expect(wf.gate).toBeUndefined();
   });
 });
