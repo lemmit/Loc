@@ -11,6 +11,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 const SRC = `
 system Directory {
+  subdomain Directory {
   context People {
     aggregate Person {
       email: string
@@ -19,7 +20,8 @@ system Directory {
     }
     repository People for Person {}
   }
-  api PeopleApi from People
+  }
+  api PeopleApi from Directory
   storage primary { type: postgres }
   resource peopleState { for: People, kind: state, use: primary }
   deployable dirApi {

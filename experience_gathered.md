@@ -4986,3 +4986,81 @@ rebaseline the case, which is how one notices if one is looking.
 "everything that isn't the good one". A third outcome added later then arrives
 as a compile-or-review question instead of silently disabling the check — and a
 new status must be classified deliberately, which is the whole point.
+## 87. The file-copy revert is only as good as the copy — verify the SOURCE, not just the command (2026-08-13)
+
+§84 and §85's relapse both end in the same rule: revert instrumentation by `cp`
+from a copy you took first, never `git checkout --`. This session obeyed that
+rule and still corrupted a file, because the rule protects the *direction* of
+the copy and says nothing about its *source*.
+
+The shape, mutation-proving a new gate:
+
+```bash
+cp test/util/naming.test.ts $SP/naming.orig 2>/dev/null || ls test/util | head -3
+# … seed the mutation into whichever file a glob picked (channels.test.ts) …
+cp $SP/naming.orig $TARGET      # "revert"
+```
+
+The backup was taken from a **different file than the one that got mutated** —
+a leftover from an earlier draft of the command where the target was chosen by
+hand. `cp` does not care: it wrote `naming.test.ts`'s contents over
+`channels.test.ts` and exited 0. The gate under test then passed, the mutation
+proof read as complete, and the only evidence was `git status` showing a file I
+had never intentionally touched as modified (`128 insertions, 83 deletions` —
+the diff between two unrelated test files).
+
+Three things made it survivable, and all three are the actual lesson:
+
+1. **`git status` after every mutation cycle, not just at commit time.** The
+   corruption was invisible in the gate's output — it was visible immediately in
+   one line of `git status`.
+2. **A `2>/dev/null || fallback` on the backup step hides exactly the failure
+   you need to see.** If the backup `cp` fails, the "revert" later writes either
+   nothing or something foreign. Let the backup fail loudly.
+3. **The safe restore for a file with no other uncommitted edits is
+   `git checkout HEAD -- <path>`** — and knowing that it *was* clean is why it
+   was safe here. §84's prohibition is about files carrying your own work; it is
+   not a blanket ban, and treating it as one leaves you with no recovery move.
+
+**Rule:** back up by copying *the file you are about to mutate*, in the same
+command that mutates it, with no error suppression — then `git status` before
+believing the proof.
+
+## 88. The emitter is more permissive than the validator — so a test can pin behaviour the language refuses (2026-08-13)
+
+Making `generateSystemFiles` assert phase ④ turned 51 test files red at once. The
+interesting part is not the count, it is what the fixtures were pinning.
+
+`test/generator/react/page-derived.test.ts` has a case literally titled
+*"sequential: a derived may reference an earlier derived"* — the documented
+feature. The validator rejected it: `checkPage`'s single-valued-property loop
+treated `DerivedProp` like `route`/`title`, so a page's SECOND `derived` was an
+error. All six frontends emitted the chain correctly, four `page-derived` suites
+asserted that emission, and every one of them was generating from a model
+`ddd generate` exits non-zero on. The feature worked; the gate said it did not;
+nothing compared the two.
+
+Same shape elsewhere in the same drain: `total += 1` (the fixture's own comment
+called it "scalar arithmetic") emits perfectly good Elixir and is a validator
+error, because `+=` is collection-only.
+
+**The asymmetry is structural, not accidental.** Emitters are written to be
+total — they render whatever IR reaches them. Validators are written to be
+selective. So the permissive side is the one that silently defines the product
+when the harness never runs the strict side. `generateSystems` does not run
+phase ⑦ at all; the test helper ran phase ④ and threw the result away. Under
+those conditions "the emitter renders X" and "X is legal" drift apart with
+nothing to notice, and the test suite records the drift as intended behaviour.
+
+Two rules fall out:
+
+1. **A harness must run at least the phases the product runs.** #2512 learned
+   this one direction (a harness running FEWER phases invents bugs and hides
+   real ones); this is the other: it also *canonises* the invented ones, because
+   somebody writes an assertion against them.
+2. **When a fixture fails a new validity gate, ask which side is wrong before
+   fixing the fixture.** Of 51 files, 49 were genuine fixture defects — but two
+   were the language: one product bug (fixed), and two constructs the design
+   documents and the scope/type system cannot express (kept as evidence via
+   `generateSystemFilesUnchecked(source, why)`, reason at the call site). A
+   reflexive fixture-fix on those would have erased the finding.

@@ -38,7 +38,7 @@ system Demo {
       }
     }
   }
-  deployable app { platform: elixir contexts: [Sales] dataSources: [st] serves: DemoApi ui: DemoUi port: 4000 }
+  deployable app { platform: elixir contexts: [Sales] dataSources: [st] serves: DemoApi ui: DemoUi { ${handle}: app } port: 4000 }
 }
 `;
 

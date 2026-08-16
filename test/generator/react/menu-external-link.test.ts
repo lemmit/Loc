@@ -22,7 +22,7 @@ system S {
     }
   }
   api SalesApi from M
-  ui WebApp with scaffold(subdomains: [Sales]) {
+  ui WebApp with scaffold(subdomains: [M]) {
     api Sales: SalesApi
     menu {
       section "Platform" {

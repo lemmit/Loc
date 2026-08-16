@@ -122,7 +122,7 @@ describe("ternary conditional rendering in walker pages", () => {
       system S {
         subdomain M { context C { } }
         ui WebApp {
-          page Greet(active: string) {
+          page Greet(active: bool) {
             route: "/g/:active"
             body:  active ? Heading { "Yes" } : Heading { "No" }
           }

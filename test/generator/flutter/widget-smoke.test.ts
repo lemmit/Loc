@@ -17,7 +17,7 @@ system Mobile {
       route: "/"
       state { count: int = 0 }
       action inc() { count := count + 1 }
-      body: Stack { Text { "Taps: " + count }, Button { "+", onClick: inc } }
+      body: Stack { Text { \`Taps: {count}\` }, Button { "+", onClick: inc } }
     }
   }
   api A from S

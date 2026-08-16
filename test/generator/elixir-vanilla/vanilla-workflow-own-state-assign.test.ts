@@ -23,7 +23,7 @@ const SRC = `
         }
       }
     }
-    api A from C
+    api A from M
     storage pg { type: postgres }
     resource sagaState { for: C, kind: state, use: pg }
     deployable d { platform: elixir  contexts: [C]  dataSources: [sagaState]  serves: A  port: 4000 }
@@ -60,7 +60,7 @@ const COMPOUND_SRC = `
         }
       }
     }
-    api A from C
+    api A from M
     storage pg { type: postgres }
     resource sagaState { for: C, kind: state, use: pg }
     deployable d { platform: elixir  contexts: [C]  dataSources: [sagaState]  serves: A  port: 4000 }

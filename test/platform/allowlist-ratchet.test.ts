@@ -138,6 +138,18 @@ const REGISTERED: Ratchet[] = [
     kind: "set",
     max: 0,
   },
+  // Catalogued `loom.*` codes with no proof anything ever raises them
+  // (M-T9.33).  38 at the 2026-08-13 census; each leaves by gaining a
+  // FIRING_FIXTURES entry that drives it, or an UNREACHABLE_PINS entry saying
+  // what preempts it.  The census gate carries its own anti-slack check; this
+  // registration is what makes the number visible from the one place that
+  // lists every ratchet in the repo.
+  {
+    file: "test/system/diagnostic-firing-census.data.ts",
+    name: "UNCOVERED",
+    kind: "set",
+    max: 38,
+  },
 ];
 
 /** Extract the balanced `[...]` (set) or `{...}` (record) literal bound to

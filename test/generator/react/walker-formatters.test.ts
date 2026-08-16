@@ -147,8 +147,8 @@ describe("formatter primitives", () => {
         ui WebApp with scaffold(aggregates: [Invoice]) {
           api Shop: ShopApi
         }
-        deployable api { platform: node, contexts: [Shop], port: 3000 }
-        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        deployable api { platform: node, contexts: [Shop], serves: ShopApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Shop: api }, port: 3001 }
       }
     `);
     const list = files.get("web/src/pages/invoices/list.tsx")!;
