@@ -41,6 +41,7 @@ import { aggregateNeedsUpdateChangeset } from "./changeset-emit.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase, isTphBase, tpcConcretesOf, tphKind } from "./inheritance-emit.js";
+import { renderUpdateProvenanceCapture, updateCapturesProvenance } from "./provenance-emit.js";
 import { containmentPreloadRels, readPreloadRels } from "./read-preload.js";
 import {
   containsRefCollField,
@@ -375,6 +376,35 @@ ${listSortArms}${listSortArms ? "\n" : ""}        _ -> :id
   const persistChangeRescue = "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}";
   const updateErrTail = versioned ? "Ecto.Changeset.t() | :conflict" : "Ecto.Changeset.t()";
   const updateSpecArgTail = `${hasStamps && stampPrincipal ? ", map() | nil" : ""}${versioned ? ", integer() | nil" : ""}`;
+  // RS-18 — the generic update runs a changeset, not the synthesized `operation
+  // update(...)` body, so its provenanced write sites must be re-captured here
+  // or the row keeps the PREVIOUS write's lineage.  When the aggregate has one,
+  // the pipe forks: build the changeset, stamp the lineages onto it, then save +
+  // flush the history in ONE transaction (the same shape the named-op persist
+  // tail uses), pushing the traces only after `Repo.update/1` succeeds so a
+  // rejected changeset leaves no orphaned buffer entry.
+  const capturesProv = updateCapturesProvenance(agg);
+  const updateProvHelper = capturesProv ? renderUpdateProvenanceCapture(agg, contextModule) : "";
+  const updateBody = capturesProv
+    ? `${versionOverride}    {changeset, lineages} =
+      record${updatePreload}
+      |> ${aggModule}Changeset.${updateChangesetFn}(attrs)${updateStamps}${updatePutAssoc}
+      |> __capture_provenance()
+
+    Repo.transaction(fn ->
+      case Repo.update(changeset) do
+        {:ok, saved} ->
+          Enum.each(lineages, &${appModule}.Provenance.record/1)
+          ${appModule}.Provenance.flush(Repo)
+          saved
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)${updateRescue}`
+    : `${versionOverride}    record${updatePreload}
+    |> ${aggModule}Changeset.${updateChangesetFn}(attrs)${updateStamps}${updatePutAssoc}
+    |> Repo.update()${updateRescue}`;
 
   // The CRUD `delete/1` repository fn is emitted only when the aggregate exposes
   // a REST delete surface (a reachable `destroy`).  Without it the function was
@@ -436,11 +466,9 @@ ${
 
   @spec update(${aggModule}.t(), map()${updateSpecArgTail}) :: {:ok, ${aggModule}.t()} | {:error, ${updateErrTail}}
   def update(%${aggModule}{} = record, attrs${updateStampActorParam}${versionedParam}) when is_map(attrs) do
-${versionOverride}    record${updatePreload}
-    |> ${aggModule}Changeset.${updateChangesetFn}(attrs)${updateStamps}${updatePutAssoc}
-    |> Repo.update()${updateRescue}
+${updateBody}
   end
-${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
+${updateProvHelper}${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
   @spec persist_change(Ecto.Changeset.t()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
