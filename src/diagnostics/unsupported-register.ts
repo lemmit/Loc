@@ -286,6 +286,13 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.35",
   },
   {
+    code: "loom.store-lifetime-target-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/store-checks.ts:318",
+    what: "`persist: local|session|url` silently in-memory on feliz / flutter",
+    mission: "M-T1.20",
+  },
+  {
     code: "loom.tph-backend-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3222",

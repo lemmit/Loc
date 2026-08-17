@@ -255,6 +255,69 @@ system S {
       code: string
       operation dispatch() audited { code := "x" }
     }`),
+  // `Tab` / `Column` are `group: "sub"` primitives — the parent consumes them
+  // inline, so anywhere else they degrade to a comment on all seven targets.
+  "loom.sub-primitive-misplaced": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Stack { Tab("one") } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // `persist: local|session|url` is dropped to in-memory by the feliz and
+  // flutter store emitters — an honest error until they implement the ladder.
+  "loom.store-lifetime-target-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: flutter
+    api C: Api
+    store Cart persist: local { state { count: int = 0 } }
+    page Home { route: "/"  body: Stack { Heading { Cart.count, level: 3 } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A resource handle is ambient over the whole context, but only workflow /
+  // handler / domain-service emitters have the resource client in scope.
+  "loom.resource-op-outside-workflow": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing {
+      name: string
+      operation archive() { files.put("t/" + this.name, this.name) }
+    }
+    repository Things for Thing { }
+  } }
+  api Api from Sub
+  storage pg { type: postgres }
+  storage blobs { type: s3, config: { bucket: "b" } }
+  resource st { for: C, kind: state, use: pg }
+  resource files { for: C, kind: objectStore, use: blobs }
+  deployable api {
+    platform: node
+    contexts: [C]
+    dataSources: [st, files]
+    serves: Api
+    port: 3000
+  }
+}`,
 };
 
 /**

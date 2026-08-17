@@ -38,8 +38,18 @@ const srcRoot = path.join(repoRoot, "src");
 /** The register lists every code as a string literal, so it would match itself. */
 const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts");
 
-/** Pinned `gap` count.  LOWER when you drain; raising it is reviewed. */
-const MAX_OPEN_GAPS = 37;
+/** Pinned `gap` count.  LOWER when you drain; raising it is reviewed.
+ *
+ *  37 → 38: `loom.store-lifetime-target-unsupported`.  The gap it names is not
+ *  new — `persist: local|session|url` has always been dropped to in-memory by
+ *  the feliz and flutter store emitters (flutter leaves a `// TODO(flutter
+ *  full-parity)` comment in the emitted Dart; feliz has no `.lifetime`
+ *  reference at all).  What is new is that the degradation is now HONEST
+ *  rather than silent, which is exactly the trade this register exists to
+ *  record: a gap that appears here is a gap that stopped shipping broken
+ *  output.  Drained by the wave-2 tasks that implement the ladder on both
+ *  targets, which delete the row and lower this back to 37. */
+const MAX_OPEN_GAPS = 38;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
