@@ -19,6 +19,7 @@ type ResolvedWorkflowBody = {
   correlation: ExprIR | undefined;
 };
 
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
 import { errorStatuses } from "../../ir/util/openapi-errors.js";
@@ -32,6 +33,7 @@ import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
+import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -2196,6 +2198,10 @@ function renderInstancesController(
   // and event-sourced workflows QueryAsync the `<ctx>_events` log then fold —
   // the same `instanceWireShape` projection + routes as the EF path.
   const rowMapDecls: string[] = [];
+  // Set when any workflow's instance-read gate reads the principal — the
+  // controller then takes `ICurrentUserAccessor` alongside its persistence
+  // handle (same shape as the projections controller).
+  let needsCurrentUser = false;
   for (const wf of workflows) {
     const slug = snake(wf.name);
     const T = upperFirst(wf.name);
@@ -2304,18 +2310,48 @@ function renderInstancesController(
         `        if (x is null) ${dotnetNotFoundThrow(ns, T, "id")}\n` +
         `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;
     }
+    // The instance-READ gate — evaluated BEFORE the store is touched on both
+    // routes; on the by-id route that means a denied caller cannot tell an
+    // existing correlation id from an absent one.  `ForbiddenException` maps to
+    // the resolved Forbidden rung through the DomainExceptionFilter, the same
+    // arm the command route's body gate uses.
+    const gate = wf.instanceReadGate;
+    if (gate) {
+      collectCsExprUsings(gate, usings);
+      usings.add(`${ns}.Domain.Common`); // ForbiddenException
+      if (exprUsesCurrentUser(gate)) {
+        usings.add(`${ns}.Auth`); // ICurrentUserAccessor
+        needsCurrentUser = true;
+      }
+    }
+    const gateLines = gate
+      ? (exprUsesCurrentUser(gate) ? `        var currentUser = _currentUser.User;\n` : "") +
+        `        if (!(${renderCsExpr(gate)})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: workflow ${wf.name} instances`,
+        )});\n`
+      : "";
+    const forbiddenAttr = gate
+      ? `    [ProducesResponseType(typeof(ProblemDetails), ${resolveErrorStatus(
+          "Forbidden",
+          ctx.structuralErrorStatuses,
+        )})]\n`
+      : "";
     blocks.push(
       `    [HttpGet("${slug}/instances")]\n` +
         `    [ProducesResponseType(typeof(IEnumerable<${T}InstanceResponse>), 200)]\n` +
+        forbiddenAttr +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstances(wf.name)))}()\n` +
         `    {\n` +
+        gateLines +
         listBody +
         `    }\n` +
         `    [HttpGet("${slug}/instances/{id}")]\n` +
         `    [ProducesResponseType(typeof(${T}InstanceResponse), 200)]\n` +
+        forbiddenAttr +
         `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(${corrClr} id)\n` +
         `    {\n` +
+        gateLines +
         byIdBody +
         `    }\n`,
     );
@@ -2324,9 +2360,13 @@ function renderInstancesController(
   const persistenceUsings = usingDapper
     ? "using Dapper;\nusing Npgsql;"
     : "using Microsoft.EntityFrameworkCore;";
-  const ctorField = usingDapper
-    ? `    private readonly NpgsqlDataSource _db;\n    public ${className}(NpgsqlDataSource db) => _db = db;`
-    : `    private readonly AppDbContext _db;\n    public ${className}(AppDbContext db) => _db = db;`;
+  const dbFieldType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
+  const ctorField = needsCurrentUser
+    ? `    private readonly ${dbFieldType} _db;\n` +
+      `    private readonly ICurrentUserAccessor _currentUser;\n` +
+      `    public ${className}(${dbFieldType} db, ICurrentUserAccessor currentUser)\n` +
+      `    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
+    : `    private readonly ${dbFieldType} _db;\n    public ${className}(${dbFieldType} db) => _db = db;`;
   const memberDecls = usingDapper && rowMapDecls.length > 0 ? `${rowMapDecls.join("\n")}\n\n` : "";
   return `// Auto-generated.
 using System;

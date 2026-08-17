@@ -41,6 +41,13 @@ export function fsString(value: string): string {
  *  Fully qualified because the generated `App.fs` opens no `System`. */
 export const FS_NOW = "System.DateTime.UtcNow";
 
+/** The props-record field a component's `Slot { }` reads, and the one a call
+ *  site fills with the children it passed.  A component function's single
+ *  parameter is always named `props` (`component-emit.ts`), so the body spelling
+ *  is fixed — which is what lets the argument-less `renderChildrenSlot` seam
+ *  answer at all. */
+export const FELIZ_CHILDREN_FIELD = "children";
+
 /** Pure F# leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `felizTarget` can forward straight to these. */

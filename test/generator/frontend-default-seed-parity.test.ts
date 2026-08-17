@@ -10,11 +10,11 @@ system S { subdomain M { context C {
   aggregate Order { customerId: string status: string = "draft" active: bool = true
     operation cancel(reason: string = "customer request") { status := reason } }
   repository Orders for Order { } } }
-  api Api from C
+  api Api from M
   ui Web with scaffold(aggregates: [Order]) { api C: Api
     page NewOrder { route: "/orders/new" body: CreateForm { of: Order } } }
   deployable api { platform: node, contexts: [C], serves: Api, port: ${port} }
-  deployable web { platform: ${platform}, targets: api, ui: Web, port: ${port + 1} } }`;
+  deployable web { platform: ${platform}, targets: api, ui: Web { C: api }, port: ${port + 1} } }`;
 
 describe("Angular default-seed parity", () => {
   it("seeds constant field + op-param defaults into FormControls", async () => {

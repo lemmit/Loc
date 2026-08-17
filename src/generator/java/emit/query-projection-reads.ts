@@ -19,7 +19,7 @@ import {
 } from "../../../ir/util/projection-aggregate.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
+import { MONEY_WIRE_SCALE, MONEY_WIRE_ZERO } from "../../money-scale.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import { JPQL_INTRINSIC_SQL, renderJpqlWhere } from "../render-jpql.js";
 import { projectionRepoField } from "./projection-reads.js";
@@ -629,6 +629,18 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
   if (c.isCount) {
     const asLong = inner.kind === "primitive" && inner.name === "long";
     return `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
+  }
+  // money pins the FIXED wire scale (RS-12) instead of echoing the aggregate's
+  // own: `sum`/`max`/`min` come back at the scale the rows were STORED at, so a
+  // `money("10.00")` write read back through a projection shipped `"40.00"`
+  // where `domainToWire` sends `"40.0000"` for the same declared field (#2549).
+  // Via `new BigDecimal(toString())` because JPQL types an aggregate result by
+  // provider choice — a `BigDecimal` for one, a `Double` for another.
+  if (c.isMoney) {
+    const scaled = `new java.math.BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+    return c.optional
+      ? `${read} == null ? null : ${scaled}`
+      : `${read} == null ? "${MONEY_WIRE_ZERO}" : ${scaled}`;
   }
   if (c.asString) {
     return c.optional

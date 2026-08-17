@@ -29,9 +29,12 @@
 // ---------------------------------------------------------------------------
 
 import type { EnrichedBoundedContextIR, WorkflowIR } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
 import { emitWorkflowStateSchemas, stateModule } from "../dispatch-emit.js";
+import { renderExpr } from "../render-expr.js";
+import { denialOverrides, denialResponse } from "./denial.js";
 
 /** Emit the saga-state schema(s) + the `WorkflowInstancesController` for one
  *  context, returning the instance read routes (`GET /workflows/<snake>/
@@ -54,7 +57,7 @@ export function emitVanillaWorkflowInstances(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const webModule = `${appModule}Web`;
   const actions = observable
-    .map((wf) => renderInstanceActions(contextModule, appModule, wf))
+    .map((wf) => renderInstanceActions(contextModule, appModule, wf, ctx))
     .join("\n\n");
 
   out.set(
@@ -104,45 +107,85 @@ end
  *  load + fold, nil if empty) for byId.  The projection reads `row.<field>`
  *  identically on the Ecto row and the folded `<Wf>State` struct, so the wire
  *  keys, route paths, and action names stay identical to the state path. */
-function renderInstanceActions(contextModule: string, appModule: string, wf: WorkflowIR): string {
+function renderInstanceActions(
+  contextModule: string,
+  appModule: string,
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const slug = snake(wf.name);
   const mapFields = (wf.instanceWireShape ?? [])
     .map((f) => `${f.name}: row.${snake(f.name)}`)
     .join(", ");
+  // The instance-READ gate (`workflow X requires <expr>`) — 403 before the read
+  // on BOTH actions, mirroring the projection controller's gate.  `current_user`
+  // is bound only when the predicate reads it: an unused binding fails
+  // `mix compile --warnings-as-errors`.
+  const gate = wf.instanceReadGate;
+  const gateExpr = gate
+    ? renderExpr(gate, { thisName: "record", contextModule, foundation: "vanilla" })
+    : null;
+  const cuBind =
+    gate && exprUsesCurrentUser(gate)
+      ? "    current_user = Map.get(conn.assigns, :current_user)\n"
+      : "";
+  const denial = denialResponse(
+    "forbidden",
+    JSON.stringify(`Forbidden: workflow ${wf.name} instances`),
+    denialOverrides(ctx),
+  );
+  /** Wrap one action body in the gate, or return it unchanged when ungated
+   *  (so an ungated workflow stays byte-identical). */
+  const wrap = (head: string, body: string): string =>
+    gateExpr
+      ? `${head}
+${cuBind}    if not (${gateExpr}) do
+      ${denial}
+    else
+${body.replace(/^ {4}/gm, "      ")}
+    end
+  end`
+      : `${head}
+${body}
+  end`;
   if (wf.eventSourced) {
     const streamMod = `${contextModule}.Workflows.${upperFirst(wf.name)}Stream`;
-    return `  @doc "GET /api/workflows/${slug}/instances"
-  def ${slug}_instances(conn, _params) do
-    data = Enum.map(${streamMod}.list_instances(), fn row -> %{${mapFields}} end)
-    json(conn, data)
-  end
+    return `${wrap(
+      `  @doc "GET /api/workflows/${slug}/instances"
+  def ${slug}_instances(conn, _params) do`,
+      `    data = Enum.map(${streamMod}.list_instances(), fn row -> %{${mapFields}} end)
+    json(conn, data)`,
+    )}
 
-  @doc "GET /api/workflows/${slug}/instances/:id"
-  def ${slug}_instance(conn, %{"id" => id}) do
-    case ${streamMod}.instance_by_id(id) do
+${wrap(
+  `  @doc "GET /api/workflows/${slug}/instances/:id"
+  def ${slug}_instance(conn, %{"id" => id}) do`,
+  `    case ${streamMod}.instance_by_id(id) do
       nil ->
         ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)}", id)
 
       row ->
         json(conn, %{${mapFields}})
-    end
-  end`;
+    end`,
+)}`;
   }
   const stateMod = stateModule(contextModule, wf);
-  return `  @doc "GET /api/workflows/${slug}/instances"
-  def ${slug}_instances(conn, _params) do
-    data = Enum.map(${appModule}.Repo.all(${stateMod}), fn row -> %{${mapFields}} end)
-    json(conn, data)
-  end
+  return `${wrap(
+    `  @doc "GET /api/workflows/${slug}/instances"
+  def ${slug}_instances(conn, _params) do`,
+    `    data = Enum.map(${appModule}.Repo.all(${stateMod}), fn row -> %{${mapFields}} end)
+    json(conn, data)`,
+  )}
 
-  @doc "GET /api/workflows/${slug}/instances/:id"
-  def ${slug}_instance(conn, %{"id" => id}) do
-    case ${appModule}.Repo.get(${stateMod}, id) do
+${wrap(
+  `  @doc "GET /api/workflows/${slug}/instances/:id"
+  def ${slug}_instance(conn, %{"id" => id}) do`,
+  `    case ${appModule}.Repo.get(${stateMod}, id) do
       nil ->
         ProblemDetails.not_found_response(conn, "${upperFirst(wf.name)}", id)
 
       row ->
         json(conn, %{${mapFields}})
-    end
-  end`;
+    end`,
+)}`;
 }

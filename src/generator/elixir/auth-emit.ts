@@ -4,6 +4,7 @@ import type {
   DeployableIR,
   FieldIR,
   SystemIR,
+  TypeIR,
   UserIR,
 } from "../../ir/types/loom-ir.js";
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
@@ -122,7 +123,7 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   }
   files.set(
     `lib/${appName}_web/controllers/auth_controller.ex`,
-    renderAuthController(webModule, auth, deployable.port ?? 4000),
+    renderAuthController(webModule, sys.user, auth, deployable.port ?? 4000),
   );
 
   return { files, enabled: true };
@@ -307,7 +308,7 @@ ${devClaimStringFields
     : "";
   // OIDC verifier vs dev stub.  The OIDC path additionally needs the JWKS
   // discovery/verification helpers; the dev stub needs none.
-  const verifierSection = auth ? renderOidcVerifier(auth, webModule) : renderDevStubVerifier();
+  const verifierSection = auth ? renderOidcVerifier(auth, webModule) : renderDevStubVerifier(user);
   const verifierDoc = auth
     ? "validates the inbound JWT via joken + joken_jwks against the issuer's JWKS (D-AUTH-OIDC)"
     : "is a permissive DEV STUB — replace verify_token/1 for production";
@@ -702,26 +703,92 @@ end
 `;
 }
 
-function renderDevStubVerifier(): string {
+function renderDevStubVerifier(user: UserIR | undefined): string {
+  // The stub identity is DERIVED FROM THE DECLARED `user { … }` SHAPE — one
+  // type-shaped value per declared field — not a fixed three-key map (#2548).
+  //
+  // It used to be `%{"id" => …, "role" => "admin", "permissions" => []}`, which
+  // `build_user/1` then read by declared field name: a field named `role` got
+  // "admin" by coincidence of NAME (and regardless of its declared TYPE — an
+  // `int` role was handed a string), and every other declared field — the
+  // `tenantId` of every tenancy system among them — came back `nil` while the
+  // other four backends filled it.  `/api/auth/me` is a contract over the
+  // declared shape, so a non-optional field must not answer null; the
+  // `x-loom-dev-claims` override below is already keyed by declared field name,
+  // and this makes the DEFAULT it merges over agree with it.
+  //
+  // The value table is the one node/python/java/dotnet already share
+  // (`renderStubUserLiteral` / `renderPyStubUserKwargs` / `stubValue` /
+  // `stubCsharpValueFor`): string → "admin", guid → the zero uuid, numbers → 0,
+  // bool → false, datetime → the epoch, array → EMPTY (so a permission-guarded
+  // surface denies by default), optional → nil.
+  //
+  // Keys are the snake_cased field names because the dev-stub arm of
+  // `build_user/1` reads flat `claims[snake(field)]` (the OIDC arm walks the
+  // configured claim path instead).
+  const claimEntries = (user?.fields ?? []).map(
+    (f) => `       ${JSON.stringify(snake(f.name))} => ${elixirStubValueFor(f)}`,
+  );
+  // `%{}` for a shapeless user block, so the emitted term stays formatter-clean
+  // either way (an empty map never reaches the multi-line layout).
+  const claims =
+    claimEntries.length > 0 ? `\n     %{\n${claimEntries.join(",\n")}\n     }}` : " %{}}";
   return `  # ---------------------------------------------------------------------------
   # User-supplied JWT verifier hook.  Default DEV STUB accepts every request
   # (nil included) as a built-in admin user so a generated stack boots
   # end-to-end — the same out-of-the-box behaviour as the Hono and .NET
-  # dev-stub verifiers.  REPLACE for production with a real JWT decoder, or
-  # declare an \`auth { oidc { … } }\` block to get the generated OIDC verifier.
+  # dev-stub verifiers.  The identity fills every field the system's
+  # \`user { … }\` block declares, so \`/auth/me\` answers the full declared shape.
+  # REPLACE for production with a real JWT decoder, or declare an
+  # \`auth { oidc { … } }\` block to get the generated OIDC verifier.
   # ---------------------------------------------------------------------------
 
   defp verify_token(token) do
     _ = token
 
-    {:ok,
-     %{
-       "id" => "00000000-0000-0000-0000-000000000000",
-       "role" => "admin",
-       "permissions" => []
-     }}
+    {:ok,${claims}
   end
 `;
+}
+
+/** One dev-stub claim value for a declared `user { … }` field — the Elixir arm
+ *  of the shared stub table (see `renderDevStubVerifier`).  An optional field
+ *  is `nil`: the declaration says the principal may not carry it. */
+function elixirStubValueFor(f: FieldIR): string {
+  if (f.optional) return "nil";
+  return elixirStubValueForType(f.type);
+}
+
+function elixirStubValueForType(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "string":
+          return `"admin"`;
+        case "int":
+        case "long":
+          return "0";
+        // Jason encodes a Decimal through its String.Chars impl, so this rides
+        // the wire as "0" — the same shape node's `"0"` sends.
+        case "decimal":
+        case "money":
+          return `Decimal.new("0")`;
+        case "bool":
+          return "false";
+        case "datetime":
+          return "~U[1970-01-01 00:00:00Z]";
+        case "guid":
+          return `"00000000-0000-0000-0000-000000000000"`;
+        default:
+          return `""`;
+      }
+    case "id":
+      return `"00000000-0000-0000-0000-000000000000"`;
+    case "array":
+      return "[]";
+    default:
+      return "nil";
+  }
 }
 
 function renderBuildUser(user: UserIR | undefined, auth: AuthIR | undefined): string {
@@ -780,10 +847,32 @@ function envOrDeclared(envVar: string, v: AuthValueIR | undefined): string {
 // No login form — the IdP hosts the credential pages.
 // ---------------------------------------------------------------------------
 
-function renderAuthController(webModule: string, auth: AuthIR | undefined, port: number): string {
-  const me = `  @doc "GET /auth/me — the verified principal, or null."
+function renderAuthController(
+  webModule: string,
+  user: UserIR | undefined,
+  auth: AuthIR | undefined,
+  port: number,
+): string {
+  // The DECLARED `user { … }` shape, BY DECLARED NAME, and nothing else
+  // (#2548).  Encoding the assign directly spelled every key the way the
+  // internal map does — `tenantId` reached the wire as `tenant_id` — and shipped
+  // the derived tenancy members (`org_path` / `root_org`) alongside, which are
+  // per-request scoping state rather than part of the declared principal.  The
+  // other four backends project the same way.
+  const meProjection = (user?.fields ?? [])
+    .map((f) => `          ${JSON.stringify(f.name)} => user[:${snake(f.name)}]`)
+    .join(",\n");
+  const me = `  @doc "GET /auth/me — the declared \`user { … }\` shape, or null."
   def me(conn, _params) do
-    json(conn, conn.assigns[:current_user])
+    case conn.assigns[:current_user] do
+      nil ->
+        json(conn, nil)
+
+      user ->
+        json(conn, %{
+${meProjection}
+        })
+    end
   end`;
 
   if (!auth) {

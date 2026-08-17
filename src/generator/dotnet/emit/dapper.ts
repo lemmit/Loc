@@ -62,6 +62,15 @@ import { renderRetrievalParamsWithCt } from "./repository.js";
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
 const tableOf = (aggName: string): string => plural(snake(aggName));
 
+/** The state table an aggregate's rows live in — the SAME derivation the
+ *  repositories and the DDL use, exported so the OTHER raw-Npgsql readers
+ *  (the query-time projection handlers, which query the table directly rather
+ *  than through a repository) name the identical table.  Pass the TPH BASE
+ *  name for a `sharedTable` concrete: it has no table of its own. */
+export function dapperAggregateTable(aggName: string): string {
+  return tableOf(aggName);
+}
+
 /** SQL + C# row type for an id value type. */
 export function idTypes(vt: IdValueType): { sql: string; cs: string } {
   switch (vt) {
@@ -620,12 +629,12 @@ const SQL_BINOP: Record<string, string> = {
  *  `this.<refColl>.contains(x)` membership predicate can resolve its
  *  AssociationIR and correlate the EXISTS subquery on the owner table's
  *  `id`.  Absent for callers with no reference collections (byte-identical). */
-interface WhereSqlCtx {
+export interface WhereSqlCtx {
   agg: EnrichedAggregateIR;
   table: string;
 }
 
-function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
+export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
   switch (e.kind) {
     case "paren":
       return `(${whereToSql(e.inner, sqlCtx)})`;
@@ -771,20 +780,20 @@ function currentUserParam(member: string): string {
  *  (GetById / FindManyByIds / retrievals), or the `currentUser` method
  *  parameter the shared repository interface adds to a `currentUser`-referencing
  *  find. */
-interface FilterPrincipalRef {
+export interface FilterPrincipalRef {
   param: string; // `__cu_tenantId`
   claimProp: string; // `TenantId`
 }
 
 /** `${param} = ${base}.${claimProp}` fields for a `new { … }` / DynamicParameters. */
-function principalFields(refs: readonly FilterPrincipalRef[], base: string): string[] {
+export function principalFields(refs: readonly FilterPrincipalRef[], base: string): string[] {
   return refs.map((r) => `${r.param} = ${base}.${r.claimProp}`);
 }
 
 /** Collect the distinct `currentUser.<claim>` references across the given
  *  predicates (deduped by claim), so the repository can bind each
  *  `@__cu_<claim>` param from the principal on every SELECT. */
-function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPrincipalRef[] {
+export function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPrincipalRef[] {
   const byParam = new Map<string, FilterPrincipalRef>();
   const walk = (e: ExprIR): void => {
     switch (e.kind) {

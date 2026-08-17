@@ -410,7 +410,7 @@ export function renderAuthFiles(
   // the redirect handshake (/auth/login|callback|logout).  Always emitted
   // when auth is required (this function only runs then), mirroring the
   // .NET `authMe`/`authHandshake` split in emit/program.ts.
-  out.set("AuthController.java", renderAuthController(pkg, oidc));
+  out.set("AuthController.java", renderAuthController(pkg, fields, oidc));
   // The generated OIDC verifier (D-AUTH-OIDC) — JWKS signature + iss/exp +
   // claim mapping onto the typed User.  @Primary so it wins over the dev
   // stub the moment an `auth { oidc }` block is present.
@@ -827,7 +827,11 @@ function renderOidcVerifier(fields: FieldIR[], auth: AuthIR, pkg: string): strin
 // (cross-backend parity — Hono/.NET keep /auth/* out of their contracts too).
 // ---------------------------------------------------------------------------
 
-function renderAuthController(pkg: string, auth: AuthIR | undefined): string {
+function renderAuthController(
+  pkg: string,
+  userFields: readonly FieldIR[],
+  auth: AuthIR | undefined,
+): string {
   const handshake = auth ? renderHandshakeMethods(auth) : [];
   const handshakeImports = auth
     ? [
@@ -912,7 +916,15 @@ import org.springframework.http.ResponseEntity;`,
     `                .header("WWW-Authenticate", "Bearer realm=\\"api\\", error=\\"invalid_token\\"")`,
     `                .body(pd);`,
     `        }`,
-    `        return ResponseEntity.ok(user);`,
+    // The DECLARED `user { … }` shape, BY DECLARED NAME, and nothing else
+    // (#2548) — spelled out rather than left to Jackson's record introspection,
+    // so this backend's `/auth/me` body is decided here and agrees with the
+    // other four by construction (they project explicitly too).  The derived
+    // tenancy members (`orgPath()` / `rootOrg()`) are per-request scoping
+    // state, not part of the declared principal, so they stay off the wire.
+    `        var body = new java.util.LinkedHashMap<String, Object>();`,
+    ...userFields.map((f) => `        body.put("${f.name}", user.${f.name}());`),
+    `        return ResponseEntity.ok(body);`,
     `    }`,
     ...handshake,
     `}`,

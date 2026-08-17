@@ -30,7 +30,7 @@ system Shop {
         operation tagWith(t: string): Order or Rejected {
           tags += t
           tags -= t
-          total += 1
+          total := total + 1
           recompute()
         }
         function recompute(): int = this.total + 1
@@ -144,7 +144,7 @@ describe("vanilla exception-less returning op — collection mutations + call", 
     // `tags += t` / `tags -= t` collection rebinds.
     expect(fn).toMatch(/record = %\{record \| tags: \(record\.tags \|\| \[\]\) \+\+ \[t\]\}/);
     expect(fn).toMatch(/record = %\{record \| tags: List\.delete\(record\.tags \|\| \[\], t\)\}/);
-    // `total += 1` scalar arithmetic.
+    // `total := total + 1` scalar arithmetic (`+=` is collection-only).
     expect(fn).toMatch(/record = %\{record \| total: record\.total \+ 1\}/);
     // `recompute()` bare call → a real call to the emitted aggregate
     // `function` (§11b), discarding the result (`_ = recompute(record)`).

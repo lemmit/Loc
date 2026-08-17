@@ -36,7 +36,7 @@ describe("user-defined components — Vue", () => {
     const files = await vueFiles(
       sys(`
       component WelcomeBox(name: string) {
-        body: Card { "Hello, " + name, Stack { Text { "Welcome!" } } }
+        body: Card { \`Hello, {name}\`, Stack { Text { "Welcome!" } } }
       }
       page Home { route: "/" body: Heading { "home" } }`),
     );
@@ -59,7 +59,7 @@ describe("user-defined components — Vue", () => {
   it("a page invoking a component imports the SFC and renders the tag", async () => {
     const files = await vueFiles(
       sys(`
-      component WelcomeBox(name: string) { body: Card { "Hi, " + name } }
+      component WelcomeBox(name: string) { body: Card { \`Hi, {name}\` } }
       page Home { route: "/" body: WelcomeBox("Alice") }`),
     );
     const home = files.get("src/pages/home.vue")!;

@@ -82,9 +82,10 @@ describe("hono whole-table aggregation", () => {
     // money row field is `z.string()`; an int/decimal one is a number.
     const p = await routes();
     expect(p).toContain("orders: Number(row?.orders ?? 0),");
-    expect(p).toContain('revenue: String(row?.revenue ?? "0"),');
+    // money pins the fixed wire scale (RS-12 / #2549).
+    expect(p).toContain("revenue: new Decimal(row?.revenue ?? 0).toFixed(4),");
     expect(p).toContain("avgLines: Number(row?.avgLines ?? 0),");
-    expect(p).toContain('biggest: String(row?.biggest ?? "0"),');
+    expect(p).toContain("biggest: new Decimal(row?.biggest ?? 0).toFixed(4),");
   });
 
   it("imports the drizzle aggregate helpers it calls", async () => {

@@ -207,8 +207,8 @@ describe("svelte generator — project shape", () => {
             body: QueryView { of: Sales.Item.byId(id), single: true, data: o => Text { o.name } }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: svelte, targets: api, ui: WebApp, port: 3002 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: svelte, targets: api, ui: WebApp { Sales: api }, port: 3002 }
       }
     `);
     const detail = out.get("web/src/routes/(app)/items/[id]/+page.svelte") ?? "";
