@@ -110,7 +110,13 @@ const REGISTERED: Ratchet[] = [
     max: 0,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
-  // not gaps — these never reach the compiler.
+  // not gaps — these never reach the compiler.  1 -> 5: the reclassification
+  // above (+3 query-time-projection fixtures, one of them the `projection-join`
+  // fixture minted by the clause census) plus `read-gates`, whose query-time
+  // gate kind hit the same boundary.  Every added entry is ONE pre-existing
+  // boundary meeting more fixtures, not a new suppression — but the raise is
+  // still a reviewed line, and `read-gates` costs this leg its find-gate and
+  // folded-projection-gate coverage as collateral (stated at the entry).
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_UNSUPPORTED",
@@ -157,6 +163,38 @@ const REGISTERED: Ratchet[] = [
     name: "UNCOVERED",
     kind: "set",
     max: 38,
+  },
+  // The MikroORM behavioural leg's skip register.  It was NOT registered here
+  // until `projection-join` (a query-time projection the adapter refuses) had to
+  // be added — so it had been growing unwatched, which is precisely the
+  // silent-growth this ratchet exists to stop.  It carries its own STALE-key
+  // check inside the runner (a key naming no corpus fixture fails the leg), but
+  // nothing bounded its SIZE.
+  //
+  // The pin has now moved in BOTH directions inside one PR, which is the whole
+  // case for it existing:
+  //   4 -> 5  `policy-deny` was added on `main` by the read-deny work while
+  //           this pin said 4. The registration's first act was catching a
+  //           concurrent grower from another author.
+  //   5 -> 2  M-T6.23 slice 4 (#2533) landed the adapter's query-time
+  //           projection reads, retiring `projection-aggregation` /
+  //           `-groupby` / `-join` together — one boundary, three fixtures,
+  //           drained in one go. The `no stale slack` check is what forced
+  //           this line down; left at 5 the register could have re-grown by
+  //           three without anyone noticing.
+  //
+  // What remains is two INDEPENDENT gaps, so the next drain will not be
+  // wholesale: `prefix-filter` (the declared `MIKROORM_SUBSET` predicate
+  // narrowing) and `policy-deny` (the read-deny form outside that subset).
+  //
+  // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
+  // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
+  // is real and stated at the entry.
+  {
+    file: "test/behavioral/run-mikroorm.mjs",
+    name: "MIKRO_SKIP",
+    kind: "record",
+    max: 2,
   },
 ];
 

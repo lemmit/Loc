@@ -123,7 +123,12 @@ function wireProjectionEntity(
   return `{ ${parts.join(", ")} }`;
 }
 
-function wireProjectionValue(
+/** Render one DOMAIN value to its wire form.  Exported because the query-time
+ *  projection route emitter must serialise a `select`ed domain value EXACTLY as
+ *  the aggregate's own `toWire` does — money's fixed RS-12 scale in particular
+ *  (`.toFixed(4)`, not `String(...)`, which decimal.js renders as `"10"`), or a
+ *  projection row and an aggregate read disagree on the same column's format. */
+export function wireProjectionValue(
   expr: string,
   t: TypeIR,
   ctx: BoundedContextIR,

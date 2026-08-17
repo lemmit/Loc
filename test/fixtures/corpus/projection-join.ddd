@@ -1,0 +1,121 @@
+// A query-time projection's `join` clause — the by-id follow.
+//
+// `join <Agg> as <alias> on <idRef>` resolves a reference field to the loaded
+// aggregate behind it, so a read model can carry a field from the REFERENCED
+// row without the source aggregate duplicating it. The join is by-id only
+// (`ProjectionJoin`'s `on` is the target's identity — arbitrary join keys are
+// rejected, boundary-respecting), and it sits between `where` and `select`.
+//
+// Why this fixture exists: the clause census (test/system/clause-census.test.ts)
+// found `ProjectionJoin` at ZERO — no `.ddd` anywhere in the repo authored a
+// `join`, on any projection, while FOUR backend emitters
+// (elixir/java/dotnet/python `query-projection*`), the lowering pass
+// (`lower-projection.ts`) and two validator check files all read `proj.joins`.
+// An emit path with no witness: it compiled nowhere, and the first person to
+// find out would have been whoever wrote the first `join`.
+//
+// The runtime caller matters as much as the compile: a join is a JOIN — the
+// value it contributes comes from another table, so "the route answers 200" is
+// exactly the assertion that cannot tell a working join from one that silently
+// projects null.
+system ProjectionJoinSys {
+  subdomain Sales {
+    context Orders {
+      aggregate Customer with crudish {
+        name: string
+        tier: string
+      }
+
+      aggregate Order with crudish {
+        code: string
+        total: money
+        customerId: Customer id
+        derived display: string = code
+      }
+
+      repository Orders for Order { }
+      repository Customers for Customer { }
+
+      // The join: each row carries the ORDER's own columns plus two fields
+      // that live on the referenced CUSTOMER row.  A backend that dropped the
+      // join emits null (or fails to compile) exactly here.
+      projection OrderWithCustomer {
+        orderId: Order id
+        code: string
+        total: money
+        customerName: string
+        customerTier: string
+        from Order as o
+        join Customer as c on o.customerId
+        select orderId = o.id,
+               code = o.code,
+               total = o.total,
+               customerName = c.name,
+               customerTier = c.tier
+      }
+    }
+  }
+
+  api OrdersApi from Sales
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+
+  test e2e "the join carries the referenced row's fields onto every projection row" against d {
+    let acme = api.customers.create({ name: "Acme", tier: "gold" })
+    let globex = api.customers.create({ name: "Globex", tier: "silver" })
+    let o1 = api.orders.create({ code: "O-1", total: money("10.00"), customerId: acme.id })
+    let o2 = api.orders.create({ code: "O-2", total: money("20.00"), customerId: globex.id })
+
+    let rows = api.orderWithCustomer.list()
+    expect(rows.count()).toBe(2)
+
+    // The whole point of the clause: `customerName` / `customerTier` are NOT
+    // columns of `orders`. A dropped join reads null here while the row count,
+    // the order's own columns and the HTTP status all still look right.
+    let first = rows.where(r => r.code == "O-1").first()
+    expect(first.customerName).toBe("Acme")
+    expect(first.customerTier).toBe("gold")
+    expect(decimal(first.total)).toBe(10)
+
+    let second = rows.where(r => r.code == "O-2").first()
+    expect(second.customerName).toBe("Globex")
+    expect(second.customerTier).toBe("silver")
+
+    // The join FOLLOWS the reference, so re-pointing an order at the other
+    // customer must move its joined fields — a backend that resolved the join
+    // once (or keyed it off the wrong column) keeps the stale name here.
+    api.orders.update(o1, { code: "O-1", total: money("10.00"), customerId: globex.id })
+    let moved = api.orderWithCustomer.list().where(r => r.code == "O-1").first()
+    expect(moved.customerName).toBe("Globex")
+    expect(moved.customerTier).toBe("silver")
+
+    // The aggregates' own routes beside the read model.
+    let listed = api.orders.all()
+    expect(listed.total).toBe(2)
+    let readBack = api.orders.getById(o2)
+    expect(readBack.code).toBe("O-2")
+    let customers = api.customers.all()
+    expect(customers.total).toBe(2)
+    expect(api.customers.getById(acme).name).toBe("Acme")
+    api.customers.update(acme, { name: "Acme Corp", tier: "gold" })
+    expect(api.customers.getById(acme).name).toBe("Acme Corp")
+
+    api.orders.destroy(o1)
+    api.orders.destroy(o2)
+    expect(api.orders.getById(o1)).toThrow(404)
+    let empty = api.orderWithCustomer.list()
+    expect(empty.count()).toBe(0)
+    api.customers.destroy(acme)
+    api.customers.destroy(globex)
+    let noCustomers = api.customers.all()
+    expect(noCustomers.total).toBe(0)
+  }
+}

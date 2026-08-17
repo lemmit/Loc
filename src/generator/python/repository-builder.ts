@@ -1474,7 +1474,12 @@ function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
 
 // --- wire projection ----------------------------------------------------------
 
-function wireValue(
+/** Render one DOMAIN value to its wire form.  Exported because the query-time
+ *  projection route emitter must serialise a `select`ed domain value EXACTLY as
+ *  the aggregate's own `to_wire` does — money through `money_str` at the fixed
+ *  RS-12 scale, datetimes through `iso` — or the response model (which declares
+ *  `str`) rejects the raw `Decimal`/`datetime` at runtime with a 500. */
+export function wireValue(
   expr: string,
   t: TypeIR,
   ctx: EnrichedBoundedContextIR,

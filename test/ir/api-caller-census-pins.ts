@@ -432,6 +432,8 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
     "api.orderVolume.list (no such aggregate)",
     "api.salesTotals.list (no such aggregate)",
   ],
+  // The by-id-follow join's read — same `notLifted` class, third shape.
+  "corpus/projection-join": ["api.orderWithCustomer.list (no such aggregate)"],
   "corpus/projection-groupby": [
     "api.revenueByDay.list (no such aggregate)",
     "api.salesByStatus.list (no such aggregate)",
