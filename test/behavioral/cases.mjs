@@ -16,6 +16,11 @@ import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import pg from "pg";
+// The pure registers live in a dependency-free module so the fast suite can
+// read them without test/behavioral/node_modules (see registers.mjs).
+import { BEHAVIOURAL_SKIP, hasBehaviouralBlock } from "./registers.mjs";
+
+export { BEHAVIOURAL_SKIP, hasBehaviouralBlock };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
@@ -71,13 +76,6 @@ export async function loadCorpusFeatures(workDir) {
   });
   const { CORPUS } = await import(pathToFileURL(bundled).href);
   return CORPUS;
-}
-
-/** True when a `.ddd` carries a behavioural block a runner can boot — a
- *  `test e2e "…"` (api) or a domain `test "…"` (unit). Mirror of the gate's
- *  detection in test/conformance/behavioural-coverage.test.ts. */
-export function hasBehaviouralBlock(src) {
-  return /(^|\n)\s*test\s+e2e\s+"/.test(src) || /(^|\n)\s*test\s+"/.test(src);
 }
 
 /** Corpus-feature cases for one backend: every manifest feature that declares
@@ -271,63 +269,6 @@ export async function resetDatabase(pgUrl) {
   }
 }
 
-/** Per-(platform, case) behavioural skips: a corpus feature or shared system that
- *  GENERATES and COMPILES on a backend but whose RUNTIME behaviour has a known,
- *  tracked gap there.  Honest and documented (not a silent drop) — the case still
- *  runs on every other backend, the gate (behavioural-coverage.test.ts) still
- *  requires it to EMIT everywhere, and each entry cites its bug in
- *  docs/audits/behavioral-parity-bugs-2026-07.md.  Removing an entry is how a fix
- *  re-arms the boot.  Keyed by platform clause; applies to BOTH featureCases and
- *  sharedSystemCases (a case name is either a corpus feature id or a systems/ file). */
-/** Exported so the fast-suite golden-coverage gate
- *  (test/conformance/wire-golden-coverage.test.ts) can derive "does this case
- *  run anywhere?" from the SAME register the runners filter by, rather than
- *  keeping a second copy of it in sync. */
-export const BEHAVIOURAL_SKIP = {
-  node: {
-    // B1 fixed (event-sourced create now folds events before asserting
-    // invariants — src/generator/typescript/emit/aggregate.ts).  `ledger`
-    // re-armed; no node skips remain.
-  },
-  dotnet: {
-    // B2/B3/B4/B8/B12 fixed — no dotnet skips remain. (B12: `crudish` on a
-    // `shape: document` aggregate now emits a matching `DeleteAsync` on the
-    // document-repo impl, so the interface/impl method sets agree; repository.ts.)
-  },
-  java: {},
-  // The DAPPER adapter of the .NET backend (`run-dapper.mjs` forces this exact
-  // clause, and looks the skip set up by it).
-  "dotnet { persistence: dapper }": {
-    // DRAINED — all three entries (`projection-aggregation`, `projection-groupby`,
-    // `read-gates`) claimed one boundary: "dapper emits no query-time projection
-    // reads, `loom.dapper-unsupported` refuses to generate".  That claim was true
-    // when `src/generator/dotnet/query-projection-emit.ts` had no `dapper` branch
-    // at all (#2468); M-T6.25 ported the four direct-table arms to raw Npgsql, so
-    // the three fixtures generate, compile and answer on this adapter.  The
-    // adapter's own oracle agrees and is the ratchet that would have caught a
-    // stale entry here: `test/e2e/corpus-dotnet-dapper-build.test.ts` now carries
-    // `DAPPER_UNSUPPORTED = { "tenancy-hierarchy": … }` and nothing else, and it
-    // FAILS an entry whose `loom.dapper-unsupported` no longer fires.  Deleting
-    // these three RE-ARMS boots that had never run once on this leg.
-  },
-  elixir: {
-    // B19 (`seed-values`) is FIXED — M-T6.37 landed the Ecto seeder, so this leg
-    // now runs the collection reads over seeded rows like the other four:
-    // `<Ctx>.Seeds` (elixir/vanilla/seed-emit.ts) inserts domain rows through the
-    // aggregate's repository changeset, `raw` rows as schema-qualified INSERTs,
-    // ship-once per dataset behind the `__loom_seed` marker, invoked from
-    // `Application.start/2` on a SERVING node.  Its skip entry is deleted rather
-    // than re-worded: an allowlist ratchets, so the fix removes the waiver.
-    // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
-    // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
-    // now mints a valid PascalCase module alias; openapi-emit.ts.)
-    // (B9: single `contains`
-    // arms the `__put_assoc_parts/1` helper on an `assign` mutation + the helper
-    // handles a single `has_one` struct; context-emit.ts. B10: parent-table
-    // migrations ordered FK-topologically so a cross-aggregate reference target
-    // is created first; migrations-emit.ts.)
-  },
-};
 
 /** Filter a case-name list against the platform's behavioural skip set. */
 function notSkipped(names, platformClause) {

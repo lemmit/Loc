@@ -2,12 +2,13 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BEHAVIOURAL_SKIP, hasBehaviouralBlock } from "../behavioral/cases.mjs";
 import {
+  BEHAVIOURAL_SKIP,
   GOLDEN_OPT_OUT,
   goldenPath,
+  hasBehaviouralBlock,
   sharedSystemGoldenCases,
-} from "../behavioral/wire-differential.mjs";
+} from "../behavioral/registers.mjs";
 import { BACKENDS, PLATFORM_CLAUSE } from "../fixtures/corpus/backends.js";
 import { corpusSource } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
@@ -32,15 +33,19 @@ import { CORPUS } from "../fixtures/corpus/manifest.js";
 //
 // NO SECOND COPY OF ANY REGISTER.  The required set is derived from the same
 // sources the runners assemble their cases from — `CORPUS` (the manifest),
-// `BEHAVIOURAL_SKIP` + `hasBehaviouralBlock` (cases.mjs), `GOLDEN_OPT_OUT` +
-// `sharedSystemGoldenCases` (wire-differential.mjs), and corpus.json's curated
+// `BEHAVIOURAL_SKIP` + `hasBehaviouralBlock` + `GOLDEN_OPT_OUT` +
+// `sharedSystemGoldenCases` (all four now in the dependency-free
+// behavioral/registers.mjs), and corpus.json's curated
 // broad systems.  (That last one is why the orphan arm below matters: the first
 // draft of this file derived from the first three only, and the two example
-// systems' goldens looked like dead files.)  Those `.mjs` modules
-// resolve their own deps (`pg`, `esbuild`) out of test/behavioral/node_modules
-// because Node/Vite resolve bare specifiers from the IMPORTING file's directory,
-// not the test's — so the fast suite can read them directly and does not need a
-// forked list.
+// systems' goldens looked like dead files.)
+//
+// It imports `registers.mjs` and NOT `cases.mjs` / `wire-differential.mjs`, and
+// that is load-bearing rather than tidiness: those two pull in `pg` and
+// `esbuild` from test/behavioral/node_modules, which the ROOT install does not
+// create.  Importing them here passes on a machine that has run `npm ci` in
+// test/behavioral and fails in CI with `Cannot find package 'esbuild'` — which
+// is exactly how the first version of this file landed red.
 //
 // THE DAPPER LEG IS DELIBERATELY NOT IN THE UNION.  `run-dapper.mjs` re-runs the
 // `dotnet` key under the `dotnet { persistence: dapper }` clause, whose skip set
@@ -104,7 +109,7 @@ describe("wire-golden coverage — every recorded case has an answer key", () =>
           "and reports 0 test failures alongside a non-zero exit.\n" +
           `Capture the answer key from the oracle and REVIEW the diff:\n` +
           `    cd test/behavioral && LOOM_WIRE_UPDATE=1 node run.mjs ${name}\n` +
-          "(or sign a GOLDEN_OPT_OUT entry in test/behavioral/wire-differential.mjs).",
+          "(or sign a GOLDEN_OPT_OUT entry in test/behavioral/registers.mjs).",
       ).toBe(true);
     });
   }

@@ -250,7 +250,17 @@ const REGISTERED: Ratchet[] = [
   // the next backend that wants to opt a whole case out of its leg.
   //
   // NOTE, as with MIKRO_SKIP: it lives in a `.mjs` runner, not a vitest file.
-  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 0 },
+  // It moved out of `cases.mjs` into the dependency-free `registers.mjs` so the
+  // fast-suite golden-coverage gate can read it without test/behavioral's own
+  // node_modules; this ratchet is what NOTICED the move (`allowlist
+  // 'BEHAVIOURAL_SKIP' not found — did it move/rename?`), which is the point of
+  // pinning by file rather than by name alone.
+  {
+    file: "test/behavioral/registers.mjs",
+    name: "BEHAVIOURAL_SKIP",
+    kind: "nested-record",
+    max: 0,
+  },
   // The Elixir corpus compile tier's skip map — the fifth leg of the per-backend
   // set registered above (java / python / dotnet / tsc), left out only because
   // it lives in its own workflow (`corpus-elixir-build.yml`, split off for the
