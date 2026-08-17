@@ -21,7 +21,9 @@ const SRC = `system S { subdomain O { context O {
   workflow OrderFulfillment { orderId: Order id  attempts: int  status: FulfillmentStatus
     create(p: OrderPlaced) by p.order { let s = Shipment.create({ orderRef: p.order, status: "P" }) emit ShipmentRequested { shipment: s.id, order: p.order } }
     on(s: ShipmentRequested) by s.order { let sh = Shipments.getById(s.shipment) sh.mark() } }
-} } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 // A workflow with no correlation field — a pure command workflow, no saga row,
 // so no instance surface.
@@ -29,7 +31,9 @@ const PLAIN = `system S { subdomain O { context O {
   aggregate Order { total: int  operation bump() { total := total + 1 } }
   repository Orders for Order { }
   workflow BumpAll { create(order: Order id) { let o = Orders.getById(order) o.bump() } }
-} } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(src: string): Promise<Map<string, string>> {
   const { model, errors } = await parseString(src);

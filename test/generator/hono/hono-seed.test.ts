@@ -28,9 +28,12 @@ const FIXTURE = `system AcmeSeed {
     }
   }
   api ShopApi from Shop
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
   deployable api {
     platform: node
     contexts: [Catalog]
+    dataSources: [catalogState]
     serves: ShopApi
     port: 3000
   }
@@ -97,7 +100,9 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
         }
       }}
       api A from S
-      deployable api { platform: node contexts: [C] serves: A port: 3000 }
+      storage primary { type: postgres }
+      resource cState { for: C, kind: state, use: primary }
+      deployable api { platform: node contexts: [C] dataSources: [cState] serves: A port: 3000 }
     }`;
     const { model, errors } = await parseString(src);
     if (errors.length) throw new Error(errors.join("\n"));
@@ -125,7 +130,9 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
         }
       }
       api A from Shop
-      deployable api { platform: node contexts: [C] serves: A port: 3000 }
+      storage primary { type: postgres }
+      resource cState { for: C, kind: state, use: primary }
+      deployable api { platform: node contexts: [C] dataSources: [cState] serves: A port: 3000 }
     }`;
     const { model, errors } = await parseString(src);
     if (errors.length) throw new Error(errors.join("\n"));
@@ -210,17 +217,27 @@ describe("Hono seeding — raw explicit-id path", () => {
       }
     } }
     api A from Sales
-    deployable api { platform: node contexts: [Sales] serves: A port: 3000 }
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api { platform: node contexts: [Sales] dataSources: [salesState] serves: A port: 3000 }
   }`;
 
   it("emits direct INSERTs via db.execute(sql.raw(...)) with explicit id + FK", async () => {
     const { model, errors } = await parseString(RAW);
     if (errors.length) throw new Error(errors.join("\n"));
     const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    // Schema-qualified, because every accepted model qualifies: a backend
+    // deployable hosting a context MUST bind a dataSource for it
+    // (`loom.persistence-mode-unsupported`), and that binding puts the
+    // context's tables in their own Postgres schema.  The bare
+    // `INSERT INTO "customers"` this used to pin is a shape no user can
+    // generate — it only existed because the fixture skipped the binding.
     expect(seed).toContain(
-      'db.execute(sql.raw("INSERT INTO \\"customers\\" (\\"id\\", \\"name\\") VALUES (\'c1\', \'Acme\')"))',
+      'db.execute(sql.raw("INSERT INTO \\"sales\\".\\"customers\\" (\\"id\\", \\"name\\") VALUES (\'c1\', \'Acme\')"))',
     );
-    expect(seed).toContain('INSERT INTO \\"orders\\" (\\"id\\", \\"customer_id\\", \\"status\\")');
+    expect(seed).toContain(
+      'INSERT INTO \\"sales\\".\\"orders\\" (\\"id\\", \\"customer_id\\", \\"status\\")',
+    );
     expect(seed).not.toContain("Customer.create(");
   });
 });

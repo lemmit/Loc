@@ -75,7 +75,9 @@ system Demo {
     }
   }
   api AccountApi from S
-  deployable pyApi { platform: python contexts: [C] serves: AccountApi port: 8000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable pyApi { platform: python contexts: [C] dataSources: [cState] serves: AccountApi port: 8000 }
 }
 `;
     const { model, errors } = await parseString(src);
