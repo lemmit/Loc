@@ -299,4 +299,42 @@ Per class: `persistence-mode-unsupported` 636→0 (103 files), `lifecycle-body-d
 1. **The assertion flip.** `generateSystemFiles` still does not throw on a phase ⑦ error. The drain had to land first — a gate added before its offenders are gone lands red — but the flip is now a small change with a clean tree behind it.
 2. **The direct-caller slice, now measured.** 223 test files call `generateSystems` directly and never touch the helper, so no flip can reach them. Instrumenting `generateSystems` ITSELF over a full run (9,276 calls) sizes the real damage at **266 error-carrying generations across 54 files** — far less than the file count implies, because most direct callers parse through `parseValid` (which does assert phase ④) or simply have valid fixtures. 201 of the 266 are the same `persistence-mode-unsupported` class. It is NOT a codemod job: tried and reverted, because these fixtures pin seed SQL, migration chains and saga dispatch, so binding a `resource` moves real emitted output and 30 tests fail for reasons that each need reading. `generateSystemResult(source, options?)` now exists in the helper (full `SystemEmission` + options passthrough, both phase gates) so migrating a direct caller is a one-line change rather than a capability loss; the migration itself, and only then a ratchet forbidding the direct import, is the slice.
 
-Sources: [test-coverage-audit-2026-08-13](../audits/test-coverage-audit-2026-08-13.md) §3.2. Relates to #2354 (the parse-error half, already landed in this helper), #2489, #2512.
+Sources: [test-coverage-audit-2026-08-13](../audits/test-coverage-audit-2026-08-13.md) §3.2. Relates to #2354 (the parse-error half, already landed in this helper), #2489, #2512. The remaining half is **M-T9.35** below.
+
+## M-T9.35 — The 54 direct `generateSystems` callers the phase gate cannot reach — `open` (measured, unclaimed) · **M** · P1
+
+**M-T9.34 gated the helper; this gates the rest.** 223 test files call `generateSystems` directly and never touch `generateSystemFiles`, so the phase ①/④/⑦ assertions cannot see them. Measuring rather than assuming — instrumenting `generateSystems` itself over one full `npm test` (**9,276 calls**) — puts the real damage at:
+
+| | |
+|---|---:|
+| error-carrying generations | **266** |
+| files | **54** |
+
+Far less than the 223-file surface implies: most direct callers parse through `parseValid` (which *does* assert phase ④, 54 of the 223) or simply have valid fixtures. By code:
+
+| count | code |
+|---:|---|
+| 201 | `loom.persistence-mode-unsupported` |
+| 20 | `loom.field-default-not-constant` |
+| 20 | `loom.named-lifecycle-dropped` |
+| 10 | `loom.workflow-unrecognised-statement` |
+| 6 | `loom.ui-id-ref-no-display` |
+| 6 | `loom.lifecycle-body-dropped` |
+| 2 | `loom.workflow-create-missing-field` |
+| 1 | `loom.guard-principal-without-auth` |
+
+Six of the eight are classes M-T9.34 already drained through the helper, so the fix shapes are known and written up in its slice commits (`storage`/`resource` + `dataSources:`; an emptied canonical `create` body; a canonical rather than named lifecycle action; `user { … }` + `auth: required`). Two are new here: `field-default-not-constant` and `workflow-create-missing-field`.
+
+**Do NOT codemod it.** That was tried against these 54 and reverted: one file stopped transforming and 30 tests failed, because *these* fixtures pin seed SQL, migration chains and saga dispatch — so binding a `resource` moves real emitted output (tables become schema-qualified, `pgTable(…)` → `<ctx>Schema.table(…)`, Ecto gains `prefix:`). Every such move is a real assertion change that needs reading, not a mechanical rewrite. Per file, with the emission diff reviewed.
+
+**Prerequisite, already landed:** `generateSystemResult(source, options?)` in `test/_helpers/generate.ts` returns the whole `SystemEmission` (not just `.files`) and takes `GenerateSystemOptions`, so migrating a direct caller is a one-line change rather than a capability loss. 260 of the direct call sites only wanted `.files`; the rest wanted the full result or `{ sourcemap: true }`.
+
+**Order:** drain the 54, migrate them to the helper, and only then add a ratchet forbidding `import { generateSystems }` in `test/**` with a shrink-only allowlist. A ratchet before the drain just blocks everyone.
+
+**The 54, by generation count** (re-measure before starting — `main` moves):
+
+`test/ir/provenance` 21 · `test/conformance/corpus-mutation` 20 · `test/generator/typescript/realtime-emission` 18 · `test/ir/audited` 13 · `java/java-workflow-dispatch` 11 · `test/platform/dotnet-fullstack` 10 · `hono/hono-seed` 10 · `hono/hono-wire-conformance` 10 · `dotnet/dotnet-wire-conformance` 10 · `java/java-workflow-instances` 7 · `dotnet/dotnet-seed` 7 · `dotnet/dotnet-showcase-compile-regressions` 7 · `java/java-workflow-command-surface` 6 · `python/message-clause` 6 · `hono/hono-destroy-route` 6 · then 39 files with ≤5 each across `elixir/`, `java/`, `python/`, `typescript/`, `test/system/`, `react/`, `flutter/`, `angular/`, `_walker/`.
+
+**How to re-measure** (the technique, since the numbers rot): temporarily add a `validateLoomModel(loom)` call inside `generateSystems` in `src/system/index.ts` behind an env var, append `{file, code}` per call (derive `file` from `new Error().stack`), run `npx vitest run`, tabulate, then **revert by file copy** — never `git checkout --`, which discards unrelated edits in the same file (retro §84, §87).
+
+Sources: M-T9.34's own measurement pass. Blocked-by: nothing — M-T9.34's helper half is landed.
