@@ -49,7 +49,9 @@ system FullstackDemo {
     repository Orders for Order { }
   } }
   ui WebApp with scaffold(subdomains: [Sales]) { }
-  deployable app { platform: dotnet, contexts: [T], ui: WebApp, port: 8080 }
+  storage pg { type: postgres }
+  resource tState { for: T, kind: state, use: pg }
+  deployable app { platform: dotnet, contexts: [T], dataSources: [tState], ui: WebApp, port: 8080 }
 }
 `;
 
@@ -64,9 +66,12 @@ const BACKEND_ONLY_SOURCE = `system BackendOnly {
     }
   }
 
+  storage pg { type: postgres }
+  resource tState { for: T, kind: state, use: pg }
   deployable app {
     platform: dotnet
     contexts: [T]
+    dataSources: [tState]
     port: 8080
   }
 }
