@@ -139,7 +139,10 @@ describe("Dapper query-time projection handlers", () => {
     // shipped `"40.00"` where the EF path ships `"40.0000"`.
     expect(src!).toContain(
       "return new SalesTotalsRow(agg?.orders ?? 0, (agg?.revenue ?? 0m)" +
-        '.ToString("F4", CultureInfo.InvariantCulture), (decimal)(agg?.avg_lines ?? 0));',
+        // `(double)`, not `(decimal)`: a wire `decimal` leaves the .NET
+        // response as the float64 the other four backends send (#2563), so
+        // the LINQ/Dapper average crosses without narrowing.
+        '.ToString("F4", CultureInfo.InvariantCulture), (double)(agg?.avg_lines ?? 0));',
     );
   });
 
