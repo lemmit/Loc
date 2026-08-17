@@ -42,9 +42,13 @@ const FIXTURE_SOURCE = `system PhoenixShop {
 
   api StoreApi from Store
 
+  storage pg { type: postgres }
+  resource storeState { for: Store, kind: state, use: pg }
+
   deployable shopBackend {
     platform: elixir,
     contexts: [Store],
+    dataSources: [storeState],
     serves: StoreApi,
     port: 4000
   }

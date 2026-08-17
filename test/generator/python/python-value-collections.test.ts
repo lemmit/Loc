@@ -34,7 +34,9 @@ system Billing {
     }
   }
   api InvoicingApi from Sales
-  deployable d { platform: python  contexts: [Invoicing]  serves: InvoicingApi  port: 4000 }
+  storage pg { type: postgres }
+  resource invoicingState { for: Invoicing, kind: state, use: pg }
+  deployable d { platform: python  contexts: [Invoicing]  dataSources: [invoicingState]  serves: InvoicingApi  port: 4000 }
 }
 `;
 
