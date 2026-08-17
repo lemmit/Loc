@@ -1,4 +1,7 @@
 import { generateDotnet } from "../../src/generator/dotnet/index.js";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { lowerModel, mergeLoomModels } from "../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { generateTypeScript } from "../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../src/platform/hono/v4/pins.js";
@@ -14,6 +17,56 @@ export { HONO_V4_PINS };
 /** Generate the single-context Hono/TS project file map from an AST Model. */
 export const generateHono = (model: Model): Map<string, string> =>
   generateTypeScript(model, HONO_V4_PINS);
+
+/**
+ * The phases a `.ddd` fixture must survive before any test may assert on what
+ * it emits — ① syntax, ④ AST validation, ⑦ IR validation.  Throws with the
+ * offending diagnostics; the message names the escape hatch.
+ *
+ * Phase ⑦ is asserted here even though `generateSystems` does not run it.  That
+ * looks like gating the helper on a phase the code under test never sees, and
+ * it is deliberate: the CLI DOES run it (`src/cli/main.ts`, `src/api/index.ts`),
+ * so a fixture that fails it is a fixture no user can generate from, whatever
+ * the orchestrator would have done with it.  A test asserting on that output is
+ * asserting on output that does not exist in the product.
+ */
+async function assertGeneratable(source: string): Promise<Model> {
+  const { model, doc } = await parseString(source);
+  const syntaxErrors = doc.parseResult.parserErrors;
+  if (syntaxErrors.length) {
+    throw new Error(
+      `.ddd fixture has ${syntaxErrors.length} syntax error(s) — the emitted AST is ` +
+        `error-recovered, so anything this test asserts is meaningless:\n` +
+        syntaxErrors.map((e) => `  ${e.message}`).join("\n"),
+    );
+  }
+  const astErrors = extractErrors(doc.diagnostics ?? []);
+  if (astErrors.length) {
+    throw new Error(
+      `.ddd fixture has ${astErrors.length} AST-validation error(s) (phase ④) — ` +
+        `\`ddd generate\` would exit non-zero on it, so the emitted output this test ` +
+        `asserts against is output no user can obtain.  Fix the fixture, or call ` +
+        `generateSystemFilesUnchecked(source, "<why this model must stay invalid>") if ` +
+        `emitting from a rejected model IS the subject:\n` +
+        astErrors.map((e) => `  ${e}`).join("\n"),
+    );
+  }
+  // Phase ⑦ — the same call the CLI and the api toolkit make.
+  const irErrors = validateLoomModel(enrichLoomModel(mergeLoomModels([lowerModel(model)]))).filter(
+    (d) => d.severity === "error",
+  );
+  if (irErrors.length) {
+    throw new Error(
+      `.ddd fixture has ${irErrors.length} IR-validation error(s) (phase ⑦) — ` +
+        `\`ddd generate\` would exit non-zero on it, so the emitted output this test ` +
+        `asserts against is output no user can obtain.  Fix the fixture, or call ` +
+        `generateSystemFilesUnchecked(source, "<why this model must stay invalid>") if ` +
+        `emitting from a rejected model IS the subject:\n` +
+        irErrors.map((d) => `  ${d.code ?? "?"} ${d.message}`).join("\n"),
+    );
+  }
+  return model;
+}
 
 /**
  * Parse a `.ddd` string and run the full system orchestrator, returning the
@@ -43,36 +96,18 @@ export const generateHono = (model: Model): Map<string, string> =>
  * A test that genuinely needs to emit from a rejected model — a degradation
  * path, a gated feature — calls `generateSystemFilesUnchecked` and says why.
  *
- * NOT asserted here: phase ⑦ (`validateLoomModel`).  `generateSystems` does not
- * run it either, so asserting it would gate this helper on a phase the code
- * under test never sees; that is M-T9.34 slice 2, which has its own drain
- * (776 calls at the census, dominated by `loom.persistence-mode-unsupported`).
+ *   IR VALIDATION (phase ⑦) — asserted since M-T9.34 slice 2.  `generateSystems`
+ *   does not run `validateLoomModel` itself, but the CLI and the api toolkit do,
+ *   so a fixture that fails it is one no user can generate from.  The drain that
+ *   made this assertable cleared 974 error-carrying generations across 149 files.
+ *
+ * See `assertGeneratable` above for all three.
  */
 export async function generateSystemFiles(
   source: string,
   options: GenerateSystemOptions = {},
 ): Promise<Map<string, string>> {
-  const { model, doc } = await parseString(source);
-  const syntaxErrors = doc.parseResult.parserErrors;
-  if (syntaxErrors.length) {
-    throw new Error(
-      `.ddd fixture has ${syntaxErrors.length} syntax error(s) — the emitted AST is ` +
-        `error-recovered, so anything this test asserts is meaningless:\n` +
-        syntaxErrors.map((e) => `  ${e.message}`).join("\n"),
-    );
-  }
-  const validationErrors = extractErrors(doc.diagnostics ?? []);
-  if (validationErrors.length) {
-    throw new Error(
-      `.ddd fixture has ${validationErrors.length} validation error(s) — \`ddd generate\` ` +
-        `would exit non-zero on it, so the emitted output this test asserts against is ` +
-        `output no user can obtain.  Fix the fixture, or call ` +
-        `generateSystemFilesUnchecked(source, "<why this model must stay invalid>") if ` +
-        `emitting from a rejected model IS the subject:\n` +
-        validationErrors.map((e) => `  ${e}`).join("\n"),
-    );
-  }
-  return generateSystems(model, options).files;
+  return generateSystems(await assertGeneratable(source), options).files;
 }
 
 /**
@@ -138,25 +173,7 @@ export async function generateSystemResult(
   source: string,
   options: GenerateSystemOptions = {},
 ): Promise<SystemEmission> {
-  const { model, doc } = await parseString(source);
-  const syntaxErrors = doc.parseResult.parserErrors;
-  if (syntaxErrors.length) {
-    throw new Error(
-      `.ddd fixture has ${syntaxErrors.length} syntax error(s) — the emitted AST is ` +
-        `error-recovered, so anything this test asserts is meaningless:\n` +
-        syntaxErrors.map((e) => `  ${e.message}`).join("\n"),
-    );
-  }
-  const validationErrors = extractErrors(doc.diagnostics ?? []);
-  if (validationErrors.length) {
-    throw new Error(
-      `.ddd fixture has ${validationErrors.length} validation error(s) — \`ddd generate\` ` +
-        `would exit non-zero on it, so the emitted output this test asserts against is ` +
-        `output no user can obtain:\n` +
-        validationErrors.map((e) => `  ${e}`).join("\n"),
-    );
-  }
-  return generateSystems(model, options);
+  return generateSystems(await assertGeneratable(source), options);
 }
 
 /** Re-exported for symmetry — generates the single .NET project file map. */
