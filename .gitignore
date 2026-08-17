@@ -29,6 +29,10 @@ docs/_site/
 .claude/worktrees/
 scratchpad/
 
+# Schemathesis writes a per-run cache dir into the repo root when the
+# contract-fuzzing leg (`npm run test:schemathesis`) runs locally.
+.schemathesis/
+
 # The elixir behavioural runner's warm dependency tree (`run-elixir.mjs` primes
 # `deps/` + `_build/` once per distinct dep set and reuses it across cases).  A
 # local build cache — ~1.1k files of fetched hex packages — that a `git add -A`

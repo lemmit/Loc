@@ -1685,7 +1685,10 @@ describe("typescript generator", () => {
       const files = generateTypeScript(model, HONO_V4_PINS);
       // sales.ddd Money: `invariant amount >= 0` + `invariant currency.length == 3`.
       const orderRoutes = files.get("http/order.routes.ts")!;
-      expect(orderRoutes).toMatch(/amount: z\.coerce\.number\(\)\.min\(0\)/);
+      // Strict `z.number()`, not `z.coerce.number()`: a JSON body carries a
+      // real number, and coercing accepted `false`/`"12"` for a field the spec
+      // declares `{"type":"number"}` (schemathesis F7).
+      expect(orderRoutes).toMatch(/amount: z\.number\(\)\.min\(0\)/);
       expect(orderRoutes).toMatch(/currency: z\.string\(\)\.length\(3\)/);
       // No leftover `.refine(` for the single-field shapes.
       const moneyBlock = orderRoutes.match(
@@ -1701,7 +1704,7 @@ describe("typescript generator", () => {
       const orderRoutes = files.get("http/order.routes.ts")!;
       // `qty > 0` → recognised as min(1) on the int field.
       expect(orderRoutes).toMatch(
-        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.coerce\.number\(\)\.int\(\)\.min\(1\)/,
+        /AddLineOrderRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1\)/,
       );
     });
 

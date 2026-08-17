@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { ProblemDetails, frameworkProblemBody, newApp } from "./problem-details";
+import { ProblemDetails, frameworkProblemBody, newApp, requireJsonContentType } from "./problem-details";
 import { HTTPException } from "hono/http-exception";
 import { recordDomainFault, recordDomainOperation } from "../obs/metrics";
 import { Product } from "../domain/product";
@@ -10,7 +10,7 @@ import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, E
 import { Money } from "../domain/value-objects";
 
 const MoneySchema = z.object({
-  amount: z.coerce.number().min(0),
+  amount: z.number().min(0),
   currency: z.string().length(3),
 }).openapi("Money");
 
@@ -62,10 +62,12 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
           content: { "application/json": { schema: CreateProductResponse } },
         },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        415: { description: "Unsupported Media Type", content: { "application/problem+json": { schema: ProblemDetails } } },
         422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
+      requireJsonContentType(c);
       const body = c.req.valid("json");
       const created = Product.create({ sku: body.sku, price: new Money(body.price.amount, body.price.currency) });
       await repo.save(created);
@@ -158,11 +160,13 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
         409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
+        415: { description: "Unsupported Media Type", content: { "application/problem+json": { schema: ProblemDetails } } },
         422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
       const { id } = c.req.valid("param");
+      requireJsonContentType(c);
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Product", op: "update", id });
       recordDomainOperation("Product", "update");

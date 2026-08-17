@@ -246,11 +246,14 @@ describe("api-surface lift", () => {
     // `slice2-crud-write.test.ts` pinned Phoenix's PATCH route.
     //
     // Asserted as an exact set, and against BOTH rungs, so neither can drift
-    // back: `place` (precondition, ungated) vs `cancel` (`when`-gated).
-    expect([...(place?.errorStatuses ?? [])].sort()).toEqual([400, 404, 422]);
+    // back: `place` (precondition, ungated) vs `cancel` (`when`-gated).  Both
+    // carry a request BODY, hence the 415 media-type refusal (schemathesis F1).
+    expect([...(place?.errorStatuses ?? [])].sort((a, b) => a - b)).toEqual([400, 404, 415, 422]);
 
     const cancel = deriveContextOperations(ctx).find((o) => o.id === "cancelOrder");
-    expect([...(cancel?.errorStatuses ?? [])].sort()).toEqual([400, 404, 409, 422]);
+    expect([...(cancel?.errorStatuses ?? [])].sort((a, b) => a - b)).toEqual([
+      400, 404, 409, 415, 422,
+    ]);
   });
 
   it("declares exactly op.errorStatuses on every emitted route (render fidelity)", async () => {
