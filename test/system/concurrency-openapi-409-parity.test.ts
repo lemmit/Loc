@@ -100,13 +100,13 @@ describe("versioned → 409 declared on the update op (cross-backend OpenAPI par
   it("Java declares 409 in the update route's status set", async () => {
     const files = await generateSystemFiles(system("java", "with versioned"));
     const cust = fileMatching(files, (p) => p.endsWith("OpenApiContractCustomizer.java"));
-    expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 409, 422\}/);
+    expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 409, 415, 422\}/);
   });
 
   it("Java declares 409 in the update route by DEFAULT (versioning default-on)", async () => {
     const files = await generateSystemFiles(system("java", ""));
     const cust = fileMatching(files, (p) => p.endsWith("OpenApiContractCustomizer.java"));
-    expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 409, 422\}/);
+    expect(cust).toMatch(/"\/api\/customers\/\{id\}\/update"[^\n]*\{400, 404, 409, 415, 422\}/);
   });
 
   it("Python declares 409 on the updateCustomer route", async () => {

@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 
 /** RFC 7807 ProblemDetails body — the base 5 spec fields plus the §3.2
  *  `errors[]` extension (per-field `{ pointer, message }` array) that
@@ -117,4 +118,34 @@ const REASON_PHRASES: Record<number, string> = {
 export function frameworkProblemBody(status: number, detail: string, instance: string): string {
   const title = REASON_PHRASES[status] ?? "Error";
   return JSON.stringify({ type: "about:blank", title, status, detail, instance });
+}
+
+/** Hono's OWN `json` media-type predicate (`hono/validator/validator.ts`'s
+ *  `jsonRegex`), mirrored character-for-character apart from two redundant
+ *  escapes Biome rejects (`[a-z-\.]` → `[a-z-.]`, `\=` → `=`; both match
+ *  identically).  It has to be the SAME test: the zod validator runs only when
+ *  this matches, so any wider guard would wave through a request whose body was
+ *  never validated — which is exactly the fault below.  Re-check it when the
+ *  pinned hono minor moves. */
+const JSON_MEDIA_TYPE = /^application\/([a-z-.]+\+)?json(;\s*[a-zA-Z0-9\-]+=([^;]+))*$/;
+
+/** Media-type gate for a body-carrying route — RFC 9110 §15.5.16.
+ *
+ *  Hono's zod validator is CONTENT-TYPE GATED: with an absent or foreign
+ *  `Content-Type` it silently skips validation instead of failing it, so the
+ *  shared 422 `defaultHook` never fires and `c.req.valid("json")` hands the
+ *  handler `undefined` — which then dereferences it and 500s (schemathesis
+ *  F1).  A skipped validator must therefore be an explicit refusal, not a
+ *  fall-through: every body-carrying handler calls this FIRST.
+ *
+ *  415 is the declared answer (`src/ir/util/openapi-errors.ts` puts it in the
+ *  create / operation / workflow response set on all five backends, matching
+ *  what ASP.NET, Spring and Plug.Parsers already answer), so the published
+ *  contract covers it.  Thrown rather than returned so the router's existing
+ *  `HTTPException` arm renders it as the same `application/problem+json` body
+ *  every other framework fault uses. */
+export function requireJsonContentType(c: Context): void {
+  const contentType = c.req.header("Content-Type");
+  if (contentType && JSON_MEDIA_TYPE.test(contentType)) return;
+  throw new HTTPException(415, { message: "Content-Type must be application/json" });
 }
