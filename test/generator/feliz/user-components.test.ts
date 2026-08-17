@@ -19,10 +19,14 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // flavours — the extern seam's `Name {| … |}` call already matches it.
 //
 // The Feliz mirror of react's `walker-user-components.test.ts` and vue's
-// `vue-user-components.test.ts`, plus the deferral pins the other frontends
-// don't need (a Feliz app is one Elmish program, so a component owning `state {}`
-// / `derived` / `action`s is an MVU design question, not a rendering gap — it
-// stays out of the emitted set and its call site keeps the comment).
+// `vue-user-components.test.ts`, plus the shape pins the other frontends don't
+// need.  A Feliz app is ONE Elmish program, so a component's `state {}` /
+// `action`s FOLD into it (Model field + Msg case + update arm, exactly as a
+// `store` does) and its `derived` becomes a plain `let` — the function gains
+// `model` / `dispatch` as leading curried params where it needs them.  What
+// still defers is what would name Msg/Model wiring nothing emits (a bare
+// `model`, an async-effect action, a form / store read), and those call sites
+// keep the honest comment rather than calling a function never written.
 // ---------------------------------------------------------------------------
 
 const sys = (uiBody: string) => `
@@ -114,21 +118,78 @@ describe("user components — Feliz", () => {
     expect(fs).toContain("Ribbon ()");
   });
 
-  it("a stateful component is DEFERRED, not silently half-emitted", async () => {
-    // A Feliz app is one Elmish program: a component's own `state {}` needs
-    // Model/Msg/update wiring (a per-component sub-model).  So it stays out of the
-    // emitted set — no declaration, and the call site keeps the honest comment
-    // rather than calling a function that was never written.
+  it("a stateful component folds into the one Elmish program instead of vanishing", async () => {
+    // A Feliz app is one Elmish program, so a component's `state {}` becomes a
+    // Model field and its `action` a Msg case + update arm — exactly the fold a
+    // `store` already gets.  Before this the whole component was dropped: no
+    // declaration, and `unknown layout component: Counter` at the call site.
     const fs = await appFs(
       sys(`
       component Counter(caption: string) {
         state { n: int = 0 }
-        body: Stack { Text { caption }, Text { string(n) } }
+        action bump() { n := n + 1 }
+        body: Stack { Text { caption }, Text { string(n) }, Button(label: "+", onClick: bump) }
       }
       page Home { route: "/" body: Stack { Counter(caption: "hits") } }`),
     );
-    expect(fs).not.toContain("let Counter (props:");
-    expect(fs).toContain("unknown layout component: Counter");
+    // The function takes Model + dispatch as LEADING CURRIED params (not props
+    // fields, which every non-stateful call site would then have to spell).
+    expect(fs).toContain(
+      "    let Counter (model: Model) (dispatch: Msg -> unit) (props: {| caption: string |}) =",
+    );
+    // Its own action binds a dispatcher, the way a page view's preamble does.
+    expect(fs).toContain("        let bump () = dispatch Bump");
+    // The state cell reads off the single Model…
+    expect(fs).toMatch(/let Counter[\s\S]*?model\.N/);
+    // …because it IS a field of it, with the Msg case + update arm to match.
+    expect(fs).toContain("  N: int");
+    expect(fs).toContain("  | Bump");
+    expect(fs).toContain("  | Bump ->");
+    // And the call site passes both.
+    expect(fs).toContain('Counter model dispatch {| caption = "hits" |}');
+    expect(fs).not.toContain("unknown layout component");
+  });
+
+  it("a `derived` binding emits as an F# let, read bare by the body", async () => {
+    // `derived` is a pure function of the props — no MVU wiring needed at all.
+    // It used to disqualify the component anyway, because the walker spelled a
+    // derived read `model.<Name>`: an Elmish Model field nothing declares.
+    const fs = await appFs(
+      sys(`
+      component TierBadge(score: int) {
+        derived tier: string = score > 90 ? "gold" : "silver"
+        derived shout: string = tier.toUpper()
+        body: Stack { Text { tier }, Text { shout } }
+      }
+      page Home { route: "/" body: Stack { TierBadge(score: 95) } }`),
+    );
+    // Props-only: no Model, no dispatch.
+    expect(fs).toContain("    let TierBadge (props: {| score: int |}) =");
+    expect(fs).toContain('        let tier = (if (score > 90) then "gold" else "silver")');
+    // A later derived reads an earlier one as the bare `let` it is.
+    expect(fs).toContain("        let shout = (tier.ToUpper())");
+    // The body reads them bare too — NOT `model.Tier`.
+    expect(fs).toMatch(/let TierBadge[\s\S]*?Html\.text \(string \(tier\)\)/);
+    expect(fs).not.toContain("model.Tier");
+    expect(fs).toContain("TierBadge {| score = 95 |}");
+    expect(fs).not.toContain("unknown layout component");
+  });
+
+  it("a param only a `derived` reads is still bound as a local", async () => {
+    // `usedParams` is reported by the BODY walk, which never sees the derived
+    // expressions — so a param referenced only there would have no `let` and the
+    // derived would name nothing.
+    const fs = await appFs(
+      sys(`
+      component TierBadge(score: int, label: string) {
+        derived tier: string = score > 90 ? "gold" : "silver"
+        body: Text { tier }
+      }
+      page Home { route: "/" body: Stack { TierBadge(score: 95, label: "x") } }`),
+    );
+    expect(fs).toContain("        let score = props.score");
+    // `label` is read by neither, so it stays a props field with no local.
+    expect(fs).not.toContain("let label = props.label");
   });
 
   it("an aggregate-typed param whose wire record this app emits types as that record", async () => {

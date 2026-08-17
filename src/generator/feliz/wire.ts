@@ -1486,12 +1486,16 @@ const BOUND_INPUT_PRIMITIVES: ReadonlyMap<string, readonly string[]> = new Map([
   ["DataGrid", ["selection"]],
 ]);
 
-/** Collect the page `state` fields a controlled input primitive two-way-binds —
+/** Collect the `state` fields a controlled input primitive two-way-binds —
  *  deduped by name, in tree order.  Each needs a `Set<Field>` Msg + update arm
  *  (built by `renderMsg`/`renderUpdate`); the input's `onChange` dispatches it.
  *  A `bind:`/`open:` that isn't a ref to a declared `state` field is ignored (the
- *  pack renders an uncontrolled stub for it). */
-export function collectPageBoundState(page: PageIR): FelizBoundState[] {
+ *  pack renders an uncontrolled stub for it).
+ *
+ *  Takes the body + state PAIR rather than a whole `PageIR` because a walked
+ *  `component` folds into the same single Elmish program and so needs the same
+ *  Msg/update wiring for ITS controlled inputs. */
+export function collectPageBoundState(page: Pick<PageIR, "body" | "state">): FelizBoundState[] {
   if (!page.body) return [];
   const stateByName = new Map(page.state.map((s) => [s.name, s.type] as const));
   const seen = new Set<string>();
@@ -1528,11 +1532,12 @@ export interface FelizFileUpload {
   name: string;
 }
 
-/** Collect the page `state` fields a standalone `FileUpload(bind:)` primitive
- *  binds — deduped by name, in tree order.  Only a `bind:` ref to a declared
+/** Collect the `state` fields a standalone `FileUpload(bind:)` primitive binds —
+ *  deduped by name, in tree order.  Only a `bind:` ref to a declared
  *  `File`-typed `state` field is collected; anything else is ignored (the pack
- *  renders an uncontrolled stub for it, so the page still compiles). */
-export function collectPageFileUploads(page: PageIR): FelizFileUpload[] {
+ *  renders an uncontrolled stub for it, so the page still compiles).  Takes the
+ *  body + state pair for the same reason `collectPageBoundState` does. */
+export function collectPageFileUploads(page: Pick<PageIR, "body" | "state">): FelizFileUpload[] {
   if (!page.body) return [];
   const fileState = new Set(page.state.filter((s) => typeIsFile(s.type)).map((s) => s.name));
   const seen = new Set<string>();

@@ -56,6 +56,13 @@ export const FELIZ_CHILDREN_FIELD = "children";
  *  cannot collide with a declared `component` param. */
 export const FELIZ_MODEL_PARAM = "__loomModel";
 
+/** The `dispatch` twin of `FELIZ_MODEL_PARAM` — marks a component whose own
+ *  named `action`s fold into the single Elmish `Msg`/`update`, so its function
+ *  binds `let <a> () = dispatch <Msg>` and therefore takes the dispatcher as a
+ *  leading curried argument (`Counter model dispatch {| … |}`).  Same `__loom`
+ *  prefix, same "not a prop" contract. */
+export const FELIZ_DISPATCH_PARAM = "__loomDispatch";
+
 /** Pure F# leaf formatters — one per divergent expression arm.  Sub-expressions
  *  arrive already rendered.  Signatures match the optional `WalkerTarget`
  *  expr-leaf seam so `felizTarget` can forward straight to these. */
