@@ -3,11 +3,14 @@ import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
+  allContextFilterEntries,
   DRIZZLE_INTRINSIC_SQL,
+  type FilterBypass,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
 import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
 import type {
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   ProjectionAggregateIR,
@@ -149,6 +152,16 @@ export function buildQueryProjectionsFile(
   // the `where` silently dropped — a wrong answer rather than a broken build.
   // Both paths name the table identically (`lowerFirst(plural(source))`), so one
   // lowering serves both.
+  //
+  // The source aggregate's CAPABILITY filters (`softDeletable`'s
+  // `!this.isDeleted`, `tenantOwned`'s `this.tenantId == currentUser.<claim>`)
+  // are ANDed in alongside the projection's own `where`.  They were not, and
+  // that was a SILENT WRONG ANSWER rather than a broken build: the
+  // repository-sourced arm gets them for free (it reads through the synthesised
+  // find, which applies them), so a `count()` over the same aggregate answered
+  // a DIFFERENT number than its `.all` — soft-deleted rows counted, foreign
+  // tenants' rows counted.  A read's `ignoring *` / `ignoring <Cap>` drops the
+  // capability-origin predicates it names, exactly as on the repository arm.
   const aggWheres = new Map<string, string | undefined>();
   for (const p of projections) {
     const grouped = groupedAggregates(p);
@@ -158,26 +171,43 @@ export function buildQueryProjectionsFile(
     // A COMPUTED grouping key (`group by o.placedAt.startOfDay()`) renders
     // through the Drizzle intrinsic snippets, which build a `sql` template.
     if ((grouped?.groupBy ?? []).some((e) => groupKeyOf(e)?.transform)) rawDrizzleOps.add("sql");
-    if (!p.query.filter) {
-      aggWheres.set(p.name, undefined);
-      continue;
+    const table = lowerFirst(plural(p.query.source));
+    const parts: string[] = [];
+    if (p.query.filter) {
+      const lowered = lowerToDrizzle(p.query.filter, table, ctx);
+      if (lowered) {
+        parts.push(lowered.expr);
+        for (const op of lowered.ops) rawDrizzleOps.add(op);
+      }
     }
-    const lowered = lowerToDrizzle(p.query.filter, lowerFirst(plural(p.query.source)), ctx);
-    if (lowered) {
-      aggWheres.set(p.name, lowered.expr);
-      for (const op of lowered.ops) rawDrizzleOps.add(op);
-    } else {
-      aggWheres.set(p.name, undefined);
+    parts.push(...drizzleCapabilityPredicates(p, ctx, table, rawDrizzleOps));
+    if (parts.length === 0) aggWheres.set(p.name, undefined);
+    else if (parts.length === 1) aggWheres.set(p.name, parts[0]);
+    else {
+      rawDrizzleOps.add("and");
+      aggWheres.set(p.name, `and(${parts.join(", ")})`);
     }
   }
   // MikroORM WHERE lowering for the same direct-table shapes: a FilterQuery
   // object built by the shared `whereToMikroFilter` (the lowering every mikro
-  // find already uses), keyed per projection.  `undefined` = no filter.
+  // find already uses), keyed per projection.  `undefined` = no filter.  Same
+  // capability-filter conjunction as the drizzle side above — `$and`-composed
+  // exactly as the mikro repository composes a read's base filter with them.
   const mikroWheres = new Map<string, string | undefined>();
   if (usingMikro) {
     for (const p of projections) {
       const f = p.query?.filter;
-      mikroWheres.set(p.name, f ? mikroFilterFor(f) : undefined);
+      const parts = [...(f ? [mikroFilterFor(f)] : []), ...mikroCapabilityFilters(p, ctx)].filter(
+        (x): x is string => x !== undefined,
+      );
+      mikroWheres.set(
+        p.name,
+        parts.length === 0
+          ? undefined
+          : parts.length === 1
+            ? parts[0]
+            : `{ $and: [${parts.join(", ")}] }`,
+      );
     }
   }
   const allAggs = new Set([...sourceAggs, ...followAggs]);
@@ -328,7 +358,19 @@ export function buildQueryProjectionsFile(
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
-  const file = lines.join("\n");
+  // A PRINCIPAL capability filter (tenancy) on a direct-table read renders
+  // `currentUser.<claim>` against the ambient accessor, exactly as the
+  // repository path does — so this file needs the import when (and only when)
+  // one is actually emitted.  Body-scanned, so a projection over an untenanted
+  // aggregate stays byte-identical.
+  const withPrincipal = (body: string): string =>
+    /\brequireCurrentUser\(/.test(body)
+      ? body.replace(
+          `import { type DomainEventDispatcher } from "../domain/events";`,
+          `import { type DomainEventDispatcher } from "../domain/events";\nimport { requireCurrentUser } from "../auth/middleware";`,
+        )
+      : body;
+  const file = withPrincipal(lines.join("\n"));
   if (!usingMikro) return `${file}\n`;
   // Body-scan the emitted routes for the mikro-only names: `raw` (the SQL
   // fragments) and each Row entity class a direct-table shape reads.  A
@@ -668,6 +710,80 @@ function mikroRowClassFor(p: ProjectionIR, source: string): string {
  *  plausible WRONG number. */
 function mikroFilterFor(filter: ExprIR): string {
   return whereToMikroFilter(filter);
+}
+
+// ---------------------------------------------------------------------------
+// Capability `filter` predicates on a DIRECT-TABLE projection read.
+//
+// The repository-sourced arm reads through the synthesised `repo.<proj>()`
+// find, so the aggregate's capability filters ride along automatically.  The
+// three direct-table shapes bypass the repository by design (an aggregation
+// must push down to SQL), and until this they bypassed the capability filters
+// with it — a soft-deleted row entered the COUNT, a foreign tenant's rows
+// entered the SUM.  Silent: the SQL is valid, the number is wrong, and the two
+// arms of the same feature disagreed with each other.
+// ---------------------------------------------------------------------------
+
+/** The projection's source AGGREGATE, or undefined for a raw-table source
+ *  (`from <Workflow>` / `from <Projection>` — neither carries capabilities). */
+function projectionSourceAggregate(
+  p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+): EnrichedAggregateIR | undefined {
+  const kind = p.query?.sourceKind;
+  if (kind === "workflow" || kind === "projection") return undefined;
+  const name = p.query?.source;
+  return name ? ctx.aggregates.find((a) => a.name === name) : undefined;
+}
+
+/** The read's `ignoring` stance, in the shape the shared bypass filter takes. */
+function projectionBypass(p: ProjectionIR): FilterBypass {
+  return { bypassAll: p.query?.bypassAll, bypassCaps: p.query?.bypassCaps };
+}
+
+/** The source aggregate's applicable capability filters as Drizzle predicate
+ *  expressions.
+ *
+ *  Deliberately NOT `contextFilterPredicate`: that one reifies a filter that is
+ *  exactly one named criterion into a `<name>Criterion(...)` call, and those
+ *  module-level fns are emitted into the REPOSITORY file — naming one here
+ *  would be an undefined identifier.  Inlining every predicate is what this
+ *  file can compile.  A principal filter renders against the ambient
+ *  `requireCurrentUser()` accessor (same as the repository path), which the
+ *  import walk below picks up by body scan. */
+function drizzleCapabilityPredicates(
+  p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  table: string,
+  ops: Set<string>,
+): string[] {
+  const agg = projectionSourceAggregate(p, ctx);
+  if (!agg) return [];
+  const out: string[] = [];
+  for (const e of allContextFilterEntries(agg, projectionBypass(p))) {
+    const l = lowerToDrizzle(e.predicate, table, ctx, {
+      principalAccessor: "requireCurrentUser()",
+    });
+    // Unlowerable is unreachable for a valid model (the queryable check + the
+    // adapter gate run first); dropping it silently is the bug this closes, so
+    // fail loudly instead.
+    if (!l)
+      throw new Error(
+        `query projection '${p.name}': capability filter on '${agg.name}' is not Drizzle-lowerable`,
+      );
+    for (const op of l.ops) ops.add(op);
+    out.push(l.expr);
+  }
+  return out;
+}
+
+/** The same set as MikroORM FilterQuery literals. */
+function mikroCapabilityFilters(p: ProjectionIR, ctx: EnrichedBoundedContextIR): string[] {
+  const agg = projectionSourceAggregate(p, ctx);
+  if (!agg) return [];
+  return allContextFilterEntries(agg, projectionBypass(p)).map((e) =>
+    whereToMikroFilter(e.predicate),
+  );
 }
 
 /** The SQL aggregate expression for one `select`, aliased column-qualified so it
