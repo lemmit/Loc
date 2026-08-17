@@ -213,6 +213,133 @@
         "id": "<volatile:key>",
         "role": "admin"
       }
+    },
+    {
+      "seq": 19,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/api/orders/{id}/place",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 21,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden",
+        "instance": "/api/orders",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 22,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-2",
+          "id": "<volatile:key>",
+          "open": false,
+          "total": "30.0000",
+          "version": 2
+        },
+        {
+          "code": "ladder",
+          "id": "<volatile:key>",
+          "open": false,
+          "total": "10.0000",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 23,
+      "method": "GET",
+      "path": "/api/projections/order_book",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden: projection OrderBook",
+        "instance": "/api/projections/order_book",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 24,
+      "method": "GET",
+      "path": "/api/projections/order_book",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-2",
+          "orderRef": "<uuid>"
+        },
+        {
+          "code": "O-1",
+          "orderRef": "<uuid>"
+        },
+        {
+          "code": "ladder",
+          "orderRef": "<uuid>"
+        }
+      ]
+    },
+    {
+      "seq": 25,
+      "method": "GET",
+      "path": "/api/projections/order_book/{id}",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden: projection OrderBook",
+        "instance": "/api/projections/order_book/{id}",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 26,
+      "method": "GET",
+      "path": "/api/projections/order_book/{id}",
+      "status": 200,
+      "body": {
+        "code": "ladder",
+        "orderRef": "<uuid>"
+      }
+    },
+    {
+      "seq": 27,
+      "method": "GET",
+      "path": "/api/projections/open_orders",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden",
+        "instance": "/api/projections/open_orders",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 28,
+      "method": "GET",
+      "path": "/api/projections/open_orders",
+      "status": 200,
+      "body": []
     }
   ]
 }
