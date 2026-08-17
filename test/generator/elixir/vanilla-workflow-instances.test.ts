@@ -132,7 +132,8 @@ describe("vanilla foundation — workflow-instance read endpoints", () => {
           }
         }
         storage primary { type: postgres }
-        deployable api { platform: elixir  contexts: [F]  port: 4000 }
+        resource fState { for: F, kind: state, use: primary }
+        deployable api { platform: elixir  contexts: [F]  dataSources: [fState]  port: 4000 }
       }
     `;
     const { model } = await parseString(SRC, { validate: false });
@@ -159,7 +160,7 @@ describe("vanilla foundation — event-sourced workflow-instance reads", () => {
   const ES_SRC = `system Sys {
     subdomain F {
       context F {
-        aggregate Order { status: string  create place() { status := "Placed"  emit OrderPlaced { order: id } } }
+        aggregate Order { status: string }
         repository Orders for Order {}
         event OrderPlaced { order: Order id }
         event PaymentRegistered { order: Order id, amount: int }

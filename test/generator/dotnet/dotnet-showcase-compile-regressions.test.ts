@@ -78,7 +78,9 @@ const SRC = `
       }
     }
     api A from Core
-    deployable svc { platform: dotnet  contexts: [Catalog]  serves: A  port: 8080 }
+    storage pg { type: postgres }
+    resource catalogState { for: Catalog, kind: state, use: pg }
+    deployable svc { platform: dotnet  contexts: [Catalog]  dataSources: [catalogState]  serves: A  port: 8080 }
   }
 `;
 
