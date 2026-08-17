@@ -176,3 +176,87 @@ describe("vanilla provenance runtime (DEBT-06)", () => {
     expect(ctx).not.toContain("Repo.transaction(");
   });
 });
+
+// ---------------------------------------------------------------------------
+// RS-18 — the CRUDISH UPDATE path.
+//
+// The generic update persists through `<Agg>Changeset.update_changeset/2` (the
+// shape RS-26's present-key / default rules need), so the synthesized
+// `operation update(...)` BODY never executes and the inline capture above
+// never runs on that path — a provenanced field kept the PREVIOUS write's
+// lineage while node/python/java/dotnet all re-captured.  That was the
+// `corpus/provenance` wire-golden divergence on `$.total_provenance.inputs`,
+// waived in `test/_helpers/wire-waivers.ts` until this landed.
+// ---------------------------------------------------------------------------
+
+const CRUDISH = `
+system OrderingCrud {
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish {
+        reference: string
+        quantity: int
+        unitPrice: int
+        discount: int
+        total: int provenanced
+
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          total := qty * price - discount
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Orders, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla provenance — the crudish UPDATE re-captures lineage (RS-18)", () => {
+  it("stamps the co-located column off the applied changeset with the update write-site snapshot", async () => {
+    const repo = file(await generateSystemFiles(CRUDISH), "/orders/order_repository.ex");
+    expect(repo).toContain("defp __capture_provenance(%Ecto.Changeset{} = changeset) do");
+    // The proposed row is the value source — a `param` leaf and a `this-prop`
+    // leaf alike read as `record.<column>`.  `update` assigns `total := total`,
+    // so the lineage names `total`, NOT the previous write's leaves.
+    expect(repo).toContain("record = Ecto.Changeset.apply_changes(changeset)");
+    expect(repo).toContain('loom_prov_inputs_0 = [%{path: "total", value: record.total}]');
+    expect(repo).toContain('target: %{type: "Order", field: "total"}');
+    expect(repo).toContain("computedValue: record.total");
+    expect(repo).toContain(
+      "changeset = Ecto.Changeset.put_change(changeset, :total_provenance, loom_lineage_0)",
+    );
+  });
+
+  it("routes the update through the capture and flushes the history on success only", async () => {
+    const repo = file(await generateSystemFiles(CRUDISH), "/orders/order_repository.ex");
+    expect(repo).toContain("|> __capture_provenance()");
+    expect(repo).toContain("Repo.transaction(fn ->");
+    // Pushed AFTER the save succeeds, so a rejected changeset leaves no
+    // orphaned, undrained trace in the per-process buffer.
+    const okIdx = repo.indexOf("{:ok, saved} ->");
+    const pushIdx = repo.indexOf("Enum.each(lineages, &Api.Provenance.record/1)");
+    const flushIdx = repo.indexOf("Api.Provenance.flush(Repo)");
+    expect(okIdx).toBeGreaterThan(-1);
+    expect(pushIdx).toBeGreaterThan(okIdx);
+    expect(flushIdx).toBeGreaterThan(pushIdx);
+    expect(repo).toContain("Repo.rollback(reason)");
+  });
+
+  it("is gated: a provenanced aggregate with no crudish update keeps the plain pipe", async () => {
+    // SOURCE declares no `update` operation, so nothing to re-capture — the
+    // update pipe stays byte-identical (`|> Repo.update()`), with no helper.
+    const repo = file(await generateSystemFiles(SOURCE), "/orders/order_repository.ex");
+    expect(repo).not.toContain("__capture_provenance");
+    expect(repo).toContain("|> Repo.update()");
+  });
+});

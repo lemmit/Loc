@@ -64,7 +64,7 @@ import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaAudit } from "./audit-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
-import { denialOverrides, denialStatus } from "./denial.js";
+import { denialOverrides, denialStatus, opHasWireDenial } from "./denial.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-handlers-emit.js";
@@ -160,6 +160,12 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // HEEx frontend translates through, and the 422 changeset-error renderer
   // resolves each `loom_code` against it.  Empty ⇒ byte-identical output.
   const validationMessages = collectWireValidationMessages(contexts);
+  // M-T6.20 — does any aggregate operation carry a WIRE-RUNG denial (a messaged
+  // `precondition` over the op's own params)?  Gates the extra
+  // `validation_errors_response/2` responder; false ⇒ byte-identical.
+  const hasWireDenials = contexts.some((c) =>
+    c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
+  );
   out.set(
     `lib/${appName}_web/problem_details.ex`,
     renderVanillaProblemDetailsModule(
@@ -173,6 +179,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       denialStatus("disallowed", ladderStatuses),
       resolveErrorStatus("ReferencedInUse", structuralStatuses),
       validationMessages.length > 0,
+      hasWireDenials,
     ),
   );
 
