@@ -236,7 +236,7 @@
       "path": "/api/orders",
       "status": 403,
       "body": {
-        "detail": "Forbidden",
+        "detail": "Forbidden: find all",
         "instance": "/api/orders",
         "status": 403,
         "title": "Forbidden",
@@ -327,7 +327,7 @@
       "path": "/api/projections/open_orders",
       "status": 403,
       "body": {
-        "detail": "Forbidden",
+        "detail": "Forbidden: projection OpenOrders",
         "instance": "/api/projections/open_orders",
         "status": 403,
         "title": "Forbidden",

@@ -70,33 +70,4 @@ export const WIRE_WAIVERS: readonly WireWaiver[] = [
     reason:
       "#2563 — .NET backs a wire `decimal` with System.Decimal, truncating a projection `avg` to ~15 significant digits where the other four send the float64 (RS-24 fixes the JSON type, not the precision)",
   },
-  // #2540 (401/403 problem-arm census) — the 403 `detail` on a `requires`-gated
-  // READ diverges by backend, and the `read-gates` fixture's 4xx ladder (new in
-  // this PR) is the first golden to record it.  node — the golden ORACLE —
-  // answers a bare `Forbidden`; python/java/dotnet/elixir answer the DESCRIPTIVE
-  // `Forbidden: <gate-expr>`:
-  //
-  //   #21 GET /api/orders                   golden "Forbidden" ≠ "Forbidden: find all"
-  //   #27 GET /api/projections/open_orders  golden "Forbidden" ≠ "Forbidden: projection OpenOrders"
-  //
-  // The ladder STATUS is identical five-way (every arm 401→403→2xx passes on
-  // every backend); only the human-readable `detail` differs.  #2540's source
-  // census already found this and named node the outlier, filing the unification
-  // as a mission of its own (the descriptive backends also disagree among
-  // themselves on the audit-history arm, and whether leaking the gate expression
-  // to an unauthorized caller is even desirable is that mission's call) — so it
-  // is deliberately NOT fixed inside this gate PR.
-  //
-  // Scoped to the exact field: `read-gates` case, the 403 `$.detail` value.  The
-  // waiver RATCHETS — when the detail is unified (node made descriptive, or the
-  // four made bare) the divergence stops reproducing and this entry fails as
-  // stale, forcing its deletion in the unifying PR.
-  {
-    backends: ["python", "java", "dotnet", "elixir"],
-    cases: ["read-gates"],
-    path: "$.detail",
-    kinds: ["value"],
-    reason:
-      "#2540 — a `requires`-gated read's 403 `detail` is bare `Forbidden` on the node oracle and descriptive `Forbidden: <gate-expr>` on the other four; status ladder agrees five-way, unification is #2540's own mission",
-  },
 ];

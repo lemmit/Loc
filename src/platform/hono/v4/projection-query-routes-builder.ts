@@ -402,7 +402,9 @@ function emitQueryProjectionRoute(
     );
   }
   if (gate) {
-    out.push(`    if (!(${renderTsExpr(gate)})) throw new ForbiddenError("Forbidden");`);
+    out.push(
+      `    if (!(${renderTsExpr(gate)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: projection ${p.name}`)});`,
+    );
   }
   // GROUPED AGGREGATION (`group by` — M-T4.2): one row per distinct
   // grouping-key combination, aggregates computed per group.  Same SQL

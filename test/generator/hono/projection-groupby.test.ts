@@ -123,11 +123,11 @@ describe("hono grouped aggregation `requires` gate", () => {
     const p = files.get(k)!;
     expect(p).toContain('.get("currentUser")');
     expect(p).toContain(
-      'if (!(currentUser.role === "admin")) throw new ForbiddenError("Forbidden");',
+      'if (!(currentUser.role === "admin")) throw new ForbiddenError("Forbidden: projection AdminSalesByStatus");',
     );
     // The gate precedes the grouped SQL read.
-    expect(p.indexOf('throw new ForbiddenError("Forbidden")')).toBeLessThan(
-      p.indexOf(".groupBy(schema.orders.status)"),
-    );
+    expect(
+      p.indexOf('throw new ForbiddenError("Forbidden: projection AdminSalesByStatus")'),
+    ).toBeLessThan(p.indexOf(".groupBy(schema.orders.status)"));
   });
 });
