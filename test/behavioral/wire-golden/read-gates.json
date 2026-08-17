@@ -1,0 +1,218 @@
+{
+  "case": "read-gates",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/orders/{id}/place",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-1",
+          "id": "<volatile:key>",
+          "open": true,
+          "total": "10.0000",
+          "version": 1
+        },
+        {
+          "code": "O-2",
+          "id": "<volatile:key>",
+          "open": false,
+          "total": "30.0000",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/projections/order_book/{id}",
+      "status": 200,
+      "body": {
+        "code": "O-2",
+        "orderRef": "<uuid>"
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/projections/open_orders",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-1"
+        }
+      ]
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/orders/{id}/place",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/projections/open_orders",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "O-1",
+        "id": "<volatile:key>",
+        "open": false,
+        "total": "10.0000",
+        "version": 2
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "O-1b",
+        "id": "<volatile:key>",
+        "open": true,
+        "total": "10.0000",
+        "version": 3
+      }
+    },
+    {
+      "seq": 11,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-2",
+          "id": "<volatile:key>",
+          "open": false,
+          "total": "30.0000",
+          "version": 2
+        }
+      ]
+    },
+    {
+      "seq": 14,
+      "method": "PATCH",
+      "path": "/api/orders",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/orders",
+        "instance": "/api/orders",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/orders",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/projections/order_book/{id}",
+      "status": 404,
+      "body": {
+        "detail": "OrderBook {id} not found",
+        "instance": "/api/projections/order_book/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 18,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "role": "admin"
+      }
+    }
+  ]
+}
