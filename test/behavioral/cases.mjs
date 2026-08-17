@@ -11,11 +11,16 @@
 //
 // A case is `{ name, source }`; `source` has `__PLATFORM__` already swapped.
 
-import { build } from "esbuild";
+// `esbuild` and `pg` are DYNAMIC imports (inside the two functions that need
+// them) rather than static ones: they live in this directory's own pinned
+// `package.json`, which only the booted runners `npm ci`.  The fast vitest suite
+// has neither, and it imports this module for the two things that must not be
+// forked — `hasBehaviouralBlock` and `BEHAVIOURAL_SKIP`
+// (test/behavioral/golden-coverage.test.ts).  Static imports would make that
+// import crash on resolution and the gate would have to duplicate the register.
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import pg from "pg";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
@@ -59,6 +64,7 @@ const SYSTEMS_DIR = join(HERE, "systems");
 /** Load the typed corpus manifest via a one-shot esbuild bundle — the same
  *  single source of truth the generation and compile tiers iterate. */
 export async function loadCorpusFeatures(workDir) {
+  const { build } = await import("esbuild");
   mkdirSync(workDir, { recursive: true });
   const bundled = join(workDir, "_manifest.mjs");
   await build({
@@ -251,6 +257,7 @@ export const AUTHZ_LADDERS = {
  *  `postgresql://user:pass@host/db`.  (The node tier needs none — PGlite is a
  *  fresh in-process DB per case.) */
 export async function resetDatabase(pgUrl) {
+  const { default: pg } = await import("pg");
   const client = new pg.Client({ connectionString: pgUrl });
   await client.connect();
   try {
@@ -279,7 +286,7 @@ export async function resetDatabase(pgUrl) {
  *  docs/audits/behavioral-parity-bugs-2026-07.md.  Removing an entry is how a fix
  *  re-arms the boot.  Keyed by platform clause; applies to BOTH featureCases and
  *  sharedSystemCases (a case name is either a corpus feature id or a systems/ file). */
-const BEHAVIOURAL_SKIP = {
+export const BEHAVIOURAL_SKIP = {
   node: {
     // B1 fixed (event-sourced create now folds events before asserting
     // invariants — src/generator/typescript/emit/aggregate.ts).  `ledger`

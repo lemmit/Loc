@@ -22,7 +22,12 @@
 //   LOOM_WIRE_OFF=1     skip the gate entirely (local debugging escape hatch).
 // ---------------------------------------------------------------------------
 
-import { build } from "esbuild";
+// `esbuild` is a DYNAMIC import inside `loadWireCore` for the same reason
+// `cases.mjs` defers its own: it is a runner-only dependency (this directory's
+// pinned `package.json`), and the fast suite imports THIS module for
+// `GOLDEN_OPT_OUT` — the register that decides which cases may run ungated
+// (test/behavioral/golden-coverage.test.ts).  A static import would break that
+// import at resolution time.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -42,6 +47,7 @@ let corePromise = null;
 export function loadWireCore(workDir) {
   if (corePromise) return corePromise;
   corePromise = (async () => {
+    const { build } = await import("esbuild");
     mkdirSync(workDir, { recursive: true });
     const shim = join(workDir, "_wire-core-entry.mts");
     writeFileSync(
