@@ -18,28 +18,37 @@
 //   6. Cross-page navigation — `useNavigate()` vs `push_navigate(socket, to: ...)`
 //
 // `WalkerTarget` is the contract every framework-specific walker
-// implements.  v0 wires the React (TSX) walker through `tsxTarget`
-// and the Phoenix LiveView (HEEx) walker through `heexTarget`.  The
-// walker itself takes a `WalkerTarget` parameter and consults it at
-// each of the seams above; the rest (pack dispatch, attribute
-// formatting, lambda traversal) stays in the shared walker.
+// implements.  The walker itself takes a `WalkerTarget` parameter and
+// consults it at each of the seams above; the rest (pack dispatch,
+// attribute formatting, lambda traversal) stays in the shared walker.
 //
-// The contract has two implementations:
+// The contract has SIX implementations — five of them ride the shared
+// `walkBody` core (`walker-core.ts`), and `heexTarget` is a conformance
+// shim over LiveView's PARALLEL engine (`heex-walker-core.ts`), whose
+// output topology diverges too far to share the core:
 //
-//   - `src/generator/react/walker/tsx-target.ts`            → `tsxTarget`
-//   - `src/generator/elixir/heex-target.ts`      → `heexTarget`
+//   - `src/generator/react/walker/tsx-target.ts`         → `tsxTarget`
+//   - `src/generator/vue/walker/vue-target.ts`           → `vueTarget`
+//   - `src/generator/svelte/walker/svelte-target.ts`     → `svelteTarget`
+//   - `src/generator/angular/walker/angular-target.ts`   → `angularTarget`
+//   - `src/generator/feliz/feliz-target.ts`              → `felizTarget` (F#)
+//   - `src/generator/flutter/flutter-target.ts`          → `flutterTarget` (Dart)
+//   - `src/generator/elixir/heex-target.ts`              → `heexTarget`
 //
-// Both validate the interface end-to-end through the cross-target
-// conformance test.  The walkers (`body-walker.ts` for React,
-// `heex-walker.ts` for Phoenix) inline their seam implementations
-// directly; extracting them behind these targets is gated on the
-// byte-identical fixture suite (React) and
-// `mix compile --warnings-as-errors` (Phoenix).
+// All validate the interface end-to-end through the cross-target
+// conformance test.
 //
-// SCOPE DECISION (13 methods: the 9 lowering seams + 4 markup
-// seams).  The contract covers the CROSS-FRAMEWORK seams a new
-// frontend (Vue / Svelte / Blazor) must implement to reuse the
-// shared walker core.  The markup seams (renderComment /
+// SCOPE.  The contract covers the CROSS-FRAMEWORK seams a new frontend
+// must implement to reuse the shared walker core.  It began at 13
+// methods (9 lowering seams + 4 markup seams) for the React/HEEx pair;
+// it is now ~70 members, grown by the Vue / Svelte / Angular / Feliz /
+// Flutter ports and by later features (stores, variant-match, the
+// interactive-table and i18n seams).  Most later additions are OPTIONAL
+// so a not-yet-ported frontend still typechecks and fails LOUD at the
+// unimplemented seam rather than silently dropping the construct.  Do
+// not read a count into this header — count the interface.
+//
+// The markup seams (renderComment /
 // renderConditionalChild / renderStyleAttr / escapeText) joined for
 // the Svelte port: Svelte 5 shares JSX's `{expr}` interpolation and
 // `<Comp x={y}/>` invocation syntax (those stay hardcoded in the
@@ -68,7 +77,7 @@
 // code.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, LiteralKind, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, LiteralKind, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "./api-hook-detector.js";
 import type { WalkContext } from "./walker-core.js";
 
@@ -1127,10 +1136,19 @@ export interface WalkerTarget {
   // CONTRACT FOR FAN-OUT FRONTENDS (Vue / Svelte / Angular):
   // A `store Cart { state {…} action …}` is a shared client-side state
   // container referenced by DOTTED name from page/component bodies
-  // (`Cart.lines` read, `Cart.clear()` call).  Three seam methods cover the
-  // two halves — USE SITE (the page/component reading/calling) and MODULE
-  // (the store's own emitted file).  The React reference (`tsx-target.ts`)
-  // implements all three against Zustand:
+  // (`Cart.lines` read, `Cart.clear()` call).  TWO seam methods cover the USE
+  // SITE (the page/component reading/calling).  The store's own emitted FILE
+  // is NOT a walker seam: every frontend emits it from its own store builder
+  // (`src/generator/{react,vue,svelte,angular}/store-builder.ts`, and
+  // `src/generator/elixir/store-emit.ts` for LiveView), outside `walkBody`.
+  //
+  // A third method, `renderStoreModule(store)`, was declared here for that
+  // file and was implemented by NO target and called by NOTHING — the
+  // builders had already taken the job.  It has been removed; the builders
+  // are the contract.
+  //
+  // The React reference (`tsx-target.ts`) implements both use-site methods
+  // against Zustand:
   //
   //   1. `renderStoreFieldRead({ storeName, field })` — a `Cart.lines` read.
   //      React: `useCart((s) => s.lines)`.  The walker records the use in
@@ -1141,17 +1159,16 @@ export interface WalkerTarget {
   //   2. `renderStoreActionCall({ storeName, action }, args)` — a
   //      `Cart.clear()` call.  React: the shell hoists `const clear =
   //      useCart((s) => s.clear)` and the call site emits `clear(args)`.
-  //   3. `renderStoreModule(store, ctx)` — the per-store FILE.  React emits a
-  //      Zustand `create<…State>((set) => ({ …fields, …actions }))` whose
-  //      action bodies reuse the SAME `:=`/`+=` statement lowering as page
-  //      actions (targeting `set(...)` instead of a `useState` setter).
-  //      Vue → a Pinia `defineStore`; Svelte → a `$state` rune module store;
-  //      Angular → an injectable signal store.  v1 stubs throw loudly so a
-  //      store on those frontends fails LOUD, never silent.
+  //
+  // The per-store FILE (React: a Zustand `create<…State>((set) => ({ …fields,
+  // …actions }))` whose action bodies reuse the SAME `:=`/`+=` statement
+  // lowering as page actions; Vue → a Pinia `defineStore`; Svelte → a `$state`
+  // rune module store; Angular → an injectable signal store) is emitted by the
+  // per-frontend store builder named above, not through this interface.
   //
   // The use-site methods are OPTIONAL on the interface so a frontend that
-  // hasn't wired stores yet still typechecks; the module emitter throws for an
-  // un-implemented frontend so a store can never be silently dropped.  Phoenix
+  // hasn't wired stores yet still typechecks — walker-core fails loud at the
+  // seam rather than dropping the read/call.  Phoenix
   // LiveView implements the store seam through its PARALLEL heex walker (a
   // dedicated `<App>Web.Stores.<Store>` module + per-page assign), NOT these
   // shared-`walkBody` methods — see `src/generator/elixir/store-emit.ts` and
@@ -1173,14 +1190,6 @@ export interface WalkerTarget {
     ref: { storeName: string; action: string; local: string },
     renderedArgs: string,
   ): string;
-
-  /** Render the per-store MODULE file (Stage 5).  Returns `{ path, content }`
-   *  — `path` relative to the generated project root (React:
-   *  `web/src/stores/<store-snake>.ts`).  React emits a Zustand store; the
-   *  fan-out frontends throw `Error("store: <frontend> not yet implemented")`
-   *  until ported.  `renderStmt` is the body-statement renderer the action
-   *  bodies reuse (so `:=`/`+=` lower identically to a page action). */
-  renderStoreModule?(store: StoreIR): { path: string; content: string };
 
   // --- Interactive-table seam (M-T1.1) ------------------------------------
   //

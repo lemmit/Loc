@@ -1582,14 +1582,17 @@ export const DIAGNOSTIC_MESSAGES = {
     ctxName: unknown;
     aggName: unknown;
     reason: unknown;
-    nonRelationalUnsupported: unknown;
+    // The remedy clause, composed at the call site: which hosts DO wire this
+    // (family, shape) pair.  Passed in rather than hardcoded here because the
+    // answer depends on the shape — naming one fixed backend (this used to say
+    // ".NET") goes stale the moment another backend ports the emitter.
+    hosts: unknown;
   }) =>
     `Deployable '${p.name}' (platform ${p.platform}) hosts aggregate ` +
     `'${p.ctxName}.${p.aggName}' with a 'filter' capability predicate that ${p.reason}. ` +
-    `Host this aggregate on a .NET deployable${
-      p.nonRelationalUnsupported
-    }, or remove the unsupported capability filter. ` +
-    `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
+    `Host this aggregate on ${p.hosts}, or remove the unsupported capability filter. ` +
+    `Non-principal filters on relational and shape(embedded) aggregates ` +
+    `(e.g. 'filter !this.isDeleted') are emitted.`,
   "loom.filter-bypass-unsupported": (p: {
     name: unknown;
     platform: unknown;

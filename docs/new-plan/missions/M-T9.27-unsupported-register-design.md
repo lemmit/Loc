@@ -202,6 +202,18 @@ flag for the same reason, so expect it to move that way again —
 `loom.filter-bypass-unsupported` ("`ignoring` … has no effect") in particular
 reads like the `-no-effect` rows slice 2 renamed out.
 
+**2026-08-17 — the prediction held, twice.** M-T6.32's verify-first step came
+back **closed on the platform axis**: all four capability sets
+(`supportsNonRelationalFilter`, `FILTER_BYPASS_FAMILIES`, `AUDIT_OP_BACKENDS`,
+`PROVENANCE_BACKENDS`) are 5/5 with named emitters — including the
+`loom.filter-bypass-unsupported` row called out above. **M-T6.34** (event-sourced
+storage), which carried no verify-first flag, was overturned the same way:
+`EVENT_SOURCING_BACKENDS` and `EVENT_SOURCING_WORKFLOW_BACKENDS` are both 5/5.
+The residue in each case is on the **adapter** axis, not the platform one, and
+belongs to M-T6.35. Reading: the verify-first flag was under-applied — every
+register row minted from a code identity rather than from a re-read emitter
+deserves it.
+
 That mission also surfaced a gate hole worth remembering: the five old sites
 were **invisible to `diagnostic-catalog.test.ts`**, because its scanner only
 records a site whose `code:` is a *string literal* and the old sites emitted

@@ -21,9 +21,9 @@
 //     clear() { this.lines.set([]); this.count.set(0); }
 //   }
 //
-// This module is Angular-only.  The other frontends (React/Vue/Svelte) wire
-// their own store-module emitters; an unimplemented frontend's
-// `WalkerTarget.renderStoreModule` throws loudly (the IR validator already
+// This module is Angular-only.  The other frontends (React/Vue/Svelte) each
+// wire their own store-module emitter, called from that frontend's
+// orchestrator rather than through a walker seam (the IR validator already
 // gates LiveView).
 // ---------------------------------------------------------------------------
 
