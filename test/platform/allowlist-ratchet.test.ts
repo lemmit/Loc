@@ -107,11 +107,22 @@ const REGISTERED: Ratchet[] = [
   // controller's raw-Npgsql port was the precedent they needed.  That port is
   // written: the four direct-table arms read through `NpgsqlDataSource` now, so
   // this map is DRAINED, not reclassified.
+  //
+  // 0 -> 1, and the raise is the reviewed line this ratchet asks for.
+  // `policy-document` joined the manifest's `dotnet` row (the EF document
+  // repository's capability filter + write-scope member landed), which enrolled
+  // it in THIS leg for the first time — and it found two more EF leaks in the
+  // Dapper adapter, of exactly the class the 2 -> 0 drain above closed:
+  // `EfOrgPathResolver.cs` is emitted whatever the adapter (CS0234/CS0246) and
+  // the Dapper document repository never got the EF twin's
+  // `GetByIdForWriteAsync` (CS0535).  So the count goes up while the repo's
+  // knowledge does too: the defects predate the entry, and were invisible
+  // because no dapper fixture had a `tenantRegistry` the compiler ever saw.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 0,
+    max: 1,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
   // not gaps — these never reach the compiler.  1 -> 5: the reclassification
