@@ -35,8 +35,10 @@ const SPEL_CONVERTED = ":#{@currentUserAccessor.user()?.tenantIdAsUuid()}";
 const guidClaim = (src: string): string =>
   src
     .replace("tenantId: string", "tenantId: guid")
-    .replace("aggregate Invoice with tenantOwned, crudish", "aggregate Invoice crossTenant with crudish");
-
+    .replace(
+      "aggregate Invoice with tenantOwned, crudish",
+      "aggregate Invoice crossTenant with crudish",
+    );
 
 async function orgRepo(src: string = SRC): Promise<string> {
   const files = await generateSystemFiles(src);

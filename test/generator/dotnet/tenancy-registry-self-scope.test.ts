@@ -35,7 +35,10 @@ const SRC = readFileSync("test/fixtures/corpus/tenancy-owned.ddd", "utf8").repla
 const guidClaim = (src: string): string =>
   src
     .replace("tenantId: string", "tenantId: guid")
-    .replace("aggregate Invoice with tenantOwned, crudish", "aggregate Invoice crossTenant with crudish");
+    .replace(
+      "aggregate Invoice with tenantOwned, crudish",
+      "aggregate Invoice crossTenant with crudish",
+    );
 
 describe("dotnet generator — derived registry self-scope filter", () => {
   it("installs the self-scope as a per-request HasQueryFilter reading a HOISTED, TryParse-guarded id member", async () => {
