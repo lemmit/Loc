@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFilesUnchecked, parseString } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Python backend — auth gate (plan S16, docs/auth.md).  An
@@ -136,9 +136,16 @@ describe("python auth gate", () => {
   it("anonymous deployables emit no auth module and stay Noop-shaped", async () => {
     const source = FIXTURE.replace(/\n {4}auth: required\n/, "\n");
     expect(source).not.toMatch(/^\s*auth: required\s*$/m);
-    const { model, errors } = await parseString(source);
-    if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-    const files = generateSystems(model).files;
+    // INVALID ON PURPOSE, and the invalidity is the subject: dropping
+    // `auth: required` from a system whose operations carry `requires
+    // currentUser…` guards is exactly what `loom.guard-principal-without-auth`
+    // refuses.  What this pins is the emitter's behaviour under that refusal —
+    // no auth module, Noop-shaped main — so the fixture must stay refused.
+    const files = await generateSystemFilesUnchecked(
+      source,
+      "a `requires currentUser` guard with `auth: required` stripped is what " +
+        "loom.guard-principal-without-auth refuses; the no-auth EMISSION is the subject",
+    );
     expect(files.get("api/app/auth/user.py")).toBeUndefined();
     const main = files.get("api/app/main.py")!;
     expect(main).not.toContain("AuthMiddleware");
