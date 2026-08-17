@@ -4,7 +4,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { corpusProjectDirs, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
+import {
+  corpusProjectDirs,
+  materializeCorpusFixture,
+  validateCorpusCase,
+} from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -93,6 +97,66 @@ describe("the dapper compile-tier maps name real corpus features", () => {
       ...Object.entries(DAPPER_UNSUPPORTED),
     ]) {
       expect(why.trim().length, `'${id}' needs a reason`).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The maps' ORACLE — always on, no SDK, no docker.
+//
+// Until now nothing checked that these maps described reality.  They are only
+// consulted when `LOOM_DOTNET_BUILD=1`, so the claim "this feature is outside
+// the adapter's boundary" (or "this one is fine") was unfalsifiable on an
+// ordinary PR — and the two halves that must agree, the FIXTURE corpus and the
+// per-adapter VALIDATOR gate, are edited by different PRs weeks apart.
+//
+// That is not a hypothetical either.  `read-gates` landed in #2523; #2498 then
+// added `loom.dapper-unsupported` for query-time projections, which rejects it.
+// Both PRs were green, `main` went red for ~6h, and the failure surfaced from a
+// docker job named after a compiler that never ran.  This gate reproduces that
+// disagreement in ~10s of pure Node.
+//
+// It runs the IR validator (phase ⑦) directly, because the corpus GENERATION
+// gate cannot: `generateSystems` never calls `validateLoomModel` (see
+// `validateCorpusCase`), so no other per-PR gate sees these diagnostics at all.
+// ---------------------------------------------------------------------------
+describe("the dapper maps agree with what the IR validator actually says", () => {
+  const dapperDeclared = CORPUS.filter((f) => f.backends.includes("dotnet")).map((f) => f.id);
+
+  it.each(dapperDeclared)("%s — its map placement matches its diagnostics", async (id) => {
+    const diags = await validateCorpusCase(id, "dotnet", "dapper");
+    const rejections = diags.filter(
+      (d) => d.severity === "error" && d.code === "loom.dapper-unsupported",
+    );
+    const otherErrors = diags.filter(
+      (d) => d.severity === "error" && d.code !== "loom.dapper-unsupported",
+    );
+
+    if (id in DAPPER_UNSUPPORTED) {
+      // Claimed a capability boundary — the validator must actually say so.
+      // A stale entry (the gap got fixed, the entry stayed) fails here, which
+      // is what makes this register ratchet rather than accumulate.
+      expect(
+        rejections.length,
+        `'${id}' is in DAPPER_UNSUPPORTED but the validator raises no ` +
+          "loom.dapper-unsupported under `persistence: dapper` — the boundary moved, so " +
+          "drop the entry and let the feature run.",
+      ).toBeGreaterThan(0);
+    } else {
+      // Everything else is claimed to REACH the compiler — including
+      // DAPPER_COMPILE_SKIP entries, which are compile debt, not boundaries.
+      // A fixture that the validator rejects while sitting outside
+      // DAPPER_UNSUPPORTED is precisely the `read-gates` failure.
+      expect(
+        rejections.map((d) => d.message),
+        `'${id}' is rejected by loom.dapper-unsupported but is not in DAPPER_UNSUPPORTED — ` +
+          "the dapper compile leg will fail at `generate`, before dotnet runs. Add it to the " +
+          "map (with the boundary stated) or narrow the validator gate.",
+      ).toEqual([]);
+      expect(
+        otherErrors.map((d) => `${d.code}: ${d.message}`),
+        `'${id}' does not validate under \`persistence: dapper\``,
+      ).toEqual([]);
     }
   });
 });

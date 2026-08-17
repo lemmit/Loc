@@ -212,6 +212,25 @@ system S {
         create(code: string) { requires 1 == 1  emit Made { order: id, code: code } }
         apply(e: Made) { code := e.code }
       }`),
+
+  // `Slot { }` is a placement contract — only a `component` body has a caller
+  // whose children it can render; in a PAGE body it is an unbound reference.
+  "loom.slot-outside-component": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Stack { Slot { } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
 };
 
 /**

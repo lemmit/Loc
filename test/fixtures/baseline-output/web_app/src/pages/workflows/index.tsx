@@ -15,6 +15,7 @@ export default function WorkflowsIndex() {
       <Stack>
         <Card withBorder padding="md" data-testid="workflow-card-place_order">
           <Title order={4}>{t("page.WorkflowsIndex.heading.gb2crw", "Place Order")}</Title>
+          <Anchor component={RouterLink} to="/workflows/place_order" data-testid="workflow-place_order-run">{t("page.WorkflowsIndex.anchor.5fm2dg", "Run →")}</Anchor>
         </Card>
       </Stack>
     </Stack>

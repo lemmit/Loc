@@ -60,7 +60,12 @@ import {
 } from "./audit-history-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
-import { denialOverrides, denialResponse } from "./denial.js";
+import {
+  denialOverrides,
+  denialResponse,
+  opHasWireDenial,
+  wireValidationResponse,
+} from "./denial.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { findRoutes, renderFindActions } from "./find-controller.js";
@@ -509,8 +514,21 @@ ${cuBind}${indexBody}
       {:error, {:disallowed, detail}} ->
         ${denialResponse("disallowed", "detail", opDenialOverrides)}`
         : "";
+      // M-T6.20 — a messaged `precondition` over the op's OWN request params is
+      // lifted into the request validator on the other four backends, so its
+      // denial must answer the WIRE-VALIDATION 422 (`errors[]` with pointer +
+      // `msg.<hash>` code), not the domain floor.  Emitted only when the op has
+      // such a guard, so no unreachable clause reaches
+      // `mix compile --warnings-as-errors`.
+      const wireArm = opHasWireDenial(op)
+        ? `
+
+      {:error, {:validation_failed, errors}} ->
+        ${wireValidationResponse()}`
+        : "";
       const denialArms =
         whenArm +
+        wireArm +
         (opHasGuards(op)
           ? `
 

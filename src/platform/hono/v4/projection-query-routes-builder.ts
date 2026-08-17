@@ -6,6 +6,7 @@ import {
   DRIZZLE_INTRINSIC_SQL,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
+import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
@@ -268,6 +269,7 @@ export function buildQueryProjectionsFile(
     lines.push(
       ...emitQueryProjectionRoute(
         p,
+        ctx,
         rawReads.get(p.name),
         aggWheres.get(p.name),
         usingMikro ? { where: mikroWheres.get(p.name) } : undefined,
@@ -357,6 +359,7 @@ export function buildQueryProjectionsFile(
  *  projection's own row shape. */
 function emitQueryProjectionRoute(
   p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
   rawRead?: { table: string; where?: string },
   aggregateWhere?: string,
   /** Present ⇒ `persistence: mikroorm`: `where` is a MikroORM FilterQuery
@@ -385,6 +388,10 @@ function emitQueryProjectionRoute(
   const gate = p.query!.requires;
   const grouped = groupedAggregates(p);
   const aggregates = wholeTableAggregates(p);
+  // The row's DECLARED wire types, by field name — what each `select` must
+  // coerce to — see the repo-read arm, which serialises through the
+  // aggregate's own `wireProjectionValue`.
+  const rowFieldType = new Map(p.stateFields.map((f) => [f.name, f.type] as const));
   out.push(`  async (httpCtx) => {`);
   // The `requires` gate (and any currentUser-scoped filter) needs the request
   // principal in scope; a failing gate denies with 403 (ForbiddenError → 403)
@@ -569,6 +576,18 @@ function emitQueryProjectionRoute(
     out.push(
       `    const rows = await db.select().from(${rawRead.table})${rawRead.where ? `.where(${rawRead.where})` : ""};`,
     );
+    // NO wire coercion here, deliberately.  This arm reads DRIZZLE COLUMNS off a
+    // raw table (a workflow's saga-state row, or a folded `<Proj>Row`), not
+    // domain values: an id/uuid column is already a string and a `numeric` money
+    // column is already `"10.0000"`, so the repo-arm's coercion below would only
+    // wrap them in a no-op `String(...)`.  Left byte-identical rather than
+    // churned — the defect that motivated the coercion (a domain `Decimal`
+    // reaching the wire unscaled) cannot occur on this arm.
+    //
+    // A selected `datetime` DOES arrive as a `Date` here, which is the one case
+    // this arm might still need; no fixture selects one, so it is stated rather
+    // than speculatively "fixed" — a change with no witness is how the last two
+    // bugs in this file got in.
     const projectedFields = (p.query!.selects ?? [])
       .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
       .join(",\n");
@@ -609,7 +628,13 @@ function emitQueryProjectionRoute(
     out.push(`    const projected = rows.map((r) => repo.toWire(r));`);
   } else {
     const projectedFields = (p.query!.selects ?? [])
-      .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
+      .map((s) => {
+        const rendered = renderProjectionSelect(s.expr, aliasMap);
+        const t = rowFieldType.get(s.field);
+        // DOMAIN values (a hydrated aggregate, or a joined one) — so this is
+        // the aggregate's own `toWire` renderer, not the column table below.
+        return `      ${s.field}: ${t ? wireProjectionValue(rendered, t, ctx, false) : rendered}`;
+      })
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
   }
