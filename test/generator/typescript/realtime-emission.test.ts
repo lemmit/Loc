@@ -182,7 +182,10 @@ const REALTIME_SYSTEM = `
 system RealtimeShop {
   subdomain Shipping {
   context Fulfillment {
-    aggregate Order { customerId: string  status: string  total: int }
+    aggregate Order {
+      customerId: string  status: string  total: int
+      derived display: string = customerId
+    }
     repository Orders for Order { }
     aggregate Shipment {
       orderRef: Order id
@@ -218,9 +221,12 @@ system RealtimeShop {
     api Fulfillment: FulfillmentApi
     page Home { route: "/" body: Heading { "hi" } }
   }
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
   deployable backend {
     platform: node
     contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
     serves: FulfillmentApi
     port: 3000
   }
