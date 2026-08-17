@@ -183,9 +183,10 @@ const REGISTERED: Ratchet[] = [
   //           this line down; left at 5 the register could have re-grown by
   //           three without anyone noticing.
   //
-  // What remains is two INDEPENDENT gaps, so the next drain will not be
-  // wholesale: `prefix-filter` (the declared `MIKROORM_SUBSET` predicate
-  // narrowing) and `policy-deny` (the read-deny form outside that subset).
+  // `policy-deny` then drained too: the adapter grew the `authz-filter` arm the
+  // deny sentinel needed AND the write-scope pre-guard it had never read.  What
+  // remains is one gap: `prefix-filter` (the declared `MIKROORM_SUBSET`
+  // predicate narrowing — no scalar intrinsic in a find predicate).
   //
   // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
   // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
@@ -194,7 +195,9 @@ const REGISTERED: Ratchet[] = [
     file: "test/behavioral/run-mikroorm.mjs",
     name: "MIKRO_SKIP",
     kind: "record",
-    max: 2,
+    // 2 → 1: `policy-deny` drained when the adapter grew an `authz-filter` arm
+    // and a write-scope pre-guard (the deny fixture now boots on this leg).
+    max: 1,
   },
 ];
 

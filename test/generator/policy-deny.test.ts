@@ -131,6 +131,111 @@ describe("policy deny — .NET (Dapper)", () => {
   });
 });
 
+describe("policy deny — node (Hono/MikroORM)", () => {
+  // The node backend's SECOND persistence adapter had BOTH halves missing:
+  // `whereToMikroFilter` had no `authz-filter` arm (so the deny READ sentinel
+  // could not lower at all — `loom.find-predicate-unsupported` refused the whole
+  // system), and `writeScopeFilter` had ZERO readers in the adapter, so a deny
+  // WRITE generated clean and the mutation SUCCEEDED.
+  const mikro = "node { persistence: mikroorm }";
+
+  it("ANDs the always-false FilterQuery contradiction into every read (deny read)", async () => {
+    const secret = await fileContaining(mikro, "repositories/secret-repository");
+    // Spliced into EVERY read site — findById, findManyByIds, the findAll page
+    // and its count.  A contradiction that reached only one of them still leaks.
+    const readSites = [
+      ...secret.matchAll(/\{ \$and: \[\{ id: null \}, \{ id: \{ \$ne: null \} \}\] \}/g),
+    ];
+    expect(readSites.length).toBeGreaterThanOrEqual(4);
+    // The deny term rides the same `$and` composition as the tenant floor.
+    expect(secret).toContain(
+      "em.findOne(SecretRow, { $and: [{ id: id as string }, { tenantId: requireCurrentUser().tenantId }, { $and: [{ id: null }, { id: { $ne: null } }] }] })",
+    );
+  });
+
+  it("emits the write-scope existence pre-guard on getById (deny write)", async () => {
+    const account = await fileContaining(mikro, "repositories/account-repository");
+    // The command load every mutation route goes through refuses first; the
+    // ordinary read filter still hydrates afterwards.
+    expect(account).toContain(
+      "const inScope = await em.count(AccountRow, { $and: [{ id: id as string }, { $and: [{ id: null }, { id: { $ne: null } }] }] });",
+    );
+    expect(account).toContain(
+      "if (inScope === 0) throw new AggregateNotFoundError(`Account ${id} not found`);",
+    );
+    // Reads stay OPEN on a write-denied aggregate (tenant floor only).
+    expect(account).not.toContain("{ $and: [{ id: null }, { id: { $ne: null } }] }, { tenantId");
+  });
+
+  it("leaves an undenied aggregate's repository untouched", async () => {
+    const org = await fileContaining(mikro, "repositories/org-repository");
+    expect(org).not.toContain("id: { $ne: null }");
+    expect(org).not.toContain("inScope");
+  });
+});
+
+// The BLOB shapes (`shape: document`, event-sourced streams) have no queryable
+// columns to push a write scope into, so their command load answers not-found
+// directly — the in-app twin of the relational pre-guard, and the same seam the
+// document read filter already uses.
+describe("policy deny write — MikroORM blob shapes (document / event-sourced)", () => {
+  const blobSystem = `
+    system Shop {
+      user { id: guid  tenantId: string }
+      tenancy by user.tenantId of Org
+      subdomain S {
+        context C {
+          event Opened { ledger: Ledger id, owner: string }
+          aggregate Doc shape: document, with crudish, tenantOwned { code: string }
+          aggregate Ledger crossTenant persistedAs: eventLog {
+            owner: string
+            create open(owner: string) { emit Opened { ledger: id, owner: owner } }
+            operation rename(owner: string) { emit Opened { ledger: id, owner: owner } }
+            apply(e: Opened) { owner := e.owner }
+          }
+          repository Docs for Doc { }
+          repository Ledgers for Ledger { }
+          policy {
+            deny write on Doc
+            deny write on Ledger
+          }
+        }
+        context Registry {
+          aggregate Org with crudish { name: string  implements tenantRegistry }
+          repository Orgs for Org { }
+        }
+      }
+      api ShopApi from S
+      storage primarySql { type: postgres }
+      resource shopState { for: C, kind: state, use: primarySql }
+      resource shopLog { for: C, kind: eventLog, use: primarySql }
+      resource registryState { for: Registry, kind: state, use: primarySql }
+      deployable api {
+        platform: node { persistence: mikroorm }
+        contexts: [C, Registry]
+        dataSources: [shopState, shopLog, registryState]
+        serves: ShopApi
+        port: 3001
+        auth: required
+      }
+    }
+  `;
+
+  it("answers not-found from the command load on both blob shapes", async () => {
+    const out = await generateSystemFiles(blobSystem);
+    const doc = [...out].find(([p]) => p.includes("doc-repository"))?.[1] ?? "";
+    const ledger = [...out].find(([p]) => p.includes("ledger-repository"))?.[1] ?? "";
+    expect(doc).toContain("// policy { deny write on Doc } — no row is in write scope.");
+    expect(doc).toMatch(
+      /async getById\(id: Ids\.DocId\): Promise<Doc> \{\n[^\n]*\n\s*throw new AggregateNotFoundError/,
+    );
+    expect(ledger).toContain("// policy { deny write on Ledger } — no row is in write scope.");
+    // No `if (!(false))` constant-condition body.
+    expect(doc).not.toContain("if (!(false))");
+    expect(ledger).not.toContain("if (!(false))");
+  });
+});
+
 describe("policy deny — Python (FastAPI/SQLAlchemy)", () => {
   it("renders the and_(is_(None), isnot(None)) contradiction", async () => {
     const secret = await fileContaining("python", "secret_repository");
