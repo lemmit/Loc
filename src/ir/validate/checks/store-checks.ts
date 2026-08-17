@@ -39,6 +39,12 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 // `VIEW_EFFECT_BUILTINS` in ui-checks.ts (a store has no router/socket).
 const VIEW_EFFECT_BUILTINS = new Set<string>(["navigate", "toast"]);
 
+/** Frontend PLATFORMS whose store emitter ignores the `persist:` lifetime
+ *  ladder and builds an in-memory store regardless (`loom.store-lifetime-
+ *  target-unsupported`).  A RATCHET: when a platform implements the ladder its
+ *  entry is deleted here in the same PR, so a stale allowance can't survive. */
+const LIFETIME_UNSUPPORTED_PLATFORMS: ReadonlySet<string> = new Set(["feliz", "flutter"]);
+
 /** Render a `StoreIR.lifetime` enum back to its `persist:` source keyword for
  *  diagnostics (`persistLocal` → `local`). */
 function lifetimeKeyword(lifetime: StoreIR["lifetime"]): string {
@@ -271,6 +277,52 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
               }
             });
           }
+        }
+      }
+    }
+
+    // loom.store-lifetime-target-unsupported — the SAME gap as the LiveView
+    // lifetime gate above, on the two frontends that don't ride the SPA store
+    // runtime either.
+    //
+    //   flutter — `flutter/store-builder.ts` writes a `// TODO(flutter
+    //     full-parity): \`persist: <lifetime>\` is not implemented` comment and
+    //     then builds the store IN-MEMORY anyway.  A comment in emitted Dart is
+    //     not a diagnostic: `ddd parse` is clean, `flutter analyze` is clean,
+    //     and the author only discovers the cart didn't survive a restart at
+    //     runtime.
+    //   feliz — `src/generator/feliz` contains ZERO references to
+    //     `store.lifetime`.  The store folds into the single Elmish `Model`,
+    //     which lives for exactly one program run; `local`/`session`/`url` are
+    //     dropped without even a comment.
+    //
+    // Both are IMPLEMENTABLE (shared_preferences + a router rewrite on Flutter;
+    // Browser.WebStorage + a Feliz.Router hook on Feliz) and are planned — this
+    // gate is the honest placeholder, and the wave-2 tasks that implement them
+    // DELETE their arm from `LIFETIME_UNSUPPORTED_PLATFORMS` rather than
+    // leaving a stale allowance behind.
+    //
+    // Detected off `dep.platform`, not `uiFramework`, for the reason the Feliz
+    // block below spells out: `platform: feliz` / `platform: flutter` each host
+    // only their own framework, and a bare declaration resolves `uiFramework`
+    // to the frontend default rather than to the platform's own name.
+    for (const dep of sys.deployables) {
+      if (!LIFETIME_UNSUPPORTED_PLATFORMS.has(dep.platform)) continue;
+      const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
+      for (const uiName of mounted) {
+        for (const store of storesByUi.get(uiName) ?? []) {
+          if (store.lifetime === "memory") continue;
+          const where = `store '${store.name}'`;
+          diags.push({
+            severity: "error",
+            code: "loom.store-lifetime-target-unsupported",
+            message: diagMessage("loom.store-lifetime-target-unsupported", {
+              where,
+              lifetime: lifetimeKeyword(store.lifetime),
+              platform: dep.platform,
+            }),
+            source: where,
+          });
         }
       }
     }

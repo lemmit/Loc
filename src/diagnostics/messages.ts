@@ -1253,6 +1253,16 @@ export const DIAGNOSTIC_MESSAGES = {
     `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
     `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
     `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
+  "loom.store-lifetime-target-unsupported": (p: {
+    where: unknown;
+    lifetime: unknown;
+    platform: unknown;
+  }) =>
+    `${p.where}: \`persist: ${p.lifetime}\` is not implemented on the ${p.platform} frontend — ` +
+    `the emitted store is IN-MEMORY regardless, so the state is lost on restart and not ` +
+    `shareable by URL, with nothing in the build output to say so.  Use \`persist: memory\` ` +
+    `here, or host this ui on a SPA frontend (react / vue / svelte / angular).  Support is ` +
+    `planned; this gate exists so the degradation is honest until it lands.`,
   "loom.store-cross-store-on-liveview-invalid": (p: {
     where: unknown;
     store: unknown;
@@ -1860,6 +1870,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `compile error on React and Feliz, and nothing at all on Vue / Svelte / Angular / ` +
     `Flutter.  Move the shared markup into a \`component … { body: … Slot { } }\` and ` +
     `have the page call it with the content as extra positional arguments.`,
+  "loom.sub-primitive-misplaced": (p: { where: unknown; name: unknown; parents: unknown }) =>
+    `${p.where}: \`${p.name}\` is a sub-element of ${p.parents} and has no renderer of its ` +
+    `own — its parent consumes it inline.  Spelled anywhere else it degrades to a comment on ` +
+    `every frontend (\`{/* ${p.name}: not supported … */}\` on React/Vue/Svelte/Angular/Feliz/` +
+    `Flutter, \`<%!-- ${p.name}: … --%>\` on Phoenix LiveView), so the element and everything ` +
+    `nested inside it silently disappear from the page.  Make it a direct child of ${p.parents}.`,
   "loom.frontend-collection-op-unsupported": (p: { where: unknown; op: unknown }) =>
     `${p.where}: uses the collection op \`.${p.op}\` on a collection in a page/component ` +
     `expression, but the frontend walker has no renderer for it — it emits verbatim ` +
@@ -2435,6 +2451,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `workflow '${p.name}': '${p.resourceName}.${p.verb}(...)' — '${p.verb}' is not a valid verb for a ${p.resourceKind} resource.  Available: ${p.resourceKind2}.`,
   "loom.resource-op-in-transaction": (p: { name: unknown; resourceName: unknown; verb: unknown }) =>
     `workflow '${p.name}': resource operation '${p.resourceName}.${p.verb}(...)' cannot run inside a transactional workflow — external effects don't roll back with the database transaction.  Move it out of the transactional span, or publish through an outbox.`,
+  "loom.resource-op-outside-workflow": (p: {
+    location: unknown;
+    resourceName: unknown;
+    verb: unknown;
+  }) =>
+    `resource operation '${p.resourceName}.${p.verb}(...)' is only available inside a workflow, a command/query handler, or a domainService operation — no backend has the resource client in scope anywhere else (.NET/Java/Phoenix fail codegen outright; TS/Python emit an unimported helper call). Found in ${p.location}; move the call into a workflow and have this member work on the value it produces.`,
 
   // ----------------------------------------------------------------------
   // src/language/ddd-validator.ts

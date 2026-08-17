@@ -31,6 +31,7 @@ import {
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateReservedStructuralErrorNames,
+  validateResourceOpPlacement,
   validateUnionFindShapes,
   validateUnionsUnimplemented,
   validateUniqueColumns,
@@ -249,6 +250,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateCurrentUserScope(c, diags);
     validateFieldDefaults(c, diags);
     validatePermissionRefs(c, diags);
+    validateResourceOpPlacement(c, diags);
     validateGenericInstancesUnimplemented(
       c,
       diags,

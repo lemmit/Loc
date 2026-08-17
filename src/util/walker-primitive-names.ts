@@ -100,6 +100,26 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
 
 export const WALKER_SUB_PRIMITIVES: ReadonlySet<string> = new Set(["Tab", "Column"]);
 
+/** The PLACEMENT contract of each sub-primitive: the parent primitive(s) whose
+ *  positional children it may appear among.
+ *
+ *  A `group: "sub"` primitive has no top-level renderer of its own — its parent
+ *  consumes it inline (`emitTabs` scans its args for `Tab(...)`; `emitTable` /
+ *  `emitDataGrid` scan theirs for `Column(...)`).  Spelled anywhere else it
+ *  reaches the walker's own dispatch, which has no `tsx` entry for it, and
+ *  DEGRADES to a comment — a `Tab: not supported by the walker yet` JSX
+ *  comment, or `<%!-- Tab: … --%>` on HEEx.  The element silently disappears
+ *  from the rendered page.
+ *
+ *  Derived, like the sets above, from the registry's `a11y.owns` (`Tabs` owns
+ *  `Tab`; `Table` and `DataGrid` own `Column`) and pinned against it by
+ *  `walker-stdlib-completeness.test.ts`, so a new sub-primitive cannot land
+ *  without declaring where it belongs. */
+export const WALKER_SUB_PRIMITIVE_PARENTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["Tab", new Set(["Tabs"])],
+  ["Column", new Set(["Table", "DataGrid"])],
+]);
+
 /** True when `name` is admissible as a v2 BuilderCall type without
  *  resolving to a user-declared type (VO, EntityPart, Component). */
 export function isWalkerPrimitive(name: string): boolean {
