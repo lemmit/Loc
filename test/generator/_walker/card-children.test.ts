@@ -124,7 +124,9 @@ system CardSlotHeex {
     }
     page Landing { route: "/"  body: Stack { Heading { "Hi" } } }
   }
-  deployable phoenixApp { platform: elixir, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000 }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable phoenixApp { platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi, ui: DemoUi, port: 4000 }
 }`);
     const comps = [...files.entries()].find(([p]) => p.endsWith("/ui_components.ex"))![1];
     expect(comps).toContain("{render_slot(@inner_block)}");
