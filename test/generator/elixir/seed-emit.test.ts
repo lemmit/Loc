@@ -123,19 +123,36 @@ describe("elixir/vanilla generator — first-boot seeding", () => {
     expect(seeds).toContain(`dataset == "default" or MapSet.member?(requested, dataset)`);
   });
 
-  it("INVOKES the seeder at boot — on a serving node only", async () => {
+  it("INVOKES the seeder at boot — after the Repo, BEFORE the Endpoint", async () => {
     const files = await generateSystemFiles(SEEDED);
     const app = files.get(APPLICATION)!;
     // The gap's real shape: an emitted-but-uncalled seeder is as silent as none.
-    expect(app).toContain("Api1.Catalog.Seeds.run()");
-    // …after the supervision tree is up, so the Repo the seeder queries exists.
-    const startLink = app.indexOf("Supervisor.start_link(children, opts)");
-    expect(startLink).toBeGreaterThan(-1);
-    expect(app.indexOf("Api1.Catalog.Seeds.run()")).toBeGreaterThan(startLink);
+    expect(app).toContain("Api1.Catalog.Seeds");
+    // ORDERING is the assertion, not mere presence.  The seeder queries the
+    // Repo, so it must start after it; and it must finish before the Endpoint
+    // accepts its first connection, or a client reaching a freshly-booted node
+    // observes the UNSEEDED table (a real window, measured on a live boot —
+    // `Supervisor.start_link/2` has already started the Endpoint by the time it
+    // returns, so seeding from there is too late).
+    const repo = app.indexOf("      Api1.Repo,");
+    const seeds = app.indexOf("      Api1.Catalog.Seeds,");
+    const endpoint = app.indexOf("      Api1Web.Endpoint");
+    expect(repo).toBeGreaterThan(-1);
+    expect(seeds).toBeGreaterThan(repo);
+    expect(endpoint).toBeGreaterThan(seeds);
+    // …and it must NOT also run after start_link (that would double-seed the
+    // marker read and reopen the window this placement closes).
+    expect(app).not.toContain("Seeds.run()");
+
     // `mix test` sets neither :serve_endpoints nor `server: true`, so the
     // emitted ExUnit suites keep the empty tables they assert against.
-    expect(app).toContain("Application.get_env(:phoenix, :serve_endpoints)");
-    expect(app).toContain("Application.get_env(:api1, Api1Web.Endpoint, [])[:server]");
+    const seedsMod = files.get(SEEDS)!;
+    expect(seedsMod).toContain("Application.get_env(:phoenix, :serve_endpoints)");
+    expect(seedsMod).toContain("Application.get_env(:api1, Api1Web.Endpoint, [])[:server]");
+    // A child slot that never becomes a process — `:ignore` is what makes the
+    // supervisor move on to the Endpoint instead of supervising a dead worker.
+    expect(seedsMod).toContain("def start_link do");
+    expect(seedsMod).toContain("    :ignore");
     // The canonical `mix run priv/repo/seeds.exs` entry calls the SAME module,
     // so a hand-run and a boot cannot disagree.
     expect(files.get(SEEDS_EXS)).toContain("Api1.Catalog.Seeds.run()");
@@ -148,6 +165,6 @@ describe("elixir/vanilla generator — first-boot seeding", () => {
     expect(UNSEEDED).not.toContain("seed ");
     expect(files.has(SEEDS)).toBe(false);
     expect(files.has(SEEDS_EXS)).toBe(false);
-    expect(files.get(APPLICATION)).not.toContain("Seeds.run()");
+    expect(files.get(APPLICATION)).not.toContain("Seeds");
   });
 });

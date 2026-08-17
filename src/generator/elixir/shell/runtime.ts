@@ -20,12 +20,17 @@ export function renderApplication(
   // the other backends' fetch-on-first-verify.  Empty ⇒ byte-identical.
   preEndpointChildren: string[] = [],
   // First-boot seed modules (`<App>.<Ctx>.Seeds`, database-seeding.md /
-  // M-T6.37) — invoked once the supervision tree is up, so the Repo is
-  // available.  This is the elixir twin of the Hono entrypoint's post-migrate
-  // `runSeeds(db)` and java's `<Ctx>SeedRunner` ApplicationRunner: it runs on
-  // `mix phx.server` AND on the release (`bin/server` migrates, then starts),
-  // where a `priv/repo/seeds.exs` script would never be executed at all.
-  // Ship-once per dataset via the `__loom_seed` marker, so re-boots are no-ops.
+  // M-T6.37) — supervision children spliced AFTER the Repo they query and
+  // BEFORE the Endpoint, so the rows are committed before the node accepts its
+  // first connection.  (Each `start_link` returns `:ignore`; the child slot
+  // buys the ORDERING, not a process.  Calling `run()` after
+  // `Supervisor.start_link/2` returns instead leaves a real window in which the
+  // Endpoint is listening over an unseeded table — measured on a live boot.)
+  // This is the elixir twin of the Hono entrypoint's post-migrate
+  // `runSeeds(db)` and java's `<Ctx>SeedRunner`: it runs on `mix phx.server`
+  // AND on the release (`bin/server` migrates, then starts), where a
+  // `priv/repo/seeds.exs` script would never be executed at all.  Ship-once per
+  // dataset via the `__loom_seed` marker, so re-boots are no-ops.
   // Empty ⇒ byte-identical.
   seedModules: readonly string[] = [],
 ): string {
@@ -66,28 +71,14 @@ defmodule ${appModule}.Application do
     children = [
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
-      ${appModule}.Telemetry${preEndpointChildren.map((c) => `,\n      ${c}`).join("")},
+      ${appModule}.Telemetry${[...seedModules, ...preEndpointChildren].map((c) => `,\n      ${c}`).join("")},
       ${appModule}Web.Endpoint${schedulerChildren.map((c) => `,\n      ${c}`).join("")}
     ]
 
     opts = [strategy: :one_for_one, name: ${appModule}.Supervisor]
     case Supervisor.start_link(children, opts) do
       {:ok, _pid} = ok ->
-        ${listeningCall}${
-          seedModules.length === 0
-            ? ""
-            : `
-        # First-boot seed data (database-seeding.md) — only on a node that
-        # actually SERVES: \`mix phx.server\` sets :phoenix/:serve_endpoints,
-        # a release sets \`server: true\` (config/prod.exs).  \`mix test\` sets
-        # neither, so the emitted ExUnit suites keep the empty tables they
-        # assert against instead of racing a seeder at application start.
-        if Application.get_env(:phoenix, :serve_endpoints) ||
-             Application.get_env(:${appName}, ${appModule}Web.Endpoint, [])[:server] do
-${seedModules.map((m) => `          ${m}.run()`).join("\n")}
-        end
-`
-        }
+        ${listeningCall}
         ok
       other ->
         other
