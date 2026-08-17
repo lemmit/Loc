@@ -66,7 +66,7 @@ const COMPOUND_SRC = `
           orderId: Order id
           attempts: int
           total: money
-          create(p: OrderPlaced) by p.order { attempts += 1  total -= 5.00 USD }
+          create(p: OrderPlaced) by p.order { attempts += 1  total -= money("5.00") }
         }
       }
     }
@@ -86,7 +86,7 @@ describe("Hono workflow own-state compound assignment", () => {
     expect(start).toContain("state.attempts = state.attempts + 1;");
   });
 
-  it("emits Decimal arithmetic for a money `total -= 5.00 USD`", async () => {
+  it("emits Decimal arithmetic for a money `total -= money(...)`", async () => {
     const files = (await generateSystems(await parseValid(COMPOUND_SRC))).files;
     const wf = [...files.entries()].find(([k]) => k.endsWith("/http/workflows.ts"))?.[1];
     const start = wf!.slice(wf!.indexOf("orderFulfillmentStartOrderPlaced"));

@@ -71,7 +71,7 @@ const COMPOUND_SRC = `
           orderId: Order id
           attempts: int
           total: money
-          create(p: OrderPlaced) by p.order { attempts += 1  total -= 5.00 USD }
+          create(p: OrderPlaced) by p.order { attempts += 1  total -= money("5.00") }
         }
       }
     }
@@ -92,7 +92,7 @@ describe(".NET workflow own-state compound assignment", () => {
     expect(handler).toContain("state.Attempts = state.Attempts + 1;");
   });
 
-  it("emits decimal arithmetic for a money `total -= 5.00 USD`", async () => {
+  it("emits decimal arithmetic for a money `total -= money(...)`", async () => {
     const files = (await generateSystems(await parseValid(COMPOUND_SRC))).files;
     const handler = [...files.entries()].find(([k]) =>
       k.endsWith("OrderFulfillmentStartOrderPlacedHandler.cs"),

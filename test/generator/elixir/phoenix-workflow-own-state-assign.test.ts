@@ -78,7 +78,7 @@ const COMPOUND_SRC = `
           orderId: Order id
           attempts: int
           total: money
-          create(p: OrderPlaced) by p.order { attempts += 1  total -= 5.00 USD }
+          create(p: OrderPlaced) by p.order { attempts += 1  total -= money("5.00") }
         }
       }
     }
@@ -109,7 +109,7 @@ describe("phoenix/ash workflow own-state compound assignment", () => {
     );
   });
 
-  it("emits Decimal arithmetic for a money `total -= 5.00 USD`", async () => {
+  it("emits Decimal arithmetic for a money `total -= money(...)`", async () => {
     const files = await genCompound();
     const start = [...files.entries()].find(([k]) =>
       k.endsWith("workflows/order_fulfillment/start_order_placed.ex"),
