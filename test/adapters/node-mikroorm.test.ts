@@ -1617,7 +1617,16 @@ describe("mikroorm — workflow (saga) correlation store is persistence-neutral"
     expect(httpIndex).toContain(
       'import { createInProcessDispatcher, workflowsRoutes } from "./workflows";',
     );
-    expect(httpIndex).toContain("events: DomainEventDispatcher = createInProcessDispatcher(db),");
+    // The in-process dispatcher is the DEFAULT `events`, which is what makes the
+    // saga cascade fire without boot-side wiring.  It is now wrapped in the
+    // realtime tee, because this fixture's channel is `delivery: broadcast` and
+    // M-T6.23 slice 5 un-gated the SSE wire on this adapter — so the composition
+    // matches drizzle's instead of being a mikro-only shape.  The assertion still
+    // pins the same fact (the cascade's dispatcher is the default); it just no
+    // longer pins the ABSENCE of the tee.
+    expect(httpIndex).toContain(
+      "events: DomainEventDispatcher = realtimeTee(createInProcessDispatcher(db)),",
+    );
   });
 });
 

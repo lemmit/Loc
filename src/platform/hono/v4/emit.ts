@@ -744,7 +744,10 @@ export function generateTypeScriptForContexts(
   // channel makes its carried events UI-observable at GET /realtime/events;
   // createApp's dispatcher tee (see routes emit) copies dispatched events
   // onto the stream.
-  if (!usingMikro) {
+  // Persistence-neutral since M-T6.23 slice 5 (the last of the five): the SSE
+  // module reads no `db` at all — `realtimeTee(inner)` decorates a dispatcher and
+  // `realtimeRoutes()` takes no handle — so the wire is adapter-independent.
+  {
     const realtimeFile = buildRealtimeFile(merged);
     if (realtimeFile) out.set("http/realtime.ts", realtimeFile);
   }
@@ -1201,8 +1204,9 @@ export function generateTypeScriptForContexts(
         // the drained rows publish to the broker (M-T4.4 slice 3).
         (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0),
       // Realtime tee: the relay's inner dispatcher rides through it so
-      // relayed (durable) events reach the SSE wire too.
-      !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
+      // relayed (durable) events reach the SSE wire too.  Persistence-neutral
+      // since M-T6.23 slice 5.
+      contexts.some((c) => realtimeEventTypes(c).size > 0),
       // OIDC turnkey auth: register the generated verifier instead of the
       // dev stub.
       !!oidcAuth,

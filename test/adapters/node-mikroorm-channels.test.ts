@@ -204,17 +204,23 @@ describe("MikroORM broker channels", () => {
     }
   });
 
-  it("still WARNS about the realtime SSE wire (slice 5, not this one)", async () => {
-    // Honesty check on the neighbouring gate: `delivery: broadcast` also asks
-    // for the SSE wire, which this adapter still omits.  With no frontend
-    // consuming it that stays a WARNING (the fold/saga routing half works), and
-    // it must survive slice 2 rather than be silently swallowed by it.
+  it("emits the realtime SSE wire alongside the broker transport (slice 5)", async () => {
+    // This case was slice 2's honesty check — it asserted the neighbouring
+    // realtime gap still WARNED, so an earlier slice could not silently absorb
+    // it.  Slice 5 closed that gap, so the case flips here, in the PR that
+    // closed it: a `delivery: broadcast` channel now gets BOTH the broker
+    // transport and the browser-observable wire, and no diagnostic at all.
+    const files = await emit(sys("mikroorm"));
+    expect(files.get("api/http/realtime.ts")).toBeDefined();
+    const app = files.get("api/http/index.ts") as string;
+    expect(app).toContain('import { realtimeRoutes, realtimeTee } from "./realtime";');
+    expect(app).toContain('app.route("/api/realtime", realtimeRoutes());');
     const services = createDddServices(NodeFileSystem);
     const doc = await parseHelper(services.Ddd)(sys("mikroorm"), { validation: true });
-    const warns = validateLoomModel(enrichLoomModel(lowerModel(doc.parseResult.value as Model)))
-      .filter((d) => d.severity === "warning" && d.code === "loom.mikroorm-unsupported")
-      .map((d) => d.message);
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("GET /realtime/events");
+    expect(
+      validateLoomModel(enrichLoomModel(lowerModel(doc.parseResult.value as Model)))
+        .filter((d) => d.code === "loom.mikroorm-unsupported")
+        .map((d) => d.message),
+    ).toEqual([]);
   });
 });
