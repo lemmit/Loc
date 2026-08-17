@@ -167,6 +167,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
         checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
+        checkSlotOutsideComponent(page, pageWhere(page), diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
         // (`<apiHandle>.<Projection>`) is the only shape that hoists the
@@ -458,6 +459,41 @@ function checkUnknownPageElements(
         severity: "error",
         code: "loom.unknown-page-element",
         message: diagMessage("loom.unknown-page-element", { where, name }),
+        source: where,
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.slot-outside-component` — `Slot { }` is the CHILDREN passthrough of a
+// `component`: the walker sets `usesChildren`, the component shell declares the
+// matching children parameter, and the call site's extra positionals fill it.
+//
+// A page has no caller and therefore no children parameter, so the same
+// `Slot { }` in a PAGE body emits an UNBOUND children reference on every
+// frontend — `{children}` (React: TS2304), `<slot />` (Vue: an empty slot that
+// can never be filled), `{@render children?.()}` (Svelte: an undeclared prop),
+// `<ng-content>`, `props.children` (Feliz: a missing record field — F# compile
+// error) and `(child ?? const SizedBox.shrink())` (Flutter: an undeclared
+// field).  Two of the six do not compile; the other four render nothing.
+//
+// It is a PLACEMENT mistake, not a per-target gap, so it belongs at the IR
+// tier alongside `loom.unknown-page-element` — one gate, all six frontends.
+// -------------------------------------------------------------------------
+
+/** Reject `Slot { }` in a PAGE body — one diagnostic per page, however many
+ *  slots it spells: a page repeating the mistake made it once. */
+function checkSlotOutsideComponent(page: PageIR, where: string, diags: LoomDiagnostic[]): void {
+  let flagged = false;
+  for (const root of walkerRenderedExprs(page)) {
+    walkExprDeep(root, (e) => {
+      if (flagged || e.kind !== "call" || e.callKind !== "free" || e.name !== "Slot") return;
+      flagged = true;
+      diags.push({
+        severity: "error",
+        code: "loom.slot-outside-component",
+        message: diagMessage("loom.slot-outside-component", { where }),
         source: where,
       });
     });

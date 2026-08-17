@@ -1,0 +1,294 @@
+{
+  "case": "projection-join",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/projections/order_with_customer",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-1",
+          "customerName": "Acme",
+          "customerTier": "gold",
+          "orderId": "<volatile:key>",
+          "total": "10.0000"
+        },
+        {
+          "code": "O-2",
+          "customerName": "Globex",
+          "customerTier": "silver",
+          "orderId": "<volatile:key>",
+          "total": "20.0000"
+        }
+      ]
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/projections/order_with_customer",
+      "status": 200,
+      "body": [
+        {
+          "code": "O-2",
+          "customerName": "Globex",
+          "customerTier": "silver",
+          "orderId": "<volatile:key>",
+          "total": "20.0000"
+        },
+        {
+          "code": "O-1",
+          "customerName": "Globex",
+          "customerTier": "silver",
+          "orderId": "<volatile:key>",
+          "total": "10.0000"
+        }
+      ]
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "code": "O-1",
+            "customerId": "<volatile:key>",
+            "display": "O-1",
+            "id": "<volatile:key>",
+            "total": "10.0000",
+            "version": 2
+          },
+          {
+            "code": "O-2",
+            "customerId": "<volatile:key>",
+            "display": "O-2",
+            "id": "<volatile:key>",
+            "total": "20.0000",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "code": "O-2",
+        "customerId": "<volatile:key>",
+        "display": "O-2",
+        "id": "<volatile:key>",
+        "total": "20.0000",
+        "version": 1
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "name": "Acme",
+            "tier": "gold",
+            "version": 1
+          },
+          {
+            "id": "<volatile:key>",
+            "name": "Globex",
+            "tier": "silver",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "name": "Acme",
+        "tier": "gold",
+        "version": 1
+      }
+    },
+    {
+      "seq": 11,
+      "method": "POST",
+      "path": "/api/customers/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/api/customers/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "name": "Acme Corp",
+        "tier": "gold",
+        "version": 2
+      }
+    },
+    {
+      "seq": 13,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 14,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "GET",
+      "path": "/api/projections/order_with_customer",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 17,
+      "method": "DELETE",
+      "path": "/api/customers/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 18,
+      "method": "DELETE",
+      "path": "/api/customers/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 19,
+      "method": "GET",
+      "path": "/api/customers",
+      "status": 200,
+      "body": {
+        "items": [],
+        "page": 1,
+        "pageSize": 20,
+        "total": 0,
+        "totalPages": 0
+      }
+    },
+    {
+      "seq": 20,
+      "method": "PATCH",
+      "path": "/api/customers",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/customers",
+        "instance": "/api/customers",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 21,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 22,
+      "method": "POST",
+      "path": "/api/customers",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/customers",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

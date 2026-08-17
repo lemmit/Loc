@@ -258,6 +258,15 @@ The validator rejects `slot` anywhere except a component parameter list
 (`loom.slot-out-of-position`) and member access on a slot ref
 (`loom.slot-member-access`).
 
+The `Slot { }` **primitive** is the unnamed sibling of a `slot` param: it
+renders the extra positional arguments a caller passed (`PageBox { "Welcome",
+Text { "hi" } }`), and the component shell declares the matching children
+parameter for it. It therefore only means something in a `component` body — a
+page has no caller, so a page-level `Slot { }` emits an unbound children
+reference (a compile error on React and Feliz, silently empty on Vue / Svelte /
+Angular / Flutter). The validator rejects that placement with
+`loom.slot-outside-component`.
+
 ---
 
 ## 6. `state { … }` block
