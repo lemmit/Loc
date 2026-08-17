@@ -36,19 +36,24 @@
 //   - `Org` is the hierarchy registry (`tenancy by … of Org` +
 //     `tenantRegistry`), which the `deep` rung's materialized path needs.
 //
-// The deployable platform is substituted per leg (node/python/java) — the three
-// backends that filter a document aggregate IN-APP.  The other two are excluded
-// for OPPOSITE reasons, and the difference is the point:
+// The deployable platform is substituted per leg (node/python/java/dotnet) —
+// the four backends that filter a document aggregate IN-APP.  ELIXIR is the ONE
+// exclusion, and it refuses this crossing BY NAME
+// (`loom.context-filter-unsupported`, raised twice on this fixture): an honest,
+// coded rejection — the contract being honoured, not a gap.
 //
-//   - ELIXIR refuses this crossing BY NAME (`loom.context-filter-unsupported`).
-//     An honest, coded rejection — the contract being honoured.
-//   - .NET is a GAP.  It generates, but the emitted project does not compile
-//     (CS0535: the document repository never implements the
-//     `GetByIdForWriteAsync` write-scope port member the `allow` ladder adds),
-//     and a document aggregate gets no EF `HasQueryFilter` at ALL — with or
-//     without a policy — so a `tenantOwned` document aggregate reads unfiltered
-//     across tenants.  Both are SILENT.  Declaring dotnet here would make this
-//     fixture claim coverage it does not have; see the manifest row's note.
+// .NET used to be the second exclusion, for the OPPOSITE reason — a silent GAP:
+// the emitted project did not compile (CS0535, no `GetByIdForWriteAsync` on the
+// document repository) and a document aggregate got no read filter at ALL, so a
+// `tenantOwned` document aggregate read unfiltered across tenants.  Both are
+// closed: `src/generator/dotnet/emit/repository.ts` hoists the AND-ed
+// capability predicate into `_CapabilityVisible(...)` and applies it on all
+// three document read paths, and emits the write-scope member.  The fixture now
+// compiles clean on dotnet under `/warnaserror`.
+//
+// The DAPPER adapter of that same backend is a different story and still has
+// two EF leaks this fixture is the first witness for — see the entry in
+// `test/e2e/corpus-dotnet-dapper-build.test.ts`'s DAPPER_COMPILE_SKIP.
 system PolicyDocument {
   user { id: guid  role: string  tenantId: string }
 
