@@ -61,9 +61,12 @@ const HONO_FIXTURE = `system AcmeHono {
     }
   }
   api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
   deployable honoApi {
     platform: node
     contexts: [Sales]
+    dataSources: [salesState]
     serves: SalesApi
     port: 3000
   }
