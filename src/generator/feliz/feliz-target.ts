@@ -264,6 +264,11 @@ export const felizTarget: WalkerTarget = {
 
   // --- State seam — MVU model reads --------------------------------------
   renderStateRead: (ref: StateRef, _pos: RenderPosition) => `model.${upperFirst(ref.name)}`,
+  // A `derived` binding is NOT an Elmish Model field — it is a pure function of
+  // what is already in scope, emitted as an F# `let` ahead of the body (see
+  // `component-emit.ts`).  So it reads BARE; `model.<Name>` (the pre-seam
+  // default) named a record field the emitted `Model` never declares.
+  renderDerivedRead: (ref: StateRef, _pos: RenderPosition) => ref.name,
   // `currentUser.<claim>` in a body (D-AUTH-OIDC, the read-side of the gate) →
   // an option-match against the decoded claims on the Model; the None branch
   // (no session yet) yields the claim type's zero value so the expression stays
