@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // Angular CreateForm `X id` field → Select (cross-aggregate reference).  When a
@@ -161,7 +161,11 @@ const NO_DISPLAY_SOURCE = `
 
 describe("angular generator — `X id` field with no derived display falls back to text", () => {
   it("renders a plain <input> and emits no Select / useAll<X> hoist", async () => {
-    const all = await generateSystemFiles(NO_DISPLAY_SOURCE);
+    const all = await generateSystemFilesUnchecked(
+      NO_DISPLAY_SOURCE,
+      "an id-ref to an aggregate with no `derived display` is exactly what " +
+        "loom.ui-id-ref-no-display rejects — the uuid-label FALLBACK is the subject",
+    );
     const page = all.get("web/src/app/pages/order-new.component.ts")!;
     expect(page).toContain(
       '<input matInput formControlName="customerId" data-testid="orders-new-input-customerId">',
