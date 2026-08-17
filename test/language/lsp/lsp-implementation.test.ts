@@ -193,8 +193,24 @@ describe("DddImplementationProvider (textDocument/implementation)", () => {
 
   // (c) a document with NO discoverable map (a second, isolated tmp dir
   // with no `out/` tree) — expect empty/undefined, no throw.
+  //
+  // NESTED FIVE DEEP ON PURPOSE, and it is the assertion as much as the setup.
+  // This is the only case where discovery finds nothing, so it is the only one
+  // that runs the ancestor walk to its `MAX_ANCESTOR_LEVELS` bound — and at each
+  // ancestor it scans that ancestor's immediate children.  Rooted directly under
+  // `tmp`, the walk therefore climbs OUT of the fixture and enumerates the shared
+  // system temp dir, one `.loom/sourcemap.json` probe per entry.  Two costs, both
+  // real: it is not hermetic (a stray map another suite leaves in os.tmpdir()
+  // decides this assertion), and it is slow in proportion to how full /tmp is —
+  // measured here at 238ms against 4ms nested, which is what made this the one
+  // test in the file to time out under full-suite parallel load.
+  //
+  // Five levels of nesting keeps every one of the walk's six probes inside the
+  // fixture, so the test now also PINS that the walk stays bounded.  The
+  // neighbour case below already had this protection and says so; this one did
+  // not.
   it("returns no result (and does not throw) when no sourcemap is discoverable", async () => {
-    const otherDir = path.join(tmp, "no-map-project");
+    const otherDir = path.join(tmp, "no-map-project", "a", "b", "c", "d");
     const { services, doc } = await loadRealDocument(otherDir, "main.ddd", SOURCE);
     const provider = services.Ddd.lsp.ImplementationProvider!;
     const pos = positionOf(SOURCE, "customerName\n");
