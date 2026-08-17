@@ -121,6 +121,26 @@ timeout fired and needed a manual label re-arm. v2 never waits:
   precisely so at least one check always comes; pending is *never* green.
 - Re-running a red check to green fires `workflow_run: completed` again, so
   the gate re-evaluates **automatically** — no manual pr-gate re-run.
+- **A `pr-gate` success you read a minute ago is not a licence to merge.**
+  Observed twice on 2026-08-16 (#2561, #2576): every check on the head SHA
+  read `success`, `pr-gate` included, and the merge API still refused with
+
+  ```
+  405 Repository rule violations found
+  Required status check "pr-gate" is expected.
+  ```
+
+  Both times the fix was the same — merge `main` into the branch, push, let the
+  fan-out re-run, merge — so it clears rather than blocks; it costs one full CI
+  cycle (~45 min under load). The CAUSE is not diagnosed. Two candidates, and
+  the obvious one is ruled out: it is **not** "branch must be up to date",
+  because the attempt that finally succeeded was itself one commit behind
+  `main`. What is left is a race — the gate re-posts on every `workflow_run`
+  completion (and on the 15-minute sweep), so the ruleset may be reading a
+  newer `pr-gate` run than the one the API just showed you — or a propagation
+  delay on the Checks-API-posted run. If you hit it: re-read the gate's
+  CURRENT state rather than trusting the one you fetched, and if it is
+  `in_progress`, wait instead of merging.
 - **`workflow_run` delivery is best-effort, so the gate does not depend on
   it alone.** Under completion storms GitHub drops dispatches — observed
   live: a fully-green PR parked at `in_progress` because the events for its
@@ -400,6 +420,15 @@ label (or mint a new one) and add a row here + in `CLAUDE.md`.**
   `ci-red`-labelled tracking issue when a monitored gate concludes `failure`
   on `main`. The red signal that was missing. Add a workflow's `name:` to its
   list when you add a new main gate.
+
+  **Claim the repair before you make it.** The alarm names the breakage but
+  nothing claims the fix, and a main-red repair is exactly the kind of small,
+  obvious change several agents reach for at once: on 2026-08-16 the missing
+  `read-gates` golden was captured twice independently (#2578 and inside
+  #2576), each burning its own full CI cycle for a one-file change. Before
+  fixing a red `main`, `list_pull_requests` for an open repair — they are easy
+  to spot, titled `Main-red #N` by convention — and if none exists, say so in a
+  draft PR first, the same rule CLAUDE.md already applies to feature work.
 - **`cancel-in-progress: false`** on the push-only post-merge gates, so a
   failure is attributed to the commit that caused it instead of being masked
   by the next merge.
