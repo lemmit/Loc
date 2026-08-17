@@ -135,7 +135,7 @@ describe("api-surface — resolved error statuses", () => {
     const cancel = opByKey(ops, "post", "/api/orders/{id}/cancel");
     // Base operation set [400, 404, 422] plus the remapped Disallowed — and no
     // stray default 409, which is what the pre-fix hardcoding produced.
-    expect(cancel?.errorStatuses).toEqual([400, 404, 422, 428]);
+    expect(cancel?.errorStatuses).toEqual([400, 404, 415, 422, 428]);
   });
 
   it("declares a union RETURN's error-arm statuses (the returning-operation set)", async () => {
@@ -160,7 +160,7 @@ describe("api-surface — resolved error statuses", () => {
       ),
     );
     const op = opByKey(deriveContextOperations(orders(model)), "post", "/api/orders/{id}/reserve");
-    expect(op?.errorStatuses).toEqual([400, 404, 409, 422]);
+    expect(op?.errorStatuses).toEqual([400, 404, 409, 415, 422]);
   });
 
   it("keeps the defaults when no httpStatus overrides exist", async () => {
@@ -177,7 +177,7 @@ describe("api-surface — resolved error statuses", () => {
     const ops = deriveContextOperations(orders(model));
     expect(opByKey(ops, "delete", "/api/orders/{id}")?.errorStatuses).toEqual([404, 409]);
     expect(opByKey(ops, "post", "/api/orders/{id}/cancel")?.errorStatuses).toEqual([
-      400, 404, 409, 422,
+      400, 404, 409, 415, 422,
     ]);
   });
 });

@@ -43,7 +43,7 @@ async function routesFile(): Promise<string> {
 describe("Hono create schema — default applied after min/max", () => {
   it("renders .min().max().default(), never .default().min()", async () => {
     const routes = await routesFile();
-    expect(routes).toContain("rating: z.coerce.number().int().min(1).max(5).default(3)");
+    expect(routes).toContain("rating: z.number().int().min(1).max(5).default(3)");
     expect(routes).not.toMatch(/rating:[^,]*\.default\([^)]*\)\.(?:min|max)\(/);
   });
 });

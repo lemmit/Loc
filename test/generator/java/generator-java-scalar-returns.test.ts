@@ -109,7 +109,7 @@ describe("java generator — scalar (non-union) operation returns (BUG-003)", ()
     // operation route, not omitted); springdoc infers the 200 schema from the
     // concrete `ResponseEntity<String>` return, so the wrapper/successRef slot
     // stays null (only the union's `ResponseEntity<?>` needs an explicit ref).
-    expect(cust).toContain('orders/{id}/describe", null, new int[] {400, 404, 422}, null),');
-    expect(cust).toMatch(/orders\/\{id\}\/quote", null, new int\[\] \{400, 404, 422\}, null\)/);
+    expect(cust).toContain('orders/{id}/describe", null, new int[] {400, 404, 415, 422}, null),');
+    expect(cust).toMatch(/orders\/\{id\}\/quote", null, new int\[\] \{400, 404, 415, 422\}, null\)/);
   });
 });
