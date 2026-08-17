@@ -32,7 +32,7 @@ describe("python workflows", () => {
     const wf = files.get("api/app/http/workflows_routes.py")!;
     expect(wf).toContain("class RenameCustomerRequest(BaseModel):");
     expect(wf).toContain(
-      '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
+      '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 415: {"model": ProblemDetails, "description": "Unsupported Media Type"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     // The route runs in a child execution-context frame under the request root
     // (parent_id chaining), so its audit/provenance rows are distinguishable

@@ -32,7 +32,7 @@
 import { lowerFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
-type Ctx = Record<string, string | number | boolean | undefined>;
+type Ctx = Record<string, string | number | boolean | readonly string[] | undefined>;
 
 /** Prepare a string for a single-quoted Dart string literal body.
  *
@@ -252,7 +252,14 @@ function primitiveCard(c: Ctx): string {
   const kids: string[] = [];
   if (c.hasTitle)
     kids.push(styledText(String(c.titleText ?? ""), "Theme.of(context).textTheme.titleMedium"));
-  if (c.hasContent) kids.push(asWidget(String(c.contentJsx ?? "")));
+  // Body children arrive UNJOINED (`contentChildren`) — a Dart `<Widget>[ … ]`
+  // literal is comma-separated, so the pack joins them itself rather than
+  // taking the walker's `\n`-joined `contentJsx`.
+  if (c.hasContent) {
+    const raw = c.contentChildren;
+    const list = Array.isArray(raw) ? raw : [String(c.contentJsx ?? "")];
+    for (const k of list) kids.push(asWidget(String(k)));
+  }
   const body =
     kids.length > 0
       ? `Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${kids.join(", ")}])`

@@ -44,6 +44,13 @@ import { CORPUS } from "../fixtures/corpus/manifest.js";
  *  standalone `unsupported` comment is. */
 const SENTINEL = /\b(?:TODO|FIXME|XXX|HACK|unsupported|unimplemented)\b/i;
 
+/** Phrases that CONTAIN a sentinel word but are not unfinished work — scrubbed
+ *  from the line before the sentinel test, so a genuine `TODO` sharing the line
+ *  still trips.  Today: the IANA reason phrase for 415, which every backend
+ *  emits as an OpenAPI `description` and an RFC 7807 `title` once a
+ *  body-carrying route declares the media-type refusal (schemathesis F1). */
+const LEGIT_PHRASES = [/Unsupported Media Type/g];
+
 /** Legitimate emitted collisions, pinned so the surface can't grow silently.
  *  Keyed by emitted file suffix; value is the reason.  EMPTY — the corpus is
  *  clean; an entry here is a documented, reviewed exception, not a TODO. */
@@ -69,7 +76,8 @@ describe("generated output carries no unfinished-work sentinels (M-T9.8)", () =>
       if (isAllowed(rel)) continue;
       const lines = content.split("\n");
       for (let i = 0; i < lines.length; i++) {
-        if (SENTINEL.test(lines[i])) {
+        const scrubbed = LEGIT_PHRASES.reduce((s, r) => s.replace(r, ""), lines[i]);
+        if (SENTINEL.test(scrubbed)) {
           offenders.push(`${rel}:${i + 1}  ${lines[i].trim().slice(0, 100)}`);
         }
       }

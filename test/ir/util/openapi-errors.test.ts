@@ -7,17 +7,21 @@
 // (Unprocessable Entity) to every body-bearing kind — `create`,
 // `operation`, `workflow` — for the per-field validation envelope
 // consumed by the frontend ACL's `applyServerErrors`.
+//
+// Schemathesis F1 added 415 (Unsupported Media Type) to the same body-bearing
+// kinds: a request whose Content-Type is not application/json is refused
+// before the handler runs, and the declared set says so.
 
 import { describe, expect, it } from "vitest";
 import { errorStatuses, problemTitle } from "../../../src/ir/util/openapi-errors.js";
 
 describe("errorStatuses — shared error matrix", () => {
   it("declares the route-shape statuses (unguarded)", () => {
-    expect(errorStatuses("create")).toEqual([400, 422]);
+    expect(errorStatuses("create")).toEqual([400, 415, 422]);
     expect(errorStatuses("getById")).toEqual([404]);
     expect(errorStatuses("destroy")).toEqual([404, 409]);
-    expect(errorStatuses("operation")).toEqual([400, 404, 422]);
-    expect(errorStatuses("workflow")).toEqual([400, 422]);
+    expect(errorStatuses("operation")).toEqual([400, 404, 415, 422]);
+    expect(errorStatuses("workflow")).toEqual([400, 415, 422]);
     expect(errorStatuses("findOptional")).toEqual([404]);
     expect(errorStatuses("findList")).toEqual([]);
     expect(errorStatuses("findSingle")).toEqual([]);
@@ -25,8 +29,8 @@ describe("errorStatuses — shared error matrix", () => {
   });
 
   it("inserts 403 for a guarded operation / workflow", () => {
-    expect(errorStatuses("operation", true)).toEqual([400, 403, 404, 422]);
-    expect(errorStatuses("workflow", true)).toEqual([400, 403, 422]);
+    expect(errorStatuses("operation", true)).toEqual([400, 403, 404, 415, 422]);
+    expect(errorStatuses("workflow", true)).toEqual([400, 403, 415, 422]);
   });
 
   it("inserts 403 for a guarded READ — `requires` is legal on a find", () => {
@@ -50,7 +54,7 @@ describe("errorStatuses — shared error matrix", () => {
     // every backend now evaluates it at its own chokepoint (route / command
     // handler / service / context) and denies with 403, so the declared set says
     // so.  `create` keeps 400 + 422; `destroy` keeps 404 + the FK-restrict 409.
-    expect(errorStatuses("create", true)).toEqual([400, 403, 422]);
+    expect(errorStatuses("create", true)).toEqual([400, 403, 415, 422]);
     expect(errorStatuses("destroy", true)).toEqual([403, 404, 409]);
   });
 

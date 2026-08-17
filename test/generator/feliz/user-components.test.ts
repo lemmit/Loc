@@ -228,4 +228,73 @@ describe("user components — Feliz", () => {
     );
     expect(fs.indexOf("let Ribbon () =")).toBeLessThan(fs.indexOf("let TierBadge (props:"));
   });
+
+  // -------------------------------------------------------------------------
+  // READ-BEARING components.  Until this shipped, a component whose body issued
+  // an api read was dropped WHOLE — no `let`, and every call site rendered
+  // `(* unknown layout component: … *)`.  Valid F#, missing UI.
+  //
+  // An Elmish read is not a per-view hook: it is a field on the ONE `Model` that
+  // the init `Cmd` fills.  So the component's function simply TAKES the Model
+  // (`readsForUi` now collects component bodies, so the field exists), and the
+  // call site passes the `model` its page view was handed.
+  // -------------------------------------------------------------------------
+  it("a read-bearing component takes the Model and every call site passes it", async () => {
+    const fs = await appFs(
+      sys(`
+      component RecentOrders(title: string) {
+        body: Stack {
+          Heading { title, level: 2 },
+          QueryView { of: Sales.Order.all, data: rows => Stack {
+            For { each: rows, o => Text { o.customerId } }
+          } }
+        }
+      }
+      page Home { route: "/" body: Stack { RecentOrders(title: "Recent") } }
+      page Other { route: "/other" body: Stack { RecentOrders(title: "Again") } }`),
+    );
+    // The read's Model field is declared (component bodies feed `readsForUi`).
+    expect(fs).toMatch(/type Model =[\s\S]*?AllOrders: Remote<Order list>/);
+    // The component function takes it as a LEADING CURRIED param — the props
+    // record stays exactly the declared props.
+    expect(fs).toContain("let RecentOrders (model: Model) (props: {| title: string |}) =");
+    expect(fs).toContain("model.AllOrders");
+    // Both call sites apply it, and neither degrades.
+    expect(fs).toContain(`RecentOrders model {| title = "Recent" |}`);
+    expect(fs).toContain(`RecentOrders model {| title = "Again" |}`);
+    expect(fs).not.toContain("unknown layout component");
+  });
+
+  it("a paramless read-bearing component applies the Model then unit", async () => {
+    const fs = await appFs(
+      sys(`
+      component RecentOrders() {
+        body: QueryView { of: Sales.Order.all, data: rows => Stack {
+          For { each: rows, o => Text { o.customerId } }
+        } }
+      }
+      page Home { route: "/" body: Stack { RecentOrders() } }`),
+    );
+    expect(fs).toContain("let RecentOrders (model: Model) () =");
+    expect(fs).toContain("RecentOrders model ()");
+    expect(fs).not.toContain("unknown layout component");
+  });
+
+  it("a byId read in a component stays deferred — no page case fires its Cmd", async () => {
+    // A `byId` read's fetch is issued by `pageCmd` on ROUTE entry, keyed to the
+    // hosting page's `Page` case.  A component has none, so `collectComponentReads`
+    // declines to declare the Model field — and the emitter must then decline the
+    // component too, rather than emitting `model.OrderById` against a field the
+    // record does not carry (which is exactly what an unguarded read path did).
+    const fs = await appFs(
+      sys(`
+      component OneOrder() {
+        body: QueryView { of: Sales.Order.byId(id), single: true, data: o => Text { o.customerId } }
+      }
+      page Detail { route: "/orders/:id" body: Stack { OneOrder() } }`),
+    );
+    expect(fs).not.toContain("let OneOrder");
+    expect(fs).not.toContain("model.OrderById");
+    expect(fs).toContain("unknown layout component: OneOrder");
+  });
 });

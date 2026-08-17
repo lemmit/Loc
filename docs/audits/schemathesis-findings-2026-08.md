@@ -29,12 +29,42 @@ hand with `curl` against a booted server, not read off the fuzzer's summary.
 and the paged `page`/`pageSize` controls carry declared, enforced upper bounds.
 Their waivers (W2, W3) are deleted and W1/W5 are narrowed to F1.
 
+**F1 and F7 landed on the node/Hono emitter (2026-08-16)** — a body-carrying
+route now refuses a non-JSON `Content-Type` with the declared `415`, and the
+request validators no longer coerce in a JSON body. Their waivers (W1, W5, W7)
+are deleted.
+
 ---
 
 ## Class: server error (500)
 
 ### F1 — a request whose `Content-Type` is not `application/json` skips body validation entirely, then 500s
-**Waiver:** W1 · **Severity: high** — every body-carrying route (create, named
+**Status: FIXED (2026-08-16, PR #2566).** A body-carrying Hono handler now
+calls `requireJsonContentType(c)` (emitted into `http/problem-details.ts`)
+before it reads the validated body. The guard mirrors hono's OWN `jsonRegex`
+(bar two redundant escapes), so it passes exactly when the zod validator ran — a wider test would
+wave through a body that was never validated, which is the fault itself. It
+throws `HTTPException(415)`, which the routers' existing `HTTPException` arm
+renders as the same `application/problem+json` body every framework fault uses:
+
+```
+curl -X POST http://host/api/products                           → 415 {"title":"Unsupported Media Type","detail":"Content-Type must be application/json"}
+curl -X POST -H 'Content-Type: text/plain' -d '<valid json>'    → 415 (same)
+curl -X POST -H 'Content-Type: application/json' -d '{}'        → 422 (unchanged)
+curl -X POST -H 'Content-Type: application/json'                → 400 Malformed JSON (unchanged)
+```
+
+`415` is DECLARED, not just answered: `errorStatuses` in
+`src/ir/util/openapi-errors.ts` adds it to the `create` / `operation` /
+`workflow` arms, so all five backends publish it together and
+`conformance-parity` stays balanced (Hono's hand-rolled workflow + explicit-
+handler response sets carry the matching line). The other four already answer
+415 at the framework layer (ASP.NET model binding, Spring, `Plug.Parsers`) —
+**except python**, where FastAPI falls through to a 422 on a foreign
+content-type; making that leg answer 415 too is the remaining follow-up.
+Waivers W1 and W5 deleted.
+
+**Waiver:** ~~W1~~ · **Severity: high** — every body-carrying route (create, named
 operation, workflow) on every generated Hono service.
 
 ```
@@ -210,7 +240,34 @@ all five backends (spec-only change, but `conformance-parity` diffs the specs,
 so it has to land together).
 
 ### F7 — declared `type`/`format` are not honoured: the wire validators coerce
-**Waiver:** W7 · **Severity: medium**
+**Status: FIXED (2026-08-16, PR #2566).** The single `REQUEST_PRIMITIVE` table
+in the Hono routes-builder split into `QUERY_PRIMITIVE` (still coercing — a
+query-string value genuinely arrives as a string, so the coercion IS the parse)
+and `BODY_PRIMITIVE` (strict — a JSON body carries real types, which is the
+argument the bool arm already made). A body `int`/`long` is `z.number().int()`,
+`decimal` is `z.number()`, and `datetime` is
+`z.string().datetime({ offset: true, local: true }).transform((s: string) => new Date(s))`,
+which still publishes `{"type":"string","format":"date-time"}` and still hands
+the domain layer a `Date`. `local: true` is not slack — the generated
+frontends render a datetime field as `<input type="datetime-local">` and send
+its unqualified `2024-01-01T00:00` value verbatim, so without it every datetime
+form submission would 422. Path parameters keep their own coercion
+(`pathParamZod`), which is correct for the same reason query does.
+
+```
+-d '{"customerId":"<uuid>","status":"Draft","placedAt":false}'  → 422 /placedAt "expected string, received boolean"
+-d '{"sku":"B","price":{"amount":false,"currency":"USD"}}'      → 422 /price/amount "expected number, received boolean"
+-d '{"sku":"C","price":{"amount":"12","currency":"USD"}}'       → 422 /price/amount "expected number, received string"
+-d '{… ,"placedAt":"nonsense"}'                                 → 422 /placedAt "Invalid ISO datetime"
+```
+
+That last line closes the second-order defect too — the coercion artefact
+`"Invalid input: expected date, received Date"` is gone. One side effect worth
+knowing: zod-to-openapi marks every COERCED field `nullable: true` (a coercing
+schema does accept `null`), so dropping the coercion also drops a spurious
+`nullable` from the published request/response schemas. Waiver W7 deleted.
+
+**Waiver:** ~~W7~~ · **Severity: medium**
 
 ```
 # placedAt is declared {"type":"string","format":"date-time"} and required
@@ -245,6 +302,60 @@ and is answered as a malformed identifier, when the honest answer is `405` —
 the path has no `DELETE`. So the framework-404/405 contract that #2485 fixed
 for undeclared verbs on a declared path still has a hole where a literal
 segment can be read as a parameter.
+
+---
+
+## Uncovered when F1/F7's waivers were deleted (2026-08-16)
+
+W1/W5/W7 were BROAD rules (`^POST /api/`, `^POST `). While they stood, every
+other POST-side root cause landed inside them and was reported as waived. The
+two below are not new defects and not regressions of the F1/F7 fix — they are
+what the same runs were already producing underneath it. They get their own
+narrow rules so the next deletion can't hide a third one.
+
+### F10 — a workflow that loads an aggregate answers 404, and the workflow route declares none
+**Waiver:** W10 · **Severity: medium** — every workflow whose body reads an
+aggregate by a client-supplied id.
+
+```
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"customerId":"<unused uuid>", …}' http://host/api/workflows/checkout
+→ 404   # `Customers.getById(customerId)` → AggregateNotFoundError → onError
+```
+
+but `errorStatuses("workflow")` declares `400`, `415`, `422` (+`403` when
+guarded) and no `404`. This is F6's shape on the workflow arm: a status the
+route really sends, published nowhere, so every generated client is blind to
+it. Unlike the read routes, the 404 is CONDITIONAL — a workflow whose body
+touches no repository cannot send it — so the honest fix needs a
+"body reads an aggregate" predicate threaded into the shared table rather than
+an unconditional `404` on the kind. Fix it with F6, on all five backends.
+
+### F11 — an `int` field declares no range, and a value inside the declared range overflows the column
+**Waiver:** W11 (server error) + W12 (its status-conformance consequence), both
+`intermittent` · **Severity: high** — any body carrying an `int`.
+
+Intermittent because reaching the column needs two things in one run: an
+out-of-int32 `qty` *and* a path `{id}` that resolves to a row the fuzzer made
+earlier (a random uuid 404s first). It reproduced on the discovery run and not
+on the next, which is why the two rules are exempt from the staleness half of
+the ratchet — same shape as W6, and it graduates the same way (a pinned
+deterministic case).
+
+```
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"productId":"<uuid>","qty":9543751572142}' http://host/api/orders/<id>/add_line
+→ 500   # value out of range for type integer
+```
+
+The wire validator says `z.number().int()` and the spec says
+`{"type":"integer"}` — neither carries a bound — while the column behind it is
+Postgres `int4`. So the fuzzer obeys the published contract exactly and still
+reaches a server error. Same family as F7 (declared vs enforced), one level
+down: F7 was the declared TYPE not being honoured, this is the declared RANGE
+not existing. The fix is to declare and enforce int32 for `int` (int64 for
+`long`) — a spec change, so all five backends together, and `.NET`/`Java`
+already type-bound their side while python/elixir do not.
 
 ---
 

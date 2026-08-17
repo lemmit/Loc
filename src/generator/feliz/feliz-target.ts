@@ -16,6 +16,7 @@ import { opActionGate } from "./auth-gate.js";
 import { FELIZ_GRID_ROW_VAR, renderFelizDataGridChild } from "./data-grid-child.js";
 import {
   FELIZ_CHILDREN_FIELD,
+  FELIZ_MODEL_PARAM,
   FS_LEAVES,
   fsString,
   fsTemporalBinary,
@@ -656,7 +657,14 @@ export const felizTarget: WalkerTarget = {
   // Props pass as an anonymous record; a prop-less component takes unit.
   renderUserComponent: (call, ctx, _depth) => {
     if (call.kind !== "call") return null;
-    const params = ctx.userComponents.get(call.name) ?? [];
+    const declared = ctx.userComponents.get(call.name) ?? [];
+    // A READ-bearing component takes the `Model` as a leading curried argument
+    // rather than a props field (`component-emit.ts`'s `MODEL_PARAM` marker) —
+    // so drop the marker from the props assignment and prefix the application
+    // with the `model` the caller's page view was handed.
+    const takesModel = declared.some((p) => p.name === FELIZ_MODEL_PARAM);
+    const params = takesModel ? declared.filter((p) => p.name !== FELIZ_MODEL_PARAM) : declared;
+    const callee = takesModel ? `${call.name} model` : call.name;
     ctx.usedUserComponents.add(call.name);
     const argNames = call.argNames ?? [];
     const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
@@ -710,7 +718,7 @@ export const felizTarget: WalkerTarget = {
             : `React.fragment [ ${walked.join("; ")} ]`;
       fields.push(`${p.name} = ${value}`);
     }
-    return fields.length > 0 ? `${call.name} {| ${fields.join("; ")} |}` : `${call.name} ()`;
+    return fields.length > 0 ? `${callee} {| ${fields.join("; ")} |}` : `${callee} ()`;
   },
 
   /** A component body's `Slot { }` → the `children` field of the props record

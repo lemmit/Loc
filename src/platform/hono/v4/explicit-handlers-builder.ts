@@ -378,11 +378,23 @@ function emitRouteHandler(
   out.push(
     `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // 415 only where there IS a body to refuse — declared under exactly the
+  // condition the handler's `requireJsonContentType` guard is emitted.  Last
+  // so the declared set stays in ascending status order.
+  if (bodySlots.length > 0) {
+    out.push(
+      `      415: { description: ${JSON.stringify(problemTitle(415))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
   if (pathSlots.length > 0) out.push(`    const params = httpCtx.req.valid("param");`);
-  if (bodySlots.length > 0) out.push(`    const body = httpCtx.req.valid("json");`);
+  if (bodySlots.length > 0) {
+    // A foreign Content-Type SKIPS hono's zod body validator (schemathesis F1).
+    out.push(`    requireJsonContentType(httpCtx);`);
+    out.push(`    const body = httpCtx.req.valid("json");`);
+  }
   // Bind each handler param to a local (path/body scalar → one wire-coerced
   // local; record → an object literal of wire-coerced fields), so every param
   // `ref` / `cmd.<field>` in the body renders against a local in scope.
@@ -736,6 +748,7 @@ export function buildExplicitRoutesFile(
     /\bframeworkProblemBody\b/.test(bodyStr) ? "frameworkProblemBody" : null,
     /\bProblemDetails\b/.test(bodyStr) ? "ProblemDetails" : null,
     "newApp",
+    /\brequireJsonContentType\(/.test(bodyStr) ? "requireJsonContentType" : null,
   ].filter((n): n is string => n !== null);
   imports.push(`import { ${problemNamed.join(", ")} } from "./problem-details";`);
   if (/\bHTTPException\b/.test(bodyStr))

@@ -41,7 +41,11 @@ describe("server-sourced create-path defaults — Hono", () => {
   it("a now() default is wire-optional and coalesced per-request (not a frozen wire default)", async () => {
     const routes = routesOf(await generateSystemFiles(HONO("createdAt: datetime = now()")));
     // Wire field is optional — NOT a boot-frozen `.default(new Date())`.
-    expect(routes).toMatch(/createdAt:\s*z\.coerce\.date\(\)\.optional\(\)/);
+    // (The declared ISO-datetime string parser replaced `z.coerce.date()` —
+    // schemathesis F7, same wire declaration, no cross-type coercion.)
+    expect(routes).toMatch(
+      /createdAt:\s*z\.string\(\)\.datetime\(\{ offset: true, local: true \}\)\.transform\(\(s: string\) => new Date\(s\)\)\.optional\(\)/,
+    );
     expect(routes).not.toMatch(/createdAt:[^\n]*\.default\(new Date\(\)\)/);
     // The factory coalesces the per-request value: omitted → a fresh `new Date()`.
     expect(routes).toMatch(

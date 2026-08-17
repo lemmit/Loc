@@ -148,12 +148,20 @@ function queryViewOfArgs(body: ExprIR): ExprIR[] {
   return out;
 }
 
-/** Collect the reads a ui's pages issue — deduped by `varName` across the whole
- *  ui.  Aggregate-rooted reads (`<handle>.<Agg>.all` / `.byId(id)` / a named
- *  find) and query-time PROJECTION reads (`<handle>.<Proj>`, M-T1.3 Phase 1)
- *  project a provider; workflow-instance reads are still skipped (a follow-up),
- *  so the caller's hoist over the same detector stays consistent (an un-emitted
- *  provider would just be an unresolved var, never silent). */
+/** Collect the reads a ui issues — deduped by `varName` across the whole ui.
+ *  Aggregate-rooted reads (`<handle>.<Agg>.all` / `.byId(id)` / a named find)
+ *  and query-time PROJECTION reads (`<handle>.<Proj>`, M-T1.3 Phase 1) project a
+ *  provider; workflow-instance reads are still skipped (a follow-up), so the
+ *  caller's hoist over the same detector stays consistent (an un-emitted
+ *  provider would just be an unresolved var, never silent).
+ *
+ *  Both PAGE and user-COMPONENT bodies are scanned: a `component X() { body:
+ *  QueryView { of: Api.Order.all, … } }` hosts its read exactly as a page does
+ *  (`component-emit.ts` emits it as a `ConsumerWidget` whose `build` hoists the
+ *  same `ref.watch(<var>Provider)`), so the provider it watches has to be in
+ *  `reads.dart`.  Before this, a read-bearing component was dropped whole —
+ *  declaration AND every call site — and the page fell back to the "unknown
+ *  layout component" comment. */
 export function collectFlutterReads(
   ui: UiIR | undefined,
   contexts: readonly EnrichedBoundedContextIR[],
@@ -170,9 +178,13 @@ export function collectFlutterReads(
   const pagedCtx = { ...detCtx, bcByAggregate: bcByAggregateOf(contexts) };
   const out: FlutterRead[] = [];
   const seen = new Set<string>();
-  for (const page of ui.pages ?? []) {
-    if (!page.body) continue;
-    for (const ofArg of queryViewOfArgs(page.body)) {
+  const bodies = [
+    ...(ui.pages ?? []).map((p) => p.body),
+    ...(ui.components ?? []).map((c) => c.body),
+  ];
+  for (const body of bodies) {
+    if (!body) continue;
+    for (const ofArg of queryViewOfArgs(body)) {
       const detected = tryDetectApiHook(ofArg, detCtx);
       if (detected?.kind === "projection") {
         // Paramless by construction — the projection IS the row, so there is

@@ -17,13 +17,22 @@
 // runtime).  `guarded` is the same predicate on every backend
 // (`operationIsGuarded` / `workflowIsGuarded`), so the three emitters stay
 // in lockstep.
-//   create  (POST /<aggs>)            → 400, [403 if guarded], 422
+//   create  (POST /<aggs>)            → 400, 415, [403 if guarded], 422
 //   getById (GET  /<aggs>/{id})       → 404  (not found)
 //   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409
-//   operation (POST /<aggs>/{id}/op)  → 400, [403 if guarded], 404, 422
+//   operation (POST /<aggs>/{id}/op)  → 400, 415, [403 if guarded], 404, 422
 //   find (optional return)            → 404
-//   workflow (POST /workflows/<wf>)   → 400, [403 if guarded], 422
+//   workflow (POST /workflows/<wf>)   → 400, 415, [403 if guarded], 422
 //   list / non-optional find          → (none beyond the universal 500)
+//
+// 415 (Unsupported Media Type, RFC 9110 §15.5.16) is declared on exactly the
+// BODY-CARRYING kinds — create / operation / workflow.  A request whose
+// `Content-Type` is not `application/json` cannot be parsed into the declared
+// request schema, and every backend refuses it before the handler runs
+// (schemathesis F1: Hono used to skip validation silently and 500 on the
+// undefined body, so the node emitter now guards it explicitly; ASP.NET,
+// Spring and Plug.Parsers already answer 415 at the framework layer).  A
+// read/delete route carries no body, so it declares none.
 //
 // 422 (Unprocessable Entity) is the validation-failure code declared per
 // docs/old/proposals/validation-error-extension.md — Phase D.  Body carries the
@@ -37,6 +46,12 @@ export const PROBLEM_JSON = "application/problem+json";
 
 /** Component-schema name for the shared RFC 7807 body. */
 export const PROBLEM_SCHEMA = "ProblemDetails";
+
+/** The media-type refusal every body-carrying route declares (RFC 9110
+ *  §15.5.16).  Named rather than spelled inline so the emitters that have to
+ *  produce the matching runtime arm (Hono's `requireJsonContentType`) can be
+ *  found from this table by grep. */
+export const UNSUPPORTED_MEDIA_TYPE = 415;
 
 /** Operation kinds that map to a distinct error-status set. */
 export type OpErrorKind =
@@ -105,7 +120,9 @@ export function errorStatuses(
     // runs (there is no instance to read yet, so the guard sees the principal
     // only — `loom.lifecycle-guard-unreadable` enforces that) → 403 on denial.
     case "create":
-      return guarded ? set(400, forbidden, 422, domain) : set(400, 422, domain);
+      return guarded
+        ? set(400, forbidden, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, UNSUPPORTED_MEDIA_TYPE, 422, domain);
     case "getById":
       return [404];
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
@@ -117,9 +134,13 @@ export function errorStatuses(
     case "destroy":
       return guarded ? set(forbidden, 404, referencedInUse) : set(404, referencedInUse);
     case "operation":
-      return guarded ? set(400, forbidden, 404, 422, domain) : set(400, 404, 422, domain);
+      return guarded
+        ? set(400, forbidden, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain);
     case "workflow":
-      return guarded ? set(400, forbidden, 422, domain) : set(400, 422, domain);
+      return guarded
+        ? set(400, forbidden, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, UNSUPPORTED_MEDIA_TYPE, 422, domain);
     // The gated FIND arms resolve `forbidden` for the same reason `operation`
     // and `workflow` do — and they are here because they did NOT.  M-T5.20
     // converted the two command arms above and left these three as literal
@@ -158,6 +179,9 @@ export function problemTitle(status: number): string {
       return "Not Found";
     case 409:
       return "Conflict";
+    // The body-carrying kinds' media-type refusal (see UNSUPPORTED_MEDIA_TYPE).
+    case 415:
+      return "Unsupported Media Type";
     case 422:
       return "Unprocessable Entity";
     case 423:
