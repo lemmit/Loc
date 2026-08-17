@@ -49,7 +49,11 @@ import {
   renderFelizGate,
   uiHasPageGate,
 } from "./auth-gate.js";
-import { emitFelizUserComponents, renderFelizComponentModule } from "./component-emit.js";
+import {
+  emitFelizUserComponents,
+  felizModelReadFields,
+  renderFelizComponentModule,
+} from "./component-emit.js";
 import { FELIZ_GRID_PRELUDE } from "./data-grid-child.js";
 import { felizTarget } from "./feliz-target.js";
 import {
@@ -73,6 +77,7 @@ import {
   renderUpdate,
 } from "./update-emit.js";
 import {
+  collectComponentReads,
   collectPageActions,
   collectPageAsyncEffects,
   collectPageBoundState,
@@ -633,6 +638,26 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
       out.push(r);
     }
   }
+  // User COMPONENTS host reads too — an Elmish read is a field on the ONE Model,
+  // so a `component X() { body: QueryView { of: Api.Order.all, … } }` needs the
+  // same Model field / init `Cmd` / `Loaded` arm a page's read gets.  Without
+  // this the component walk resolved `model.AllOrders` against a field nothing
+  // declared, which is why `component-emit.ts` used to drop the whole component
+  // (declaration AND every call site) rather than emit unbuildable F#.
+  for (const component of ui.components ?? []) {
+    for (const r of collectComponentReads(
+      component,
+      apiParamNames,
+      aggregateNames,
+      bcByAggregate,
+      projectionNames,
+      projectionIRs,
+    )) {
+      if (seen.has(r.field)) continue;
+      seen.add(r.field);
+      out.push(r);
+    }
+  }
   return out;
 }
 
@@ -1142,6 +1167,10 @@ function renderAppFs(
     authUi,
     i18nEnabled,
     emittedRecords,
+    // The Model fields the record ACTUALLY declares — same `reads` list
+    // `renderModel` is built from, so a component naming `model.<Field>` can
+    // only be emitted when that field exists.
+    modelFields: felizModelReadFields(reads),
   });
   // The map every call site resolves against: both flavours, since
   // `felizTarget.renderUserComponent` renders them identically (an extern name

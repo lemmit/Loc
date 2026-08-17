@@ -1098,18 +1098,74 @@ export function collectPageReads(
   projectionIRs: ReadonlyMap<string, ProjectionIR> = new Map(),
 ): FelizRead[] {
   if (!page.body) return [];
+  // The byId read is keyed to the hosting page's `Page` case, which is the
+  // aggregate-qualified emit name (`OrderDetail`) — NOT the bare scaffold page
+  // name (`Detail`), which collides across aggregates (Fable error 37/39).
+  return collectBodyReads(page.body, page, upperFirst(pageEmitName(page, nameCtx)), {
+    apiParamNames,
+    aggregatesByName,
+    bcByAggregate,
+    projectionsByName,
+    projectionIRs,
+  });
+}
+
+/** Collect the reads a user `component`'s body issues.
+ *
+ *  Same Model-field projection as a page's — an Elmish read is not per-view
+ *  state, it is a field on the ONE `Model` that the init `Cmd` fills, so a
+ *  component's `QueryView { of: Api.Order.all }` resolves to exactly the field a
+ *  page's would.  That is what lets `component-emit.ts` emit a read-bearing
+ *  component as a `model`-taking function instead of dropping it.
+ *
+ *  `byId` reads are NOT collected here: their fetch is fired by `pageCmd` on
+ *  ROUTE entry, keyed to a `Page` case a component does not have.  The component
+ *  emitter defers such a body for the same reason (`usesRouteId`), so the two
+ *  halves agree. */
+export function collectComponentReads(
+  component: { body?: ExprIR; state: readonly { name: string }[] },
+  apiParamNames: ReadonlySet<string>,
+  aggregatesByName: ReadonlySet<string>,
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  projectionsByName: ReadonlySet<string> = new Set(),
+  projectionIRs: ReadonlyMap<string, ProjectionIR> = new Map(),
+): FelizRead[] {
+  if (!component.body) return [];
+  return collectBodyReads(component.body, component, undefined, {
+    apiParamNames,
+    aggregatesByName,
+    bcByAggregate,
+    projectionsByName,
+    projectionIRs,
+  });
+}
+
+/** The shared read projection over any walked BODY — a page's or a component's.
+ *  `pageCase` is the `Page` union case a `byId` read's entry `Cmd` is keyed to;
+ *  `undefined` (a component) skips `byId` reads entirely rather than emitting a
+ *  Model field nothing ever fills. */
+function collectBodyReads(
+  body: ExprIR,
+  host: { state: readonly { name: string }[] },
+  pageCase: string | undefined,
+  lookups: {
+    apiParamNames: ReadonlySet<string>;
+    aggregatesByName: ReadonlySet<string>;
+    bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
+    projectionsByName: ReadonlySet<string>;
+    projectionIRs: ReadonlyMap<string, ProjectionIR>;
+  },
+): FelizRead[] {
+  const { apiParamNames, aggregatesByName, bcByAggregate, projectionsByName, projectionIRs } =
+    lookups;
   // `projectionsByName` arms the detector's Pattern H (`<apiHandle>.<Proj>`).
   // Defaulted to empty so every existing caller keeps its output byte-identical:
   // absent, Pattern H is inert and only aggregate reads are collected.
   const detCtx = { apiParamNames, aggregatesByName, projectionsByName };
   const pagedCtx = { ...detCtx, bcByAggregate };
-  // The byId read is keyed to the hosting page's `Page` case, which is the
-  // aggregate-qualified emit name (`OrderDetail`) — NOT the bare scaffold page
-  // name (`Detail`), which collides across aggregates (Fable error 37/39).
-  const pageCase = upperFirst(pageEmitName(page, nameCtx));
   const out: FelizRead[] = [];
   const seen = new Set<string>();
-  for (const { of: ofArg, explicitPaged } of queryViewOfArgs(page.body)) {
+  for (const { of: ofArg, explicitPaged } of queryViewOfArgs(body)) {
     const detected = tryDetectApiHook(ofArg, detCtx);
     if (detected?.kind === "projection") {
       // The detector answers with a NAME; the read's shape is a property of the
@@ -1134,9 +1190,10 @@ export function collectPageReads(
         // envelope the walker already resolves `rows.total` against.  Keying
         // this on the explicit flag instead is what let the two disagree.
         paged: explicitPaged || isPagedQuery(ofArg, pagedCtx),
-        controls: pagingFromArgs(detected.args, page),
+        controls: pagingFromArgs(detected.args, host),
       });
-    else if (detected.operation === "byId") read = felizByIdRead(detected.aggregateName, pageCase);
+    else if (detected.operation === "byId" && pageCase !== undefined)
+      read = felizByIdRead(detected.aggregateName, pageCase);
     if (!read) continue;
     // The same aggregate can be read twice on one page — a controlled list plus,
     // say, an FK-select's option source.  They share a Model field, so keep the
@@ -1160,7 +1217,10 @@ export function collectPageReads(
  *  `.all()`, a hand-written call with a different shape) yields `undefined` and
  *  the read stays uncontrolled, so this recognises the scaffold's shape without
  *  claiming to interpret arbitrary arguments. */
-function pagingFromArgs(args: readonly ExprIR[], page: PageIR): FelizPageControls | undefined {
+function pagingFromArgs(
+  args: readonly ExprIR[],
+  host: { state: readonly { name: string }[] },
+): FelizPageControls | undefined {
   if (args.length !== 4) return undefined;
   const [pageArg, sizeArg, sortKeyArg, sortDirArg] = args;
   if (pageArg?.kind !== "ref" || sortKeyArg?.kind !== "ref" || sortDirArg?.kind !== "ref") {
@@ -1169,7 +1229,7 @@ function pagingFromArgs(args: readonly ExprIR[], page: PageIR): FelizPageControl
   if (sizeArg?.kind !== "literal" || sizeArg.lit !== "int") return undefined;
   // Each control must be a declared `state {}` cell: that is what gives it a
   // Model field to read and a `Set<Field>` Msg to refetch on.
-  const stateNames = new Set(page.state.map((s) => s.name));
+  const stateNames = new Set(host.state.map((s) => s.name));
   for (const a of [pageArg, sortKeyArg, sortDirArg]) {
     if (!stateNames.has(a.name)) return undefined;
   }
