@@ -66,10 +66,10 @@ describe("loom.ui-duplicate-area", () => {
       ui WebApp {
         api Sales: SalesApi
         area Ops {
-          page Dashboard { route: "/ops/a", body: Stack { Heading { "A", level: 1 }, testid: "a" } }
+          page Dashboard { route: "/ops/a" body: Stack { Heading { "A", level: 1 }, testid: "a" } }
         }
         area Ops {
-          page Overview { route: "/ops/b", body: Stack { Heading { "B", level: 1 }, testid: "b" } }
+          page Overview { route: "/ops/b" body: Stack { Heading { "B", level: 1 }, testid: "b" } }
         }
       }
       ${TAIL}
@@ -92,13 +92,13 @@ describe("loom.ui-duplicate-area", () => {
         ui WebApp {
           api Sales: SalesApi
           area Ops {
-            page Dashboard { route: "/ops/a", body: Stack { Heading { "A", level: 1 }, testid: "a" } }
+            page Dashboard { route: "/ops/a" body: Stack { Heading { "A", level: 1 }, testid: "a" } }
             area Ops {
-              page Dashboard { route: "/ops/ops/a", body: Stack { Heading { "B", level: 1 }, testid: "b" } }
+              page Dashboard { route: "/ops/ops/a" body: Stack { Heading { "B", level: 1 }, testid: "b" } }
             }
           }
           area Finance {
-            page Dashboard { route: "/finance/a", body: Stack { Heading { "C", level: 1 }, testid: "c" } }
+            page Dashboard { route: "/finance/a" body: Stack { Heading { "C", level: 1 }, testid: "c" } }
           }
         }
         ${TAIL}
@@ -152,10 +152,10 @@ describe("loom.ui-page-path-collision", () => {
         ui WebApp {
           api Sales: SalesApi
           area Ops {
-            page Dashboard { route: "/ops/d", body: Stack { Heading { "A", level: 1 }, testid: "a" } }
+            page Dashboard { route: "/ops/d" body: Stack { Heading { "A", level: 1 }, testid: "a" } }
           }
           area Finance {
-            page Dashboard { route: "/finance/d", body: Stack { Heading { "B", level: 1 }, testid: "b" } }
+            page Dashboard { route: "/finance/d" body: Stack { Heading { "B", level: 1 }, testid: "b" } }
           }
         }
         ${TAIL}
