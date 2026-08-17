@@ -6,11 +6,12 @@
 // macros and the top-level composer share one source of truth.
 
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import type { Aggregate, Area, Page, Ui, Workflow } from "../../api/index.js";
-import { area, boolLit, callExpr, page, stringLit } from "../../api/index.js";
+import type { Aggregate, Area, Expression, Page, Ui, Workflow } from "../../api/index.js";
+import { area, boolLit, callExpr, cloneExpr, page, stringLit } from "../../api/index.js";
 import {
   filterFindsForAggregate,
   filterStateFields,
+  listReadGateForAggregate,
   scaffoldDetailsParts,
   scaffoldHome,
   scaffoldInstanceDetails,
@@ -66,10 +67,18 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
   const labelPlural = humanize(plural(aggName));
   const apiHandle = firstApiHandle(ui);
   const filters = filterFindsForAggregate(agg);
+  // The `find all(): T[] requires …` gate guards `GET /<aggs>` — the very read
+  // this List page makes.  Same reasoning as the workflow-instance pages: the
+  // nav link's visibility is rendered from the PAGE's gate, so without this the
+  // entry shows for a principal the backend refuses.  A find gate is
+  // `currentUser`-only by validation (`loom.find-gate-not-current-user`), so it
+  // ports to the client unchanged.
+  const listGate = listReadGateForAggregate(agg);
   return [
     page({
       name: "List",
       route: `/${pluralSnake}`,
+      requires: listGate ? cloneExpr(listGate) : undefined,
       // The full Breadcrumbs/Toolbar/QueryView/Table tree, emitted directly as
       // unfoldable source (no IR-phase sentinel expansion).  The find-filter
       // inputs bind to page state named by `filterStateFields`.
@@ -174,10 +183,22 @@ export function workflowIsObservable(wf: Workflow): boolean {
 export function pagesForWorkflowInstances(wf: Workflow): Page[] {
   const slug = snake(wf.name);
   const wfName = wf.name;
+  // The workflow's HEADER gate guards `GET /workflows/<wf>/instances[/{id}]`
+  // (M-T3.15 §A2) — the exact two routes these pages read.  Propagate it, or
+  // the scaffold emits a visible nav entry that 403s on click: `menu-emitter`
+  // renders a link's visibility from the PAGE's own `requires`, and knows
+  // nothing about the route's.  Cloned per page — an AST node has one
+  // `$container`, so sharing would move the gate off the workflow.
+  //
+  // Sound because a workflow header gate is `currentUser`-only by validation
+  // (`loom.workflow-gate-not-current-user`), which is precisely the subset a
+  // page gate can evaluate client-side.
+  const gate = (): Expression | undefined => (wf.gate ? cloneExpr(wf.gate) : undefined);
   return [
     page({
       name: `${upperFirst(wfName)}InstancesList`,
       route: `/workflows/${slug}/instances`,
+      requires: gate(),
       body: scaffoldInstanceList(wf),
       menu: {
         section: stringLit("Workflows"),
@@ -187,6 +208,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
     page({
       name: `${upperFirst(wfName)}InstanceDetail`,
       route: `/workflows/${slug}/instances/:id`,
+      requires: gate(),
       body: scaffoldInstanceDetails(wf),
       menu: { hidden: boolLit(true) },
     }),
