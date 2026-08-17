@@ -279,7 +279,11 @@ export async function resetDatabase(pgUrl) {
  *  docs/audits/behavioral-parity-bugs-2026-07.md.  Removing an entry is how a fix
  *  re-arms the boot.  Keyed by platform clause; applies to BOTH featureCases and
  *  sharedSystemCases (a case name is either a corpus feature id or a systems/ file). */
-const BEHAVIOURAL_SKIP = {
+/** Exported so the fast-suite golden-coverage gate
+ *  (test/conformance/wire-golden-coverage.test.ts) can derive "does this case
+ *  run anywhere?" from the SAME register the runners filter by, rather than
+ *  keeping a second copy of it in sync. */
+export const BEHAVIOURAL_SKIP = {
   node: {
     // B1 fixed (event-sourced create now folds events before asserting
     // invariants — src/generator/typescript/emit/aggregate.ts).  `ledger`
