@@ -29,6 +29,7 @@ public sealed class ProductsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(CreateProductResponse), 201)]
     [ProducesResponseType(typeof(ProblemDetails), 400)]
+    [ProducesResponseType(typeof(ProblemDetails), 415)]
     [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<CreateProductResponse>> CreateProduct([FromBody] CreateProductRequest request)
     {
@@ -75,6 +76,7 @@ public sealed class ProductsController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), 400)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 415)]
     [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<IActionResult> UpdateProduct([FromRoute] Guid id, [FromBody] UpdateProductRequest request)
     {

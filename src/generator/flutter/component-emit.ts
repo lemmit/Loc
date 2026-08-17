@@ -4,9 +4,14 @@
 // constructor call `Foo(param: value)`; this module emits the class the call
 // resolves to.
 //
-// TWO SHAPES:
+// THREE SHAPES:
 //   • STATELESS (value-param, no own state/action) → a `StatelessWidget`: one
 //     final field per param, the walked body as the `build` return.
+//   • READ-BEARING (a `QueryView { of: … }` body, no own state) → a Riverpod
+//     `ConsumerWidget`, exactly as a read-bearing PAGE is: `build` receives the
+//     `WidgetRef` and hoists `ref.watch(<var>Provider…)` through the same
+//     `renderApiHoisting` seam, and `collectFlutterReads` scans component bodies
+//     so the provider it watches exists in `reads.dart`.
 //   • STATEFUL (`state {}` + named `action`s) → a `StatefulWidget` whose `State`
 //     holds an immutable `<Comp>Model` (the same data-class shape a Riverpod page
 //     projects), exposes each param as a `widget.<param>` getter, and wraps each
@@ -15,11 +20,13 @@
 //     per-instance (each `Foo(...)` its own `State`), which a shared Riverpod
 //     provider would get wrong.
 //
-// A component that issues READS (a QueryView / api-hook body), an `extern`
-// component (hand-written Dart), a `derived` binding, or an async-effect action
-// (`match await`) is NOT threaded into the walker's `userComponents`, so its call
-// falls back to the shared "unknown component" comment (never broken Dart).
-// `slot`/children params are likewise deferred.
+// An `extern` component (hand-written Dart), a `derived` binding, an
+// async-effect action (`match await`), a STORE read (the binding is named by the
+// page shell, not here), a read keyed by the ROUTE id (`byId(id)` — no route on
+// a component), and a stateful component that ALSO reads (that would need
+// `ConsumerStatefulWidget`) are NOT threaded into the walker's `userComponents`,
+// so their calls fall back to the shared "unknown component" comment (never
+// broken Dart).
 
 import type {
   ComponentIR,
@@ -29,7 +36,8 @@ import type {
   UiApiParamIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { walkBody } from "../_walker/walker-core.js";
+import type { ApiCallSite } from "../_walker/target.js";
+import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
 import { FLUTTER_CHILD_PARAM } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
@@ -56,9 +64,16 @@ export interface ComponentWalkCtx {
 
 interface ComponentWalkResult {
   widget: string;
-  /** True when the body issues a data read (api hook) — a read component can't
-   *  be a plain `StatelessWidget`/`StatefulWidget` here, so it stays deferred. */
-  hasReads: boolean;
+  /** The api reads the body issued, in walk order — the same `ApiHookUse`
+   *  entries a page's `renderConsumerPage` feeds to `renderApiHoisting`.  A
+   *  non-empty map turns the widget into a `ConsumerWidget` whose `build`
+   *  hoists `final <var> = ref.watch(<var>Provider…)`. */
+  apiHooks: ReadonlyMap<string, ApiHookUse>;
+  /** True when the body's read is keyed by the ROUTE id (`byId(id)`) — the
+   *  walker renders that as the bare local `id`, which only a page shell binds
+   *  from its route arguments.  A component has no route, so such a body stays
+   *  deferred rather than emitting Dart that names nothing. */
+  usesRouteId: boolean;
   /** True when the body reads a store field / calls a store action.  A store is
    *  a Riverpod provider, so reaching it needs a `WidgetRef` — which only the
    *  page path's `ConsumerWidget` carries.  Rather than bind a name nothing
@@ -102,10 +117,19 @@ function walkComponent(
   );
   return {
     widget: r.tsx.trim(),
-    hasReads: r.usedApiHooks.size > 0,
+    apiHooks: r.usedApiHooks,
+    usesRouteId: r.usesRouteId,
     usesStores: (r.usedStores?.size ?? 0) > 0,
     usesChildren: r.usesChildren,
   };
+}
+
+/** True when this component's walk can ride the `ConsumerWidget` path — it
+ *  issues reads, carries no `state {}` of its own (a stateful+reads component
+ *  would need `ConsumerStatefulWidget`, still deferred), and its reads are not
+ *  keyed by a route id it has no way to bind. */
+function isReadConsumer(c: ComponentIR, r: ComponentWalkResult): boolean {
+  return r.apiHooks.size > 0 && !isStateful(c) && !r.usesRouteId;
 }
 
 /** True when a component carries its own reactive state — the `StatefulWidget`
@@ -135,18 +159,20 @@ function candidates(components: readonly ComponentIR[]): ComponentIR[] {
 /** The set of emittable components + their param lists — threaded into the page
  *  walker's `userComponents` so a `Foo(...)` call resolves (and only these, so a
  *  non-emittable component's call falls back to the diagnostic comment).  A
- *  component is emittable iff its body issues no reads (nested component refs
- *  don't affect that probe). */
+ *  read-BEARING component qualifies through the `ConsumerWidget` path
+ *  (`isReadConsumer`); a store-bearing one still does not (a store binding is
+ *  named by the page shell, not by the component). */
 export function emittableComponentParams(
   components: readonly ComponentIR[],
   ctx: ComponentWalkCtx,
 ): Map<string, readonly ParamIR[]> {
-  // First pass with NO threading — the read probe is independent of nesting.
+  // First pass with NO threading — the probes are independent of nesting.
   const all = new Map(candidates(components).map((c) => [c.name, c.params] as const));
   const out = new Map<string, readonly ParamIR[]>();
   for (const c of candidates(components)) {
     const r = walkComponent(c, all, ctx);
-    if (!r.hasReads && !r.usesStores) out.set(c.name, c.params);
+    if (r.usesStores) continue;
+    if (r.apiHooks.size === 0 || isReadConsumer(c, r)) out.set(c.name, c.params);
   }
   return out;
 }
@@ -160,6 +186,44 @@ function needsModels(components: readonly ComponentIR[]): boolean {
       const dt = dartType(p.type).replace(/\?$/, "");
       return !prim.has(dt) && !dt.startsWith("List<") && dt !== "dynamic";
     }),
+  );
+}
+
+/** Emit a READ-BEARING component as a Riverpod `ConsumerWidget` — the exact
+ *  shape a read-bearing PAGE takes (`renderConsumerPage`): `build` receives the
+ *  `WidgetRef`, hoists one `final <var> = ref.watch(<var>Provider…)` per
+ *  distinct read through the SAME `renderApiHoisting` seam, and returns the
+ *  walked body (whose `QueryView` dispatches on that `AsyncValue` via `.when`).
+ *  The providers themselves come from `reads.dart` — `collectFlutterReads` now
+ *  scans component bodies alongside page bodies, so the watch and the provider
+ *  cannot disagree. */
+function renderConsumerComponent(
+  c: ComponentIR,
+  widget: string,
+  ctorArgs: string,
+  fields: string[],
+  apiHooks: ReadonlyMap<string, ApiHookUse>,
+): string {
+  const uses: ApiCallSite[] = [...apiHooks.values()].map((h) => ({
+    apiHandle: "",
+    aggregateName: "",
+    operation: "",
+    kind: "query",
+    args: [],
+    varName: h.varName,
+    argsRendered: h.argsRendered,
+  }));
+  return lines(
+    `class ${c.name} extends ConsumerWidget {`,
+    `  const ${c.name}({super.key${ctorArgs ? `, ${ctorArgs}` : ""}});`,
+    ...fields,
+    "",
+    "  @override",
+    "  Widget build(BuildContext context, WidgetRef ref) {",
+    ...flutterTarget.renderApiHoisting(uses),
+    `    return ${widget || "const SizedBox.shrink()"};`,
+    "  }",
+    "}",
   );
 }
 
@@ -303,8 +367,10 @@ export function renderComponentsFile(
   const used = candidates(components).filter((c) => usedNames.has(c.name));
   if (used.length === 0) return "";
 
+  let anyConsumer = false;
   const blocks = used.map((c) => {
-    const { widget, usesChildren } = walkComponent(c, componentParams, ctx);
+    const walked = walkComponent(c, componentParams, ctx);
+    const { widget, usesChildren } = walked;
     const ctorParts = c.params.map((p) => `required this.${p.name}`);
     const fields = c.params.map((p) => `  final ${dartType(p.type)} ${p.name};`);
     // `Slot { }` in the body reads the `child` param — OPTIONAL (not `required`),
@@ -315,12 +381,24 @@ export function renderComponentsFile(
       fields.push(`  final Widget? ${FLUTTER_CHILD_PARAM};`);
     }
     const ctorArgs = ctorParts.join(", ");
+    if (isReadConsumer(c, walked)) {
+      anyConsumer = true;
+      return renderConsumerComponent(c, widget, ctorArgs, fields, walked.apiHooks);
+    }
     return isStateful(c)
       ? renderStatefulComponent(c, widget, ctorArgs, fields, componentParams, ctx)
       : renderStatelessComponent(c, widget, ctorArgs, fields);
   });
 
   const imports = ["import 'package:flutter/material.dart';"];
+  // A read-bearing component is a `ConsumerWidget` watching a provider from
+  // `reads.dart` — both imports are needed exactly when one emitted.
+  if (anyConsumer) {
+    imports.push(
+      "import 'package:flutter_riverpod/flutter_riverpod.dart';",
+      "import 'reads.dart';",
+    );
+  }
   if (needsModels(used)) imports.push("import 'models.dart';");
   if (usesIntl(blocks.join("\n"))) imports.push("import 'package:intl/intl.dart';");
   // The generated translation runtime (M-T1.11) — a sibling of this file under

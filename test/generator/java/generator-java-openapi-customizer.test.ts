@@ -122,7 +122,7 @@ describe("java OpenApiCustomizer — RFC 7807 error responses", () => {
 
   it("create → 400, 422", async () => {
     const c = await customizer();
-    expect(c).toContain('new Route("post", "/api/orders", null, new int[] {400, 422}, null)');
+    expect(c).toContain('new Route("post", "/api/orders", null, new int[] {400, 415, 422}, null)');
   });
 
   it("getById → 404; destroy → 404, 409", async () => {
@@ -136,17 +136,17 @@ describe("java OpenApiCustomizer — RFC 7807 error responses", () => {
   it("plain operation → 400, 404, 422; a guarded operation adds 403", async () => {
     const c = await customizer();
     expect(c).toContain(
-      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 422}, null)',
+      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 415, 422}, null)',
     );
     expect(c).toContain(
-      'new Route("post", "/api/orders/{id}/archive", null, new int[] {400, 403, 404, 422}, null)',
+      'new Route("post", "/api/orders/{id}/archive", null, new int[] {400, 403, 404, 415, 422}, null)',
     );
   });
 
   it("a guarded workflow → 400, 403, 422", async () => {
     const c = await customizer();
     expect(c).toContain(
-      'new Route("post", "/api/workflows/place_order", null, new int[] {400, 403, 422}, "placeOrderWorkflow")',
+      'new Route("post", "/api/workflows/place_order", null, new int[] {400, 403, 415, 422}, "placeOrderWorkflow")',
     );
   });
 
@@ -230,7 +230,7 @@ describe("java OpenApiCustomizer — operationId overrides", () => {
     const c = await customizer();
     // The rename/confirm aggregate ops carry no operationId override.
     expect(c).toContain(
-      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 422}, null)',
+      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 415, 422}, null)',
     );
   });
 });

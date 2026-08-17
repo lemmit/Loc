@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { ProblemDetails, frameworkProblemBody, newApp } from "./problem-details";
+import { ProblemDetails, frameworkProblemBody, newApp, requireJsonContentType } from "./problem-details";
 import { HTTPException } from "hono/http-exception";
 import { recordDomainFault, recordDomainOperation } from "../obs/metrics";
 import { Customer } from "../domain/customer";
@@ -12,14 +12,14 @@ import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, E
 const CreateCustomerRequest = z.object({
   username: z.string().min(3).max(32),
   email: z.string(),
-  age: z.coerce.number().int().min(18).max(150),
+  age: z.number().int().min(18).max(150),
 }).openapi("CreateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
 const UpdateCustomerRequest = z.object({
   username: z.string().min(3).max(32),
   email: z.string(),
-  age: z.coerce.number().int().min(18).max(150),
+  age: z.number().int().min(18).max(150),
 }).openapi("UpdateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 
 const AllQuery = z.object({
@@ -60,10 +60,12 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
           content: { "application/json": { schema: CreateCustomerResponse } },
         },
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
+        415: { description: "Unsupported Media Type", content: { "application/problem+json": { schema: ProblemDetails } } },
         422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
+      requireJsonContentType(c);
       const body = c.req.valid("json");
       const created = Customer.create({ username: body.username, email: body.email, age: body.age });
       await repo.save(created);
@@ -156,11 +158,13 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
         400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
         409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
+        415: { description: "Unsupported Media Type", content: { "application/problem+json": { schema: ProblemDetails } } },
         422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
       const { id } = c.req.valid("param");
+      requireJsonContentType(c);
       const body = c.req.valid("json");
       (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Customer", op: "update", id });
       recordDomainOperation("Customer", "update");

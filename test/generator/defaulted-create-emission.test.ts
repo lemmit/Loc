@@ -123,7 +123,7 @@ describe("defaulted aggregate — parameterized create (invariant gate)", () => 
     );
     // Each `= default` rides onto the wire as a zod `.default(…)`, so the
     // client may omit the field — it is no longer a required input.
-    expect(routes).toMatch(/count:\s*z\.coerce\.number\(\)\.int\(\)\.default\(0\)/);
+    expect(routes).toMatch(/count:\s*z\.number\(\)\.int\(\)\.default\(0\)/);
     expect(routes).toMatch(/label:\s*z\.string\(\)\.default\("untitled"\)/);
     // The route still names every field — the wire has a value for each.
     expect(routes).toMatch(/Counter\.create\(\{ count: body\.count, label: body\.label \}\)/);
