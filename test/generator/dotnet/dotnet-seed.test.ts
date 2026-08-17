@@ -29,9 +29,12 @@ const FIXTURE = `system AcmeSeed {
     }
   }
   api ShopApi from Shop
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
   deployable api {
     platform: dotnet
     contexts: [Catalog]
+    dataSources: [catalogState]
     serves: ShopApi
     port: 8080
   }
@@ -138,15 +141,21 @@ describe("dotnet seeding — raw explicit-id path", () => {
       }
     } }
     api A from Sales
-    deployable api { platform: dotnet contexts: [Sales] serves: A port: 8080 }
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api { platform: dotnet contexts: [Sales] dataSources: [salesState] serves: A port: 8080 }
   }`;
 
   it("emits ExecuteSqlRawAsync INSERTs with explicit id + FK", async () => {
     const seed = find(await build(RAW), /Seed\.cs$/);
+    // Schema-qualified, because every accepted model qualifies — see the
+    // RAW_WITH_SCHEMA note below.
     expect(seed).toContain(
-      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", cancellationToken);',
+      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""sales"".""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", cancellationToken);',
     );
-    expect(seed).toContain('INSERT INTO ""orders"" (""id"", ""customer_id"", ""status"")');
+    expect(seed).toContain(
+      'INSERT INTO ""sales"".""orders"" (""id"", ""customer_id"", ""status"")',
+    );
     expect(seed).not.toContain("Customer.Create(");
   });
 
@@ -155,8 +164,10 @@ describe("dotnet seeding — raw explicit-id path", () => {
   // INSERT was built unqualified, so a `default` dataset carrying raw rows
   // failed at first boot (`relation "customers" does not exist`).  python and
   // java qualified theirs from the start; the .NET and node halves are fixed
-  // together in #2517.  The no-binding fixture above still emits unqualified
-  // SQL, which is correct there: those tables are unqualified too.
+  // together in #2517.  The fixture above used to skip the binding and pin the
+  // unqualified SQL — but a backend deployable hosting a context MUST bind a
+  // dataSource (`loom.persistence-mode-unsupported`), so the unqualified shape
+  // is unreachable in the product and both fixtures now bind one (M-T9.35).
   const RAW_WITH_SCHEMA = `system S {
     subdomain Sales { context Sales {
       aggregate Customer with crudish { name: string }
