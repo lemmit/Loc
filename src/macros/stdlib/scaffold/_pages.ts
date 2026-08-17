@@ -47,17 +47,50 @@ export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
   return area(plural(agg.name), pagesForAggregate(agg, ui));
 }
 
-/** Whether the aggregate's implicit `all` is the paged `Paged<T>` findAll
- *  (M-T2.6) rather than a bare `T[]`.  Macro-time mirror of the enrichment
- *  exclusion in `ensureFindAll` (src/ir/enrich/enrichments.ts): only a plain
- *  single-table relational aggregate pages; event-sourced, `shape: document` /
- *  `shape: embedded`, and inheritance-subtype (`extends`) aggregates keep the
- *  unbounded `T[]` (their read path can't be a plain SQL `LIMIT/OFFSET` page),
- *  so their scaffold list stays CLIENT-paged. */
+/** Whether the aggregate's `all` read is the paged `Paged<T>` findAll (M-T2.6)
+ *  rather than a bare `T[]` — the fact the whole scaffolded list body hangs
+ *  off: a server-paged list calls `all(pageNum, 10, sortKey, sortDir)` and
+ *  unwraps `.items`, a client-paged one calls a bare `all` over an array.
+ *
+ *  Two cases, and the ORDER matters:
+ *
+ *  1. The author DECLARED `find all` on the aggregate's repository.  Then the
+ *     enrichment's `ensureFindAll` leaves it alone and the shape is whatever
+ *     was written, so the only honest answer is that find's own return type —
+ *     read here exactly the way the backends read it (`pagedReturn`, i.e. the
+ *     outermost `paged` carrier).  Guessing instead is what emitted a
+ *     `list_<agg>s(page, size, sort, dir)` call against the bare 0-arity
+ *     `defdelegate list_<agg>s()` the declared `T[]` find produces — a project
+ *     that fails `mix compile` (M-T6.40), with the same shape on the JSX
+ *     frontends (`useAllOrders()` called with four arguments).
+ *  2. No declared `all` — the read is the SYNTHESISED findAll, so mirror
+ *     `ensureFindAll`'s own exclusions (src/ir/enrich/enrichments.ts): only a
+ *     plain single-table relational aggregate pages; event-sourced,
+ *     `shape: document` / `shape: embedded`, and inheritance-subtype
+ *     (`extends`) aggregates keep the unbounded `T[]` (their read path can't be
+ *     a plain SQL `LIMIT/OFFSET` page), so their scaffold list stays
+ *     CLIENT-paged. */
 function aggregateHasPagedFindAll(agg: Aggregate): boolean {
+  const declaredAll = declaredFindAll(agg);
+  if (declaredAll) return declaredAll.returnType.ctors?.includes("paged") ?? false;
   return (
     agg.persistedAs !== "eventLog" && (agg.shape ?? "relational") === "relational" && !agg.superType
   );
+}
+
+/** The aggregate's AUTHOR-DECLARED `find all`, if its context declares a
+ *  repository for it that spells one out.  Macro-time twin of the context
+ *  emitters' `(ctx.repositories ?? []).find(r => r.aggregateName === agg.name)
+ *  ?.finds?.find(f => f.name === "all")`, so the scaffolded call site and the
+ *  emitted delegate read the SAME declaration. */
+function declaredFindAll(agg: Aggregate): { returnType: { ctors?: string[] } } | undefined {
+  for (const m of agg.$container.members) {
+    if (m.$type !== "Repository") continue;
+    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
+    const all = m.finds.find((f) => f.name === "all");
+    if (all) return all;
+  }
+  return undefined;
 }
 
 export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
