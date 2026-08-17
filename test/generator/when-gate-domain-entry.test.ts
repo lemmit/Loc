@@ -156,6 +156,18 @@ describe("M-T6.38 — the `when` state gate is a property of the domain method",
       expect(caller).toContain(b.call);
     });
 
+    it(`${b.platform}: a PRIVATE gated operation is gated too`, async () => {
+      // A private operation has no route — which is precisely why the gate has
+      // to live on the method: the only callers it can have are in-system ones.
+      // (The validator warns that a private `when` exposes no `can-<op>` query;
+      // it does NOT mean the gate is inert.)
+      const files = await generateSystemFiles(
+        SOURCE(b.platform).replace("operation cancel() when", "private operation cancel() when"),
+      );
+      const hit = [...files.entries()].find(([p]) => b.domain.test(p));
+      expect(hit?.[1]).toContain(DETAIL);
+    });
+
     it(`${b.platform}: an ungated operation emits no refusal`, async () => {
       // `place()` carries no `when`, so the same domain file must not have
       // grown a gate for it — a backend that widened the predicate onto every

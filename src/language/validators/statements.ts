@@ -125,9 +125,15 @@ export function checkOperation(op: Operation, agg: Aggregate, accept: Validation
       });
     }
     if (op.private) {
+      // The gate itself DOES still run — since M-T6.38 / D-WHEN-GATE-DOMAIN the
+      // `when` predicate is emitted at the domain-method entry on every
+      // backend, so an in-system caller (a workflow step, another domain
+      // method) is refused.  What a private operation loses is the HTTP
+      // surface: no route to gate, and no `can-<op>` companion for a UI to
+      // read.  The warning says exactly that, and no more.
       accept(
         "warning",
-        `'when' has no effect on private operation '${op.name}' — it has no HTTP entry point, so no gate or can-${op.name} query is emitted.`,
+        `'when' on private operation '${op.name}' gates the domain method but exposes nothing — a private operation has no HTTP entry point, so no can-${op.name} query is emitted for a UI to read the gate.`,
         { node: op, property: "when" },
       );
     }
