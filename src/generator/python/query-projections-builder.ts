@@ -29,6 +29,7 @@ import {
 } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
+import { wireValue } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Query-time projection routes — `app/http/query_projections_routes.py`,
@@ -175,6 +176,7 @@ export function buildPyQueryProjectionsFile(
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
+  const wireHelpers = ["iso", "money_str"].filter(refersTo);
 
   return lines(
     `"""Query-time projection routes.  Auto-generated."""`,
@@ -187,6 +189,9 @@ export function buildPyQueryProjectionsFile(
       : "from pydantic import BaseModel",
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
+    // `Decimal` — the money aggregate's zero-default over an empty table
+    // (`pyCoerce`), fed to `money_str` so it reads at the canonical scale.
+    refersTo("Decimal") ? "from decimal import Decimal" : null,
     "from typing import Annotated",
     "",
     // A `requires` auth gate (or a currentUser-scoped where/select) binds the
@@ -195,8 +200,10 @@ export function buildPyQueryProjectionsFile(
     refersTo("User") ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
     // `iso()` — a `datetime` grouping key crosses the wire as its ISO-8601
-    // string (see `pyKeyCoerce`); `refersTo` drops the import when unused.
-    refersTo("iso") ? "from app.db.wire import iso" : null,
+    // string (see `pyKeyCoerce`).  `money_str()` — the RS-12 money scale a
+    // money aggregate is pinned to (`pyCoerce`).  `refersTo` drops each name
+    // when unused (an unused import is `F401` under the emitted ruff config).
+    wireHelpers.length > 0 ? `from app.db.wire import ${wireHelpers.join(", ")}` : null,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
     refersTo("ForbiddenError") ? "from app.domain.errors import ForbiddenError" : null,
@@ -315,10 +322,20 @@ function projectionRoute(
     out.push("    return [repo.to_wire(r) for r in rows]");
     return out.join("\n");
   }
+  // The row's DECLARED wire types, by field name.  A `select` reads DOMAIN
+  // values (a hydrated aggregate, or a joined one), so each one is serialised
+  // by the aggregate's own `to_wire` renderer — money through `money_str` at
+  // the fixed RS-12 scale, datetimes through `iso`.  Without it the response
+  // model (which declares `str`) is handed a raw `Decimal`/`datetime` and
+  // FastAPI answers 500, and a `select` naming a money column would disagree
+  // with that same column read through the aggregate's own route.
+  const rowFieldType = new Map(proj.stateFields.map((f) => [f.name, f.type] as const));
   out.push("    return [");
   out.push("        {");
   for (const s of proj.query!.selects ?? []) {
-    out.push(`            "${s.field}": ${renderProjectionSelect(s.expr, aliasMap)},`);
+    const rendered = renderProjectionSelect(s.expr, aliasMap);
+    const t = rowFieldType.get(s.field);
+    out.push(`            "${s.field}": ${t ? wireValue(rendered, t, ctx, false) : rendered},`);
   }
   out.push("        }");
   out.push("        for r in rows");
@@ -388,6 +405,17 @@ function pyAggregate(agg: ProjectionAggregateIR, row: string): string {
 function pyCoerce(s: AggregateSelect, expr: string): string {
   const c = aggregateCoercion(s);
   if (c.isCount) return `int(${expr} or 0)`;
+  // money pins the FIXED wire scale (RS-12) instead of echoing the aggregate's
+  // own: `sum`/`max`/`min` come back at the scale the rows were STORED at, so a
+  // `money("10.00")` write read back through a projection shipped `"40.00"`
+  // where the aggregate's own `to_wire` sends `money_str(...)` → `"40.0000"`
+  // (#2549).  `Decimal(_ or 0)` also carries the empty-table zero-default into
+  // the same formatter, so it reads `"0.0000"` rather than a bare `"0"`.
+  if (c.isMoney) {
+    return c.optional
+      ? `None if ${expr} is None else money_str(${expr})`
+      : `money_str(Decimal(${expr} or 0))`;
+  }
   if (c.optional) return `None if ${expr} is None else ${c.asString ? "str" : "float"}(${expr})`;
   return c.asString ? `str(${expr} or "0")` : `float(${expr} or 0)`;
 }

@@ -105,7 +105,8 @@ A workflow `let x = <expr>` whose bound `x` is **never referenced downstream** (
 
 Sources: found 2026-07-20 while draining the compose `parity` gate (the .NET `global::` / Phoenix `def/3` / Python indent+`/metrics` chain). Related pattern: M-T6.15 (Feliz unused-binder → `_`).
 
-## M-T6.40 — a direct-table aggregation applies NO capability `contextFilters` — on BOTH adapters · `todo` · **M** · P2 ⭐ silent wrong answer
+## M-T6.41 — a direct-table aggregation applies NO capability `contextFilters` — on BOTH adapters · `open` · **M** · P2 ⭐ silent wrong answer
+*(ID note: minted as M-T6.40 in #2533, renumbered here — #2551 claimed M-T6.40 for the Elixir list-page compile bug and merged first. Third dup-ID incident this week; M-T9.32's automation is the fix all three evidence.)*
 
 Found 2026-08-12 by an owner review of M-T6.23 slice 4 (PR #2533), and it is **not** a mikroorm bug — the default drizzle path has it too, which is why no adapter-parity gate could see it.
 
@@ -125,7 +126,7 @@ It is a **silent wrong answer**, not a crash: the number looks plausible. The ro
 
 Sources: review thread on PR #2533; `src/platform/hono/v4/projection-query-routes-builder.ts` (`aggWheres` / the two `mikro` aggregation branches), `mikroContextFilters` in `src/generator/typescript/emit/mikroorm.ts`. Sibling of #2530 (dotnet document-shape tenant filter) — same class, different bypass.
 
-## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `partial` (gates landed; 4 of 5 emitters done) · **M–L** · P2 ⭐ was silent
+## M-T6.23 — `persistence: mikroorm` non-persistence feature gaps — `done` (all 5 emitters landed; every gate deleted) · **M–L** · P2 ⭐ was silent
 M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persistence** axis, and the validator's comment block said so without qualification. But **five non-persistence features are gated `&& !usingMikro` in the Hono emitter** and emitted *nothing*, with no diagnostic — a valid model generated a project with the feature simply absent and the CLI reported success:
 
 | feature | file drizzle writes | mikroorm | now |
@@ -134,13 +135,17 @@ M-T6.9 drained the MikroORM adapter to full parity with drizzle on the **persist
 | `timerSource` | `scheduler.ts` | **EMITS** (slice 3, PR #2525) | — |
 | broker `channelSource` | `http/channels.ts` | **EMITS** (slice 2, PR #2524) | — |
 | durable channel + local reactor | outbox + relay wiring | **EMITS** (slice 1, PR #2516) | — |
-| realtime (`delivery: broadcast`) | `http/realtime.ts` | — | error / warning (below) |
+| realtime (`delivery: broadcast`) | `http/realtime.ts` | **EMITS** (slice 5, PR #2534) | — |
 
 **Landed (gates, 2026-07-30):** all five are `loom.mikroorm-unsupported` diagnostics naming the omitted file and the way out (`src/ir/validate/checks/system-checks.ts`, `validateMikroOrmSupport`); `test/ir/mikroorm-feature-gates.test.ts` pins both directions per feature (mikroorm rejects, the same model on drizzle stays clean). Only R1 (the projection case) was on record — in [`integrity-audit-2026-07-residue.md`](../old/proposals/integrity-audit-2026-07-residue.md), which proposed exactly this interim; the other four were unrecorded.
 
-**The realtime severity split** is the load-bearing design call: a `broadcast` channel does double duty, and its *routing* half (what makes a projection fold or saga subscribe) works fine on this adapter. A frontend targeting the backend emits `src/api/realtime.ts` off the target's **platform**, not its persistence, so its EventSource would poll a 404 → **error**. With no such frontend the wire is unobserved and the fold/saga path is intact → **warning**. Without that split the gate rejects working models (it broke 4 `test/adapters/` suites and 3 corpus features before the split).
+**The realtime severity split** was the load-bearing design call *of the interim gate*, and it is **gone with the gap** (slice 5). For the record: a `broadcast` channel does double duty, and its *routing* half (what makes a projection fold or saga subscribe) always worked on this adapter. A frontend targeting the backend emits `src/api/realtime.ts` off the target's **platform**, not its persistence, so its EventSource would poll a 404 → **error**; with no such frontend the wire was unobserved and the fold/saga path intact → **warning**. Without that split the gate rejected working models (it broke 4 `test/adapters/` suites and 3 corpus features before the split). Worth keeping in mind for the *next* interim gate: severity is a function of who OBSERVES the missing thing, not of how broken the emitter is.
 
-**Open (the principled fix):** one emitter left — the realtime SSE wire. It closes by **deleting its clause** here; the gate is the interim, not the answer.
+**All five emitters have landed** (slices 1–5, PRs #2516 / #2524 / #2525 / #2533 / #2534), and with the last clause deleted `validateMikroOrmSupport`'s **entire feature-gate family is gone** — `rejectFeature` itself is deleted, leaving only the one genuine SHAPE reject (an abstract inheritance base owning its own `contains`). The gate was always the interim; the emitters are the answer. `test/ir/mikroorm-feature-gates.test.ts` survives as the **ratchet**: every case now asserts EMISSION, so re-adding a clause — or re-gating an emitter on `!usingMikro` — turns it red.
+
+**What the five slices actually cost, which is the transferable lesson.** Two were single-boolean deletions (broker channels, realtime SSE) because their emitters read no `db` at all; two were real ports (the outbox's capture/drain, the timer scheduler's watermark + `_xact_`-scoped advisory lock); one was a mixed port where three of four shapes needed a QueryBuilder and the fourth was already adapter-neutral. **An adapter gate written from "the emitter is `&& !usingMikro`-gated" says nothing about how much work the port is** — two of these had been hard ERRORS for two weeks and cost one boolean each. Read the emitter before sizing the gap.
+
+**And every single slice's real bugs were found by BOOTING, not by compiling.** `em.nativeInsert` doesn't exist in v6; the saga Row was missing `lastEventId`; `<Ctx>EventRow.seq` made every event-sourced append fail `tsc`; a `date_trunc` key came back a string not a `Date`; MikroORM's result mapping renamed a `customer_id` alias and shipped the literal string `"undefined"`. Five bugs, five shapes, zero caught by a green compile.
 
 **Slice 1 — outbox: DONE (PR #2516).** The adapter emits a `LoomOutboxRow` EntitySchema (`__loom_outbox`, `src/generator/typescript/emit/mikroorm.ts`) plus `createOutboxDispatcher` / `startOutboxRelay` over the EntityManager (`src/platform/hono/v4/workflow-builder.ts` — capture on a `fork({ keepTransactionContext: true }).insert`, drain on a fresh fork with `find` + `nativeUpdate`), and the `wireOutbox` / boot-relay / `index.ts`-import gates lost their `!usingMikro`. The validator clause is **deleted**; its `mikroorm-feature-gates` case flips to asserting the model generates, and emitter pins live in `test/adapters/node-mikroorm-outbox.test.ts`.
 
@@ -190,6 +195,12 @@ Each half independently prevents the loss, which is why both stay: the entity ma
 *Evidence.* `tsc --noEmit` clean on both generated mikro projects (`projection-aggregation`, `projection-groupby`); booted against real Postgres, the filtered singleton answers `{orders:2, revenue:"42.5000", avgLines:3, biggest:"32.5000", smallest:"10.0000"}` over three rows of which one is excluded by the criterion, and both grouped routes answer correct buckets; `run-mikroorm.mjs projection-aggregation projection-groupby` — **both api-tier cases pass** (they were the two `MIKRO_SKIP` entries, now deleted). Mutation-proved five ways: re-gating the emit (4 cases), reverting the `mapResults` fix (1), reverting the key decode (1), removing the projection-filter gate (1), re-adding the feature clause (6 across both files).
 
 *Coverage note, deliberately NOT acted on.* Neither `projection-aggregation` nor `projection-groupby` has a committed wire golden, so the cross-backend VALUE differential does not cover either feature on ANY backend — the mikro leg reports "0 cases compared". Capturing one from the node oracle would newly gate both features on the python/dotnet/java/elixir legs too, whose agreement I cannot verify from here; that is a wire-contract change for a reviewer to take deliberately, not a side effect of this slice. Both of this slice's bugs were caught by the api-tier assertions regardless.
+
+**Slice 5 — realtime SSE: DONE (PR #2534, stacked on slice 4).** The last gate. `src/platform/hono/v4/realtime-builder.ts` reads **no `db`** (`realtimeTee(inner)` decorates a dispatcher; `realtimeRoutes()` takes no handle), so — like slice 2 — the port was deleting the gates: the file emit, the boot tee flag, `wireRealtime`, and the validator clause *including its consumer-dependent severity split*.
+
+*Evidence.* `tsc --noEmit` clean on a generated mikro project carrying a broadcast channel + a folded projection + a react frontend; `test/adapters/node-mikroorm-realtime.test.ts` pins the module and its two exports, the tee composed OVER the projection fold (order matters — the fold runs, then the copy), the frontend's `EventSource` client, byte-equality with drizzle, and no diagnostic at either severity for both consumer shapes. **Runtime, BOOTED** against real Postgres: with the SSE stream open, `place()` delivers `event: OrderPlaced` + `{"type":"OrderPlaced","orderRef":"019ff4ff-…","at":"2026-08-12T08:03:47.922Z"}` to the connected client. Mutation-proved three ways: re-gating `wireRealtime` (the tee case), re-gating the file emit (4 cases across two files), re-adding the validator clause (5 cases across three files).
+
+*Two test conversions this slice OWED, and paid.* (1) The `still WARNS about the realtime SSE wire (slice 5, not this one)` case added in slice 2 existed precisely so an earlier slice could not silently absorb the neighbouring gap — it flips here, in the PR that closed it. (2) `node-mikroorm.test.ts`'s saga pin asserted `events = createInProcessDispatcher(db)`, i.e. the ABSENCE of the tee — a drizzle-vs-mikro difference that only existed because realtime was gated off. It now pins the same fact in the teed form the default adapter already used.
 
 **Hollow-cell note (feeds M-T9.8), corrected 2026-08-11.** The 2026-07-30 note claimed `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg with the feature absent. They were not passing — they were never **collected**: neither corpus fixture carries a `test e2e` block, so `featureCases` skips both on every backend, and the `MIKRO_SKIP` entries were silently **inert** (a register entry claiming a checked gap that nothing checks — hollower than the original diagnosis). `run-mikroorm.mjs` now ratchets its own register: a key naming no fixture fails the run, and a key whose fixture has no behavioural block prints `INERT` so the claim is visible. Giving `outbox.ddd` / `channels-broker.ddd` real `test e2e` blocks is its own mission-sized change (it arms five backend legs + the wire golden at once, like #2468) — **not** folded into slice 1, whose runtime proof is the booted check above.
 
@@ -364,7 +375,7 @@ the RELATIONAL repository emitter only — on **both** adapters. A `shape: docum
 declare a method neither `repository.ts` nor `dapper.ts` implements. No fixture reaches it;
 worth a mission if one ever does.
 
-## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `open` · **M** · P2 ⭐ two shapes silent
+## M-T6.25 — `persistence: dapper`: query-time projections are EF-coupled — `done` (2026-08-16) · **M** · P2 ⭐ two shapes silent
 
 Four of the five query-time projection handler shapes inject `AppDbContext` and
 run EF LINQ, so a `persistence: dapper` deployable that declares one does not
@@ -439,6 +450,38 @@ projection-sourced shapes first, so their port has a gate. `dotnet build
 Worked around in `test/fixtures/corpus/audited.ddd` by passing the field
 explicitly, with a comment pointing here — deliberately NOT worked around in the
 compiler.
+
+### Outcome (2026-08-16)
+
+All four direct-table arms are raw Npgsql; `DAPPER_UNSUPPORTED` went **5 → 1**
+(`tenancy-hierarchy`, the only remaining boundary with a witness) and
+`DAPPER_COMPILE_SKIP` stayed at its 0 floor with the debt behind it paid.
+`read-gates`, `projection-aggregation`, `projection-groupby` and
+`projection-join` all generate, compile `/warnaserror`, and — verified by
+running the emitted SQL against a real Postgres — return the values their
+`test e2e` blocks assert.
+
+**One design decision changed.** Decision 1 above nominated
+`src/generator/sql-pg-expr.ts` as the predicate renderer to widen. The
+implementation uses **`whereToSql` (`emit/dapper.ts`)** instead, for the same
+"don't write a second one" reason pointed at a different existing renderer:
+`sql-pg-expr.ts` is the MIGRATION-BACKFILL renderer, which nothing on the Dapper
+runtime path uses, whereas `whereToSql` is the lowering every Dapper find,
+retrieval and capability filter already goes through. Reusing it means a
+projection `where` and a find `where` over the same predicate emit byte-identical
+SQL — which is the property decision 1 was actually after. Decision 2 (reject
+out-of-subset at validate time, never an in-memory fallback) stands, and is
+carried by the pre-existing `DAPPER_SUBSET` descriptor plus the narrowed
+`dapperQueryProjectionGap`.
+
+The workflow-sourced and projection-sourced arms were ported without first
+minting the corpus fixtures the scoping note asked for — they are pinned by
+`test/generator/dotnet/dapper-query-projection-emission.test.ts` and by the fact
+that both read a store this adapter itself emits (so their columns are known),
+but a runtime witness for each is still owed and belongs with M-T9.x.
+
+**Found while landing it:** M-T6.41 below — the Dapper adapter emits UNQUOTED
+identifiers, so a reserved-word column name makes its DDL a syntax error.
 
 ## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
 Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
@@ -543,6 +586,49 @@ Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 ## M-T6.34 — Event-sourced storage exists on one backend of five — `open` · **L** · P2
 `persistedAs: eventLog` emits storage on Hono only (`loom.event-sourcing-backend-unsupported`), and **event-sourced workflow storage — a per-correlation event stream folded into workflow state — exists nowhere** (`loom.event-sourced-workflow-unsupported`, rejected on all five). The aggregate half is a four-backend port of a shipped design; the workflow half is unbuilt everywhere and should be scoped before it is started. Sized L because the two halves are not the same work and the second may want its own mission once scoped.
 Sources: M-T9.27 register rows.
+
+## M-T6.41 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `open` · **M** · P1 ⭐ boots red, compiles green
+
+A `.ddd` field named `order` / `user` / `group` / `end` — any of Postgres'
+~100 reserved words — makes the Dapper adapter's emitted schema a **syntax
+error**:
+
+```
+CREATE TABLE IF NOT EXISTS order_books (
+    order uuid primary key,     -- ERROR: syntax error at or near "order"
+    code text
+);
+```
+
+Reproduced 2026-08-16 by `psql -f`-ing `test/fixtures/corpus/read-gates.ddd`'s
+emitted `DbSchema.cs` (its folded projection is `keyed by order`).
+
+**Every gate is blind to it.** The C# compiles — the SQL is a string literal, so
+`dotnet build /warnaserror` passes. `schema-load.yml` loads the MIGRATION chain,
+which the Dapper adapter does not use (`hasMigrations = !usingDapper`; it
+provisions itself through `DbSchema.EnsureAsync`). It surfaces only at BOOT.
+
+**The rest of the toolchain already decided this question.** `sql-pg.ts` quotes
+identifiers ALWAYS, and says why in its own comment: "safe for reserved words
+(`order`, `user`, `end`)". The Dapper adapter never picked the rule up.
+
+**Why it is its own mission and not a one-liner.** The identifier appears in ~43
+`new CommandDefinition("…")` sites across `emit/dapper.ts`,
+`emit/dapper-workflow.ts` and `projection-emit.ts`, and those SQL strings live
+in TWO different C# escaping contexts — regular literals (need `\"`) and the
+verbatim `@"…"` in `DbSchema.cs` (needs `""`). Quoting the identifier without
+fixing the escaping at each site produces C# that does not compile. A partial
+fix is worse than none: quoting only the DDL makes the schema load and then the
+queries fail.
+
+**Verification when it lands.** A corpus fixture with a reserved-word column
+(`read-gates` is already one, via `keyed by order`), plus extending the
+`schema-load` gate to `psql -f` the Dapper `DbSchema.Sql` — the oracle that
+would have caught this from the start, and the reason the class stayed invisible.
+
+**Sources:** found while landing M-T6.25 (the port that first let `read-gates`
+generate under this adapter). Sibling of M-T6.35 — a persistence-ADAPTER gap,
+the axis the "five backends" framing hides.
 
 ## M-T6.35 — Persistence-adapter capability gaps — `open` · **M** · P2
 The non-default persistence adapters reject shapes their EF/Ecto siblings accept: `loom.dapper-unsupported` (features Dapper does not emit), `loom.find-predicate-unsupported` (a find predicate the active adapter cannot lower), `loom.persistence-mode-unsupported` (a `persistedAs`/`shape` pair the adapter cannot store), `loom.saving-shape-unsupported` (a `shape(...)` the hosting backend cannot persist), `loom.vanilla-document-unsupported` (`shape: document` only partly emitted on Elixir). The adapter axis is where "all targets support the whole surface" costs the most, because each adapter multiplies the matrix again — worth confirming per row whether the adapter *cannot* express the shape (a permanent limit, so a rename) or merely *does not yet* (a gap).

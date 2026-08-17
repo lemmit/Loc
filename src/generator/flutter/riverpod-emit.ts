@@ -439,7 +439,13 @@ export function buildStateInits(
   const entries = fields.map((f) =>
     f.init ? `${f.name}: ${emitExpr(f.init, ctx)}` : `${f.name}: ${dartZeroValue(f.type)}`,
   );
-  const constEligible = fields.every((f) => !f.init || f.init.kind === "literal");
+  // `now()` is a literal KIND but not a compile-time constant — it renders as
+  // `DateTime.now().toUtc()`, a runtime call a `const` constructor invocation
+  // cannot contain ("Arguments of a constant creation must be constant
+  // expressions").  Every other literal kind is a Dart compile-time constant.
+  const constEligible = fields.every(
+    (f) => !f.init || (f.init.kind === "literal" && f.init.lit !== "now"),
+  );
   return { entries, constEligible };
 }
 

@@ -1,0 +1,142 @@
+{
+  "case": "vo-field-default",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "credit": {
+          "amount": 0,
+          "currency": "EUR"
+        },
+        "id": "<volatile:key>",
+        "note": "none",
+        "reference": "R1",
+        "seats": 1,
+        "tier": "free",
+        "total": {
+          "amount": 0,
+          "currency": "USD"
+        },
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/invoices",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "credit": {
+              "amount": 0,
+              "currency": "EUR"
+            },
+            "id": "<volatile:key>",
+            "note": "none",
+            "reference": "R1",
+            "seats": 1,
+            "tier": "free",
+            "total": {
+              "amount": 0,
+              "currency": "USD"
+            },
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/invoices/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/invoices/{id}",
+      "status": 200,
+      "body": {
+        "credit": {
+          "amount": 1,
+          "currency": "GBP"
+        },
+        "id": "<volatile:key>",
+        "note": "changed",
+        "reference": "R2",
+        "seats": 3,
+        "tier": "paid",
+        "total": {
+          "amount": 5,
+          "currency": "GBP"
+        },
+        "version": 2
+      }
+    },
+    {
+      "seq": 5,
+      "method": "DELETE",
+      "path": "/api/invoices/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "PATCH",
+      "path": "/api/invoices",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/invoices",
+        "instance": "/api/invoices",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "POST",
+      "path": "/api/invoices",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/invoices",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

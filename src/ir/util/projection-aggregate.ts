@@ -217,6 +217,22 @@ function toAggregateSelect(
 export interface AggregateCoercion {
   /** The result is carried on the wire as a string (`money`, `guid`). */
   asString: boolean;
+  /** The result is `money`, so the wire string carries the FIXED
+   *  `MONEY_WIRE_SCALE` (RS-12) rather than whatever scale the aggregate came
+   *  back with.
+   *
+   *  A SQL aggregate's scale is not the declared type's: `sum`/`max`/`min` echo
+   *  the scale the rows were STORED at (a `money("10.00")` write lands 2dp on a
+   *  backend that persists the value as given), `avg` over a numeric widens it,
+   *  and `NULL` over an empty table collapses to a bare `0`.  Every backend's
+   *  ordinary aggregate read pins money to 4dp on the way out (`.toFixed(4)` /
+   *  `money_str` / `setScale(4)` / `ToString("F4")` / `Decimal.round(_, 4)`);
+   *  the projection path has to do the same, or the SAME declared `money` field
+   *  reads back at a different scale depending on which route served it (#2549).
+   *
+   *  Separate from `asString` because that arm also covers `guid`, which must
+   *  be stringified WITHOUT any numeric formatting. */
+  isMoney: boolean;
   /** The field is nullable, so `NULL` stays null instead of collapsing to 0. */
   optional: boolean;
   /** `count` — always a number, always zero-defaulted. */
@@ -226,9 +242,11 @@ export interface AggregateCoercion {
 export function aggregateCoercion(s: AggregateSelect): AggregateCoercion {
   const inner = s.type.kind === "optional" ? s.type.inner : s.type;
   const optional = s.type.kind === "optional";
-  const asString = inner.kind === "primitive" && (inner.name === "money" || inner.name === "guid");
+  const isMoney = inner.kind === "primitive" && inner.name === "money";
+  const asString = isMoney || (inner.kind === "primitive" && inner.name === "guid");
   return {
     asString,
+    isMoney,
     optional: optional && s.aggregate.op !== "count",
     isCount: s.aggregate.op === "count",
   };

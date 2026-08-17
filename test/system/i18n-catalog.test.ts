@@ -32,7 +32,7 @@ const UI_SYSTEM = `
     deployable web {
       platform: react
       targets: api
-      ui: Web
+      ui: Web { Sales: api }
       port: 3100
     }
   }

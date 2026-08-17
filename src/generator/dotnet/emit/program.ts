@@ -32,6 +32,10 @@ export function renderProgram(
   ns: string,
   options?: {
     authRequired?: boolean;
+    /** Declared `user { … }` field names, in declaration order — the shape
+     *  `/auth/me` projects (#2548).  Empty/absent when the deployable has no
+     *  auth. */
+    userFields?: string[];
     usesValidators?: boolean;
     /** When true, at least one aggregate carries `flags.isAuditable`
      *  (any aggregate has contextStamps from one or more macros).
@@ -517,8 +521,23 @@ using (var scope = app.Services.CreateScope())
   // `ExcludeFromDescription()` keeps it out of the OpenAPI contract — it's
   // an internal probe, not a business operation, and the Hono `/auth/me`
   // lives outside its OpenAPI doc too (cross-backend parity).
+  // The body is the DECLARED `user { … }` shape, BY DECLARED NAME (#2548).
+  // Serialising the `User` record itself also shipped the DERIVED members
+  // (`OrgPath` / `RootOrg` are public computed properties, so System.Text.Json
+  // emitted them) — per-request tenancy scoping state that is not part of the
+  // declared principal, and that python/java never sent.  A `Dictionary` keeps
+  // the declared spelling verbatim (the web defaults' camelCase policy applies
+  // to PROPERTY names, not dictionary keys) and sidesteps C# identifier rules.
+  const meProjection = (options?.userFields ?? [])
+    .map((f) => `            [${JSON.stringify(f)}] = accessor.User.${upperFirst(f)},`)
+    .join("\n");
   const authMe = authRequired
-    ? `app.MapGet("${AUTH_BASE_PATH}/me", (ICurrentUserAccessor accessor) => Results.Json(accessor.User)).ExcludeFromDescription();
+    ? `app.MapGet("${AUTH_BASE_PATH}/me", (ICurrentUserAccessor accessor) =>
+    Results.Json(
+        new Dictionary<string, object?>
+        {
+${meProjection}
+        })).ExcludeFromDescription();
 `
     : "";
   // OIDC redirect handshake (/auth/login|callback|logout) — mounted under an

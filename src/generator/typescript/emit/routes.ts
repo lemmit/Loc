@@ -134,7 +134,10 @@ export function renderHttpIndex(
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable — createApp wraps its
   // default dispatcher with the realtime tee and mounts GET /realtime/events.
-  const wireRealtime = !usingMikro && realtimeEventTypes(ctx).size > 0;
+  // Persistence-neutral since M-T6.23 slice 5: `http/realtime.ts` emits on both
+  // adapters (it reads no `db`), so the tee + the `/realtime` mount are no longer
+  // drizzle-gated.
+  const wireRealtime = realtimeEventTypes(ctx).size > 0;
   const realtimeImport = wireRealtime
     ? `import { realtimeRoutes, realtimeTee } from "./realtime";`
     : null;

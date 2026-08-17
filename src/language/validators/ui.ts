@@ -431,6 +431,15 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     // `action submit()`) — they're declarations, not single-valued props
     // (named-actions-and-stores.md, Proposal A Stage 1).
     if (key === "ActionDecl") continue;
+    // Same for `derived name: T = expr`: the feature is SEQUENTIAL by design —
+    // "a derived may reference an earlier derived" (docs/page-metamodel.md;
+    // page-derived-bindings.md) — and all six frontends emit a chain of them.
+    // It was swept in here as a single-valued prop, so the second binding on a
+    // page was an error while every emitter happily rendered it; the four
+    // `page-derived` suites had asserted that emission from a REJECTED model
+    // for as long as they existed.  Found by making `generateSystemFiles`
+    // assert phase ④ (M-T9.34).
+    if (key === "DerivedProp") continue;
     seen.set(key, (seen.get(key) ?? 0) + 1);
   }
   for (const [key, count] of seen) {

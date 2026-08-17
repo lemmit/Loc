@@ -1218,6 +1218,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `yet), so it may only reference \`currentUser\` (and constants) — \`${p.offending}\` is not ` +
     "available here. Use `where` to scope which rows return; use `requires` to allow / deny " +
     "the caller.",
+  "loom.workflow-gate-not-current-user": (p: { name: unknown; offending: unknown }) =>
+    `workflow '${p.name}': the header \`requires\` gate guards the instance READS ` +
+    "(`/workflows/<wf>/instances`) and runs before any instance is loaded, so it may only " +
+    `reference \`currentUser\` (and constants) — \`${p.offending}\` is not available here. ` +
+    "To gate a COMMAND on instance state, put a `requires` in that `create` / `handle` body, " +
+    "where the instance is bound.",
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/store-checks.ts
@@ -1383,6 +1389,8 @@ export const DIAGNOSTIC_MESSAGES = {
     `denyByDefault: find '${p.name}.${p.findName}' is reachable on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` (use \`requires true\` to allow anonymous access).`,
   "loom.default-deny-ungated#denybydefault-projection": (p: { name: unknown }) =>
     `denyByDefault: projection '${p.name}' is served as a read endpoint on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` after its declaration header (use \`requires true\` to allow anonymous access).`,
+  "loom.default-deny-ungated#denybydefault-workflow-instances": (p: { name: unknown }) =>
+    `denyByDefault: workflow '${p.name}' serves its instance reads (\`/workflows/${String(p.name).toLowerCase()}/instances\`) on an 'auth: required' deployable but declares no \`requires\` gate. Add a \`requires <expr>\` to the workflow header (use \`requires true\` to allow anonymous access) — it gates the READS; the command entries keep their own body gates.`,
   "loom.default-deny-ungated#denybydefault-handler": (p: {
     kind: unknown;
     ctx: unknown;
@@ -1675,12 +1683,13 @@ export const DIAGNOSTIC_MESSAGES = {
     name: unknown;
     ctxName: unknown;
     projection: unknown;
+    reason: unknown;
   }) =>
     `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
-    `the query-time projection '${p.projection}', which the Dapper adapter does not emit — the ` +
-    `generated project would reference EF Core's AppDbContext and fail to compile. Drop the ` +
-    `'persistence: dapper' clause to use the default (EF Core) adapter, which emits it, or host ` +
-    `the projection on a different deployable.`,
+    `the query-time projection '${p.projection}', which ${p.reason}. The Dapper adapter writes ` +
+    `its own SQL, so an aggregation can only name real columns. Drop the 'persistence: dapper' ` +
+    `clause to use the default (EF Core) adapter, which translates the aggregation itself, or ` +
+    `host the projection on a different deployable.`,
   "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +

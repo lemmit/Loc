@@ -78,7 +78,9 @@ describe("hono grouped aggregation (group by)", () => {
     expect(p).toContain("const projected = rows.map((r) => ({");
     expect(p).toContain("      status: r.status,");
     expect(p).toContain("      orders: Number(r.orders ?? 0),");
-    expect(p).toContain('      revenue: String(r.revenue ?? "0"),');
+    // money pins the fixed wire scale (RS-12 / #2549); `String()` shipped
+    // whatever scale the driver returned.
+    expect(p).toContain("      revenue: new Decimal(r.revenue ?? 0).toFixed(4),");
   });
 
   it("imports the drizzle helpers it calls, and `schema` as a VALUE", async () => {

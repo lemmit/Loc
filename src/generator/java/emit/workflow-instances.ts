@@ -1,4 +1,5 @@
 import type { EnrichedBoundedContextIR, WireField, WorkflowIR } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import {
   camelId,
   opWorkflowInstanceById,
@@ -10,7 +11,7 @@ import {
 } from "../../../ir/util/workflow-instances.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
-import { javaValueTypeForId } from "../render-expr.js";
+import { collectJavaExprImports, javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import { javaNotFoundThrow } from "./common.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 import {
@@ -132,6 +133,33 @@ function renderInstancesController(
   // (no mutable state repo); needs `ArrayList` for the fold accumulator.
   const esPresent = esWfs.length > 0;
 
+  // The instance-READ gate (`workflow X requires <expr>`): bind the principal
+  // (only when the predicate reads it), then 403 BEFORE the read.  Collected
+  // across workflows because the import set and the accessor injection are
+  // controller-wide decisions — the same shape the projections controller uses.
+  const gateImports = new Set<string>();
+  let anyGate = false;
+  let anyGateUsesUser = false;
+  for (const wf of workflows) {
+    const g = wf.instanceReadGate;
+    if (!g) continue;
+    anyGate = true;
+    collectJavaExprImports(g, gateImports);
+    if (exprUsesCurrentUser(g)) anyGateUsesUser = true;
+  }
+  const gateLines = (wf: WorkflowIR): string[] => {
+    const g = wf.instanceReadGate;
+    if (!g) return [];
+    const gl: string[] = [];
+    if (exprUsesCurrentUser(g)) gl.push(`        var currentUser = currentUserAccessor.user();`);
+    gl.push(
+      `        if (!(${renderJavaExpr(g, { thisName: "this" })})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: workflow ${wf.name} instances`,
+      )});`,
+    );
+    return gl;
+  };
+
   const routes: string[] = [];
   for (const wf of workflows) {
     const T = `${upperFirst(wf.name)}InstanceResponse`;
@@ -166,6 +194,7 @@ function renderInstancesController(
       routes.push(
         `    @GetMapping("/${slug}/instances")`,
         `    public List<${T}> ${camelId(opWorkflowInstances(wf.name))}() {`,
+        ...gateLines(wf),
         `        var __rows = jdbc.queryForList(`,
         `            "select stream_id, type, data from ${table} where stream_type = ? order by stream_id, version", "${streamType}");`,
         `        var __byStream = new LinkedHashMap<String, List<DomainEvent>>();`,
@@ -182,6 +211,7 @@ function renderInstancesController(
         ``,
         `    @GetMapping("/${slug}/instances/{id}")`,
         `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${paramJava} id) {`,
+        ...gateLines(wf),
         `        var __sid = ${idJava === "String" ? "id" : "String.valueOf(id)"};`,
         `        var __rows = jdbc.queryForList(`,
         `            "select type, data from ${table} where stream_type = ? and stream_id = ? order by version", "${streamType}", __sid);`,
@@ -204,6 +234,7 @@ function renderInstancesController(
       routes.push(
         `    @GetMapping("/${slug}/instances")`,
         `    public List<${T}> ${camelId(opWorkflowInstances(wf.name))}() {`,
+        ...gateLines(wf),
         `        return ${repo}.findAll().stream()`,
         `            .map(x -> new ${T}(${proj("x")}))`,
         `            .toList();`,
@@ -211,6 +242,7 @@ function renderInstancesController(
         ``,
         `    @GetMapping("/${slug}/instances/{id}")`,
         `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${paramJava} id) {`,
+        ...gateLines(wf),
         `        return ${repo}.findById(new ${idClass}(${idExpr}))`,
         `            .map(x -> ResponseEntity.ok(new ${T}(${proj("x")})))`,
         `            .orElseThrow(() -> ${javaNotFoundThrow(upperFirst(wf.name), "id")});`,
@@ -229,14 +261,17 @@ function renderInstancesController(
   const fieldDecls = [
     ...repoFields,
     ...(esPresent ? [`    private final JdbcTemplate jdbc;`] : []),
+    ...(anyGateUsesUser ? [`    private final CurrentUserAccessor currentUserAccessor;`] : []),
   ];
   const ctorParams = [
     ...stateWfs.map((wf) => `${workflowStateClass(wf)}Repository ${stateRepoField(wf)}`),
     ...(esPresent ? ["JdbcTemplate jdbc"] : []),
+    ...(anyGateUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
   ].join(", ");
   const ctorAssigns = [
     ...stateWfs.map((wf) => `        this.${stateRepoField(wf)} = ${stateRepoField(wf)};`),
     ...(esPresent ? ["        this.jdbc = jdbc;"] : []),
+    ...(anyGateUsesUser ? ["        this.currentUserAccessor = currentUserAccessor;"] : []),
   ];
 
   return lines(
@@ -253,7 +288,10 @@ function renderInstancesController(
     ``,
     // The 404 carrier the instance show raises (M-T6.31) — unconditional, since
     // every instance-bearing workflow emits a show route.
+    ...[...gateImports].sort().map((i) => `import ${i};`),
     `import ${wctx.basePkg}.domain.common.AggregateNotFoundException;`,
+    anyGate ? `import ${wctx.basePkg}.domain.common.ForbiddenException;` : null,
+    anyGateUsesUser ? `import ${wctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${wctx.pkg}.*;`,
     stateWfs.length > 0 ? `import ${wctx.stateRepoPkg}.*;` : null,
     esPresent ? `import ${wctx.basePkg}.domain.events.*;` : null,

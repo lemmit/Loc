@@ -31,7 +31,7 @@ system S {
       state { draft: Shipping = Shipping.create({ address: Address.create({ zip: "", city: "" }), method: "std" }) }
       action setZip(z: string) { draft.address.zip := z }
       action setMethod(m: string) { draft.method := m }
-      body: Stack { Heading { "Edit", level: 1 }, Text { "Zip: " + draft.address.zip }, Button { "set", onClick: setZip } }
+      body: Stack { Heading { "Edit", level: 1 }, Text { \`Zip: {draft.address.zip}\` }, Button { "set", onClick: setZip } }
     }
   }
   deployable api1 { platform: node contexts: [C] dataSources: [st] serves: A port: 8081 }

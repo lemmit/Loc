@@ -96,7 +96,9 @@ describe("java grouped projection (group by)", () => {
     // exactly like the singleton arm (count → int, money sum → wire string).
     expect(svc).toContain(
       "new SalesByStatusRow((OrderStatus) r[0], ((Number) r[1]).intValue(), " +
-        'r[2] == null ? "0" : r[2].toString())',
+        // money pins the fixed wire scale (RS-12 / #2549); its empty zero is
+        // "0.0000", where a count or plain decimal is unchanged.
+        'r[2] == null ? "0.0000" : new java.math.BigDecimal(r[2].toString()).setScale(4, java.math.RoundingMode.HALF_UP).toPlainString())',
     );
     // No provider-specific casts on aggregate results.
     expect(svc).not.toContain("(Long) r[");

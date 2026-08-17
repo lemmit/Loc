@@ -22,7 +22,7 @@ system Acme {
     api Sales: SalesApi
     page Brand {
       route: "/brand"
-      body: Image { "/logo.png" }
+      body: Image { "/logo.png", alt: "logo" }
     }
   }
   storage primarySql { type: postgres }

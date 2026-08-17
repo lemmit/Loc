@@ -1428,6 +1428,18 @@ fragment IgnoringClause:
 Workflow:
     'workflow' name=ID (eventSourced?='eventSourced')?
         (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
+    // The instance-READ gate, on the declaration header like every other gate
+    // in the language (`operation … requires`, `find … requires`, `projection
+    // … requires`).  It guards `GET /workflows/<wf>/instances` and
+    // `.../instances/{id}` — the compiler-derived reads that publish every
+    // instance's correlation id and state, and which had no author surface to
+    // gate until this clause existed.
+    //
+    // It does NOT gate the command entries: a `create`/`handle` carries its own
+    // `requires` in its body, and "who may start this workflow" is a different
+    // question from "who may read its state" — which is the entire reason the
+    // read needs a gate of its own.
+    ('requires' gate=Expression)?
     '{'
         members+=WorkflowMember*
     '}';

@@ -142,8 +142,11 @@ function entrySource({ deplDir, authMode }) {
   let authImport = "";
   let authRegister = "";
   if (authMode === "devstub") {
-    authImport = `import { registerUserVerifier } from ${J(join(deplDir, "auth", "verifier.ts"))};`;
-    authRegister = `registerUserVerifier(() => ({ id: "00000000-0000-0000-0000-000000000000", tenantId: "admin" }));`;
+    // The GENERATED registrar (#2548) — same reason as run.mjs: a hand-written
+    // identity is one this backend never actually serves, and here it would
+    // also mean fuzzing `/api/auth/me` against a shape the emitter never emits.
+    authImport = `import { registerDevStubVerifier } from ${J(join(deplDir, "auth", "dev-stub.ts"))};`;
+    authRegister = "registerDevStubVerifier();";
   }
   return `
 import { synthDDL } from ${J(join(REPO, "web/src/runtime/ddl.ts"))};

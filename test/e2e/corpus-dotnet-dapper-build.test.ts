@@ -4,7 +4,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { corpusProjectDirs, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
+import {
+  corpusProjectDirs,
+  materializeCorpusFixture,
+  validateCorpusCase,
+} from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
 // ---------------------------------------------------------------------------
@@ -40,24 +44,29 @@ const CASE = process.env.LOOM_CORPUS_DAPPER_CASE;
 // Each entry is a precise, reproducible bug report; widen the gate by FIXING
 // the emitter and dropping the entry.  Ratcheted by `allowlist-ratchet.test.ts`
 // so this map can only shrink.
-const DAPPER_COMPILE_SKIP: Record<string, string> = {
-  "projection-aggregation":
-    "query-time projection handlers are EF-LINQ over AppDbContext (CS0234: no Microsoft.EntityFrameworkCore under dapper) — needs the raw-Npgsql port the FOLDED read controller already got",
-  "projection-groupby":
-    "same as projection-aggregation — the grouped QP handler is EF-LINQ over AppDbContext",
-};
+// EMPTY, and DRAINED rather than reclassified.  Both entries were the same bug —
+// query-time projection handlers were EF-LINQ over `AppDbContext`, so a
+// `persistence: dapper` project referenced a type it did not have — and M-T6.25
+// ported those handlers to raw Npgsql, so both fixtures now generate, compile
+// and answer correctly on this adapter.
+const DAPPER_COMPILE_SKIP: Record<string, string> = {};
 
 // Features the IR validator HONESTLY rejects under dapper — not a gap, a
 // documented capability boundary (`loom.dapper-unsupported`).  These never
 // reach the compiler, so they are excluded rather than skipped.
+//
+// 2 -> 1 (M-T6.25).  `read-gates` was here for ONE reason — it carries a
+// query-time projection (`OpenOrders`), and "the Dapper adapter does not emit
+// query-time projections" — and that boundary is gone: the four direct-table
+// arms (whole-table aggregation, grouped, workflow-sourced, projection-sourced)
+// are raw Npgsql now, and the per-row arm never touched EF at all (it reads
+// through the aggregate's repository, which this adapter has always emitted).
+// So the fixture is back to covering all three of its read-gate kinds here, not
+// two-thirds dropped as collateral.  What survives of the gate is narrow enough
+// to have no corpus witness: an aggregation whose source aggregate keeps its
+// fields somewhere other than columns (`shape: document`, event-sourced) — see
+// `dapperQueryProjectionGap`.
 const DAPPER_UNSUPPORTED: Record<string, string> = {
-  "read-gates":
-    "the fixture carries a query-time projection (`OpenOrders`) so its read-gate coverage spans " +
-    "all three gated read surfaces — and the Dapper adapter does not emit query-time projections " +
-    "(M-T6.25, the open half #2498's witnesses ratchet).  `loom.dapper-unsupported` refuses at " +
-    "generation, naming the projection and the fix.  Entered 2026-08-13: #2523 added the fixture " +
-    "and its dapper cell went red on main — the refusal predates it; the fixture merely walked in.  " +
-    "Delete this entry when M-T6.25 lands the Dapper query-time projection emitters.",
   "tenancy-hierarchy":
     "hierarchical tenancy's capability filter is outside the Dapper SQL subset; the validator " +
     "says so with loom.dapper-unsupported.  NOTE: that claim was FALSE until M-T6.29 — the " +
@@ -88,6 +97,66 @@ describe("the dapper compile-tier maps name real corpus features", () => {
       ...Object.entries(DAPPER_UNSUPPORTED),
     ]) {
       expect(why.trim().length, `'${id}' needs a reason`).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The maps' ORACLE — always on, no SDK, no docker.
+//
+// Until now nothing checked that these maps described reality.  They are only
+// consulted when `LOOM_DOTNET_BUILD=1`, so the claim "this feature is outside
+// the adapter's boundary" (or "this one is fine") was unfalsifiable on an
+// ordinary PR — and the two halves that must agree, the FIXTURE corpus and the
+// per-adapter VALIDATOR gate, are edited by different PRs weeks apart.
+//
+// That is not a hypothetical either.  `read-gates` landed in #2523; #2498 then
+// added `loom.dapper-unsupported` for query-time projections, which rejects it.
+// Both PRs were green, `main` went red for ~6h, and the failure surfaced from a
+// docker job named after a compiler that never ran.  This gate reproduces that
+// disagreement in ~10s of pure Node.
+//
+// It runs the IR validator (phase ⑦) directly, because the corpus GENERATION
+// gate cannot: `generateSystems` never calls `validateLoomModel` (see
+// `validateCorpusCase`), so no other per-PR gate sees these diagnostics at all.
+// ---------------------------------------------------------------------------
+describe("the dapper maps agree with what the IR validator actually says", () => {
+  const dapperDeclared = CORPUS.filter((f) => f.backends.includes("dotnet")).map((f) => f.id);
+
+  it.each(dapperDeclared)("%s — its map placement matches its diagnostics", async (id) => {
+    const diags = await validateCorpusCase(id, "dotnet", "dapper");
+    const rejections = diags.filter(
+      (d) => d.severity === "error" && d.code === "loom.dapper-unsupported",
+    );
+    const otherErrors = diags.filter(
+      (d) => d.severity === "error" && d.code !== "loom.dapper-unsupported",
+    );
+
+    if (id in DAPPER_UNSUPPORTED) {
+      // Claimed a capability boundary — the validator must actually say so.
+      // A stale entry (the gap got fixed, the entry stayed) fails here, which
+      // is what makes this register ratchet rather than accumulate.
+      expect(
+        rejections.length,
+        `'${id}' is in DAPPER_UNSUPPORTED but the validator raises no ` +
+          "loom.dapper-unsupported under `persistence: dapper` — the boundary moved, so " +
+          "drop the entry and let the feature run.",
+      ).toBeGreaterThan(0);
+    } else {
+      // Everything else is claimed to REACH the compiler — including
+      // DAPPER_COMPILE_SKIP entries, which are compile debt, not boundaries.
+      // A fixture that the validator rejects while sitting outside
+      // DAPPER_UNSUPPORTED is precisely the `read-gates` failure.
+      expect(
+        rejections.map((d) => d.message),
+        `'${id}' is rejected by loom.dapper-unsupported but is not in DAPPER_UNSUPPORTED — ` +
+          "the dapper compile leg will fail at `generate`, before dotnet runs. Add it to the " +
+          "map (with the boundary stated) or narrow the validator gate.",
+      ).toEqual([]);
+      expect(
+        otherErrors.map((d) => `${d.code}: ${d.message}`),
+        `'${id}' does not validate under \`persistence: dapper\``,
+      ).toEqual([]);
     }
   });
 });

@@ -481,7 +481,11 @@ function emitProjectFromContexts(
     });
     // Query-time projections (read-path-architecture.md rev.13) — a live read
     // (source find + join bulk-loads + select) with no folded read-model table.
-    emitQueryProjections(ctx, ns, out, { routePrefix, sourcemap });
+    emitQueryProjections(ctx, ns, out, {
+      routePrefix,
+      sourcemap,
+      usingDapper: system?.deployable.persistence === "dapper",
+    });
   }
   // Explicit transport layer (unfoldable-api-derivation.md, A1): one
   // ControllerBase per served api whose `route` list is non-empty, dispatching
@@ -1062,6 +1066,7 @@ function emitProjectFromContexts(
       kafka: channelBindings.some((b) => b.transport === "kafka"),
     },
     authRequired,
+    userFields: (userFields ?? []).map((f) => f.name),
     actorIdProp,
     usesValidators,
     usesStamping,
@@ -1790,6 +1795,9 @@ function emitProject(
   out: Map<string, string>,
   options?: {
     authRequired?: boolean;
+    /** Declared `user { … }` field names in declaration order — the shape
+     *  `/auth/me` projects (#2548).  Empty without auth. */
+    userFields?: string[];
     usesValidators?: boolean;
     usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
@@ -1885,6 +1893,7 @@ function emitProject(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
+      userFields: options?.userFields ?? [],
       usesValidators,
       usesStamping,
       hasEmbeddedSpa,

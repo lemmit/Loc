@@ -49,7 +49,7 @@ system Par {
       route: "/"
       state { n: int = 0 }
       action inc() { n := n + 1 }
-      body: Stack { Heading { "H", level: 1 }, Banner(label: "hi"), Text { "n: " + n }, Button { "+", onClick: inc } }
+      body: Stack { Heading { "H", level: 1 }, Banner(label: "hi"), Text { \`n: {n}\` }, Button { "+", onClick: inc } }
     }
     page NewItem { route: "/new" body: Stack { Heading { "New", level: 1 }, CreateForm { of: Item } } }
   }

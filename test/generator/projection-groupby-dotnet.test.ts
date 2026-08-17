@@ -104,7 +104,9 @@ describe(".NET grouped query-time projection (group by)", () => {
     // Key: the Row param is the enum type (JsonStringEnumConverter → wire member
     // name), so the raw key value passes through unconverted.
     expect(handler).toContain(
-      "new SalesByStatusRow(x.Status, x?.Orders ?? 0, (x?.Revenue ?? 0m).ToString(CultureInfo.InvariantCulture))",
+      // money pins the fixed wire scale (RS-12 / #2549) — "F4", not a bare
+      // ToString, which would echo whatever scale SQL returned.
+      'new SalesByStatusRow(x.Status, x?.Orders ?? 0, (x?.Revenue ?? 0m).ToString("F4", CultureInfo.InvariantCulture))',
     );
     // Row DTO declares the wire types: enum key, int count, money as string.
     const row = await fileEndingWith(system(BY_STATUS), "Projections/SalesByStatusRow.cs");

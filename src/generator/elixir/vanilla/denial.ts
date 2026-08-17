@@ -34,7 +34,9 @@
 
 import type { StmtIR, WorkflowStmtIR } from "../../../ir/types/loom-ir.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { classifyForWire, pickErrorPath } from "../../../ir/validate/invariant-classify.js";
 import { errorTitle, resolveErrorStatus } from "../../../util/error-defaults.js";
+import { messageCode } from "../../../util/message-code.js";
 
 type GuardStmt = Extract<StmtIR | WorkflowStmtIR, { kind: "requires" | "precondition" }>;
 
@@ -145,9 +147,118 @@ export function denialMessage(s: GuardStmt): string {
  *  `{:forbidden, "Forbidden: …"}` / `{:precondition_failed, "Precondition
  *  failed: …"}`.  Rendered into `ensure(<cond>, <term>)` and into the inline
  *  `if …, do: :ok, else: {:error, <term>}` workflow form alike. */
-export function denialTerm(s: GuardStmt): string {
+export function denialTerm(s: GuardStmt, wireAvailable?: ReadonlySet<string>): string {
+  if (deniesAtWire(s, wireAvailable)) return wireValidationTerm(s);
   const tag = s.kind === "requires" ? ":forbidden" : ":precondition_failed";
   return `{${tag}, ${JSON.stringify(denialMessage(s))}}`;
+}
+
+// ---------------------------------------------------------------------------
+// The WIRE-VALIDATION rung (M-T6.20).
+//
+// The other four backends lift an operation's `precondition`s into the SAME
+// request validator the aggregate invariants use (`preconditionsAsInvariants`
+// → zod `refine` / FluentValidation / pydantic / bean-validation), so a tripped
+// precondition over the operation's own params answers the WIRE-VALIDATION 422:
+// title "Validation failed", detail "One or more fields are invalid.", and an
+// `errors[]` entry carrying the RFC 6901 pointer + the `msg.<hash>` code.
+//
+// Elixir lowers preconditions to the `ensure/2` control-flow chain instead, so
+// the same denial answered the DOMAIN-FLOOR 422 — authored message in `detail`,
+// no `errors[]`, hence no pointer and no code.  A frontend ACL's
+// `applyServerErrors` therefore bound nothing on this backend.  That was the
+// M-T9.11 `corpus/validation-messages` wire-golden divergence.
+//
+// SCOPE — a MESSAGED precondition whose predicate `classifyForWire` admits
+// against the operation's params.  Two halves to that gate:
+//
+//   * the `available` set is the op's params, exactly what
+//     `routes-builder.ts` / `validation-catalog.ts` classify against, so a
+//     precondition reading `this.<state>` (e.g. `wire-contract`'s
+//     `availability != Availability.Discontinued`) is NOT wire-translatable on
+//     any backend and rightly stays on the domain floor here too;
+//   * MESSAGED, because the authored text and its content-hash `code` are
+//     precisely what the `errors[]` entry carries.  A message-LESS rule has no
+//     code and derives its wire text from each backend's NATIVE validator chain
+//     (zod's "Too small: …", not Loom's "Precondition failed: …"), so lifting it
+//     here would trade one divergence for another with no oracle to check it
+//     against — it keeps the domain-floor rung (unchanged).
+// ---------------------------------------------------------------------------
+
+/** True when this guard is a messaged, wire-translatable `precondition` — the
+ *  one denial shape that must answer the wire-validation 422 rather than the
+ *  domain floor.  `available` is the operation's param names; `undefined` (every
+ *  non-operation call site: lifecycle gates, workflows, dispatch handlers) means
+ *  "no request body to point into", so the answer is always false and those
+ *  paths stay byte-identical. */
+export function deniesAtWire(s: GuardStmt, available: ReadonlySet<string> | undefined): boolean {
+  if (available === undefined) return false;
+  if (s.kind !== "precondition" || s.message == null) return false;
+  return classifyForWire({ expr: s.expr, source: s.source, message: s.message }, { available });
+}
+
+/** `{:validation_failed, [%{pointer: "/amount", message: "…", code: "msg.…"}]}`
+ *  — the reason term a wire-translatable messaged precondition short-circuits
+ *  to.  One entry, because one precondition denies at a time (the `with` chain
+ *  short-circuits); the list shape matches the `errors[]` extension the
+ *  changeset path already produces so the controller can render both through
+ *  one responder. */
+export function wireValidationTerm(s: GuardStmt): string {
+  const path = pickErrorPath({ expr: s.expr, source: s.source });
+  const pointer = path === null ? "" : `/${rfc6901(path)}`;
+  const text = denialMessage(s);
+  const entry = [
+    `pointer: ${JSON.stringify(pointer)}`,
+    `message: ${JSON.stringify(text)}`,
+    `code: ${JSON.stringify(messageCode(text))}`,
+  ].join(", ");
+  return `{:validation_failed, [%{${entry}}]}`;
+}
+
+/** RFC 6901 segment escaping (`~` → `~0`, `/` → `~1`) — the same escaping the
+ *  emitted `ProblemDetails.pointer_of/1` and Hono's `pointerOf` apply. */
+function rfc6901(segment: string): string {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+/** Does any of the operation's guards deny at the wire rung?  Gates the
+ *  controller's `{:error, {:validation_failed, errors}}` clause, so an op with
+ *  no such guard emits no unreachable clause (`--warnings-as-errors`). */
+export function opHasWireDenial(op: {
+  statements: readonly StmtIR[];
+  params: readonly { name: string }[];
+}): boolean {
+  const available = new Set(op.params.map((p) => p.name));
+  return op.statements.some(
+    (s) => (s.kind === "requires" || s.kind === "precondition") && deniesAtWire(s, available),
+  );
+}
+
+/** Does any aggregate operation across these contexts carry a wire-rung denial?
+ *  Gates the ProblemDetails responder AND the shared `respond/2` error tail —
+ *  a workflow `op-call` / explicit handler that invokes such an operation
+ *  propagates the term to its own dispatcher, which would otherwise fall to the
+ *  sanitized 500 catch-all.  False ⇒ every one of those seams is byte-identical. */
+export function contextsHaveWireDenials(
+  contexts: readonly {
+    aggregates: readonly {
+      operations?: readonly {
+        statements: readonly StmtIR[];
+        params: readonly { name: string }[];
+      }[];
+    }[];
+  }[],
+): boolean {
+  return contexts.some((c) =>
+    c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
+  );
+}
+
+/** The controller arm that answers a wire-rung denial with the §3.2 `errors[]`
+ *  422 — the SAME body `ProblemDetails.validation_error_response/2` builds from
+ *  a changeset, so both 422 rungs share one wire shape. */
+export function wireValidationResponse(problemModule = "ProblemDetails"): string {
+  return `${problemModule}.validation_errors_response(conn, errors)`;
 }
 
 /** The two ProblemDetails clauses a controller needs to answer a typed denial,
@@ -197,6 +308,15 @@ export function respondErrorTail(
   fnName = "respond",
   indent = "  ",
   overrides?: ErrorStatusMap,
+  /** True when some aggregate operation reachable from this dispatcher denies at
+   *  the WIRE rung (M-T6.20).  A workflow `op-call` threads that operation's
+   *  `{:error, reason}` straight through here, so without the arm the denial
+   *  would fall to the sanitized 500 catch-all instead of the 422 the direct
+   *  controller answers.  Gated so a project without one keeps the exact tail it
+   *  had — and never references a `validation_errors_response/2` the
+   *  ProblemDetails module didn't emit (an undefined remote call is itself a
+   *  `--warnings-as-errors` failure). */
+  wireDenials = false,
 ): string {
   const clause = (head: string, body: string): string =>
     `${indent}${head},\n${indent}  do: ${body}`;
@@ -205,6 +325,14 @@ export function respondErrorTail(
       `def ${fnName}(conn, {:error, :not_found})`,
       denialResponse("notFound", '"Resource not found"', overrides),
     ),
+    ...(wireDenials
+      ? [
+          clause(
+            `def ${fnName}(conn, {:error, {:validation_failed, errors}})`,
+            wireValidationResponse(),
+          ),
+        ]
+      : []),
     denialResponders(fnName, indent, overrides),
     clause(`def ${fnName}(conn, {:error, _reason})`, internalFallbackResponse()),
   ].join("\n\n");

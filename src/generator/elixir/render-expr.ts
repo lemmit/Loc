@@ -748,7 +748,14 @@ export function renderDeepScopeEcto(
   // `tid` row column above, which only coincides when the author happened to
   // name the claim `tenantId`.
   const tenant = `^(current_user && current_user.${snake(tenantClaim)})`;
-  const sql = `(? IS NOT NULL AND (? = ? OR ? LIKE ? || '${DATA_KEY_PATH_DELIMITER}%')) OR (? IS NULL AND ? = ?)`;
+  // Descendant test as an ANCHORED POSITION, not `LIKE ? || '.%'`.  The anchor
+  // is a principal CLAIM, so `_`/`%` inside it are LIKE wildcards: an org named
+  // `acme_corp` yields the pattern `acme_corp.%`, which matches `acmeXcorp.…` —
+  // a cross-tenant read with no attacker, just an underscore in a name.  Ecto
+  // pins the value (`^`), which stops injection but not wildcard semantics.
+  // `strpos(col, needle) = 1` has no pattern language, matching how
+  // `string.startsWith` lowers elsewhere in this file.
+  const sql = `(? IS NOT NULL AND (? = ? OR strpos(?, ? || '${DATA_KEY_PATH_DELIMITER}') = 1)) OR (? IS NULL AND ? = ?)`;
   return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
 }
 

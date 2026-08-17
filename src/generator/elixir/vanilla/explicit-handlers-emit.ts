@@ -52,7 +52,7 @@ import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import type { ApiRoute } from "../api-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { renderControllerSerialize } from "./controller-serialize.js";
-import { denialOverrides, respondErrorTail } from "./denial.js";
+import { contextsHaveWireDenials, denialOverrides, respondErrorTail } from "./denial.js";
 import {
   type BodyLine,
   collectParamRefs,
@@ -614,7 +614,7 @@ ${actions.join("\n\n")}
   def respond(conn, {:error, %Ecto.Changeset{} = changeset}),
     do: ProblemDetails.validation_error_response(conn, changeset)
 
-${respondErrorTail("respond", "  ", contexts[0] ? denialOverrides(contexts[0]) : undefined)}
+${respondErrorTail("respond", "  ", contexts[0] ? denialOverrides(contexts[0]) : undefined, contextsHaveWireDenials(contexts))}
 
 ${serializeBlock.clauses}${
   hasPaged

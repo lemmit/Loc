@@ -432,10 +432,20 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
     "api.orderVolume.list (no such aggregate)",
     "api.salesTotals.list (no such aggregate)",
   ],
+  // The by-id-follow join's read — same `notLifted` class, third shape.
+  "corpus/projection-join": ["api.orderWithCustomer.list (no such aggregate)"],
   "corpus/projection-groupby": [
     "api.revenueByDay.list (no such aggregate)",
     "api.salesByStatus.list (no such aggregate)",
     "api.volumeByCustomerAndStatus.list (no such aggregate)",
+  ],
+  // Both projection kinds again, this time as the GATED read surfaces
+  // (`projection … requires`).  Same `notLifted` class as the four entries
+  // above; the denial half of these reads is the authz ladder's, which is not
+  // an `api.*` call at all.
+  "corpus/read-gates": [
+    "api.openOrders.list (no such aggregate)",
+    "api.orderBook.byKey (no such aggregate)",
   ],
 };
 
@@ -508,23 +518,6 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // against fabricated rows in `test/generator/policy-document-inapp.test.ts`, so
   // the filtering semantics are proven — just not end-to-end over the wire.
   "policy-document",
-  // `read-gates` exists for the COMPILE tier: it carries the three read
-  // surfaces that take a `requires` gate (the gated list read, a folded
-  // projection, a query-time projection) so every backend's emitted guard is
-  // proven to compile — the failure mode that unit assertions over generated
-  // TEXT cannot see (a missing `java.util.Objects` import, a `ForbiddenError`
-  // python never imported, a bound-and-unused `current_user` that trips
-  // `--warnings-as-errors`).
-  //
-  // The runtime half needs a principal the harness does not have. Asserting a
-  // read gate means asserting the 403, and that takes an AUTHENTICATED-BUT-
-  // UNAUTHORIZED caller; `DEV_CLAIMS` is a single authorized principal, so the
-  // only thing an e2e block here could assert is that the gate lets the
-  // authorized caller through — which is what `auth-simple`'s guarded
-  // operation already proves for the write side. M-T9.28 (multi-principal
-  // behavioural harness) is what makes the denial assertable; this entry
-  // drops when it lands.
-  "read-gates",
   // SIDECARS — `objectStore` (S3/minio), `queue`, an http `api` peer and a
   // `mailer` (mailpit).  A put→get round-trip needs them standing up, which is
   // `email-e2e.yml`'s and `channels-e2e.yml`'s shape, not this leg's.

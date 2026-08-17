@@ -81,13 +81,11 @@ import {
   type DeployableIR,
   type EnrichedBoundedContextIR,
   type EventIR,
-  type FieldIR,
   isMaterializedProjection,
   isQueryTimeProjection,
   type RepositoryIR,
   type SystemIR,
   type TimerSourceIR,
-  type TypeIR,
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
@@ -213,7 +211,6 @@ export class ConcurrencyError extends Error {
  *  consumed by the frontend ACL's `applyServerErrors`). */
 function problemDetailsTs(localizeMessages: boolean): string {
   return `// Auto-generated.  Do not edit by hand.
-import { STATUS_CODES } from "node:http";
 import { z } from "zod";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
@@ -306,6 +303,33 @@ export function newApp(): OpenAPIHono {
   return new OpenAPIHono({ defaultHook });
 }
 
+/** Reason phrases (RFC 9110 §15 / the IANA registry) for the statuses THIS
+ *  layer raises: 404 and 500 directly, plus the ones a hono \`HTTPException\`
+ *  carries through \`frameworkProblem\` (a malformed body, a method mismatch)
+ *  and the authz ladder's 401/403/409/422.
+ *
+ *  This used to read node's \`STATUS_CODES\`, on the reasoning that a hand-kept
+ *  map would silently mistitle a status it missed — right for a node
+ *  deployment, wrong everywhere else this backend runs.  The playground boots
+ *  the SAME bundle in a browser worker, where \`node:http\` resolves to an EMPTY
+ *  module: \`STATUS_CODES[status]\` then threw inside the one helper whose job is
+ *  turning a fault into a problem document, so every 404/422/500 took the worker
+ *  down instead of answering.
+ *
+ *  The values are node's verbatim, so the wire is unchanged.  A status outside
+ *  this set falls back to "Error" — exactly what the old read did for a code
+ *  node's own table didn't carry. */
+const REASON_PHRASES: Record<number, string> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  405: "Method Not Allowed",
+  409: "Conflict",
+  422: "Unprocessable Entity",
+  500: "Internal Server Error",
+};
+
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
  *  describes: an unmatched route, a body hono itself refused to parse, an
  *  aborted request.  Before this, such a fault left the wire two ways: never
@@ -315,10 +339,7 @@ export function newApp(): OpenAPIHono {
  *  already committed to \`application/problem+json\`.  Shared by http/index.ts's
  *  root handlers and every router's \`HTTPException\` arm so they can't drift. */
 export function frameworkProblemBody(status: number, detail: string, instance: string): string {
-  // Reason phrase from node's own table rather than a hand-kept map — the
-  // framework can raise any status, and a partial table would silently title
-  // the ones it missed.
-  const title = STATUS_CODES[status] ?? "Error";
+  const title = REASON_PHRASES[status] ?? "Error";
   return JSON.stringify({ type: "about:blank", title, status, detail, instance });
 }
 `;
@@ -723,7 +744,10 @@ export function generateTypeScriptForContexts(
   // channel makes its carried events UI-observable at GET /realtime/events;
   // createApp's dispatcher tee (see routes emit) copies dispatched events
   // onto the stream.
-  if (!usingMikro) {
+  // Persistence-neutral since M-T6.23 slice 5 (the last of the five): the SSE
+  // module reads no `db` at all — `realtimeTee(inner)` decorates a dispatcher and
+  // `realtimeRoutes()` takes no handle — so the wire is adapter-independent.
+  {
     const realtimeFile = buildRealtimeFile(merged);
     if (realtimeFile) out.set("http/realtime.ts", realtimeFile);
   }
@@ -1180,8 +1204,9 @@ export function generateTypeScriptForContexts(
         // the drained rows publish to the broker (M-T4.4 slice 3).
         (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0),
       // Realtime tee: the relay's inner dispatcher rides through it so
-      // relayed (durable) events reach the SSE wire too.
-      !usingMikro && contexts.some((c) => realtimeEventTypes(c).size > 0),
+      // relayed (durable) events reach the SSE wire too.  Persistence-neutral
+      // since M-T6.23 slice 5.
+      contexts.some((c) => realtimeEventTypes(c).size > 0),
       // OIDC turnkey auth: register the generated verifier instead of the
       // dev stub.
       !!oidcAuth,
@@ -1530,12 +1555,12 @@ function renderProjectIndexTs(
     ? ""
     : oidc
       ? `import { registerOidcVerifier } from "./auth/oidc";\n`
-      : `import { registerUserVerifier } from "./auth/verifier";\n`;
+      : `import { registerDevStubVerifier } from "./auth/dev-stub";\n`;
   const authStubCall = !userShape
     ? ""
     : oidc
       ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
-      : `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterUserVerifier((req) => {\n  const base = ${indentContinuation(renderStubUserLiteral(userShape), "  ")};\n  const injected = req.headers.get("x-loom-dev-claims");\n  if (!injected) return base;\n  try {\n    return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };\n  } catch {\n    return base;\n  }\n});\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
+      : `\n// Dev-stub verifier (auth/dev-stub.ts) — accepts every request as a\n// built-in identity filling every field the \`user { … }\` block declares.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterDevStubVerifier();\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
   // Tenant-registry orgPath resolver (multi-tenancy P2.2) — wired only on the
   // drizzle path (mikroorm hierarchy falls back to the claim via the
   // unregistered-resolver path).  The auth middleware calls it per request;
@@ -1717,65 +1742,6 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
-}
-
-/** Re-indent a multi-line snippet for embedding at a deeper nesting:
- *  every line after the first gets `pad` prepended (blank lines stay
- *  blank).  Keeps an interpolated object literal Biome-clean inside a
- *  nested function body. */
-function indentContinuation(s: string, pad: string): string {
-  return s
-    .split("\n")
-    .map((line, i) => (i === 0 || line.length === 0 ? line : pad + line))
-    .join("\n");
-}
-
-/** Build a TS object literal matching the system's `user {}` shape, with
- *  sensible defaults per primitive type — used as the body of the dev-stub
- *  user verifier so a generated app boots without the caller having to wire
- *  a JWT decoder. */
-function renderStubUserLiteral(userShape: UserIR): string {
-  const entries = userShape.fields.map((f) => `  ${snakeToCamel(f.name)}: ${stubValueFor(f)}`);
-  return `{\n${entries.join(",\n")},\n}`;
-}
-
-function stubValueFor(f: FieldIR): string {
-  if (f.optional) return "null";
-  return stubValueForType(f.type);
-}
-
-function stubValueForType(t: TypeIR): string {
-  switch (t.kind) {
-    case "primitive":
-      switch (t.name) {
-        case "string":
-          return `"admin"`;
-        case "int":
-        case "long":
-          return "0";
-        case "decimal":
-        case "money":
-          return `"0"`;
-        case "bool":
-          return "false";
-        case "datetime":
-          return `new Date(0)`;
-        case "guid":
-          return `"00000000-0000-0000-0000-000000000000"`;
-        default:
-          return `""`;
-      }
-    case "id":
-      return `"00000000-0000-0000-0000-000000000000"`;
-    case "array":
-      return "[]";
-    default:
-      return "null";
-  }
-}
-
-function snakeToCamel(name: string): string {
-  return name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
 // Multi-stage Dockerfile: build stage installs all deps and compiles

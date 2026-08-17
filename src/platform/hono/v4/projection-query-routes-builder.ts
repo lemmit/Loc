@@ -1,10 +1,12 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
+import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   DRIZZLE_INTRINSIC_SQL,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
+import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
@@ -219,6 +221,7 @@ export function buildQueryProjectionsFile(
       lines.push(`import { ${[...rawDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
     }
   }
+  if (anyMoneyAggregate(projections)) lines.push(`import Decimal from "decimal.js";`);
   if (needsIds) lines.push(`import * as Ids from "../domain/ids";`);
   for (const aggName of [...allAggs].sort()) {
     lines.push(
@@ -266,6 +269,7 @@ export function buildQueryProjectionsFile(
     lines.push(
       ...emitQueryProjectionRoute(
         p,
+        ctx,
         rawReads.get(p.name),
         aggWheres.get(p.name),
         usingMikro ? { where: mikroWheres.get(p.name) } : undefined,
@@ -355,6 +359,7 @@ export function buildQueryProjectionsFile(
  *  projection's own row shape. */
 function emitQueryProjectionRoute(
   p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
   rawRead?: { table: string; where?: string },
   aggregateWhere?: string,
   /** Present ⇒ `persistence: mikroorm`: `where` is a MikroORM FilterQuery
@@ -383,6 +388,10 @@ function emitQueryProjectionRoute(
   const gate = p.query!.requires;
   const grouped = groupedAggregates(p);
   const aggregates = wholeTableAggregates(p);
+  // The row's DECLARED wire types, by field name — what each `select` must
+  // coerce to — see the repo-read arm, which serialises through the
+  // aggregate's own `wireProjectionValue`.
+  const rowFieldType = new Map(p.stateFields.map((f) => [f.name, f.type] as const));
   out.push(`  async (httpCtx) => {`);
   // The `requires` gate (and any currentUser-scoped filter) needs the request
   // principal in scope; a failing gate denies with 403 (ForbiddenError → 403)
@@ -567,6 +576,18 @@ function emitQueryProjectionRoute(
     out.push(
       `    const rows = await db.select().from(${rawRead.table})${rawRead.where ? `.where(${rawRead.where})` : ""};`,
     );
+    // NO wire coercion here, deliberately.  This arm reads DRIZZLE COLUMNS off a
+    // raw table (a workflow's saga-state row, or a folded `<Proj>Row`), not
+    // domain values: an id/uuid column is already a string and a `numeric` money
+    // column is already `"10.0000"`, so the repo-arm's coercion below would only
+    // wrap them in a no-op `String(...)`.  Left byte-identical rather than
+    // churned — the defect that motivated the coercion (a domain `Decimal`
+    // reaching the wire unscaled) cannot occur on this arm.
+    //
+    // A selected `datetime` DOES arrive as a `Date` here, which is the one case
+    // this arm might still need; no fixture selects one, so it is stated rather
+    // than speculatively "fixed" — a change with no witness is how the last two
+    // bugs in this file got in.
     const projectedFields = (p.query!.selects ?? [])
       .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
       .join(",\n");
@@ -607,7 +628,13 @@ function emitQueryProjectionRoute(
     out.push(`    const projected = rows.map((r) => repo.toWire(r));`);
   } else {
     const projectedFields = (p.query!.selects ?? [])
-      .map((s) => `      ${s.field}: ${renderProjectionSelect(s.expr, aliasMap)}`)
+      .map((s) => {
+        const rendered = renderProjectionSelect(s.expr, aliasMap);
+        const t = rowFieldType.get(s.field);
+        // DOMAIN values (a hydrated aggregate, or a joined one) — so this is
+        // the aggregate's own `toWire` renderer, not the column table below.
+        return `      ${s.field}: ${t ? wireProjectionValue(rendered, t, ctx, false) : rendered}`;
+      })
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
   }
@@ -718,8 +745,29 @@ function aggregateColumn(arg: ExprIR, sourceTable: string): string {
 function coerceAggregate(sel: AggregateSelect, expr: string): string {
   const c = aggregateCoercion(sel);
   if (c.isCount) return `Number(${expr} ?? 0)`;
+  // money pins the FIXED wire scale (RS-12) rather than echoing the scale the
+  // driver hands back: `sum`/`max`/`min` return the STORED scale (2dp for a
+  // `money("10.00")` write) and the empty-table default would ship a bare
+  // `"0"`, where this aggregate's own read route sends `.toFixed(4)` (#2549).
+  // `Decimal` (not `Number`) because money can exceed float64's exact range.
+  if (c.isMoney) {
+    return c.optional
+      ? `${expr} == null ? null : new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`
+      : `new Decimal(${expr} ?? 0).toFixed(${MONEY_WIRE_SCALE})`;
+  }
   if (c.optional) return `${expr} == null ? null : ${c.asString ? "String" : "Number"}(${expr})`;
   return c.asString ? `String(${expr} ?? "0")` : `Number(${expr} ?? 0)`;
+}
+
+/** Whether any projection here aggregates a `money` column — the gate for the
+ *  `decimal.js` import `coerceAggregate` emits calls into.  Emitting the call
+ *  without the import is a `TS2304`, so the flag and the import stay adjacent
+ *  (the same discipline the elixir emitter applies to `__money_round/1`). */
+function anyMoneyAggregate(projections: readonly ProjectionIR[]): boolean {
+  return projections.some((p) => {
+    const aggs = groupedAggregates(p)?.aggregates ?? wholeTableAggregates(p) ?? [];
+    return aggs.some((a) => aggregateCoercion(a).isMoney);
+  });
 }
 
 /** The validated grouping key an expression names.  The validator pins every

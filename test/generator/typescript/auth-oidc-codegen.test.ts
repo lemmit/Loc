@@ -183,11 +183,16 @@ describe("hono OIDC turnkey auth — codegen", () => {
     expect(handshake).not.toContain('app.get("/login"');
     const index = entryIndex(files);
     expect(index).toContain("auth_dev_stub_registered");
+    // The stub itself lives in `auth/dev-stub.ts` (#2548) — its own module, so
+    // a harness that boots `createApp` instead of `index.ts` registers THE
+    // generated identity rather than hand-writing a copy of it.
+    expect(index).toContain("registerDevStubVerifier()");
+    const devStub = findFile(files, /auth\/dev-stub\.ts$/);
     // The dev stub honours an injected x-loom-dev-claims header (the
     // playground identity-injection seam) — dev-only, merged over the
     // built-in identity.
-    expect(index).toContain('req.headers.get("x-loom-dev-claims")');
-    expect(index).toContain('Buffer.from(injected, "base64")');
+    expect(devStub).toContain('req.headers.get("x-loom-dev-claims")');
+    expect(devStub).toContain('Buffer.from(injected, "base64")');
     const pkg = JSON.parse(findFile(files, /package\.json$/)) as {
       dependencies: Record<string, string>;
     };
