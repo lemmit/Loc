@@ -95,7 +95,12 @@ import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { internalCreateFn, internalDeleteFn } from "../lifecycle-seam.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { renderControllerSerialize } from "./controller-serialize.js";
-import { denialOverrides, denialTerm, respondErrorTail } from "./denial.js";
+import {
+  contextsHaveWireDenials,
+  denialOverrides,
+  denialTerm,
+  respondErrorTail,
+} from "./denial.js";
 import { renderFunctionBodyLines } from "./function-emit.js";
 
 /** The aggregate a workflow step targets, for the lifecycle-seam decision (which
@@ -1690,7 +1695,7 @@ ${actions}
   def respond(conn, {:error, %Ecto.Changeset{} = changeset}),
     do: ProblemDetails.validation_error_response(conn, changeset)
 
-${respondErrorTail("respond", "  ", groups[0] ? denialOverrides(groups[0].ctx) : undefined)}
+${respondErrorTail("respond", "  ", groups[0] ? denialOverrides(groups[0].ctx) : undefined, contextsHaveWireDenials(groups.map((g) => g.ctx)))}
 
 ${ser.clauses}${ser.helpers}
 end

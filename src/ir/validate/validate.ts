@@ -13,6 +13,7 @@ import {
   validateQueryableWheres,
   validateRawSeedColumns,
   validateRetrievals,
+  validateWorkflowInstanceReadGates,
 } from "./checks/query-checks.js";
 import { validateStores } from "./checks/store-checks.js";
 import {
@@ -225,6 +226,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateQueryableWheres(c, diags);
     validateFindGates(c, diags);
     validateProjectionGates(c, diags);
+    validateWorkflowInstanceReadGates(c, diags);
     validateRetrievals(c, diags);
     validateRawSeedColumns(c, diags);
     validateFindNameCollisions(c, diags);

@@ -265,9 +265,10 @@ separating them by the time a request reaches a route is the authorization
 predicate. A 403 from the second one therefore cannot be confused with a
 verifier failure (which is a 401).
 
-`AUTHZ_LADDERS` (`cases.mjs`) declares, per case, a `requires`-gated
-surface; `__authzLadder` (the shared recorder preamble in
-`wire-differential.mjs`, so every leg can adopt it) walks the three rungs:
+`AUTHZ_LADDERS` (`cases.mjs`) declares, per case, one or more
+`requires`-gated surfaces; `__authzLadder` (the shared recorder preamble in
+`wire-differential.mjs`, so every leg can adopt it) walks the three rungs
+over each of them:
 
 ```
 unauthenticated                → 401     authn precedes authz
@@ -292,10 +293,28 @@ Two deliberate properties:
   for a reason unrelated to the wire. (M-T9.11 may promote the ladder to a
   recorded probe; that is a golden rebaseline, taken deliberately.)
 
-Slice 1 wires the ladder on the **node** leg and hand-writes `AUTHZ_LADDERS`
-over one gated surface. Slice 2 replaces that map with a census **derived
-from the enriched IR** — every `requires`, `policy` ladder, `mask unless`
-field and tenancy stance — so a gated surface with no probe fails the gate.
+The ladder runs on **all five** backend legs. That matters more than it
+looks: the read-side gates it probes were dropped on *java/python/elixir*
+specifically (the list route is special-cased out of the per-find loop on
+each of them, so its `requires` was never read), so a node-only ladder
+could not have seen the defect it exists to catch. Adoption on a leg is
+credential plumbing, not a new prober — each runner passes
+`AUTHZ_LADDERS[case]` plus `unauthorizedCredentials(...)` into its entry
+source, and the shared preamble does the rest.
+
+A spec may declare **several** gated surfaces and a **multi-step** seed.
+Both exist for the read side: one system carries three distinct gated read
+surfaces (the gated list read, a folded projection, a query-time
+projection), and booting a fixture per surface would pay a whole
+generate + migrate + boot each; the folded read model is populated by an
+*event*, so its seed needs the create *and* the operation that emits. The
+walk is **surface-major** — all three rungs per surface — so a mutating
+surface's authorized arm cannot disturb the next surface's denial arms.
+
+Slice 1 hand-writes `AUTHZ_LADDERS`. Slice 2 replaces that map with a
+census **derived from the enriched IR** — every `requires`, `policy`
+ladder, `mask unless` field and tenancy stance — so a gated surface with no
+probe fails the gate.
 
 ## How it works
 

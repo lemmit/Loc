@@ -68,7 +68,10 @@ describe("scaffoldDashboard — the projection half", () => {
       "api/http/query-projections.ts",
     )!;
     expect(routes).toContain("totalSum: z.string(),");
-    expect(routes).toContain('totalSum: String(row?.totalSum ?? "0"),');
+    // …and a money sum is formatted to the FIXED wire scale, not shipped at
+    // whatever scale SQL returned (RS-12 / #2549), so the dashboard tile reads
+    // the same value the aggregate's own route sends.
+    expect(routes).toContain("totalSum: new Decimal(row?.totalSum ?? 0).toFixed(4),");
   });
 
   it("skips a nullable column, whose SUM would describe a different row set", async () => {

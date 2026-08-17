@@ -52,7 +52,7 @@ describe("HEEx For comprehension (DEBT-05)", () => {
   });
 
   it("the loop variable resolves to a bare local inside the body (no `@` assign prefix)", async () => {
-    const heex = await landingHeex(`Stack { For { each: [1, 2], n => Bold { "x=" + n } } }`);
+    const heex = await landingHeex(`Stack { For { each: [1, 2], n => Bold { \`x={n}\` } } }`);
     // `n` is a for-comprehension local, not a socket assign.
     expect(heex).toMatch(/<%= for n <- /);
     // The slot is a user-visible INTERPOLATION, so it is translated (M-T1.11,

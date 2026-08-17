@@ -136,6 +136,29 @@ export const DEV_CLAIMS_UNAUTHORIZED = JSON.stringify({
   role: "visitor",
 });
 
+/** The authenticated-but-unauthorized credential for one case, in that system's
+ *  auth flavour — the ONE place all five runner legs derive it, so "what
+ *  unauthorized means" cannot drift between them.
+ *
+ *  dev-stub: the same `x-loom-dev-claims` channel the authorized principal
+ *  rides, carrying the non-granting claims.  OIDC: a second mock-issuer token —
+ *  same key and same issuer, so it VERIFIES and the ONLY thing separating it
+ *  from the authorized principal by the time a request reaches a route is the
+ *  authorization predicate.  That is what makes a 403 here mean "the gate
+ *  denied" rather than "the verifier rejected" (which would be a 401).
+ *
+ *  `null` (no auth, or OIDC without a mock issuer) means the ladder cannot run
+ *  at all and the runner skips it. */
+export function unauthorizedCredentials(authMode, unauthorizedToken) {
+  if (authMode === "oidc") {
+    return unauthorizedToken ? { authorization: `Bearer ${unauthorizedToken}` } : null;
+  }
+  if (authMode === "devstub") {
+    return { "x-loom-dev-claims": Buffer.from(DEV_CLAIMS_UNAUTHORIZED).toString("base64") };
+  }
+  return null;
+}
+
 /** Per-case authorization-ladder probes (M-T9.28 slice 1).
  *
  *  Keyed by case name; the runner hands the matching entry to `__authzLadder`
@@ -146,11 +169,16 @@ export const DEV_CLAIMS_UNAUTHORIZED = JSON.stringify({
  *  harness seam carries a real ladder, not to be the census.
  *
  *  Shape:
- *    seed    — a create the AUTHORIZED principal performs first, so the gated
- *              surface has a row to address.  `{ path, body }`; the response is
- *              expected to carry `{ id }`.
- *    gated   — the `requires`-guarded surface.  `{ method, path, body }`;
- *              `{id}` in `path` is substituted with the seeded id.
+ *    seed    — what the AUTHORIZED principal performs first, so the gated
+ *              surface has a row to address.  `{ path, body }` (method defaults
+ *              to POST), or an ARRAY of those to run in order — the first id
+ *              any of them returns is what `{id}` substitutes.  A non-2xx seed
+ *              step fails the ladder rather than being measured as denial.
+ *    gated   — the `requires`-guarded surface, `{ method, path, body }`, or an
+ *              ARRAY of them when one system gates several.  `{id}` in `path`
+ *              is substituted with the seeded id; `label` names the surface in
+ *              the arm output and a per-surface `arms` overrides the spec-level
+ *              one.
  *    arms    — expected status per identity.  `null` means "not expressible on
  *              this system's auth flavour" and the arm is SKIPPED (see
  *              `anonymousNote`), never silently passed.
@@ -173,6 +201,42 @@ export const AUTHZ_LADDERS = {
     seed: { path: "/api/tickets", body: { subject: "authz ladder probe", open: true } },
     gated: { method: "POST", path: "/api/tickets/{id}/close", body: {} },
     arms: { anonymous: 401, unauthorized: 403, authorized: 204 },
+  },
+
+  /** The READ side (read-gates.ddd).  Three distinct emission sites, each of
+   *  which shipped ungated on some subset of backends while every compile tier
+   *  stayed green — the exact #2446 shape, on reads instead of writes:
+   *
+   *    1. `find all(): T[] requires` — java/python/elixir each special-case
+   *       `all` out of the per-find route loop and emitted the bespoke list
+   *       route without reading its `requires`.
+   *    2. a FOLDED projection's gate — it had no surface to be spelled on at
+   *       all until the gate moved to the projection declaration header.
+   *    3. a QUERY-TIME projection's gate.
+   *
+   *  The fixture's `test e2e` drives these same three surfaces with the
+   *  AUTHORIZED principal, so the two halves pin the guard to its predicate
+   *  from both sides: an always-deny guard fails the e2e, a no-op guard fails
+   *  the `unauthorized` arms here.  Reads are non-mutating, so the surface
+   *  ordering carries no state between them.
+   *
+   *  `seed` is two steps because the folded read model is populated by an
+   *  EVENT, not by the create: `place()` is what emits `OrderPlaced`.  Probing
+   *  an empty read model would make a 403 indistinguishable from a 200 over
+   *  nothing. */
+  "read-gates": {
+    seed: [
+      { path: "/api/orders", body: { code: "ladder", total: "10.00", open: true } },
+      { path: "/api/orders/{id}/place", body: {} },
+    ],
+    gated: [
+      { label: "gated list read", method: "GET", path: "/api/orders" },
+      { label: "folded projection", method: "GET", path: "/api/projections/order_book" },
+      { label: "folded projection by key", method: "GET", path: "/api/projections/order_book/{id}" },
+      { label: "query-time projection", method: "GET", path: "/api/projections/open_orders" },
+    ],
+    arms: { anonymous: null, unauthorized: 403, authorized: 200 },
+    anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
   },
 };
 
@@ -244,6 +308,15 @@ const BEHAVIOURAL_SKIP = {
       "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
     "projection-groupby":
       "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
+    // Third of the same class, and the reason it is here is worth stating: this
+    // fixture is about read GATES, not about projections, but one of the three
+    // gated read surfaces it must carry IS a query-time projection — so the
+    // adapter's gap takes the whole case with it.  The gated list read and the
+    // FOLDED projection do emit on dapper (`test:dapper-corpus` compiles them);
+    // what cannot be run here is their runtime denial.  Deleting this entry
+    // alongside the two above is what re-arms it.
+    "read-gates":
+      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate) — and this fixture's third gated surface is one",
   },
   elixir: {
     // B19 — a SILENT gap the first collection read over seed data found (#2517):

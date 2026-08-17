@@ -5,7 +5,13 @@
 // Every assertion here was written against a running backend + Postgres, not
 // from reading the emitter.  All five agreed on the wire once fixed:
 //
-//   [{"day":"2026-08-01T00:00:00Z","orders":2,"revenue":"15.50"}, …]
+//   [{"day":"2026-08-01T00:00:00Z","orders":2,"revenue":"15.5000"}, …]
+//
+// (The money field read `"15.50"` when this was written: a `sum` over money
+// echoed the scale its rows were stored at instead of the fixed wire scale.
+// All five were consistently wrong on that path, so it did not show up as a
+// divergence here — #2549 pins it to 4dp; see
+// `projection-aggregate-money-scale.test.ts`.)
 //
 // (Hono spells the same instant `2026-08-01T00:00:00.000Z` — its own
 // `.toISOString()` convention for every datetime, and the wire-golden

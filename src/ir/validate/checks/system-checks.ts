@@ -49,7 +49,7 @@ import {
   stmtUsesCurrentUser,
 } from "../../types/loom-ir.js";
 import { isMacroEmitted } from "../../types/origin.js";
-import { backendServesRealtime, realtimeEventTypes } from "../../util/channels.js";
+import { backendServesRealtime } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
@@ -59,6 +59,7 @@ import {
 } from "../../util/find-predicate-capability.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
+import { dapperQueryProjectionGap } from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -899,6 +900,31 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
             name: proj.name,
           }),
           source: `projection/${proj.name}`,
+        });
+      }
+      // Workflow INSTANCE reads (`/workflows/<wf>/instances[/{id}]`).  An
+      // observable workflow — one with a correlation field, hence an
+      // `instanceWireShape` — publishes every instance's correlation id and
+      // state on two GET routes, so under denyByDefault it needs a gate for
+      // the same reason an ungated find or projection does.
+      //
+      // It could not be required before: the routes are compiler-derived and a
+      // workflow had no surface to declare a read gate on, so demanding one
+      // would have demanded the impossible — the identical situation the folded
+      // projection was in.  The header `requires` clause is that surface, so
+      // the exemption has no reason left.
+      //
+      // Keyed on `instanceWireShape`: a stateless workflow (no correlation
+      // field) serves no instance routes, so there is nothing to gate.
+      for (const wf of c.workflows) {
+        if (!wf.instanceWireShape || wf.instanceReadGate) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.default-deny-ungated",
+          message: diagMessage("loom.default-deny-ungated#denybydefault-workflow-instances", {
+            name: wf.name,
+          }),
+          source: `workflow/${wf.name}`,
         });
       }
     }
@@ -2684,30 +2710,35 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // QUERY-TIME PROJECTIONS are the one FEATURE gap on this adapter, and it
-      // was SILENT in the worst way: `query-projection-emit.ts` has no dapper
-      // branch at all, so it emits the EF shape unconditionally — `using
-      // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;`,
-      // neither of which exists here.  The generated project does not COMPILE
-      // (CS0234 "namespace 'EntityFrameworkCore' does not exist" / CS0246
-      // "'AppDbContext' could not be found"), and nothing said so at generate
-      // time: the author gets a C# build error naming a type they never wrote.
-      // Found when `projection-aggregation`/`projection-groupby` got their first
-      // runtime callers (#2468) and the dapper behavioral leg failed to boot.
+      // QUERY-TIME PROJECTIONS used to be refused WHOLESALE here:
+      // `query-projection-emit.ts` had no dapper branch at all, so it emitted
+      // the EF shape unconditionally — `using Microsoft.EntityFrameworkCore;` +
+      // `private readonly AppDbContext _db;`, neither of which exists on this
+      // adapter — and the generated project did not COMPILE (CS0234 / CS0246).
+      // M-T6.25 ported the four direct-table arms to raw Npgsql (the same
+      // `NpgsqlDataSource` + private row DTO + `Map` shape the FOLDED read
+      // controller already used), so the feature EMITS here now and the blanket
+      // refusal is gone.
       //
-      // Honest error until a Dapper query-projection emitter lands — the same
-      // interim-gate/principled-emitter split the MikroORM feature gate uses
-      // below.  Dapper is raw SQL and a query-time projection IS a SQL
-      // aggregate, so the port is a smaller job here than the gate implies;
-      // deleting this clause is what closes it.
+      // What survives is the ONE thing raw SQL genuinely cannot reach: the two
+      // arms that AGGREGATE (`select total = count()` / `group by`) name
+      // COLUMNS on the source aggregate's table, and an aggregate whose fields
+      // are not columns — a `shape: document` jsonb blob, an event-sourced
+      // stream with no state table — has nothing for `sum(total)` to name.  EF
+      // Core hides that behind its own JSON translation; Dapper cannot.  The
+      // condition is computed by `dapperQueryProjectionGap`, which the emitter
+      // reads too, so the gate and the emission arm cannot drift.
       for (const p of ctx.projections ?? []) {
-        if (isQueryTimeProjection(p)) {
+        if (!isQueryTimeProjection(p)) continue;
+        const gap = dapperQueryProjectionGap(p, ctx, sys);
+        if (gap) {
           diags.push({
             severity: "error",
             message: diagMessage("loom.dapper-unsupported#feature", {
               name: dep.name,
               ctxName,
               projection: p.name,
+              reason: gap,
             }),
             source: `${sys.name}/${dep.name}`,
             code: "loom.dapper-unsupported",
@@ -2884,14 +2915,17 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 //      included.  Only one survives M-T6.9: an abstract inheritance base that
 //      owns its own `contains` (the base has no repository and concretes do not
 //      inherit its parts, so its tables would have no reader/writer).
-//  (b) FEATURE rejects (`rejectFeature`, M-T6.23) — parity is persistence-only,
-//      and five NON-persistence features are gated `&& !usingMikro` in the Hono
-//      emitter: query-time projections, realtime SSE, the transactional outbox,
-//      timers (`scheduler.ts`) and broker channel drivers.  Each one used to
-//      generate a project with the feature SILENTLY absent; each is now an
-//      honest error.  Closing any of them means deleting its clause here — the
-//      gate is the interim, the emitter is the principled fix
-//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1).
+//  (b) FEATURE rejects (M-T6.23) — GONE, all five.  Parity is persistence-only,
+//      but five NON-persistence features were once gated `&& !usingMikro` in the
+//      Hono emitter and emitted NOTHING: query-time projections, realtime SSE,
+//      the transactional outbox, timers (`scheduler.ts`) and broker channel
+//      drivers.  Each was first made an honest error here, then closed by its
+//      emitter — the gate was always the interim, never the answer
+//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1 named the
+//      projection case; the other four were unrecorded).  Nothing about a
+//      non-persistence feature is gated on this adapter any more; if a new one
+//      is ever `!usingMikro`-gated, gate it HERE rather than dropping it
+//      silently, and delete the clause with the emitter that closes it.
 //
 // Persist-time audit stamping IS supported (node-persist-time-auditing): the
 // MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
@@ -2917,31 +2951,6 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         code: "loom.mikroorm-unsupported",
       });
     };
-    // The FEATURE-gap twin of `reject`.  The clauses below do not reject an
-    // unmappable SHAPE — they reject a feature whose Hono emitter is gated
-    // `&& !usingMikro`, so on this adapter it emits NOTHING.  Each of these was
-    // a SILENT drop (a valid model generated a project with the feature simply
-    // absent, no diagnostic) until this gate; see
-    // `docs/old/proposals/integrity-audit-2026-07-residue.md` R1, which named
-    // the query-time-projection case, and M-T6.23 for the rest.  The honest
-    // answer names the default adapter as the way out — every one of these
-    // features emits on drizzle.
-    const rejectFeature = (
-      subject: string,
-      emits: string,
-      severity: "error" | "warning" = "error",
-    ): void => {
-      diags.push({
-        severity,
-        message:
-          `Deployable '${dep.name}' selects 'persistence: mikroorm', but ${subject}, which the ` +
-          `MikroORM adapter does not emit — the generated project would silently omit ${emits}. ` +
-          `Drop the 'persistence: mikroorm' clause to use the default (drizzle) adapter, which ` +
-          `emits it, or host the feature on a different deployable.`,
-        source: `${sys.name}/${dep.name}`,
-        code: "loom.mikroorm-unsupported",
-      });
-    };
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -2956,31 +2965,13 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       // outside the FilterQuery subset is refused by
       // `validateFindPredicateAdapterSupport` (which now walks projection
       // filters), so an aggregation can never silently drop its filter.
-      // (2) Realtime SSE: `http/realtime.ts` and the index.ts realtime tee are
-      // both `!usingMikro`-gated, so a `delivery: broadcast` channel loses the
-      // browser-observable wire.
-      //
-      // Severity is CONSUMER-DEPENDENT, because a broadcast channel does double
-      // duty: it is also the routing declaration that makes a projection fold or
-      // a saga subscribe to the event — and that half works fine here (the
-      // in-process dispatcher is emitted on this adapter).  So:
-      //   - a FRONTEND targeting this backend emits `src/api/realtime.ts`
-      //     unconditionally for a broadcast channel (the frontend gate keys on
-      //     the target's PLATFORM, not its persistence), so its EventSource
-      //     would poll a route that 404s → error, a real broken feature.
-      //   - with no such frontend the wire is unobserved: fold/saga routing is
-      //     intact and nothing notices the missing endpoint → warning, so the
-      //     omission is on the record without failing a working model.
-      if (realtimeEventTypes(ctx).size > 0) {
-        const consumed = sys.deployables.some((f) => f.targetName === dep.name);
-        rejectFeature(
-          `context '${ctxName}' carries a 'delivery: broadcast' channel`,
-          consumed
-            ? `the realtime SSE wire ('GET /realtime/events') that the frontend targeting it subscribes to`
-            : `the realtime SSE wire ('GET /realtime/events') — the fold/saga routing half of the channel is unaffected`,
-          consumed ? "error" : "warning",
-        );
-      }
+      // (2) Realtime SSE: CLOSED by M-T6.23 slice 5, the last of the five —
+      // `http/realtime.ts` and the boot tee emit on this adapter, so a
+      // `delivery: broadcast` channel keeps its browser-observable wire and a
+      // frontend's EventSource has a route to subscribe to.  The
+      // consumer-dependent severity split that used to live here (error when a
+      // frontend targeted the backend, warning otherwise) goes with the gap it
+      // described: the module reads no `db`, so there is nothing left to gate.
       // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
       // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
       // `startOutboxRelay` over the EntityManager, so a durable channel
@@ -3013,7 +3004,7 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // clean today and silently serves cross-tenant rows.  Refuse it until
         // the subtree predicate is expressible (M-T6.23's remaining half).
         if ((a.contextFilters ?? []).some((f) => isDeepScopeFilter(f))) {
-          rejectFeature(
+          reject(
             `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
             `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
               `cannot express it, and an unlowerable principal filter is dropped ` +

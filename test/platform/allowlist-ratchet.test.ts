@@ -92,30 +92,44 @@ const REGISTERED: Ratchet[] = [
     max: 0,
   },
   { file: "test/e2e/corpus-tsc-build.test.ts", name: "TS_COMPILE_SKIP", kind: "record", max: 0 },
-  // The .NET Dapper adapter's compile tier.  Both remaining entries are the
-  // SAME bug — query-time projection handlers are EF-LINQ over `AppDbContext`
-  // (M-T6.25) — and the folded read controller already has the raw-Npgsql port
-  // they need, so that pair is a port with a precedent, not an open design
-  // question.  Lowered 3 -> 2 by M-T6.29, which drained `policy-deny`: the
-  // `deny` authz sentinel now has its `whereToSql` arm (`1 = 0`, ANDed into
-  // every read SELECT) and `dapper.ts` reads `writeScopeFilter` to emit the
-  // `GetByIdForWriteAsync` the shared command layer has always dispatched to.
+  // The .NET Dapper adapter's compile tier.  Lowered 3 -> 2 by M-T6.29, which
+  // drained `policy-deny`: the `deny` authz sentinel got its `whereToSql` arm
+  // (`1 = 0`, ANDed into every read SELECT) and `dapper.ts` reads
+  // `writeScopeFilter` to emit the `GetByIdForWriteAsync` the shared command
+  // layer has always dispatched to.
+  //
+  // 2 -> 0 by M-T6.25.  Both remaining entries were the SAME bug — query-time
+  // projection handlers were EF-LINQ over `AppDbContext` — and the folded read
+  // controller's raw-Npgsql port was the precedent they needed.  That port is
+  // written: the four direct-table arms read through `NpgsqlDataSource` now, so
+  // this map is DRAINED, not reclassified.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 2,
+    max: 0,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
-  // not gaps — these never reach the compiler.
+  // not gaps — these never reach the compiler.  1 -> 5: the reclassification
+  // above (+3 query-time-projection fixtures, one of them the `projection-join`
+  // fixture minted by the clause census) plus `read-gates`, whose query-time
+  // gate kind hit the same boundary.  Every added entry is ONE pre-existing
+  // boundary meeting more fixtures, not a new suppression — but the raise is
+  // still a reviewed line, and `read-gates` costs this leg its find-gate and
+  // folded-projection-gate coverage as collateral (stated at the entry).
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_UNSUPPORTED",
     kind: "record",
-    // 1 -> 2 (2026-08-13): `read-gates` (#2523) carries a query-time projection,
-    // which dapper honestly refuses until M-T6.25 lands its QP emitters — the
-    // entry cites that mission and deleting it is M-T6.25's acceptance ratchet.
-    max: 2,
+    // 2 -> 1, M-T6.25 — the acceptance ratchet `read-gates`' entry named.  It
+    // was here for one reason: the fixture carries a query-time projection
+    // (`OpenOrders`), and this adapter emitted none.  The port removed that
+    // boundary, so the fixture is back to covering all three of its read-gate
+    // kinds here rather than losing the find gate and the folded-projection
+    // gate as per-fixture collateral.
+    //
+    // 1 = `tenancy-hierarchy`, the one boundary left with a real witness.
+    max: 1,
   },
   // Primitives exempt from the pack testid contract.
   {
@@ -137,6 +151,50 @@ const REGISTERED: Ratchet[] = [
     name: "KNOWN_GAPS",
     kind: "set",
     max: 0,
+  },
+  // Catalogued `loom.*` codes with no proof anything ever raises them
+  // (M-T9.33).  38 at the 2026-08-13 census; each leaves by gaining a
+  // FIRING_FIXTURES entry that drives it, or an UNREACHABLE_PINS entry saying
+  // what preempts it.  The census gate carries its own anti-slack check; this
+  // registration is what makes the number visible from the one place that
+  // lists every ratchet in the repo.
+  {
+    file: "test/system/diagnostic-firing-census.data.ts",
+    name: "UNCOVERED",
+    kind: "set",
+    max: 38,
+  },
+  // The MikroORM behavioural leg's skip register.  It was NOT registered here
+  // until `projection-join` (a query-time projection the adapter refuses) had to
+  // be added — so it had been growing unwatched, which is precisely the
+  // silent-growth this ratchet exists to stop.  It carries its own STALE-key
+  // check inside the runner (a key naming no corpus fixture fails the leg), but
+  // nothing bounded its SIZE.
+  //
+  // The pin has now moved in BOTH directions inside one PR, which is the whole
+  // case for it existing:
+  //   4 -> 5  `policy-deny` was added on `main` by the read-deny work while
+  //           this pin said 4. The registration's first act was catching a
+  //           concurrent grower from another author.
+  //   5 -> 2  M-T6.23 slice 4 (#2533) landed the adapter's query-time
+  //           projection reads, retiring `projection-aggregation` /
+  //           `-groupby` / `-join` together — one boundary, three fixtures,
+  //           drained in one go. The `no stale slack` check is what forced
+  //           this line down; left at 5 the register could have re-grown by
+  //           three without anyone noticing.
+  //
+  // What remains is two INDEPENDENT gaps, so the next drain will not be
+  // wholesale: `prefix-filter` (the declared `MIKROORM_SUBSET` predicate
+  // narrowing) and `policy-deny` (the read-deny form outside that subset).
+  //
+  // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
+  // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
+  // is real and stated at the entry.
+  {
+    file: "test/behavioral/run-mikroorm.mjs",
+    name: "MIKRO_SKIP",
+    kind: "record",
+    max: 2,
   },
 ];
 

@@ -21,6 +21,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  arrow,
+  BASELINE,
   countCompileSkips,
   countHeexPins,
   countOpenGaps,
@@ -30,6 +32,7 @@ import {
   isFixShaped,
   isMerge,
   parseLog,
+  renderReport,
   staleDrafts,
   summarize,
 } from "../../scripts/quality-delta.mjs";
@@ -613,5 +616,99 @@ describe("quality-delta — the readers reach the live repo files", async () => 
   it("waiver and pin counts are numbers, whatever they currently are", () => {
     expect(Number.isInteger(registers.wireWaivers)).toBe(true);
     expect(Array.isArray(registers.heexPins)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Week-over-week Δ (M-T9.31 lane 2).
+//
+// The bug this section exists to prevent: the report used to diff every run
+// against a FROZEN constant (the 2026-08-02 audit), so a ratchet drained after
+// that date read as GROWTH forever.  The 2026-08-16 run printed `wire waivers
+// 2 → 4 ↑ +2 ⚠️` while the real week-over-week movement was DOWNWARD, and
+// `COMPILE_SKIP 0 → 2 ↑ +2 ⚠️` for a pair that had not moved at all.  In a repo
+// whose convention is "a stale waiver fails its gate", a false ⚠️ costs an
+// agent a re-fix of something already fixed.
+//
+// Δ is now derived — the same register files read at the commit that was tip
+// when the window opened — so there is no stored series to go stale.
+// ---------------------------------------------------------------------------
+
+describe("quality-delta — the Δ cell", () => {
+  it("a drained ratchet reads as an improvement, not a regression", () => {
+    expect(arrow(4, 7)).toBe("↓ -3 ✅");
+  });
+
+  it("MUTATION PROOF: the same drain read as a REGRESSION against the frozen baseline", () => {
+    // 7 → 4 is the movement; BASELINE.wireWaivers (2) is what the old code
+    // compared against.  If this ever stops being a ⚠️, the old behaviour has
+    // come back and the test above is no longer proving anything.
+    expect(arrow(4, BASELINE.wireWaivers)).toMatch(/⚠️/);
+    expect(arrow(4, 7)).not.toMatch(/⚠️/);
+  });
+
+  it("growth is still flagged — the guard did not simply mute the warning", () => {
+    expect(arrow(7, 4)).toBe("↑ +3 ⚠️");
+  });
+
+  it("an unreadable previous value is `n/a`, never an arrow and never zero", () => {
+    // Rendering `null` as 0 would print `↑ +4 ⚠️` on a register that was merely
+    // renamed — a phantom regression, the exact false alarm being removed.
+    expect(arrow(4, null)).toBe("n/a");
+    expect(arrow(4, undefined)).toBe("n/a");
+    expect(arrow(0, null)).toBe("n/a");
+  });
+
+  it("no movement is flat", () => {
+    expect(arrow(2, 2)).toBe("→ flat");
+  });
+});
+
+describe("quality-delta — reading a register that is absent at the compared commit", () => {
+  // `read()` returns undefined for a path that does not exist at a past commit.
+  // Every parser funnels through `literalBlock`, so undefined must surface as
+  // the parsers' existing "not found" throw — loud at HEAD, degraded to `n/a`
+  // for the past — rather than a TypeError from `undefined.indexOf`.
+  it("throws a NAMED error rather than a TypeError", () => {
+    expect(() => countWireWaivers(undefined as unknown as string)).toThrow(/WIRE_WAIVERS/);
+    expect(() => countHeexPins(undefined as unknown as string)).toThrow(/KNOWN_HEEX_GAPS/);
+    expect(() => countOpenGaps(undefined as unknown as string)).toThrow(/UNSUPPORTED_REGISTER/);
+  });
+
+  it("a missing corpus file names the backend it belongs to", () => {
+    expect(() => countCompileSkips({ dapper: undefined as unknown as string })).toThrow(/dapper/);
+  });
+});
+
+describe("quality-delta — the report without a comparison point", () => {
+  const registers = {
+    wireWaivers: 4,
+    register: { gaps: 37, scope: 8, rows: 45 },
+    heexPins: ["DataGrid"],
+    compileSkips: { node: [], dotnet: [], dapper: ["a", "b"], java: [], python: [], elixir: [] },
+  };
+  const stats = summarize([]);
+  const base = {
+    now: Date.parse("2026-08-16T07:00:00Z"),
+    days: 7,
+    registers,
+    stats,
+    prs: [],
+    runs: undefined,
+    sha: "abcdef1234567890",
+  };
+
+  it("says so plainly instead of fabricating a delta", () => {
+    const body = renderReport({ ...base, prev: undefined, prevStats: undefined });
+    expect(body).toContain("no previous-week comparison");
+    // Not one arrow anywhere in the ratchet table.
+    expect(body).not.toMatch(/[↑↓] [+-]\d/);
+  });
+
+  it("renders the real delta once a comparison commit exists", () => {
+    const prev = { ...registers, wireWaivers: 7, sha: "0123456789abcdef" };
+    const body = renderReport({ ...base, prev, prevStats: summarize([]) });
+    expect(body).toContain("↓ -3 ✅");
+    expect(body).toContain("0123456");
   });
 });

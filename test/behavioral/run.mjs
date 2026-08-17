@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, DEV_CLAIMS_UNAUTHORIZED, featureCases, sharedSystemCases } from "./cases.mjs";
+import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -89,32 +89,23 @@ function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerT
     authImport = `import { registerOidcVerifier } from ${J(join(deplDir, "auth", "oidc.ts"))};`;
     authRegister = "registerOidcVerifier();";
   } else if (authMode === "devstub") {
-    authImport = `import { registerUserVerifier } from ${J(join(deplDir, "auth", "verifier.ts"))};`;
-    authRegister = `registerUserVerifier((req) => {
-    const base = { id: "00000000-0000-0000-0000-000000000000", tenantId: "admin" };
-    const injected = req.headers.get("x-loom-dev-claims");
-    if (!injected) return base;
-    try {
-      return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };
-    } catch {
-      return base;
-    }
-  });`;
+    // The GENERATED registrar, not a copy of it (#2548).  This used to inline
+    // its own verifier whose identity was a fixed
+    // `{ id, tenantId: "admin" }` — a principal no backend produces: the
+    // generated stub fills the DECLARED `user { … }` shape, so on `auth-simple`
+    // (`user { id  role }`) the harness answered `tenantId` and dropped `role`.
+    // Every `/api/auth/me` this leg records is the oracle for the other four,
+    // so a hand-copied identity means the answer key is fiction.  Importing
+    // `auth/dev-stub.ts` — the module `index.ts` itself calls — makes the boot
+    // path the harness takes and the boot path a real deployment takes register
+    // the same thing, the way the OIDC arm above already does.
+    authImport = `import { registerDevStubVerifier } from ${J(join(deplDir, "auth", "dev-stub.ts"))};`;
+    authRegister = "registerDevStubVerifier();";
   }
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   // The authenticated-but-unauthorized credential, in this system's auth
-  // flavour (M-T9.28).  Dev-stub: the same `x-loom-dev-claims` channel the
-  // authorized principal rides, carrying the non-granting claims.  OIDC: a
-  // second mock-issuer token — same key and issuer, so it VERIFIES and only the
-  // authorization predicate separates it from the authorized one.
-  const unauthorizedCreds =
-    authMode === "oidc"
-      ? unauthorizedToken
-        ? { authorization: `Bearer ${unauthorizedToken}` }
-        : null
-      : authMode === "devstub"
-        ? { "x-loom-dev-claims": Buffer.from(DEV_CLAIMS_UNAUTHORIZED).toString("base64") }
-        : null;
+  // flavour (M-T9.28) — derived by the shared helper all five legs use.
+  const unauthorizedCreds = unauthorizedCredentials(authMode, unauthorizedToken);
   // FIRST-BOOT SEEDS.  The generated entrypoint (index.ts) runs
   // `migrate` → `runSeeds` → `createApp`; booting via `createApp` skipped the
   // middle step, so a system carrying `seed` datasets started with EMPTY tables
@@ -177,7 +168,7 @@ export async function run() {
     for (const r of await runTests(cases)) out.push({ tier: "api", ...r });
     // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
     // golden aligns on, and so a failing tier is diagnosed on its own requests.
-    await __frameworkProbes(dispatch);
+    await __frameworkProbes(dispatch, { auth: ${J(authMode !== "none")} });
     // M-T9.28 — the authorization ladder, on the cases that declare one.  Runs
     // last and off the RECORDER (see __authzLadder) so it neither shifts wire
     // ordinals nor perturbs the tier it follows.

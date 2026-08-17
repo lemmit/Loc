@@ -78,6 +78,19 @@ export function emitBadge(
   });
 }
 
+/** The frameworks for which the `{children}` fallback below is the CORRECT
+ *  spelling — i.e. the ones that embed JSX and take children as a prop.  React
+ *  is the only one: Vue (`<slot />`), Svelte 5 (`{@render children?.()}`),
+ *  Angular (`<ng-content>`), Feliz (`props.children`) and Flutter
+ *  (`child ?? …`) each implement `renderChildrenSlot`.
+ *
+ *  It is an ALLOWLIST rather than a default because `{children}` is not inert
+ *  where it is wrong — it is a valid-looking expression in F# (an anonymous
+ *  record over an unbound name) and in Dart (a set literal), so a target that
+ *  forgot the seam emitted code that read fine and did not compile.  A new
+ *  frontend now fails loudly at its first `Slot { }` instead. */
+const JSX_CHILDREN_PROP_FRAMEWORKS: ReadonlySet<string> = new Set(["react"]);
+
 export function emitSlot(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Children-prop placeholder.  `Slot()` inside a
   // component's body renders whatever markup the parent passed in.
@@ -88,7 +101,17 @@ export function emitSlot(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   void call;
   void depth;
   ctx.usesChildren = true;
-  return ctx.target.renderChildrenSlot?.() ?? `{children}`;
+  const slot = ctx.target.renderChildrenSlot?.();
+  if (slot !== undefined) return slot;
+  if (!JSX_CHILDREN_PROP_FRAMEWORKS.has(ctx.target.framework)) {
+    throw new Error(
+      `walker: frontend '${ctx.target.framework}' has no renderChildrenSlot seam, but a component ` +
+        "body renders `Slot { }`.  The JSX `{children}` fallback is a React idiom — implement " +
+        "renderChildrenSlot (and have the component emitter declare the matching children " +
+        "parameter) for this target.",
+    );
+  }
+  return `{children}`;
 }
 
 export function emitDivider(

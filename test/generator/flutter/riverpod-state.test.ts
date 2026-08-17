@@ -31,7 +31,7 @@ system Counter {
       state { count: int = 0 }
       action inc() { count := count + 1 }
       body: Stack {
-        Text { "Count: " + count },
+        Text { \`Count: {count}\` },
         Button { "+", onClick: inc }
       }
     }

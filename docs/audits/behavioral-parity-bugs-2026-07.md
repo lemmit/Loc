@@ -65,6 +65,16 @@ visible once anything read a seeded row back (**B19**, the first ⛔ in this reg
 
 ---
 
+## B20 🔴 node — a projection folds with NO channel carrying its event; the other four do not
+
+- **Where:** `deriveEventSubscriptions` (`src/ir/enrich/enrichments.ts`) opens with `if (!channels || channels.length === 0) return []`, and each backend's dispatcher is built from those subscriptions — so a `projection … { on(e: E) { … } }` whose `E` is carried by no declared `channel` produces **no subscription**, and python/java/dotnet/elixir emit no fold (python does not even emit `app/dispatch.py`). The Hono backend folds it anyway.
+- **Repro:** take `test/fixtures/corpus/projection.ddd` and delete its `channel Lifecycle { carries: OrderPlaced, OrderShipped … }` block. On node the read model still fills; on python `GET /api/projections/<p>/{key}` 404s after the emitting operation, and `find . -name dispatch.py` is empty. (Found the other way round: a new fixture written *without* a channel folded on node and 404'd on python.)
+- **Impact:** one `.ddd` produces a working read model on one backend and a permanently empty table on four, with no diagnostic on either side. Which behaviour is *correct* is the open question, and it is a language decision, not a codegen one: `docs/channels.md` and `projection.ddd`'s own comments treat the channel as how a fold subscribes, which makes node the lenient outlier — but "a projection declares the events it folds; a channel is for *transport*" is a defensible reading in which the other four are wrong. Either way one side must move, and the losing side should get a diagnostic rather than silence.
+- **Found by:** the read-gate runtime slice, whose fixture happened to declare no channel. Not caused by it.
+- **Status:** OPEN, recorded only. `read-gates.ddd` declares the channel (as `projection.ddd` does), so nothing is skipped and no leg is red; deciding the semantics is its own slice.
+
+---
+
 ## B19 ⛔ elixir — `seed` datasets emit NO seeder at all (silently dropped)
 
 - **Where:** `src/generator/elixir/` — nothing reads `ctx.seeds`. The layout adapter reserves the slot (`adapters/by-feature-layout.ts` → `"seeds"` → `priv/repo/seeds.exs`) and `docs/generators.md`'s Phoenix file map lists that file, but no emitter ever writes it. node (`db/seed.ts`), python (`app/db/seed.py`), java (`<Ctx>SeedRunner`) and .NET (`Infrastructure/Persistence/Seed.cs`) all emit a seeder AND invoke it at boot after migrating.

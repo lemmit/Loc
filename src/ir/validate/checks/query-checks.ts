@@ -374,6 +374,38 @@ export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagno
   }
 }
 
+// Workflow instance-READ gate (`workflow X requires <expr> { … }`) — the third
+// member of the same family as the find and projection gates, and constrained
+// the same way for the same reason: it runs before
+// `GET /workflows/<wf>/instances[/{id}]` executes, so no instance row is bound
+// and only `currentUser` (+ constants) is in scope.
+//
+// The gate is lowered in the BARE context env (`lower-workflow.ts`) precisely so
+// a `this.<state field>` reference cannot silently resolve to the workflow
+// instance — this check is what turns that into a diagnostic the author can act
+// on rather than an expression that type-checks and has no value at run time.
+export function validateWorkflowInstanceReadGates(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const wf of ctx.workflows) {
+    const gate = wf.instanceReadGate;
+    if (!gate) continue;
+    const offending = firstNonGateRef(gate, GATE_ALLOWED_REFS);
+    if (offending !== null) {
+      diags.push({
+        severity: "error",
+        code: "loom.workflow-gate-not-current-user",
+        message: diagMessage("loom.workflow-gate-not-current-user", {
+          name: wf.name,
+          offending,
+        }),
+        source: `workflow/${wf.name}`,
+      });
+    }
+  }
+}
+
 /** The name of the first reference in an expression tree that isn't in the
  *  gate's `allowed` refKind set, or null when the expression touches only
  *  allowed refs / constants / operators. */

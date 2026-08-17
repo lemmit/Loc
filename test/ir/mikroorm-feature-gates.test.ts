@@ -3,11 +3,11 @@
 // The MikroORM adapter reached full parity with drizzle on the PERSISTENCE axis
 // (M-T6.9), but five NON-persistence features stayed gated `&& !usingMikro` in
 // the Hono emitter: query-time projections, realtime SSE, the transactional
-// outbox, timers, and broker channel drivers.  ONE is still gated (the realtime
-// SSE wire) — the outbox (slice 1), the broker channel driver (slice 2), the
-// timer scheduler (slice 3) and the query-time projection reads (slice 4)
-// EMITTERS landed, so their clauses are deleted and their cases here assert
-// emission instead of rejection.  Each one used to generate a
+// outbox, timers, and broker channel drivers.  ALL FIVE EMITTERS HAVE NOW LANDED
+// (M-T6.23 slices 1–5), so every clause is deleted and every case here asserts
+// EMISSION instead of rejection.  The suite is kept as the RATCHET: re-adding
+// any clause — or re-gating any emitter on `!usingMikro` — turns these red.
+// Each one used to generate a
 // project with the feature SILENTLY absent — the model validated clean, the CLI
 // reported success, and the emitted tree simply had no `scheduler.ts` /
 // `http/channels.ts` / `http/realtime.ts` / `http/query-projections.ts` / outbox
@@ -93,7 +93,7 @@ async function drizzleErrorCodes(body: string, systemTail = "", depTail = ""): P
     .map((d) => d.code ?? "");
 }
 
-// --- The five feature bodies (four CLOSED — only realtime SSE is left) ------
+// --- The five feature bodies (ALL FIVE CLOSED — every case asserts emission) -
 
 /** Query-time projection (`from … select …`) — `http/query-projections.ts`.
  *  CLOSED by M-T6.23 slice 4 (kept here as the ratchet). */
@@ -105,7 +105,8 @@ const QUERY_TIME_PROJECTION = `
         select rowId = o.id, status = o.status
       }`;
 
-/** `delivery: broadcast` — the SSE wire (`GET /realtime/events`). */
+/** `delivery: broadcast` — the SSE wire (`GET /realtime/events`).  CLOSED by
+ *  M-T6.23 slice 5 (kept here as the ratchet). */
 const BROADCAST_CHANNEL = `
       channel Live { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }`;
 
@@ -152,24 +153,21 @@ describe("persistence: mikroorm — feature gates are honest, not silent", () =>
     expect(await mikroDiags(QUERY_TIME_PROJECTION, "", "", "warning")).toEqual([]);
   });
 
-  it("warns (not errors) on a broadcast channel with no realtime consumer", async () => {
-    // The fold/saga routing half of the channel works on this adapter, so a
-    // model with no frontend must keep generating — the missing wire is recorded,
-    // not fatal.  This is what keeps the fold/saga corpus features valid here.
+  it("CLOSED (slice 5): a broadcast channel generates — no warning either", async () => {
+    // The wire emits now, so the WARNING goes too.  This case is the reason the
+    // warning existed in the first place (an unobserved missing endpoint), and
+    // asserting BOTH severities empty is what stops a future slice from quietly
+    // reintroducing a "soft" gap.
     expect(await mikroDiags(BROADCAST_CHANNEL)).toEqual([]);
-    const warns = await mikroDiags(BROADCAST_CHANNEL, "", "", "warning");
-    expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("'delivery: broadcast' channel");
-    expect(warns[0]).toContain("fold/saga routing half of the channel is unaffected");
+    expect(await mikroDiags(BROADCAST_CHANNEL, "", "", "warning")).toEqual([]);
   });
 
-  it("rejects a broadcast channel when a frontend targets the backend", async () => {
-    // The frontend emits `src/api/realtime.ts` off the target's PLATFORM, so its
-    // EventSource would poll a 404 — a broken feature, not a silent omission.
-    const msgs = await mikroDiags(BROADCAST_CHANNEL, FRONTEND_TAIL);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("GET /realtime/events");
-    expect(msgs[0]).toContain("frontend targeting it subscribes to");
+  it("CLOSED (slice 5): a frontend targeting the backend generates too", async () => {
+    // The consumer-dependent severity split is gone with the gap: the frontend's
+    // `src/api/realtime.ts` EventSource now has a route to subscribe to, so the
+    // case that used to be the hard ERROR is simply valid.
+    expect(await mikroDiags(BROADCAST_CHANNEL, FRONTEND_TAIL)).toEqual([]);
+    expect(await mikroDiags(BROADCAST_CHANNEL, FRONTEND_TAIL, "", "warning")).toEqual([]);
   });
 
   it("CLOSED (slice 1): a durable channel with a reactor generates — the outbox emits", async () => {

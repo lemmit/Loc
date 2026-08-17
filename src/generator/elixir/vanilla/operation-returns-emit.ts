@@ -30,7 +30,6 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
-import { leafPath } from "../../_stmt/leaves.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
@@ -46,8 +45,10 @@ import {
   disallowedResponse,
   disallowedTerm,
   type ErrorStatusMap,
+  opHasWireDenial,
+  wireValidationResponse,
 } from "./denial.js";
-import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
+import { collectVanillaLeaves, provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
 /** One operation body's exact emitted text plus its per-statement
@@ -218,8 +219,13 @@ export function opHasGuards(op: OperationIR): boolean {
 function renderOpGuardClause(
   s: Extract<StmtIR, { kind: "requires" | "precondition" }>,
   rc: RenderCtx,
+  /** The operation's param names — the request body a wire-rung denial can
+   *  point into (M-T6.20).  A messaged `precondition` classified wire-translatable
+   *  against this set denies with `{:validation_failed, errors}` instead of the
+   *  domain floor; everything else is byte-identical. */
+  wireAvailable?: ReadonlySet<string>,
 ): string {
-  return `:ok <- ensure(${renderExpr(s.expr, rc)}, ${denialTerm(s)})`;
+  return `:ok <- ensure(${renderExpr(s.expr, rc)}, ${denialTerm(s, wireAvailable)})`;
 }
 
 /** Does the operation declare a `when` canCommand state gate (criterion.md use
@@ -249,9 +255,13 @@ function renderWhenGateClause(aggName: string, op: OperationIR, rc: RenderCtx): 
 export function collectOpGuardClauses(aggName: string, op: OperationIR, rc: RenderCtx): string[] {
   const clauses: string[] = [];
   if (op.when) clauses.push(renderWhenGateClause(aggName, op, rc));
+  // The request body a wire-rung denial can point into is the op's own params —
+  // the same `available` set `routes-builder.ts` / `_i18n/validation-catalog.ts`
+  // classify an `<Op>Request` refine against (M-T6.20).
+  const wireAvailable = new Set(op.params.map((p) => p.name));
   for (const s of op.statements) {
     if (s.kind === "requires" || s.kind === "precondition") {
-      clauses.push(renderOpGuardClause(s, rc));
+      clauses.push(renderOpGuardClause(s, rc, wireAvailable));
     }
   }
   return clauses;
@@ -1101,51 +1111,6 @@ function renderProvenancedAssign(
   ].join("\n");
 }
 
-/** Bounded walk over a provenanced write's RHS collecting leaf inputs — the
- *  `this`-props, params and let-bindings (and member chains rooted at them)
- *  that fed the value, each rendered to its current Elixir value.  Lambdas are
- *  skipped (their bodies reference lambda-local params, not stored leaves).
- *  Elixir sibling of the TS/.NET `collectLeaves`. */
-function collectVanillaLeaves(
-  e: ExprIR,
-  rc: RenderCtx,
-  out: Array<{ path: string; value: string }> = [],
-): Array<{ path: string; value: string }> {
-  switch (e.kind) {
-    case "ref":
-      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
-        out.push({ path: e.name, value: renderExpr(e, rc) });
-      }
-      break;
-    case "member":
-      out.push({ path: leafPath(e), value: renderExpr(e, rc) });
-      break;
-    case "method-call":
-      collectVanillaLeaves(e.receiver, rc, out);
-      for (const a of e.args) collectVanillaLeaves(a, rc, out);
-      break;
-    case "call":
-      for (const a of e.args) collectVanillaLeaves(a, rc, out);
-      break;
-    case "paren":
-      collectVanillaLeaves(e.inner, rc, out);
-      break;
-    case "unary":
-      collectVanillaLeaves(e.operand, rc, out);
-      break;
-    case "binary":
-      collectVanillaLeaves(e.left, rc, out);
-      collectVanillaLeaves(e.right, rc, out);
-      break;
-    case "ternary":
-      collectVanillaLeaves(e.cond, rc, out);
-      collectVanillaLeaves(e.then, rc, out);
-      collectVanillaLeaves(e.otherwise, rc, out);
-      break;
-  }
-  return out;
-}
-
 // ---------------------------------------------------------------------------
 // Controller action — case over the tagged result.
 // ---------------------------------------------------------------------------
@@ -1229,6 +1194,15 @@ export function renderReturningOpControllerAction(
       ? [
           `  def ${resultFn}(conn, {:error, {:disallowed, detail}}),
     do: ${disallowedResponse("detail", denialOverrides(ctx))}`,
+        ]
+      : []),
+    // M-T6.20 — the WIRE-VALIDATION rung: a messaged `precondition` over the op's
+    // own request params denies with the `errors[]` 422 the other four backends'
+    // lifted request validator produces, not the domain floor.
+    ...(opHasWireDenial(op)
+      ? [
+          `  def ${resultFn}(conn, {:error, {:validation_failed, errors}}),
+    do: ${wireValidationResponse()}`,
         ]
       : []),
     ...(opHasGuards(op)

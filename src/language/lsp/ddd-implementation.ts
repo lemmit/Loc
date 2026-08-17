@@ -115,7 +115,24 @@ export class DddImplementationProvider implements ImplementationProvider {
     try {
       const text = await this.fileSystemProvider.readFile(mapUri);
       const map = JSON.parse(text) as SourceMap;
-      if (!Array.isArray(map.sources) || matchPath(docPath, map.sources) === undefined) {
+      if (!Array.isArray(map.sources)) return undefined;
+      const source = matchPath(docPath, map.sources);
+      // A BARE-FILENAME match is not evidence this map is about this document.
+      //
+      // `matchPath` is a longest-common-suffix match and accepts a single
+      // shared segment, which is right for `ddd trace` (a runtime stack frame
+      // may be rooted differently from the map). It is wrong HERE, because the
+      // ancestor walk above also scans every SIBLING directory: two unrelated
+      // projects that both call their entry point `main.ddd` share exactly one
+      // segment, so the neighbour's map would be adopted and every
+      // "Go to Implementation" would land in the WRONG project's generated
+      // files — silently, since the locations returned are real.
+      //
+      // The generator writes ABSOLUTE source paths (`collectSources` records
+      // `doc.uri.path`), so a map that genuinely covers this document agrees
+      // with it far beyond the filename; requiring more than one segment costs
+      // a real match nothing and removes the collision.
+      if (source === undefined || commonTrailingSegments(docPath, source) < 2) {
         return undefined;
       }
       return { map, root: dir };
@@ -136,4 +153,20 @@ function targetRangeFor([start, end]: [number, number]): Range {
     start: { line: start - 1, character: 0 },
     end: { line: end, character: 0 },
   };
+}
+
+/** How many trailing path segments two paths agree on — the strength of a
+ *  `matchPath` hit, which `matchPath` itself does not report. */
+function commonTrailingSegments(a: string, b: string): number {
+  const aSeg = a.split(/[\\/]+/).filter(Boolean);
+  const bSeg = b.split(/[\\/]+/).filter(Boolean);
+  let n = 0;
+  while (
+    n < aSeg.length &&
+    n < bSeg.length &&
+    aSeg[aSeg.length - 1 - n] === bSeg[bSeg.length - 1 - n]
+  ) {
+    n++;
+  }
+  return n;
 }

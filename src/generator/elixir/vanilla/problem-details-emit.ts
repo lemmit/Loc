@@ -47,6 +47,13 @@ export function renderVanillaProblemDetailsModule(
    *  resolves through gettext for the request locale.  False ⇒ byte-identical to
    *  pre-catalog output. */
   localizeMessages = false,
+  /** True when some aggregate operation carries a WIRE-RUNG denial — a messaged
+   *  `precondition` over the op's own request params, which the other four
+   *  backends lift into the request validator (M-T6.20).  Gates the extra
+   *  `validation_errors_response/2` entry point + its private renderer, so an
+   *  app without one is byte-identical (an unused `defp` is a `mix compile
+   *  --warnings-as-errors` failure). */
+  hasWireDenials = false,
 ): string {
   // Optimistic-concurrency 409 (`versioned` capability, D-VERSIONED).  A stale
   // write raises `Ecto.StaleEntryError`, which the repository rescues into
@@ -191,14 +198,25 @@ export function renderVanillaProblemDetailsModule(
     { name: "status", valueExpr: "422" },
   ]);
   // The 422 body — shared by the plain (no-`unique`) and the unique-aware forms.
-  const body422 = `    ${log422}
-    ${renderPhoenixDomainFault("domain_error")}
-
-    pointer_errors =
+  const body422 = `    pointer_errors =
       changeset.errors
       |> List.flatten()
       |> Enum.map(&render_changeset_error/1)
       |> Enum.reject(&is_nil/1)
+
+    send_validation_problem(conn, pointer_errors)`;
+  // The one §3.2 `errors[]` 422 SENDER.  Both rungs that produce this body pass
+  // through it — the changeset path above and, when the app has one, the
+  // wire-translatable `precondition` path below (M-T6.20) — so the two can never
+  // drift into different titles / details / log events.
+  const sendValidationProblemFn = `
+
+  # The §3.2 \`errors[]\` 422 sender — one place, so every rung that answers the
+  # WIRE-VALIDATION shape (the changeset path, and the wire-translatable
+  # \`precondition\` path) emits byte-identical title / detail / envelope.
+  defp send_validation_problem(conn, pointer_errors) do
+    ${log422}
+    ${renderPhoenixDomainFault("domain_error")}
 
     body =
       Jason.encode!(%{
@@ -215,7 +233,33 @@ export function renderVanillaProblemDetailsModule(
     conn
     |> put_resp_content_type("application/problem+json")
     |> put_resp_header("x-request-id", trace_id)
-    |> send_resp(422, body)`;
+    |> send_resp(422, body)
+  end`;
+  // M-T6.20 — the wire-validation rung for a denial that never builds an
+  // `Ecto.Changeset`.  On the other four backends an operation `precondition`
+  // over the op's own params is lifted into the SAME wire validator the
+  // invariants use, so its denial carries a pointer + the `msg.<hash>` code;
+  // elixir lowers preconditions to the `ensure/2` chain, so the term arrives here
+  // already shaped as the `errors[]` entry the golden expects.
+  const wireErrorsFn = hasWireDenials
+    ? `
+
+  @doc """
+  Send a 422 ProblemDetails carrying an EXPLICIT \`errors[]\` list — the
+  wire-validation rung for a denial that never builds an \`Ecto.Changeset\`
+  (M-T6.20: a messaged \`precondition\` over the operation's own request params,
+  which the other four backends lift into the \`<Op>Request\` validator).  Each
+  entry is \`%{pointer:, message:, code:}\`; the code resolves through the same
+  catalog the changeset path uses, so both rungs localise identically.
+  """
+  def validation_errors_response(conn, errors) when is_list(errors) do
+    send_validation_problem(conn, Enum.map(errors, &render_wire_error/1))
+  end
+
+  defp render_wire_error(%{pointer: pointer, message: message, code: code}) do
+    %{pointer: pointer, message: ${localizeMessages ? "localize(code, message)" : "message"}, code: code}
+  end`
+    : "";
   // A `unique (...)` breach surfaces as a changeset `constraint: :unique` error
   // (Ecto.Changeset.unique_constraint/3), which is a CONFLICT (409), not a 422.
   // Only emit that branch when the app declares a `unique` key, so a unique-free
@@ -293,7 +337,7 @@ defmodule ${appModule}Web.ProblemDetails do
   Send a 422 ProblemDetails response carrying the §3.2 \`errors[]\`
   extension built from an \`Ecto.Changeset\` errors map.${conflictDoc}
   """
-${responseFns}
+${responseFns}${sendValidationProblemFn}${wireErrorsFn}
 
   @doc """
   Send a 404 ProblemDetails response for a missing record.

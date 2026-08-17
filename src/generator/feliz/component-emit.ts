@@ -65,6 +65,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { felizTarget } from "./feliz-target.js";
+import { FELIZ_CHILDREN_FIELD } from "./fs-expr.js";
 import { felizPack } from "./pack.js";
 import { wireFieldType } from "./wire.js";
 
@@ -135,6 +136,22 @@ interface RenderedComponent {
   /** Sibling walked components this body calls. */
   uses: ReadonlySet<string>;
   component: ComponentIR;
+  /** True when the body renders `Slot { }` — the props record then carries a
+   *  `children` field, and every CALL SITE has to fill it (an F# anonymous
+   *  record is exact: an absent field is a type error, not a default). */
+  usesChildren: boolean;
+}
+
+/** The synthetic param a `Slot { }`-bearing component gains, so a call site
+ *  resolving against `userComponents` knows to fill `children` — with the
+ *  caller's markup, or `Html.none` when it passed none.  Typed `slot`, the IR's
+ *  own "any walker expression" param kind, which is exactly what it holds. */
+const CHILDREN_PARAM: ParamIR = { name: FELIZ_CHILDREN_FIELD, type: { kind: "slot" } };
+
+/** A component's params as a CALL SITE sees them — the declared ones, plus the
+ *  synthetic `children` when its body has a slot to fill. */
+function callSiteParams(r: RenderedComponent): readonly ParamIR[] {
+  return r.usesChildren ? [...r.component.params, CHILDREN_PARAM] : r.component.params;
 }
 
 /** Walk one component body and render its F# declaration, or `undefined` when
@@ -143,7 +160,7 @@ function renderOne(
   c: ComponentIR,
   componentParams: ReadonlyMap<string, readonly ParamIR[]>,
   ctx: FelizComponentCtx,
-): { decl: string; uses: ReadonlySet<string> } | undefined {
+): { decl: string; uses: ReadonlySet<string>; usesChildren: boolean } | undefined {
   const result = walkBody(
     c.body!,
     felizTarget,
@@ -181,6 +198,12 @@ function renderOne(
     return undefined;
   }
   const fields = c.params.map((p) => `${p.name}: ${propType(p, ctx.emittedRecords)}`);
+  // A body containing `Slot { }` reads `props.children` (the `renderChildrenSlot`
+  // seam), so the props record has to CARRY it — otherwise the F# names an
+  // absent field.  One `ReactElement`, not a list: the slot renders in element
+  // position, and `felizTarget.renderUserComponent` folds several passed
+  // children into a single `React.fragment`.
+  if (result.usesChildren) fields.push(`${FELIZ_CHILDREN_FIELD}: ReactElement`);
   const head =
     fields.length > 0
       ? `let ${c.name} (props: {| ${fields.join("; ")} |}) =`
@@ -202,6 +225,7 @@ function renderOne(
     // Only sibling WALKED components matter for ordering; an extern call resolves
     // through an `open`ed module, and a primitive isn't a name at all.
     uses: new Set([...result.usedUserComponents].filter((n) => componentParams.has(n))),
+    usesChildren: result.usesChildren,
   };
 }
 
@@ -280,7 +304,13 @@ export function emitFelizUserComponents(
     for (const c of candidates) {
       const one = renderOne(c, inScope, ctx);
       if (one === undefined) continue;
-      round.push({ name: c.name, decl: one.decl, uses: one.uses, component: c });
+      round.push({
+        name: c.name,
+        decl: one.decl,
+        uses: one.uses,
+        component: c,
+        usesChildren: one.usesChildren,
+      });
     }
     rendered = round;
     if (round.length === candidates.length) break;
@@ -289,6 +319,6 @@ export function emitFelizUserComponents(
   const ordered = orderByCallGraph(rendered);
   return {
     decls: ordered.map((r) => r.decl),
-    params: new Map(ordered.map((r) => [r.name, r.component.params] as const)),
+    params: new Map(ordered.map((r) => [r.name, callSiteParams(r)] as const)),
   };
 }

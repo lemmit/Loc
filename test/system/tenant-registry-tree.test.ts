@@ -8,7 +8,7 @@
 //   - `dataKey` off create/update inputs (managed) yet present on reads.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../_helpers/generate.js";
 
 const SRC = `
   system Billder {
@@ -117,7 +117,17 @@ const SIGNUP_SRC = `
 
 describe("tenantRegistry — dataKey built at signUp via workflow repo-let on the parent", () => {
   it("loads the parent, sets the immutable `parent` FK, and computes the managed `dataKey`", async () => {
-    const files = await generateSystemFiles(SIGNUP_SRC);
+    const files = await generateSystemFilesUnchecked(
+      SIGNUP_SRC,
+      // The documented child-path computation is `dataKey := parent.dataKey + "." + seg`,
+      // and `dataKey` is the MANAGED path — nullable by construction (a root has
+      // none).  `+` requires both operands `string`, and the DSL has no
+      // null-coalescing or optional-unwrapping intrinsic, so the shape the
+      // tenancy design specifies cannot currently be spelled type-correctly.
+      // Kept as the evidence for that gap rather than silently rewritten:
+      // the emitted path logic below is what the design asks for.
+      "tenancy's documented dataKey path concatenates the nullable managed parent path, which the type system has no way to narrow",
+    );
     const wf = [...files.entries()].find(([p]) => p.includes("workflow"))?.[1];
     expect(wf).toBeDefined();
     // repo-let load of the parent row.

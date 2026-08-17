@@ -108,8 +108,8 @@ describe("vue walker — scaffold pages", () => {
             body: QueryView { of: Sales.Order.byId(id), single: true, data: o => Text { o.customerId } }
           }
         }
-        deployable api { platform: node, contexts: [Orders], port: 3000 }
-        deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }
+        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        deployable web { platform: vue, targets: api, ui: WebApp { Sales: api }, port: 3003 }
       }
     `);
     const detail = all.get("web/src/pages/order_detail.vue")!;

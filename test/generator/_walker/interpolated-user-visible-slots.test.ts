@@ -86,7 +86,7 @@ describe("an interpolated attribute slot translates", () => {
     ["vue", "vue", "vuetify", /:aria-label='t\(/],
     ["svelte", "svelte", "flowbite", /aria-label=\{t\(/],
     ["angular", "angular", "angularMaterial", /\[attr\.aria-label\]='t\(/],
-    ["feliz", "feliz", "mantine", /prop\.ariaLabel \(I18n\.tf /],
+    ["feliz", "feliz", "light", /prop\.ariaLabel \(I18n\.tf /],
     ["flutter", "flutter", "mantine", /Semantics\(label: t\(/],
   ];
 

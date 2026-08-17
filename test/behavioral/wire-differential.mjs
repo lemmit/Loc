@@ -63,15 +63,43 @@ export function loadWireCore(workDir) {
   return corePromise;
 }
 
-/** The cases that MUST carry a golden: the shared `systems/*.ddd`, which every
- *  backend runs (`sharedSystemCases`).  DERIVED from the directory, not a
+/** The shared `systems/*.ddd` cases, DERIVED from the directory rather than a
  *  hand-list — a new shared system is gated the moment it lands, and a golden
  *  can't be deleted to dodge the gate. */
-export function requiredGoldenCases() {
+export function sharedSystemGoldenCases() {
   return readdirSync(SYSTEMS_DIR)
     .filter((f) => f.endsWith(".ddd"))
     .map((f) => f.replace(/\.ddd$/, ""))
     .sort();
+}
+
+/**
+ * Cases deliberately allowed to run with NO golden.
+ *
+ * EMPTY, and meant to stay that way.  Every case the tier records is compared;
+ * an entry here is a signed decision to leave one uncompared, and it needs the
+ * same thing a wire waiver needs — a reason and a named exit.
+ *
+ * This list exists because the alternative is what `main` did until this
+ * change: a missing golden was only a failure for the shared systems, and for
+ * every FEATURE case it returned `none` — no comparison, no message.  Four
+ * cases (`field-mask`, `policy-deny`, `seed-values`, `vo-field-default`) had
+ * been running that way on every backend leg, two of them authorization-shaped.
+ * Nothing was wrong with them; nothing was checking them either.
+ *
+ * That is the failure mode the skip-outcome comment below already names — "a
+ * silently-off gate is worse than an absent one" — so the missing-golden branch
+ * now holds to the same standard: a new fixture fails with the capture command
+ * until someone decides, rather than joining the tier ungated by default.
+ *
+ * @type {ReadonlyArray<{case: string, reason: string}>}
+ */
+export const GOLDEN_OPT_OUT = [];
+
+/** Every case that must carry a golden: all of them, minus the signed opt-outs. */
+export function requiredGoldenCases() {
+  const optedOut = new Set(GOLDEN_OPT_OUT.map((o) => o.case));
+  return { optedOut, shared: sharedSystemGoldenCases() };
 }
 
 export const goldenPath = (caseName) => join(GOLDEN_DIR, `${caseName}.json`);
@@ -114,19 +142,19 @@ export async function gateWireRecording({ backend, caseName, entries, workDir })
 
   const golden = readGolden(caseName);
   if (!golden) {
-    if (requiredGoldenCases().includes(caseName)) {
-      return {
-        gating: [{ seq: -1, request: "(recording)", kind: "request-count", path: "$", golden: undefined, actual: entries.length }],
-        waived: [],
-        usedWaivers: new Set(),
-        skipped: false,
-        report:
-          `  ✗ wire: no golden for shared system "${caseName}" — every systems/*.ddd case must be\n` +
-          "      gated. Capture one with:  LOOM_WIRE_UPDATE=1 node run.mjs " +
-          caseName,
-      };
-    }
-    return none;
+    const { optedOut, shared } = requiredGoldenCases();
+    if (optedOut.has(caseName)) return none;
+    const kindOfCase = shared.includes(caseName) ? `shared system "${caseName}"` : `case "${caseName}"`;
+    return {
+      gating: [{ seq: -1, request: "(recording)", kind: "request-count", path: "$", golden: undefined, actual: entries.length }],
+      waived: [],
+      usedWaivers: new Set(),
+      skipped: false,
+      report:
+        `  ✗ wire: no golden for ${kindOfCase} — every case the tier records is\n` +
+        `      compared.  Capture one with:  LOOM_WIRE_UPDATE=1 node run.mjs ${caseName}\n` +
+        "      (or add a signed entry to GOLDEN_OPT_OUT in wire-differential.mjs).",
+    };
   }
 
   const divergences = core.diffRecording(golden.entries, entries);
@@ -182,13 +210,24 @@ export function makeWireGate(backend, workDir) {
      * `request-count` divergence — technically true, but it restates a failure
      * the runner is already gating on and buries the real error. So a failed
      * tier is noted and skipped, never re-diagnosed.
+     *
+     * A `skip` is NOT such a failure and must not disable the gate.  It used to:
+     * the predicate was `status !== "pass"`, and #2515's authz ladder reports
+     * `skip` for an arm the case's auth flavour cannot express (a dev-stub
+     * system has no anonymous caller).  From that day every `auth-simple` run on
+     * every backend printed "the tier did not pass" and compared NOTHING — the
+     * whole golden, not just the ladder — while reading like a deliberate skip.
+     * A silently-off gate is worse than an absent one, so the predicate names
+     * the failing statuses instead of everything that isn't a pass: a new
+     * outcome has to be classified deliberately rather than turning the gate off
+     * by default.
      */
     async check(caseName, entries, results) {
       if (WIRE_OFF) return 0;
       // No recording at all ⇒ the api tier never ran (a boot/infra failure the
       // runner has ALREADY counted as an errored case).
       if (entries == null) return 0;
-      if (results?.some((r) => r.status !== "pass")) {
+      if (results?.some((r) => r.status === "fail" || r.status === "error")) {
         process.stdout.write(
           "  ⟐ wire: skipped — the tier did not pass, so its recording is not comparable\n",
         );
@@ -219,10 +258,26 @@ export function makeWireGate(backend, workDir) {
         workDir,
       });
       if (report) process.stdout.write(`${report}\n`);
-      const bad = gating + stale.length;
+      // The same ratchet, one level up: an opt-out whose case now HAS a golden
+      // (or no longer runs) is excusing nothing, and a list that only grows
+      // stops meaning anything — exactly the failure the waiver registry guards
+      // against.
+      const staleOptOuts = GOLDEN_OPT_OUT.filter(
+        (o) => !ranCases.includes(o.case) || existsSync(goldenPath(o.case)),
+      );
+      if (staleOptOuts.length) {
+        process.stdout.write(
+          `\n✗ wire: ${staleOptOuts.length} STALE golden opt-out(s) — the case now has a\n` +
+            "  golden, or no longer runs. Delete them from GOLDEN_OPT_OUT in\n" +
+            "  test/behavioral/wire-differential.mjs:\n" +
+            `${staleOptOuts.map((o) => `    - ${o.case} — ${o.reason}`).join("\n")}\n`,
+        );
+      }
+      const bad = gating + stale.length + staleOptOuts.length;
       process.stdout.write(
         `\nwire differential (${backend}): ${ranCases.length} case(s) compared to golden, ` +
-          `${gating} divergence(s)${stale.length ? `, ${stale.length} stale waiver(s)` : ""}\n`,
+          `${gating} divergence(s)${stale.length ? `, ${stale.length} stale waiver(s)` : ""}` +
+          `${staleOptOuts.length ? `, ${staleOptOuts.length} stale opt-out(s)` : ""}\n`,
       );
       return bad;
     },
@@ -290,7 +345,13 @@ const __record = (dispatch) => {
 // dependent on the fixture.  If the tier DID use PATCH on that path (an
 // explicit \`route PATCH …\` api), the probe steps aside rather than assert a
 // mismatch that isn't one.
-const __frameworkProbes = async (dispatch) => {
+// \`opts.auth\` — whether this case's deployable declares \`auth: required\` at
+// all.  Passed in by the runner (which knows) rather than sniffed from the
+// recorded headers (which cannot tell): the emitted suite forwards
+// \`x-loom-dev-claims\` on EVERY case, inert where nothing reads it, so a header
+// test would probe \`/api/auth/me\` on the ~35 auth-less cases too and freeze a
+// 404 that \`/__loom_no_such_path\` already pins in every one of their goldens.
+const __frameworkProbes = async (dispatch, opts = {}) => {
   const paths = __urls.map((u) => { try { return new URL(u); } catch { return null; } }).filter(Boolean);
   const collection = paths.find((u) => /^\\/api\\/[^/]+$/.test(u.pathname));
   if (!collection) return;
@@ -323,18 +384,32 @@ const __frameworkProbes = async (dispatch) => {
   // ArgumentError and answered 500 for an id its type could not parse, which
   // is a real defect but not this probe's subject.
   //
-  // Only where the tier itself carried a credential.  A dev-stub \`auth {}\`
-  // system (no \`oidc\` block) fabricates a principal for ANY caller, so it has
-  // no unauthenticated arm to reach — the probe would answer 200 and record
-  // the stub's User instead, which is a third thing this probe does not
-  // assert.  (It diverges: node serialises \`{id, tenantId}\`, phoenix
-  // \`{id, role, tenantId}\` with the opposite two populated.  Real, and filed
-  // separately — the dev stub's principal shape is not the RS-9 error
-  // contract.)  A no-auth system is skipped for free and loses nothing: its
+  // Only on an \`auth: required\` deployable — but on EITHER flavour now, not
+  // only OIDC (#2548).  What the anonymous probe records differs by flavour,
+  // and both answers are wire contracts worth freezing:
+  //
+  //   oidc  -> 401 + the RFC 7807 body above
+  //   stub  -> 200 + the dev stub's BUILT-IN principal
+  //
+  // The stub arm was excluded while it was undecided what that 200 should say:
+  // a dev-stub \`auth {}\` system (no \`oidc\` block) fabricates a principal for
+  // ANY caller, and the answer diverged — phoenix's identity was a fixed
+  // \`%{"id","role","permissions"}\` claim map read by declared field name, so it
+  // filled a field NAMED \`role\` and nulled every other one the other four
+  // backends filled from the declared \`user { … }\` shape.  That is now decided
+  // (the stub serialises the declared shape, one type-shaped value per declared
+  // field) and this probe is what holds it: the identity is exactly what a
+  // frontend's \`auth: ui\` guard reads, and nothing else in the tier ever
+  // requests it.
+  //
+  // Deliberately WITHOUT the tier's credentials, on both arms: the header would
+  // hand the stub an override (\`DEV_CLAIMS\`) and record that instead of the
+  // built-in identity, which is the half that had nothing pinning it.
+  //
+  // A no-auth system is still skipped for free and loses nothing: its
   // \`/api/auth/me\` 404 is the same framework miss \`/__loom_no_such_path\`
   // already pins.
-  const authed = Object.keys(__authHeaders).some((k) => /^authorization$/i.test(k));
-  if (authed) {
+  if (opts.auth) {
     await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
   }
 };
@@ -384,8 +459,8 @@ const __absentReadProbes = async (dispatch) => {
 // The behavioural tier used to hold ONE identity, so the only authz statement it
 // could make was "the satisfying principal gets through".  A \`requires\` emitted
 // as a no-op passes that identically — which is exactly how #2446 shipped a
-// guarded create with an OPEN route.  This walks the full ladder over ONE gated
-// surface instead:
+// guarded create with an OPEN route.  This walks the full ladder over each
+// declared gated surface instead:
 //
 //   unauthenticated              → 401   (authn precedes authz)
 //   authenticated-but-UNauthORIZED → 403 (the gate actually denies)
@@ -416,40 +491,71 @@ const __authzLadder = async (spec, creds) => {
   const json = (h) => ({ ...h, "content-type": "application/json" });
   const out = [];
   const push = (name, status, error) => out.push({ tier: "authz", name, status, error });
+  // A gated READ surface is a GET, and fetch refuses a body on GET/HEAD — so the
+  // body is conditional on the method, not on the spec declaring one.
+  const withBody = (m, b) => (m === "GET" || m === "HEAD" ? {} : { body: JSON.stringify(b ?? {}) });
 
   // Seed with the AUTHORIZED principal so the gated surface addresses a real
   // row.  Several backends load the aggregate BEFORE evaluating the guard, so a
   // made-up id would answer 404 and the ladder would measure not-found instead
-  // of denial.
-  const seeded = await dispatch({
-    method: "POST",
-    url: origin + spec.seed.path,
-    headers: json(creds.authorized),
-    body: JSON.stringify(spec.seed.body ?? {}),
-  });
+  // of denial.  A spec may declare SEVERAL seed steps (a create, then the
+  // operation whose emitted event a folded read model needs) — they run in
+  // order under the authorized principal, and the first id any of them returns
+  // is the one \`{id}\` substitutes.
+  const seedSteps = Array.isArray(spec.seed) ? spec.seed : [spec.seed];
   let id = null;
-  try {
-    id = JSON.parse(seeded?.response?.body ?? "{}")?.id ?? null;
-  } catch { /* handled by the null check below */ }
+  for (const step of seedSteps) {
+    const r = await dispatch({
+      method: step.method ?? "POST",
+      url: origin + step.path.replace("{id}", id ?? ""),
+      headers: json(creds.authorized),
+      ...withBody(step.method ?? "POST", step.body),
+    });
+    const st = r?.response?.status;
+    if (!(st >= 200 && st < 300)) {
+      push("authz ladder: seed", "fail", \`seed \${step.method ?? "POST"} \${step.path} → \${st}: \${String(r?.response?.body ?? "").slice(0, 200)}\`);
+      return out;
+    }
+    if (id === null) {
+      try {
+        id = JSON.parse(r?.response?.body ?? "{}")?.id ?? null;
+      } catch { /* handled by the null check below */ }
+    }
+  }
   if (!id) {
-    push("authz ladder: seed", "fail", \`seed POST \${spec.seed.path} → \${seeded?.response?.status}: no id in body\`);
+    push("authz ladder: seed", "fail", \`seed \${seedSteps[0].path}: no id in any seed response body\`);
     return out;
   }
 
-  const arm = async (label, headers, expected) => {
+  // ONE spec may gate SEVERAL surfaces — the read side alone has three distinct
+  // emission sites (gated list read, folded projection, query-time projection)
+  // behind a single system, and booting a fixture per surface would pay a whole
+  // generate+migrate+boot for each.  \`gated\` is therefore normalised to a list;
+  // a surface may carry its own \`arms\`, otherwise the spec-level arms apply to
+  // all of them.
+  const surfaces = (Array.isArray(spec.gated) ? spec.gated : [spec.gated]).map((g) => ({
+    method: g.method,
+    path: g.path,
+    body: g.body,
+    label: g.label ?? null,
+    arms: g.arms ?? spec.arms,
+  }));
+
+  const arm = async (surface, rung, headers, expected) => {
+    const where = surface.label ? \`\${surface.label} — \` : "";
     if (expected === null || expected === undefined) {
-      push(\`authz ladder: \${label} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
+      push(\`authz ladder: \${where}\${rung} (skipped — \${spec.anonymousNote ?? "not expressible"})\`, "skip");
       return;
     }
     const r = await dispatch({
-      method: spec.gated.method,
-      url: origin + spec.gated.path.replace("{id}", id),
+      method: surface.method,
+      url: origin + surface.path.replace("{id}", id),
       headers: json(headers),
-      body: JSON.stringify(spec.gated.body ?? {}),
+      ...withBody(surface.method, surface.body),
     });
     const got = r?.response?.status;
     push(
-      \`authz ladder: \${label} → \${expected}\`,
+      \`authz ladder: \${where}\${rung} → \${expected}\`,
       got === expected ? "pass" : "fail",
       got === expected ? undefined : \`expected \${expected}, got \${got}: \${String(r?.response?.body ?? "").slice(0, 200)}\`,
     );
@@ -458,10 +564,14 @@ const __authzLadder = async (spec, creds) => {
   // Order matters: the two DENIED arms run first, so the surface is still in its
   // pre-operation state when they run and a 403 cannot be an artefact of the
   // operation having already been applied.  The authorized arm mutates, so it
-  // goes last.
-  await arm("unauthenticated", {}, spec.arms.anonymous);
-  await arm("authenticated-but-unauthorized", creds.unauthorized, spec.arms.unauthorized);
-  await arm("authorized", creds.authorized, spec.arms.authorized);
+  // goes last.  With several surfaces that ordering is kept PER SURFACE — the
+  // walk is surface-major, not rung-major — so a mutating surface's authorized
+  // arm cannot disturb the next surface's denial arms.
+  for (const s of surfaces) {
+    await arm(s, "unauthenticated", {}, s.arms.anonymous);
+    await arm(s, "authenticated-but-unauthorized", creds.unauthorized, s.arms.unauthorized);
+    await arm(s, "authorized", creds.authorized, s.arms.authorized);
+  }
   return out;
 };`;
 }

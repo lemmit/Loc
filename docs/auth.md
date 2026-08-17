@@ -65,6 +65,47 @@ escape — else `loom.default-deny-ungated` fires.  Covered:
   lived inside the query-clause fragment, which a folded projection has none
   of, and `loom.projection-gate-without-source` rejected the combination.  Both
   halves are fixed and that diagnostic is gone.
+- **workflow INSTANCE reads** — `GET /workflows/<wf>/instances` and
+  `.../instances/{id}` publish every instance's correlation id and state, so an
+  observable workflow (one with a correlation field) carries the same optional
+  gate on its declaration header:
+
+  ```ddd
+  workflow Fulfilment requires currentUser.role == "supervisor" {
+    orderId: Order id
+    stage: string
+    create start(order: Order id) {
+      requires currentUser.role == "clerk"
+      …
+    }
+  }
+  ```
+
+  The header gate guards the **reads only** — command entries keep their own
+  body gates, because "who may start this workflow" and "who may read its
+  state" are different questions (this example authorizes them to different
+  roles deliberately).  It is `currentUser`-only for the same reason the find
+  and projection gates are: it runs before any instance is loaded, so there is
+  no instance to reference (`loom.workflow-gate-not-current-user`).  Enforced
+  on all five backends, on both routes, ahead of the store read — so a denied
+  caller cannot tell an existing correlation id from an absent one.
+
+  Like the folded projection before it, this read was previously **ungateable**
+  rather than merely ungated: the routes are compiler-derived and a workflow had
+  no surface to declare a gate on.
+
+**These gates are proven to DENY, not just to compile.** A guard emitted as a
+no-op passes every compile tier and every single-principal e2e identically —
+that is how each of the read gates above shipped open on some subset of
+backends.  `test/fixtures/corpus/read-gates.ddd` closes that with two halves
+that only mean something together: its `test e2e` drives all three read
+surfaces with the principal the gate *names* (so an always-deny guard fails),
+and the authorization ladder (`AUTHZ_LADDERS` in `test/behavioral/cases.mjs`)
+drives the same surfaces with an authenticated-but-**un**authorized principal
+and demands 403 (so a no-op guard fails).  Both run per-PR on **all five**
+backend legs — which is the point, since the list-read drop was a
+java/python/elixir defect that a node-only probe could not have seen.  See
+`test/behavioral/README.md` § "Principals — and the authorization ladder".
 
 What's intentionally **not** here yet:
 
@@ -927,10 +968,17 @@ curl -H 'x-loom-dev-claims: {"id":"u-1","role":"manager","tenantId":"t-1"}' \
   http://localhost:8080/api/orders
 ```
 
-With no header the stub returns a default principal. This is emitted uniformly
-across all five backends — Hono, .NET, Python, Java, and Elixir — so the same
-header drives every generated backend identically. It is a **dev convenience,
-not a production path**: register a real verifier (above) before shipping.
+With no header the stub returns its **built-in identity**: one value per field
+the `user { … }` block declares — `"admin"` for a `string`, the all-zero uuid
+for a `guid`, `0` for a number, `false` for a `bool`, the epoch for a
+`datetime`, the EMPTY list for an array (so a permission-guarded surface denies
+by default), and `null` where the field is declared optional. The identity is
+derived from the declared shape, so a non-optional field is never null and the
+same `.ddd` yields the same principal on every backend. This is emitted
+uniformly across all five backends — Hono, .NET, Python, Java, and Elixir — so
+the same header drives every generated backend identically. It is a **dev
+convenience, not a production path**: register a real verifier (above) before
+shipping.
 
 ## Auth routes
 
@@ -939,7 +987,12 @@ Every backend mounts its auth routes under the shared API base, i.e.
 
 - `/api/auth/me` — the session probe the `auth: ui` frontend guard reads;
   always present under `auth: required`, and **not** bypassed (the
-  middleware verifies the principal or returns 401 first).
+  middleware verifies the principal or returns 401 first). The body is the
+  declared `user { … }` shape, **by declared name** — and nothing else: the
+  per-request derived tenancy members (`currentUser.orgPath` / `rootOrg`) are
+  server-side scoping state, so they stay off the wire. All five backends
+  answer byte-identically here (frozen by the `/api/auth/me` entry in the
+  behavioural wire goldens).
 - `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout` — the OIDC
   authorization-code redirect handshake, emitted only under an
   `auth { oidc { … } }` block.

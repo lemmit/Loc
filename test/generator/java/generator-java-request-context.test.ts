@@ -172,7 +172,7 @@ describe("Java execution-context carrier", () => {
       `
 system S {
   user {
-    id: uuid
+    id: guid
     role: string
   }
   subdomain M {
@@ -215,7 +215,7 @@ system S {
       `
 system S {
   user {
-    userId: uuid
+    userId: guid
     role: string
   }
   subdomain M {

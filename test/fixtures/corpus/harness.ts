@@ -1,6 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
+import { lowerModel } from "../../../src/ir/lower/lower.js";
+import { type LoomDiagnostic, validateLoomModel } from "../../../src/ir/validate/validate.js";
 import { generateSystems } from "../../../src/system/index.js";
 import { parseString } from "../../_helpers/parse.js";
 import { type Backend, PLATFORM_CLAUSE } from "./backends.js";
@@ -82,4 +85,29 @@ export async function generateCorpusCase(
     throw new Error(`parse/validation errors:\n${errors.join("\n")}`);
   }
   return generateSystems(model).files;
+}
+
+/**
+ * Run phase ⑦ (the IR validator) over a corpus feature, optionally under a
+ * non-default persistence adapter, and return its diagnostics.
+ *
+ * `generateCorpusCase` above deliberately does NOT do this: it goes
+ * `parseString` → `generateSystems`, and `generateSystems` never calls
+ * `validateLoomModel` (only the CLI and `src/api` do).  So the corpus GENERATION
+ * gate is structurally blind to every IR-level diagnostic — including the
+ * per-adapter capability gates, which is how a fixture and a gate that rejects
+ * it can land 16h apart with both PRs green.  This is the missing oracle for the
+ * per-adapter skip maps, and it needs no SDK, no docker and no compile.
+ */
+export async function validateCorpusCase(
+  featureId: string,
+  backend: Backend,
+  persistence?: string,
+): Promise<LoomDiagnostic[]> {
+  const source = corpusSourceFor(featureId, backend, persistence);
+  const { model, errors } = await parseString(source);
+  if (errors.length > 0) {
+    throw new Error(`parse/validation errors:\n${errors.join("\n")}`);
+  }
+  return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }

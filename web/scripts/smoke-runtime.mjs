@@ -39,6 +39,7 @@ import { API_BASE_PATH } from "../../out/util/api-base.js";
 import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import { generateSystems } from "../../out/system/index.js";
 import {
+  devStubEntryFor,
   makeEntryStdin,
   pgliteAssetUrl,
   resolveInFs,
@@ -142,7 +143,15 @@ function pgliteAssets() {
  *  additionally asserts the synthesised DDL declares a Postgres schema —
  *  so the system-mode case can't silently degrade into testing an
  *  unqualified backend (which would no longer guard the regression). */
-async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
+async function runCase({ label, sourcePath, mode, expectSchemaQualified, expectAuth }) {
+  // Per-CASE identity for the emitted bundle.  It used to be the `mode` alone,
+  // which is not unique: `await import()` caches by URL, so a second case with
+  // the same mode re-imported the FIRST case's already-evaluated module and
+  // asserted against the wrong backend — silently, and green.  The auth case
+  // below is the one that surfaced it (it booted the sales-system app, which
+  // has no /auth routes at all).  Keyed off the fixture, which is what actually
+  // distinguishes two cases.
+  const caseId = `${mode}-${path.basename(sourcePath, ".ddd")}`;
   console.log(`\n=== case: ${label} (${path.basename(sourcePath)}) ===`);
 
   console.log("# 1/5 generating…");
@@ -172,7 +181,12 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
   const bundleStart = Date.now();
   const out = await esbuild.build({
     stdin: {
-      contents: makeEntryStdin(entry, schemaPath),
+      // `vfs` is keyed "/" + path, which is what devStubEntryFor expects.  An
+      // `auth: required` fixture would otherwise die at the createApp below
+      // with "No user verifier is registered" — the same #2571 gap the runtime
+      // engine had.  Today's fixtures declare no auth, so this is a no-op that
+      // keeps the two boot paths from drifting apart again.
+      contents: makeEntryStdin(entry, schemaPath, devStubEntryFor(vfs, entry)),
       resolveDir: "/",
       sourcefile: "__entry__.ts",
       loader: "ts",
@@ -204,7 +218,7 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
   // and pg-protocol's `Buffer.allocUnsafe(0)`, both top-level statements.
   // See worker-realm.mjs for what this does and does not prove.
   const realm = await evaluateInWorkerRealm(patched, {
-    filename: `loom-bundle-${mode}.mjs`,
+    filename: `loom-bundle-${caseId}.mjs`,
   }).catch((err) => {
     fail(
       `bundle failed to evaluate in a worker-shaped realm: ${err.message}\n` +
@@ -227,7 +241,7 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
     return;
   }
 
-  const tmpFile = path.join(os.tmpdir(), `loom-bundle-${mode}-${process.pid}.mjs`);
+  const tmpFile = path.join(os.tmpdir(), `loom-bundle-${caseId}-${process.pid}.mjs`);
   writeFileSync(tmpFile, patched);
   const mod = await import(pathToFileURL(tmpFile).href);
   for (const name of EXPECTED_EXPORTS) {
@@ -293,6 +307,36 @@ async function runCase({ label, sourcePath, mode, expectSchemaQualified }) {
   }
   console.log(`# OK — round-tripped 1 product (${rows[0].sku}) through PGlite + drizzle + Hono`);
 
+  // A FRAMEWORK fault must answer an RFC 7807 document, not take the worker
+  // down.  The reason phrase used to come from node's `STATUS_CODES`, which
+  // bundles to an empty module on the browser target this preview runs — so
+  // `frameworkProblemBody` threw inside the very handler meant to turn a fault
+  // into a response, and every 404/422/500 killed the runtime.  No case ever
+  // requested a missing route, so nothing noticed.
+  const miss = await app.fetch(new Request(`http://localhost${API_BASE_PATH}/__no_such_route`));
+  if (miss.status !== 404) fail(`expected 404 for an unrouted path, got ${miss.status}`);
+  const missBody = await miss.text();
+  const problem = JSON.parse(missBody);
+  if (problem?.title !== "Not Found" || problem?.status !== 404) {
+    fail(`404 should be an RFC 7807 problem document, got ${missBody}`);
+  }
+  console.log(`# framework 404 answered a problem document (${problem.title})`);
+
+  if (expectAuth) {
+    // The session probe the `auth: ui` guard reads.  Reaching it at all means
+    // the dev-stub verifier was registered (createApp would have thrown
+    // otherwise), and the body is the DECLARED `user { … }` shape — id + role,
+    // filled by the stub's built-in identity (#2548, #2571).
+    const me = await app.fetch(new Request(`http://localhost${API_BASE_PATH}/auth/me`));
+    const meBody = await me.text();
+    if (me.status !== 200) fail(`GET ${API_BASE_PATH}/auth/me expected 200, got ${me.status}: ${meBody}`);
+    const principal = JSON.parse(meBody);
+    if (typeof principal?.id !== "string" || typeof principal?.role !== "string") {
+      fail(`/auth/me should answer the declared user shape {id, role}, got ${meBody}`);
+    }
+    console.log(`# auth: dev stub registered — /auth/me answered ${meBody}`);
+  }
+
   await pglite.close();
 }
 
@@ -308,6 +352,18 @@ await runCase({
   sourcePath: path.resolve(here, "../src/examples/sales-system.ddd"),
   mode: "system",
   expectSchemaQualified: true,
+});
+
+// `auth: required` (#2571).  The preview boots `createApp`, which asserts a
+// registered verifier — so before the entry registered the emitted dev stub
+// this case died at "# app booted" with
+// "createApp failed: No user verifier is registered".
+await runCase({
+  label: "auth: required (dev-stub verifier registered by the bundle entry)",
+  sourcePath: path.resolve(here, "fixtures/auth-required-smoke.ddd"),
+  mode: "system",
+  expectSchemaQualified: true,
+  expectAuth: true,
 });
 
 console.log("\n# all green");
