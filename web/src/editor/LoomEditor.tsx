@@ -6,6 +6,7 @@ import type { Diagnostic } from "../lsp/protocol";
 import { modelUriFor } from "../lsp/workspace-lsp-sync";
 import { installMonacoEnvironment } from "./monaco-env";
 import type { EditorHandle } from "./editor-handle";
+import { loomQuickFixes, quickFixesAt } from "./fix-hint-actions";
 
 export type { EditorHandle };
 
@@ -255,8 +256,49 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
     });
     emitDiagnostics();
 
+    // Quick-fix lightbulbs.  The playground showed the squiggle for a hinted
+    // diagnostic and offered no fix: the toolkit has resolved every `fixHint`
+    // (`src/language/fix-hints.ts`) into an applyable `CodeAction` all along
+    // (`fixHintCodeActions`, `src/api/lsp.ts`) — nothing here ever asked.  This
+    // is the generic seam, so a new fix-hint provider lights up in the editor
+    // with no editor change; the Langium worker's own `DddCodeActionProvider`
+    // stays as-is and keeps serving its two hardcoded codes (one of which,
+    // `loom.bare-aggregate-in-type`, therefore appears twice in the menu — the
+    // same edit under two titles, which is why nothing here special-cases it).
+    // The only playground-specific logic is the LSP→Monaco position shift, in
+    // `fix-hint-actions.ts` (0-based → 1-based), unit-tested there.
+    const codeActionSub = monaco.languages.registerCodeActionProvider("ddd", {
+      provideCodeActions: async (target, range, _context, token) => {
+        const empty = { actions: [], dispose: () => {} };
+        const fixes = await loomQuickFixes(target.getValue(), target.uri.toString());
+        // The document may have moved on (or the request been superseded) while
+        // we validated — applying a stale range would corrupt the source, so
+        // drop the result rather than answer with positions from an old text.
+        if (token.isCancellationRequested || target.isDisposed()) return empty;
+        return {
+          actions: quickFixesAt(fixes, range).map((fix) => ({
+            title: fix.title,
+            kind: "quickfix",
+            isPreferred: true,
+            edit: {
+              edits: fix.edits.map((e) => ({
+                resource: target.uri,
+                // Monaco applies `textEdit` verbatim: 1-based range + `text`
+                // (LSP's `newText`).  `versionId: undefined` opts out of
+                // Monaco's own staleness check — the guard above is ours.
+                textEdit: { range: e.range, text: e.text },
+                versionId: undefined,
+              })),
+            },
+          })),
+          dispose: () => {},
+        };
+      },
+    });
+
     return () => {
       if (handleRef.current) handleRef.current.current = null;
+      codeActionSub.dispose();
       delete (window as unknown as { __loomSetSource?: unknown }).__loomSetSource;
       delete (window as unknown as { __loomGetSource?: unknown }).__loomGetSource;
       changeSub.dispose();
