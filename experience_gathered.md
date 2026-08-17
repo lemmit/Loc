@@ -5064,3 +5064,69 @@ Two rules fall out:
    documents and the scope/type system cannot express (kept as evidence via
    `generateSystemFilesUnchecked(source, why)`, reason at the call site). A
    reflexive fixture-fix on those would have erased the finding.
+
+## 89. Two harnesses, one identity: when the case name is not the cache key (2026-08-16)
+
+#2571 was a two-line fix — the playground's synthesised bundle entry never
+registered a verifier, so every `auth: required` system died at
+`createApp failed: No user verifier is registered`. Adding a smoke case to gate
+it is where the session was actually spent, and both obstacles were the harness
+lying rather than the fix being hard.
+
+### The new case tested the previous case's backend
+
+`web/scripts/smoke-runtime.mjs` wrote its bundle to
+`loom-bundle-${mode}-${process.pid}.mjs` and then `await import(...)`ed it.
+Node's ESM loader **caches by URL**. Two cases sharing a `mode` therefore share
+a module URL, and the second one silently re-imports the FIRST one's
+already-evaluated module — same `createApp`, same app, wrong system. The file on
+disk is overwritten; nobody reads it again.
+
+For two years this was invisible because the fixture list happened to hold one
+`legacy` case and one `system` case. The moment a third arrived — same `mode` as
+the second — it booted `sales-system` and asserted the products round-trip
+against it, **passing**. It only surfaced because the new case also asked for
+`/api/auth/me` and got `no route`: the assertion that had nothing to do with the
+collision is the one that exposed it.
+
+**Rule:** a per-case temp artifact must be keyed by the CASE, not by a property
+several cases share. And when a harness caches — module registry, require cache,
+memoized bundle — the cache key is part of the test's identity: if two cases can
+produce the same key, they are one case with two names.
+
+The tell to look for: a new case that passes on the FIRST run, asserting
+something the fixture cannot possibly satisfy. Green is the failure mode.
+
+### `node:http` in emitted code — fine on node, fatal in the worker
+
+`frameworkProblemBody` took its reason phrases from node's `STATUS_CODES`, with
+a comment defending the choice: a hand-kept map "would silently mistitle a
+status it missed". Correct for a node deployment. But the playground bundles the
+SAME generated backend for the browser, where `node:http` resolves to an EMPTY
+module — so `STATUS_CODES[status]` threw *inside the helper whose entire job is
+turning a fault into a problem document*. Every 404/422/500 killed the worker
+instead of answering.
+
+Two compounding blind spots: `playground-realm-check` evaluates the bundle for
+node globals read at MODULE-EVALUATION time, and this one is read per REQUEST;
+and no smoke case had ever requested a route that does not exist, so the error
+path had no coverage at all. The fix is a local table (node's values verbatim);
+the gate is one assertion — every smoke case now requests a missing path and
+demands an RFC 7807 body.
+
+**Rule:** generated code inherits every runtime its targets run on, not the one
+the emitter runs on. A `node:` import in emitted output is a portability
+decision, and the playground is a browser runtime that ships the same bytes. And
+if a helper exists to handle failures, the suite must EXERCISE a failure — an
+error path with no test is not covered by the happy path that never reaches it.
+
+### Scope note that cost a rebuild
+
+The first cut of that table carried the full IANA set, which put
+`415: "Unsupported Media Type"` into every emitted project — and the M-T9.8
+sentinel scanner (`/\b…|unsupported|…\b/i`) reads "Unsupported" as an
+unfinished-work marker: 48 corpus cells red. The gate's `ALLOW` list is
+deliberately empty, so the answer was to scope the table to the statuses this
+layer actually raises, not to waive. Worth remembering before adding any
+standard vocabulary to emitted output: **the sentinel scanner does not know
+IANA from TODO.**
