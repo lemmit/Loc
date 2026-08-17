@@ -18,7 +18,7 @@
 //      through the scaffold dispatch path, not the walker.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
@@ -159,7 +159,8 @@ describe("recursive layout walker", () => {
   });
 
   it("unknown components leave a placeholder comment, no crash", async () => {
-    const files = await buildAndGenerate(`
+    const files = await generateSystemFilesUnchecked(
+      `
       system S {
         subdomain M { context C { } }
         ui WebApp {
@@ -176,7 +177,10 @@ describe("recursive layout walker", () => {
           port: 3001
         }
       }
-    `);
+    `,
+      "an unrecognised primitive is `loom.unknown-page-element` by definition — " +
+        "the JSX-comment placeholder it degrades to is the subject",
+    );
     const content = files.get("web/src/pages/mixed.tsx")!;
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Real"\)\}<\/Title>/);
     // Unknown component renders as a JSX comment placeholder, so

@@ -29,7 +29,10 @@ system S {
         name: string
         operation touch() { name := name }
       }
-      error OrderNotFound { code: string }
+      // An absence-mapped error may only carry resource: string — no other
+      // field can be derived from a row that is not there
+      // (loom.union-find-shape-unsupported).
+      error OrderNotFound { resource: string }
       repository Orders for Order {
         find locate(code: string): Order or OrderNotFound where this.code == code
       }

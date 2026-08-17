@@ -26,6 +26,18 @@ const SRC = readFileSync("test/fixtures/corpus/tenancy-owned.ddd", "utf8").repla
 const ROOT = "d/src/main/java/com/loom/d";
 const SPEL_CONVERTED = ":#{@currentUserAccessor.user()?.tenantIdAsUuid()}";
 
+// A guid claim and the `tenantOwned` capability are incompatible by
+// construction: the capability provides `tenantId: string`, and comparing that
+// to a guid claim mis-compiles the typed backends — `loom.tenant-owned-claim-type`
+// says so.  The REGISTRY's own comparison is same-typed against its guid id and
+// is fine, which is exactly what these cases exercise, so the guid variant drops
+// the tenant-OWNED aggregate rather than emitting from a rejected model.
+const guidClaim = (src: string): string =>
+  src
+    .replace("tenantId: string", "tenantId: guid")
+    .replace("aggregate Invoice with tenantOwned, crudish", "aggregate Invoice crossTenant with crudish");
+
+
 async function orgRepo(src: string = SRC): Promise<string> {
   const files = await generateSystemFiles(src);
   return files.get(`${ROOT}/features/organizations/OrganizationJpaRepository.java`)!;
@@ -45,7 +57,7 @@ describe("java generator — derived registry self-scope filter", () => {
   });
 
   it("binds a same-typed guid claim directly (no UUID.fromString)", async () => {
-    const repo = await orgRepo(SRC.replace("tenantId: string", "tenantId: guid"));
+    const repo = await orgRepo(guidClaim(SRC));
     expect(repo).toContain("e.id.value = :#{@currentUserAccessor.user()?.tenantId()}");
     expect(repo).not.toContain("fromString");
   });
