@@ -19,6 +19,15 @@ export function renderApplication(
   // the backend does not accept traffic until it can verify tokens, matching
   // the other backends' fetch-on-first-verify.  Empty ⇒ byte-identical.
   preEndpointChildren: string[] = [],
+  // First-boot seed modules (`<App>.<Ctx>.Seeds`, database-seeding.md /
+  // M-T6.37) — invoked once the supervision tree is up, so the Repo is
+  // available.  This is the elixir twin of the Hono entrypoint's post-migrate
+  // `runSeeds(db)` and java's `<Ctx>SeedRunner` ApplicationRunner: it runs on
+  // `mix phx.server` AND on the release (`bin/server` migrates, then starts),
+  // where a `priv/repo/seeds.exs` script would never be executed at all.
+  // Ship-once per dataset via the `__loom_seed` marker, so re-boots are no-ops.
+  // Empty ⇒ byte-identical.
+  seedModules: readonly string[] = [],
 ): string {
   // Catalog server-lifecycle events.  Same identities Hono + .NET
   // emit so a cross-backend dashboard pivots on one event name.
@@ -64,7 +73,21 @@ defmodule ${appModule}.Application do
     opts = [strategy: :one_for_one, name: ${appModule}.Supervisor]
     case Supervisor.start_link(children, opts) do
       {:ok, _pid} = ok ->
-        ${listeningCall}
+        ${listeningCall}${
+          seedModules.length === 0
+            ? ""
+            : `
+        # First-boot seed data (database-seeding.md) — only on a node that
+        # actually SERVES: \`mix phx.server\` sets :phoenix/:serve_endpoints,
+        # a release sets \`server: true\` (config/prod.exs).  \`mix test\` sets
+        # neither, so the emitted ExUnit suites keep the empty tables they
+        # assert against instead of racing a seeder at application start.
+        if Application.get_env(:phoenix, :serve_endpoints) ||
+             Application.get_env(:${appName}, ${appModule}Web.Endpoint, [])[:server] do
+${seedModules.map((m) => `          ${m}.run()`).join("\n")}
+        end
+`
+        }
         ok
       other ->
         other
