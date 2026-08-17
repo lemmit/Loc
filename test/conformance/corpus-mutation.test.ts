@@ -1,5 +1,8 @@
 import type { Diagnostic } from "langium";
 import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
+import { lowerModel, mergeLoomModels } from "../../src/ir/lower/lower.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { generateSystems } from "../../src/system/index.js";
 import { parseString } from "../_helpers/parse.js";
 import { BACKEND_LABEL, type Backend, PLATFORM_CLAUSE } from "../fixtures/corpus/backends.js";
@@ -57,13 +60,32 @@ function loomCodes(diagnostics: readonly Diagnostic[]): string[] {
 }
 
 /** Validate a mutated source once, on `node` — a rejection is model-level, so
- *  it does not depend on which backend the deployable targets. */
+ *  it does not depend on which backend the deployable targets.
+ *
+ *  BOTH validation phases, because the product runs both: `ddd generate` (and
+ *  `src/api/index.ts`) call the AST validators AND `validateLoomModel`, and
+ *  exit non-zero on either.  Running only the first made this gate mis-sort a
+ *  rejection as an acceptance — 10 `fixture x mutation` cases were refused by
+ *  `loom.field-default-not-constant` (phase ⑦) and still fell through to arm 2,
+ *  where the gate emitted from a model the product refuses and asserted on the
+ *  result.  A harness that runs fewer phases than the product invents findings
+ *  and hides real ones (#2512); M-T9.35 measured this one. */
 async function validateOnce(
   source: string,
 ): Promise<{ ok: true } | { ok: false; codes: string[]; errors: string[] }> {
-  const { diagnostics, errors } = await parseString(source.replaceAll("__PLATFORM__", "node"));
-  if (errors.length === 0) return { ok: true };
-  return { ok: false, codes: loomCodes(diagnostics), errors };
+  const specialised = source.replaceAll("__PLATFORM__", "node");
+  const { model, diagnostics, errors } = await parseString(specialised);
+  if (errors.length > 0) return { ok: false, codes: loomCodes(diagnostics), errors };
+  // Phase ⑦ — the same call the CLI and the api toolkit make.
+  const irErrors = validateLoomModel(enrichLoomModel(mergeLoomModels([lowerModel(model)]))).filter(
+    (d) => d.severity === "error",
+  );
+  if (irErrors.length === 0) return { ok: true };
+  return {
+    ok: false,
+    codes: irErrors.map((d) => d.code ?? "").filter((c) => c.startsWith("loom.")),
+    errors: irErrors.map((d) => `${d.code ?? "(no code)"}: ${d.message}`),
+  };
 }
 
 /** Emit an already-validated mutated source on one backend, in-memory. */

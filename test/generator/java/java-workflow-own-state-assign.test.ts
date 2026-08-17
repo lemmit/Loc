@@ -79,7 +79,7 @@ const COMPOUND_SRC = `
           orderId: Order id
           attempts: int
           total: money
-          create(p: OrderPlaced) by p.order { attempts += 1  total -= 5.00 USD }
+          create(p: OrderPlaced) by p.order { attempts += 1  total -= money("5.00") }
         }
       }
     }
@@ -104,7 +104,7 @@ describe("java workflow own-state compound assignment", () => {
     expect(dispatcher).toContain("state.setAttempts(state.attempts() + 1);");
   });
 
-  it("emits BigDecimal arithmetic for a money `total -= 5.00 USD`", async () => {
+  it("emits BigDecimal arithmetic for a money `total -= money(...)`", async () => {
     const dispatcher = find(await genCompound(), "workflows/CDispatcher.java");
     expect(dispatcher).toContain('state.setTotal(state.total().subtract(new BigDecimal("5.00")));');
   });
