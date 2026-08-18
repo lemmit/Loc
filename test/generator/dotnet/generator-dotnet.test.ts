@@ -1758,7 +1758,9 @@ describe(".NET generator", () => {
       expect(customerCreate).toMatch(
         /public sealed class CreateCustomerCommandValidator : AbstractValidator<CreateCustomerCommand>/,
       );
-      expect(customerCreate).toMatch(/RuleFor\(x => x\.Email\)\.Must\(v => v == null \|\| \(v\.Length - v\.Count\(char\.IsLowSurrogate\)\) >= 1\)/);
+      expect(customerCreate).toMatch(
+        /RuleFor\(x => x\.Email\)\.Must\(v => v == null \|\| \(v\.Length - v\.Count\(char\.IsLowSurrogate\)\) >= 1\)/,
+      );
       expect(customerCreate).toMatch(/using FluentValidation;/);
     });
 
@@ -1771,7 +1773,9 @@ describe(".NET generator", () => {
       // fails FluentValidation instead of reaching the domain floor.
       const customerUpdate = files.get("Application/Customers/Commands/UpdateCommandValidator.cs")!;
       expect(customerUpdate).toBeDefined();
-      expect(customerUpdate).toMatch(/RuleFor\(x => x\.Email\)\.Must\(v => v == null \|\| \(v\.Length - v\.Count\(char\.IsLowSurrogate\)\) >= 1\)/);
+      expect(customerUpdate).toMatch(
+        /RuleFor\(x => x\.Email\)\.Must\(v => v == null \|\| \(v\.Length - v\.Count\(char\.IsLowSurrogate\)\) >= 1\)/,
+      );
     });
 
     it("emits an AbstractValidator per public op with single-field preconditions", async () => {
@@ -1965,7 +1969,9 @@ describe(".NET generator", () => {
       expect(files.has("Application/Users/Commands/CreateUserCommandValidator.cs")).toBe(false);
       // But the domain `AssertInvariants` still enforces it.
       const userClass = files.get("Domain/Users/User.cs")!;
-      expect(userClass).toMatch(/\(this\.Username\.Length - this\.Username\.Count\(char\.IsLowSurrogate\)\) >= 3/);
+      expect(userClass).toMatch(
+        /\(this\.Username\.Length - this\.Username\.Count\(char\.IsLowSurrogate\)\) >= 3/,
+      );
     });
 
     it("emits cross-field invariants as `RuleFor(x => x).Must(...)` with `.WithName`", async () => {

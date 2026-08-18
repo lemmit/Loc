@@ -66,6 +66,29 @@ async function file(suffix: string): Promise<string> {
   return all.get(hit)!;
 }
 
+// A field carrying BOTH a regex and a length bound — `chainSingleFieldNative`
+// is called twice on the same base, and the order is load-bearing under zod 3.
+const REGEX_AND_LENGTH = `
+  system R {
+    subdomain Sales {
+      context Cat {
+        aggregate Person with crudish {
+          // Length declared FIRST on purpose: the emitter must still chain the
+          // refine last (orderSingleFieldPatterns).
+          email: string
+          invariant email.length <= 120
+          invariant email.matches("^[^@]+@[^@]+$")
+        }
+        repository People for Person { }
+      }
+    }
+    api CatApi from Sales
+    storage db { type: postgres }
+    resource st { for: Cat, kind: state, use: db }
+    deployable nodeApi { platform: node contexts: [Cat] dataSources: [st] serves: CatApi port: 8080 }
+  }
+`;
+
 describe("string .length is code points — node/Hono", () => {
   it("the native chain is a code-point refine, not zod's code-unit .min/.max", async () => {
     const routes = await file("node_api/http/product.routes.ts");
@@ -90,6 +113,20 @@ describe("string .length is code points — node/Hono", () => {
     const domain = await file("node_api/domain/product.ts");
     expect(domain).toContain("[...this._code].length >= 3");
     expect(domain).not.toContain("this._code.length >= 3");
+  });
+
+  it("chains the code-point refine AFTER a regex on the same field", async () => {
+    // zod 3 (`platform: node@v4`, the v1 react stack) types `.refine()` as a
+    // ZodEffects WRAPPER with no `.regex` on it, so `.refine(…).regex(/…/)`
+    // is a type error there.  The length invariant is declared FIRST in the
+    // fixture; the emitter must still order the refine last.
+    const all = await generateSystemFiles(REGEX_AND_LENGTH);
+    const routes = all.get(
+      [...all.keys()].find((k) => k.endsWith("node_api/http/person.routes.ts"))!,
+    )!;
+    expect(routes).toContain(
+      "email: z.string().regex(/^[^@]+@[^@]+$/).refine((s) => [...s].length <= 120).openapi({ maxLength: 120 })",
+    );
   });
 });
 

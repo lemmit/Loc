@@ -65,6 +65,23 @@ export function chainSingleFieldNative(inner: string, pattern: SingleFieldPatter
   }
 }
 
+/** Native-chain patterns first, code-point `len-*` refines LAST.
+ *
+ *  zod 3 (which `platform: node@v4` and the v1 react stack still pin) types
+ *  `.refine()` as a `ZodEffects` WRAPPER that no longer exposes `.regex` /
+ *  `.min` / `.max`.  A field carrying both a regex and a length bound —
+ *  `invariant email.matches("…") && email.length <= 120`, the very example
+ *  `singleFieldConstraints` documents — would then emit
+ *  `z.string().refine(…).regex(/…/)`, a type error under that major.  zod 4
+ *  keeps the `ZodString` type through `.refine`, so the ordering is a no-op
+ *  there; the emitter is shared, so it orders for the stricter of the two. */
+export function orderSingleFieldPatterns(
+  patterns: readonly SingleFieldPattern[],
+): SingleFieldPattern[] {
+  const isLen = (p: SingleFieldPattern) => p.kind.startsWith("len-");
+  return [...patterns.filter((p) => !isLen(p)), ...patterns.filter(isLen)];
+}
+
 /** The JSON-Schema length declaration a field's `len-*` patterns imply, or
  *  null when it has none.  `chainSingleFieldNative` renders the `len-*` CHECK
  *  as a code-point refine, which zod cannot describe — so a caller whose zod

@@ -65,7 +65,9 @@ describe("dotnet — messaged rule → FluentValidation .WithMessage carrier", (
     const { validator } = await gen();
     // A string LENGTH bound is a code-point `.Must`, not FluentValidation's
     // code-unit `.MinimumLength` (RS-31).
-    expect(validator).toContain(`RuleFor(x => x.Sku).Must(v => v == null || (v.Length - v.Count(char.IsLowSurrogate)) >= 1)`);
+    expect(validator).toContain(
+      `RuleFor(x => x.Sku).Must(v => v == null || (v.Length - v.Count(char.IsLowSurrogate)) >= 1)`,
+    );
   });
 });
 

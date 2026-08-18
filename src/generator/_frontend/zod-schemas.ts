@@ -42,7 +42,12 @@ import {
   unionMemberObjects,
   unionMembers,
 } from "../_payload/union-wire.js";
-import { chainSingleFieldNative, refineClauseFor, takeSingleFieldChain } from "../zod-refine.js";
+import {
+  chainSingleFieldNative,
+  orderSingleFieldPatterns,
+  refineClauseFor,
+  takeSingleFieldChain,
+} from "../zod-refine.js";
 
 // ---------------------------------------------------------------------------
 // Schema emission helpers
@@ -106,7 +111,8 @@ export function emitObjectWithRefines(
     let schema = f.base;
     const patterns = chainByField.get(f.name);
     if (patterns) {
-      for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+      for (const p of orderSingleFieldPatterns(patterns))
+        schema = chainSingleFieldNative(schema, p);
     }
     out.push(`  ${f.name}: ${schema},`);
   }
