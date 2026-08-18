@@ -1700,6 +1700,36 @@ export const DIAGNOSTIC_MESSAGES = {
     `its own SQL, so an aggregation can only name real columns. Drop the 'persistence: dapper' ` +
     `clause to use the default (EF Core) adapter, which translates the aggregation itself, or ` +
     `host the projection on a different deployable.`,
+  // The self-provisioning-adapter migration gate.  Neither blanket message
+  // above fits: this is not "no relational mapping anywhere" — the sibling
+  // adapter (efcore / drizzle) applies the very same migration chain fine.
+  // What these two lack is a migration chain AT ALL: they provision the schema
+  // themselves at boot, so a declared `migration` block silently does nothing
+  // (dapper) or is "resolved" as a drop+add (mikroorm), which deletes data.
+  "loom.dapper-unsupported#migrations": (p: {
+    name: unknown;
+    migration: unknown;
+    step: unknown;
+    count: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: dapper', but the model declares ` +
+    `${p.count} migration step(s) it can never apply (first: '${p.step}' in migration ` +
+    `'${p.migration}'). The Dapper adapter emits no migration chain — it provisions its ` +
+    `schema with 'CREATE TABLE IF NOT EXISTS' at boot, which does nothing to an existing ` +
+    `table, so the rename/backfill/sql step would silently never run. Use ` +
+    `'persistence: efcore' on this deployable, or host these contexts elsewhere.`,
+  "loom.mikroorm-unsupported#migrations": (p: {
+    name: unknown;
+    migration: unknown;
+    step: unknown;
+    count: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: mikroorm', but the model declares ` +
+    `${p.count} migration step(s) it can never apply (first: '${p.step}' in migration ` +
+    `'${p.migration}'). The MikroORM adapter emits no migration chain — it syncs its schema ` +
+    `with 'orm.schema.updateSchema()' at boot, which has no rename intent to consult and ` +
+    `resolves a rename as DROP + ADD, destroying the column's data. Use ` +
+    `'persistence: drizzle' on this deployable, or host these contexts elsewhere.`,
   "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
