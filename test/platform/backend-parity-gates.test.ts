@@ -83,6 +83,18 @@ system Crit {
   deployable d { platform: ${platform}, contexts: [Orders], dataSources: [ordersState], serves: OrdersApi, port: 4000 }
 }`;
 
+// The same capability filter on a `shape: document` aggregate.  This is the
+// crossing where the filter CANNOT be a column predicate — the whole tree is one
+// opaque jsonb blob — so every backend evaluates it IN-APP over the rehydrated
+// instance instead, through a completely different emitter than the relational
+// row above.  It is the exact pair that stayed unwired longest (elixir +
+// `document` was the final cell in `validateContextFilterSupport`'s deferral
+// tables, and .NET before it emitted NO document filter at all — a silent
+// cross-tenant read, #2527 follow-up 1), which is why it earns its own row:
+// passing the relational case says nothing about this one.
+const documentFilterDdd = (platform: string): string =>
+  filterDdd(platform).replace("aggregate Order {", "aggregate Order shape: document {");
+
 const provenanceDdd = (platform: string): string => `
 system OrderingSystem {
   subdomain Ordering {
@@ -178,6 +190,23 @@ const FEATURES: readonly Feature[] = [
       python: "not_(OrderRow.archived)",
       // Vanilla Phoenix/Ecto folds the filter into each read's `where:` clause.
       elixir: "not record.archived",
+    },
+  },
+  {
+    name: "capability filter on a `shape: document` aggregate (in-app, no column to narrow)",
+    code: "loom.context-filter-unsupported",
+    ddd: documentFilterDdd,
+    // All five evaluate the predicate over the REHYDRATED instance: node/python
+    // filter the mapped list, java appends inside the loop, .NET hoists it into
+    // `_CapabilityVisible`, elixir filters the `%<Agg>.Data{}` embed the row
+    // rehydrates to.
+    emits: new Set<Backend>(["node", "dotnet", "java", "python", "elixir"]),
+    marker: {
+      node: ".filter((x) => (!x.archived))",
+      dotnet: "_CapabilityVisible(Order x) => (!x.Archived)",
+      java: "if ((!x.archived())) out.add(x);",
+      python: "if ((not x.archived))",
+      elixir: "if not record.archived, do: {:ok, row}, else: {:error, :not_found}",
     },
   },
   {
