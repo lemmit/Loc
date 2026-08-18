@@ -159,6 +159,107 @@ function sqlExprFamily(e: ExprIR): string | undefined {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Migration chain vs. persistence adapter (the SELF-PROVISIONING adapters).
+//
+// Two adapters opt OUT of the phase-⑨ `MigrationsIR` chain entirely and
+// provision their schema themselves at boot:
+//
+//   - `persistence: dapper`   — `hasMigrations = !usingDapper`
+//     (`src/generator/dotnet/index.ts`); schema comes from the
+//     `CREATE TABLE IF NOT EXISTS` block `DbSchema.EnsureAsync` runs.
+//   - `persistence: mikroorm` — `hasMigrations = !usingMikro`
+//     (`src/platform/hono/v4/emit.ts`, shared by v5); schema comes from
+//     `orm.schema.updateSchema()`.
+//
+// Both are fine for a FIRST boot.  Neither can carry a declared `migration`
+// block, and the failure is SILENT in the worst way:
+//
+//   - dapper: `CREATE TABLE IF NOT EXISTS` sees the table already there and
+//     does nothing, so a declared `rename` / backfill / raw `sql` step never
+//     runs.  The column keeps its old name and the app 500s on a column that
+//     "should" exist — or worse, quietly reads a NULL the backfill was meant
+//     to populate.
+//   - mikroorm: `updateSchema()` has no rename intent to consult, so it sees
+//     a dropped column and an added one — it DROPS the old column and ADDS
+//     the new one, i.e. it deletes the very data the rename existed to keep.
+//
+// The declared intents are exactly the migration surface that lives on the IR
+// at phase ⑦ (`renameIntents` / `tableRenameIntents` / `backfillIntents` /
+// `sqlMigrationSteps`) — the derived `MigrationsIR` itself only exists in
+// phase ⑨.  So the gate is here, and it makes the gap HONEST: a declared
+// migration on a self-provisioning adapter is now a compile error naming the
+// adapter to switch to, instead of a silent no-op (dapper) or silent data loss
+// (mikroorm).
+// ---------------------------------------------------------------------------
+
+/** The self-provisioning persistence adapters, and the message key each one's
+ *  diagnostic resolves through.  The message KEYS stay as string literals at
+ *  the `diagMessage(...)` call sites below — `diagnostic-catalog.test.ts` reads
+ *  them syntactically, so a key routed through a lookup table reads as an
+ *  orphan entry. */
+const SELF_PROVISIONING_ADAPTERS = new Set(["dapper", "mikroorm"]);
+
+export function validateMigrationAdapterSupport(
+  loom: EnrichedLoomModel,
+  diags: LoomDiagnostic[],
+): void {
+  // Declared migration steps, indexed by the context they name.  A raw
+  // `sql "…"` step names no context (it is a system-wide statement), so it is
+  // collected separately and charged to every self-provisioning deployable.
+  const byContext = new Map<string, { migration: string; step: string }[]>();
+  const add = (context: string, migration: string, step: string): void => {
+    const list = byContext.get(context) ?? [];
+    list.push({ migration, step });
+    byContext.set(context, list);
+  };
+  for (const r of loom.renameIntents)
+    add(r.context, r.migration, `rename ${r.aggregate}.${r.from}`);
+  for (const t of loom.tableRenameIntents)
+    add(t.context, t.migration, `rename ${t.fromAggregate} -> ${t.toAggregate}`);
+  for (const b of loom.backfillIntents)
+    add(b.context, b.migration, `backfill ${b.aggregate}.${b.field}`);
+  const sqlSteps = loom.sqlMigrationSteps.map((s) => ({
+    migration: s.migration,
+    step: `sql step #${s.index}`,
+  }));
+  if (byContext.size === 0 && sqlSteps.length === 0) return;
+
+  for (const sys of loom.systems) {
+    for (const dep of sys.deployables) {
+      if (!dep.persistence || !SELF_PROVISIONING_ADAPTERS.has(dep.persistence)) continue;
+      const hits = [...dep.contextNames.flatMap((c) => byContext.get(c) ?? []), ...sqlSteps];
+      if (hits.length === 0) continue;
+      // One diagnostic per deployable, naming the first offending step — the
+      // fix (switch the adapter, or move the migration off this deployable) is
+      // the same for every step, so N of them would be noise.
+      const first = hits[0]!;
+      const params = {
+        name: dep.name,
+        migration: first.migration,
+        step: first.step,
+        count: hits.length,
+      };
+      const source = `${sys.name}/${dep.name}`;
+      if (dep.persistence === "dapper") {
+        diags.push({
+          severity: "error",
+          code: "loom.dapper-unsupported",
+          message: diagMessage("loom.dapper-unsupported#migrations", params),
+          source,
+        });
+      } else {
+        diags.push({
+          severity: "error",
+          code: "loom.mikroorm-unsupported",
+          message: diagMessage("loom.mikroorm-unsupported#migrations", params),
+          source,
+        });
+      }
+    }
+  }
+}
+
 function typeFamily(t: TypeIR): string | undefined {
   switch (t.kind) {
     case "primitive":

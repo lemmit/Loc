@@ -20,24 +20,33 @@
 //     per-instance (each `Foo(...)` its own `State`), which a shared Riverpod
 //     provider would get wrong.
 //
-// An `extern` component (hand-written Dart), a `derived` binding, an
-// async-effect action (`match await`), a STORE read (the binding is named by the
-// page shell, not here), a read keyed by the ROUTE id (`byId(id)` — no route on
-// a component), and a stateful component that ALSO reads (that would need
-// `ConsumerStatefulWidget`) are NOT threaded into the walker's `userComponents`,
-// so their calls fall back to the shared "unknown component" comment (never
-// broken Dart).
+// A `derived` binding rides ALL THREE shapes: it is a pure function of the
+// params (and, on the stateful shape, of `state`), so it emits as a Dart GETTER
+// on the class whose scope those names live in — the widget for the stateless /
+// consumer shapes, the `State` for the stateful one — and the body reads it
+// bare through the walker's `renderDerivedRead` seam.  Before that seam a
+// derived read was spelled `state.<name>`, a field the `<Comp>Model` data class
+// never declares, so every `derived`-bearing component was dropped WHOLE.
+//
+// An `extern` component (hand-written Dart), an async-effect action
+// (`match await`), a STORE read (the binding is named by the page shell, not
+// here), a read keyed by the ROUTE id (`byId(id)` — no route on a component), a
+// `derived` reaching for one of those same page-shell-only bindings, and a
+// stateful component that ALSO reads (that would need `ConsumerStatefulWidget`)
+// are NOT threaded into the walker's `userComponents`, so their calls fall back
+// to the shared "unknown component" comment (never broken Dart).
 
 import type {
   ComponentIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   ParamIR,
   UiApiParamIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import type { ApiCallSite } from "../_walker/target.js";
-import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
+import { type ApiHookUse, emitExpr, walkBody } from "../_walker/walker-core.js";
 import { FLUTTER_CHILD_PARAM } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
@@ -110,7 +119,9 @@ function walkComponent(
     new Map(), // paramTypes
     new Map(), // pageRoutes
     new Set(), // externFunctions
-    new Set(), // derivedNames — `candidates()` excludes derived-bearing components
+    // `derived` bindings — read BARE (a class getter, see `derivedGetters`),
+    // which is what `flutterTarget.renderDerivedRead` spells.
+    new Set(c.derived.map((d) => d.name)),
     false, // authUi
     // i18n key prefix — `component.<Name>` matches the catalog.
     ctx.i18nEnabled ? `component.${c.name}` : undefined,
@@ -146,14 +157,72 @@ function hasAsyncEffectAction(c: ComponentIR): boolean {
   return c.actions.some((a) => a.body.some((s) => s.kind === "variant-match"));
 }
 
-/** The candidate components — non-extern, no `derived`, with a body.  A `derived`
- *  binding reads as `state.<name>` which the component's Model doesn't carry, so
- *  those stay deferred.  Both stateless and stateful (`state {}` + `action`s)
- *  shapes qualify. */
+/** True when a `derived` expression reaches for a binding only a PAGE SHELL
+ *  supplies — a store member (a Riverpod provider needing a `WidgetRef`), the
+ *  route `id`, or the session `currentUser`.  A getter naming one of those would
+ *  be `Undefined name` Dart, so its component stays deferred instead.  (The
+ *  body walk has its own probes for the same three; this is the derived-side
+ *  twin, which the walk never sees.) */
+function derivedNeedsShell(e: ExprIR): boolean {
+  if (e.kind === "id") return true;
+  if (e.kind === "ref" && (e.refKind === "store-field" || e.refKind === "current-user"))
+    return true;
+  for (const v of Object.values(e)) {
+    if (Array.isArray(v)) {
+      for (const c of v)
+        if (c && typeof c === "object" && "kind" in c && derivedNeedsShell(c)) {
+          return true;
+        }
+    } else if (v && typeof v === "object" && "kind" in v && derivedNeedsShell(v as ExprIR)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The candidate components — non-extern, with a body, no async-effect action,
+ *  and no `derived` reaching for a page-shell-only binding.  All three shapes
+ *  (stateless, read-bearing consumer, stateful) carry their `derived` bindings
+ *  as class getters. */
 function candidates(components: readonly ComponentIR[]): ComponentIR[] {
   return components.filter(
-    (c) => !c.extern && c.derived.length === 0 && !hasAsyncEffectAction(c) && c.body !== undefined,
+    (c) =>
+      !c.extern &&
+      !hasAsyncEffectAction(c) &&
+      c.body !== undefined &&
+      !c.derived.some((d) => derivedNeedsShell(d.expr)),
   );
+}
+
+/** One `<DartType> get <name> => <expr>;` per `derived` binding, in declaration
+ *  order so a later one may read an earlier (Dart getters are order-free, but
+ *  the `derivedNames` scope has to grow left-to-right for the REF to resolve as
+ *  a bare name rather than a stray identifier).
+ *
+ *  Emitted on the class whose scope the expression's names live in: for the
+ *  stateless / consumer shapes that is the widget (params are its `final`
+ *  fields); for the stateful shape it is the `State` (params arrive through its
+ *  `widget.<p>` getters and `state.<f>` is its model). */
+function derivedGetters(
+  c: ComponentIR,
+  componentParams: ReadonlyMap<string, readonly ParamIR[]>,
+  ctx: ComponentWalkCtx,
+): string[] {
+  const seen = new Set<string>();
+  return c.derived.map((d) => {
+    const dctx = stateCtx({
+      stateNames: new Set(c.state.map((s) => s.name)),
+      derivedNames: new Set(seen),
+      aggregatesByName: ctx.aggregatesByName,
+      locals: new Map(),
+      paramNames: new Set(c.params.map((p) => p.name)),
+      apiParamNames: new Map(ctx.apiParams.map((p) => [p.name, p.apiName])),
+      userComponents: componentParams,
+    });
+    const line = `  ${dartType(d.type)} get ${d.name} => ${emitExpr(d.expr, dctx)};`;
+    seen.add(d.name);
+    return line;
+  });
 }
 
 /** The set of emittable components + their param lists — threaded into the page
@@ -177,15 +246,17 @@ export function emittableComponentParams(
   return out;
 }
 
-/** True when a component's fields reference a non-primitive (domain) type, so
- *  `lib/components.dart` must import `../models.dart`. */
+/** True when a component's fields — params or `derived` getter return types —
+ *  reference a non-primitive (domain) type, so `lib/components.dart` must import
+ *  `../models.dart`. */
 function needsModels(components: readonly ComponentIR[]): boolean {
   const prim = new Set(["String", "int", "double", "bool", "DateTime"]);
-  return components.some((c) =>
-    c.params.some((p) => {
-      const dt = dartType(p.type).replace(/\?$/, "");
-      return !prim.has(dt) && !dt.startsWith("List<") && dt !== "dynamic";
-    }),
+  const domain = (t: ParamIR["type"]): boolean => {
+    const dt = dartType(t).replace(/\?$/, "");
+    return !prim.has(dt) && !dt.startsWith("List<") && dt !== "dynamic";
+  };
+  return components.some(
+    (c) => c.params.some((p) => domain(p.type)) || c.derived.some((d) => domain(d.type)),
   );
 }
 
@@ -259,11 +330,16 @@ function renderStatefulComponent(
   fields: string[],
   componentParams: ReadonlyMap<string, readonly ParamIR[]>,
   ctx: ComponentWalkCtx,
+  /** `derived` getters — on the STATE class, whose scope has both the param
+   *  getters and `state`, not on the widget. */
+  derived: readonly string[],
 ): string {
   const modelClass = `${c.name}Model`;
   const stateFields = buildStateFields(c.state);
   const stateNames = new Set(c.state.map((s) => s.name));
-  const derivedNames = new Set<string>();
+  // An action body / a state init may read a `derived` binding — bare, since it
+  // is a getter on this same `State` class (`derivedGetters`).
+  const derivedNames = new Set(c.derived.map((d) => d.name));
   const paramNames = new Set(c.params.map((p) => p.name));
   const apiParamNames = new Map(ctx.apiParams.map((p) => [p.name, p.apiName]));
 
@@ -326,6 +402,7 @@ function renderStatefulComponent(
     `class ${stateClassName} extends State<${c.name}> {`,
     `  late ${modelClass} state;`,
     ...paramGetters,
+    ...derived,
     "",
     "  @override",
     "  void initState() {",
@@ -381,13 +458,18 @@ export function renderComponentsFile(
       fields.push(`  final Widget? ${FLUTTER_CHILD_PARAM};`);
     }
     const ctorArgs = ctorParts.join(", ");
+    // `derived` getters land on the class whose scope their expression reads:
+    // the widget for the stateless / consumer shapes, the `State` for a
+    // stateful one (where the params are `widget.<p>` getters and `state` is
+    // the model).
+    const derived = derivedGetters(c, componentParams, ctx);
     if (isReadConsumer(c, walked)) {
       anyConsumer = true;
-      return renderConsumerComponent(c, widget, ctorArgs, fields, walked.apiHooks);
+      return renderConsumerComponent(c, widget, ctorArgs, [...fields, ...derived], walked.apiHooks);
     }
     return isStateful(c)
-      ? renderStatefulComponent(c, widget, ctorArgs, fields, componentParams, ctx)
-      : renderStatelessComponent(c, widget, ctorArgs, fields);
+      ? renderStatefulComponent(c, widget, ctorArgs, fields, componentParams, ctx, derived)
+      : renderStatelessComponent(c, widget, ctorArgs, [...fields, ...derived]);
   });
 
   const imports = ["import 'package:flutter/material.dart';"];

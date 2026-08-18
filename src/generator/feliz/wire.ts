@@ -358,9 +358,12 @@ export function felizDeleteMutation(aggregate: string): FelizMutation {
 /** The HTML input widget a form field renders as — derived from its wire type so
  *  the browser enforces the shape at entry (`number` for numerics, a `checkbox`
  *  for bools, a `select` for enums, an `idselect` for a foreign-key `X id`
- *  populated from the target's runtime list, `text` otherwise).  The form record
- *  itself stays all-string (raw input is a string; the encoder lifts it at submit). */
-export type FelizInputKind = "text" | "number" | "checkbox" | "select" | "idselect";
+ *  populated from the target's runtime list, a `file` picker for a `File`,
+ *  `text` otherwise).  The form record is all-string EXCEPT a `file` field: a
+ *  file is not typeable, so that one cell holds the uploaded `FileRef option`
+ *  the multipart `POST /files` returned (the encoder ships the object verbatim,
+ *  never a string). */
+export type FelizInputKind = "text" | "number" | "checkbox" | "select" | "idselect" | "file";
 
 /** One field of a create form — an F# form-record field (string-typed, bound to
  *  an `Html.input`), its `Set<Form><Field>` update `Msg`, the Thoth encoder
@@ -583,9 +586,10 @@ function scalarBase(t: TypeIR): TypeIR {
 
 /** The HTML input widget a field type maps to — numerics render `type: number`,
  *  bools a `checkbox`, an enum (whose values we can resolve) a `select`, a
- *  foreign-key `X id` (whose target we can resolve) an `idselect`, everything
- *  else a plain text input.  Purely derived from the wire type (no stamped
- *  field); the form record stays all-string. */
+ *  foreign-key `X id` (whose target we can resolve) an `idselect`, a `File` a
+ *  `file` picker, everything else a plain text input.  Purely derived from the
+ *  wire type (no stamped field); the form record stays all-string apart from a
+ *  `file` field (a `FileRef option` — see `FelizInputKind`). */
 function inputKindFor(
   t: TypeIR,
   enumsByName: ReadonlyMap<string, string[]>,
@@ -603,6 +607,13 @@ function inputKindFor(
         return "number";
       case "bool":
         return "checkbox";
+      // A `File` is not typeable: it renders a file picker whose pick uploads
+      // (multipart POST /files) and whose RESULT — the `FileRef` — is what the
+      // form submits.  Without this arm the field fell to `text` and encoded
+      // `Encode.string form.<f>` — a guaranteed 422 (the backend expects the
+      // FileRef object `{ url, key, contentType, size }`).
+      case "File":
+        return "file";
       default:
         return "text";
     }
@@ -747,6 +758,13 @@ function elemEncoderFn(base: TypeIR): string {
  *  a legitimate `false`, never absent). */
 function encodeExprFor(t: TypeIR, access: string, optional = false): string {
   const base = scalarBase(t);
+  // A `File` form cell is NOT a string — it holds the `FileRef option` the
+  // upload returned, so it encodes as the FileRef OBJECT (`fileRefEncoder`) or
+  // JSON `null` when nothing has been uploaded yet.  Required-ness is enforced
+  // by the submit guard (`Validation`), not by the encoder.
+  if (base.kind === "primitive" && base.name === "File") {
+    return `(match ${access} with | Some __f -> fileRefEncoder __f | None -> Encode.nil)`;
+  }
   // A scalar array → split the comma-separated input, trim/drop blanks, encode
   // each element.  An empty input yields `[]` (never null), so it needs no
   // optional-null wrapping.
@@ -826,13 +844,20 @@ function buildFieldArray(
       const optional = vf.type.kind === "optional";
       const kind = inputKindFor(vf.type, enumsByName, idLabels);
       const eb = scalarBase(vf.type);
+      // A `File` sub-field inside a dynamic ROW keeps the v1 text degradation:
+      // the row record is all-string, and a real per-row picker needs an INDEXED
+      // upload `Cmd` (one in flight per row) — a follow-up, alongside the per-row
+      // FK select.  The FLAT form path (`buildField`) does render a real picker.
+      const rowFile = kind === "file";
       return {
         wireName: vf.name,
         setMsg: `Set${formType}${upperFirst(field.name)}${upperFirst(vf.name)}`,
         // A per-row FK select would need the target list in every row; v1 renders
         // the id as plain text instead.
-        inputKind: kind === "idselect" ? "text" : kind,
-        encodeExpr: encodeExprFor(vf.type, `row.${vf.name}`, optional),
+        inputKind: kind === "idselect" || rowFile ? "text" : kind,
+        encodeExpr: rowFile
+          ? `Encode.string row.${vf.name}`
+          : encodeExprFor(vf.type, `row.${vf.name}`, optional),
         jsonKey: vf.name,
         enumValues: kind === "select" && eb.kind === "enum" ? enumsByName.get(eb.name) : undefined,
         required: !optional,
@@ -1486,12 +1511,16 @@ const BOUND_INPUT_PRIMITIVES: ReadonlyMap<string, readonly string[]> = new Map([
   ["DataGrid", ["selection"]],
 ]);
 
-/** Collect the page `state` fields a controlled input primitive two-way-binds —
+/** Collect the `state` fields a controlled input primitive two-way-binds —
  *  deduped by name, in tree order.  Each needs a `Set<Field>` Msg + update arm
  *  (built by `renderMsg`/`renderUpdate`); the input's `onChange` dispatches it.
  *  A `bind:`/`open:` that isn't a ref to a declared `state` field is ignored (the
- *  pack renders an uncontrolled stub for it). */
-export function collectPageBoundState(page: PageIR): FelizBoundState[] {
+ *  pack renders an uncontrolled stub for it).
+ *
+ *  Takes the body + state PAIR rather than a whole `PageIR` because a walked
+ *  `component` folds into the same single Elmish program and so needs the same
+ *  Msg/update wiring for ITS controlled inputs. */
+export function collectPageBoundState(page: Pick<PageIR, "body" | "state">): FelizBoundState[] {
   if (!page.body) return [];
   const stateByName = new Map(page.state.map((s) => [s.name, s.type] as const));
   const seen = new Set<string>();
@@ -1528,11 +1557,12 @@ export interface FelizFileUpload {
   name: string;
 }
 
-/** Collect the page `state` fields a standalone `FileUpload(bind:)` primitive
- *  binds — deduped by name, in tree order.  Only a `bind:` ref to a declared
+/** Collect the `state` fields a standalone `FileUpload(bind:)` primitive binds —
+ *  deduped by name, in tree order.  Only a `bind:` ref to a declared
  *  `File`-typed `state` field is collected; anything else is ignored (the pack
- *  renders an uncontrolled stub for it, so the page still compiles). */
-export function collectPageFileUploads(page: PageIR): FelizFileUpload[] {
+ *  renders an uncontrolled stub for it, so the page still compiles).  Takes the
+ *  body + state pair for the same reason `collectPageBoundState` does. */
+export function collectPageFileUploads(page: Pick<PageIR, "body" | "state">): FelizFileUpload[] {
   if (!page.body) return [];
   const fileState = new Set(page.state.filter((s) => typeIsFile(s.type)).map((s) => s.name));
   const seen = new Set<string>();
@@ -1565,10 +1595,35 @@ export function fileUploadedMsg(name: string): string {
   return `${upperFirst(name)}Uploaded`;
 }
 
+/** Msg case a FORM's `File` field raises when a file is picked — the form-scoped
+ *  sibling of `fileSelectMsg` (`AttachmentForm` + `attachment` →
+ *  `SelectAttachmentFormAttachmentFile`), carrying the picked
+ *  `Browser.Types.File`.  Derived from the same (formType, wireName) pair the
+ *  field's `setMsg` is, so the Msg/update/view sites agree by construction. */
+export function formFileSelectMsg(formType: string, wireName: string): string {
+  return `Select${formType}${upperFirst(wireName)}File`;
+}
+
+/** Msg case carrying a FORM `File` field's upload result (`AttachmentForm` +
+ *  `attachment` → `AttachmentFormAttachmentUploaded`), `Result<FileRef, string>`
+ *  — the form-scoped sibling of `fileUploadedMsg`. */
+export function formFileUploadedMsg(formType: string, wireName: string): string {
+  return `${formType}${upperFirst(wireName)}Uploaded`;
+}
+
+/** True when any form carries a `File` field — the gate for the `FileRef`
+ *  record/encoder/decoder + `Api.uploadFile`, exactly as a standalone
+ *  `FileUpload(bind:)` gates them (both go through the same multipart upload). */
+export function formsHaveFileField(forms: readonly FormRecord[]): boolean {
+  return forms.some((f) => f.fields.some((fld) => fld.inputKind === "file"));
+}
+
 /** The fixed `FileRef` wire record (`{ url, key, contentType, size }`) + its
- *  Thoth decoder — emitted once when a ui has any `File`-typed page state, so
- *  the `File` Model field (`FileRef option`) + `Api.uploadFile` typecheck.  The
- *  shape is fixed (mirrors the backend `POST /files` 201 body). */
+ *  Thoth decoder AND encoder — emitted once when a ui has any `File`-typed page
+ *  state / form field / wire field, so the `File` Model cell (`FileRef option`),
+ *  `Api.uploadFile`, and the form encoders typecheck.  The shape is fixed
+ *  (mirrors the backend `POST /files` 201 body, the one wire contract every
+ *  backend's File column round-trips). */
 export function renderFileRefType(): string {
   return lines(
     "// File upload — the fixed FileRef wire shape returned by POST /files.",
@@ -1588,6 +1643,14 @@ export function renderFileRefType(): string {
     '      contentType = get.Required.Field "contentType" Decode.string',
     '      size = get.Required.Field "size" Decode.int',
     "    })",
+    "",
+    "let fileRefEncoder (f: FileRef) : JsonValue =",
+    "  Encode.object [",
+    '    "url", Encode.string f.url',
+    '    "key", Encode.string f.key',
+    '    "contentType", Encode.string f.contentType',
+    '    "size", Encode.int f.size',
+    "  ]",
   );
 }
 
@@ -2560,9 +2623,24 @@ export function renderApiModule(
   );
 }
 
+/** The F# type of a form-record cell — `string` for every typeable field (bound
+ *  to an `Html.input`, lifted by the encoder at submit) and `FileRef option` for
+ *  a `file` field, whose value is the uploaded reference rather than anything
+ *  the user typed. */
+function formFieldFsType(fld: FelizFormField): string {
+  return fld.inputKind === "file" ? "FileRef option" : "string";
+}
+
+/** The `empty<Form>` seed for a form-record cell — `None` for a `file` field (no
+ *  upload yet), else the field's `emptyValue` string literal. */
+function formFieldEmpty(fld: FelizFormField): string {
+  return fld.inputKind === "file" ? "None" : JSON.stringify(fld.emptyValue);
+}
+
 /** Emit the form record types + their `empty<Form>` values — every field is a
- *  `string` (bound to an `Html.input`, encoded at submit).  Shared by create +
- *  operation forms (both `FormRecord`). */
+ *  `string` (bound to an `Html.input`, encoded at submit) except a `File` field,
+ *  which holds the uploaded `FileRef option`.  Shared by create + operation
+ *  forms (both `FormRecord`). */
 export function renderFormTypes(forms: FormRecord[]): string {
   if (forms.length === 0) return "";
   // Dynamic-row element records (`type LineItemRow = { … }` + `emptyLineItemRow`),
@@ -2589,22 +2667,24 @@ export function renderFormTypes(forms: FormRecord[]): string {
     }
   }
   return lines(
-    "// Form state — each field a string (bound to Html.input); array-of-VO fields",
-    "// hold a list of string-typed row records (a repeatable sub-form).",
+    "// Form state — each field a string (bound to Html.input) except a File field",
+    "// (the uploaded FileRef option); array-of-VO fields hold a list of",
+    "// string-typed row records (a repeatable sub-form).",
     ...rowTypeDecls,
     ...forms.flatMap((f, i) => [
       i > 0 || rowTypeDecls.length > 0 ? "" : undefined,
       `type ${f.formType} =`,
       "  {",
-      ...f.fields.map((fld) => `    ${fld.wireName}: string`),
+      ...f.fields.map((fld) => `    ${fld.wireName}: ${formFieldFsType(fld)}`),
       ...f.fieldArrays.map((fa) => `    ${fa.fieldName}: ${fa.rowType} list`),
       "  }",
       "",
       `let ${f.emptyBinding} : ${f.formType} =`,
       "  {",
       // Most fields start empty; a required enum starts at its first value (its
-      // `<select>` always has a selection); an array field starts empty.
-      ...f.fields.map((fld) => `    ${fld.wireName} = ${JSON.stringify(fld.emptyValue)}`),
+      // `<select>` always has a selection); a File field starts `None` (nothing
+      // uploaded); an array field starts empty.
+      ...f.fields.map((fld) => `    ${fld.wireName} = ${formFieldEmpty(fld)}`),
       ...f.fieldArrays.map((fa) => `    ${fa.fieldName} = []`),
       "  }",
     ]),
@@ -2668,6 +2748,17 @@ export function renderEncoders(forms: FormRecord[]): string {
   );
 }
 
+/** The "this required field is still unfilled" predicate for a form cell —
+ *  blank/whitespace for a string cell, `None` for a `file` cell (whose value is
+ *  a `FileRef option`, so `IsNullOrWhiteSpace` would not even typecheck).  Both
+ *  the whole-form submit guard (negated) and the per-field inline error read it,
+ *  so they can't disagree. */
+function emptyPredicate(fld: FelizFormField): string {
+  return fld.inputKind === "file"
+    ? `Option.isNone form.${fld.wireName}`
+    : `System.String.IsNullOrWhiteSpace form.${fld.wireName}`;
+}
+
 /** Emit the `Validation` module — one `<form>Valid` predicate per form, true
  *  when every REQUIRED text/number field is non-empty.  Optional fields and
  *  checkbox (bool) fields are excluded: an optional field left empty encodes to
@@ -2689,14 +2780,12 @@ export function renderValidation(forms: FormRecord[]): string {
       const required = requiredValidatedFields(f);
       const body =
         required.length > 0
-          ? required
-              .map((fld) => `not (System.String.IsNullOrWhiteSpace form.${fld.wireName})`)
-              .join(" && ")
+          ? required.map((fld) => `not (${emptyPredicate(fld)})`).join(" && ")
           : "true"; // nothing required (all optional / bool) → always submittable
       const errorFns = required.flatMap((fld) => [
         "",
         `  let ${fieldErrorFn(f.formType, fld.wireName)} (form: ${f.formType}) : string option =`,
-        `    if System.String.IsNullOrWhiteSpace form.${fld.wireName} then Some "Required" else None`,
+        `    if ${emptyPredicate(fld)} then Some "Required" else None`,
       ]);
       return [
         i > 0 ? "" : undefined,

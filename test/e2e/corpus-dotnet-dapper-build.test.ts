@@ -44,12 +44,42 @@ const CASE = process.env.LOOM_CORPUS_DAPPER_CASE;
 // Each entry is a precise, reproducible bug report; widen the gate by FIXING
 // the emitter and dropping the entry.  Ratcheted by `allowlist-ratchet.test.ts`
 // so this map can only shrink.
-// EMPTY, and DRAINED rather than reclassified.  Both entries were the same bug —
-// query-time projection handlers were EF-LINQ over `AppDbContext`, so a
-// `persistence: dapper` project referenced a type it did not have — and M-T6.25
-// ported those handlers to raw Npgsql, so both fixtures now generate, compile
-// and answer correctly on this adapter.
-const DAPPER_COMPILE_SKIP: Record<string, string> = {};
+// Was EMPTY and DRAINED (both former entries were the same query-time-projection
+// bug, ported to raw Npgsql by M-T6.25).  0 -> 1: `policy-document` joined the
+// manifest's `dotnet` row once the EF document repository grew its capability
+// filter + write-scope member, and enrolling it here surfaced the SAME class of
+// bug on the Dapper adapter — silently, exactly like the pre-M-T6.25 one:
+// codegen is clean, the IR validator says nothing (`validateCorpusCase` under
+// `dapper` raises no diagnostic at all — the oracle below proves it), and only
+// the C# compiler objects.
+const DAPPER_COMPILE_SKIP: Record<string, string> = {
+  // Two independent EF leaks in the Dapper document/hierarchy path, both
+  // reproduced with `LOOM_DOTNET_BUILD=1 LOOM_CORPUS_DAPPER_CASE=policy-document`:
+  //
+  //   1. `Infrastructure/Persistence/EfOrgPathResolver.cs` is emitted whatever
+  //      the persistence adapter is — it opens `using Microsoft.EntityFrameworkCore;`
+  //      and takes an `AppDbContext`, neither of which a `persistence: dapper`
+  //      project has.  CS0234 + 2x CS0246.  This fixture is the adapter's first
+  //      witness: the resolver only appears with a `tenantRegistry` TREE, and
+  //      the only other fixture carrying one (`tenancy-hierarchy`) never
+  //      reaches the compiler here — it is in DAPPER_UNSUPPORTED below.
+  //   2. `Infrastructure/Repositories/ThingRepository.cs` (the DAPPER document
+  //      repository) does not implement `GetByIdForWriteAsync`, so the `allow`
+  //      ladder's write-scope port member is unimplemented — CS0535.  This is
+  //      the same defect the EF document repository fixed (`writeScopeMethod`
+  //      in `src/generator/dotnet/emit/repository.ts`); the fix simply never
+  //      reached the Dapper twin.
+  //
+  // Widen the gate by porting both to the Dapper adapter and dropping this
+  // entry.  Until then the fixture still gates the EF leg (`test:dotnet-corpus`
+  // compiles it clean under /warnaserror) and all four in-app-filter backends.
+  "policy-document":
+    "dapper leaks EF into the hierarchy/document path: EfOrgPathResolver.cs is emitted " +
+    "unconditionally and references Microsoft.EntityFrameworkCore + AppDbContext (CS0234/CS0246), " +
+    "and the dapper document repository omits the `GetByIdForWriteAsync` write-scope member the " +
+    "`allow` ladder adds (CS0535 — the EF twin's fix never reached this adapter).  Silent: " +
+    "generation and the IR validator are both clean.",
+};
 
 // Features the IR validator HONESTLY rejects under dapper — not a gap, a
 // documented capability boundary (`loom.dapper-unsupported`).  These never

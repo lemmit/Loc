@@ -80,7 +80,14 @@ const SENTINELS: ReadonlyArray<{ label: string; re: RegExp }> = [
   // component, and a registered primitive with no renderer on this target.
   { label: "unknown layout component", re: /unknown layout component:\s*(\w+)/g },
   { label: "unknown page element", re: /unknown page element:\s*(\w+)/g },
-  { label: "primitive not supported", re: /not supported by the \w+ walker yet/g },
+  // Both spellings of `walk()`'s "registered primitive, no renderer here" arm:
+  // the shared `walker-core.ts` comment (`not supported by the walker yet` —
+  // it used to say "the React walker" even on Vue/Svelte/Angular/Feliz/Flutter)
+  // and `heex-walker-core.ts`'s LiveView wording.
+  {
+    label: "primitive not supported",
+    re: /not supported by (?:the (?:\w+ )?walker yet|Phoenix LiveView target)/g,
+  },
 ];
 
 /**

@@ -37,7 +37,7 @@ Parallel agents collide. The defence is the same one humans use: **announce inte
 
 ## What this is
 
-**Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView on plain Ecto/Phoenix, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and six frontends (React/Vite, Vue 3/Vite, Svelte/SvelteKit, Angular, Feliz F#/Fable/Elmish, Flutter/Dart+Riverpod) are supported. An `auth { oidc { … } }` block generates a full OIDC authorization-code flow (PKCE, refresh-token rotation, silent renewal) on all five backends (`docs/auth.md`, D-AUTH-OIDC); on top of it sits a full **authorization layer** — a typed `permissions { … }` catalogue (with `implies` grant closure), `policy { … }` record-level read ladders and named policy functions, `requires <expr>` gates on operations/finds/views/workflows/pages, and `mask unless` field read-redaction against a typed `currentUser` principal (all five backends; `docs/auth.md`; the `write(...)`/`readonly when` write-side field gates were reverted in #2257 — redundant with a row-aware `requires` on the operation). `tenancy by user.<claim> of <Registry>` plus the `tenantOwned`/`tenantRegistry` capabilities generate multi-tenant isolation including hierarchical (subtree) scoping (`docs/tenancy.md`). An **i18n layer** (M-T1.11, in progress but well past foundation) extracts every user-visible string — page/component/menu literals, backtick-template interpolations lowered to ICU, design-pack chrome, and `message "..."` clauses on invariants/checks/preconditions — into a content-hash-keyed catalog (`.loom/messages.en.json`, keys per D-I18N-KEY); the generated frontends translate through a `t()` runtime (all six), the backends resolve 422 `errors[].message` through a per-backend validation catalog keyed by the same `msg.<hash>` codes against `RequestContext.locale`, and `ddd i18n sync` gives translators a three-way merge workflow (design record: `docs/old/proposals/i18n.md` + `i18n-strings.md`; live status: `docs/new-plan/T1-ui-frontend.md` § M-T1.11).
+**Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView on plain Ecto/Phoenix, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and six frontends (React/Vite, Vue 3/Vite, Svelte/SvelteKit, Angular, Feliz F#/Fable/Elmish, Flutter/Dart+Riverpod) are supported. Feature areas, each with its own reference doc: OIDC auth + the authorization layer (`permissions`/`policy`/`requires`/`mask unless`) — [`docs/auth.md`](docs/auth.md); multi-tenant isolation incl. hierarchical scoping — [`docs/tenancy.md`](docs/tenancy.md); the i18n string-catalog layer (`t()` runtime, `msg.<hash>` validation catalog, `ddd i18n sync`) — [`docs/new-plan/T1-ui-frontend.md`](docs/new-plan/T1-ui-frontend.md) § M-T1.11. Per-feature status belongs in `docs/new-plan/`, not here — it goes stale fastest.
 
 The package name in `package.json` is `loc-ddd-dsl`; the CLI binary is `ddd`; the working name everywhere in docs and code is "Loom".
 
@@ -58,146 +58,22 @@ npm run prepare              # = langium:generate && build && build:web; runs on
 
 ### Tests
 
-The default `npm test` excludes the slow opt-in suites below. Run a single test by path:
-
 ```bash
-npm test                                   # fast vitest suite (~all unit + IR + generator tests)
+npm test                                   # fast vitest suite (unit + IR + generator); excludes every slow suite
 npm run test:watch                         # same, watch mode
 npx vitest run test/parsing.test.ts        # one suite
 npx vitest run -t "test name pattern"      # filter by name
-
-# Opt-in slow suites (each gated on a LOOM_* env var; default `npm test` excludes them):
-npm run test:e2e          # LOOM_E2E=1 — boots docker-compose stack + hits /health + runs DSL e2e + Playwright UI + OpenAPI parity diff
-npm run test:tsc          # LOOM_TS_BUILD=1 — emits TS projects and runs `tsc --noEmit` against them
-npm run test:tsc-react    # LOOM_REACT_BUILD=1 — emits React projects for every example × design pack and tscs them
-                          # CI shards via LOOM_REACT_BUILD_CASE=<ddd-path>:<pack>
-npm run test:svelte-build # LOOM_SVELTE_BUILD=1 — emits SvelteKit projects (examples × svelte packs), svelte-checks + vite-builds them
-                          # CI shards via LOOM_SVELTE_BUILD_CASE=<ddd-path>:<pack>
-npm run test:vue-build    # LOOM_VUE_BUILD=1 — {minimal,scaffold,showcase} × {vuetify,shadcnVue}: vue-tsc + vite build
-                          # CI shards via LOOM_VUE_BUILD_CASE=<case>:<pack>
-npm run test:angular-build # LOOM_ANGULAR_BUILD=1 — `ng build` over the Angular case × pack matrix (shard via LOOM_ANGULAR_BUILD_CASE)
-npm run test:react-e2e    # LOOM_REACT_E2E=1 — RUNTIME e2e: vite build + `vite preview` + emitted Playwright smoke spec
-                          # (pure client-side; pack via LOOM_REACT_E2E_PACK). Vue/Svelte/Angular siblings:
-npm run test:vue-e2e      # LOOM_VUE_E2E=1 (pack via LOOM_VUE_E2E_PACK)
-npm run test:svelte-e2e   # LOOM_SVELTE_E2E=1
-npm run test:angular-e2e  # LOOM_ANGULAR_E2E=1 (pack via LOOM_ANGULAR_E2E_PACK)
-npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
-npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 25 + Gradle 9.1+)
-npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
-npm run test:phoenix      # LOOM_PHOENIX_VANILLA_BUILD=1 — `mix compile --warnings-as-errors` against plain Ecto/Phoenix in Elixir docker
-
-# Corpus compile gates — every feature fixture in test/fixtures/corpus/*.ddd (feature list from the typed
-# manifest test/fixtures/corpus/manifest.ts, minus each backend's COMPILE_SKIP map) compiled per backend:
-npm run test:tsc-corpus     # LOOM_TS_BUILD=1  (per-feature shard via LOOM_CORPUS_<BACKEND>_CASE)
-npm run test:dotnet-corpus  # LOOM_DOTNET_BUILD=1
-npm run test:dapper-corpus  # LOOM_DOTNET_BUILD=1 — same fixtures with persistence: dapper forced
-npm run test:java-corpus    # LOOM_JAVA_BUILD=1
-npm run test:python-corpus  # LOOM_PYTHON_BUILD=1
-npm run test:elixir-corpus  # LOOM_ELIXIR_BUILD=1 — mix compile per feature in the hexpm/elixir image (needs LOOM_HEX_MIRROR)
-
-# Tenancy runtime e2e — flat isolation + registry self-scope/signup bootstrap, all five backends
-# (shared harness; docker postgres sidecar, or LOOM_TENANCY_PG_URL to skip it):
-npm run test:tenancy               # LOOM_TENANCY_E2E=1 — Hono
-npm run test:tenancy-{python,java,dotnet,elixir}   # LOOM_TENANCY_E2E_<BACKEND>=1 — same assertions per backend
-# Hierarchy siblings (tenantRegistry TREE: materialized-path setPath + per-request orgPath resolver + row stamp
-# + descendant-or-self predicate must AGREE → subtree-scoped reads):
-npm run test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir}
-
-# Migration-evolution runtime e2e — proves migrations EVOLVE on data, not just emit/first-boot: per SQL
-# backend, (1) migrate-chain schema ≡ fresh-create schema, and (2) seed v1 → evolve .ddd → forward-migrate
-# → the row survives with correct values (rename preserved, backfill populated, nullable add NULL).  Shared
-# harness (one pg server, chain+fresh DBs, order-independent schema fingerprint via host psql):
-npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}   # LOOM_MIGRATION_E2E[_<BACKEND>]=1
-
-# Schema-load gate — does the emitted DDL actually LOAD?  The compile tiers are blind to the
-# emitted SCHEMA (it is data, not code), so a chain Postgres will refuse still compiles green on
-# every backend (G2/#2316).  Generates every corpus fixture and `psql -f`s its migration chain into
-# a throwaway db — nothing compiled, nothing booted.  One db per (fixture, deployable), matching how
-# compose provisions them.  node only: MigrationsIR + sql-pg.ts are shared, so one chain covers the
-# derivation python/java also emit from.  Runs per-PR (schema-load.yml), not behind a label.
-npm run test:schema-load           # LOOM_SCHEMA_LOAD=1 (docker sidecar, or LOOM_MIGRATION_PG_URL)
-
-# Spec-driven contract fuzzing (M-T9.21) — boots the generated Hono backend on PGlite over a real
-# port and feeds it its OWN emitted /openapi.json to Schemathesis: never a 500, responses conform to
-# the declared schema, declared required/format/enum/bounds honored.  Known findings are ratcheting
-# ROOT-CAUSE rules in test/behavioral/schemathesis-waivers.json (unattributed finding fails the run;
-# a rule that stops reproducing fails it too), documented in docs/audits/schemathesis-findings-2026-08.md.
-# Needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`.  ~1 min; nightly in CI.
-npm run test:schemathesis          # LOOM_SCHEMATHESIS=1 (node/Hono leg; other four backends are follow-ups)
-
-# Channels runtime e2e — cross-deployable eventing (redis/rabbitmq/kafka, CloudEvents + outbox relay);
-# per-broker × per-backend legs, each behind its own LOOM_CHANNELS_E2E[_<BROKER>][_<BACKEND>] var:
-npm run test:channels                                    # redis, Hono
-npm run test:channels-{python,dotnet,java,elixir}        # redis, other backends
-npm run test:channels-rabbit{,-python,-dotnet,-java,-elixir}
-npm run test:channels-kafka{,-python,-dotnet,-java,-elixir}
-npm run test:channels-auth                               # broker-auth variant
-
-npm run test:api-call     # LOOM_API_CALL_E2E=1 — typed in-system `api` call between deployables, runtime round-trip
-
-# Email runtime e2e — workflow `mail.send(...)` delivered to a Mailpit sidecar (from/to/subject/body
-# asserted via its REST inbox), all five backends:
-npm run test:email{,-python,-dotnet,-java,-elixir}       # LOOM_EMAIL_E2E[_<BACKEND>]=1
-
-# Auth/OIDC runtime e2e — generated OIDC code flow (PKCE + refresh rotation) against dockerized Keycloak:
-npm run test:auth-e2e              # LOOM_AUTH_E2E=1 — Hono, native boot
-npm run test:auth-e2e-{dotnet,java,python}         # LOOM_AUTH_E2E_<BACKEND>=1 — native per backend
-npm run test:auth-e2e-compose      # LOOM_AUTH_E2E_COMPOSE=1 — full generated docker-compose stack + bundled dev Keycloak
-npm run test:auth-e2e-phoenix      # LOOM_AUTH_E2E_PHOENIX=1 — the Phoenix compose sibling
-
-npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
-npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
-npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX_VANILLA=1 — same for the Phoenix backend (postgres sidecar via docker)
-npm run test:obs-java     # LOOM_OBS_E2E_JAVA=1 — same for the Java backend (docker postgres, or LOOM_OBS_PG_URL override)
-npm run test:obs-python   # LOOM_OBS_E2E_PYTHON=1 — same for the Python backend (docker postgres, or LOOM_OBS_PG_URL override)
-npm run test:phoenix-ui-e2e # LOOM_PHOENIX_UI_E2E=1 — LiveView UI smoke against the booted Phoenix backend
-npm run test:biome-gen    # LOOM_BIOME=1 — Biome lint against emitted TS/TSX (already run in `test.yml`)
-npm run test:contrast     # per-pack WCAG-AA design-token contrast gate (runs in test.yml's lint job)
-npm run test:k8s          # LOOM_K8S=1 — `generate system --k8s` → helm lint + helm template | kubeconform (+ raw k8s/); needs helm + kubeconform on PATH
-npm run test:k8s-e2e      # cluster smoke — install ONE backend's chart (per-deployable enabled toggle) into a kind cluster + throwaway postgres, assert it boots + /ready + real read (findAll GET) AND write (POST a fixture body → 201 → read back) round-trips; parametrized SMOKE_DDD/SMOKE_BACKEND/SMOKE_FIXTURE (k8s-e2e.yml fans it across backends as a matrix); needs kind + kubectl + helm + docker (run `kind create cluster` first)
 ```
 
-**Behavioral tier — now ALL FIVE backends (plus a UI tier)** — runs the DSL-emitted `test e2e` (api) + `test` (unit) suites against a booted GENERATED backend, promoting the behavioral domain layer (otherwise nightly-docker-only in `conformance-full`) to a fast per-PR gate. The Hono leg boots on PGlite in-process (no docker, reusing the playground's runners `web/src/testing/*`, `web/src/runtime/ddl.ts`); the cross-backend legs re-point the same backend-agnostic emitted api suite at a real booted process (postgres sidecar; `LOOM_BH_{PY,DOTNET,JAVA,ELIXIR}_BASE` dispatches at an already-running server). Not part of `npm test` (own pinned deps — zod 3 etc.):
+Every slower tier is opt-in behind its own `LOOM_*` env var and has an `npm run test:*`
+script — `jq -r '.scripts | keys[]' package.json | grep '^test'` lists all 88. For the
+catalog (what each tier proves, the corpus/behavioral/runtime-e2e legs, the wire-golden
+differential) and the Docker recipes for compiling each generated backend locally, invoke
+the **`loom-test-suites`** skill; tier-placement guidance is [`docs/testing.md`](docs/testing.md).
 
-```bash
-cd test/behavioral && npm ci
-node run.mjs          # Hono on PGlite — api + unit both gate (see test/behavioral/README.md)
-node run-python.mjs   # generated FastAPI    (behavioral-e2e-python.yml)
-node run-dotnet.mjs   # generated .NET/EF    (behavioral-e2e-dotnet.yml)
-node run-dapper.mjs   # generated .NET/Dapper — run-dotnet with persistence: dapper forced (behavioral-e2e-dapper.yml)
-node run-java.mjs     # generated Spring Boot (behavioral-e2e-java.yml)
-node run-elixir.mjs   # generated Phoenix    (behavioral-e2e-elixir.yml)
-node run-mikroorm.mjs # generated Hono on the MikroORM persistence adapter (persistence: mikroorm) — real Postgres boot, api tier only (behavioral-e2e-mikroorm.yml; LOOM_BH_MIKRO_BASE)
-node run-ui.mjs       # UI tier — vite-built React/Mantine frontend + Hono-on-PGlite origin, emitted *.ui.spec.ts Playwright round-trips (behavioral-ui-e2e.yml; non-React frontends run nightly via frontend-fullstack-e2e.yml)
-```
-
-Every one of those runner legs ALSO gates the **cross-backend runtime wire differential** (M-T9.11): each records its requests at its single `fetch` chokepoint and diffs the normalized responses against the committed canonical goldens in `test/behavioral/wire-golden/` (README there). A golden is a reviewed ANSWER KEY, not a majority vote — so the diff names a winner, and because A≡golden ∧ B≡golden ⇒ A≡B the five-way differential becomes five independent per-PR gates at zero new CI boot cost. Known divergences are explicit, ratcheting waivers in `test/_helpers/wire-waivers.ts`. Rebaseline deliberately with `LOOM_WIRE_UPDATE=1 node run.mjs` (node is the oracle) and review the golden diff as the wire-contract change it is; `LOOM_WIRE_OFF=1` is a local-debug escape hatch.
-
-`test/behavioral/corpus.json` is the curated allowlist of BROAD multi-aggregate systems (single-`platform: node`-backend each, so dispatch is unambiguous; UI variants tagged `uiTier: "nightly"`); per-FEATURE cases come from the typed corpus manifest `test/fixtures/corpus/manifest.ts` instead.
-
-`LOOM_E2E_CA_DIR=<dir-of-*.crt>` injects custom CAs when running the e2e suite behind a TLS-intercepting proxy.
-
-### Docker (running the container-backed suites)
-
-**Docker is runnable in the remote/sandbox environment** — the Docker-backed suites above (`test:e2e`, `test:phoenix`, the `obs-*` / `auth-e2e-*` legs, `test:k8s-e2e`) are *not* off-limits. The container ships the Docker **client** but **no running daemon by default, and the daemon is intentionally not auto-started** — bring it up yourself when a task needs it:
-
-```bash
-dockerd >/tmp/dockerd.log 2>&1 &     # root + passwordless sudo; backgrounded
-until docker info >/dev/null 2>&1; do sleep 1; done   # readiness gate
-```
-
-It does **not** persist — if `docker info` starts failing mid-session, just relaunch it (the daemon process gets reaped). Image pulls from Docker Hub / `mcr.microsoft.com` work through the standard egress.
-
-**Every backend target compiles locally without waiting on CI** (verified end-to-end here — generate → compile):
-
-- **Java** — the generated projects target a **Java 25** toolchain (needs Gradle 9.1+). The sandbox host ships JDK 21 + Gradle 8.14, which **cannot** build them, so build in the `gradle:9-jdk25` container (matches the emitted Dockerfile): `docker run --rm --network host -v <deployable>:/src -w /src -v /root/.ccr:/root/.ccr:ro -e JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS" gradle:9-jdk25 gradle --no-daemon testClasses bootJar`. (CI installs JDK 25 + a pinned Gradle 9.6.1 via `gradle/actions/setup-gradle`.)
-- **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:10.0` container (matches the `net10.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
-- **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the `hexpm/elixir` image, against plain Ecto/Phoenix.
-- **Python** — `uv sync` + ruff + mypy + pytest on the host.
-
-The fast recipe for spot-checking a backend by hand: `node bin/cli.js generate system <f.ddd> -o out`, then run that backend's compiler (host for Java/.NET/Python, `docker run … hexpm/elixir … 'mix deps.get && mix compile'` for Phoenix).
-
-**Egress proxy wrinkle (Elixir only):** some proxies allowlist by *TLS fingerprint* — system OpenSSL (curl/.NET/Gradle/Python `ssl`) passes, but Erlang/OTP's `:ssl` gets a bare HTTP 503, so `mix deps.get` can't reach hex.pm from the container. Set **`LOOM_HEX_MIRROR=1`** to route hex.pm through a loopback TLS-terminating mirror (`scripts/hex-mirror.py` via `test/e2e/support/hex-mirror.ts`) that re-originates with the accepted fingerprint — `LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix` then runs green. Needs `python3` + `openssl` and the privilege to bind `:443`. Unset, it's a no-op (CI runners have direct hex.pm access). Full write-up: [`docs/tools.md`](docs/tools.md) → "Compiling generated backends in Docker"; gotcha log in `experience_gathered.md` §14.
+**Docker is runnable in the remote/sandbox environment** but the daemon is not auto-started
+(`dockerd >/tmp/dockerd.log 2>&1 &`, then poll `docker info`). It does not persist — relaunch
+it if `docker info` starts failing mid-session.
 
 ### CLI
 
@@ -243,7 +119,7 @@ This is **test-enforced**, not just convention: `test/platform/pipeline-layering
 
 The lowering phase has two sub-passes, both driven by `lowerModel`:
 
-- **⑤a** `src/ir/lower/lower.ts` — structural walk (`lowerModel` / `lowerProject` / `lowerSystem` / `lowerContext` / `lowerAggregate`, etc.). Never descends into expressions. `lower.ts` is an **orchestrator** (~1.6k LOC): the per-declaration-kind lowerers live in sibling leaf modules it imports — `lower-platform.ts` (design/platform qualification), `lower-requirements.ts`, `lower-capabilities.ts` (filter/stamp/implements collection), `lower-members.ts` (shared field/derived/invariant/function/containment + operation/create/destroy/apply action bodies), `lower-deployment.ts`, `lower-ui.ts`, `lower-workflow.ts`, `lower-auth.ts`, `lower-projection.ts`, `lower-domain-service.ts`, `lower-test.ts` (unit-test `test "…" { … }` blocks) — plus shared IR-layer helper leaves the lowerers import (`repo-read.ts` — the single "is this a repository read" detector; `id-follow.ts` — cross-aggregate bulk-load / join planning; `origin.ts` — macro-origin + `$cstNode` span capture into the `OriginRef` chain). The graph is acyclic: leaves never import `lower.ts`; the only public exports (`lowerModel`/`lowerProject`/`mergeLoomModels`) stay in `lower.ts`. The post-lowering scaffold passes (non-constructible-page drop, emit-path + detail-`id` side effects) classify each page on demand from its role-scoped name + area via `classifyPage` (`src/ir/util/page-kind.ts`) — there is no stamped page `origin`/`source`, and the scaffold pages (dashboards included) already carry their full body from the macro, so there is no inline-primitive expansion sub-pass.
+- **⑤a** `src/ir/lower/lower.ts` — structural walk (`lowerModel` / `lowerProject` / `lowerSystem` / `lowerContext` / `lowerAggregate`, etc.). **Never descends into expressions.** `lower.ts` is an **orchestrator** (~1.6k LOC): one sibling leaf module per declaration kind (`lower-members.ts`, `lower-ui.ts`, `lower-workflow.ts`, …), plus shared IR-layer helper leaves the lowerers import (`repo-read.ts` — the single "is this a repository read" detector; `id-follow.ts` — cross-aggregate bulk-load / join planning; `origin.ts` — macro-origin + `$cstNode` span capture). The graph is acyclic: leaves never import `lower.ts`; the only public exports (`lowerModel`/`lowerProject`/`mergeLoomModels`) stay in `lower.ts`. The post-lowering scaffold passes (non-constructible-page drop, emit-path + detail-`id` side effects) classify each page on demand from its role-scoped name + area via `classifyPage` (`src/ir/util/page-kind.ts`) — there is no stamped page `origin`/`source`, and the scaffold pages (dashboards included) already carry their full body from the macro, so there is no inline-primitive expansion sub-pass.
 - **⑤b** `src/ir/lower/lower-expr.ts` + `lower-stmt.ts` + `lower-types.ts` — expressions, statements, types, name resolution, member typing. `lower.ts` (and the ⑤a sibling leaves) import from these; they never import from `lower.ts`.
 
 After lowering, `src/ir/enrich/` (`enrichments.ts` + `wire-projection.ts`) runs **one pure pass** (phase ⑥) that derives:
@@ -257,7 +133,7 @@ After lowering, `src/ir/enrich/` (`enrichments.ts` + `wire-projection.ts`) runs 
 
 The output is a branded `EnrichedLoomModel` — the validator, system orchestrator, and generators all take `EnrichedLoomModel` / `EnrichedBoundedContextIR` / `EnrichedAggregateIR` at their entry points, so an un-enriched IR fails to type-check rather than getting silently passed through with a `wireShape!` cast.
 
-Then `src/ir/validate/validate.ts` runs phase ⑦ — cross-aggregate / multi-file IR-level checks that need the fully-resolved, enriched IR. `validate.ts` is a thin orchestrator (`validateLoomModel`) that fans out to ~17 per-theme leaf modules under `src/ir/validate/checks/` (`system-checks` / `query-checks` / `test-checks` / `workflow-checks` / `structural-checks` / `api-checks` / `capability-checks` / `tenancy-checks` / `projection-checks` / `domain-service-checks` / `migration-checks` / `store-checks` / `timer-checks` / `ui-checks` / `index-suggestion-checks`, plus `shared.ts` helpers and `diagnostic.ts` for the `LoomDiagnostic` type); `firstNonQueryableNode` + `LoomDiagnostic` are re-exported from `validate.ts` so its public surface is unchanged.
+Then `src/ir/validate/validate.ts` runs phase ⑦ — cross-aggregate / multi-file IR-level checks that need the fully-resolved, enriched IR. `validate.ts` is a thin orchestrator (`validateLoomModel`) that fans out to ~17 per-theme leaf modules under `src/ir/validate/checks/`, plus `shared.ts` helpers and `diagnostic.ts` for the `LoomDiagnostic` type; `firstNonQueryableNode` + `LoomDiagnostic` are re-exported from `validate.ts` so its public surface is unchanged.
 
 **Diagnostic wording lives in one catalog.** Every `loom.*` diagnostic the user can see — raised by the macro expander (`src/macros/expander.ts`, phase ②), the AST validators (`src/language/validators/`), these IR check leaves, or the `src/api/` toolkit entry points — takes its human-readable text from `src/diagnostics/messages.ts` — keyed by the stable `loom.*` code (plus a `#<slug>` when one code carries several messages), with the call site passing `diagMessage(key, params)` and still attaching the bare `code`. Add a message there, not inline; `test/system/diagnostic-catalog.test.ts` fails on an inline literal, on a key that belongs to a different code, and on an orphaned entry.
 
@@ -296,28 +172,24 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 
 | Path | What lives here |
 |---|---|
-| `src/` | The Loom toolchain (compiler, generators, CLI). |
 | `src/language/generated/` | **Committed** `langium generate` output — parser, AST types, reflection. Regenerate and commit after a grammar edit; `langium-generated.yml` guards it against drift. Must exist before `tsc` runs. |
 | `src/language/print/` | AST → `.ddd` source printer (`printExpr` / `printStmt` / `printStructural`).  Drives the LSP "unfold macro" code action (`src/language/lsp/unfold-macro.ts`), which rewrites a `with X(...)` clause into its expanded source in place. Each printer dispatches on `node.$type` and throws on an unhandled type; `test/language/print/print-completeness.test.ts` pins all three against the grammar's printable unions (via Langium reflection), so a new member/expr/stmt rule without a printer arm fails CI — add the matching `case` when extending the grammar. Round-trip safety is gated by `print-structural-roundtrip.test.ts`. |
-| `src/ir/{types,lower,enrich,validate,util}/` | The phase-revealing IR layout. One subdir per pipeline phase. `lower/` is a `lower.ts` orchestrator over sibling leaves: the expr/stmt/type passes (`lower-expr.ts` / `lower-stmt.ts` / `lower-types.ts`), the per-UI declaration index (`walker-primitive-expander.ts`, just `buildExpandContext`), the per-declaration-kind lowerers (`lower-platform` / `-requirements` / `-capabilities` / `-members` / `-deployment` / `-ui` / `-workflow` / `-auth` / `-projection` / `-domain-service` / `-test`), and shared IR-layer helper leaves (`repo-read.ts`, `id-follow.ts`, `origin.ts`). `enrich/` is `enrichments.ts` + `wire-projection.ts`. `validate/` is a thin `validate.ts` orchestrator over `validate/checks/*` (~17 per-theme check leaves + `shared.ts` + `diagnostic.ts`). `util/` has grown to ~33 helper modules (`tenant-stance.ts`, `audit-capability.ts`, `openapi-*.ts`, …). |
+| `src/ir/{types,lower,enrich,validate,util}/` | The phase-revealing IR layout — one subdir per pipeline phase (module-by-module breakdown in the Architecture section above). The dependency graph is acyclic: the `lower/` leaves never import `lower.ts`, and only `lowerModel`/`lowerProject`/`mergeLoomModels` are public. |
 | `src/trace/` | Pure resolution core behind `ddd trace` / `ddd breakpoints` (`annotate.ts` / `frames.ts` / `resolve.ts`) — maps runtime stack traces and generated file:lines back to `.ddd` constructs via `.loom/sourcemap.json`. |
 | `src/macros/` | Macro pipeline. `expander.ts` is the Langium `DocumentBuilder` listener; `registry.ts` is the global lookup; `api/` is the macro-authoring surface (`defineMacro`, factories); `stdlib/` ships the built-in macros (`softDelete/`, `scaffold/`, `crudish.macro.ts`); `prelude.ts` ships the built-in pure-mixin capabilities (`auditable`, `softDeletable`, `tenantOwned`, `versioned`, `tenantRegistry`). `bootMacros()` from `src/language/ddd-module.ts` registers them once at language-module init. |
 | `src/verify/` | `ddd verify` rollup — joins test-execution results onto the traceability graph to produce per-requirement Definition-of-Done verdicts.  Pure, dependency-free; consumed by both the CLI and the browser playground. |
 | `src/api/` | **Transport-neutral toolkit** — `validate()` / `generate()` / `applyPatches()` over an in-memory `.ddd` source, returning the `src/diagnostics/contract.ts` wire shapes. One shared core for every surface (CLI, MCP server, LSP adapters, web playground); parses on `EmptyFileSystem` so it stays browser-safe. `report.ts` holds the diagnostic/outline serializers. See [D-API-TOOLKIT](docs/decisions.md). |
 | `src/tools/` | **Agent-tool catalog** ([D-AGENT-TOOLS](docs/decisions.md)) — one transport-neutral set of `loom_*` tool defs (name + JSON-Schema input + handler) over `src/api/`. Pure, side-effect-free, browser-safe. `callTool(name, args)` is the single dispatch entry every transport reuses (MCP server, playground chat). |
-| `src/mcp/` | **MCP server core** — a Node-only island (like `src/cli/`) that registers the `src/tools/` catalog over the Model Context Protocol via the low-level `@modelcontextprotocol/sdk` `Server` (raw-JSON-Schema `tools/list` + `tools/call` → `callTool`). `main.ts` is the stdio entrypoint (compiled to `out/mcp/main.js`, launched by the `packages/ddd-mcp` bin). Owns no tool logic — only transport wiring. |
-| `src/dap-server/` | **DAP server core** — a Node-only island (mirrors `src/mcp/` exactly) wiring the pure `src/dap/` resolution cores (`resolveSetBreakpoints`/`remapStackFrames`) to a real `@vscode/debugadapter` `DebugSession` (`session.ts`'s `LoomDebugSession`). `load-map.ts` is the only `fs`-touching code (parses `.loom/sourcemap.json` the same way `ddd trace` does); `main.ts` is the stdio entrypoint (compiled to `out/dap-server/main.js`, launched by the `packages/ddd-dap` bin). Ships the REMAP LAYER only — `initialize`/`setBreakpoints`/`stackTrace` handlers over the two shipped cores; the full delegating target-debugger proxy (spawning `js-debug`/`coreclr`/JDWP for `launch`/`attach`) is the documented, editor-verified frontier. See [`docs/old/proposals/source-map-and-debugging.md`](docs/old/proposals/source-map-and-debugging.md) §6E and `docs/old/plans/dap-node-debug.md` (Milestone 27). |
+| `src/mcp/` | **MCP server core** — a Node-only island (like `src/cli/`) exposing the `src/tools/` catalog over MCP. Owns no tool logic — only transport wiring. |
+| `src/dap-server/` | **DAP server core** — a Node-only island mirroring `src/mcp/`, wiring the pure `src/dap/` resolution cores to a real `@vscode/debugadapter` `DebugSession`. `load-map.ts` is the only `fs`-touching code. Ships the REMAP LAYER only — `initialize`/`setBreakpoints`/`stackTrace` handlers over the two shipped cores; the full delegating target-debugger proxy (spawning `js-debug`/`coreclr`/JDWP for `launch`/`attach`) is the documented, editor-verified frontier. See [`docs/old/proposals/source-map-and-debugging.md`](docs/old/proposals/source-map-and-debugging.md) §6E and `docs/old/plans/dap-node-debug.md` (Milestone 27). |
 | `src/system/` | More than just the orchestrator — siblings of `index.ts` emit the `.loom/` artefact bundle: `mermaid.ts`, `likec4.ts`, `traceability.ts`, `wire-spec.ts`, `sourcemap.ts` (opt-in `.loom/sourcemap.json` under `--sourcemap`, consumed by `ddd trace`), `loomsnap.ts` (provenance snapshot capture for `ddd snapshot`), `migrations-builder.ts` (derives `MigrationsIR`; the Postgres-SQL renderer it feeds, `sql-pg.ts`, lives under `src/generator/` since only the backends consume it).  See [`docs/loom-artifacts.md`](docs/loom-artifacts.md). |
-| `packages/` | **Publish-shaped workspaces** discovered by the plugin resolver: `@loom/core` (the toolchain library + `PlatformSurface` contract), `@loom/backend-hono-v4` and `@loom/backend-hono-v5` (versioned Hono backends; v5 is the `platform: node` default), `@loom/ui-test-driver` (the cross-window page-object/locator runtime), `ddd-mcp` (the MCP stdio-server publish wrapper — `bin` + the SDK dep over `src/mcp/`), `ddd-dap` (the DAP stdio-server publish wrapper — `bin` + the `@vscode/debugadapter`/`@vscode/debugprotocol` deps over `src/dap-server/`).  Each `package.json` carries a `loom` key (`kind: "core"\|"backend"\|"mcp-server"\|"dap-server"`, `family`, `loomVersion`, `core` semver range) read by `src/platform/fs-discovery.ts` — this is the out-of-tree backend story (`fs-discovery.ts` only classifies `kind: "backend"` manifests; every other `kind` — `mcp-server`, `dap-server`, `core` — is quietly skipped as `notLoom`). |
+| `packages/` | **Publish-shaped workspaces** discovered by the plugin resolver (`ls packages/`; `backend-hono-v5` is the `platform: node` default).  Each `package.json` carries a `loom` key (`kind: "core"\|"backend"\|"mcp-server"\|"dap-server"`, `family`, `loomVersion`, `core` semver range) read by `src/platform/fs-discovery.ts` — this is the out-of-tree backend story (`fs-discovery.ts` only classifies `kind: "backend"` manifests; every other `kind` — `mcp-server`, `dap-server`, `core` — is quietly skipped as `notLoom`). |
 | `web/` | Separate package — the browser-side playground. Imports the Loom toolchain straight from `../src` (pure TS, no Node-only APIs except `src/cli/` and `src/language/main.ts`). Has its own `package.json`, `playwright.config.ts`, and Vite shim that swaps `_packs/loader-fs.js` for a VFS-backed loader. |
-| `vscode/` | Separate package — VS Code extension (LSP client). Has its own `package.json`; builds against the compiled toolchain. |
-| `designs/` | Design packs, 13 families with versioned subdirs (`designs/<family>/<vNN>/pack.json`; the `format` field names the framework, absent = React). **React:** `mantine` (v7, v9), `mui` (v5, v7), `chakra` (v2, v3), `shadcn` (v3, v4). **Vue:** `vuetify` (v3), `shadcnVue` (v1). **Svelte:** `flowbite` (v1), `shadcnSvelte` (v1). **Angular:** `angularMaterial` (v1), `primeng` (v1), `spartanNg` (v1). **Phoenix HEEx** (`format:"heex"`, `.heex.hbs` templates): `coreComponents` (v3, the baseline) and `daisyui` (v1) — these replaced the old `ashPhoenix` pack. Each React/Vue/Svelte/Angular pack is a tree of templates that the body-walker dispatches into. Feliz and Flutter have no `.hbs` pack pipeline (they self-host). **The HEEx packs are wired differently from the JSX packs**: LiveView has one component convention, so the walker emits design-neutral markup + `<.button>`/`<.table>`-style component calls inline, and a HEEx pack owns the SHELL surface instead of call-site primitive templates — `core-components` (→ `core_components.ex`, the function-component library every page renders through), `main`/`app-shell`/`sidebar`(+`-entry`) (root/app layouts + sidebar), `theme` (design-token CSS), and the assets pipeline (`assets-css`/`assets-js`/`tailwind-config`/`package-json` → `assets/`, built into `priv/static/assets` by the Dockerfile's assets-build stage or `mix assets.build`; daisyui's tailwind config is where its plugin loads). The required set is `REQUIRED_PRIMITIVES.heex` (`{core: [], shell: HEEX_SHELL}`); `test/generator/elixir/heex-design-pack.test.ts` gates that the two packs genuinely diverge. |
+| `designs/` | Design packs, one versioned subdir per family (`designs/<family>/<vNN>/pack.json`; the `format` field names the framework, absent = React — `ls designs/` for the current inventory). Each React/Vue/Svelte/Angular pack is a tree of templates that the body-walker dispatches into. Feliz and Flutter have no `.hbs` pack pipeline (they self-host). **The HEEx packs are wired differently from the JSX packs**: LiveView has one component convention, so the walker emits design-neutral markup + `<.button>`/`<.table>`-style component calls inline, and a HEEx pack owns the SHELL surface instead of call-site primitive templates — `core-components` (→ `core_components.ex`, the function-component library every page renders through), `main`/`app-shell`/`sidebar`(+`-entry`) (root/app layouts + sidebar), `theme` (design-token CSS), and the assets pipeline (`assets-css`/`assets-js`/`tailwind-config`/`package-json` → `assets/`, built into `priv/static/assets` by the Dockerfile's assets-build stage or `mix assets.build`; daisyui's tailwind config is where its plugin loads). The required set is `REQUIRED_PRIMITIVES.heex` (`{core: [], shell: HEEX_SHELL}`); `test/generator/elixir/heex-design-pack.test.ts` gates that the two packs genuinely diverge. |
 | `api/`, `vite/`, `docker/`, `sveltekit/`, `vue/`, `angular/` | Top-level `.hbs` snippets — boilerplate for generated projects (API client, vite config, dockerfile); `sveltekit/`, `vue/`, `angular/` are the per-framework hosts' shared template layers. |
 | `stacks/` | Versioned Handlebars templates for generated-project `package.json` dependency / devDependency blocks (`stack-package-deps.hbs`, `stack-package-devdeps.hbs`, `stack.json`). Stack ids are per-framework, not one version line: `v1`/`v3` (React/TSX family), `vue1`, `sv1` (Svelte), `ng1` (Angular) — each pack.json's `stack` field picks one. |
-| `phoenix/` | Top-level companion docs for the Phoenix backend (README only; HEEx packs live under `designs/`). |
 | `journey/` | A 5-stage runnable `.ddd` build-journey walkthrough (`01-todo.ddd` → `05-custom.ddd`) growing one app from scaffolded CRUD to hand-written multi-framework, testing the "start fast like no-code, then no excuses" promise. `FINDINGS.md` is a build journal (incl. silent-codegen bugs found by compiling output); not a DSL feature — "journey" is not a keyword. |
 | `examples/`, `web/src/examples/` | Sample `.ddd` files. CI's `generated-react-build.yml` matrix iterates `examples/acme.ddd` + everything under `web/src/examples/` × every design pack. |
-| `test/` | Test tree mirrors `src/` phases — `test/language/`, `test/macro/`, `test/ir/`, `test/generator/`, `test/platform/`, `test/system/`, `test/cli/`, `test/conformance/`, `test/playground/`, `test/util/`, with slow opt-in suites under `test/e2e/`. |
 | `test/fixtures/` | **Excluded from vitest discovery** in `vitest.config.ts`. These are byte-for-byte snapshots of generated output used as regression fixtures (capture script: `scripts/capture-baseline-fixture.mjs`); the `.test.ts` files inside are not part of this project's test surface. |
 | `docs/` | Reference docs (top-level), plus `new-plan/` (**the live global implementation plan** — feature tracks + agent-pickable missions; the only authoritative status/ordering source), `old/` (the archived proposals/plans design corpus — frozen statuses, design record only), and `audits/` (snapshot-in-time empirical audits). `docs/README.md` is the canonical index. Build the landing+docs site via `node docs/build.mjs` (recurses into `new-plan/`, `old/plans/`, `old/proposals/`, `audits/`). Deployed by `.github/workflows/pages.yml` to GitHub Pages. |
 | `experience_gathered.md` | Running retrospective of design decisions and gotchas. **Worth reading before non-trivial changes** — covers Langium grammar gotchas, the Handlebars-removal rationale, Mantine + Playwright findings, IR design trade-offs. |
@@ -334,88 +206,31 @@ Each JSX/markup target dispatches per-primitive through the active **design pack
 - **Derive, don't stamp.** If a value is a pure function of facts already on an IR node, compute it on demand — don't store it as a denormalized field. Page *kind* is the canonical example: it's classified from the page's role-scoped name + `area` via `classifyPage` (`src/ir/util/page-kind.ts`), not stamped as an `origin`/`source` field. A stamped classification is a cache with no invalidation story — the construction site that forgets to set it is the bug. Store a fact only when it's an input the pipeline can't re-derive. (Retro: §15 of `experience_gathered.md`.)
 - **Macros emit final AST, not sentinels.** A scaffold macro builds the complete page body up front (so `unfold` ejects real `.ddd` source) — never a placeholder call rewritten by a later lowering pass. Before deferring expansion, check whether the later pass has any information the macro lacks; usually it doesn't, and the split is accidental. (This is why there is no phase ⑤c and no `source` tag — see §15.)
 
-## Extending — the recipes from `docs/technical.md`
+## Extending
 
-**Adding a language feature:**
-1. Edit `src/language/ddd.langium`; `npm run langium:generate`.
-2. Update `ddd-scope.ts` / `src/language/validators/<themed>.ts` / `type-system.ts` as needed.
-3. Add IR node in `loom-ir.ts`; lower it in the relevant `lower/` module — the matching per-declaration-kind sibling (`lower-members.ts`, `lower-workflow.ts`, …) or `lower-expr.ts` (expr/stmt/type) — and wire the call into the `lower.ts` orchestrator if it's a new structural member.
-4. For a new `ExprIR.kind`: add one arm to `renderExprWith` in `src/generator/_expr/target.ts` and one method to the `ExprTarget` interface — the exhaustive switch + interface make every backend's target a compile error until filled. For a new `StmtIR` kind: extend each backend's `render-stmt.ts`.
-5. Extend `emit/*.ts` (or `*-emit.ts` on Phoenix) or a `*-builder.ts` per backend.
-6. If the feature adds a structural member / expression / statement to the grammar, add the matching arm in `src/language/print/print-structural.ts` (or `print-expr.ts` / `print-stmt.ts`) — `print-completeness.test.ts` fails until you do.
-7. Add: one parsing test, one negative validator test, one generator test per backend.
-8. Verify with `npm test` and at least one `LOOM_TS_BUILD=1` / `LOOM_REACT_BUILD=1` run.
-
-**Adding a backend:**
-1. Two homes are possible:
-   - **In-tree (default for new backends):** implement `PlatformSurface` in `src/platform/<backend>.ts`; register in `src/platform/registry.ts`.
-   - **Out-of-tree (versioned package, like the `node@v4` / `node@v5` backends in `packages/backend-hono-v4/` and `packages/backend-hono-v5/`):** add a workspace under `packages/backend-<family>-v<N>/` with a `package.json` carrying a `loom: { kind: "backend", family, loomVersion, core }` block.  `src/platform/fs-discovery.ts` picks it up via `setBackendSource`; `parseBuiltinPlatformRef` lets a deployable target it by `family@version`.
-2. If the backend serves a wire shape, read `agg.wireShape` etc. directly from the IR — do not recompute.
-3. If it runs domain logic, implement `render-expr.ts` / `render-stmt.ts` honouring `refKind` / `callKind` / `isCollectionOp`.
-4. If a new `platform:` keyword is added, also extend the `Platform` rule in `ddd.langium`, the `Platform` type in `loom-ir.ts`, and `checkDeployable` in `src/language/validators/deployable.ts` (see the `'react'` and `'phoenixLiveView'` additions for the pattern).
+Adding a language feature walks the whole pipeline; the per-phase file map, the
+target matrix, and the completeness gates live in the **`language-feature-developer`**
+skill (`references/pipeline-checklist.md`), which also carries the "adding a backend"
+recipe. The narrative version is [`docs/technical.md`](docs/technical.md).
 
 ## CI surface (what each workflow gates)
 
 **Every gate below runs locally — never push just to see a check's verdict** (it burns the shared ~20-slot runner pool and turns a 3-minute check into an hour of queue). The workflow → local-command reverse index is [`docs/testing.md`](docs/testing.md) → "Running any CI gate locally"; completeness is pinned by `test/system/local-run-mapping.test.ts`, and the weird-toolchain recipes (Java/.NET/Elixir in docker, the hex mirror, Flutter) are in [`docs/tools.md`](docs/tools.md).
 
-- `test.yml` — the fast vitest suite (the same one `npm test` runs), **sharded 4 ways** via `vitest --shard` (the suite is evenly-spread CPU-bound work with no hot file, so it scales horizontally — not by optimising individual files). Each shard emits a `blob` report; the `coverage` job merges them (`vitest --merge-reports`) into one combined coverage summary. The `lint` job (check name `lint + web-tsc`) runs `biome ci` + `test:biome-gen` + `test:contrast` (per-pack WCAG-AA contrast) + the playground typecheck and `test:ddl` (folded in from the old separate `web-tsc` job to save a runner slot — so these now gate the rollup too). `tests-passed` is the single roll-up status for branch protection — require it, not the per-shard `test (shard i/4)` checks, so the shard count can change without touching branch-protection rules. `test.yml` runs unfiltered on every PR (the required floor); the rest of the per-PR fan-out is **draft-gated** — it fires when a PR is marked ready for review, while drafts get only the fast lane (`docs/ci-gating.md` → "Draft PRs and the runner queue"). Locally, `npm run test:gen` / `test:lang` / `test:ir` scope to a subtree.
-- `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
-- **Generated-frontend build gates (per-PR):** `generated-react-build.yml` (matrix `{example × pack}`, `tsc --noEmit`), `generated-svelte-build.yml` (`svelte-check` + `vite build`), `generated-vue-build.yml` (`vue-tsc` + `vite build`), `generated-angular-build.yml` (`ng build`), `generated-feliz-build.yml` (dotnet + Fable build + Playwright over example/scaffold/authgate scenarios), `generated-flutter-build.yml` (`flutter analyze` + `flutter build web`). Catch generator drift invisible to IR-level tests.
-- **Generated-frontend runtime gates (post-merge only):** `generated-{react,vue,svelte,angular}-e2e.yml` — `vite build` + `vite preview` + the emitted Playwright smoke spec (pure client-side, no backend). `push: [main]` only, deliberately: the per-PR `generated-*-build` (tsc) + `behavioral-ui-e2e` cover the same emitters, and the route-driven smoke has caught nothing per-PR (see the react workflow's header).
-- `generated-a11y.yml` — axe-core WCAG-AA scan over generated frontends across an 11-pack matrix. Nightly / `a11y` label / dispatch.
-- **Generated-backend build gates (per-PR):** `hono-build.yml` (`tsc --noEmit` + `tsup`), `dotnet-build.yml` (`dotnet build /warnaserror`), `java-build.yml` (`gradle testClasses bootJar`, main + emitted JUnit sources), `python-build.yml` (`uv sync` + `ruff` + `mypy --strict` + `pytest`), `elixir-vanilla-build.yml` (`mix compile --warnings-as-errors` in an Elixir docker image).
-- `corpus-build.yml` — compiles EVERY corpus feature fixture (`test/fixtures/corpus/*.ddd`, list from `manifest.ts` minus per-backend `COMPILE_SKIP`) on tsc/dotnet/java/python as matrix jobs. Per-PR — the cross-feature compile-regression net. `corpus-elixir-build.yml` is the fifth leg (`mix compile` per feature in the `hexpm/elixir` image + `LOOM_HEX_MIRROR`, sharded via `LOOM_CORPUS_ELIXIR_CASE`), split out because it needs the Elixir docker image + hex egress.
-- **Behavioral gates (per-PR):** `behavioral-e2e.yml` (Hono on PGlite, headless — api + unit tiers), `behavioral-e2e-{dotnet,elixir,java,python}.yml` (same emitted api suite against the real booted backend + postgres sidecar), `behavioral-e2e-dapper.yml` (the .NET leg with `persistence: dapper` forced), `behavioral-e2e-mikroorm.yml` (the node/Hono backend on the MikroORM persistence adapter — booted against a real postgres sidecar since `@mikro-orm/postgresql` can't use PGlite; api tier), `behavioral-ui-e2e.yml` (React/Mantine `*.ui.spec.ts` Playwright round-trips against Hono-on-PGlite). `frontend-fullstack-e2e.yml` drives the NON-React frontends (vue/svelte/angular/feliz) through the same full round-trip — nightly / `frontend-fullstack` label. Every behavioral leg additionally enforces the **wire-golden differential** (M-T9.11) — a runtime-VALUE divergence from `test/behavioral/wire-golden/` fails that backend's leg per-PR, which is what moved cross-backend response equality off the nightly `differential-report.yml` (still the nightly DISCOVERY sweep over the wider compose stack).
-- **OIDC auth gates (main-push + dispatch + `run-oidc` label):** `{hono,dotnet,java,python,elixir}-oidc-e2e.yml` — native backend OIDC runtime e2e against dockerized Keycloak; `auth-oidc-compose-e2e.yml` — the full generated compose stack + bundled dev Keycloak, real token → User mapping. Each also asserts the **negative-authz** half (M-T3.13): a `requires`-gated find `403`s the authenticated-but-unauthorized caller and `401`s the unauthenticated one, so the emitted authz filter is proven to *enforce*, not just compile. All six answer to the one `run-oidc` label (see "Forcing a post-merge gate before merge" below).
-- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-vanilla-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). Main-push + dispatch + `run-obs` label (one label fires all five).
-- `elixir-vanilla-vo-e2e.yml` — vanilla-Phoenix value-object wire round-trip against postgres (main-push + `run-e2e` label).
-- `context-integration-e2e.yml` — **per-PR (path-scoped)**: RUNS the emitted per-context integration test on all five backends against a throwaway postgres via each backend's native test runner (vitest / pytest / dotnet test / gradle test / mix test; `scripts/context-integration-e2e.sh`) — the create → operation → find round-trip tier the compile gates are blind to.
-- `email-e2e.yml` — workflow `mail.send(...)` delivery asserted against a Mailpit sidecar's REST inbox, 5-backend matrix. Main-push on broad pipeline paths + per-PR on the narrow mailer paths.
-- `api-call-e2e.yml` — typed in-system `api` call between deployables, caller-backend matrix. Main-push + dispatch + `run-api-call` label.
-- `channels-e2e.yml` — cross-deployable eventing runtime e2e (broker × backend legs). Main-push + dispatch + `run-channels` label.
-- `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch + `run-tenancy` label.
-- `migration-evolution-e2e.yml` — the runtime companion to the rename/baseline/data-migration language work (M-T2.13). Per SQL backend (5-cell matrix), against a postgres service: (1) migrate-chain schema ≡ fresh-create schema (order-independent fingerprint), and (2) seed v1 → regenerate `.ddd` to v2 → forward-migrate → the seeded row survives with correct values. Proves migrations **evolve** on data, not just emit/first-boot (the silent-data-loss class). Main-push + dispatch + the per-PR `run-migration-e2e` label.
-- `schemathesis.yml` — **nightly / `run-schemathesis` label / dispatch**: boots the generated **Hono** backend and feeds it its OWN emitted `/openapi.json` to [Schemathesis](https://schemathesis.readthedocs.io/), asserting it never 500s, never violates its own declared response schema, and honours the declared `required`/`format`/`enum`/bounds. Every other runtime gate drives EXAMPLE-shaped input, so the adversarial space (wrong verb, absent body, malformed fields, boundary numbers, non-UUID references) was only ever covered where a human wrote the case — the class behind #2485/#2440/#2442/#2472/#2500/#2261. Complements M-T9.11: the differential checks backends against *each other*, this checks each backend against *its own published contract*. Known findings are ratcheting root-cause rules in `test/behavioral/schemathesis-waivers.json` (an unattributed finding fails; a rule that stops reproducing fails too); the register is [`docs/audits/schemathesis-findings-2026-08.md`](docs/audits/schemathesis-findings-2026-08.md). The python/java/dotnet/elixir legs are follow-up slices.
-- `schema-load.yml` — **per-PR**: loads every corpus fixture's emitted migration chain into a real Postgres (`psql -f`, one db per deployable). The oracle the compile gates structurally lack — emitted schema is data, not code, so invalid DDL compiles green everywhere (G2). No build, no boot, <1min, so it runs on every PR rather than behind a label.
-- `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
-- `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
-- `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
-- `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview). Post-merge / nightly / `run-e2e` label, because the bundle/boot specs hit esm.sh + jsdelivr. `playground-e2e-no-network.yml` is its **per-PR** sibling: the network-free subset (workspace/history/persistence, the system + mobile builders, requirements, editor) on every PR touching `web/**` or `src/**` — no npm mirror, no bundle/boot, 30-min cap.
-- `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader nightly / `run-conformance`-label run against a docker stack).
-- `workflow-lint.yml` — **per-PR** on `.github/workflows/**`: YAML-parses every workflow file + runs actionlint, so a malformed workflow can't merge and turn into a permanent silent `startup_failure` on main.
-- `playground-realm-check.yml` — **per-PR**: evaluates the playground's generated-backend bundle in a `vm` realm built from a measured browser-worker global set (`web/scripts/worker-globals.json`) — catches dependencies that read `process`/`Buffer` at module-evaluation time, which the in-Node smoke build is blind to and the real-worker `playground-e2e` only catches post-merge.
-- `ci-red-alarm.yml` — post-merge watchdog: when a main-push gate goes red it files/updates a single open issue labelled `ci-red` (deduped by label) instead of one issue per failure.
-- `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
-
 **Which gate catches what — and why `main` can still go red.** Branch protection requires two checks: `tests passed` (the fast vitest rollup, unfiltered on PRs) and **`pr-gate`** (`pr-gate.yml` + `scripts/pr-gate.mjs`) — an event-driven aggregate check: every other workflow's completion (`workflow_run`) triggers a seconds-long evaluation of all checks on the head SHA, posting the `pr-gate` verdict via the Checks API — `failure` if anything triggered failed, `in_progress` while checks still run, `success` when everything triggered passed. Path-skipped workflows never appear on the SHA, so they're OK by construction; anything that *does* trigger — the path-scoped `behavioral-e2e-*` legs, the `pages` build, a `run-*`-label heavy run — is thereby **binding**, without stranding PRs the paths don't match. Re-running a red check re-evaluates automatically; the `workflow_run` list is completeness-pinned by `test/system/pr-gate.test.ts`. The gates that still never run on an unlabeled PR (`tenancy-e2e`, `*-obs-e2e`, `*-oidc-e2e`, `auth-oidc-compose-e2e`) remain the post-merge blind spot. **The merge queue would be the full fix and its workflow side is done** — all 39 gates in the intended required set carry `merge_group:` triggers and stable check names (manifest: `test/system/merge-queue-required-checks.ts`, drift-pinned by `merge-queue-readiness.test.ts`) — but GitHub offers merge queues only on org-owned repos, so it stays inert while the repo lives under a personal account. [`docs/ci-gating.md`](docs/ci-gating.md) documents the tiers, the pr-gate design, and the queue runbook; consult it before assuming a green PR means a green `main`.
 
-**Forcing a post-merge gate before merge (labels).** Because those heavy gates trigger on `push: [main]` only, an agent can't otherwise see them until after landing. The escape hatch: each carries a `pull_request: types: [labeled]` trigger gated (job-level `if`) on **one feature label** — add the label to your PR and that gate runs against your branch *before* merge. Labels name a **feature/blast-radius**, reused across every backend of that feature (not one label per workflow):
-
-| Label | Fires |
-|---|---|
-| `run-obs` | all five `*-obs-e2e` |
-| `run-oidc` | all five `*-oidc-e2e` + `auth-oidc-compose-e2e` |
-| `run-tenancy` | `tenancy-e2e` (10-leg matrix) |
-| `run-api-call` | `api-call-e2e` (typed in-system call, caller-backend matrix) |
-| `run-migration-e2e` | `migration-evolution-e2e` (5 SQL backends) |
-| `run-conformance` | `conformance-full` |
-| `run-schemathesis` | `schemathesis` (spec-driven contract fuzzing, node/Hono) |
-| `run-channels` | `channels-e2e` |
-| `run-differential` | `differential-report` |
-| `run-e2e` | `phoenix-ui-e2e`, `playground-e2e`, `elixir-vanilla-vo-e2e` |
-| `frontend-fullstack` | `frontend-fullstack-e2e` |
-| `a11y` | `generated-a11y` |
-| `e2e-k8s` | `k8s-e2e` |
-
-This is a **manual pre-merge check**, not a replacement for the structural fix — `docs/ci-gating.md` positions the merge queue (triggers already present, switched off in branch protection) as the real answer; labels are the interim "80/20." When you add a new post-merge gate, wire it to the matching feature label (or mint a new `run-<feature>` one) and add a row here.
+For what each of the ~65 workflows gates, which tier it runs in, and the `run-*`
+feature labels that force a post-merge-only gate onto your PR before merge, invoke the
+**`loom-ci-gates`** skill. When you add a new post-merge gate, wire it to the matching
+feature label (or mint a new `run-<feature>` one) and add a row there.
 
 ### Local enforcement (checked-in Claude Code hooks)
 
 `.claude/settings.json` wires three project hooks so the CI Biome gate (and a clean-merge invariant) can't be forgotten:
 
-- **SessionStart** (`.claude/hooks/session-start.sh`) — runs `npm install` (the `prepare` lifecycle: `langium:generate` + `build`) on a fresh remote container so Biome, the build, and the tests are ready. Idempotent; skips when `node_modules/.bin/biome` and `src/language/generated/` already exist; remote-only (`$CLAUDE_CODE_REMOTE`).
-- **Stop** (`.claude/hooks/biome-gate.sh`) — when a turn finishes with work in the tree, runs `npm run lint` (`biome ci .`, the exact `test.yml` step). On failure it **blocks** and feeds the Biome output back so it's fixed before finishing; it releases (with a loud warning) after one fix cycle to avoid a stop loop, and never blocks when Biome isn't installed.
-- **PreToolUse(Bash)** (`.claude/hooks/pre-push-merge-check.sh`) — before a `git push`, fetches `origin/main` and runs a `git merge-tree --write-tree` dry-run; **denies** the push (with a rebase hint + the conflicting files) when the branch wouldn't merge cleanly, so upstream drift is caught before it becomes a stale PR. Conservative: only blocks on a *definite* conflict and **fails open** on any uncertainty (not a repo, no `origin/main`, offline, git < 2.38, pushing trunk itself).
+- **SessionStart** — `npm install` (the `prepare` lifecycle) on a fresh remote container. Idempotent, remote-only (`$CLAUDE_CODE_REMOTE`).
+- **Stop** — `npm run lint` (`biome ci .`, the exact `test.yml` step) when a turn finishes with work in the tree. On failure it **blocks** and feeds the output back; it then releases (with a loud warning) after **one** fix cycle to avoid a stop loop, and never blocks when Biome isn't installed.
+- **PreToolUse(Bash)** — **denies** a `git push` whose branch wouldn't merge cleanly into `origin/main` (`git merge-tree --write-tree` dry-run), so upstream drift is caught before it becomes a stale PR. Conservative: only blocks on a *definite* conflict and **fails open** on any uncertainty (not a repo, no `origin/main`, offline, git < 2.38, pushing trunk itself). Non-push Bash calls early-exit, so it costs nothing per call.
 
 `.claude/` stays gitignored except `settings.json` and `hooks/` (see `.gitignore`), so the hooks ship with the repo while worktrees and `settings.local.json` stay local.
 

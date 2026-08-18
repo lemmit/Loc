@@ -511,10 +511,18 @@ page/component references the store by **dotted name** — `Cart.lines` (a
 shell derives its store dependency from those resolved refs (derive-don't-
 stamp), imports `useCart`, and hoists one selector binding per used member
 (`const lines = useCart((s) => s.lines)`); the body / action handlers reference
-the bare local. The `persist:` lifetime ladder **ships** — `store <Name> persist:
-memory|local|session|url { … }` is real grammar and every frontend honours it, so
+the bare local. The `persist:` lifetime ladder **ships on the SPA frontends** —
+`store <Name> persist: memory|local|session|url { … }` is real grammar, and
+React / Vue / Svelte / Angular honour it, so the blanket
 `loom.store-lifetime-unsupported` is retired (a bad value is rejected earlier as
-`loom.store-lifetime-invalid`). A `persist: url` store reflects its fields into
+`loom.store-lifetime-invalid`). Three targets do **not** implement the ladder,
+and each refuses a non-`memory` lifetime rather than degrading silently:
+Phoenix LiveView (`loom.store-lifetime-liveview-invalid` — a server-side
+per-process struct has no browser storage, and URL state belongs to the page's
+`handle_params`), and **Feliz and Flutter**
+(`loom.store-lifetime-target-unsupported` — both emitters build the store
+in-memory regardless; support is planned, tracked as a `gap` row in
+`src/diagnostics/unsupported-register.ts`). A `persist: url` store reflects its fields into
 query params, which carry only scalars, so an array / entity / value-object field
 there is rejected (`loom.store-url-field-invalid`). `sync:` remains reserved.
 Validator gates: a store action can't call a

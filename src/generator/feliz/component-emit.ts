@@ -51,20 +51,45 @@
 // this, a read-bearing component was dropped WHOLE — no `let`, and every call
 // site rendered the give-up comment.
 //
-// WHY THE ACCEPTED SET IS NARROWER THAN REACT'S
-// ---------------------------------------------
+// DERIVED — an F# `let` ahead of the body
+// ---------------------------------------
+// A `derived total: int = qty * price` is a pure function of what is already in
+// scope, so it needs nothing from MVU at all: it emits as a `let` between the
+// param bindings and the body, and the body reads it BARE through the walker's
+// `renderDerivedRead` seam.  (Before that seam existed a derived read was
+// spelled `model.<Name>` — an Elmish Model field nothing declares — which is why
+// every `derived`-bearing component had to be dropped whole.)  A derived that
+// reaches for the route `id` or `currentUser` still defers: those are bound by a
+// PAGE view, not here.
+//
+// STATE + ACTIONS — folded into the one Elmish program
+// ----------------------------------------------------
 // A Feliz app is ONE Elmish program: state lives on a single flat `Model`,
-// updates are `Msg` cases, and a page view is `model -> dispatch -> element`.  A
-// component that owns `state {}` / `derived` / named `action`s, or that mounts a
-// form, therefore needs Model + Msg + update arms wired for it — a genuine MVU
-// design question (per-component sub-models), not a rendering gap.  Those shapes
-// stay OUT of the emitted set, so their call sites keep the existing comment
-// rather than referencing a function that was never written, and the
-// render-degradation ratchet keeps them visible.  Deferred:
-//   • `state {}` / `derived` / named `action`s, and any body the walk shows
-//     reaching for `dispatch`, a BARE `model`, or a `model.<Field>` the emitted
-//     record does not declare (the mechanical backstop for a shape not
-//     enumerated here — never broken F#).
+// updates are `Msg` cases, and a page view is `model -> dispatch -> element`.
+// Component `state {}` / `action`s fold into exactly that program the way STORES
+// already do (`index.ts`: `combinedState` / `combinedActions`) — each state cell
+// is a Model field, each action a `Msg` case with an `update` arm — and the
+// function gains the `model` / `dispatch` it needs as leading curried params
+// (the `MODEL_PARAM` / `DISPATCH_PARAM` markers).  The consequence is worth
+// stating: like a page's, a component's state is program-scoped, so two
+// instances of the same component SHARE it.  That is the same trade the store
+// path makes, and it beats the alternative this replaced — the whole component
+// vanishing, silently, with an `unknown layout component` comment at every call
+// site.  Per-instance sub-models are the real answer and remain future work.
+//
+// WHY THE ACCEPTED SET IS STILL NARROWER THAN REACT'S
+// ---------------------------------------------------
+// A shape that would need Msg/update wiring nothing emits stays OUT of the
+// emitted set, so its call sites keep the existing comment rather than
+// referencing a function that was never written, and the render-degradation
+// ratchet keeps it visible.  Deferred:
+//   • any body the walk shows reaching for a BARE `model` (a call to a sibling
+//     that itself takes the Model — this function has none to pass on) or a
+//     `model.<Field>` neither the reads nor this component's own state declare
+//     (the mechanical backstop for a shape not enumerated here — never broken
+//     F#).
+//   • an async-effect action (`match await`): its trigger/result Msg pair is
+//     projected per PAGE (`asyncEffectsForUi`), so a component's would not exist.
 //   • forms / action mutations / store reads in the body (same reason).
 //   • a `byId` read: its fetch is fired by `pageCmd` on ROUTE entry, keyed to
 //     the hosting page's `Page` case, which a component does not have.
@@ -79,14 +104,22 @@ import type {
   AggregateIR,
   ComponentIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   ParamIR,
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { upperFirst } from "../../util/naming.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { felizTarget } from "./feliz-target.js";
-import { FELIZ_CHILDREN_FIELD, FELIZ_MODEL_PARAM } from "./fs-expr.js";
+import {
+  FELIZ_CHILDREN_FIELD,
+  FELIZ_DISPATCH_PARAM,
+  FELIZ_MODEL_PARAM,
+  renderFsExpr,
+} from "./fs-expr.js";
 import { felizPack } from "./pack.js";
+import { msgCase } from "./update-emit.js";
 import { pageMetaFieldName, wireFieldType } from "./wire.js";
 
 /** Everything a component walk needs — the same lookups a page view walk gets
@@ -132,15 +165,41 @@ function propType(p: ParamIR, emittedRecords: ReadonlySet<string>): string | und
   return wireFieldType(t);
 }
 
-/** A component whose SHAPE can be a props-only F# function — see the header for
- *  why each exclusion is a real MVU question rather than a rendering gap. */
+/** True when a `derived` expression reaches for something only a PAGE view
+ *  binds — the route `id` (a view-fn parameter) or the session `currentUser`
+ *  (bound by the page gate).  `renderFsExpr` would render those as `""` / a
+ *  stray identifier, so the component defers instead. */
+function derivedNeedsPageScope(e: ExprIR): boolean {
+  if (e.kind === "id") return true;
+  if (e.kind === "ref" && e.refKind === "current-user") return true;
+  for (const v of Object.values(e)) {
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        if (c && typeof c === "object" && "kind" in c && derivedNeedsPageScope(c)) return true;
+      }
+    } else if (v && typeof v === "object" && "kind" in v && derivedNeedsPageScope(v as ExprIR)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** True when an action awaits a remote effect (`match await` → a `variant-match`
+ *  statement).  Its trigger/result Msg pair is projected per PAGE
+ *  (`asyncEffectsForUi`), so a component carrying one would dispatch a case the
+ *  `Msg` union never declares — deferred. */
+function hasAsyncEffectAction(c: ComponentIR): boolean {
+  return c.actions.some((a) => a.body.some((s) => s.kind === "variant-match"));
+}
+
+/** A component whose SHAPE can be an F# function — see the header for why each
+ *  exclusion is a real MVU question rather than a rendering gap. */
 function isCandidate(c: ComponentIR, emittedRecords: ReadonlySet<string>): boolean {
   return (
     !c.extern &&
     c.body !== undefined &&
-    c.state.length === 0 &&
-    c.derived.length === 0 &&
-    c.actions.length === 0 &&
+    !hasAsyncEffectAction(c) &&
+    !c.derived.some((d) => derivedNeedsPageScope(d.expr)) &&
     c.params.every((p) => propType(p, emittedRecords) !== undefined)
   );
 }
@@ -162,7 +221,14 @@ function isCandidate(c: ComponentIR, emittedRecords: ReadonlySet<string>): boole
  *
  *  A BARE `model` (not a field read) also defers: the only shape that produces
  *  one is a component calling a sibling that itself takes the Model, and this
- *  function has no Model of its own to pass on. */
+ *  function has no Model of its own to pass on.
+ *
+ *  `dispatch` is NO LONGER blanket-disqualifying — a component's own named
+ *  `action`s fold into the one `Msg`/`update`, and this function binds them
+ *  itself (`let <a> () = dispatch <Msg>`) exactly as a page shell does.  What is
+ *  scanned here is the walked BODY, which references those bindings by their
+ *  bare local name; a `dispatch` surviving in it therefore still came from
+ *  somewhere unbound (a sibling component's application), so it defers. */
 function needsMvuScope(fs: string, modelFields: ReadonlySet<string>): boolean {
   if (/\bdispatch\b/.test(fs)) return true;
   for (const m of fs.matchAll(/\bmodel\.([A-Za-z_]\w*)/g)) {
@@ -191,10 +257,15 @@ interface RenderedComponent {
    *  `children` field, and every CALL SITE has to fill it (an F# anonymous
    *  record is exact: an absent field is a type error, not a default). */
   usesChildren: boolean;
-  /** True when the body reads a Model field (an api read) — the function then
-   *  takes the `Model` as a leading curried parameter and every call site
-   *  passes the `model` its page view was handed. */
+  /** True when the body reads a Model field (an api read, or one of this
+   *  component's own `state {}` cells) — the function then takes the `Model` as
+   *  a leading curried parameter and every call site passes the `model` its page
+   *  view was handed. */
   takesModel: boolean;
+  /** True when the body invokes one of this component's named `action`s — the
+   *  function then binds `let <a> () = dispatch <Msg>` and so takes `dispatch`
+   *  as a leading curried parameter too. */
+  takesDispatch: boolean;
 }
 
 /** The synthetic param a `Slot { }`-bearing component gains, so a call site
@@ -210,12 +281,23 @@ const CHILDREN_PARAM: ParamIR = { name: FELIZ_CHILDREN_FIELD, type: { kind: "slo
  *  component emitter and the walker target. */
 const MODEL_PARAM: ParamIR = { name: FELIZ_MODEL_PARAM, type: { kind: "none" } };
 
+/** The synthetic marker param an ACTION-bearing component gains — the `dispatch`
+ *  twin of `MODEL_PARAM`.  Its own `let <a> () = dispatch <Msg>` wrappers need a
+ *  `dispatch` in scope, so the function takes one as a second leading curried
+ *  parameter and every call site passes the one its page view was handed. */
+const DISPATCH_PARAM: ParamIR = { name: FELIZ_DISPATCH_PARAM, type: { kind: "none" } };
+
 /** A component's params as a CALL SITE sees them — the declared ones, plus the
- *  synthetic `children` when its body has a slot to fill, plus the `model`
- *  marker when its body reads one. */
+ *  synthetic `children` when its body has a slot to fill, plus the `model` /
+ *  `dispatch` markers when its body reads state-or-reads / dispatches actions.
+ *  Marker order matches the curried parameter order of the emitted function. */
 function callSiteParams(r: RenderedComponent): readonly ParamIR[] {
   const declared = r.usesChildren ? [...r.component.params, CHILDREN_PARAM] : r.component.params;
-  return r.takesModel ? [MODEL_PARAM, ...declared] : declared;
+  const markers = [
+    ...(r.takesModel ? [MODEL_PARAM] : []),
+    ...(r.takesDispatch ? [DISPATCH_PARAM] : []),
+  ];
+  return [...markers, ...declared];
 }
 
 /** Walk one component body and render its F# declaration, or `undefined` when
@@ -225,14 +307,26 @@ function renderOne(
   componentParams: ReadonlyMap<string, readonly ParamIR[]>,
   ctx: FelizComponentCtx,
 ):
-  | { decl: string; uses: ReadonlySet<string>; usesChildren: boolean; takesModel: boolean }
+  | {
+      decl: string;
+      uses: ReadonlySet<string>;
+      usesChildren: boolean;
+      takesModel: boolean;
+      takesDispatch: boolean;
+    }
   | undefined {
+  // `derived` first: it is a pure function of the props (and of this component's
+  // own state, which is a Model field), so it renders without walking anything —
+  // and its F# text joins the body in the disqualifying scans below.
+  const derivedBinds = renderDerivedBinds(c);
   const result = walkBody(
     c.body!,
     felizTarget,
     felizPack(),
     new Set(c.params.map((p) => p.name)),
-    new Set(), // stateNames — a candidate declares no `state {}`
+    // `state {}` — folded into the single Elmish Model, so a read renders
+    // `model.<Field>` exactly as a page's does.
+    new Set(c.state.map((s) => s.name)),
     componentParams,
     ctx.apiParams,
     ctx.aggregatesByName,
@@ -250,13 +344,22 @@ function renderOne(
     ),
     new Map(), // pageRoutes — a component has no route of its own
     ctx.externFunctionNames,
-    new Set(), // derivedNames — a candidate declares none
+    // `derived` bindings — read BARE (the `let`s emitted above the body), which
+    // is what `felizTarget.renderDerivedRead` spells.
+    new Set(c.derived.map((d) => d.name)),
     ctx.authUi,
     ctx.i18nEnabled ? `component.${c.name}` : undefined,
   );
   const body = result.tsx.trim();
+  // The scans below run over the derived `let`s TOO — a derived reading a store
+  // renders `model.<Store><Field>`, which is a Model field this component has no
+  // business naming, and the check has to see it.
+  const scanned = [body, ...derivedBinds].join("\n");
+  // This component's own `state {}` cells are Model fields (folded in by
+  // `index.ts`'s `combinedState`), so `model.<Field>` reads of them are declared.
+  const modelFields = new Set([...ctx.modelFields, ...c.state.map((s) => upperFirst(s.name))]);
   if (
-    needsMvuScope(body, ctx.modelFields) ||
+    needsMvuScope(scanned, modelFields) ||
     result.formOfs.length > 0 ||
     result.actionMutations.length > 0 ||
     (result.usedStores?.size ?? 0) > 0 ||
@@ -266,9 +369,20 @@ function renderOne(
   ) {
     return undefined;
   }
-  // Every `model.` here is now a declared read field, so the function takes the
-  // `Model`.
-  const takesModel = /\bmodel\./.test(body);
+  // Every `model.` here is now a declared read field or one of this component's
+  // own state cells, so the function takes the `Model`.
+  const takesModel = /\bmodel\./.test(scanned);
+  // Named `action`s the body invoked — bound here as dispatchers, exactly as
+  // `index.ts`'s `dispatchWrappers` does for a page view.
+  const actionBinds = c.actions
+    .filter((a) => result.usedActions?.has(a.name) ?? false)
+    .map((a) => {
+      const p = a.params[0]?.name;
+      return p
+        ? `    let ${a.name} ${p} = dispatch (${msgCase(a.name)} ${p})`
+        : `    let ${a.name} () = dispatch ${msgCase(a.name)}`;
+    });
+  const takesDispatch = actionBinds.length > 0;
   const fields = c.params.map((p) => `${p.name}: ${propType(p, ctx.emittedRecords)}`);
   // A body containing `Slot { }` reads `props.children` (the `renderChildrenSlot`
   // seam), so the props record has to CARRY it — otherwise the F# names an
@@ -281,20 +395,32 @@ function renderOne(
   // would force every non-reading call site to spell it too.  `Model` is
   // declared well above the `Components` module (F# is order-sensitive), and
   // `renderUserComponent` emits the matching `<Name> model …` at the call site.
-  const modelParam = takesModel ? "(model: Model) " : "";
+  const leading = [
+    ...(takesModel ? ["(model: Model)"] : []),
+    ...(takesDispatch ? ["(dispatch: Msg -> unit)"] : []),
+  ].join(" ");
+  const leadingParams = leading ? `${leading} ` : "";
   const head =
     fields.length > 0
-      ? `let ${c.name} ${modelParam}(props: {| ${fields.join("; ")} |}) =`
-      : `let ${c.name} ${modelParam}() =`;
-  // Only the params the body actually reads are re-bound — an unbound param is
-  // still part of the props type (the call site fills it), it just has no local.
+      ? `let ${c.name} ${leadingParams}(props: {| ${fields.join("; ")} |}) =`
+      : `let ${c.name} ${leadingParams}() =`;
+  // Only the params the body OR a `derived` actually reads are re-bound — an
+  // unbound param is still part of the props type (the call site fills it), it
+  // just has no local.  The derived side is asked of the rendered F# rather than
+  // re-walked: `renderFsExpr` spells a param read as the bare name, which is
+  // exactly what the binding provides.
+  const derivedFs = derivedBinds.join("\n");
   const binds = c.params
-    .filter((p) => result.usedParams.has(p.name))
+    .filter((p) => result.usedParams.has(p.name) || new RegExp(`\\b${p.name}\\b`).test(derivedFs))
     .map((p) => `    let ${p.name} = props.${p.name}`);
   return {
     decl: [
       head,
       ...binds,
+      // Action dispatchers before the `derived` lets: neither reads the other,
+      // but this is the order a page view's preamble uses.
+      ...actionBinds,
+      ...derivedBinds,
       body
         .split("\n")
         .map((l) => (l.length > 0 ? `    ${l}` : l))
@@ -305,7 +431,23 @@ function renderOne(
     uses: new Set([...result.usedUserComponents].filter((n) => componentParams.has(n))),
     usesChildren: result.usesChildren,
     takesModel,
+    takesDispatch,
   };
+}
+
+/** One `let <name> = <F#>` per `derived` binding, in declaration order so a
+ *  later one may read an earlier (F# resolves top-to-bottom).  Scope: the props
+ *  bound just above (bare names) and this component's `state {}` cells, which
+ *  fold into the Elmish Model and so render `model.<Field>`. */
+function renderDerivedBinds(c: ComponentIR): string[] {
+  const stateNames = new Set(c.state.map((s) => s.name));
+  const locals = new Set(c.params.map((p) => p.name));
+  return c.derived.map((d) => {
+    const fs = renderFsExpr(d.expr, { stateNames, locals });
+    // Visible to the NEXT derived — as a bare local, which is what a `let` is.
+    locals.add(d.name);
+    return `    let ${d.name} = ${fs}`;
+  });
 }
 
 /** Order the declarations so every callee precedes its caller — F# resolves
@@ -390,6 +532,7 @@ export function emitFelizUserComponents(
         component: c,
         usesChildren: one.usesChildren,
         takesModel: one.takesModel,
+        takesDispatch: one.takesDispatch,
       });
     }
     rendered = round;

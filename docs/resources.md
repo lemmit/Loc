@@ -162,7 +162,14 @@ workflow ArchiveOrder(order: Order id) {
 
 The vocabulary is registry-defined (`src/ir/resource-verbs.ts`). Rules:
 
-- **workflows only** — resource-ops are not allowed in aggregate operations;
+- **workflows only** — resource-ops are legal in a `workflow` body, a
+  command/query handler body, and a `domainService` operation body, and nowhere
+  else (`loom.resource-op-outside-workflow`). An aggregate `operation` /
+  `create` / `destroy` body, a lifecycle `requires` guard, an invariant, a
+  `derived`, an aggregate `function` and a repository `find` filter are all
+  rejected: only the first three render sites have the resource client in
+  scope, so elsewhere .NET/Java/Phoenix fail codegen outright and TS/Python
+  emit a call to a helper the file never imports;
 - **capability-gated** — a verb whose capability the bound sourceType doesn't
   offer is an error (`loom.resource-unknown-verb` / the need⊆sourceType check);
 - **not inside a transactional span** — an external effect can't roll back with

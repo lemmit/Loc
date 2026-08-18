@@ -301,29 +301,17 @@ export const BEHAVIOURAL_SKIP = {
   // The DAPPER adapter of the .NET backend (`run-dapper.mjs` forces this exact
   // clause, and looks the skip set up by it).
   "dotnet { persistence: dapper }": {
-    // Was a SILENT gap — `src/generator/dotnet/query-projection-emit.ts` has no
-    // `dapper` branch at all, so it hard-coded `using
-    // Microsoft.EntityFrameworkCore;` + `private readonly AppDbContext _db;` and
-    // the generated project simply did not COMPILE (CS0234 / CS0246), with
-    // nothing said at generate time.  Found by these two fixtures' first runtime
-    // callers (#2468); now an HONEST `loom.dapper-unsupported` error, so forcing
-    // the case here fails validation instead of the C# build.  Same shape as the
-    // MikroORM feature gates.  Delete both entries when a Dapper
-    // query-projection emitter lands (raw SQL — a query-time projection IS a SQL
-    // aggregate, so the port is smaller than the gate implies).
-    "projection-aggregation":
-      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
-    "projection-groupby":
-      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate)",
-    // Third of the same class, and the reason it is here is worth stating: this
-    // fixture is about read GATES, not about projections, but one of the three
-    // gated read surfaces it must carry IS a query-time projection — so the
-    // adapter's gap takes the whole case with it.  The gated list read and the
-    // FOLDED projection do emit on dapper (`test:dapper-corpus` compiles them);
-    // what cannot be run here is their runtime denial.  Deleting this entry
-    // alongside the two above is what re-arms it.
-    "read-gates":
-      "dapper emits no query-time projection reads (`loom.dapper-unsupported` refuses to generate) — and this fixture's third gated surface is one",
+    // DRAINED — all three entries (`projection-aggregation`, `projection-groupby`,
+    // `read-gates`) claimed one boundary: "dapper emits no query-time projection
+    // reads, `loom.dapper-unsupported` refuses to generate".  That claim was true
+    // when `src/generator/dotnet/query-projection-emit.ts` had no `dapper` branch
+    // at all (#2468); M-T6.25 ported the four direct-table arms to raw Npgsql, so
+    // the three fixtures generate, compile and answer on this adapter.  The
+    // adapter's own oracle agrees and is the ratchet that would have caught a
+    // stale entry here: `test/e2e/corpus-dotnet-dapper-build.test.ts` now carries
+    // `DAPPER_UNSUPPORTED = { "tenancy-hierarchy": … }` and nothing else, and it
+    // FAILS an entry whose `loom.dapper-unsupported` no longer fires.  Deleting
+    // these three RE-ARMS boots that had never run once on this leg.
   },
   elixir: {
     // B19 — a SILENT gap the first collection read over seed data found (#2517):

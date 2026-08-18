@@ -32,7 +32,7 @@ describe("walker primitive — For (list comprehension)", () => {
     expect(tsx).toContain("<Fragment key={nIdx}>");
     expect(tsx).toMatch(/<Title order=\{2\}[^>]*>\{t\("[^"]*", "Row"\)\}<\/Title>/);
     // The legacy "not supported" stub must be gone.
-    expect(tsx).not.toContain("not supported by the React walker");
+    expect(tsx).not.toContain("not supported by the walker");
   });
 
   it("imports Fragment from react only when a For is present", async () => {

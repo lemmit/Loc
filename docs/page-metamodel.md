@@ -267,6 +267,16 @@ reference (a compile error on React and Feliz, silently empty on Vue / Svelte /
 Angular / Flutter). The validator rejects that placement with
 `loom.slot-outside-component`.
 
+**Sub-element placement is the same kind of contract.** `Tab` and `Column` have
+no renderer of their own — their parent consumes them inline, so `Tab` is only
+meaningful as a direct child of `Tabs`, and `Column` only as a direct child of
+`Table` or `DataGrid`. Anywhere else the primitive reaches the walker's own
+dispatch, finds no renderer, and degrades to a comment on every frontend
+(`{/* Tab: not supported by the walker yet */}` on the JSX family,
+`<%!-- Tab: … --%>` on Phoenix LiveView) — the element and everything nested
+inside it silently vanish from the page, with nothing failing to compile. The
+validator rejects the misplacement with `loom.sub-primitive-misplaced`.
+
 ---
 
 ## 6. `state { … }` block
@@ -532,7 +542,7 @@ Split the problem by where the rule lives:
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink`, `FileLink` | Formatter primitives. |
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). `title:` is a user-visible slot — a caption above the sample, translated through the message catalog. The code SOURCE deliberately is not: translating code breaks it, so an untitled block leaves a page string-less. |
-| `Table`, `Column` | Tabular display (data lambda accessors). |
+| `Table`, `Column` | Tabular display (data lambda accessors). `Column` is the sub-element of `Table`/`DataGrid`. |
 | `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts, pages and filters on every frontend. |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |

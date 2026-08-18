@@ -1,4 +1,11 @@
+node_modules
 node_modules/
+# …and the SYMLINK form.  A worktree-isolated agent links the root install in
+# (`ln -sfn ../../node_modules ./node_modules`), and the trailing-slash pattern
+# above matches a DIRECTORY only — so `git add -A` happily commits the symlink.
+# It has landed on main at least once already (4acd3ec).  One tree entry,
+# invisible in a review, and a fresh clone gets a dangling link.
+node_modules
 out/
 *.log
 *.tsbuildinfo
