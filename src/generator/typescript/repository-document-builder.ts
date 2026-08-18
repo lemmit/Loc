@@ -268,6 +268,31 @@ export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string
   return preds.length > 0 ? preds.join(" && ") : null;
 }
 
+/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+ *  scope is strictly narrower than the read scope) as an IN-APP boolean over a
+ *  rehydrated aggregate bound to `varName`, or null when nothing narrows.
+ *
+ *  The blob-shaped stores (`shape: document`, and the event-sourced stream —
+ *  neither has queryable columns) cannot push the write scope into a `where`,
+ *  so the command load checks it over the loaded instance instead.  Same
+ *  sentinel desugar as {@link documentCapabilityBody}: `deny` collapses to the
+ *  `false` literal, which callers should special-case into an unconditional
+ *  not-found rather than emitting `if (!(false))`. */
+export function documentWriteScopeBody(agg: EnrichedAggregateIR, varName: string): string | null {
+  if (!agg.writeScopeFilter) return null;
+  return renderTsExpr(desugarAuthzFilterInApp(agg.writeScopeFilter, agg.name), {
+    thisName: varName,
+  });
+}
+
+/** True when the aggregate's write scope denies EVERY row (`policy { deny write
+ *  on X }`) — the in-app form is the constant `false`, so a command load can
+ *  answer not-found without loading anything. */
+export function writeScopeDeniesAll(agg: EnrichedAggregateIR): boolean {
+  const f = agg.writeScopeFilter;
+  return f !== undefined && f.kind === "authz-filter" && f.filter.kind === "deny";
+}
+
 function documentFindMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
