@@ -818,7 +818,14 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
         ? `Enum.sum(Enum.map(${recv}, ${args[0]}))`
         : `Enum.sum(${recv})`,
   all: (recv, args) => `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
-  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> false end"})`,
+  // Argless `xs.any()` means NON-EMPTY (`all`'s dual: `all` over no predicate
+  // is vacuously true, `any` over no predicate is "there is an element").  The
+  // default lambda was `fn _ -> false end` — always false, compiling clean and
+  // silently disagreeing with every sibling backend (`.some(() => true)` /
+  // `.Any(_ => true)` / `!isEmpty()` / `len(...) > 0`).  Audit finding A12.
+  // Note `Enum.any?/1` would NOT do: it tests element TRUTHINESS, so a
+  // `bool[]` of `false`s (or a list with a `nil`) would answer wrongly.
+  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   contains: (recv, args) => `Enum.member?(${recv}, ${args[0] ?? "nil"})`,
   where: (recv, args) => `Enum.filter(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   first: (recv) => `List.first(${recv})`,

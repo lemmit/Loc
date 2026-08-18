@@ -314,16 +314,28 @@ function withCa2245Suppressed(rendered: string): string {
   ].join("\n");
 }
 
-// For collection mutation we go via the private backing field —
-// EXCEPT for `Id<T>[]` reference collections, which the entity
-// emitter exposes as a writable `List<TargetId>` property (no `_`
-// backing field; the public surface IS the mutable list).  Identifies
-// ref-collections via `ctx.agg.associations`; falls back to the
-// containment convention when there's no aggregate context.
+// For collection mutation we go via the private backing field — EXCEPT when
+// the head is not a CONTAINMENT, in which case the entity emitter exposes a
+// writable `List<T>` property with no `_` backing field and the public surface
+// IS the mutable list.  Two shapes land there:
+//
+//   - `Id<T>[]` reference collections (`Target id[]`), identified via
+//     `ctx.agg.associations`;
+//   - plain SCALAR arrays (`codes: int[]`, `tags: string[]`), identified by
+//     the head naming a declared `field` rather than a `contains`.  Missing
+//     that case emitted `_codes.Add(...)` against a class whose only member is
+//     `public List<int> Codes` — CS0103, "the name '_codes' does not exist".
+//     Found while adding the `collection-op-shapes` corpus fixture: no
+//     fixture had ever mutated a scalar array, so the compile tier could not
+//     see it.  (Sibling of audit A13, which is the Java half of the same
+//     "scalar-array mutation" blind spot.)
+//
+// Falls back to the containment convention when there's no aggregate context.
 function renderPrivatePath(p: PathIR, ctx?: CsRenderContext): string {
   if (p.segments.length === 0) return "this";
   const [head, ...tail] = p.segments;
   const isRefColl = !!ctx?.agg?.associations?.some((a) => a.fieldName === head);
-  const headPath = isRefColl ? upperFirst(head!) : `_${head}`;
+  const isScalarField = !!ctx?.agg?.fields?.some((f) => f.name === head);
+  const headPath = isRefColl || isScalarField ? upperFirst(head!) : `_${head}`;
   return `${headPath}${tail.map((t) => `.${upperFirst(t)}`).join("")}`;
 }

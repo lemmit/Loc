@@ -163,7 +163,14 @@ function renderTsStatement(
     case "remove": {
       const path = renderPath(s.target);
       const value = renderTsExpr(s.value);
-      const base = `${INDENT}{ const idx = ${path}.findIndex((e) => e === (${value})); if (idx >= 0) ${path}.splice(idx, 1); }`;
+      // `money` elements are decimal.js `Decimal` instances, so `===` is
+      // REFERENCE identity — `prices -= p` never matches a value-equal entry
+      // and silently removes nothing.  Compare with `.eq`, the same money
+      // special-case `contains`/`distinct` carry in render-expr (audit A14).
+      const money =
+        s.collection && s.elementType.kind === "primitive" && s.elementType.name === "money";
+      const eq = money ? `(e) => e.eq(${value})` : `(e) => e === (${value})`;
+      const base = `${INDENT}{ const idx = ${path}.findIndex(${eq}); if (idx >= 0) ${path}.splice(idx, 1); }`;
       return withTrace(base, s.prov, s.target, s.value, emitProvenance, index);
     }
     case "emit": {
