@@ -192,8 +192,15 @@ describe("Hono validation-error extension — emission", () => {
     );
     expect(fourHundreds, "expected at least one 400 declaration").not.toBeNull();
     expect(fourTwentyTwos, "expected at least one 422 declaration").not.toBeNull();
-    // Every 400 (body-bearing route) pairs with a 422 (validation arm
-    // of the same route).
-    expect(fourTwentyTwos!.length).toBe(fourHundreds!.length);
+    // Every 400 (body-bearing route) pairs with a 422 (validation arm of the
+    // same route) — but 422 is now the WIDER set: schemathesis F6 extended it
+    // to every route that parses a request part, which includes the read and
+    // delete routes that carry no body and therefore no 400.  So the invariant
+    // is containment, not equality; the exact per-route sets are pinned by
+    // declared-validation-status-and-method-guard.test.ts.
+    expect(fourTwentyTwos!.length).toBeGreaterThanOrEqual(fourHundreds!.length);
+    // …and the read routes are exactly the surplus: getById + destroy + the
+    // paged collection GET, none of which declares a 400.
+    expect(fourTwentyTwos!.length).toBeGreaterThan(fourHundreds!.length);
   });
 });

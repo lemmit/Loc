@@ -11,6 +11,13 @@
 // Schemathesis F1 added 415 (Unsupported Media Type) to the same body-bearing
 // kinds: a request whose Content-Type is not application/json is refused
 // before the handler runs, and the declared set says so.
+//
+// Schemathesis F6 widened 422 past the body: a `{id}` path parameter is parsed
+// too, so `getById` and `destroy` declare it unconditionally.  The three FIND
+// kinds do NOT get it here — whether a find parses anything is a fact about its
+// route shape (declared params, or a paged return), which `OpErrorKind` cannot
+// express; `findValidatesRequest` in `api-surface.ts` decides it and
+// `api-surface-statuses.test.ts` pins the result.
 
 import { describe, expect, it } from "vitest";
 import { errorStatuses, problemTitle } from "../../../src/ir/util/openapi-errors.js";
@@ -18,8 +25,8 @@ import { errorStatuses, problemTitle } from "../../../src/ir/util/openapi-errors
 describe("errorStatuses — shared error matrix", () => {
   it("declares the route-shape statuses (unguarded)", () => {
     expect(errorStatuses("create")).toEqual([400, 415, 422]);
-    expect(errorStatuses("getById")).toEqual([404]);
-    expect(errorStatuses("destroy")).toEqual([404, 409]);
+    expect(errorStatuses("getById")).toEqual([404, 422]);
+    expect(errorStatuses("destroy")).toEqual([404, 409, 422]);
     expect(errorStatuses("operation")).toEqual([400, 404, 415, 422]);
     expect(errorStatuses("workflow")).toEqual([400, 415, 422]);
     expect(errorStatuses("findOptional")).toEqual([404]);
@@ -55,13 +62,13 @@ describe("errorStatuses — shared error matrix", () => {
     // handler / service / context) and denies with 403, so the declared set says
     // so.  `create` keeps 400 + 422; `destroy` keeps 404 + the FK-restrict 409.
     expect(errorStatuses("create", true)).toEqual([400, 403, 415, 422]);
-    expect(errorStatuses("destroy", true)).toEqual([403, 404, 409]);
+    expect(errorStatuses("destroy", true)).toEqual([403, 404, 409, 422]);
   });
 
   it("guarded stays inert for the remaining kinds", () => {
     // `list` is the auto-`findAll` — synthesized, so it has no `requires` of
     // its own.  `getById` is a canonical route with no guard clause.
-    expect(errorStatuses("getById", true)).toEqual([404]);
+    expect(errorStatuses("getById", true)).toEqual([404, 422]);
     expect(errorStatuses("list", true)).toEqual([]);
   });
 

@@ -34,6 +34,11 @@ route now refuses a non-JSON `Content-Type` with the declared `415`, and the
 request validators no longer coerce in a JSON body. Their waivers (W1, W5, W7)
 are deleted.
 
+**F6 and F8 landed (2026-08-18, PR #2612)** — every route that PARSES a request
+part declares the `422` it answers (shared matrix, so all five backends move
+together), and a wrong verb on a static sub-path answers `405` + `Allow` instead
+of the sibling `/{id}` validator's `422`. Their waivers (W4, W9) are deleted.
+
 ---
 
 ## Class: server error (500)
@@ -213,7 +218,33 @@ to a pinned deterministic case is the follow-up that removes the exemption.
 ## Class: contract gap
 
 ### F6 — every read/delete route answers 422, and the emitted spec declares it nowhere
-**Waiver:** W4 · **Severity: medium** · ~17 operations per fixture — the single
+**Status: FIXED (2026-08-18, PR #2612).** `422` is no longer the body tier's
+private status: the shared matrix (`src/ir/util/openapi-errors.ts`) declares it
+on `getById` and `destroy` — both always parse a `{id}` — and the find arms get
+it from `findValidatesRequest` in `src/ir/util/api-surface.ts`, which is TRUE
+when the find declares params or its return is paged (a paged `all` parses
+`?page=` even with nothing declared). Because it is one table read by all five
+backends, `conformance-parity` stays balanced by construction; Hono's two
+hand-rolled `{id}` reads (the audit-history route and the workflow-instance
+by-id route, both of which render against `errorStatuses("getById")` on the
+other backends) carry the matching line.
+
+The predicate is not a guess about the route — it is the SAME expression Hono
+gates its query validator on. `emitFindRoute`'s `hasQuery` now calls
+`findValidatesRequest`, so a find cannot grow the validator that ANSWERS the 422
+without growing the declaration, or the reverse:
+
+```
+curl 'http://host/api/customers?pageSize=0'  → 422, declared          (was: declared 200 alone)
+curl  http://host/api/customers/0            → 422, declared          (was: declared 200, 404)
+curl -X DELETE http://host/api/customers/0   → 422, declared          (was: declared 204, 404, 409)
+```
+
+A param-less, un-paged find (`find recent(): Product[]`) parses nothing and
+still declares nothing — the flag is route-shape-derived, not blanket. Waiver W4
+deleted.
+
+**Waiver:** ~~W4~~ · **Severity: medium** · ~17 operations per fixture — the single
 highest-count finding.
 
 ```
@@ -235,9 +266,9 @@ Every read and delete route validates its path/query parameters and can answer
 blind to a status it will routinely receive — the #2472 shape (real responses
 outside the published contract).
 
-**Fix shape:** emit `422` on every operation whose parameters are validated, on
-all five backends (spec-only change, but `conformance-parity` diffs the specs,
-so it has to land together).
+**Fix shape (as landed):** emit `422` on every operation whose parameters are
+validated, on all five backends (spec-only change, but `conformance-parity`
+diffs the specs, so it has to land together).
 
 ### F7 — declared `type`/`format` are not honoured: the wire validators coerce
 **Status: FIXED (2026-08-16, PR #2566).** The single `REQUEST_PRIMITIVE` table
@@ -289,7 +320,34 @@ carries the nonsense message `"Invalid input: expected date, received Date"` —
 a zod-coercion artefact that reaches the user through the validation catalog.
 
 ### F8 — a wrong verb on a static sub-path is swallowed by the sibling `/{id}` route
-**Waiver:** W9 · **Severity: low** · the #2485 shape, one layer down.
+**Status: FIXED (2026-08-18, PR #2612).** Each aggregate router now opens with a
+one-segment guard middleware listing its STATIC sub-paths and the methods each
+serves (`{ by_email: ["GET"], prepare: ["GET"] }`, emitted by
+`staticSubpathMethods` / `emitStaticSubpathMethodGuard` in
+`src/platform/hono/v4/routes-builder.ts`):
+
+```
+curl -X DELETE http://host/api/customers/by_email
+→ 405 application/problem+json, allow: GET      (was: 422 {"pointer":"/id","message":"Invalid UUID"})
+curl -X GET    http://host/api/customers/by_email  → 200/404 (unchanged)
+```
+
+It has to be a MIDDLEWARE and it has to be first: `@hono/zod-openapi` runs the
+`{id}` param validator as part of the matched route's own handler chain, so any
+check inside the `/{id}` handlers is already too late — the 422 has been sent.
+Registered with `app.use`, i.e. under hono's `ALL` method, which the root
+router's `allowedFor` probe skips by construction — so `app.notFound`'s 405 arm
+(#2485) answers exactly what it answered before for every other path, and the
+two mechanisms do not overlap. It also fixes the `Allow` those paths used to
+get: `POST /api/customers/by_email` reached `notFound`, whose probe matched the
+sibling `/{id}` routes and advertised `GET, DELETE` on a path that serves only
+`GET`.
+
+Only ONE-segment statics need it. `/{id}/history` and `/{id}/can_<op>` are two
+segments, so nothing shadows them and a wrong verb there already falls through
+to the root 405 arm. Waiver W9 deleted.
+
+**Waiver:** ~~W9~~ · **Severity: low** · the #2485 shape, one layer down.
 
 ```
 curl -X PUT    http://host/api/products            → 405 Method Not Allowed   ✅ (the #2485 fix holds)
