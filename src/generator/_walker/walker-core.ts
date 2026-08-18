@@ -81,7 +81,26 @@ import { emitUserComponent } from "./primitives/controls.js";
 import { WALKER_PRIMITIVES } from "./registry.js";
 import { wirePackChromeImport } from "./render-primitive.js";
 import { describeReceiver, positionalArgs } from "./shared/args.js";
-import type { WalkerTarget } from "./target.js";
+import type { RenderPosition, WalkerTarget } from "./target.js";
+
+/** Read of a `derived <name>: T = expr` binding, in whatever position.
+ *
+ *  A derived value is spelled like a state cell on the JSX frontends (both are
+ *  plain locals / computed refs), which is why this defaulted to
+ *  `renderStateRead` for its whole life.  On Feliz and Flutter it is not: state
+ *  lives in a named container (`model.<F>` / `state.<f>`) that a derived binding
+ *  is NOT a member of, so those targets override `renderDerivedRead` to the bare
+ *  name.  Routing every derived read through here is what lets them do that
+ *  without every other target changing a byte. */
+function renderDerived(ctx: WalkContext, name: string, position: RenderPosition): string {
+  const ref = {
+    field: { name, type: { kind: "primitive" as const, name: "string" as const } },
+    name,
+  };
+  return ctx.target.renderDerivedRead !== undefined
+    ? ctx.target.renderDerivedRead(ref, position)
+    : ctx.target.renderStateRead(ref, position);
+}
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -1064,11 +1083,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       // state field (computed refs unwrap identically), but no `usesState`
       // (the shell hoists it as a computed, not `useState`).
       if (ctx.derivedNames.has(expr.name)) {
-        const derivedRef = {
-          field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
-          name: expr.name,
-        };
-        return ctx.target.renderInterpolation(ctx.target.renderStateRead(derivedRef, "template"));
+        return ctx.target.renderInterpolation(renderDerived(ctx, expr.name, "template"));
       }
       return ctx.target.renderComment(`ref: ${expr.name}`);
     case "match": {
@@ -1459,11 +1474,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // A `derived` binding — read like a state field (handler position),
       // no `usesState` (hoisted as a computed, not `useState`).
       if (ctx.derivedNames.has(expr.name)) {
-        const derivedRef = {
-          field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
-          name: expr.name,
-        };
-        return ctx.target.renderStateRead(derivedRef, "handler");
+        return renderDerived(ctx, expr.name, "handler");
       }
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
@@ -2449,11 +2460,7 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     }
     // A `derived` binding — read like state (interpolated), no `usesState`.
     if (ctx.derivedNames.has(expr.name)) {
-      const derivedRef = {
-        field: { name: expr.name, type: { kind: "primitive" as const, name: "string" as const } },
-        name: expr.name,
-      };
-      return ctx.target.renderInterpolation(ctx.target.renderStateRead(derivedRef, "template"));
+      return ctx.target.renderInterpolation(renderDerived(ctx, expr.name, "template"));
     }
     // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the

@@ -828,14 +828,25 @@ function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fel
   return out;
 }
 
-/** The page `state` fields a ui's controlled inputs two-way-bind, across ALL
- *  pages (deduped by name) — each gets a `Set<Field>` Msg + update arm so the
- *  input `onChange` can dispatch it. */
+/** Every body that contributes `state {}` / `action`s / controlled inputs to the
+ *  single Elmish program: the ui's pages AND its walked (non-`extern`)
+ *  components, which fold into the SAME flat Model/Msg the way stores do
+ *  (`component-emit.ts` header).  A component's body reads `model.<Field>` and
+ *  dispatches `<Msg>` exactly as a page's does, so every collector below has to
+ *  see it — otherwise the component's function names a field or a case the
+ *  emitted record / union never declares. */
+function stateBearingBodies(ui: UiIR): Pick<PageIR, "body" | "state">[] {
+  return [...ui.pages, ...ui.components.filter((c) => !c.extern)];
+}
+
+/** The `state` fields a ui's controlled inputs two-way-bind, across ALL pages
+ *  AND components (deduped by name) — each gets a `Set<Field>` Msg + update arm
+ *  so the input `onChange` can dispatch it. */
 function boundStateForUi(ui: UiIR): FelizBoundState[] {
   const seen = new Set<string>();
   const out: FelizBoundState[] = [];
-  for (const page of ui.pages)
-    for (const b of collectPageBoundState(page))
+  for (const body of stateBearingBodies(ui))
+    for (const b of collectPageBoundState(body))
       if (!seen.has(b.name)) {
         seen.add(b.name);
         out.push(b);
@@ -849,8 +860,8 @@ function boundStateForUi(ui: UiIR): FelizBoundState[] {
 function fileUploadsForUi(ui: UiIR): FelizFileUpload[] {
   const seen = new Set<string>();
   const out: FelizFileUpload[] = [];
-  for (const page of ui.pages)
-    for (const u of collectPageFileUploads(page))
+  for (const body of stateBearingBodies(ui))
+    for (const u of collectPageFileUploads(body))
       if (!seen.has(u.name)) {
         seen.add(u.name);
         out.push(u);
@@ -858,13 +869,16 @@ function fileUploadsForUi(ui: UiIR): FelizFileUpload[] {
   return out;
 }
 
-/** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
- *  share one flat Model; distinct pages should use distinct field names). */
+/** A ui's `state {}` fields across ALL pages AND walked components, deduped by
+ *  name (one flat Model; distinct declarations should use distinct field
+ *  names).  A component's cells ride here rather than in a per-component
+ *  sub-model — see the `component-emit.ts` header for why, and for the
+ *  program-scoped-state consequence that follows. */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
   const seen = new Set<string>();
   const out: PageIR["state"][number][] = [];
-  for (const page of ui.pages)
-    for (const f of page.state)
+  for (const owner of stateBearingBodies(ui))
+    for (const f of owner.state)
       if (!seen.has(f.name)) {
         seen.add(f.name);
         out.push(f);
@@ -872,12 +886,13 @@ function combinedState(ui: UiIR): PageIR["state"][number][] {
   return out;
 }
 
-/** A ui's named `action`s across ALL pages, deduped by name. */
+/** A ui's named `action`s across ALL pages AND walked components, deduped by
+ *  name — each becomes one `Msg` case + `update` arm. */
 function combinedActions(ui: UiIR): PageIR["actions"][number][] {
   const seen = new Set<string>();
   const out: PageIR["actions"][number][] = [];
-  for (const page of ui.pages)
-    for (const a of page.actions)
+  for (const owner of [...ui.pages, ...ui.components.filter((c) => !c.extern)])
+    for (const a of owner.actions)
       if (!seen.has(a.name)) {
         seen.add(a.name);
         out.push(a);
