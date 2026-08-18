@@ -97,8 +97,11 @@ tells you when it applies.
   switch makes every backend a compile error until you fill its leaf table
   (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET` / `PY_TARGET` / `JAVA_TARGET` in
   each backend's `render-expr.ts`). Frontends don't run domain logic — skip them.
-- **New `StmtIR` kind:** extend each backend's `render-stmt.ts` (flat per-backend
-  dispatch — deliberately *not* shared, the arms are shape-divergent).
+- **New `StmtIR` kind:** add ONE arm to `renderStmt` and ONE method to the
+  `StmtTarget` interface in `src/generator/_stmt/target.ts`; the exhaustive
+  switch makes each of the four leaf tables (`tsStmtTarget` / `csStmtTarget` /
+  `javaStmtTarget` / `pyStmtTarget` in each backend's `render-stmt.ts`) a
+  compile error until you fill it.  Elixir has no `render-stmt.ts`.
 - **Backend-specific emission** (persistence, stores, routes, stamps): the
   matching emitter — TS `src/generator/typescript/emit/*.ts` +
   `src/platform/hono/v4/{emit,routes-builder}.ts`; .NET `src/generator/dotnet/emit/*.ts`;
@@ -179,5 +182,5 @@ across layers, put it at the layer where its consumers live, never "upward".
    - **In-tree (default for new backends):** implement `PlatformSurface` in `src/platform/<backend>.ts`; register in `src/platform/registry.ts`.
    - **Out-of-tree (versioned package, like the `node@v4` / `node@v5` backends in `packages/backend-hono-v4/` and `packages/backend-hono-v5/`):** add a workspace under `packages/backend-<family>-v<N>/` with a `package.json` carrying a `loom: { kind: "backend", family, loomVersion, core }` block.  `src/platform/fs-discovery.ts` picks it up via `setBackendSource`; `parseBuiltinPlatformRef` lets a deployable target it by `family@version`.
 2. If the backend serves a wire shape, read `agg.wireShape` etc. directly from the IR — do not recompute.
-3. If it runs domain logic, implement `render-expr.ts` / `render-stmt.ts` honouring `refKind` / `callKind` / `isCollectionOp`.
+3. If it runs domain logic, implement an `ExprTarget` leaf table in `render-expr.ts` and a `StmtTarget` leaf table in `render-stmt.ts` (the dispatchers live in `src/generator/_expr/target.ts` and `src/generator/_stmt/target.ts`), honouring `refKind` / `callKind` / `isCollectionOp`.
 4. If a new `platform:` keyword is added, also extend the `Platform` rule in `ddd.langium`, the `Platform` type in `loom-ir.ts`, and `checkDeployable` in `src/language/validators/deployable.ts` (see the `'react'` and `'phoenixLiveView'` additions for the pattern).
