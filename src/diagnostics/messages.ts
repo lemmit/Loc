@@ -324,6 +324,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `Abstract aggregate '${p.name}' cannot declare a '${p.kw}' action — abstract ` +
     `bases are never instantiated and have no polymorphic dispatch in v1. ` +
     `Declare it on each concrete subtype.`,
+  "loom.abstract-aggregate-contains": (p: { name: unknown; member: unknown }) =>
+    `Abstract aggregate '${p.name}' cannot declare 'contains ${p.member}' — an abstract ` +
+    `base owns no repository and its concretes do not inherit its parts, so the part's ` +
+    `table would have no reader and no writer. Declare the containment on each concrete ` +
+    `subtype instead.`,
   "loom.es-tph-forced-own-table": (p: { name: unknown; why: unknown; baseName: unknown }) =>
     `'${p.name}' is ${p.why} but extends the sharedTable (TPH) base '${p.baseName}'. ` +
     `An event-sourced / document concrete cannot share the base table — declare ` +
@@ -1733,11 +1738,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `with 'orm.schema.updateSchema()' at boot, which has no rename intent to consult and ` +
     `resolves a rename as DROP + ADD, destroying the column's data. Use ` +
     `'persistence: drizzle' on this deployable, or host these contexts elsewhere.`,
-  "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
-    `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
-    `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
-    `rejects have no relational persistence mapping at all (drizzle included) — restructure ` +
-    `the model as the message suggests.`,
+  // (The generic `loom.mikroorm-unsupported` tail lived here — the one
+  // `validateMikroOrmSupport` used for its SHAPE rejects.  Its last surviving
+  // caller was the abstract-inheritance-base-with-`contains` shape, which is
+  // impossible on every target and so became the target-neutral
+  // `loom.abstract-aggregate-contains` above; the gate function went with it.
+  // The CODE stays live through the `#migrations` variant just above.)
   "loom.find-predicate-unsupported": (p: {
     name: unknown;
     adapter: unknown;
