@@ -28,6 +28,38 @@ const BARE = `context Sales {
 }
 `;
 
+/** Two system-scope `ui { … }` blocks and a frontend deployable that binds
+ *  neither — `missingUiFix`'s multi-option path, the only `choose`-kind hint
+ *  that ships today. */
+const TWO_UIS = `system Shop {
+  context Orders {
+    aggregate Order { name: string }
+    repository Orders for Order { }
+  }
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  api ShopApi from Orders
+  ui Admin {
+    area Back {
+      page AdminBoard {
+        route: "/admin"
+        body: Text { "admin" }
+      }
+    }
+  }
+  ui Storefront {
+    area Front {
+      page Shelf {
+        route: "/shelf"
+        body: Text { "shelf" }
+      }
+    }
+  }
+  deployable honoApi { platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 }
+  deployable webApp { platform: react targets: honoApi port: 3001 }
+}
+`;
+
 /** Apply Monaco-shaped edits (1-based line AND column) to a source.
  *
  *  Positions are clamped rather than trusted: a broken conversion must produce
@@ -147,6 +179,32 @@ describe("playground fix-hint quick fixes", () => {
     expect(quickFixesAt([fix], range(5, 1, 5, 1))).toHaveLength(0);
     expect(overlapsLines(range(1, 1, 2, 1), range(2, 4, 9, 1))).toBe(true);
     expect(overlapsLines(range(1, 1, 1, 9), range(2, 1, 2, 9))).toBe(false);
+  });
+
+  // The `preferred` flag is the one field the editor turns into BEHAVIOUR: a
+  // preferred action is one Monaco may apply on its own (auto-fix).  A
+  // `choose`-kind hint fans out one action per option precisely because there
+  // is no single right answer, so carrying a hardcoded `true` through would let
+  // the editor pick an arbitrary one for the user.
+  it("carries `preferred` from the action — a fanned-out choice is never preferred", async () => {
+    const single = toQuickFixes(
+      await fixHintCodeActions(await validate(BARE), BARE, "file:///m.ddd"),
+    );
+    expect(single.length).toBeGreaterThan(0);
+    expect(
+      single.every((f) => f.preferred),
+      "one unambiguous repair — the editor may apply it",
+    ).toBe(true);
+
+    const multi = toQuickFixes(
+      await fixHintCodeActions(await validate(TWO_UIS), TWO_UIS, "file:///m.ddd"),
+    );
+    const choices = multi.filter((f) => f.title.startsWith("ui: "));
+    expect(choices.length, "two declared ui blocks → two options").toBe(2);
+    expect(
+      choices.some((f) => f.preferred),
+      "a fanned-out choice must not be auto-applyable",
+    ).toBe(false);
   });
 
   it("carries the diagnostic's own range as the anchor (so the lightbulb lands on the squiggle)", async () => {

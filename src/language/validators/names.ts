@@ -227,6 +227,16 @@ export function checkUnknownNameRefs(
       node,
       property: "name",
       code: "loom.unknown-name",
+      // The did-you-mean candidate travels as STRUCTURED data, not only inside
+      // the prose: `DiagnosticInfo.data` is copied verbatim onto the LSP
+      // `Diagnostic` by Langium's DocumentValidator, so a fix-hint provider
+      // (src/language/fix-hints.ts) can emit an applyable patch from the repair
+      // this validator already computed — instead of every consumer having to
+      // re-derive it, or scrape it back out of the message.  Attached only when
+      // a candidate was found (an absent `data` keeps the diagnostic exactly as
+      // it was); the key is `suggestion` and NOT `code`, which Langium reserves
+      // on `data` for its own lex/parse/link phase markers.
+      ...(hint !== undefined ? { data: { suggestion: hint } } : {}),
     });
   }
 }

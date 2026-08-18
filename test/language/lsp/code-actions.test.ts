@@ -148,9 +148,7 @@ describe("DddCodeActionProvider quick fixes (via the fix-hint registry)", () => 
 
     // …and the chosen binding actually clears the diagnostic.
     const after = await validate(admin);
-    expect(after.diagnostics.map((d) => d.code)).not.toContain(
-      "loom.react-deployable-missing-ui",
-    );
+    expect(after.diagnostics.map((d) => d.code)).not.toContain("loom.react-deployable-missing-ui");
   });
 
   it("offers nothing for a diagnostic with no registered fix hint", async () => {

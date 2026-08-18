@@ -47,6 +47,11 @@ export interface LoomQuickFix {
   title: string;
   edits: EditorTextEdit[];
   anchor: EditorRange;
+  /** Whether the editor should mark this the one obvious repair.  Carried from
+   *  the `CodeAction`, never assumed: a `choose`-kind hint fans out one action
+   *  per option precisely because there is NO single right answer, and marking
+   *  them all preferred would let the editor auto-apply an arbitrary one. */
+  preferred: boolean;
 }
 
 /** LSP range → Monaco range.  Both coordinates shift by one; `character` and
@@ -82,6 +87,7 @@ export function toQuickFixes(actions: readonly CodeAction[]): LoomQuickFix[] {
       title: action.title,
       edits,
       anchor: diagRange ? toEditorRange(diagRange) : edits[0]!.range,
+      preferred: action.isPreferred === true,
     });
   }
   return fixes;

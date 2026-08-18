@@ -279,7 +279,10 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
           actions: quickFixesAt(fixes, range).map((fix) => ({
             title: fix.title,
             kind: "quickfix",
-            isPreferred: true,
+            // Never hardcoded: a `choose`-kind hint fans out one action per
+            // option BECAUSE there is no single right answer, and a preferred
+            // action is one the editor may apply on its own.
+            isPreferred: fix.preferred,
             edit: {
               edits: fix.edits.map((e) => ({
                 resource: target.uri,
