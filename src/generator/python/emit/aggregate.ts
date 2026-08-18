@@ -545,7 +545,7 @@ function renderEntity(
   const whenGate = (op: (typeof e.operations)[number]): string[] =>
     op.when
       ? [
-          `        if not (${renderPyExpr(op.when)}):`,
+          `        if ${renderPyNegatedGuard(op.when)}:`,
           `            raise DisallowedError(${JSON.stringify(
             `operation '${op.name}' is not allowed in the current state of ${e.name}.`,
           )})`,
